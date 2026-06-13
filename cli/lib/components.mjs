@@ -54,9 +54,10 @@ export const GUARD_OPTIONS = [
  * The all-recommended selection: every component on, every guard on. This is the EXACT
  * behaviour of `--yes` (and of a non-TTY run), preserving the pre-wizard default.
  * `structure` is recommended-on but only *applies* when the stack has a template — the
- * apply layer no-ops it otherwise (see init.mjs `isStructure`).
+ * apply layer no-ops it otherwise (see init.mjs `isStructure`). `fallow` is the one
+ * recommended-OFF component (heavier third-party tool) — opt-in even under --yes.
  *
- * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,husky:boolean,structure:boolean,guards:string[]}}
+ * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,husky:boolean,structure:boolean,fallow:boolean,guards:string[]}}
  */
 export function defaultSelection() {
   return {
@@ -65,6 +66,7 @@ export function defaultSelection() {
     skills: true,
     husky: true,
     structure: true,
+    fallow: false,
     guards: [...GUARD_IDS],
   };
 }

@@ -137,7 +137,7 @@ try {
 // (detect/orderKey/symFileKey + the --changed `changed.has()` compare) is OS-agnostic. The
 // allowlist, git diff output, and MATCHER_CHANGED_FILES are all '/'; a Windows index that
 // stored '\' would otherwise never match → reconcile over-drops, the gate fails open.
-for (const r of rows) r.file_path = r.file_path.replace(/\\/g, '/');
+for (const r of rows) r.file_path = /** @type {string} */ (r.file_path).replace(/\\/g, '/');
 const n = rows.length;
 if (n === 0) {
   // Empty index = nothing to compare = clean. Gate allows (exit 0).

@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { outro } from '@clack/prompts';
+import { confirm, isCancel, outro } from '@clack/prompts';
 import { COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
@@ -32,17 +32,31 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky-block.mjs';
+import {
+  ensureFallowGitignore,
+  installFallow,
+  saveFallowBaselines,
+  wireFallowGate,
+} from '../lib/install-fallow.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { syncSkills } from './sync-skills.mjs';
 
 const INIT_VERSION = 2;
 
 // Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs + baselines).
-const STRUCTURE_STACKS = new Set(['electron']);
+// next/node-service are deliberately OUT until a template ships for them — listing one here
+// would make init read a non-existent templates/<stack> dir.
+const STRUCTURE_STACKS = new Set(['electron', 'react-app']);
 
-// The files each structure stack emits, [src-relative-to-template, dest-relative-to-cwd].
+// The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
+// The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
 const STRUCTURE_TEMPLATE_FILES = {
   electron: [
+    ['eslint.config.mjs', 'eslint.config.mjs'],
+    ['eslint/domains.mjs', 'eslint/domains.mjs'],
+    ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+  ],
+  'react-app': [
     ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
     ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
@@ -64,6 +78,7 @@ function parseFlags(args) {
     force: false,
     stack: null,
     removeDeselected: false,
+    fallow: false,
     no: new Set(),
     guards: null,
   };
@@ -73,6 +88,7 @@ function parseFlags(args) {
     else if (a === '--dry-run') flags.dryRun = true;
     else if (a === '--force') flags.force = true;
     else if (a === '--remove-deselected') flags.removeDeselected = true;
+    else if (a === '--fallow') flags.fallow = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
     else if (a.startsWith('--no-')) flags.no.add(a.slice('--no-'.length));
@@ -89,6 +105,8 @@ function selectionFromFlags(flags) {
   }
   if (flags.no.has('guards')) sel.guards = [];
   else if (flags.guards) sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
+  // fallow is OPT-IN (heavier third-party tool): off unless --fallow, and --no-fallow keeps off.
+  sel.fallow = flags.fallow && !flags.no.has('fallow');
   return sel;
 }
 
@@ -147,11 +165,11 @@ function installConfigs(cwd, sel, force, dryRun) {
   }
 }
 
-function installStructureFiles(cwd, force, dryRun) {
-  const tplDir = join(packageDir(), 'templates', 'electron');
-  // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (renderer rules).
+function installStructureFiles(cwd, stack, force, dryRun) {
+  const tplDir = join(packageDir(), 'templates', stack);
+  // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (stack rules).
   const items = [
-    ...STRUCTURE_TEMPLATE_FILES.electron,
+    ...STRUCTURE_TEMPLATE_FILES[stack],
     ['biome.jsonc', 'biome.jsonc'],
     ['tsconfig.json', 'tsconfig.json'],
     ['guard.config.json', 'guard.config.json'],
@@ -273,26 +291,86 @@ function runFreezes(cwd, dryRun) {
   }
 }
 
-async function runStructureBaselines(cwd, dryRun) {
+async function runStructureBaselines(cwd, stack, dryRun) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
     return;
   }
+  // The generators grandfather electron's process trees (the generator's own DEFAULT_ROOTS).
+  // react-app needs no generated structure baseline: its preset is grandfathered via permissive
+  // rules + EMPTY baselines (the eslint.config loadBaseline() returns [] when absent), and its
+  // structureRoot is derived live from guard.config.json scanRoots — so for a src-rooted app
+  // these calls are no-ops by design (the electron tree names never match).
+  const opts = { log: (m) => console.log(m) };
   try {
-    await generateStructureBaselines(cwd, { log: (m) => console.log(m) });
+    await generateStructureBaselines(cwd, opts);
   } catch (e) {
     console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
   }
   try {
-    generateImportWallBaseline(cwd, { log: (m) => console.log(m) });
+    generateImportWallBaseline(cwd, opts);
   } catch (e) {
     console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
-    console.log('    (install deps — bun install — then re-run `devkit init --stack electron`)');
+    console.log(`    (install deps — bun install — then re-run \`devkit init --stack ${stack}\`)`);
   }
 }
 
 function firstLine(e) {
   return (e.stderr || e.message || '').toString().trim().split('\n')[0];
+}
+
+// A @clack confirm that's safe in any context: only prompts on a TTY-interactive run,
+// otherwise returns the non-interactive default. isCancel (Ctrl-C / Esc) → the default too.
+async function subConfirm(message, { interactive, fallback }) {
+  if (!interactive) return fallback;
+  const v = await confirm({ message, initialValue: fallback });
+  return isCancel(v) ? fallback : v;
+}
+
+// Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
+// against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
+// (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
+function fallowHasDebt(cwd) {
+  try {
+    execFileSync('fallow', ['audit'], { cwd, stdio: 'pipe' });
+    return false; // exit 0 → clean → nothing to baseline
+  } catch (e) {
+    return e.status != null; // non-zero exit → debt; ENOENT (status null) → treat as none
+  }
+}
+
+// Apply the OPTIONAL fallow component. Every step is fail-open (install-fallow never throws);
+// order: install → gitignore (always) → optional `fallow init` (sub-confirm, default NO —
+// fallow is zero-config) → wire fallow's own git hook → save baselines ONLY if the gate wired
+// AND the repo has debt to grandfather. dryRun prints + writes nothing throughout.
+async function applyFallow(cwd, dryRun, interactive) {
+  const r = installFallow({ cwd, dryRun });
+  console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
+  ensureFallowGitignore({ cwd, dryRun });
+  console.log(`  ${dryRun ? '[dry-run] ensure' : '✓ ensured'} .fallow/ in .gitignore`);
+
+  const doInit = await subConfirm('Run `fallow init`? (optional — fallow is zero-config)', {
+    interactive,
+    fallback: false,
+  });
+  if (doInit) {
+    if (dryRun) console.log('  [dry-run] fallow init');
+    else {
+      try {
+        execFileSync('fallow', ['init'], { cwd, stdio: 'inherit' });
+        console.log('  ✓ fallow init');
+      } catch (e) {
+        console.log(`  ! fallow init skipped: ${firstLine(e)}`);
+      }
+    }
+  }
+
+  const gate = wireFallowGate({ cwd, dryRun, target: 'git' });
+  console.log(`  ${gate.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
+  if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
+    const saved = saveFallowBaselines({ cwd, dryRun });
+    console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);
+  }
 }
 
 // Flip the commented structure-lint placeholder to the live `bunx eslint <roots>` call.
@@ -446,7 +524,9 @@ function removeStructure(cwd, prevConfig, dryRun) {
     console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
     return;
   }
-  for (const [, dest] of STRUCTURE_TEMPLATE_FILES.electron) {
+  // Same structure file set across stacks today; key off the recorded stack to stay generic.
+  const files = STRUCTURE_TEMPLATE_FILES[prevConfig.stack] ?? STRUCTURE_TEMPLATE_FILES.electron;
+  for (const [, dest] of files) {
     const p = join(cwd, dest);
     if (existsSync(p)) {
       console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} ${dest}`);
@@ -526,10 +606,18 @@ const STEP_LABELS = {
  * @param {string[]} [plan.remove] component ids to remove
  * @param {boolean} [plan.force]
  * @param {boolean} [plan.dryRun]
+ * @param {boolean} [plan.interactive] TTY run — enables fallow sub-confirms (default false)
  * @param {string} [plan.devkitRef]
  */
 export async function applyInit(cwd, plan) {
-  const { stack, selection, remove = [], force = false, dryRun = false } = plan;
+  const {
+    stack,
+    selection,
+    remove = [],
+    force = false,
+    dryRun = false,
+    interactive = false,
+  } = plan;
   const isStructure = selection.structure && STRUCTURE_STACKS.has(stack);
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
@@ -546,7 +634,7 @@ export async function applyInit(cwd, plan) {
   console.log(`  components: ${on.join(', ') || '(none)'}\n`);
 
   console.log('1. configs');
-  if (isStructure) installStructureFiles(cwd, force, dryRun);
+  if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
   else installConfigs(cwd, selection, force, dryRun);
 
   console.log('2. package.json');
@@ -564,7 +652,7 @@ export async function applyInit(cwd, plan) {
 
   if (isStructure) {
     console.log('5. structure + import-wall baselines (grandfather current tree)');
-    await runStructureBaselines(cwd, dryRun);
+    await runStructureBaselines(cwd, stack, dryRun);
     console.log('6. enable structure-lint in pre-commit');
     enableStructureLint(cwd, dryRun);
   }
@@ -574,17 +662,23 @@ export async function applyInit(cwd, plan) {
     syncSkills(dryRun ? ['--dry-run'] : [], cwd);
   }
 
+  if (selection.fallow) {
+    console.log('8. fallow (optional code-health layer)');
+    await applyFallow(cwd, dryRun, interactive);
+  }
+
   // Removals (deselected + present).
   applyRemovals(cwd, remove, prevConfig, dryRun);
 
   // .devkit/config.json with the component selection.
-  console.log('8. .devkit/config.json');
+  console.log('9. .devkit/config.json');
   const components = {
     biome: selection.biome,
     tsconfig: selection.tsconfig,
     skills: selection.skills,
     husky: selection.husky,
     structure: isStructure,
+    fallow: Boolean(selection.fallow),
     guards: selection.husky ? [...selection.guards] : [],
   };
   const config = { stack, devkitRef, initVersion: INIT_VERSION, components };
@@ -660,6 +754,7 @@ export default async function run(args, cwd) {
     remove,
     force: flags.force,
     dryRun: flags.dryRun,
+    interactive,
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;

@@ -1,3 +1,6 @@
+// @ts-nocheck — emitted config file: it imports peer-installed tools (eslint-plugin-project-
+// structure, @typescript-eslint/parser) that live in the CONSUMER repo, not in devkit. TS in
+// the devkit repo can't resolve them; eslint configs aren't type-checked anyway.
 // ESLint config — scoped narrowly to the project-structure plugin (folder
 // hierarchy + file naming + import walls + file/function size). Biome handles
 // all code/style/lint rules; this config is purely structural.

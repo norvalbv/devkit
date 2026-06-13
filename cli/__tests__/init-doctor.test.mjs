@@ -75,6 +75,46 @@ describe('init --yes (all recommended)', () => {
   });
 });
 
+describe('init --stack react-app (structure ungated)', () => {
+  it('installs the react-app structure template set + records structure on', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      dependencies: { react: '^18' },
+    });
+    const r = devkit(root, 'init', '--stack', 'react-app', '--yes');
+    expect(r.status).toBe(0);
+    for (const f of [
+      'eslint.config.mjs',
+      'eslint/domains.mjs',
+      'eslint/baselines/exempt.mjs',
+      'guard.config.json',
+      'biome.jsonc',
+      'tsconfig.json',
+    ]) {
+      expect(existsSync(join(root, f)), `${f} should exist`).toBe(true);
+    }
+    const cfg = config(root);
+    expect(cfg.stack).toBe('react-app');
+    expect(cfg.components.structure).toBe(true);
+    // react-app installs from templates/react-app, NOT templates/electron.
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/react-app preset/);
+  });
+
+  it('enables the structure-lint line in the husky hook (template exists)', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      dependencies: { react: '^18' },
+    });
+    devkit(root, 'init', '--stack', 'react-app', '--yes');
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).toMatch(/\nbunx eslint src/);
+  });
+});
+
 describe('init — per-component flag selection', () => {
   it('--no-biome → no biome.jsonc, no biome devDep, no biome husky step', () => {
     const root = tmpRepo();

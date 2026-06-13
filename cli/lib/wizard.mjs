@@ -12,13 +12,28 @@
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
 import { COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './components.mjs';
 
-const STACKS = ['electron', 'next', 'node-service', 'generic'];
+const STACKS = ['electron', 'react-app', 'next', 'node-service', 'generic'];
 
 // The picker components (everything except `guards`, which gets its own multiselect when
 // husky is on). `structure` is filtered in at call time only when a template exists.
 const COMPONENT_OPTIONS = COMPONENTS.filter((c) => c.id !== 'guards');
 
-// Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). Returns true if cancelled.
+// fallow is an OPTIONAL, heavier third-party tool — offered in the same multiselect but
+// DEFAULT OFF (never seeded into initialValues). Kept out of the COMPONENTS registry (which
+// drives the all-on --yes defaults) precisely so it stays opt-in. The apply layer reads
+// selection.fallow; doctor records components.fallow.
+const FALLOW_OPTION = {
+  id: 'fallow',
+  label: 'fallow',
+  hint: 'code-health audit + its own git hook (optional, off by default)',
+};
+
+// Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). A TS type guard, so a
+// non-cancelled value narrows to its real type after `if (bail(x)) return null`.
+/**
+ * @param {unknown} value
+ * @returns {value is symbol}
+ */
 function bail(value) {
   if (isCancel(value)) {
     cancel('Aborted — nothing written.');
@@ -58,13 +73,14 @@ export async function runWizard({ detectedStack, structureAvailable, installed }
   });
   if (bail(stack)) return null;
 
-  // 2. Components — one checkbox list. Structure only appears when a template exists.
+  // 2. Components — one checkbox list. Structure only appears when a template exists;
+  // fallow is appended last and DEFAULT OFF (not in initialValues).
   const componentChoices = COMPONENT_OPTIONS.filter(
     (c) => c.id !== 'structure' || structureAvailable,
   );
   const picked = await multiselect({
     message: 'Select components to install',
-    options: componentChoices.map(componentOption),
+    options: [...componentChoices.map(componentOption), componentOption(FALLOW_OPTION)],
     initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
     required: false,
   });
@@ -76,6 +92,7 @@ export async function runWizard({ detectedStack, structureAvailable, installed }
   for (const c of COMPONENT_OPTIONS) {
     selection[c.id] = chosen.has(c.id);
   }
+  selection.fallow = chosen.has('fallow');
   // Structure is always-false when there's no template for the stack.
   if (!structureAvailable) selection.structure = false;
 
@@ -130,6 +147,7 @@ function summarize(selection, structureAvailable, deselected) {
       return `${on ? '✓' : '·'} ${c.label}${detail}`;
     },
   );
+  lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
   if (deselected.length) lines.push('', `will ask to remove: ${deselected.join(', ')}`);
   return lines.join('\n');
 }

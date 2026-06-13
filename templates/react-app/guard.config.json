@@ -1,0 +1,21 @@
+{
+  "//": "react-app preset for the devkit governance gate-engine. Copy to your repo ROOT. JSON has no real comments, so guidance lives in //-prefixed sibling keys — strip them or leave them (the loader ignores unknown keys). Every path resolves relative to the consumer repo, never the devkit package.",
+
+  "//scanRoots": "Where the ratchets + scans look for impl files. Default ['src'] suits a standard Vite/CRA app. If your app lives under a non-standard root (e.g. a monorepo package at services/webapp/src), OVERRIDE this — set scanRoots to that path.",
+  "scanRoots": ["src"],
+
+  "//boundaries": "Cross-trust-boundary prefixes for the decisions smell gate. A plain React app has no trust boundary, so this is EMPTY (the smell never fires on a single-process frontend). Add prefixes only if you grow a backend in-repo.",
+  "boundaries": [],
+
+  "//fanoutCap": "Max non-test impl files per folder (any depth) before guard-fanout trips. This — NOT eslint — governs fan-out for the react-app preset.",
+  "fanoutCap": 12,
+
+  "//fanoutExempt": "Flat-by-design folders exempt from the fanout cap. EMPTY by default; add a folder only when its flatness is intentional (e.g. an icon set).",
+  "fanoutExempt": [],
+
+  "//allowlistPath": "Co-occurrence intentional-dup approvals (guard-dup + guard-clone).",
+  "allowlistPath": ".co-occurrence-allowlist.json",
+
+  "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
+  "decisionsDir": "docs/decisions"
+}

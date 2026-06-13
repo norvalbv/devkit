@@ -7,6 +7,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Mock the fallow installer so the fallow apply step never shells out to bun/npm/cargo/fallow.
+// hoisted spies let each test assert the exact call order applyInit drives.
+const fallowSpies = vi.hoisted(() => ({
+  installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
+  ensureFallowGitignore: vi.fn(),
+  wireFallowGate: vi.fn(() => ({ ok: true })),
+  saveFallowBaselines: vi.fn(() => ({ ok: true })),
+}));
+vi.mock('../lib/install-fallow.mjs', () => fallowSpies);
+
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mjs';
 import { defaultSelection, normalizeSelection } from '../lib/components.mjs';
 
@@ -17,7 +28,10 @@ function tmpRepo(pkg = { name: 'fx', version: '0.0.0', type: 'module' }) {
   writeFileSync(join(root, 'package.json'), JSON.stringify(pkg, null, 2));
   return root;
 }
-beforeEach(() => vi.spyOn(console, 'log').mockImplementation(() => {}));
+beforeEach(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  for (const fn of Object.values(fallowSpies)) fn.mockClear();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   for (const r of roots) rmSync(r, { recursive: true, force: true });
@@ -68,6 +82,12 @@ describe('selection helpers', () => {
     expect(sel.biome).toBe(false);
     expect(sel.tsconfig).toBe(true);
     expect(sel.guards).toEqual(['fanout']);
+  });
+
+  it('fallow is OPT-IN: off by default, on with --fallow, off again with --no-fallow', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).fallow).toBe(false);
+    expect(selectionFromFlags(parseFlags(['--yes', '--fallow'])).fallow).toBe(true);
+    expect(selectionFromFlags(parseFlags(['--yes', '--fallow', '--no-fallow'])).fallow).toBe(false);
   });
 });
 
@@ -132,5 +152,79 @@ describe('detectInstalled', () => {
     const installed = detectInstalled(root);
     expect(installed.has('biome')).toBe(true);
     expect(installed.has('tsconfig')).toBe(false);
+  });
+});
+
+describe('structure is stack-generic (react-app un-gated)', () => {
+  it('--stack react-app installs the react-app structure template + records structure on', async () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      dependencies: { react: '^18' },
+    });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...defaultSelection(), skills: false, fallow: false },
+      devkitRef: 'v0.3.0',
+    });
+    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
+    expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(true);
+    expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
+    // It must come from templates/react-app, not templates/electron.
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/react-app preset/);
+    expect(config(root).components.structure).toBe(true);
+  });
+
+  it('electron parity: structure still records on for the electron stack', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'electron',
+      selection: { ...defaultSelection(), skills: false, fallow: false },
+      devkitRef: 'v0.3.0',
+    });
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).not.toMatch(/react-app preset/);
+    expect(config(root).components.structure).toBe(true);
+  });
+});
+
+describe('fallow apply step (mocked installer — never shells out)', () => {
+  it('selection.fallow drives install → gitignore → gate in order + records it', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: false,
+        husky: false,
+        structure: false,
+        fallow: true,
+        guards: [],
+      },
+      devkitRef: 'v0.3.0',
+    });
+    expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
+    expect(fallowSpies.ensureFallowGitignore).toHaveBeenCalledTimes(1);
+    expect(fallowSpies.wireFallowGate).toHaveBeenCalledTimes(1);
+    // Gate target is git (the husky-managed hook, not the agent hook).
+    expect(fallowSpies.wireFallowGate.mock.calls[0][0]).toMatchObject({ target: 'git' });
+    // install runs before the gate is wired.
+    expect(fallowSpies.installFallow.mock.invocationCallOrder[0]).toBeLessThan(
+      fallowSpies.wireFallowGate.mock.invocationCallOrder[0],
+    );
+    expect(config(root).components.fallow).toBe(true);
+  });
+
+  it('does NOT run any fallow step when fallow is unselected, records fallow:false', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...defaultSelection(), fallow: false },
+      devkitRef: 'v0.3.0',
+    });
+    expect(fallowSpies.installFallow).not.toHaveBeenCalled();
+    expect(fallowSpies.wireFallowGate).not.toHaveBeenCalled();
+    expect(config(root).components.fallow).toBe(false);
   });
 });

@@ -23,7 +23,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.3.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.4.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -122,7 +122,8 @@ review a summary, and apply. **Ctrl-C aborts cleanly — nothing is written.**
 | `skills`    | the agent skills synced into `.claude` + `.cursor` (+ the manifest)     |
 | `husky`     | the `.husky/pre-commit` hook (the `# devkit-guards` block container)    |
 | `guards`    | a multi-select of the gate lines: `size · fanout · dup · clone · decisions` |
-| `structure` | the stack's eslint folder/import-wall preset — **only offered when a template exists** for the detected stack (currently `electron`; `next`/`node-service`/`generic` skip it with a note) |
+| `structure` | the stack's eslint folder/import-wall preset — **only offered when a template exists** for the detected stack (currently `electron` + `react-app`; `next`/`node-service`/`generic` skip it with a note) |
+| `fallow`    | the optional [fallow](https://www.npmjs.com/package/fallow) code-health layer — **off by default**; installs the pinned CLI zero-config (`bun add -g` → `npm i -g` → `cargo install fallow-cli`, no brew/curl) and wires fallow's **own** git hook via `fallow hooks install` (not a devkit gate line) |
 
 Whatever you choose is recorded in `.devkit/config.json` under `components`, so `doctor`
 knows what to check.
@@ -169,6 +170,18 @@ Additionally emits the structure-governance `eslint.config.mjs` + a growable
 domain-registry skeleton and grandfathers the folder-structure + import-wall baselines, so
 the boundary/structure walls go live **born-grandfathered**. `init` **prints** (never
 installs) the referenced-tool steps (fallow, the search-code MCP index).
+
+### Structure stack (`--stack react-app`)
+
+Ships a **LIGHT** preset for any plain Vite/CRA app: PascalCase component/page folders +
+file/function size caps + fan-out (via `guard.config.json`) — and nothing else. The
+frink-renderer taxonomy is deliberately **not** imposed: no `lib/<domain>` mandate, no
+import walls, and the domain registries (`eslint/domains.mjs`) ship **empty +
+grandfathered** (every existing top-level folder is left ungoverned). You **AMEND** it
+per-repo: register a concern in `eslint/domains.mjs` (or copy a `structureRoot` block to
+govern a new folder), then **re-run the baseline generator** (`devkit init --stack
+react-app`) to grandfather the current tree. A non-standard `src` root (e.g. a monorepo
+package at `services/webapp/src`) is set via `guard.config.json`'s `scanRoots`, not eslint.
 
 ### `devkit doctor`
 
