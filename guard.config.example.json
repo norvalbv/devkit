@@ -1,0 +1,33 @@
+{
+  "//": "Copy to guard.config.json at your repo ROOT, then strip these //-comment keys (real JSON has no comments). Every path below is resolved relative to THIS repo (the consumer cwd), never the devkit package dir. Omit any field to keep its built-in default (see gate-engine/config.mjs DEFAULTS).",
+
+  "//boundaries": "Cross-trust-boundary path prefixes. The decisions smell gate flags a single change that straddles 2+ of these (a cross-boundary move = likely an architectural decision). Default: [] (no boundaries → smell never fires).",
+  "boundaries": ["src/main/", "socket-server/", "vercel-serverless/"],
+
+  "//scanRoots": "Where the ratchets + structure scans look for implementation files. Default: ['src'].",
+  "scanRoots": ["src", "socket-server/src", "vercel-serverless"],
+
+  "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target). Default: 'docs/decisions'.",
+  "decisionsDir": "docs/decisions",
+
+  "//fanoutCap": "Max non-test impl files per folder (any depth) before guard-fanout trips. Default: 12.",
+  "fanoutCap": 12,
+
+  "//fanoutExempt": "Flat-by-design folders exempt from the fanout cap (e.g. one-file-per-domain routers, vendored UI primitives). Default: [].",
+  "fanoutExempt": ["src/main/lib/trpc/routers", "src/renderer/components/ui"],
+
+  "//allowlistPath": "Co-occurrence intentional-dup approvals (guard-dup + guard-clone). Default: '.co-occurrence-allowlist.json'.",
+  "allowlistPath": ".co-occurrence-allowlist.json",
+
+  "//thresholds": "Matcher/clone tier + size knobs. Override any subset; unspecified knobs keep their default.",
+  "thresholds": {
+    "nearCode": 0.95,
+    "driftCode": 0.8,
+    "driftDesc": 0.88,
+    "minLoc": 15,
+    "minTokens": 50
+  },
+
+  "//indexPath": "search-code embedding index for the semantic duplication matcher. null (or omit) => matcher opts out / fails open; guard-clone + ratchets still run.",
+  "indexPath": ".search-code/index.db"
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "Hand-labeled ground truth for the co-occurrence matcher benchmark. label='dup' = genuine cross-file duplication the matcher SHOULD flag (includes intentional twins — a human approves those via the allowlist; flagging them is correct). label='noise' = unrelated/sibling code that merely scores similar and should NOT be flagged. Matched to computed pairs by order-independent symbol-name pair. Labels are heuristic (name+context based), not domain-authoritative.",
+  "pairs": [
+    {
+      "a": "pluralize",
+      "b": "pluralize",
+      "label": "dup",
+      "note": "same util duplicated across 3 dirs"
+    },
+    {
+      "a": "highlightTextInDom",
+      "b": "highlightTextInDom",
+      "label": "dup",
+      "note": "copy across 3 text-part files"
+    },
+    {
+      "a": "computeFanOutBodyChain",
+      "b": "computeFanOutBodyChain",
+      "label": "dup",
+      "note": "main vs shared copy"
+    },
+    {
+      "a": "getUser",
+      "b": "getUser",
+      "label": "dup",
+      "note": "auth-manager vs auth-store, drifted"
+    },
+    { "a": "FolderOpenIcon", "b": "FolderOpenIcon", "label": "dup", "note": "dup icon component" },
+    { "a": "TextSelectIcon", "b": "TextSelectIcon", "label": "dup", "note": "dup icon component" },
+    {
+      "a": "computeDagrePositions",
+      "b": "computeDagrePositions",
+      "label": "dup",
+      "note": "dup graph layout"
+    },
+    { "a": "TodoStatusIcon", "b": "TodoStatusIcon", "label": "dup", "note": "dup status icon" },
+    { "a": "LoadingState", "b": "LoadingState", "label": "dup", "note": "dup loading component" },
+    { "a": "ResizeHandle", "b": "ResizeHandle", "label": "dup", "note": "dup resize handle" },
+    {
+      "a": "uninstallCli",
+      "b": "uninstallCli",
+      "label": "dup",
+      "note": "cli vs platform/linux copy"
+    },
+    {
+      "a": "LAUNCH_FLAGS",
+      "b": "LAUNCH_FLAGS",
+      "label": "dup",
+      "note": "shared<>vercel mirror (intentional twin)"
+    },
+    {
+      "a": "validateGraph",
+      "b": "validateGraph",
+      "label": "dup",
+      "note": "shared<>vercel mirror (intentional twin)"
+    },
+    {
+      "a": "expandHomePath",
+      "b": "expandHomePath",
+      "label": "dup",
+      "note": "shared<>vercel mirror (intentional twin)"
+    },
+    {
+      "a": "DarwinPlatformProvider",
+      "b": "LinuxPlatformProvider",
+      "label": "dup",
+      "note": "parallel-by-design twin; matcher should flag, human allowlists"
+    },
+    {
+      "a": "groupFilesByFolder",
+      "b": "buildFileTree",
+      "label": "dup",
+      "note": "diff-name real: file-tree building logic"
+    },
+    {
+      "a": "listBatchRunsForBatch",
+      "b": "listBatchStageRunsForStage",
+      "label": "dup",
+      "note": "diff-name real: parallel list logic"
+    },
+    {
+      "a": "ChangesPanelHeader",
+      "b": "ChangesHeader",
+      "label": "dup",
+      "note": "diff-name real: dup header"
+    },
+    {
+      "a": "formatTimeSince",
+      "b": "formatTimeSince",
+      "label": "dup",
+      "note": "dup time formatter"
+    },
+    { "a": "isoOr", "b": "isoOr", "label": "dup", "note": "dup adapter helper" },
+
+    {
+      "a": "destroy",
+      "b": "destroyAllDaemons",
+      "label": "noise",
+      "note": "substring name, unrelated scope"
+    },
+    {
+      "a": "getThemeById",
+      "b": "isShikiBundledTheme",
+      "label": "noise",
+      "note": "both theme-domain, not dup"
+    },
+    {
+      "a": "useChatMode",
+      "b": "useSubChatModeSync",
+      "label": "noise",
+      "note": "related hooks, not dup"
+    },
+    {
+      "a": "NODE_STATUSES",
+      "b": "NODE_RUN_STATUSES",
+      "label": "noise",
+      "note": "sibling enums, distinct values"
+    },
+    {
+      "a": "FlowRunStatusIcon",
+      "b": "RunStatusLabel",
+      "label": "noise",
+      "note": "both status UI, different render"
+    },
+    {
+      "a": "isCustomNodeBlockType",
+      "b": "isRegisteredBlockType",
+      "label": "noise",
+      "note": "sibling predicates"
+    },
+    {
+      "a": "generatePaneId",
+      "b": "newChatTerminalId",
+      "label": "noise",
+      "note": "both id-gen, trivial + unrelated"
+    },
+    {
+      "a": "getAddableBlockTypes",
+      "b": "getTriggerBlockTypes",
+      "label": "noise",
+      "note": "sibling getters"
+    },
+    {
+      "a": "normalizeGithubCredentialErrorCode",
+      "b": "resolveGithubPatStatus",
+      "label": "noise",
+      "note": "both github-cred, not dup"
+    },
+    {
+      "a": "bashSig",
+      "b": "extractSignature",
+      "label": "noise",
+      "note": "unrelated signature concepts"
+    },
+    {
+      "a": "MemoizedTextPartInner",
+      "b": "areListPropsEqual",
+      "label": "noise",
+      "note": "unrelated memo helpers"
+    },
+    {
+      "a": "cfg",
+      "b": "claudeConfigFingerprint",
+      "label": "noise",
+      "note": "test var vs subject, not dup"
+    },
+    { "a": "initMock", "b": "sentryMock", "label": "noise", "note": "two different mocks" },
+    {
+      "a": "FolderIcon",
+      "b": "FolderOpenIcon",
+      "label": "noise",
+      "note": "two distinct icons (open vs closed)"
+    }
+  ]
+}
