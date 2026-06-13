@@ -4,7 +4,7 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 
 | Half      | What                                                          | How consumers get it                       |
 | --------- | ------------------------------------------------------------ | ------------------------------------------ |
-| **AGENT** | `skills/` — Claude/agent skills (governance, design, review) | `npx skills add github:norvalbv/devkit/<skill>` |
+| **AGENT** | `skills/` — Claude/agent skills (governance, design, review) | bundled in the package; `devkit init` / `devkit sync-skills` copies them in |
 | **CODE**  | shared **configs** (Biome, tsconfig) + the **gate-engine**   | `bun add git+ssh://git@github.com/norvalbv/devkit.git#<tag>` |
 
 The two halves ship from the **same repo, same tag** so an agent skill and the engine
@@ -100,14 +100,44 @@ search-code index — resolves against the **consumer's** working directory, nev
 scans **that** repo. This is why devkit ships no data: the data is yours, found from
 your cwd.
 
-## AGENT half
+## Onboarding a repo — `devkit init`
 
-Skills live under `skills/` and install with the `skills` CLI, same repo + tag:
+After installing the CODE half, scaffold the guardrails in one idempotent step:
 
 ```bash
-npx skills add github:norvalbv/devkit/<skill-name>
+bunx devkit init [--stack electron|next|node-service|generic] [--yes] [--dry-run]
 ```
 
-A skill and the gate-engine bin it invokes are versioned together — adopt a tag and
-both halves move in lock-step.
-# devkit
+`init` wires: `guard.config.json`; `biome.jsonc` + `tsconfig.json` extending the devkit
+bases; the generic gate set appended into `.husky/pre-commit` (between `# devkit-guards`
+markers — never clobbering an existing hook); the size/fanout baselines (grandfathering
+your current tree); the skills sync; and `.devkit/config.json`. With `--stack electron`
+it additionally emits the structure-governance `eslint.config.mjs` + a growable
+domain-registry skeleton and grandfathers the folder-structure + import-wall baselines,
+so the boundary/structure walls go live **born-grandfathered**. It **prints** (never
+installs) the referenced-tool steps (fallow, the search-code MCP index).
+
+`bunx devkit doctor [--fix]` checks the wiring is present + in sync (husky calls the
+guards, configs extend the bases, skills match the manifest, baselines exist, devkit
+pinned to a tag) — exit `0` OK / `1` drift / `2` not-initialized.
+
+## AGENT half — skills
+
+Skills live under `skills/` and ship **inside this package** (same repo, same tag as the
+engine). `devkit init` (or `devkit sync-skills`) copies them into the consumer's
+`.claude/skills` + `.cursor/skills` and writes `.devkit/skills-manifest.json` (per-file
+SHA-256) so `doctor` detects drift. A skill and the gate-engine bin it drives stay
+lock-stepped to one tag. (We do **not** use `npx skills` — its private-repo support is
+unreliable; bundling skills in the package is the maintainable single channel.)
+
+## Updating devkit (consumers)
+
+Bump the pinned tag, then — two bun gotchas worth knowing:
+
+```bash
+bun pm cache rm            # bun caches git deps; without this it won't see the new tag
+# edit package.json's devkit dep to the new #vX.Y.Z, then:
+bun install                # use install for a RE-PIN; `bun add` can hit a DependencyLoop
+                           # transitioning one git-tag ref to another
+bunx devkit doctor --fix   # re-sync skills + template configs to the new version
+```

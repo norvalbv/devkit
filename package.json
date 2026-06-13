@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -14,6 +14,7 @@
     "./gate-engine/config": "./gate-engine/config.mjs"
   },
   "bin": {
+    "devkit": "./cli/index.mjs",
     "guard-decisions": "./gate-engine/decisions/cli.mjs",
     "guard-dup": "./gate-engine/co-occurrence/matcher.mjs",
     "guard-clone": "./gate-engine/co-occurrence/clone-detector.mjs",
@@ -21,6 +22,8 @@
     "guard-size": "./gate-engine/ratchets/size-disable.mjs"
   },
   "files": [
+    "cli",
+    "templates",
     "biome",
     "tsconfig",
     "gate-engine",

@@ -11,6 +11,7 @@
   "extends": ["./biome/base.jsonc"],
   "files": {
     "includes": [
+      "cli/**",
       "gate-engine/**",
       "tsconfig/**",
       "biome/**",
@@ -36,6 +37,18 @@
         "rules": {
           "suspicious": {
             "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      // Tests legitimately use inline regex literals in expect(...).toMatch(/…/) —
+      // the top-level-regex perf rule is noise there (not a hot path).
+      "includes": ["**/*.test.mjs"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "useTopLevelRegex": "off"
           }
         }
       }

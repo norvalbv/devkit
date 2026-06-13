@@ -5,6 +5,6 @@ import { defineConfig } from 'vitest/config';
 // devkit's own test run — scope include so a stray skill script can't redden it.
 export default defineConfig({
   test: {
-    include: ['gate-engine/**/*.test.mjs'],
+    include: ['gate-engine/**/*.test.mjs', 'cli/**/*.test.mjs'],
   },
 });

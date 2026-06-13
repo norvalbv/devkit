@@ -1,0 +1,8 @@
+{
+  "scanRoots": ["src"],
+  "boundaries": [],
+  "fanoutCap": 12,
+  "fanoutExempt": [],
+  "allowlistPath": ".co-occurrence-allowlist.json",
+  "decisionsDir": "docs/decisions"
+}

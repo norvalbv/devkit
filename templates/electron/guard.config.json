@@ -1,0 +1,8 @@
+{
+  "scanRoots": ["src", "socket-server/src", "vercel-serverless"],
+  "boundaries": ["src/main/", "socket-server/", "vercel-serverless/"],
+  "fanoutCap": 12,
+  "fanoutExempt": ["src/main/lib/trpc/routers", "src/renderer/components/ui"],
+  "allowlistPath": ".co-occurrence-allowlist.json",
+  "decisionsDir": "docs/decisions"
+}
