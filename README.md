@@ -23,7 +23,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.4.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.4.1
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -105,8 +105,15 @@ your cwd.
 After installing the CODE half, scaffold the guardrails:
 
 ```bash
-bunx devkit init [--stack electron|next|node-service|generic] [options]
+bunx devkit init [--stack electron|react-app|next|node-service|generic] [options]
 ```
+
+The stack auto-detects from the repo's `package.json` (`react` → `react-app`, `next` → `next`,
+`electron` → `electron`, headless ESM → `node-service`, else `generic`). A **monorepo-style repo
+whose app lives in a subdir** (e.g. `services/webapp`, with a framework-less root manifest)
+detects `generic` at the root — install in that subdir, or stay at the git root and pass
+`--stack react-app --scan-root services/webapp/src` (the gate then lives at the git root but
+governs the subdir).
 
 On a TTY (and without `--yes`) `init` runs an **interactive setup wizard** (powered by
 [`@clack/prompts`](https://www.npmjs.com/package/@clack/prompts)): confirm the detected
@@ -137,10 +144,15 @@ behaviour). Per-component flags work with or without `--yes`:
 bunx devkit init --yes --no-biome              # everything except biome
 bunx devkit init --yes --guards fanout,size    # only those two gate lines
 bunx devkit init --yes --no-skills --no-structure
+# nested app at the git root: govern the subdir, gate stays at the root
+bunx devkit init --stack react-app --scan-root services/webapp/src --no-biome --no-tsconfig
 ```
 
 Flags: `--no-biome` `--no-tsconfig` `--no-skills` `--no-husky` `--no-structure`
-`--no-guards`, and `--guards <a,b,…>` (a subset of `size,fanout,dup,clone,decisions`).
+`--no-guards` `--no-fallow`, `--guards <a,b,…>` (a subset of `size,fanout,dup,clone,decisions`),
+`--fallow` (opt-in code-health layer), and `--scan-root <a,b,…>` (override `guard.config.json`
+`scanRoots` up front — set **before** the freezes + the `react-app` `structureRoot`, so a
+non-`src` root like `services/webapp/src` is grandfathered correctly without an edit-then-refreeze).
 A non-TTY run without `--yes` behaves as `--yes` plus any `--no-*` flags (it never hangs
 waiting for input). `--dry-run` prints every action and writes nothing.
 

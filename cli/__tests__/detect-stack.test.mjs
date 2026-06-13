@@ -31,6 +31,14 @@ describe('detectStack', () => {
     expect(detectStack(tmpRepo({ dependencies: { next: '^14' } }))).toBe('next');
   });
 
+  it('picks react-app when react is present (not next/electron)', () => {
+    expect(detectStack(tmpRepo({ dependencies: { react: '^18', vite: '^5' } }))).toBe('react-app');
+  });
+
+  it('next wins over react (next pulls react)', () => {
+    expect(detectStack(tmpRepo({ dependencies: { react: '^18', next: '^14' } }))).toBe('next');
+  });
+
   it('picks node-service for a headless ESM package (no frontend framework)', () => {
     expect(detectStack(tmpRepo({ type: 'module', dependencies: { express: '^4' } }))).toBe(
       'node-service',

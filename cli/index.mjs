@@ -3,7 +3,7 @@
  * devkit CLI — wire a consumer repo onto the @norvalbv/devkit shared configs +
  * gate-engine, sync agent skills, and diagnose drift.
  *
- *   devkit init [--stack <x>] [--yes] [--dry-run] [--force]
+ *   devkit init [--stack <x>] [--scan-root <a,b>] [--fallow] [--yes] [--dry-run] [--force]
  *   devkit doctor [--fix]
  *   devkit sync-skills [--dry-run]
  *   devkit --help
@@ -17,13 +17,17 @@ Usage:
   devkit init [options]      Interactive SETUP WIZARD (on a TTY) to SELECT which components
                              to install — biome, tsconfig, skills, husky, guards, structure —
                              and to REMOVE a deselected one on a later run. Idempotent.
-    --stack <x>              electron | next | node-service | generic (default: auto-detect)
+    --stack <x>              electron | react-app | next | node-service | generic
+                             (default: auto-detect; structure preset ships for electron + react-app)
     --yes                    Non-interactive: all recommended defaults (no prompts).
     --dry-run                Print every file action; write nothing.
     --force                  Overwrite existing devkit-managed files.
     --no-<component>         Skip a component: --no-biome --no-tsconfig --no-skills
-                             --no-husky --no-structure --no-guards.
+                             --no-husky --no-structure --no-guards --no-fallow.
     --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
+    --fallow                 Also install the optional fallow code-health layer (off by default).
+    --scan-root <a,b,…>      Override guard.config.json scanRoots up front (set BEFORE the
+                             freezes) — e.g. --scan-root services/webapp/src for a nested app.
     --remove-deselected      With --yes: REMOVE any installed-but-now-deselected component
                              (default off — removal is opt-in / non-destructive).
 

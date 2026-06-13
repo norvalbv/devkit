@@ -89,6 +89,13 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow'])).fallow).toBe(true);
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow', '--no-fallow'])).fallow).toBe(false);
   });
+
+  it('parseFlags reads --scan-root / --scan-roots as a comma list', () => {
+    expect(parseFlags(['--scan-root', 'services/webapp/src']).scanRoots).toEqual([
+      'services/webapp/src',
+    ]);
+    expect(parseFlags(['--scan-roots', 'a/src, b/src']).scanRoots).toEqual(['a/src', 'b/src']);
+  });
 });
 
 describe('applyInit (direct chosen map — the wizard seam)', () => {
@@ -129,6 +136,39 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
     expect(config(root).components.biome).toBe(false);
+  });
+
+  it('--scan-root overrides guard.config scanRoots before the freeze (generic)', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: false,
+        husky: false,
+        structure: false,
+        guards: ['fanout'],
+      },
+      scanRoots: ['services/webapp/src'],
+      devkitRef: 'v0.4.1',
+    });
+    const cfg = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(cfg.scanRoots).toEqual(['services/webapp/src']);
+  });
+
+  it('--scan-root patch preserves the react-app guard.config //-comment guidance', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...defaultSelection(), structure: true },
+      scanRoots: ['services/webapp/src'],
+      devkitRef: 'v0.4.1',
+    });
+    const raw = readFileSync(join(root, 'guard.config.json'), 'utf8');
+    expect(JSON.parse(raw).scanRoots).toEqual(['services/webapp/src']);
+    // Regex patch (not a JSON round-trip), so the //-comment guidance survives.
+    expect(raw).toContain('"//scanRoots"');
   });
 });
 

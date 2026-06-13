@@ -71,6 +71,10 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // re-comments). Hoisted to module scope (perf: avoid recompiling per call).
 const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
 
+// Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
+// (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
+const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
+
 function parseFlags(args) {
   const flags = {
     yes: false,
@@ -81,6 +85,7 @@ function parseFlags(args) {
     fallow: false,
     no: new Set(),
     guards: null,
+    scanRoots: null,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -91,6 +96,13 @@ function parseFlags(args) {
     else if (a === '--fallow') flags.fallow = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
+    // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
+    // + the react-app structureRoot grandfather a non-standard tree (e.g. services/webapp/src).
+    else if (a === '--scan-root' || a === '--scan-roots')
+      flags.scanRoots = (args[++i] ?? '')
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean);
     else if (a.startsWith('--no-')) flags.no.add(a.slice('--no-'.length));
   }
   return flags;
@@ -184,6 +196,31 @@ function installStructureFiles(cwd, stack, force, dryRun) {
       logWrite(writeIfAbsent(target, readText(join(tplDir, src)), { force }), dest);
     }
   }
+}
+
+// Override guard.config.json scanRoots from --scan-root, BEFORE the freezes run so they (and
+// the react-app structureRoot, which derives from scanRoots[0]) grandfather the right tree —
+// e.g. a non-`src` root like services/webapp/src. Patches the scanRoots array in place via
+// regex to PRESERVE the template's //-comment guidance keys; falls back to a JSON round-trip if
+// the key is absent. No-op when guard.config.json wasn't written (no guards/structure selected).
+function applyScanRoots(cwd, scanRoots, dryRun) {
+  if (!scanRoots?.length) return;
+  const value = JSON.stringify(scanRoots);
+  if (dryRun) {
+    console.log(`  [dry-run] set guard.config.json scanRoots = ${value}`);
+    return;
+  }
+  const path = join(cwd, 'guard.config.json');
+  if (!existsSync(path)) return;
+  const raw = readText(path);
+  let next = raw.replace(SCANROOTS_RE, `$1${value}`);
+  if (next === raw) {
+    const cfg = readJson(path) ?? {};
+    cfg.scanRoots = scanRoots;
+    next = `${JSON.stringify(cfg, null, 2)}\n`;
+  }
+  writeFileSync(path, next);
+  console.log(`  ✓ guard.config.json scanRoots = ${value}`);
 }
 
 function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
@@ -607,6 +644,7 @@ const STEP_LABELS = {
  * @param {boolean} [plan.force]
  * @param {boolean} [plan.dryRun]
  * @param {boolean} [plan.interactive] TTY run — enables fallow sub-confirms (default false)
+ * @param {string[]} [plan.scanRoots] override guard.config.json scanRoots (--scan-root)
  * @param {string} [plan.devkitRef]
  */
 export async function applyInit(cwd, plan) {
@@ -617,6 +655,7 @@ export async function applyInit(cwd, plan) {
     force = false,
     dryRun = false,
     interactive = false,
+    scanRoots = null,
   } = plan;
   const isStructure = selection.structure && STRUCTURE_STACKS.has(stack);
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
@@ -636,6 +675,7 @@ export async function applyInit(cwd, plan) {
   console.log('1. configs');
   if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
   else installConfigs(cwd, selection, force, dryRun);
+  applyScanRoots(cwd, scanRoots, dryRun);
 
   console.log('2. package.json');
   patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun);
@@ -755,6 +795,7 @@ export default async function run(args, cwd) {
     force: flags.force,
     dryRun: flags.dryRun,
     interactive,
+    scanRoots: flags.scanRoots,
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;
