@@ -27,7 +27,9 @@ function checkConfig(cwd) {
   return check('.devkit/config.json', 'OK', 'present');
 }
 
-function checkHusky(cwd) {
+// Selection-aware: only the SELECTED guards must be present in the block (a deselected
+// guard being absent is correct, not drift).
+function checkHusky(cwd, selectedGuards) {
   const hookPath = join(cwd, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
     return check('.husky/pre-commit', 'MISSING', 'no hook', 'run `devkit init`', true);
@@ -42,24 +44,23 @@ function checkHusky(cwd) {
       true,
     );
   }
-  const guards = [
-    'guard-size gate',
-    'guard-fanout gate',
-    'guard-dup',
-    'guard-clone',
-    'guard-decisions',
-  ];
-  const missing = guards.filter((g) => !content.includes(g));
+  const missing = selectedGuards.filter((g) => !content.includes(`bunx guard-${g}`));
   if (missing.length) {
     return check(
       '.husky/pre-commit',
       'DRIFT',
-      `block missing: ${missing.join(', ')}`,
+      `block missing guard(s): ${missing.join(', ')}`,
       'run `devkit init --force` to refresh the block',
       true,
     );
   }
-  return check('.husky/pre-commit', 'OK', 'devkit-guards block calls all gates');
+  return check(
+    '.husky/pre-commit',
+    'OK',
+    selectedGuards.length
+      ? `block calls: ${selectedGuards.join(', ')}`
+      : 'block present (no guards selected)',
+  );
 }
 
 // A jsonc-tolerant extends check (strip // line comments before parse).
@@ -160,15 +161,28 @@ function checkPin(cwd) {
 // recreated when MISSING (by plain, create-if-absent init).
 const FORCE_FIXABLE = new Set(['biome.jsonc', 'tsconfig.json']);
 
+// Turn a recorded component selection into the init flag list that reproduces it, so
+// `--fix` re-runs init for the RECORDED selection (not the all-on --yes default).
+function selectionFlags(sel) {
+  const flags = ['--yes'];
+  for (const id of ['biome', 'tsconfig', 'skills', 'husky', 'structure']) {
+    if (sel[id] === false) flags.push(`--no-${id}`);
+  }
+  if (!sel.guards?.length) flags.push('--no-guards');
+  else flags.push('--guards', sel.guards.join(','));
+  return flags;
+}
+
 // --fix: repair fixable findings. NEVER refreeze (only recreate MISSING baselines), and
 // NEVER force-overwrite a consumer-tuned file. A DRIFTED template config is force-rewritten
 // from its template DIRECTLY (not via `init --force`, which would also clobber the
-// consumer's tuned guard.config.json); MISSING files + husky go through plain init.
-function applyFix(cwd, results) {
-  console.log('\n--fix: re-running idempotent steps for fixable findings...');
+// consumer's tuned guard.config.json); MISSING files + husky go through `init` for the
+// RECORDED selection (selectionFlags) so --fix never silently re-adds a deselected component.
+function applyFix(cwd, results, sel, stack) {
+  console.log('\n--fix: re-running idempotent steps for the recorded selection...');
 
   // Force-rewrite only the specific drifted fixed-contract configs, straight from template.
-  const tplDir = join(packageDir(), 'templates', 'generic');
+  const tplDir = join(packageDir(), 'templates', stack === 'electron' ? 'electron' : 'generic');
   for (const r of results) {
     if (r.status === 'DRIFT' && FORCE_FIXABLE.has(r.name)) {
       writeFileSync(join(cwd, r.name), readFileSync(join(tplDir, r.name), 'utf8'));
@@ -176,13 +190,14 @@ function applyFix(cwd, results) {
     }
   }
 
-  // MISSING template files / husky drift → plain (idempotent, non-destructive) init.
+  // MISSING template files / husky drift → init for the recorded selection (idempotent).
   const needsInit = results.some(
     (r) => r.fixable && r.status === 'MISSING' && r.name !== 'baselines' && r.name !== 'skills',
   );
   const huskyDrift = results.some((r) => r.name === '.husky/pre-commit' && r.status !== 'OK');
   if (needsInit || huskyDrift) {
-    execFileSync(process.execPath, [join(packageDir(), 'cli', 'index.mjs'), 'init', '--yes'], {
+    const args = ['init', '--stack', stack, ...selectionFlags(sel)];
+    execFileSync(process.execPath, [join(packageDir(), 'cli', 'index.mjs'), ...args], {
       cwd,
       stdio: 'inherit',
     });
@@ -221,16 +236,28 @@ export default async function run(args, cwd) {
     return 2;
   }
 
-  const results = [
-    configResult,
-    checkHusky(cwd),
-    checkExtends(cwd, 'biome.jsonc', '@norvalbv/devkit/biome/base'),
-    checkExtends(cwd, 'tsconfig.json', '@norvalbv/devkit/tsconfig/base'),
-    await checkGuardConfig(cwd),
-    await checkSkills(cwd),
-    checkBaselines(cwd),
-    checkPin(cwd),
-  ];
+  // Selection-aware: only check the components that were actually installed. A config with
+  // no `components` block defaults to all-on (a fresh init always records it).
+  const cfg = readJson(join(cwd, '.devkit', 'config.json')) ?? {};
+  const sel = cfg.components ?? {
+    biome: true,
+    tsconfig: true,
+    skills: true,
+    husky: true,
+    structure: false,
+    guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
+  };
+
+  const results = [configResult];
+  if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []));
+  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', '@norvalbv/devkit/biome/base'));
+  if (sel.tsconfig)
+    results.push(checkExtends(cwd, 'tsconfig.json', '@norvalbv/devkit/tsconfig/base'));
+  if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
+  if (sel.skills) results.push(await checkSkills(cwd));
+  if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
+    results.push(checkBaselines(cwd));
+  results.push(checkPin(cwd));
 
   console.log('devkit doctor\n');
   const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };
@@ -242,7 +269,7 @@ export default async function run(args, cwd) {
 
   const drifted = results.some((r) => r.status !== 'OK');
   if (fix && drifted) {
-    applyFix(cwd, results);
+    applyFix(cwd, results, sel, cfg.stack ?? 'generic');
     console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
   }
 

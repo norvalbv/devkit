@@ -1,10 +1,10 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Single source-of-truth devkit: shared Biome/TS configs + portable governance gate-engine. Consumed via `bun add github:norvalbv/devkit#<tag>`.",
+  "description": "Single source-of-truth devkit: shared Biome/TS configs + portable governance gate-engine + setup-wizard CLI. Consumed via `bun add git+ssh://git@github.com/norvalbv/devkit.git#<tag>`.",
   "exports": {
     "./biome/base": "./biome/base.jsonc",
     "./biome/react": "./biome/react.jsonc",
@@ -41,5 +41,8 @@
   },
   "optionalDependencies": {
     "jscpd": "^4.2.4"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.5.1"
   }
 }

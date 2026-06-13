@@ -15,15 +15,19 @@ function tmpRepo(pkg = { name: 'fx', version: '0.0.0', type: 'module' }) {
   return root;
 }
 function devkit(root, ...args) {
+  // --yes forces the non-interactive path even when the test runner has a TTY.
   return spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
+}
+function config(root) {
+  return JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
 }
 afterEach(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots = [];
 });
 
-describe('init (generic)', () => {
-  it('emits the generic config set + husky hook + .devkit/config.json', () => {
+describe('init --yes (all recommended)', () => {
+  it('emits the full generic config set + husky hook + .devkit/config.json', () => {
     const root = tmpRepo();
     const r = devkit(root, 'init', '--stack', 'generic', '--yes');
     expect(r.status).toBe(0);
@@ -36,11 +40,12 @@ describe('init (generic)', () => {
     ]) {
       expect(existsSync(join(root, f)), `${f} should exist`).toBe(true);
     }
-    // Generic stack does NOT emit the structure-lint preset.
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false);
-    const cfg = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
+    const cfg = config(root);
     expect(cfg.stack).toBe('generic');
-    expect(cfg.steps).not.toContain('structure-baselines');
+    expect(cfg.components.biome).toBe(true);
+    expect(cfg.components.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions']);
+    expect(cfg.components.structure).toBe(false);
   });
 
   it('is idempotent: a second run reports "already wired", writes no new files', () => {
@@ -70,18 +75,120 @@ describe('init (generic)', () => {
   });
 });
 
-describe('doctor', () => {
-  it('exits 2 on an uninitialized repo', () => {
+describe('init — per-component flag selection', () => {
+  it('--no-biome → no biome.jsonc, no biome devDep, no biome husky step', () => {
     const root = tmpRepo();
-    const r = devkit(root, 'doctor');
-    expect(r.status).toBe(2);
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@biomejs/biome']).toBeUndefined();
+    expect(pkg.scripts.lint).toBeUndefined();
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).not.toContain('biome format');
+    expect(config(root).components.biome).toBe(false);
   });
 
-  it('exits 0 after a successful init', () => {
+  it('--guards fanout,size → only those two gate lines in the hook', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).toContain('bunx guard-fanout');
+    expect(hook).toContain('bunx guard-size');
+    expect(hook).not.toContain('bunx guard-dup');
+    expect(hook).not.toContain('bunx guard-clone');
+    expect(hook).not.toContain('bunx guard-decisions');
+    expect(config(root).components.guards).toEqual(['fanout', 'size']);
+    // No clone guard → jscpd devDep omitted.
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies.jscpd).toBeUndefined();
+  });
+
+  it('--no-skills → no skills synced, no manifest', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-skills');
+    expect(existsSync(join(root, '.claude/skills'))).toBe(false);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(false);
+    expect(config(root).components.skills).toBe(false);
+  });
+});
+
+describe('init — removal (deselected + present)', () => {
+  it('biome present then deselected with --remove-deselected → biome.jsonc gone, others intact', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
+
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome', '--remove-deselected');
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    // Untouched components survive.
+    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
+    expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
+    expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@biomejs/biome']).toBeUndefined();
+    expect(pkg.scripts.format).toBeUndefined();
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).not.toContain('biome format');
+    expect(hook).toContain('bunx guard-size'); // other guards intact
+    expect(config(root).components.biome).toBe(false);
+  });
+
+  it('WITHOUT --remove-deselected a deselected-but-present component is left in place', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    // No --remove-deselected: removal is opt-in. biome.jsonc stays even though deselected.
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
+  });
+
+  it('removing a single guard drops only its line, keeps the rest', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    devkit(
+      root,
+      'init',
+      '--stack',
+      'generic',
+      '--yes',
+      '--guards',
+      'fanout',
+      '--remove-deselected',
+    );
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    // guards is removed-as-a-unit then re-added with the new subset.
+    expect(hook).toContain('bunx guard-fanout');
+    expect(hook).not.toContain('bunx guard-size');
+    expect(config(root).components.guards).toEqual(['fanout']);
+  });
+});
+
+describe('doctor — selection-aware', () => {
+  it('exits 2 on an uninitialized repo', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'doctor').status).toBe(2);
+  });
+
+  it('exits 0 after a successful --yes init', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/All checks OK/);
+  });
+
+  it('does NOT flag biome missing when biome was deselected', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toMatch(/biome\.jsonc/);
+  });
+
+  it('only checks the selected guards in the husky block', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/block calls: fanout, size/);
   });
 });

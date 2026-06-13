@@ -1,103 +1,174 @@
 /**
- * `devkit init` — scaffold a consumer repo onto devkit's shared configs + gate-engine.
+ * `devkit init` — scaffold a consumer repo onto devkit's shared configs + gate-engine,
+ * with an interactive SETUP WIZARD (clack) for component selection AND removal.
  *
- * Idempotent (create-if-absent, reports "already wired" per step). Steps (generic stack):
- *   1. guard.config.json
- *   2. biome.jsonc + tsconfig.json (extend devkit's bare subpaths)
- *   3. consumer package.json devDeps + scripts
- *   4. .husky/pre-commit (write template OR append the devkit-guards block, never clobber)
- *   5. guard-fanout freeze + guard-size freeze (grandfather current debt)
- *   6. sync-skills
- *   7. .devkit/config.json
- *   8. print (never run) the referenced-tool steps (fallow, search-code index)
+ * Three resolution paths converge on one `selection` (see components.mjs):
+ *   1. interactive  — TTY + no --yes → runWizard() asks per component + per guard.
+ *   2. --yes        — all recommended defaults (EXACT pre-wizard behaviour), minus any --no-*.
+ *   3. non-TTY      — same as --yes (never hangs waiting for stdin), minus any --no-*.
+ *
+ * Apply logic per component: selected+absent → install; selected+present → idempotent;
+ * deselected+present → REMOVE (wizard confirms per component default-NO;
+ * --remove-deselected removes without prompting). Removal is SAFE: it never deletes a file
+ * devkit didn't create.
+ *
+ * The chosen set is recorded in .devkit/config.json.components so `doctor` is selection-aware.
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { outro } from '@clack/prompts';
+import { COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
 import { generateImportWallBaseline } from '../lib/generate-import-wall-baseline.mjs';
 import { generateStructureBaselines } from '../lib/generate-structure-baseline.mjs';
-import { extractBlock, mergeBlock, readHook } from '../lib/husky.mjs';
+import {
+  buildFullHook,
+  buildGuardBlock,
+  hasFragment,
+  removeFragment,
+  removeGuardBlock,
+  replaceGuardBlock,
+} from '../lib/husky-block.mjs';
+import { runWizard } from '../lib/wizard.mjs';
 import { syncSkills } from './sync-skills.mjs';
 
-const INIT_VERSION = 1;
+const INIT_VERSION = 2;
 
-// Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs +
-// per-tree baselines). Generic gets the gate set only; these get structure too.
+// Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs + baselines).
 const STRUCTURE_STACKS = new Set(['electron']);
 
-// The commented structure-lint placeholder in the generic husky template that a
-// structure stack flips live (enableStructureLint).
-const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
-
-// The files each structure stack emits, as [src-relative-to-template, dest-relative-to-cwd].
+// The files each structure stack emits, [src-relative-to-template, dest-relative-to-cwd].
 const STRUCTURE_TEMPLATE_FILES = {
   electron: [
     ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
     ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
-    ['guard.config.json', 'guard.config.json'],
-    ['biome.jsonc', 'biome.jsonc'],
-    ['tsconfig.json', 'tsconfig.json'],
   ],
 };
 
+// devDeps/scripts owned by each component — used by both install (add) and remove (delete).
+const BIOME_DEV_DEPS = ['@biomejs/biome'];
+const BIOME_SCRIPTS = ['lint', 'format'];
+
+// The commented structure-lint placeholder line a structure stack flips live (and removal
+// re-comments). Hoisted to module scope (perf: avoid recompiling per call).
+const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
+
 function parseFlags(args) {
-  const flags = { yes: false, dryRun: false, force: false, stack: null };
+  const flags = {
+    yes: false,
+    dryRun: false,
+    force: false,
+    stack: null,
+    removeDeselected: false,
+    no: new Set(),
+    guards: null,
+  };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--yes' || a === '-y') flags.yes = true;
     else if (a === '--dry-run') flags.dryRun = true;
     else if (a === '--force') flags.force = true;
+    else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--stack') flags.stack = args[++i];
+    else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
+    else if (a.startsWith('--no-')) flags.no.add(a.slice('--no-'.length));
   }
   return flags;
 }
 
-// Report the outcome of a writeIfAbsent-style step, honouring dry-run.
+// Build a selection from flags (the --yes / non-TTY path): all recommended, minus --no-*,
+// guards narrowed by --guards / --no-guards.
+function selectionFromFlags(flags) {
+  const sel = defaultSelection();
+  for (const id of ['biome', 'tsconfig', 'skills', 'husky', 'structure']) {
+    if (flags.no.has(id)) sel[id] = false;
+  }
+  if (flags.no.has('guards')) sel.guards = [];
+  else if (flags.guards) sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
+  return sel;
+}
+
+// Which components are currently wired? Read the recorded set first (authoritative), then
+// fall back to on-disk detection for a pre-wizard repo with no `components` block.
+function detectInstalled(cwd) {
+  const cfg = readJson(join(cwd, '.devkit', 'config.json'));
+  const installed = new Set();
+  const recorded = cfg?.components;
+  if (recorded) {
+    for (const id of ['biome', 'tsconfig', 'skills', 'husky', 'structure']) {
+      if (recorded[id]) installed.add(id);
+    }
+    if (recorded.guards?.length) installed.add('guards');
+    return installed;
+  }
+  if (existsSync(join(cwd, 'biome.jsonc'))) installed.add('biome');
+  if (existsSync(join(cwd, 'tsconfig.json'))) installed.add('tsconfig');
+  if (existsSync(join(cwd, '.devkit', 'skills-manifest.json'))) installed.add('skills');
+  if (existsSync(join(cwd, '.husky', 'pre-commit'))) installed.add('husky');
+  if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
+  const hook = existsSync(join(cwd, '.husky', 'pre-commit'))
+    ? readFileSync(join(cwd, '.husky', 'pre-commit'), 'utf8')
+    : '';
+  if (GUARD_IDS.some((g) => hasFragment(hook, `guard-${g}`))) installed.add('guards');
+  return installed;
+}
+
+function readText(path) {
+  return readFileSync(path, 'utf8');
+}
+
 function logWrite(action, label) {
   const map = { created: '✓ created', forced: '✓ overwrote', exists: '• already wired' };
   console.log(`  ${map[action] ?? action} ${label}`);
 }
 
-// Step 1+2: template configs that extend devkit. A structure stack (electron)
-// emits the structure-lint preset (eslint.config.mjs + eslint/domains.mjs +
-// exempt.mjs) on top of the shared guard/biome/tsconfig set; generic emits only
-// the shared set.
-function writeConfigs(cwd, stack, force, dryRun) {
-  const isStructure = STRUCTURE_STACKS.has(stack);
-  const tplDir = join(packageDir(), 'templates', isStructure ? stack : 'generic');
-  const items = isStructure
-    ? STRUCTURE_TEMPLATE_FILES[stack]
-    : [
-        ['guard.config.json', 'guard.config.json'],
-        ['biome.jsonc', 'biome.jsonc'],
-        ['tsconfig.json', 'tsconfig.json'],
-      ];
+// ── install steps ──────────────────────────────────────────────────────────
+
+function installConfigs(cwd, sel, force, dryRun) {
+  const tplDir = join(packageDir(), 'templates', 'generic');
+  const items = [];
+  if (sel.biome) items.push(['biome.jsonc', 'biome.jsonc']);
+  if (sel.tsconfig) items.push(['tsconfig.json', 'tsconfig.json']);
+  // guard.config.json is needed whenever ANY gate runs (guards or structure).
+  if (sel.guards?.length || sel.structure) items.push(['guard.config.json', 'guard.config.json']);
   for (const [src, dest] of items) {
-    const content = readText(join(tplDir, src));
     const target = join(cwd, dest);
     if (dryRun) {
       console.log(
         `  [dry-run] ${existsSync(target) && !force ? 'skip (exists)' : 'write'} ${dest}`,
       );
     } else {
-      logWrite(writeIfAbsent(target, content, { force }), dest);
+      logWrite(writeIfAbsent(target, readText(join(tplDir, src)), { force }), dest);
     }
   }
 }
 
-// Read a template file verbatim (preserve comments in .jsonc — don't round-trip through JSON.parse).
-function readText(path) {
-  return readFileSync(path, 'utf8');
+function installStructureFiles(cwd, force, dryRun) {
+  const tplDir = join(packageDir(), 'templates', 'electron');
+  // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (renderer rules).
+  const items = [
+    ...STRUCTURE_TEMPLATE_FILES.electron,
+    ['biome.jsonc', 'biome.jsonc'],
+    ['tsconfig.json', 'tsconfig.json'],
+    ['guard.config.json', 'guard.config.json'],
+  ];
+  for (const [src, dest] of items) {
+    const target = join(cwd, dest);
+    if (dryRun) {
+      console.log(
+        `  [dry-run] ${existsSync(target) && !force ? 'skip (exists)' : 'write'} ${dest}`,
+      );
+    } else {
+      logWrite(writeIfAbsent(target, readText(join(tplDir, src)), { force }), dest);
+    }
+  }
 }
 
-// Step 3: patch the consumer package.json devDeps + scripts (idempotent). A
-// structure stack also pulls eslint + the project-structure plugin + the TS parser
-// and adds the structure-lint scripts.
-function patchPackageJson(cwd, devkitRef, isStructure, dryRun) {
+function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
   const pkgPath = join(cwd, 'package.json');
   const pkg = readJson(pkgPath);
   if (!pkg) {
@@ -106,9 +177,9 @@ function patchPackageJson(cwd, devkitRef, isStructure, dryRun) {
   }
   const devDeps = {
     '@norvalbv/devkit': `git+ssh://git@github.com/norvalbv/devkit.git#${devkitRef}`,
-    '@biomejs/biome': '^2.5.0',
-    husky: '^9.1.7',
-    jscpd: '^4.2.4',
+    ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
+    ...(sel.husky ? { husky: '^9.1.7' } : {}),
+    ...(sel.guards?.includes('clone') ? { jscpd: '^4.2.4' } : {}),
     ...(isStructure
       ? {
           eslint: '^9.0.0',
@@ -118,10 +189,11 @@ function patchPackageJson(cwd, devkitRef, isStructure, dryRun) {
       : {}),
   };
   const scripts = {
-    lint: 'biome check .',
-    format: 'biome check --write .',
-    prepare: 'husky',
-    'guard:freeze': 'guard-fanout freeze && guard-size freeze',
+    ...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),
+    ...(sel.husky ? { prepare: 'husky' } : {}),
+    ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
+      ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
+      : {}),
     ...(isStructure ? { 'lint:structure': 'eslint src' } : {}),
   };
 
@@ -140,7 +212,6 @@ function patchPackageJson(cwd, devkitRef, isStructure, dryRun) {
       added.push(`script ${k}`);
     }
   }
-
   if (added.length === 0) {
     console.log('  • package.json already wired (devDeps + scripts)');
     return;
@@ -153,41 +224,36 @@ function patchPackageJson(cwd, devkitRef, isStructure, dryRun) {
   console.log(`  ✓ package.json: ${added.join(', ')}`);
 }
 
-// Step 4: wire .husky/pre-commit (write template if absent, else append marker block).
-function wireHusky(cwd, dryRun) {
-  const tplPath = join(packageDir(), 'templates', '_shared', 'husky', 'pre-commit.generic.sh');
-  const tplContent = readText(tplPath);
+// Wire .husky/pre-commit from the selection: fresh repo → full hook; existing hook →
+// replace/insert the devkit-guards block assembled from the selection.
+function installHusky(cwd, sel, dryRun) {
   const hookPath = join(cwd, '.husky', 'pre-commit');
-
   if (!existsSync(hookPath)) {
     if (dryRun) {
-      console.log('  [dry-run] write .husky/pre-commit (full generic template) + husky init');
+      console.log('  [dry-run] write .husky/pre-commit (assembled from selection) + husky init');
       return;
     }
     mkdirSync(join(cwd, '.husky'), { recursive: true });
-    writeFileSync(hookPath, tplContent);
+    writeFileSync(hookPath, buildFullHook(sel));
     chmodSync(hookPath, 0o755);
-    console.log('  ✓ created .husky/pre-commit (generic gates)');
+    console.log('  ✓ created .husky/pre-commit (selected gates)');
     return;
   }
-
-  // Hook present (frink / marketing have their own) — insert/refresh only the marker block.
-  const block = extractBlock(tplContent);
-  const current = readHook(hookPath);
-  const { content, action } = mergeBlock(current, block);
-  if (action === 'unchanged') {
+  const current = readText(hookPath);
+  const block = buildGuardBlock(sel);
+  const merged = replaceGuardBlock(current, block);
+  if (merged === current) {
     console.log('  • .husky/pre-commit already wired (devkit-guards block current)');
     return;
   }
   if (dryRun) {
-    console.log(`  [dry-run] ${action} devkit-guards block in existing .husky/pre-commit`);
+    console.log('  [dry-run] refresh devkit-guards block in existing .husky/pre-commit');
     return;
   }
-  writeFileSync(hookPath, content);
-  console.log(`  ✓ ${action} devkit-guards block in .husky/pre-commit`);
+  writeFileSync(hookPath, merged);
+  console.log('  ✓ refreshed devkit-guards block in .husky/pre-commit');
 }
 
-// Step 5: grandfather current debt so the ratchets only block FUTURE growth.
 function runFreezes(cwd, dryRun) {
   if (dryRun) {
     console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
@@ -202,28 +268,21 @@ function runFreezes(cwd, dryRun) {
       execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
       console.log(`  ✓ ${name} freeze (baseline grandfathered)`);
     } catch (e) {
-      console.log(
-        `  ! ${name} freeze failed: ${(e.stderr || e.message || '').toString().trim().split('\n')[0]}`,
-      );
+      console.log(`  ! ${name} freeze failed: ${firstLine(e)}`);
     }
   }
 }
 
-// Structure stacks: grandfather the consumer's existing tree against the
-// just-emitted eslint.config.mjs + eslint/domains.mjs. Runs the folder-structure
-// walker (per existing tree) + the import-wall scan generator. Skipped on dry-run.
 async function runStructureBaselines(cwd, dryRun) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
     return;
   }
-  // Folder-structure grandfathers (per existing tree). Reads the emitted eslint/domains.mjs.
   try {
     await generateStructureBaselines(cwd, { log: (m) => console.log(m) });
   } catch (e) {
     console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
   }
-  // Import-wall grandfather (scan mode). Needs eslint installed in the consumer.
   try {
     generateImportWallBaseline(cwd, { log: (m) => console.log(m) });
   } catch (e) {
@@ -236,13 +295,11 @@ function firstLine(e) {
   return (e.stderr || e.message || '').toString().trim().split('\n')[0];
 }
 
-// Structure stacks: flip the commented structure-lint line in the pre-commit hook
-// to the live `bunx eslint <roots>` call. Idempotent: a no-op once already live.
+// Flip the commented structure-lint placeholder to the live `bunx eslint <roots>` call.
 function enableStructureLint(cwd, dryRun) {
   const hookPath = join(cwd, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
   const content = readFileSync(hookPath, 'utf8');
-  const LIVE = '\nbunx eslint src\n';
   if (content.includes('\nbunx eslint src')) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
@@ -255,11 +312,297 @@ function enableStructureLint(cwd, dryRun) {
     console.log('  [dry-run] uncomment `bunx eslint src` in .husky/pre-commit');
     return;
   }
-  writeFileSync(hookPath, content.replace(COMMENTED_LINT_RE, LIVE));
+  writeFileSync(hookPath, content.replace(COMMENTED_LINT_RE, '\nbunx eslint src\n'));
   console.log('  ✓ enabled structure-lint (`bunx eslint src`) in .husky/pre-commit');
 }
 
-// Step 8: print (never run) the referenced-tool follow-ups.
+// ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
+
+function removeFromPkg(cwd, devDeps, scripts, dryRun) {
+  const pkgPath = join(cwd, 'package.json');
+  const pkg = readJson(pkgPath);
+  if (!pkg) return [];
+  const removed = [];
+  for (const k of devDeps) {
+    if (pkg.devDependencies?.[k]) {
+      removed.push(`devDep ${k}`);
+      if (!dryRun) delete pkg.devDependencies[k];
+    }
+  }
+  for (const k of scripts) {
+    if (pkg.scripts?.[k]) {
+      removed.push(`script ${k}`);
+      if (!dryRun) delete pkg.scripts[k];
+    }
+  }
+  if (removed.length && !dryRun) writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  return removed;
+}
+
+function removeBiome(cwd, dryRun) {
+  const file = join(cwd, 'biome.jsonc');
+  if (existsSync(file)) {
+    console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} biome.jsonc`);
+    if (!dryRun) rmSync(file);
+  }
+  const pkgRemoved = removeFromPkg(cwd, BIOME_DEV_DEPS, BIOME_SCRIPTS, dryRun);
+  if (pkgRemoved.length)
+    console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
+  // Drop the biome-format step from the husky block.
+  removeHuskyPiece(cwd, 'biome-format', dryRun);
+}
+
+// Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
+function removeTsconfig(cwd, dryRun) {
+  const file = join(cwd, 'tsconfig.json');
+  if (!existsSync(file)) return;
+  const raw = readFileSync(file, 'utf8');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.log('  ! tsconfig.json unparseable — left untouched');
+    return;
+  }
+  const ext = parsed.extends;
+  const isDevkit = (e) => typeof e === 'string' && e.startsWith('@norvalbv/devkit/tsconfig');
+  const onlyExtends = Object.keys(parsed).length === 1 && 'extends' in parsed;
+  if (!ext || (Array.isArray(ext) ? !ext.some(isDevkit) : !isDevkit(ext))) {
+    console.log('  • tsconfig.json has no devkit extends — left untouched');
+    return;
+  }
+  if (Array.isArray(ext)) parsed.extends = ext.filter((e) => !isDevkit(e));
+  else delete parsed.extends;
+  if (dryRun) {
+    console.log('  [dry-run] strip devkit extends from tsconfig.json');
+    return;
+  }
+  writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
+  console.log(
+    `  ✓ stripped devkit extends from tsconfig.json${onlyExtends ? ' (file now has no extends — review/remove if empty)' : ''}`,
+  );
+}
+
+// Remove devkit-synced skills (per the manifest) from .claude + .cursor + drop the manifest.
+function removeSkills(cwd, dryRun) {
+  const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
+  const manifest = readJson(manifestPath);
+  if (!manifest) {
+    console.log('  • no skills-manifest.json — nothing to remove');
+    return;
+  }
+  const targets = ['.claude/skills', '.cursor/skills'];
+  let n = 0;
+  for (const rel of Object.keys(manifest.files)) {
+    for (const t of targets) {
+      const p = join(cwd, t, rel);
+      if (existsSync(p)) {
+        n++;
+        if (!dryRun) rmSync(p);
+      }
+    }
+  }
+  if (!dryRun) rmSync(manifestPath, { force: true });
+  console.log(
+    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced skill file(s) + manifest`,
+  );
+}
+
+// Remove the entire devkit-guards block from the hook (leaving the rest of the consumer hook).
+function removeHusky(cwd, dryRun) {
+  const hookPath = join(cwd, '.husky', 'pre-commit');
+  if (!existsSync(hookPath)) return;
+  const { content, removed } = removeGuardBlock(readFileSync(hookPath, 'utf8'));
+  if (!removed) {
+    console.log('  • no devkit-guards block in .husky/pre-commit');
+    return;
+  }
+  if (dryRun) {
+    console.log('  [dry-run] remove devkit-guards block from .husky/pre-commit');
+    return;
+  }
+  writeFileSync(hookPath, content);
+  console.log('  ✓ removed devkit-guards block from .husky/pre-commit');
+}
+
+// Remove a single fragment (one guard, or the biome-format step) from the hook block.
+function removeHuskyPiece(cwd, id, dryRun) {
+  const hookPath = join(cwd, '.husky', 'pre-commit');
+  if (!existsSync(hookPath)) return false;
+  const { content, removed } = removeFragment(readFileSync(hookPath, 'utf8'), id);
+  if (!removed) return false;
+  if (dryRun) {
+    console.log(`  [dry-run] remove ${id} from .husky/pre-commit`);
+    return true;
+  }
+  writeFileSync(hookPath, content);
+  console.log(`  ✓ removed ${id} from .husky/pre-commit`);
+  return true;
+}
+
+// Remove ONLY devkit-created structure files (guarded by config marker), re-comment the line.
+function removeStructure(cwd, prevConfig, dryRun) {
+  if (!prevConfig?.components?.structure) {
+    console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
+    return;
+  }
+  for (const [, dest] of STRUCTURE_TEMPLATE_FILES.electron) {
+    const p = join(cwd, dest);
+    if (existsSync(p)) {
+      console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} ${dest}`);
+      if (!dryRun) rmSync(p);
+    }
+  }
+  const baselines = join(cwd, 'eslint', 'baselines', 'imports.mjs');
+  if (existsSync(baselines)) {
+    console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} eslint/baselines/imports.mjs`);
+    if (!dryRun) rmSync(baselines);
+  }
+  const pkgRemoved = removeFromPkg(
+    cwd,
+    ['eslint', 'eslint-plugin-project-structure', '@typescript-eslint/parser'],
+    ['lint:structure'],
+    dryRun,
+  );
+  if (pkgRemoved.length) {
+    console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
+  }
+  // Re-comment the live structure-lint line in the hook.
+  const hookPath = join(cwd, '.husky', 'pre-commit');
+  if (existsSync(hookPath)) {
+    const content = readFileSync(hookPath, 'utf8');
+    const live = '\nbunx eslint src\n';
+    if (content.includes(live)) {
+      if (!dryRun) {
+        writeFileSync(
+          hookPath,
+          content.replace(
+            live,
+            '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n',
+          ),
+        );
+      }
+      console.log(
+        `  ${dryRun ? '[dry-run]' : '✓'} re-commented structure-lint line in .husky/pre-commit`,
+      );
+    }
+  }
+}
+
+function applyRemovals(cwd, remove, prevConfig, dryRun) {
+  if (!remove.length) return;
+  console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
+  // Guards (individual lines) before husky (whole-block) so order is irrelevant.
+  if (remove.includes('guards')) {
+    for (const g of GUARD_IDS) removeHuskyPiece(cwd, `guard-${g}`, dryRun);
+  }
+  if (remove.includes('biome')) removeBiome(cwd, dryRun);
+  if (remove.includes('tsconfig')) removeTsconfig(cwd, dryRun);
+  if (remove.includes('skills')) removeSkills(cwd, dryRun);
+  if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
+  if (remove.includes('husky')) removeHusky(cwd, dryRun);
+}
+
+// ── orchestration ────────────────────────────────────────────────────────────
+
+const STEP_LABELS = {
+  biome: 'biome.jsonc',
+  tsconfig: 'tsconfig.json',
+  skills: 'skills',
+  husky: 'husky pre-commit',
+  guards: 'gate-engine guards',
+  structure: 'structure-lint',
+};
+
+/**
+ * The testable apply layer: given a resolved selection (+ removals), install/remove and
+ * record .devkit/config.json.components. No prompting — callers (the CLI dispatcher, tests)
+ * pass a fully-resolved plan.
+ *
+ * @param {string} cwd consumer root
+ * @param {object} plan
+ * @param {string} plan.stack
+ * @param {object} plan.selection
+ * @param {string[]} [plan.remove] component ids to remove
+ * @param {boolean} [plan.force]
+ * @param {boolean} [plan.dryRun]
+ * @param {string} [plan.devkitRef]
+ */
+export async function applyInit(cwd, plan) {
+  const { stack, selection, remove = [], force = false, dryRun = false } = plan;
+  const isStructure = selection.structure && STRUCTURE_STACKS.has(stack);
+  const devkitPkg = readJson(join(packageDir(), 'package.json'));
+  const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
+  const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
+
+  console.log(
+    `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
+  );
+  const on = COMPONENTS.filter((c) =>
+    c.id === 'guards'
+      ? selection.guards.length
+      : selection[c.id] && !(c.id === 'structure' && !isStructure),
+  ).map((c) => c.id);
+  console.log(`  components: ${on.join(', ') || '(none)'}\n`);
+
+  console.log('1. configs');
+  if (isStructure) installStructureFiles(cwd, force, dryRun);
+  else installConfigs(cwd, selection, force, dryRun);
+
+  console.log('2. package.json');
+  patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun);
+
+  if (selection.husky) {
+    console.log('3. husky pre-commit');
+    installHusky(cwd, selection, dryRun);
+  }
+
+  if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
+    console.log('4. freeze baselines');
+    runFreezes(cwd, dryRun);
+  }
+
+  if (isStructure) {
+    console.log('5. structure + import-wall baselines (grandfather current tree)');
+    await runStructureBaselines(cwd, dryRun);
+    console.log('6. enable structure-lint in pre-commit');
+    enableStructureLint(cwd, dryRun);
+  }
+
+  if (selection.skills) {
+    console.log('7. skills');
+    syncSkills(dryRun ? ['--dry-run'] : [], cwd);
+  }
+
+  // Removals (deselected + present).
+  applyRemovals(cwd, remove, prevConfig, dryRun);
+
+  // .devkit/config.json with the component selection.
+  console.log('8. .devkit/config.json');
+  const components = {
+    biome: selection.biome,
+    tsconfig: selection.tsconfig,
+    skills: selection.skills,
+    husky: selection.husky,
+    structure: isStructure,
+    guards: selection.husky ? [...selection.guards] : [],
+  };
+  const config = { stack, devkitRef, initVersion: INIT_VERSION, components };
+  const configPath = join(cwd, '.devkit', 'config.json');
+  if (dryRun) {
+    console.log('  [dry-run] write .devkit/config.json');
+  } else {
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    console.log('  ✓ wrote .devkit/config.json');
+  }
+
+  printReferencedSteps();
+  console.log(
+    `\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit init complete.'} Run \`devkit doctor\` to verify.`,
+  );
+}
+
 function printReferencedSteps() {
   console.log('\nNext, by hand (devkit prints these — it never runs them):');
   console.log('  • fallow (optional code-health audit): install per https://docs.fallow.tools');
@@ -270,77 +613,56 @@ function printReferencedSteps() {
   );
 }
 
+function structureAvailableFor(stack) {
+  return STRUCTURE_STACKS.has(stack);
+}
+
 export default async function run(args, cwd) {
   const flags = parseFlags(args);
-  const stack = flags.stack ?? detectStack(cwd);
-  const isStructure = STRUCTURE_STACKS.has(stack);
-  const devkitPkg = readJson(join(packageDir(), 'package.json'));
-  const devkitRef = devkitPkg ? `v${devkitPkg.version}` : 'main';
+  const detectedStack = flags.stack ?? detectStack(cwd);
+  const interactive = !flags.yes && process.stdout.isTTY && !flags.dryRun;
 
-  if (stack !== 'generic' && !isStructure) {
-    console.log(`devkit init: stack "${stack}" detected — wires the GENERIC gate set`);
-    console.log(
-      '  (no structure-lint preset for this stack yet; only electron has one — left OFF here).',
-    );
-  }
-  console.log(
-    `devkit init${flags.dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}\n`,
-  );
+  let stack = detectedStack;
+  let selection;
+  let remove = [];
 
-  console.log('1. configs');
-  writeConfigs(cwd, stack, flags.force, flags.dryRun);
-
-  console.log('2. package.json');
-  patchPackageJson(cwd, devkitRef, isStructure, flags.dryRun);
-
-  console.log('3. husky pre-commit');
-  wireHusky(cwd, flags.dryRun);
-
-  console.log('4. freeze baselines');
-  runFreezes(cwd, flags.dryRun);
-
-  if (isStructure) {
-    console.log('5. structure + import-wall baselines (grandfather current tree)');
-    await runStructureBaselines(cwd, flags.dryRun);
-    console.log('6. enable structure-lint in pre-commit');
-    enableStructureLint(cwd, flags.dryRun);
-  }
-
-  const skillsStep = isStructure ? 7 : 5;
-  console.log(`${skillsStep}. skills`);
-  syncSkills(flags.dryRun ? ['--dry-run'] : [], cwd);
-
-  const configStep = isStructure ? 8 : 6;
-  console.log(`${configStep}. .devkit/config.json`);
-  const steps = isStructure
-    ? [
-        'configs',
-        'package.json',
-        'husky',
-        'freeze',
-        'structure-baselines',
-        'structure-lint',
-        'skills',
-      ]
-    : ['configs', 'package.json', 'husky', 'freeze', 'skills'];
-  const config = {
-    stack,
-    devkitRef,
-    initVersion: INIT_VERSION,
-    steps,
-  };
-  const configPath = join(cwd, '.devkit', 'config.json');
-  if (flags.dryRun) {
-    console.log('  [dry-run] write .devkit/config.json');
+  if (interactive) {
+    const installed = detectInstalled(cwd);
+    const result = await runWizard({
+      detectedStack,
+      structureAvailable: structureAvailableFor(detectedStack),
+      installed,
+    });
+    if (!result) return 0; // cancelled — nothing written
+    ({ stack, selection, remove } = result);
   } else {
-    mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-    console.log('  ✓ wrote .devkit/config.json');
+    selection = selectionFromFlags(flags);
+    // Non-interactive removal of deselected-present components only with --remove-deselected.
+    if (flags.removeDeselected) {
+      const installed = detectInstalled(cwd);
+      for (const id of installed) {
+        const stillSelected = id === 'guards' ? selection.guards.length > 0 : selection[id];
+        if (!stillSelected) remove.push(id);
+      }
+    }
   }
 
-  printReferencedSteps();
-  console.log(
-    `\n${flags.dryRun ? 'Dry-run complete (nothing written).' : 'devkit init complete.'} Run \`devkit doctor\` to verify.`,
-  );
+  if (!structureAvailableFor(stack) && selection.structure) {
+    selection.structure = false; // no template for this stack — silently skip (noted below)
+    if (stack !== 'generic') {
+      console.log(`devkit init: no structure-lint preset for stack "${stack}" yet — skipping it.`);
+    }
+  }
+
+  await applyInit(cwd, {
+    stack,
+    selection,
+    remove,
+    force: flags.force,
+    dryRun: flags.dryRun,
+  });
+  if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;
 }
+
+export { detectInstalled, parseFlags, STEP_LABELS, selectionFromFlags };

@@ -23,7 +23,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.1.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.3.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -100,26 +100,83 @@ search-code index — resolves against the **consumer's** working directory, nev
 scans **that** repo. This is why devkit ships no data: the data is yours, found from
 your cwd.
 
-## Onboarding a repo — `devkit init`
+## Onboarding a repo — `devkit init` (the setup wizard)
 
-After installing the CODE half, scaffold the guardrails in one idempotent step:
+After installing the CODE half, scaffold the guardrails:
 
 ```bash
-bunx devkit init [--stack electron|next|node-service|generic] [--yes] [--dry-run]
+bunx devkit init [--stack electron|next|node-service|generic] [options]
 ```
 
-`init` wires: `guard.config.json`; `biome.jsonc` + `tsconfig.json` extending the devkit
-bases; the generic gate set appended into `.husky/pre-commit` (between `# devkit-guards`
-markers — never clobbering an existing hook); the size/fanout baselines (grandfathering
-your current tree); the skills sync; and `.devkit/config.json`. With `--stack electron`
-it additionally emits the structure-governance `eslint.config.mjs` + a growable
-domain-registry skeleton and grandfathers the folder-structure + import-wall baselines,
-so the boundary/structure walls go live **born-grandfathered**. It **prints** (never
+On a TTY (and without `--yes`) `init` runs an **interactive setup wizard** (powered by
+[`@clack/prompts`](https://www.npmjs.com/package/@clack/prompts)): confirm the detected
+stack, then pick which components to install, then pick which gate-engine guards to enable,
+review a summary, and apply. **Ctrl-C aborts cleanly — nothing is written.**
+
+### The selectable components
+
+| Component   | What it wires                                                            |
+| ----------- | ----------------------------------------------------------------------- |
+| `biome`     | `biome.jsonc` extending the devkit base + `@biomejs/biome` devDep + `lint`/`format` scripts + the staged-format step in the hook |
+| `tsconfig`  | `tsconfig.json` extending the devkit base                               |
+| `skills`    | the agent skills synced into `.claude` + `.cursor` (+ the manifest)     |
+| `husky`     | the `.husky/pre-commit` hook (the `# devkit-guards` block container)    |
+| `guards`    | a multi-select of the gate lines: `size · fanout · dup · clone · decisions` |
+| `structure` | the stack's eslint folder/import-wall preset — **only offered when a template exists** for the detected stack (currently `electron`; `next`/`node-service`/`generic` skip it with a note) |
+
+Whatever you choose is recorded in `.devkit/config.json` under `components`, so `doctor`
+knows what to check.
+
+### Scriptable / CI (non-interactive)
+
+`--yes` (or any non-TTY run) installs **all recommended defaults** (the pre-wizard
+behaviour). Per-component flags work with or without `--yes`:
+
+```bash
+bunx devkit init --yes --no-biome              # everything except biome
+bunx devkit init --yes --guards fanout,size    # only those two gate lines
+bunx devkit init --yes --no-skills --no-structure
+```
+
+Flags: `--no-biome` `--no-tsconfig` `--no-skills` `--no-husky` `--no-structure`
+`--no-guards`, and `--guards <a,b,…>` (a subset of `size,fanout,dup,clone,decisions`).
+A non-TTY run without `--yes` behaves as `--yes` plus any `--no-*` flags (it never hangs
+waiting for input). `--dry-run` prints every action and writes nothing.
+
+### Removing a deselected component
+
+Re-running `init` and **deselecting** a component that's currently installed triggers
+removal. In the wizard you're asked per component (`Remove <x>? It's currently installed.`,
+default **NO** — removal is non-destructive). Non-interactively, pass
+`--remove-deselected` (with `--yes`) to remove without prompting:
+
+```bash
+bunx devkit init --yes --no-biome --remove-deselected   # uninstall biome
+```
+
+Removal is **safe — it never deletes a file devkit didn't create**:
+
+- **biome** → deletes `biome.jsonc`, drops the `@biomejs/biome` devDep + `lint`/`format` scripts + the biome step from the hook block.
+- **tsconfig** → strips only the devkit `extends` (a `tsconfig.json` with your own content is kept; if it's left with no extends, you're told to review it).
+- **a guard** → removes just that gate line from the `# devkit-guards` block, keeping the others.
+- **skills** → removes the devkit-synced files (per the manifest) from `.claude`/`.cursor` + drops the manifest. **Consumer-authored skills are never touched.**
+- **husky** → removes the whole `# devkit-guards` block, leaving the rest of your hook.
+- **structure** → removes the eslint files **only if devkit created them** (guarded by the recorded config) + re-comments the structure-lint line.
+
+### Structure stack (`--stack electron`)
+
+Additionally emits the structure-governance `eslint.config.mjs` + a growable
+domain-registry skeleton and grandfathers the folder-structure + import-wall baselines, so
+the boundary/structure walls go live **born-grandfathered**. `init` **prints** (never
 installs) the referenced-tool steps (fallow, the search-code MCP index).
 
-`bunx devkit doctor [--fix]` checks the wiring is present + in sync (husky calls the
-guards, configs extend the bases, skills match the manifest, baselines exist, devkit
-pinned to a tag) — exit `0` OK / `1` drift / `2` not-initialized.
+### `devkit doctor`
+
+`bunx devkit doctor [--fix]` checks the wiring for the **installed component set** only (a
+deselected component is never flagged as missing) — husky calls the selected guards,
+configs extend the bases, skills match the manifest, baselines exist, devkit pinned to a
+tag. Exit `0` OK / `1` drift / `2` not-initialized. `--fix` re-runs `init` **for the
+recorded selection** (it won't silently re-add a component you removed).
 
 ## AGENT half — skills
 

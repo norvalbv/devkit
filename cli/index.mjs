@@ -14,14 +14,21 @@
 const HELP = `devkit — wire a repo onto @norvalbv/devkit's shared configs + gate-engine.
 
 Usage:
-  devkit init [options]      Scaffold guard.config.json, biome/tsconfig, husky gates,
-                             skills, and .devkit/config.json (idempotent, create-if-absent).
+  devkit init [options]      Interactive SETUP WIZARD (on a TTY) to SELECT which components
+                             to install — biome, tsconfig, skills, husky, guards, structure —
+                             and to REMOVE a deselected one on a later run. Idempotent.
     --stack <x>              electron | next | node-service | generic (default: auto-detect)
-    --yes                    Assume yes (no prompts).
-    --dry-run                Print every file action + diff; write nothing.
+    --yes                    Non-interactive: all recommended defaults (no prompts).
+    --dry-run                Print every file action; write nothing.
     --force                  Overwrite existing devkit-managed files.
+    --no-<component>         Skip a component: --no-biome --no-tsconfig --no-skills
+                             --no-husky --no-structure --no-guards.
+    --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
+    --remove-deselected      With --yes: REMOVE any installed-but-now-deselected component
+                             (default off — removal is opt-in / non-destructive).
 
-  devkit doctor [--fix]      Diagnose drift (read-only). --fix re-runs idempotent steps.
+  devkit doctor [--fix]      Diagnose drift for the INSTALLED component set (read-only).
+                             --fix re-runs init for the recorded selection.
   devkit sync-skills [--dry-run]  Copy devkit skills into .claude/skills + .cursor/skills.
   devkit --help              This help.`;
 
