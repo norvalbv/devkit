@@ -80,7 +80,10 @@ describe('detectSmells', () => {
 
   it('ignores lockfile-only churn', () => {
     expect(
-      detectSmells([entry({ status: 'M', path: 'bun.lock', added: 200, deleted: 200 })], BOUNDARIES),
+      detectSmells(
+        [entry({ status: 'M', path: 'bun.lock', added: 200, deleted: 200 })],
+        BOUNDARIES,
+      ),
     ).toEqual([]);
     expect(
       detectSmells(

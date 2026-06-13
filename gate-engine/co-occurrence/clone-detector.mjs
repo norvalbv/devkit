@@ -42,8 +42,7 @@ import { isExpired } from './decay.mjs';
 const cfg = resolveGuardConfig(process.cwd());
 const repoRoot = cfg.cwd;
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
-const allowlistPath =
-  process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
+const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI on a gate block — generic default = the engine's own bin; a consumer
 // can point it at their own wrapper via GUARD_ALLOWLIST_CLI. The printed command
 // double-quotes args; assumes paths/hashes are shell-safe (git-tracked paths + hex hashes).

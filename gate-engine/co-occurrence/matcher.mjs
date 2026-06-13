@@ -61,8 +61,7 @@ const cfg = resolveGuardConfig(process.cwd());
 // resolved to the consumer cwd. null => no index configured => matcher opt-out.
 const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
-const allowlistPath =
-  process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
+const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a
 // dup). Generic default = the engine's own bin; a consumer can point it at their own
 // wrapper via GUARD_ALLOWLIST_CLI. The printed command double-quotes args; assumes

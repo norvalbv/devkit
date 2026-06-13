@@ -27,7 +27,7 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mjs';
 
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
@@ -210,7 +210,8 @@ function runGate() {
     });
     if (verdict === 0) process.exit(0);
     // Regex says block — let the LLM try to clear a false positive (dep bump, sync, etc.).
-    if (judgeWithClaude(cwd, cfg.noLlm, sh(cwd, 'git diff --cached')) === 'ROUTINE') process.exit(0);
+    if (judgeWithClaude(cwd, cfg.noLlm, sh(cwd, 'git diff --cached')) === 'ROUTINE')
+      process.exit(0);
     console.error(`decision smells: ${smells.join(', ')}`);
     process.exit(1);
   } catch (e) {

@@ -1,78 +1,92 @@
 {
-	// @norvalbv/devkit — Biome BASE preset (generic core, no app-specific paths).
-	//
-	// CONSUME via the BARE exports subpath, never the .jsonc file path (BL-1):
-	//   { "extends": ["@norvalbv/devkit/biome/base"] }   // ✅
-	//   { "extends": ["@norvalbv/devkit/biome/base.jsonc"] }   // ❌ exports map owns the extension
-	//
-	// This preset ships the GENERIC core only: formatter, json formatter, and the
-	// generic linter rules. It carries NO `files.includes` — add your own locally:
-	//   {
-	//     "extends": ["@norvalbv/devkit/biome/base"],
-	//     "files": { "includes": ["**", "!dist", "!build"] }
-	//   }
-	"$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
-	"vcs": {
-		"enabled": true,
-		"clientKind": "git",
-		"useIgnoreFile": true
-	},
-	"files": {
-		"ignoreUnknown": true
-	},
-	"formatter": {
-		"enabled": true,
-		"formatWithErrors": false,
-		"indentStyle": "space",
-		"indentWidth": 2,
-		"lineEnding": "lf",
-		"lineWidth": 100,
-		"attributePosition": "auto",
-		"bracketSpacing": true
-	},
-	"assist": {
-		"enabled": true,
-		"actions": {
-			"source": {
-				"organizeImports": "on"
-			}
-		}
-	},
-	"linter": {
-		"enabled": true,
-		"rules": {
-			"recommended": true,
-			"correctness": {
-				"noUnusedImports": "error",
-				"noUnusedVariables": "error",
-				"useHookAtTopLevel": "error"
-			},
-			"performance": {
-				"useTopLevelRegex": "error"
-			},
-			"style": {
-				"useEnumInitializers": "off"
-			},
-			"suspicious": {
-				"noConsole": "warn"
-			}
-		}
-	},
-	"javascript": {
-		"formatter": {
-			"arrowParentheses": "always",
-			"bracketSameLine": false,
-			"bracketSpacing": true,
-			"jsxQuoteStyle": "double",
-			"quoteProperties": "asNeeded",
-			"quoteStyle": "single",
-			"semicolons": "always",
-			"attributePosition": "auto"
-		}
-	},
-	"json": {
-		"formatter": {
-			"trailingCommas": "none"
-		}
-	}
+  // @norvalbv/devkit — Biome BASE preset (generic core, no app-specific paths).
+  //
+  // CONSUME via the BARE exports subpath, never the .jsonc file path (BL-1):
+  //   { "extends": ["@norvalbv/devkit/biome/base"] }   // ✅
+  //   { "extends": ["@norvalbv/devkit/biome/base.jsonc"] }   // ❌ exports map owns the extension
+  //
+  // This preset ships the GENERIC core only: formatter, json formatter, and the
+  // generic linter rules. It carries NO `files.includes` — add your own locally:
+  //   {
+  //     "extends": ["@norvalbv/devkit/biome/base"],
+  //     "files": { "includes": ["**", "!dist", "!build"] }
+  //   }
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 100,
+    "attributePosition": "auto",
+    "bracketSpacing": true
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "useHookAtTopLevel": "error"
+      },
+      "performance": {
+        "useTopLevelRegex": "error"
+      },
+      "style": {
+        "useEnumInitializers": "off"
+      },
+      "suspicious": {
+        "noConsole": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "bracketSpacing": true,
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "attributePosition": "auto"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  },
+  "css": {
+    "formatter": {
+      // Pin CSS formatting in the shared preset. These values match the inherited
+      // top-level formatter (space / 2 / 100) and biome's CSS quoteStyle default
+      // (double) — declared explicitly so a consumer extending base gets identical
+      // CSS output even if a future biome default drifts. Output-equivalent to the
+      // frink reference config (which relies on inheritance + the default).
+      "enabled": true,
+      "indentStyle": "space",
+      "indentWidth": 2,
+      "lineWidth": 100,
+      "quoteStyle": "double"
+    }
+  }
 }

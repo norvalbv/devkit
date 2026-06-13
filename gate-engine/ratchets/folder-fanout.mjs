@@ -18,7 +18,14 @@
 // hardcoded. The baseline (eslint/baselines/fanout.json) is per-repo STATE: it is
 // read/written under the CONSUMER cwd, never the package dir.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mjs';

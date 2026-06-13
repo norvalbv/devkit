@@ -69,7 +69,9 @@ describe('parseAlignVerdict', () => {
     );
   });
   it('markdown-dressed VERDICT lines (bold, bullet) still parse — a model that formats must not silently lose its block', () => {
-    expect(parseAlignVerdict('Might CONTRADICT at first glance.\n**VERDICT: ALIGN**')).toBe('ALIGN');
+    expect(parseAlignVerdict('Might CONTRADICT at first glance.\n**VERDICT: ALIGN**')).toBe(
+      'ALIGN',
+    );
     expect(parseAlignVerdict('Could ALIGN, but no.\n- VERDICT: **CONTRADICT**')).toBe('CONTRADICT');
   });
   it('no VERDICT line → strict single-word fallback (case/punct-insensitive)', () => {
@@ -249,7 +251,10 @@ describe('--gate (integration, real git repo)', () => {
   });
 
   it('a staged decision .md with NO_LLM → no depth judgement → passes (0)', () => {
-    writeFileSync(join(repo, 'docs', 'decisions', 'fresh.md'), scopedTargetMd('fresh', 'src/x/**', 'r'));
+    writeFileSync(
+      join(repo, 'docs', 'decisions', 'fresh.md'),
+      scopedTargetMd('fresh', 'src/x/**', 'r'),
+    );
     git('add docs/decisions/fresh.md');
     expect(gate()).toBe(0);
   });

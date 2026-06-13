@@ -124,9 +124,7 @@ describe('CLI freeze/gate contract', () => {
     fill(root, 'src/pile', 20);
     expect(run(root, 'freeze').status).toBe(0);
     // Baseline must materialize inside the temp consumer repo, addressed from its cwd.
-    expect(() =>
-      readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8'),
-    ).not.toThrow();
+    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).not.toThrow();
   });
 
   it('gate blocks a NEW folder exceeding the cap', () => {

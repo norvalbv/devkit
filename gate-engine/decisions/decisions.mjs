@@ -46,7 +46,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { writeFileAtomic } from './atomic-write.mjs';
 
@@ -305,7 +305,9 @@ function addTarget(slug, o, p) {
 // Cheap convergence note under the current Target. INDEX untouched (a note is not a ruling).
 function addNote(slug, o, p) {
   if (!o.note) {
-    console.error('Usage: guard-decisions add <slug> --note "…"   (or --target … for an epic Target)');
+    console.error(
+      'Usage: guard-decisions add <slug> --note "…"   (or --target … for an epic Target)',
+    );
     process.exit(1);
   }
   const file = slugPath(p, slug);

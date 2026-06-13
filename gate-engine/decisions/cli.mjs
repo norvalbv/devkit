@@ -18,7 +18,6 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { main as decisionsMain } from './decisions.mjs';
 
 const SUB_ENGINES = {

@@ -43,7 +43,7 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { currentTarget, parseDecision } from './decisions.mjs';
 
@@ -206,7 +206,10 @@ function runJudge(cwd, model, prompt, stdinText, timeout) {
 export function judge(files, target, cwd = process.cwd()) {
   const cfg = resolveGuardConfig(cwd);
   if (cfg.noLlm || files.length === 0) return null;
-  const stat = sh(cwd, `git diff --cached --stat -- ${files.map((f) => JSON.stringify(f)).join(' ')}`);
+  const stat = sh(
+    cwd,
+    `git diff --cached --stat -- ${files.map((f) => JSON.stringify(f)).join(' ')}`,
+  );
   const first = runJudge(
     cwd,
     'haiku',

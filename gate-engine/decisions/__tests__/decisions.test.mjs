@@ -56,7 +56,14 @@ const reqFlags = (slug) => [
 ];
 
 // A minimal valid epic Target add for `slug`.
-const target = (slug, extra = []) => ['add', slug, '--target', ...reqFlags(slug), '--new', ...extra];
+const target = (slug, extra = []) => [
+  'add',
+  slug,
+  '--target',
+  ...reqFlags(slug),
+  '--new',
+  ...extra,
+];
 
 describe('pure helpers', () => {
   it('INDEX round-trips a row', () => {

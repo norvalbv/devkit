@@ -1,0 +1,44 @@
+{
+  // @norvalbv/devkit — ROOT biome config (lints devkit's OWN authored code).
+  //
+  // This is the package linting ITSELF, so it extends the base preset by its
+  // RELATIVE FILE PATH ("./biome/base.jsonc") — NOT the bare `@norvalbv/devkit/biome/base`
+  // exports subpath. A package cannot reliably self-resolve its own exports map while
+  // being linted in-place (the name maps into node_modules, which is not the working
+  // tree here), so the relative path is the correct seam for self-linting. Consumers
+  // still extend the bare subpath — see biome/base.jsonc's header.
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  "extends": ["./biome/base.jsonc"],
+  "files": {
+    "includes": [
+      "gate-engine/**",
+      "tsconfig/**",
+      "biome/**",
+      "*.mjs",
+      "*.json",
+      "*.jsonc",
+      "!node_modules",
+      // skills/ is vendored SKILL.md content + repo-coupled helper scripts — not
+      // devkit's authored code, don't lint it.
+      "!skills",
+      // templates/ holds literal emitted configs (verbatim fixtures) that may not
+      // match devkit's own formatting — exclude.
+      "!templates",
+      "!bun.lock"
+    ]
+  },
+  "overrides": [
+    {
+      // The gate-engine bins are CLIs — console output is their legitimate UX, not a
+      // suspicious leftover. Turn noConsole off for the whole authored surface.
+      "includes": ["**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    }
+  ]
+}

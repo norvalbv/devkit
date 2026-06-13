@@ -5,7 +5,7 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 | Half      | What                                                          | How consumers get it                       |
 | --------- | ------------------------------------------------------------ | ------------------------------------------ |
 | **AGENT** | `skills/` — Claude/agent skills (governance, design, review) | `npx skills add github:norvalbv/devkit/<skill>` |
-| **CODE**  | shared **configs** (Biome, tsconfig) + the **gate-engine**   | `bun add github:norvalbv/devkit#<tag>`     |
+| **CODE**  | shared **configs** (Biome, tsconfig) + the **gate-engine**   | `bun add git+ssh://git@github.com/norvalbv/devkit.git#<tag>` |
 
 The two halves ship from the **same repo, same tag** so an agent skill and the engine
 it drives can never drift apart.
@@ -23,8 +23,11 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D github:norvalbv/devkit#v0.1.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.1.0
 ```
+
+> Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
+> resolves through GitHub's API tarball endpoint, which 404s on a private repo.
 
 There is **no build step and no `dist/`** — bun runs no lifecycle scripts on a git
 install, so everything is committed as runnable plain `.mjs` / `.json` / `.jsonc`

@@ -23,13 +23,17 @@
   "files": [
     "biome",
     "tsconfig",
-    "gate-engine"
+    "gate-engine",
+    "skills"
   ],
   "scripts": {
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
     "vitest": "^4.1.8"
   },
   "optionalDependencies": {
