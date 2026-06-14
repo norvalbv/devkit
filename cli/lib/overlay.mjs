@@ -26,6 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
 import { buildOverlayHook } from './husky-block.mjs';
 
@@ -36,8 +37,10 @@ const HUSKY_UNDERSCORE_RE = /\/_$/;
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
 
 // Append paths to .git/info/exclude (per-clone, uncommitted), skipping any already present.
+// `gitRoot` is the dir that holds `.git` — NOT necessarily cwd (a monorepo package is a subdir).
 function addToGitExclude(gitRoot, relPaths, dryRun) {
-  const file = join(gitRoot, '.git', 'info', 'exclude');
+  const infoDir = join(gitRoot, '.git', 'info');
+  const file = join(infoDir, 'exclude');
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const lines = existing.split('\n');
   const missing = relPaths.filter((p) => !lines.includes(p));
@@ -51,6 +54,7 @@ function addToGitExclude(gitRoot, relPaths, dryRun) {
   }
   const header = existing.includes(EXCLUDE_HEADER) ? '' : `\n${EXCLUDE_HEADER}\n`;
   const sep = existing && !existing.endsWith('\n') ? '\n' : '';
+  mkdirSync(infoDir, { recursive: true }); // a fresh/odd clone may lack .git/info
   writeFileSync(file, `${existing}${sep}${header}${missing.join('\n')}\n`);
   console.log(`  ✓ git-ignored locally (.git/info/exclude): ${missing.join(', ')}`);
 }
@@ -153,8 +157,9 @@ function writeBiomeOverlay(cwd, stack, force, dryRun) {
   return true;
 }
 
-// Point core.hooksPath at the local hooks dir + write the overlay hook that chains to the repo's.
-function installOverlayHook(gitRoot, sel, chainTarget, dryRun) {
+// Point core.hooksPath (at the GIT ROOT — repo-wide) at the local hooks dir + write the overlay
+// hook that cd's into the package (monorepo) then chains to the repo's hook.
+function installOverlayHook(gitRoot, pkgRel, sel, chainTarget, dryRun) {
   if (dryRun) {
     console.log(
       `  [dry-run] git config core.hooksPath ${LOCAL_HOOKS} + write ${LOCAL_HOOKS}/pre-commit (chains → ${chainTarget})`,
@@ -164,7 +169,7 @@ function installOverlayHook(gitRoot, sel, chainTarget, dryRun) {
   const dir = join(gitRoot, LOCAL_HOOKS);
   mkdirSync(dir, { recursive: true });
   const hookPath = join(dir, 'pre-commit');
-  writeFileSync(hookPath, buildOverlayHook(sel, chainTarget));
+  writeFileSync(hookPath, buildOverlayHook(sel, chainTarget, pkgRel));
   chmodSync(hookPath, 0o755);
   try {
     execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], { cwd: gitRoot });
@@ -181,8 +186,18 @@ function installOverlayHook(gitRoot, sel, chainTarget, dryRun) {
  * @param {string} stack
  */
 export function installOverlay(cwd, sel, stack, force, dryRun) {
-  const chainTarget = detectChainTarget(cwd);
-  const excludes = ['.devkit/', 'guard.config.json', 'eslint/baselines/'];
+  // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
+  // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const chainTarget = detectChainTarget(gitRoot);
+  const pfx = pkgRel ? `${pkgRel}/` : '';
+  const excludes = new Set([
+    `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
+    `${pfx}.devkit/`, // the package's .devkit (config + vendored biome)
+    `${pfx}guard.config.json`,
+    `${pfx}eslint/baselines/`,
+  ]);
+  if (pkgRel) console.log(`  monorepo: package "${pkgRel}" — hook + git-ignore at the git root`);
 
   // guard.config.json (data) — generic template.
   console.log('  guard.config.json');
@@ -196,19 +211,20 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
     }
   }
 
-  // ours-extends-theirs lint overlays.
+  // ours-extends-theirs lint overlays, in the package.
   console.log('  lint overlays (extend the repo config)');
-  if (sel.biome && writeBiomeOverlay(cwd, stack, force, dryRun))
-    excludes.push('biome.devkit.jsonc');
-  if (writeEslintOverlay(cwd, force, dryRun)) excludes.push('eslint.config.devkit.mjs');
+  if (sel.biome && writeBiomeOverlay(cwd, stack, force, dryRun)) {
+    excludes.add(`${pfx}biome.devkit.jsonc`);
+  }
+  if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
 
-  // local hook (core.hooksPath override) + chain.
+  // local hook (core.hooksPath override) at the git root + chain.
   console.log('  local hook');
-  installOverlayHook(cwd, sel, chainTarget, dryRun);
+  installOverlayHook(gitRoot, pkgRel, sel, chainTarget, dryRun);
 
-  // make it all invisible to git.
+  // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
-  addToGitExclude(cwd, excludes, dryRun);
+  addToGitExclude(gitRoot, [...excludes], dryRun);
 
   return chainTarget;
 }

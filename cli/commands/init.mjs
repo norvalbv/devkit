@@ -848,21 +848,25 @@ function structureAvailableFor(stack) {
 export default async function run(args, cwd) {
   const flags = parseFlags(args);
   const detectedStack = flags.stack ?? detectStack(cwd);
+  // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
+  const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';
   const interactive = !flags.yes && process.stdout.isTTY && !flags.dryRun;
 
   let stack = detectedStack;
   let selection;
   let remove = [];
+  let mode = detectedMode;
 
   if (interactive) {
     const installed = detectInstalled(cwd);
     const result = await runWizard({
       detectedStack,
+      detectedMode,
       structureAvailable: structureAvailableFor(detectedStack),
       installed,
     });
     if (!result) return 0; // cancelled — nothing written
-    ({ stack, selection, remove } = result);
+    ({ mode, stack, selection, remove } = result);
   } else {
     selection = selectionFromFlags(flags);
     // Non-interactive removal of deselected-present components only with --remove-deselected.
@@ -890,8 +894,8 @@ export default async function run(args, cwd) {
     dryRun: flags.dryRun,
     interactive,
     scanRoots: flags.scanRoots,
-    standalone: flags.standalone,
-    overlay: flags.overlay,
+    standalone: mode === 'standalone',
+    overlay: mode === 'overlay',
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;

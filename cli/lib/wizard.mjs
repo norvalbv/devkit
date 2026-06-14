@@ -47,6 +47,25 @@ function componentOption(c) {
   return { value: c.id, label: c.label, hint: c.hint };
 }
 
+// The three install modes (the FIRST thing the wizard asks — it changes everything else).
+const MODES = [
+  {
+    value: 'package',
+    label: 'Package',
+    hint: 'devkit as a dep; configs extend it — your own repos',
+  },
+  {
+    value: 'standalone',
+    label: 'Standalone',
+    hint: 'global CLI, nothing in package.json — shared repos',
+  },
+  {
+    value: 'overlay',
+    label: 'Overlay',
+    hint: "git-ignored + non-invasive — a repo you can't modify",
+  },
+];
+
 /**
  * Drive the wizard. `installed` is the set of component ids already present (from the old
  * .devkit/config.json or on-disk detection) so we can offer removal. `structureAvailable`
@@ -54,14 +73,28 @@ function componentOption(c) {
  *
  * @param {object} opts
  * @param {string} opts.detectedStack
+ * @param {string} [opts.detectedMode] pre-selected mode (from --standalone/--overlay), default package
  * @param {boolean} opts.structureAvailable
  * @param {Set<string>} opts.installed component ids currently wired
- * @returns {Promise<{stack:string, selection:object, remove:string[]}|null>} null on cancel
+ * @returns {Promise<{mode:string, stack:string, selection:object, remove:string[]}|null>} null on cancel
  */
-export async function runWizard({ detectedStack, structureAvailable, installed }) {
+export async function runWizard({
+  detectedStack,
+  detectedMode = 'package',
+  structureAvailable,
+  installed,
+}) {
   intro('◆ devkit setup');
 
-  // 1. Stack — single-select, detection pre-highlighted so Enter accepts it.
+  // 1. Mode — package / standalone / overlay. Drives every later step.
+  const mode = await select({
+    message: 'Install mode',
+    options: MODES,
+    initialValue: detectedMode,
+  });
+  if (bail(mode)) return null;
+
+  // 2. Stack — single-select, detection pre-highlighted so Enter accepts it.
   const stack = await select({
     message: 'Select your stack',
     options: STACKS.map((s) => ({
@@ -73,30 +106,36 @@ export async function runWizard({ detectedStack, structureAvailable, installed }
   });
   if (bail(stack)) return null;
 
-  // 2. Components — one checkbox list. Structure only appears when a template exists;
-  // fallow is appended last and DEFAULT OFF (not in initialValues).
-  const componentChoices = COMPONENT_OPTIONS.filter(
-    (c) => c.id !== 'structure' || structureAvailable,
-  );
-  const picked = await multiselect({
-    message: 'Select components to install',
-    options: [...componentChoices.map(componentOption), componentOption(FALLOW_OPTION)],
-    initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
-    required: false,
-  });
-  if (bail(picked)) return null;
-  const chosen = new Set(picked);
-
-  // Build the selection map the apply layer consumes.
+  // 3. Components. Overlay auto-wires (guards + eslint/biome extend + local hook) — no picker.
+  // Standalone omits structure-lint (no eslint flat-config plugin in a no-package setup).
+  // Structure is only offered in PACKAGE mode where a template exists.
+  const structAvail = mode === 'package' && structureAvailable;
   const selection = { guards: [] };
-  for (const c of COMPONENT_OPTIONS) {
-    selection[c.id] = chosen.has(c.id);
+  if (mode === 'overlay') {
+    Object.assign(selection, {
+      biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
+      tsconfig: false,
+      skills: false,
+      husky: true, // overlay always installs the local (git-ignored) hook
+      structure: false,
+      fallow: false,
+    });
+  } else {
+    const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
+    const picked = await multiselect({
+      message: 'Select components to install',
+      options: [...componentChoices.map(componentOption), componentOption(FALLOW_OPTION)],
+      initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
+      required: false,
+    });
+    if (bail(picked)) return null;
+    const chosen = new Set(picked);
+    for (const c of COMPONENT_OPTIONS) selection[c.id] = chosen.has(c.id);
+    selection.fallow = chosen.has('fallow');
+    if (!structAvail) selection.structure = false;
   }
-  selection.fallow = chosen.has('fallow');
-  // Structure is always-false when there's no template for the stack.
-  if (!structureAvailable) selection.structure = false;
 
-  // 3. Guards — a dedicated multiselect, only when the husky hook is in (guards live in it).
+  // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook).
   if (selection.husky) {
     const guards = await multiselect({
       message: 'Select gate guards',
@@ -108,17 +147,20 @@ export async function runWizard({ detectedStack, structureAvailable, installed }
     selection.guards = guards;
   }
 
-  // 4. Removal: anything installed today but now unticked (default NO — non-destructive).
+  // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).
   const remove = [];
-  const deselected = [...installed].filter((id) => {
-    const stillSelected = id === 'guards' ? selection.guards.length > 0 : selection[id];
-    return !stillSelected;
-  });
+  const deselected =
+    mode === 'overlay'
+      ? []
+      : [...installed].filter((id) => {
+          const stillSelected = id === 'guards' ? selection.guards.length > 0 : selection[id];
+          return !stillSelected;
+        });
 
-  // 5. Summary — what will be installed + what (if anything) is up for removal.
-  note(summarize(selection, structureAvailable, deselected), `stack: ${stack}`);
+  // 6. Summary — what will be installed + what (if anything) is up for removal.
+  note(summarize(mode, selection, structAvail, deselected), `mode: ${mode} · stack: ${stack}`);
 
-  // 6. Apply?
+  // 7. Apply?
   const go = await confirm({ message: 'Apply?', initialValue: true });
   if (bail(go) || !go) {
     cancel('Aborted — nothing written.');
@@ -135,11 +177,20 @@ export async function runWizard({ detectedStack, structureAvailable, installed }
     if (yes) remove.push(id);
   }
 
-  return { stack, selection, remove };
+  return { mode, stack, selection, remove };
 }
 
 // Concise plan summary for the note(): a ✓/· line per component + a remove line.
-function summarize(selection, structureAvailable, deselected) {
+function summarize(mode, selection, structureAvailable, deselected) {
+  if (mode === 'overlay') {
+    const g = selection.guards.length ? ` (${selection.guards.join(', ')})` : '';
+    return [
+      'overlay — everything git-ignored, nothing committed:',
+      `✓ guards${g}`,
+      '✓ eslint/biome overlay (extends the repo, staged files)',
+      '✓ local hook → chains to the repo’s own',
+    ].join('\n');
+  }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(
     (c) => {
       const on = c.id === 'guards' ? selection.guards.length > 0 : selection[c.id];

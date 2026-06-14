@@ -4,7 +4,7 @@
  * untouched), and layer ours-extends-theirs configs + a local hook that chains to the team's.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,5 +97,59 @@ describe('overlay (local-only) install', () => {
     expect(JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).overlay).toBe(
       true,
     );
+  });
+
+  it('monorepo subdir: hook + .git/info/exclude live at the git ROOT, not the package', async () => {
+    // git root with the app in a subdir (the case that ENOENT'd: .git is above cwd).
+    const root = mkdtempSync(join(tmpdir(), 'overlay-mono-'));
+    roots.push(root);
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'root' }, null, 2));
+    mkdirSync(join(root, '.husky'), { recursive: true });
+    writeFileSync(join(root, '.husky', 'pre-commit'), '#!/bin/sh\necho team\n');
+    const pkg = join(root, 'services', 'webapp');
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'webapp' }, null, 2));
+    writeFileSync(join(pkg, 'eslint.config.mjs'), 'export default [{ rules: {} }];\n');
+    writeFileSync(join(pkg, 'biome.jsonc'), '{}\n');
+    git('config', 'core.hooksPath', '.husky/_');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    await applyInit(pkg, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.1',
+    });
+
+    // hook + git-exclude at the ROOT, NOT the package
+    expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
+    expect(existsSync(join(pkg, '.devkit', 'hooks'))).toBe(false);
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude).toContain('.devkit/hooks/');
+    expect(exclude).toContain('services/webapp/guard.config.json');
+
+    // configs in the package; hook cd's into it; core.hooksPath at the root
+    expect(existsSync(join(pkg, 'guard.config.json'))).toBe(true);
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toContain(
+      'cd "services/webapp"',
+    );
+    expect(
+      execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('.devkit/hooks');
+    expect(() =>
+      execFileSync('sh', ['-n', join(root, '.devkit', 'hooks', 'pre-commit')], { stdio: 'pipe' }),
+    ).not.toThrow();
+    // still invisible
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
   });
 });
