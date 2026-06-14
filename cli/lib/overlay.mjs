@@ -28,7 +28,7 @@ import {
 import { join } from 'node:path';
 import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
-import { buildOverlayHook } from './husky-block.mjs';
+import { buildOverlayHook, buildPassthroughHook } from './husky-block.mjs';
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 const LOCAL_HOOKS = '.devkit/hooks';
@@ -59,21 +59,54 @@ function addToGitExclude(gitRoot, relPaths, dryRun) {
   console.log(`  ✓ git-ignored locally (.git/info/exclude): ${missing.join(', ')}`);
 }
 
-// The repo's existing committed hook to chain to. husky sets core.hooksPath=.husky/_ → the real
-// script is .husky/pre-commit. Falls back to .husky/pre-commit, then .git/hooks/pre-commit.
-function detectChainTarget(gitRoot) {
-  let hp = '';
+// Standard git hook names — used to pick the repo's real hooks out of a hooks dir (ignoring
+// husky internals / .sample files / stray entries).
+const GIT_HOOKS = new Set([
+  'applypatch-msg',
+  'pre-applypatch',
+  'post-applypatch',
+  'pre-commit',
+  'pre-merge-commit',
+  'prepare-commit-msg',
+  'commit-msg',
+  'post-commit',
+  'pre-rebase',
+  'post-checkout',
+  'post-merge',
+  'pre-push',
+  'post-rewrite',
+  'post-update',
+  'pre-auto-gc',
+]);
+
+// The raw core.hooksPath (the repo's CURRENT hooks setting), '' if unset. Captured BEFORE we
+// override it so `devkit clean` can restore exactly what was there.
+function readHooksPath(gitRoot) {
   try {
-    hp = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+    return execFileSync('git', ['config', '--get', 'core.hooksPath'], {
       cwd: gitRoot,
       encoding: 'utf8',
     }).trim();
   } catch {
-    // unset
+    return '';
   }
-  if (hp && hp !== LOCAL_HOOKS) return `${hp.replace(HUSKY_UNDERSCORE_RE, '')}/pre-commit`;
-  if (existsSync(join(gitRoot, '.husky', 'pre-commit'))) return '.husky/pre-commit';
-  return '.git/hooks/pre-commit';
+}
+
+// Where the repo's hook SCRIPTS live (git-root-relative). husky's .husky/_ → the scripts are the
+// parent's .husky/<hook>; a custom hooksPath holds them directly; unset → .git/hooks.
+function hookScriptDir(origHooksPath) {
+  if (origHooksPath && origHooksPath !== LOCAL_HOOKS) {
+    return origHooksPath.replace(HUSKY_UNDERSCORE_RE, '');
+  }
+  return '.git/hooks';
+}
+
+// The repo's existing hooks (names) in `scriptDir` — what we must keep running when we take over
+// core.hooksPath.
+function detectExistingHooks(gitRoot, scriptDir) {
+  const abs = join(gitRoot, scriptDir);
+  if (!existsSync(abs)) return [];
+  return readdirSync(abs).filter((f) => GIT_HOOKS.has(f));
 }
 
 // Detect the repo's flat eslint config to extend (overlay only supports flat ESM/JS configs).
@@ -157,31 +190,48 @@ function writeBiomeOverlay(cwd, stack, force, dryRun) {
   return true;
 }
 
-// Point core.hooksPath (at the GIT ROOT — repo-wide) at the local hooks dir + write the overlay
-// hook that cd's into the package (monorepo) then chains to the repo's hook.
-function installOverlayHook(gitRoot, pkgRel, sel, chainTarget, dryRun) {
+// Take over core.hooksPath (at the GIT ROOT — repo-wide) and write our hooks dir. CRITICAL: git
+// then runs ONLY our dir, so we wrap EVERY hook the repo already had (pre-push, commit-msg, …) as
+// a pass-through, or they'd silently stop. pre-commit additionally runs devkit's gates (cd'd into
+// the package for a monorepo) before chaining to the repo's pre-commit.
+function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun) {
+  const scriptDir = hookScriptDir(origHooksPath);
+  const existing = detectExistingHooks(gitRoot, scriptDir);
+  const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
+  const passthrough = existing.filter((h) => h !== 'pre-commit');
   if (dryRun) {
     console.log(
-      `  [dry-run] git config core.hooksPath ${LOCAL_HOOKS} + write ${LOCAL_HOOKS}/pre-commit (chains → ${chainTarget})`,
+      `  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}`,
     );
     return;
   }
   const dir = join(gitRoot, LOCAL_HOOKS);
   mkdirSync(dir, { recursive: true });
-  const hookPath = join(dir, 'pre-commit');
-  writeFileSync(hookPath, buildOverlayHook(sel, chainTarget, pkgRel));
-  chmodSync(hookPath, 0o755);
+  // pre-commit: devkit gates + chain to the repo's pre-commit (if any).
+  const pre = join(dir, 'pre-commit');
+  writeFileSync(pre, buildOverlayHook(sel, preCommitChain, pkgRel));
+  chmodSync(pre, 0o755);
+  // every OTHER existing hook → pass-through wrapper so it keeps running unchanged.
+  for (const h of passthrough) {
+    const p = join(dir, h);
+    writeFileSync(p, buildPassthroughHook(`${scriptDir}/${h}`));
+    chmodSync(p, 0o755);
+  }
   try {
     execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], { cwd: gitRoot });
-    console.log(`  ✓ core.hooksPath → ${LOCAL_HOOKS} (local config) — chains to ${chainTarget}`);
+    const extra = passthrough.length ? ` (+ pass-through: ${passthrough.join(', ')})` : '';
+    console.log(
+      `  ✓ core.hooksPath → ${LOCAL_HOOKS} (local) — pre-commit + your hooks preserved${extra}`,
+    );
   } catch (e) {
     console.log(`  ! could not set core.hooksPath: ${firstLine(e)}`);
   }
 }
 
 /**
- * Install the overlay. Returns the chainTarget (recorded in config for re-apply/restore).
- * @param {string} cwd repo root
+ * Install the overlay. Returns { chainTarget, origHooksPath } (recorded in config so `devkit
+ * clean` can restore the original core.hooksPath exactly).
+ * @param {string} cwd repo (or package) dir
  * @param {{guards?:string[], biome?:boolean, tsconfig?:boolean}} sel
  * @param {string} stack
  */
@@ -189,7 +239,8 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
   // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
   // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
-  const chainTarget = detectChainTarget(gitRoot);
+  // Capture the CURRENT hooksPath BEFORE we override it (for restore on clean + chaining).
+  const origHooksPath = readHooksPath(gitRoot);
   const pfx = pkgRel ? `${pkgRel}/` : '';
   const excludes = new Set([
     `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
@@ -218,13 +269,14 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
   }
   if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
 
-  // local hook (core.hooksPath override) at the git root + chain.
+  // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
-  installOverlayHook(gitRoot, pkgRel, sel, chainTarget, dryRun);
+  installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun);
 
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
   addToGitExclude(gitRoot, [...excludes], dryRun);
 
-  return chainTarget;
+  // origHooksPath ('' = was unset) lets `devkit clean` restore exactly what was there.
+  return { origHooksPath };
 }

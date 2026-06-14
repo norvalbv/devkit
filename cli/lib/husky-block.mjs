@@ -234,6 +234,23 @@ exit 0
 `;
 }
 
+/**
+ * Build a PASS-THROUGH wrapper for a non-pre-commit hook. Overriding `core.hooksPath` makes git
+ * run ONLY our hooks dir, so EVERY hook the repo already had (pre-push, commit-msg, …) needs a
+ * wrapper here or it silently stops. This just runs the repo's own hook unchanged.
+ *
+ * @param {string} chainScript the repo's existing hook script (git-root-relative)
+ * @returns {string}
+ */
+export function buildPassthroughHook(chainScript) {
+  return `${HOOK_PREAMBLE}
+# devkit overlay pass-through — git now runs this dir, so we forward to the repo's own hook
+# unchanged (devkit adds nothing to it).
+[ -f ${JSON.stringify(chainScript)} ] && exec sh ${JSON.stringify(chainScript)} "$@"
+exit 0
+`;
+}
+
 /** Slice the (package-scoped) marker block (inclusive) out of a hook; null if absent. */
 export function extractGuardBlock(hookContent, pkgRel = '') {
   const s = markStart(pkgRel);

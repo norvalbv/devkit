@@ -31,7 +31,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.7.1
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.8.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -237,7 +237,7 @@ mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and 
 the global CLI — **package.json is never touched.**
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.7.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.8.0   # once per machine
 cd <shared-repo>           # (or a package subdir in a monorepo)
 devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
 ```
@@ -265,7 +265,7 @@ where you still want the guardrails locally. Overlay mode touches **nothing comm
 **invisible to git**:
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.7.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.8.0   # once per machine
 cd <work-repo>
 devkit init --overlay
 ```
@@ -274,7 +274,9 @@ devkit init --overlay
   not `.gitignore`, which the team would review). `git status` stays clean.
 - **Non-invasive pre-commit**: the repo's committed husky hook is **not edited**. `core.hooksPath`
   (a **local** git config, never committed) points at a git-ignored `.devkit/hooks/` whose hook
-  runs devkit's gates, then `exec`s the repo's own hook unchanged.
+  runs devkit's gates, then `exec`s the repo's own hook unchanged. **Every other hook the repo
+  has** (`pre-push`, `commit-msg`, …) gets a pass-through wrapper, so taking over `core.hooksPath`
+  never silently drops one.
 - **ours-extends-theirs**: `eslint.config.devkit.mjs` / `biome.devkit.jsonc` (git-ignored)
   **import + extend** the repo's committed configs and add devkit's rules; the local hook runs
   them over **staged files only** (your changes are checked without flooding on existing code).
@@ -282,6 +284,11 @@ devkit init --overlay
 
 Caveat: husky's `prepare` re-claims `core.hooksPath` on the next `bun install` — re-run
 `devkit init --overlay` (idempotent) to re-apply. `devkit doctor` reports if it was reclaimed.
+
+**Undo it all:** `devkit clean` restores `core.hooksPath` to exactly what it was, removes every
+devkit file, and prunes the devkit lines from `.git/info/exclude` — the repo goes back to
+untouched. (`devkit clean` also uninstalls a package/standalone install: removes the configs,
+the `# devkit-guards` hook block, skills, and the `@norvalbv/devkit` dep + devkit scripts.)
 
 ## AGENT half — skills
 

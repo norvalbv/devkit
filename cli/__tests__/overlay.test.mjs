@@ -152,4 +152,78 @@ describe('overlay (local-only) install', () => {
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
     ).toBe('');
   });
+
+  it('preserves ALL the repo hooks (pass-through wrappers), not just pre-commit', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'overlay-hooks-'));
+    roots.push(root);
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }, null, 2));
+    mkdirSync(join(root, '.husky'), { recursive: true });
+    for (const h of ['pre-commit', 'pre-push', 'commit-msg']) {
+      writeFileSync(join(root, '.husky', h), `#!/bin/sh\necho ${h}\n`);
+    }
+    git('config', 'core.hooksPath', '.husky/_');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.8.0',
+    });
+
+    // a wrapper exists for EVERY repo hook (else core.hooksPath takeover would silently drop it)
+    for (const h of ['pre-commit', 'pre-push', 'commit-msg']) {
+      expect(existsSync(join(root, '.devkit', 'hooks', h))).toBe(true);
+    }
+    // pre-commit runs devkit gates; the others are pure pass-throughs to the repo's own
+    const pre = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+    const push = readFileSync(join(root, '.devkit', 'hooks', 'pre-push'), 'utf8');
+    expect(pre).toContain('__dk_gate');
+    expect(push).not.toContain('__dk_gate');
+    expect(push).toContain('.husky/pre-push');
+  });
+
+  it('devkit clean reverses overlay (restores core.hooksPath, removes files, prunes exclude)', async () => {
+    const root = workRepo(); // committed husky pre-commit + eslint + biome; core.hooksPath .husky/_
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.8.0',
+    });
+    // overlay applied
+    expect(
+      execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('.devkit/hooks');
+
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+
+    // core.hooksPath restored to the original; devkit files gone; the team's untouched
+    expect(
+      execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('.husky/_');
+    expect(existsSync(join(root, '.devkit'))).toBe(false);
+    expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
+    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
+    expect(existsSync(join(root, 'eslint.config.devkit.mjs'))).toBe(false);
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(true); // the team's, untouched
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude).not.toContain('.devkit/');
+    // back to a clean committed state
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
 });

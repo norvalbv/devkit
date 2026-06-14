@@ -709,7 +709,7 @@ export async function applyInit(cwd, plan) {
     console.log(
       '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
     );
-    const chainTarget = installOverlay(cwd, selection, stack, force, dryRun);
+    const { origHooksPath } = installOverlay(cwd, selection, stack, force, dryRun);
     if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
       console.log('  freeze baselines (grandfather current tree)');
       runFreezes(cwd, dryRun);
@@ -724,7 +724,8 @@ export async function applyInit(cwd, plan) {
             devkitRef,
             initVersion: INIT_VERSION,
             overlay: true,
-            chainTarget,
+            pkgRel,
+            origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
             components: { guards: [...(selection.guards ?? [])] },
           },
           null,

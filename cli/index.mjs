@@ -41,12 +41,16 @@ Usage:
 
   devkit doctor [--fix]      Diagnose drift for the INSTALLED component set (read-only).
                              --fix re-runs init for the recorded selection.
+  devkit clean [--yes] [--dry-run]  UNINSTALL devkit — reverse init for the recorded mode
+                             (overlay restores core.hooksPath + prunes .git/info/exclude;
+                             package/standalone removes configs, the hook block, deps, skills).
   devkit sync-skills [--dry-run]  Copy devkit skills into .claude/skills + .cursor/skills.
   devkit --help              This help.`;
 
 const COMMANDS = {
   init: () => import('./commands/init.mjs'),
   doctor: () => import('./commands/doctor.mjs'),
+  clean: () => import('./commands/clean.mjs'),
   'sync-skills': () => import('./commands/sync-skills.mjs'),
 };
 
