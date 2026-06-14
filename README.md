@@ -23,7 +23,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.4.1
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.5.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -109,11 +109,29 @@ bunx devkit init [--stack electron|react-app|next|node-service|generic] [options
 ```
 
 The stack auto-detects from the repo's `package.json` (`react` → `react-app`, `next` → `next`,
-`electron` → `electron`, headless ESM → `node-service`, else `generic`). A **monorepo-style repo
-whose app lives in a subdir** (e.g. `services/webapp`, with a framework-less root manifest)
-detects `generic` at the root — install in that subdir, or stay at the git root and pass
-`--stack react-app --scan-root services/webapp/src` (the gate then lives at the git root but
-governs the subdir).
+`electron` → `electron`, headless ESM → `node-service`, else `generic`).
+
+### Monorepo (a package in a subdir)
+
+Run `init` **inside the package** — devkit is git-root-aware:
+
+```bash
+cd services/webapp
+bunx devkit init --stack react-app --no-biome --no-tsconfig   # if the package has its own
+```
+
+- **Configs + baselines** (`eslint.config.mjs`, `guard.config.json`, `eslint/baselines/*`) land
+  **in the package**, governed at its own root (`scanRoots: ["src"]`, no `--scan-root` needed —
+  the eslint-plugin's project-root resolves to the package via its own `node_modules`).
+- The **husky hook** is installed at the **git root** with a *package-scoped* block whose gates
+  run `( cd "services/webapp" && … ) || exit 1` — so the one hook (the only place git fires it)
+  governs the package. A second JS package adds its **own** block; they coexist.
+- **Skills** sync to the **repo-root** `.claude`/`.cursor` (repo-wide), not the package.
+
+A single-package repo (cwd IS the git root) behaves exactly as before — one unscoped block, no
+`cd`. (Alternative for a one-off: stay at the root and pass `--stack react-app --scan-root
+services/webapp/src` to govern the subdir from a root-level config — but per-package install is
+the cleaner, scalable path.)
 
 On a TTY (and without `--yes`) `init` runs an **interactive setup wizard** (powered by
 [`@clack/prompts`](https://www.npmjs.com/package/@clack/prompts)): confirm the detected

@@ -9,8 +9,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
-import { MARK_END, MARK_START } from '../lib/husky.mjs';
+import { markEnd, markStart } from '../lib/husky.mjs';
+import { extractGuardBlock } from '../lib/husky-block.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;
@@ -28,23 +30,26 @@ function checkConfig(cwd) {
 }
 
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
-// guard being absent is correct, not drift).
+// guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
+// block is package-scoped — resolve both from cwd.
 function checkHusky(cwd, selectedGuards) {
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
     return check('.husky/pre-commit', 'MISSING', 'no hook', 'run `devkit init`', true);
   }
   const content = readFileSync(hookPath, 'utf8');
-  if (!content.includes(MARK_START) || !content.includes(MARK_END)) {
+  if (!content.includes(markStart(pkgRel)) || !content.includes(markEnd(pkgRel))) {
     return check(
       '.husky/pre-commit',
       'DRIFT',
-      'no devkit-guards marker block',
+      pkgRel ? `no devkit-guards block for "${pkgRel}"` : 'no devkit-guards marker block',
       'run `devkit init` (appends the block)',
       true,
     );
   }
-  const missing = selectedGuards.filter((g) => !content.includes(`bunx guard-${g}`));
+  const block = extractGuardBlock(content, pkgRel) ?? '';
+  const missing = selectedGuards.filter((g) => !block.includes(`bunx guard-${g}`));
   if (missing.length) {
     return check(
       '.husky/pre-commit',
@@ -105,7 +110,9 @@ async function checkGuardConfig(cwd) {
 }
 
 async function checkSkills(cwd) {
-  const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
+  // Skills are repo-wide → manifest + .claude live at the git root (cwd for a single-package repo).
+  const { gitRoot } = detectGitRoot(cwd);
+  const manifestPath = join(gitRoot, '.devkit', 'skills-manifest.json');
   const manifest = readJson(manifestPath);
   if (!manifest) {
     return check('skills', 'MISSING', 'no skills-manifest.json', 'run `devkit sync-skills`', true);
@@ -116,7 +123,7 @@ async function checkSkills(cwd) {
   for (const [rel, recordedSha] of Object.entries(manifest.files)) {
     const srcPath = join(skillsSrc, rel);
     if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(cwd, '.claude', 'skills', rel);
+    const consumerPath = join(gitRoot, '.claude', 'skills', rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
   if (sourceDrift.length || consumerDrift.length) {

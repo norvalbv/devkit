@@ -10,7 +10,7 @@
  * brittle regex against shell prose.
  */
 
-import { MARK_END, MARK_START } from './husky.mjs';
+import { markEnd, markStart } from './husky.mjs';
 
 // One guard fragment: an echo banner + the bunx call + its exit-code check, wrapped in
 // sentinels. Keyed by guard id (GUARD_IDS in components.mjs).
@@ -110,30 +110,44 @@ export PATH
  * Build the `# devkit-guards` marker block (inclusive of markers) from a selection.
  * Order: biome format → structure placeholder → guards in GUARD_FRAGMENTS order.
  *
+ * `pkgRel` (monorepo): when set, the markers are package-scoped and the gates run inside a
+ * `( cd "<pkgRel>" … ) || exit 1` subshell so the hook (at the git root) governs that package.
+ * biome's staged-file format is REPO-WIDE → emitted only at the root (pkgRel ''), never inside
+ * a package subshell (where `git add` paths would resolve wrong).
+ *
  * @param {{biome?:boolean, guards?:string[]}} selection
+ * @param {string} [pkgRel] package path relative to the git root ('' = root install)
  * @returns {string}
  */
-export function buildGuardBlock(selection) {
+export function buildGuardBlock(selection, pkgRel = '') {
   const pieces = [];
-  if (selection.biome) pieces.push(BIOME_FRAGMENT);
+  if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   pieces.push(STRUCTURE_PLACEHOLDER);
   for (const id of Object.keys(GUARD_FRAGMENTS)) {
     if (selection.guards?.includes(id)) pieces.push(GUARD_FRAGMENTS[id]);
   }
-  return `${MARK_START}\n${pieces.join('\n\n')}\n${MARK_END}`;
+  const body = pieces.join('\n\n');
+  const start = markStart(pkgRel);
+  const end = markEnd(pkgRel);
+  if (!pkgRel) return `${start}\n${body}\n${end}`;
+  // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
+  // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
+  return `${start}\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
-export function buildFullHook(selection) {
-  return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection)}\n\nexit 0\n`;
+export function buildFullHook(selection, pkgRel = '') {
+  return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel)}\n\nexit 0\n`;
 }
 
-/** Slice the marker block (inclusive) out of a hook; returns null if no block present. */
-export function extractGuardBlock(hookContent) {
-  const start = hookContent.indexOf(MARK_START);
-  const end = hookContent.indexOf(MARK_END);
+/** Slice the (package-scoped) marker block (inclusive) out of a hook; null if absent. */
+export function extractGuardBlock(hookContent, pkgRel = '') {
+  const s = markStart(pkgRel);
+  const e = markEnd(pkgRel);
+  const start = hookContent.indexOf(s);
+  const end = hookContent.indexOf(e);
   if (start === -1 || end === -1) return null;
-  return hookContent.slice(start, end + MARK_END.length);
+  return hookContent.slice(start, end + e.length);
 }
 
 /**
@@ -163,26 +177,38 @@ export function hasFragment(hookContent, id) {
   return hookContent.includes(`# devkit:${id}`);
 }
 
-/** Replace (or insert) the marker block in an existing hook with `newBlock`. */
-export function replaceGuardBlock(hookContent, newBlock) {
-  const start = hookContent.indexOf(MARK_START);
-  const end = hookContent.indexOf(MARK_END);
+/**
+ * Replace (or insert/append) the package-scoped marker block in an existing hook. A new
+ * package's block is appended, leaving any other packages' blocks + the consumer's lines intact.
+ */
+export function replaceGuardBlock(hookContent, newBlock, pkgRel = '') {
+  const s = markStart(pkgRel);
+  const e = markEnd(pkgRel);
+  const start = hookContent.indexOf(s);
+  const end = hookContent.indexOf(e);
   if (start === -1 || end === -1) {
+    // Append before a trailing `exit 0` if present, else at the end.
+    const exitIdx = hookContent.lastIndexOf('\nexit 0');
+    if (exitIdx !== -1) {
+      return `${hookContent.slice(0, exitIdx)}\n\n${newBlock}${hookContent.slice(exitIdx)}`;
+    }
     const sep = hookContent.endsWith('\n') ? '\n' : '\n\n';
     return `${hookContent}${sep}${newBlock}\n`;
   }
-  return hookContent.slice(0, start) + newBlock + hookContent.slice(end + MARK_END.length);
+  return hookContent.slice(0, start) + newBlock + hookContent.slice(end + e.length);
 }
 
 /**
- * Remove the entire devkit-guards block (markers inclusive) from a hook, collapsing the
- * blank lines that surrounded it. Returns { content, removed }.
+ * Remove the (package-scoped) devkit-guards block (markers inclusive) from a hook, collapsing
+ * the blank lines that surrounded it. Returns { content, removed }.
  */
-export function removeGuardBlock(hookContent) {
-  const start = hookContent.indexOf(MARK_START);
-  const end = hookContent.indexOf(MARK_END);
+export function removeGuardBlock(hookContent, pkgRel = '') {
+  const s = markStart(pkgRel);
+  const e = markEnd(pkgRel);
+  const start = hookContent.indexOf(s);
+  const end = hookContent.indexOf(e);
   if (start === -1 || end === -1) return { content: hookContent, removed: false };
-  const afterEnd = end + MARK_END.length;
+  const afterEnd = end + e.length;
   let from = start;
   let to = afterEnd;
   if (hookContent.slice(start - 2, start) === '\n\n') from = start - 1;

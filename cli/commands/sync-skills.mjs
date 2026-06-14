@@ -10,6 +10,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../lib/fs-helpers.mjs';
 
 const TARGET_DIRS = ['.claude/skills', '.cursor/skills'];
@@ -76,6 +77,7 @@ export function syncSkills(args, cwd) {
 }
 
 export default function run(args, cwd) {
-  syncSkills(args, cwd);
+  // Skills are repo-wide → target the git root (= cwd for a single-package repo).
+  syncSkills(args, detectGitRoot(cwd).gitRoot);
   return 0;
 }

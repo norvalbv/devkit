@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
+import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
 import { generateImportWallBaseline } from '../lib/generate-import-wall-baseline.mjs';
@@ -27,6 +28,7 @@ import { generateStructureBaselines } from '../lib/generate-structure-baseline.m
 import {
   buildFullHook,
   buildGuardBlock,
+  extractGuardBlock,
   hasFragment,
   removeFragment,
   removeGuardBlock,
@@ -135,15 +137,19 @@ function detectInstalled(cwd) {
     if (recorded.guards?.length) installed.add('guards');
     return installed;
   }
+  // Per-package configs live in cwd; the hook + skills are at the git root (monorepo) or cwd
+  // (single-package, where gitRoot === cwd).
   if (existsSync(join(cwd, 'biome.jsonc'))) installed.add('biome');
   if (existsSync(join(cwd, 'tsconfig.json'))) installed.add('tsconfig');
-  if (existsSync(join(cwd, '.devkit', 'skills-manifest.json'))) installed.add('skills');
-  if (existsSync(join(cwd, '.husky', 'pre-commit'))) installed.add('husky');
   if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
-  const hook = existsSync(join(cwd, '.husky', 'pre-commit'))
-    ? readFileSync(join(cwd, '.husky', 'pre-commit'), 'utf8')
-    : '';
-  if (GUARD_IDS.some((g) => hasFragment(hook, `guard-${g}`))) installed.add('guards');
+  const { gitRoot } = detectGitRoot(cwd);
+  if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) installed.add('skills');
+  const hookPath = join(gitRoot, '.husky', 'pre-commit');
+  if (existsSync(hookPath)) {
+    installed.add('husky');
+    const hook = readFileSync(hookPath, 'utf8');
+    if (GUARD_IDS.some((g) => hasFragment(hook, `guard-${g}`))) installed.add('guards');
+  }
   return installed;
 }
 
@@ -279,34 +285,37 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
   console.log(`  ✓ package.json: ${added.join(', ')}`);
 }
 
-// Wire .husky/pre-commit from the selection: fresh repo → full hook; existing hook →
-// replace/insert the devkit-guards block assembled from the selection.
-function installHusky(cwd, sel, dryRun) {
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+// Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
+// which is `cwd` for a single-package repo, or the monorepo root when init runs in a package
+// subdir). `pkgRel` scopes the block + `cd`s the gates into the package. Fresh repo → full
+// hook; existing hook → replace/insert THIS package's devkit-guards block (others untouched).
+function installHusky(sel, hookRoot, pkgRel, dryRun) {
+  const where = pkgRel ? ` (git root, scoped to ${pkgRel})` : '';
+  const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
     if (dryRun) {
-      console.log('  [dry-run] write .husky/pre-commit (assembled from selection) + husky init');
+      console.log(`  [dry-run] write .husky/pre-commit${where} (assembled from selection)`);
       return;
     }
-    mkdirSync(join(cwd, '.husky'), { recursive: true });
-    writeFileSync(hookPath, buildFullHook(sel));
+    mkdirSync(join(hookRoot, '.husky'), { recursive: true });
+    writeFileSync(hookPath, buildFullHook(sel, pkgRel));
     chmodSync(hookPath, 0o755);
-    console.log('  ✓ created .husky/pre-commit (selected gates)');
+    console.log(`  ✓ created .husky/pre-commit${where}`);
     return;
   }
   const current = readText(hookPath);
-  const block = buildGuardBlock(sel);
-  const merged = replaceGuardBlock(current, block);
+  const block = buildGuardBlock(sel, pkgRel);
+  const merged = replaceGuardBlock(current, block, pkgRel);
   if (merged === current) {
     console.log('  • .husky/pre-commit already wired (devkit-guards block current)');
     return;
   }
   if (dryRun) {
-    console.log('  [dry-run] refresh devkit-guards block in existing .husky/pre-commit');
+    console.log(`  [dry-run] refresh devkit-guards block${where} in existing .husky/pre-commit`);
     return;
   }
   writeFileSync(hookPath, merged);
-  console.log('  ✓ refreshed devkit-guards block in .husky/pre-commit');
+  console.log(`  ✓ refreshed devkit-guards block${where} in .husky/pre-commit`);
 }
 
 function runFreezes(cwd, dryRun) {
@@ -410,16 +419,23 @@ async function applyFallow(cwd, dryRun, interactive) {
   }
 }
 
-// Flip the commented structure-lint placeholder to the live `bunx eslint <roots>` call.
-function enableStructureLint(cwd, dryRun) {
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+// Flip the commented structure-lint placeholder to the live `bunx eslint src` call, scoped to
+// THIS package's block (a monorepo hook may hold several). Inside a package block the gates run
+// cd'd into the package, so `bunx eslint src` resolves the package's own eslint.config + src.
+function enableStructureLint(hookRoot, pkgRel, dryRun) {
+  const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
   const content = readFileSync(hookPath, 'utf8');
-  if (content.includes('\nbunx eslint src')) {
+  const block = extractGuardBlock(content, pkgRel);
+  if (!block) {
+    console.log('  ! no devkit-guards block to enable structure-lint in');
+    return;
+  }
+  if (block.includes('\nbunx eslint src')) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
   }
-  if (!COMMENTED_LINT_RE.test(content)) {
+  if (!COMMENTED_LINT_RE.test(block)) {
     console.log('  ! could not find the commented structure-lint placeholder to enable');
     return;
   }
@@ -427,7 +443,10 @@ function enableStructureLint(cwd, dryRun) {
     console.log('  [dry-run] uncomment `bunx eslint src` in .husky/pre-commit');
     return;
   }
-  writeFileSync(hookPath, content.replace(COMMENTED_LINT_RE, '\nbunx eslint src\n'));
+  // `|| exit 1` so a structure violation BLOCKS the commit — a bare line would let a non-zero
+  // eslint pass (no `set -e`). In a package subshell the exit propagates via the `) || exit 1`.
+  const newBlock = block.replace(COMMENTED_LINT_RE, '\nbunx eslint src || exit 1\n');
+  writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
   console.log('  ✓ enabled structure-lint (`bunx eslint src`) in .husky/pre-commit');
 }
 
@@ -499,8 +518,9 @@ function removeTsconfig(cwd, dryRun) {
 }
 
 // Remove devkit-synced skills (per the manifest) from .claude + .cursor + drop the manifest.
-function removeSkills(cwd, dryRun) {
-  const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
+// `root` is the git root (skills are repo-wide), which equals cwd for a single-package repo.
+function removeSkills(root, dryRun) {
+  const manifestPath = join(root, '.devkit', 'skills-manifest.json');
   const manifest = readJson(manifestPath);
   if (!manifest) {
     console.log('  • no skills-manifest.json — nothing to remove');
@@ -510,7 +530,7 @@ function removeSkills(cwd, dryRun) {
   let n = 0;
   for (const rel of Object.keys(manifest.files)) {
     for (const t of targets) {
-      const p = join(cwd, t, rel);
+      const p = join(root, t, rel);
       if (existsSync(p)) {
         n++;
         if (!dryRun) rmSync(p);
@@ -523,11 +543,12 @@ function removeSkills(cwd, dryRun) {
   );
 }
 
-// Remove the entire devkit-guards block from the hook (leaving the rest of the consumer hook).
-function removeHusky(cwd, dryRun) {
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+// Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
+// other packages' blocks intact.
+function removeHusky(hookRoot, pkgRel, dryRun) {
+  const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
-  const { content, removed } = removeGuardBlock(readFileSync(hookPath, 'utf8'));
+  const { content, removed } = removeGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
   if (!removed) {
     console.log('  • no devkit-guards block in .husky/pre-commit');
     return;
@@ -540,23 +561,27 @@ function removeHusky(cwd, dryRun) {
   console.log('  ✓ removed devkit-guards block from .husky/pre-commit');
 }
 
-// Remove a single fragment (one guard, or the biome-format step) from the hook block.
-function removeHuskyPiece(cwd, id, dryRun) {
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+// Remove a single fragment (one guard, or the biome step) from THIS package's block. Scoped via
+// extract→removeFragment→replace so a shared sentinel in another package's block is untouched.
+function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
+  const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return false;
-  const { content, removed } = removeFragment(readFileSync(hookPath, 'utf8'), id);
+  const content = readFileSync(hookPath, 'utf8');
+  const block = extractGuardBlock(content, pkgRel);
+  if (!block) return false;
+  const { content: newBlock, removed } = removeFragment(block, id);
   if (!removed) return false;
   if (dryRun) {
     console.log(`  [dry-run] remove ${id} from .husky/pre-commit`);
     return true;
   }
-  writeFileSync(hookPath, content);
+  writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
   console.log(`  ✓ removed ${id} from .husky/pre-commit`);
   return true;
 }
 
 // Remove ONLY devkit-created structure files (guarded by config marker), re-comment the line.
-function removeStructure(cwd, prevConfig, dryRun) {
+function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   if (!prevConfig?.components?.structure) {
     console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
     return;
@@ -584,21 +609,18 @@ function removeStructure(cwd, prevConfig, dryRun) {
   if (pkgRemoved.length) {
     console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
   }
-  // Re-comment the live structure-lint line in the hook.
-  const hookPath = join(cwd, '.husky', 'pre-commit');
+  // Re-comment the live structure-lint line inside THIS package's block at the git-root hook.
+  const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (existsSync(hookPath)) {
     const content = readFileSync(hookPath, 'utf8');
-    const live = '\nbunx eslint src\n';
-    if (content.includes(live)) {
-      if (!dryRun) {
-        writeFileSync(
-          hookPath,
-          content.replace(
-            live,
-            '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n',
-          ),
-        );
-      }
+    const block = extractGuardBlock(content, pkgRel);
+    const live = '\nbunx eslint src || exit 1\n';
+    if (block?.includes(live)) {
+      const newBlock = block.replace(
+        live,
+        '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n',
+      );
+      if (!dryRun) writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
       console.log(
         `  ${dryRun ? '[dry-run]' : '✓'} re-commented structure-lint line in .husky/pre-commit`,
       );
@@ -606,18 +628,18 @@ function removeStructure(cwd, prevConfig, dryRun) {
   }
 }
 
-function applyRemovals(cwd, remove, prevConfig, dryRun) {
+function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
   if (!remove.length) return;
   console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
   // Guards (individual lines) before husky (whole-block) so order is irrelevant.
   if (remove.includes('guards')) {
-    for (const g of GUARD_IDS) removeHuskyPiece(cwd, `guard-${g}`, dryRun);
+    for (const g of GUARD_IDS) removeHuskyPiece(gitRoot, pkgRel, `guard-${g}`, dryRun);
   }
   if (remove.includes('biome')) removeBiome(cwd, dryRun);
   if (remove.includes('tsconfig')) removeTsconfig(cwd, dryRun);
-  if (remove.includes('skills')) removeSkills(cwd, dryRun);
-  if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
-  if (remove.includes('husky')) removeHusky(cwd, dryRun);
+  if (remove.includes('skills')) removeSkills(gitRoot, dryRun);
+  if (remove.includes('structure')) removeStructure(cwd, prevConfig, gitRoot, pkgRel, dryRun);
+  if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
 
 // ── orchestration ────────────────────────────────────────────────────────────
@@ -661,10 +683,17 @@ export async function applyInit(cwd, plan) {
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
+  // Monorepo: configs/baselines stay in cwd (the package), but the husky hook + repo-wide
+  // skills target the git root, with gates scoped `cd <pkgRel>`. Single-package repo → gitRoot
+  // === cwd, pkgRel '' → everything as before.
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
 
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
   );
+  if (pkgRel) {
+    console.log(`  monorepo: package "${pkgRel}" — hook + skills at the git root (${gitRoot})`);
+  }
   const on = COMPONENTS.filter((c) =>
     c.id === 'guards'
       ? selection.guards.length
@@ -682,7 +711,7 @@ export async function applyInit(cwd, plan) {
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    installHusky(cwd, selection, dryRun);
+    installHusky(selection, gitRoot, pkgRel, dryRun);
   }
 
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -694,12 +723,13 @@ export async function applyInit(cwd, plan) {
     console.log('5. structure + import-wall baselines (grandfather current tree)');
     await runStructureBaselines(cwd, stack, dryRun);
     console.log('6. enable structure-lint in pre-commit');
-    enableStructureLint(cwd, dryRun);
+    enableStructureLint(gitRoot, pkgRel, dryRun);
   }
 
   if (selection.skills) {
     console.log('7. skills');
-    syncSkills(dryRun ? ['--dry-run'] : [], cwd);
+    // Skills are repo-wide → sync to the git root's .claude/.cursor (+ manifest), not the package.
+    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot);
   }
 
   if (selection.fallow) {
@@ -708,7 +738,7 @@ export async function applyInit(cwd, plan) {
   }
 
   // Removals (deselected + present).
-  applyRemovals(cwd, remove, prevConfig, dryRun);
+  applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
 
   // .devkit/config.json with the component selection.
   console.log('9. .devkit/config.json');
@@ -721,7 +751,8 @@ export async function applyInit(cwd, plan) {
     fallow: Boolean(selection.fallow),
     guards: selection.husky ? [...selection.guards] : [],
   };
-  const config = { stack, devkitRef, initVersion: INIT_VERSION, components };
+  // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills.
+  const config = { stack, devkitRef, initVersion: INIT_VERSION, pkgRel, components };
   const configPath = join(cwd, '.devkit', 'config.json');
   if (dryRun) {
     console.log('  [dry-run] write .devkit/config.json');
