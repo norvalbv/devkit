@@ -186,6 +186,50 @@ export function buildStandaloneHook(selection, pkgRel = '') {
   return `${HOOK_PREAMBLE}\n${buildStandaloneBlock(selection, pkgRel)}\n\nexit 0\n`;
 }
 
+// The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
+// STAGED files only (so new changes are checked without flooding on the team's existing code,
+// which can't be grandfathered invisibly). Each step is fail-open: only fires if the local
+// config + the repo's own binary are present.
+const OVERLAY_LINT_STEPS = `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
+DK_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
+if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
+    echo "🧱 devkit eslint overlay (staged)..."
+    echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+fi
+DK_FMT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
+if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome ]; then
+    echo "🎨 devkit biome overlay (staged)..."
+    echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
+fi`;
+
+/**
+ * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
+ * git-ignored local hooks dir; `core.hooksPath` points at it). It runs devkit's gates + lint
+ * overlay, then `exec`s the repo's OWN committed hook unchanged (so its exit propagates). Used
+ * for a work repo where devkit must be invisible and non-invasive.
+ *
+ * @param {{guards?:string[]}} selection
+ * @param {string} [chainTarget] the repo's existing hook to chain to (default .husky/pre-commit)
+ * @returns {string}
+ */
+export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit') {
+  const gates = [DK_GATE_HELPER];
+  for (const id of Object.keys(STANDALONE_GATES)) {
+    if (selection.guards?.includes(id)) gates.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
+  }
+  return `${HOOK_PREAMBLE}
+# devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
+# the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
+${gates.join('\n')}
+
+${OVERLAY_LINT_STEPS}
+
+# Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
+[ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"
+exit 0
+`;
+}
+
 /** Slice the (package-scoped) marker block (inclusive) out of a hook; null if absent. */
 export function extractGuardBlock(hookContent, pkgRel = '') {
   const s = markStart(pkgRel);

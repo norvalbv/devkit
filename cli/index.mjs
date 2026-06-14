@@ -3,7 +3,7 @@
  * devkit CLI — wire a consumer repo onto the @norvalbv/devkit shared configs +
  * gate-engine, sync agent skills, and diagnose drift.
  *
- *   devkit init [--stack <x>] [--standalone] [--scan-root <a,b>] [--fallow] [--yes] [--dry-run]
+ *   devkit init [--stack <x>] [--standalone | --overlay] [--scan-root <a,b>] [--fallow] [--yes]
  *   devkit doctor [--fix]
  *   devkit sync-skills [--dry-run]
  *   devkit --help
@@ -30,6 +30,10 @@ Usage:
                              fail-open hook calling the GLOBAL guard-* bins; adds NOTHING to
                              package.json. For shared repos where a private dep is unwanted.
                              Requires devkit installed globally (\`bun add -g\`).
+    --overlay                LOCAL-ONLY mode for a repo you can't modify: everything is
+                             git-ignored via .git/info/exclude (invisible to the team), the
+                             local hook chains to the repo's own (no committed change), and
+                             eslint/biome configs EXTEND the repo's. Requires global devkit.
     --scan-root <a,b,…>      Override guard.config.json scanRoots up front (set BEFORE the
                              freezes) — e.g. --scan-root services/webapp/src for a nested app.
     --remove-deselected      With --yes: REMOVE any installed-but-now-deselected component

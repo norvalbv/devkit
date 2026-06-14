@@ -40,6 +40,7 @@ import {
   saveFallowBaselines,
   wireFallowGate,
 } from '../lib/install-fallow.mjs';
+import { installOverlay } from '../lib/overlay.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { syncSkills } from './sync-skills.mjs';
@@ -87,6 +88,7 @@ function parseFlags(args) {
     removeDeselected: false,
     fallow: false,
     standalone: false,
+    overlay: false,
     no: new Set(),
     guards: null,
     scanRoots: null,
@@ -99,6 +101,7 @@ function parseFlags(args) {
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
     else if (a === '--standalone') flags.standalone = true;
+    else if (a === '--overlay') flags.overlay = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
     // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
@@ -671,6 +674,7 @@ const STEP_LABELS = {
  * @param {boolean} [plan.interactive] TTY run — enables fallow sub-confirms (default false)
  * @param {string[]} [plan.scanRoots] override guard.config.json scanRoots (--scan-root)
  * @param {boolean} [plan.standalone] no-package mode — vendored configs + global fail-open hook
+ * @param {boolean} [plan.overlay] local-only mode — git-ignored, non-invasive, extends the repo
  * @param {string} [plan.devkitRef]
  */
 export async function applyInit(cwd, plan) {
@@ -683,6 +687,7 @@ export async function applyInit(cwd, plan) {
     interactive = false,
     scanRoots = null,
     standalone = false,
+    overlay = false,
   } = plan;
   // Standalone (no-package): structure-lint is omitted (its eslint flat-config needs the plugin
   // resolvable from the repo, which a no-package setup can't provide).
@@ -694,6 +699,48 @@ export async function applyInit(cwd, plan) {
   // skills target the git root, with gates scoped `cd <pkgRel>`. Single-package repo → gitRoot
   // === cwd, pkgRel '' → everything as before.
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
+
+  // Overlay (local-only): a self-contained path — invisible to git (.git/info/exclude),
+  // non-invasive (extends the repo, edits nothing committed). Used on a shared work repo.
+  if (overlay) {
+    console.log(
+      `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
+    );
+    console.log(
+      '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
+    );
+    const chainTarget = installOverlay(cwd, selection, stack, force, dryRun);
+    if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
+      console.log('  freeze baselines (grandfather current tree)');
+      runFreezes(cwd, dryRun);
+    }
+    if (!dryRun) {
+      mkdirSync(join(cwd, '.devkit'), { recursive: true });
+      writeFileSync(
+        join(cwd, '.devkit', 'config.json'),
+        `${JSON.stringify(
+          {
+            stack,
+            devkitRef,
+            initVersion: INIT_VERSION,
+            overlay: true,
+            chainTarget,
+            components: { guards: [...(selection.guards ?? [])] },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      console.log('  ✓ wrote .devkit/config.json (git-ignored)');
+    }
+    console.log(
+      `\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit overlay complete — local-only.'}`,
+    );
+    console.log(
+      '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath).',
+    );
+    return;
+  }
 
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
@@ -844,6 +891,7 @@ export default async function run(args, cwd) {
     interactive,
     scanRoots: flags.scanRoots,
     standalone: flags.standalone,
+    overlay: flags.overlay,
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;

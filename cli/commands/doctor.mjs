@@ -247,6 +247,33 @@ export default async function run(args, cwd) {
   // Selection-aware: only check the components that were actually installed. A config with
   // no `components` block defaults to all-on (a fresh init always records it).
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) ?? {};
+
+  // Overlay (local-only) has its own minimal checks: the local hook + core.hooksPath (which
+  // husky re-claims on install). Package/pin/extends checks don't apply.
+  if (cfg.overlay) {
+    let hooksPath = '';
+    try {
+      hooksPath = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd,
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      // unset
+    }
+    const hookOk = existsSync(join(cwd, '.devkit', 'hooks', 'pre-commit'));
+    const pathOk = hooksPath === '.devkit/hooks';
+    console.log('devkit doctor — overlay (local-only)\n');
+    console.log(
+      `  ${hookOk ? '✓' : '✗'} .devkit/hooks/pre-commit ${hookOk ? 'present' : 'MISSING'}`,
+    );
+    console.log(
+      `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ' — re-run `devkit init --overlay` (husky may have reclaimed it)'}`,
+    );
+    return hookOk && pathOk ? 0 : 1;
+  }
+
+  // Selection-aware: only check the components that were actually installed. A config with
+  // no `components` block defaults to all-on (a fresh init always records it).
   const sel = cfg.components ?? {
     biome: true,
     tsconfig: true,

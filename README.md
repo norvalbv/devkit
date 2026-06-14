@@ -18,19 +18,20 @@ log, no `guard.config.json`. Those are born and live in each consumer repo, addr
 relative to the consumer's cwd (see "W-3" below). Update the engine by bumping the tag;
 your data is untouched because it was never in here.
 
-## Two ways to consume devkit
+## Three ways to consume devkit
 
 | Mode | How | When |
 | ---- | --- | ---- |
 | **Package** (default) | `bun add -D` the git dep; configs `extends "@norvalbv/devkit/…"`; hook calls `bunx guard-*` | Your own repos — auto-updates on a tag bump |
-| **Standalone** (`--standalone`) | `bun add -g` devkit once; `devkit init --standalone` vendors configs + a fail-open hook; **nothing in package.json** | **Shared / work repos** where a private dep would force every teammate to have repo access ([see below](#standalone-no-package--like-fallow-init)) |
+| **Standalone** (`--standalone`) | `bun add -g` devkit once; `devkit init --standalone` vendors configs + a fail-open hook; **nothing in package.json** | **Shared / work repos** where a private dep is unwanted ([↓](#standalone-no-package--like-fallow-init)) |
+| **Overlay** (`--overlay`) | global devkit; `devkit init --overlay` — everything **git-ignored** (`.git/info/exclude`), hook **chains** to the repo's own, configs **extend** theirs | A repo you **can't modify** — the team would reject a devkit PR, but you want it locally + invisibly ([↓](#overlay-local-only--invisible--non-invasive)) |
 
 ## CODE half (package mode)
 
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.6.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.7.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -236,7 +237,7 @@ mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and 
 the global CLI — **package.json is never touched.**
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.6.0   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.7.0   # once per machine
 cd <shared-repo>           # (or a package subdir in a monorepo)
 devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
 ```
@@ -256,6 +257,31 @@ What standalone does differently:
   `generic` stack). The ratchet guards + biome cover the shared-repo case.
 
 `devkit doctor` is standalone-aware (no pin check; verifies the vendored relative-extends).
+
+## Overlay (local-only) — invisible + non-invasive
+
+For a repo you **can't modify** — a shared work repo whose team would reject a devkit PR — but
+where you still want the guardrails locally. Overlay mode touches **nothing committed** and is
+**invisible to git**:
+
+```bash
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.7.0   # once per machine
+cd <work-repo>
+devkit init --overlay
+```
+
+- **Invisible**: every devkit file is added to **`.git/info/exclude`** (per-clone, uncommitted —
+  not `.gitignore`, which the team would review). `git status` stays clean.
+- **Non-invasive pre-commit**: the repo's committed husky hook is **not edited**. `core.hooksPath`
+  (a **local** git config, never committed) points at a git-ignored `.devkit/hooks/` whose hook
+  runs devkit's gates, then `exec`s the repo's own hook unchanged.
+- **ours-extends-theirs**: `eslint.config.devkit.mjs` / `biome.devkit.jsonc` (git-ignored)
+  **import + extend** the repo's committed configs and add devkit's rules; the local hook runs
+  them over **staged files only** (your changes are checked without flooding on existing code).
+- **package.json untouched.**
+
+Caveat: husky's `prepare` re-claims `core.hooksPath` on the next `bun install` — re-run
+`devkit init --overlay` (idempotent) to re-apply. `devkit doctor` reports if it was reclaimed.
 
 ## AGENT half — skills
 
