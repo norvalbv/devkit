@@ -3,7 +3,7 @@
  * devkit CLI — wire a consumer repo onto the @norvalbv/devkit shared configs +
  * gate-engine, sync agent skills, and diagnose drift.
  *
- *   devkit init [--stack <x>] [--scan-root <a,b>] [--fallow] [--yes] [--dry-run] [--force]
+ *   devkit init [--stack <x>] [--standalone] [--scan-root <a,b>] [--fallow] [--yes] [--dry-run]
  *   devkit doctor [--fix]
  *   devkit sync-skills [--dry-run]
  *   devkit --help
@@ -26,6 +26,10 @@ Usage:
                              --no-husky --no-structure --no-guards --no-fallow.
     --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
     --fallow                 Also install the optional fallow code-health layer (off by default).
+    --standalone             NO-PACKAGE mode (à la \`fallow init\`): vendors configs + writes a
+                             fail-open hook calling the GLOBAL guard-* bins; adds NOTHING to
+                             package.json. For shared repos where a private dep is unwanted.
+                             Requires devkit installed globally (\`bun add -g\`).
     --scan-root <a,b,…>      Override guard.config.json scanRoots up front (set BEFORE the
                              freezes) — e.g. --scan-root services/webapp/src for a nested app.
     --remove-deselected      With --yes: REMOVE any installed-but-now-deselected component

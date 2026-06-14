@@ -140,6 +140,52 @@ export function buildFullHook(selection, pkgRel = '') {
   return `${HOOK_PREAMBLE}\n${buildGuardBlock(selection, pkgRel)}\n\nexit 0\n`;
 }
 
+// Standalone (no-package) gate args, in run order. The bin is global (devkit installed with
+// `bun add -g`); the block fail-opens per gate so a repo whose committer doesn't have devkit is
+// never blocked — exactly fallow's `command -v fallow || exit 0`.
+const STANDALONE_GATES = {
+  size: ['guard-size', 'gate'],
+  fanout: ['guard-fanout', 'gate'],
+  dup: ['guard-dup', 'scan', '--new', '--changed', '--gate'],
+  clone: ['guard-clone', 'scan', '--changed', '--gate'],
+  decisions: ['guard-decisions', 'detect', '--gate'],
+};
+
+// fail-open helper: run a gate only if its global bin is on PATH (skip silently otherwise), and
+// block the commit ONLY on exit 1 (a real violation). Exit 2 means the gate couldn't run
+// (e.g. no search-code index) → fail-open, same as the package-mode fragments.
+const DK_GATE_HELPER =
+  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; "$@"; if [ $? -eq 1 ]; then exit 1; fi; }';
+
+/**
+ * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
+ * NO `bunx`/node_modules. Structure-lint + biome-format are omitted (they need project-local
+ * tooling; standalone covers the pure-node ratchet guards). pkgRel cd-wraps for a monorepo.
+ *
+ * @param {{guards?:string[]}} selection
+ * @param {string} [pkgRel]
+ * @returns {string}
+ */
+export function buildStandaloneBlock(selection, pkgRel = '') {
+  const pieces = [
+    '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
+    DK_GATE_HELPER,
+  ];
+  for (const id of Object.keys(STANDALONE_GATES)) {
+    if (selection.guards?.includes(id)) pieces.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
+  }
+  const body = pieces.join('\n');
+  const start = markStart(pkgRel);
+  const end = markEnd(pkgRel);
+  if (!pkgRel) return `${start}\n${body}\n${end}`;
+  return `${start}\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+}
+
+/** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
+export function buildStandaloneHook(selection, pkgRel = '') {
+  return `${HOOK_PREAMBLE}\n${buildStandaloneBlock(selection, pkgRel)}\n\nexit 0\n`;
+}
+
 /** Slice the (package-scoped) marker block (inclusive) out of a hook; null if absent. */
 export function extractGuardBlock(hookContent, pkgRel = '') {
   const s = markStart(pkgRel);

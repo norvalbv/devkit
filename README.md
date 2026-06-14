@@ -18,12 +18,19 @@ log, no `guard.config.json`. Those are born and live in each consumer repo, addr
 relative to the consumer's cwd (see "W-3" below). Update the engine by bumping the tag;
 your data is untouched because it was never in here.
 
-## CODE half
+## Two ways to consume devkit
+
+| Mode | How | When |
+| ---- | --- | ---- |
+| **Package** (default) | `bun add -D` the git dep; configs `extends "@norvalbv/devkit/…"`; hook calls `bunx guard-*` | Your own repos — auto-updates on a tag bump |
+| **Standalone** (`--standalone`) | `bun add -g` devkit once; `devkit init --standalone` vendors configs + a fail-open hook; **nothing in package.json** | **Shared / work repos** where a private dep would force every teammate to have repo access ([see below](#standalone-no-package--like-fallow-init)) |
+
+## CODE half (package mode)
 
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.5.0
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.6.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -220,6 +227,35 @@ deselected component is never flagged as missing) — husky calls the selected g
 configs extend the bases, skills match the manifest, baselines exist, devkit pinned to a
 tag. Exit `0` OK / `1` drift / `2` not-initialized. `--fix` re-runs `init` **for the
 recorded selection** (it won't silently re-add a component you removed).
+
+## Standalone (no-package) — "like `fallow init`"
+
+For a **shared / work repo** you may not want a private `@norvalbv/devkit` entry in
+`package.json` (it forces every teammate to have repo access just to `bun install`). Standalone
+mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and the gates run off
+the global CLI — **package.json is never touched.**
+
+```bash
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.6.0   # once per machine
+cd <shared-repo>           # (or a package subdir in a monorepo)
+devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
+```
+
+What standalone does differently:
+
+- **package.json**: untouched — no devkit dep, no scripts.
+- **biome / tsconfig**: devkit's bases are **vendored** into `.devkit/{biome,tsconfig}/` and your
+  `biome.jsonc` / `tsconfig.json` extend them by **relative path** (no package to resolve).
+  Re-run `init` to refresh the vendored copies on a devkit bump.
+- **hook**: a committed `.husky/pre-commit` whose gates call the **global** `guard-*` bins,
+  **fail-open** — `command -v guard-X || skip`. A teammate without devkit installed is **never
+  blocked** (exactly fallow's `command -v fallow || exit 0`); a real violation (gate exit 1) still
+  blocks. Wired via `core.hooksPath` — **no `husky` dependency**.
+- **structure-lint** is **omitted** in standalone (its eslint flat-config needs the plugin
+  resolvable from the repo, which a no-package setup can't provide; it also doesn't apply to a
+  `generic` stack). The ratchet guards + biome cover the shared-repo case.
+
+`devkit doctor` is standalone-aware (no pin check; verifies the vendored relative-extends).
 
 ## AGENT half — skills
 

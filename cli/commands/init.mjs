@@ -40,6 +40,7 @@ import {
   saveFallowBaselines,
   wireFallowGate,
 } from '../lib/install-fallow.mjs';
+import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { syncSkills } from './sync-skills.mjs';
 
@@ -85,6 +86,7 @@ function parseFlags(args) {
     stack: null,
     removeDeselected: false,
     fallow: false,
+    standalone: false,
     no: new Set(),
     guards: null,
     scanRoots: null,
@@ -96,6 +98,7 @@ function parseFlags(args) {
     else if (a === '--force') flags.force = true;
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
+    else if (a === '--standalone') flags.standalone = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
     // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
@@ -667,6 +670,7 @@ const STEP_LABELS = {
  * @param {boolean} [plan.dryRun]
  * @param {boolean} [plan.interactive] TTY run — enables fallow sub-confirms (default false)
  * @param {string[]} [plan.scanRoots] override guard.config.json scanRoots (--scan-root)
+ * @param {boolean} [plan.standalone] no-package mode — vendored configs + global fail-open hook
  * @param {string} [plan.devkitRef]
  */
 export async function applyInit(cwd, plan) {
@@ -678,8 +682,11 @@ export async function applyInit(cwd, plan) {
     dryRun = false,
     interactive = false,
     scanRoots = null,
+    standalone = false,
   } = plan;
-  const isStructure = selection.structure && STRUCTURE_STACKS.has(stack);
+  // Standalone (no-package): structure-lint is omitted (its eslint flat-config needs the plugin
+  // resolvable from the repo, which a no-package setup can't provide).
+  const isStructure = !standalone && selection.structure && STRUCTURE_STACKS.has(stack);
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
@@ -691,6 +698,9 @@ export async function applyInit(cwd, plan) {
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
   );
+  if (standalone) {
+    console.log('  standalone: no package.json dep — global devkit CLI, fail-open hook');
+  }
   if (pkgRel) {
     console.log(`  monorepo: package "${pkgRel}" — hook + skills at the git root (${gitRoot})`);
   }
@@ -702,16 +712,21 @@ export async function applyInit(cwd, plan) {
   console.log(`  components: ${on.join(', ') || '(none)'}\n`);
 
   console.log('1. configs');
-  if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
+  if (standalone) installStandaloneConfigs(cwd, stack, selection, force, dryRun);
+  else if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
   else installConfigs(cwd, selection, force, dryRun);
   applyScanRoots(cwd, scanRoots, dryRun);
 
-  console.log('2. package.json');
-  patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun);
+  // Standalone touches NO package.json (the whole point — no private dep in a shared repo).
+  if (!standalone) {
+    console.log('2. package.json');
+    patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun);
+  }
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    installHusky(selection, gitRoot, pkgRel, dryRun);
+    if (standalone) installStandaloneHook(gitRoot, pkgRel, selection, dryRun);
+    else installHusky(selection, gitRoot, pkgRel, dryRun);
   }
 
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -751,8 +766,9 @@ export async function applyInit(cwd, plan) {
     fallow: Boolean(selection.fallow),
     guards: selection.husky ? [...selection.guards] : [],
   };
-  // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills.
-  const config = { stack, devkitRef, initVersion: INIT_VERSION, pkgRel, components };
+  // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
+  // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
+  const config = { stack, devkitRef, initVersion: INIT_VERSION, pkgRel, standalone, components };
   const configPath = join(cwd, '.devkit', 'config.json');
   if (dryRun) {
     console.log('  [dry-run] write .devkit/config.json');
@@ -827,6 +843,7 @@ export default async function run(args, cwd) {
     dryRun: flags.dryRun,
     interactive,
     scanRoots: flags.scanRoots,
+    standalone: flags.standalone,
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;

@@ -49,7 +49,8 @@ function checkHusky(cwd, selectedGuards) {
     );
   }
   const block = extractGuardBlock(content, pkgRel) ?? '';
-  const missing = selectedGuards.filter((g) => !block.includes(`bunx guard-${g}`));
+  // Match both package mode (`bunx guard-X`) and standalone (`__dk_gate guard-X`).
+  const missing = selectedGuards.filter((g) => !block.includes(`guard-${g}`));
   if (missing.length) {
     return check(
       '.husky/pre-commit',
@@ -255,16 +256,26 @@ export default async function run(args, cwd) {
     guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
   };
 
+  // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no
+  // devkit pin to check (the whole point — no package dep).
+  const standalone = Boolean(cfg.standalone);
+  const stack = cfg.stack ?? 'generic';
+  const biomeExpected = standalone
+    ? `./.devkit/biome/${['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base'}.jsonc`
+    : '@norvalbv/devkit/biome/base';
+  const tsconfigExpected = standalone
+    ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
+    : '@norvalbv/devkit/tsconfig/base';
+
   const results = [configResult];
   if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []));
-  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', '@norvalbv/devkit/biome/base'));
-  if (sel.tsconfig)
-    results.push(checkExtends(cwd, 'tsconfig.json', '@norvalbv/devkit/tsconfig/base'));
+  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', biomeExpected));
+  if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', tsconfigExpected));
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   if (sel.skills) results.push(await checkSkills(cwd));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
-  results.push(checkPin(cwd));
+  if (!standalone) results.push(checkPin(cwd));
 
   console.log('devkit doctor\n');
   const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };
