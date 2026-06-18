@@ -58,6 +58,10 @@ Usage:
                              run tests, commit, tag, and push. bump = patch (default) | minor
                              | major | an explicit x.y.z. --dry-run prints the plan; --yes skips
                              the confirm. Refuses outside the devkit repo or on a dirty tree.
+  devkit update [--dry-run]  Self-update to the latest published tag (also --update / -u).
+                             Re-pins package.json + \`bun install\` if devkit is a dep here,
+                             else \`bun add -g\` the new tag (updates the global CLI). Set
+                             DEVKIT_REPO if your ssh uses a host alias.
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -68,15 +72,17 @@ const COMMANDS = {
   'sync-skills': () => import('./commands/sync-skills.mjs'),
   'sync-agents': () => import('./commands/sync-agents.mjs'),
   release: () => import('./commands/release.mjs'),
+  update: () => import('./commands/update.mjs'),
 };
 
 async function main() {
-  const cmd = process.argv[2];
+  let cmd = process.argv[2];
 
   if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
     console.log(devkitVersion());
     process.exit(0);
   }
+  if (cmd === '--update' || cmd === '-u') cmd = 'update'; // alias → the update command
 
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
     console.log(HELP);

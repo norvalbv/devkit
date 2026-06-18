@@ -75,7 +75,9 @@ export default async function release(args, cwd) {
   }
 
   console.log(`devkit release: ${current} → ${target} (${bump})`);
-  console.log(`  bump package.json + README pins · run tests · commit · tag ${tag} · push origin ${branch} + ${tag}`);
+  console.log(
+    `  bump package.json + README pins · run tests · commit · tag ${tag} · push origin ${branch} + ${tag}`,
+  );
   if (dryRun) {
     console.log('  --dry-run: nothing written.');
     return 0;
