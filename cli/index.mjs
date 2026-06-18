@@ -6,10 +6,18 @@
  *   devkit init [--stack <x>] [--standalone | --overlay] [--scan-root <a,b>] [--fallow] [--yes]
  *   devkit doctor [--fix]
  *   devkit sync-skills [--dry-run]
+ *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
+ *   devkit --version
  *   devkit --help
  *
  * Plain .mjs, no build — `what you install is what runs` (devkit ships no dist/).
  */
+import { readFileSync } from 'node:fs';
+
+/** devkit's own version, read from the package it ships in (always accurate). */
+function devkitVersion() {
+  return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+}
 
 const HELP = `devkit — wire a repo onto @norvalbv/devkit's shared configs + gate-engine.
 
@@ -46,6 +54,11 @@ Usage:
                              package/standalone removes configs, the hook block, deps, skills).
   devkit sync-skills [--dry-run]  Copy devkit skills into .claude/skills + .cursor/skills.
   devkit sync-agents [--dry-run]  Copy devkit review/testing agents into .claude/agents + .cursor/agents.
+  devkit release [bump]      MAINTAINER-ONLY (run in the devkit repo): bump the version,
+                             run tests, commit, tag, and push. bump = patch (default) | minor
+                             | major | an explicit x.y.z. --dry-run prints the plan; --yes skips
+                             the confirm. Refuses outside the devkit repo or on a dirty tree.
+  devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
 const COMMANDS = {
@@ -54,10 +67,16 @@ const COMMANDS = {
   clean: () => import('./commands/clean.mjs'),
   'sync-skills': () => import('./commands/sync-skills.mjs'),
   'sync-agents': () => import('./commands/sync-agents.mjs'),
+  release: () => import('./commands/release.mjs'),
 };
 
 async function main() {
   const cmd = process.argv[2];
+
+  if (cmd === '--version' || cmd === '-v' || cmd === 'version') {
+    console.log(devkitVersion());
+    process.exit(0);
+  }
 
   if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
     console.log(HELP);
