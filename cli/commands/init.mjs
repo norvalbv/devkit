@@ -46,8 +46,10 @@ import {
   removeHookScripts,
   syncHookScripts,
 } from '../lib/install-hooks.mjs';
+import { installSearchCode } from '../lib/install-search-code.mjs';
 import { installOverlay } from '../lib/overlay.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
+import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { syncAgents } from './sync-agents.mjs';
 import { syncSkills } from './sync-skills.mjs';
@@ -96,6 +98,7 @@ function parseFlags(args) {
     fallow: false,
     searchSteering: false,
     agentHooks: false,
+    searchCode: false,
     standalone: false,
     overlay: false,
     no: new Set(),
@@ -111,6 +114,7 @@ function parseFlags(args) {
     else if (a === '--fallow') flags.fallow = true;
     else if (a === '--search-steering') flags.searchSteering = true;
     else if (a === '--agent-hooks') flags.agentHooks = true;
+    else if (a === '--search-code') flags.searchCode = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
     else if (a === '--stack') flags.stack = args[++i];
@@ -140,6 +144,7 @@ function selectionFromFlags(flags) {
   sel.fallow = flags.fallow && !flags.no.has('fallow');
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
+  sel.searchCode = flags.searchCode && !flags.no.has('search-code');
   return sel;
 }
 
@@ -548,58 +553,6 @@ function removeTsconfig(cwd, dryRun) {
   );
 }
 
-// Remove devkit-synced skills (per the manifest) from .claude + .cursor + drop the manifest.
-// `root` is the git root (skills are repo-wide), which equals cwd for a single-package repo.
-function removeSkills(root, dryRun) {
-  const manifestPath = join(root, '.devkit', 'skills-manifest.json');
-  const manifest = readJson(manifestPath);
-  if (!manifest) {
-    console.log('  • no skills-manifest.json — nothing to remove');
-    return;
-  }
-  const targets = ['.claude/skills', '.cursor/skills'];
-  let n = 0;
-  for (const rel of Object.keys(manifest.files)) {
-    for (const t of targets) {
-      const p = join(root, t, rel);
-      if (existsSync(p)) {
-        n++;
-        if (!dryRun) rmSync(p);
-      }
-    }
-  }
-  if (!dryRun) rmSync(manifestPath, { force: true });
-  console.log(
-    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced skill file(s) + manifest`,
-  );
-}
-
-// Remove devkit-synced agents (per the manifest) from .claude/agents + .cursor/agents + drop the
-// manifest. `root` is the git root (agents are repo-wide), = cwd for a single-package repo.
-function removeAgents(root, dryRun) {
-  const manifestPath = join(root, '.devkit', 'agents-manifest.json');
-  const manifest = readJson(manifestPath);
-  if (!manifest) {
-    console.log('  • no agents-manifest.json — nothing to remove');
-    return;
-  }
-  const targets = ['.claude/agents', '.cursor/agents'];
-  let n = 0;
-  for (const rel of Object.keys(manifest.files)) {
-    for (const t of targets) {
-      const p = join(root, t, rel);
-      if (existsSync(p)) {
-        n++;
-        if (!dryRun) rmSync(p);
-      }
-    }
-  }
-  if (!dryRun) rmSync(manifestPath, { force: true });
-  console.log(
-    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced agent file(s) + manifest`,
-  );
-}
-
 // Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
 // other packages' blocks intact.
 function removeHusky(hookRoot, pkgRel, dryRun) {
@@ -891,6 +844,11 @@ export async function applyInit(cwd, plan) {
     await applyFallow(cwd, dryRun, interactive);
   }
 
+  if (selection.searchCode) {
+    console.log('8b. search-code (opt-in semantic search)');
+    installSearchCode(cwd, dryRun);
+  }
+
   // Removals (deselected + present).
   applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection);
 
@@ -906,6 +864,7 @@ export async function applyInit(cwd, plan) {
     husky: selection.husky,
     structure: isStructure,
     fallow: Boolean(selection.fallow),
+    searchCode: Boolean(selection.searchCode),
     guards: selection.husky ? [...selection.guards] : [],
   };
   // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,

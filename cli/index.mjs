@@ -34,6 +34,9 @@ Usage:
                              --no-husky --no-structure --no-guards --no-fallow.
     --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
     --fallow                 Also install the optional fallow code-health layer (off by default).
+    --search-code            Opt this repo in to the semantic search index: writes
+                             search-code.config.json + gitignores .search-code/ + wires the dup
+                             matcher's indexPath (off by default; the engine is referenced, not vendored).
     --standalone             NO-PACKAGE mode (à la \`fallow init\`): vendors configs + writes a
                              fail-open hook calling the GLOBAL guard-* bins; adds NOTHING to
                              package.json. For shared repos where a private dep is unwanted.

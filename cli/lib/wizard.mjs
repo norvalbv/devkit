@@ -28,6 +28,14 @@ const FALLOW_OPTION = {
   hint: 'code-health audit + its own git hook (optional, off by default)',
 };
 
+// search-code: same opt-in shape as fallow. Drops the per-repo opt-in config + points the dup
+// matcher at the index. The engine itself is referenced, not vendored (off by default).
+const SEARCHCODE_OPTION = {
+  id: 'search-code',
+  label: 'search-code',
+  hint: 'opt this repo in to the semantic search index (optional, off by default)',
+};
+
 // Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). A TS type guard, so a
 // non-cancelled value narrows to its real type after `if (bail(x)) return null`.
 /**
@@ -122,12 +130,17 @@ export async function runWizard({
       husky: true, // overlay always installs the local (git-ignored) hook
       structure: false,
       fallow: false,
+      searchCode: false,
     });
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
     const picked = await multiselect({
       message: 'Select components to install',
-      options: [...componentChoices.map(componentOption), componentOption(FALLOW_OPTION)],
+      options: [
+        ...componentChoices.map(componentOption),
+        componentOption(FALLOW_OPTION),
+        componentOption(SEARCHCODE_OPTION),
+      ],
       initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
       required: false,
     });
@@ -135,6 +148,7 @@ export async function runWizard({
     const chosen = new Set(picked);
     for (const c of COMPONENT_OPTIONS) selection[c.id] = chosen.has(c.id);
     selection.fallow = chosen.has('fallow');
+    selection.searchCode = chosen.has('search-code');
     if (!structAvail) selection.structure = false;
   }
 
@@ -202,6 +216,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
     },
   );
   lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
+  lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
   if (deselected.length) lines.push('', `will ask to remove: ${deselected.join(', ')}`);
   return lines.join('\n');
 }
