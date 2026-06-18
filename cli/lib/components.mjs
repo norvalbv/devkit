@@ -75,7 +75,7 @@ export const GUARD_OPTIONS = [
  * apply layer no-ops it otherwise (see init.mjs `isStructure`). `fallow` is the one
  * recommended-OFF component (heavier third-party tool) — opt-in even under --yes.
  *
- * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,agents:boolean,searchSteering:boolean,agentHooks:boolean,husky:boolean,structure:boolean,fallow:boolean,guards:string[]}}
+ * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,agents:boolean,searchSteering:boolean,agentHooks:boolean,husky:boolean,structure:boolean,fallow:boolean,searchCode:boolean,guards:string[]}}
  */
 export function defaultSelection() {
   return {
@@ -89,6 +89,7 @@ export function defaultSelection() {
     husky: true,
     structure: true,
     fallow: false,
+    searchCode: false,
     guards: [...GUARD_IDS],
   };
 }

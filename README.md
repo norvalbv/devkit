@@ -175,6 +175,7 @@ review a summary, and apply. **Ctrl-C aborts cleanly — nothing is written.**
 | `guards`    | a multi-select of the gate lines: `size · fanout · dup · clone · decisions` |
 | `structure` | the stack's eslint folder/import-wall preset — **only offered when a template exists** for the detected stack (currently `electron` + `react-app`; `next`/`node-service`/`generic` skip it with a note) |
 | `fallow`    | the optional [fallow](https://www.npmjs.com/package/fallow) code-health layer — **off by default**; installs the pinned CLI zero-config (`bun add -g` → `npm i -g` → `cargo install fallow-cli`, no brew/curl) and wires fallow's **own** git hook via `fallow hooks install` (not a devkit gate line) |
+| `search-code` | **off by default** — opts the repo in to the dev's own semantic search engine: writes `search-code.config.json` (the engine's per-repo opt-in marker), gitignores `.search-code/`, and wires the dup matcher's `indexPath`. The engine is **referenced, not vendored** — install + index it separately (0.9.0+) |
 
 Whatever you choose is recorded in `.devkit/config.json` under `components`, so `doctor`
 knows what to check.

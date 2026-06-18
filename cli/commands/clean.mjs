@@ -17,6 +17,8 @@ import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { readJson } from '../lib/fs-helpers.mjs';
 import { removeGuardBlock } from '../lib/husky-block.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install-hooks.mjs';
+import { removeSearchCode } from '../lib/install-search-code.mjs';
+import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 
 function rm(path, label, dryRun) {
   if (!existsSync(path)) return;
@@ -116,6 +118,19 @@ function depesc(cwd, dryRun) {
   if (!dryRun) writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
+// Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
+// rest of the file untouched; no-ops if the line isn't present.
+function pruneGitignoreLine(root, line, dryRun) {
+  const giPath = join(root, '.gitignore');
+  if (!existsSync(giPath)) return;
+  const raw = readFileSync(giPath, 'utf8');
+  const lines = raw.split('\n');
+  const kept = lines.filter((l) => l.trim() !== line);
+  if (kept.length === lines.length) return;
+  console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${line} from .gitignore`);
+  if (!dryRun) writeFileSync(giPath, kept.join('\n'));
+}
+
 function cleanPackage(cwd, cfg, dryRun) {
   const { gitRoot } = detectGitRoot(cwd);
   console.log(`cleaning ${cfg.standalone ? 'STANDALONE' : 'PACKAGE'} devkit install:`);
@@ -130,10 +145,11 @@ function cleanPackage(cwd, cfg, dryRun) {
       if (!dryRun) writeFileSync(hookPath, content);
     }
   }
-  // skills (manifest at the git root).
-  rm(join(gitRoot, '.devkit', 'skills-manifest.json'), 'skills-manifest.json', dryRun);
-  // agents (manifest at the git root) + agent-hook scripts + the hook registrations they wrote.
-  rm(join(gitRoot, '.devkit', 'agents-manifest.json'), 'agents-manifest.json', dryRun);
+  // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
+  // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
+  removeSkills(gitRoot, dryRun);
+  removeAgents(gitRoot, dryRun);
+  // agent-hook scripts + the hook registrations they wrote.
   removeHookScripts(gitRoot, { dryRun });
   removeHookRegistrations(gitRoot, { dryRun });
   // devkit-created configs/data in the package.
@@ -144,10 +160,19 @@ function cleanPackage(cwd, cfg, dryRun) {
   rm(join(cwd, 'eslint.config.mjs'), 'eslint.config.mjs', dryRun);
   rm(join(cwd, 'eslint'), 'eslint/ (domains + baselines)', dryRun);
   rm(join(cwd, '.co-occurrence-allowlist.json'), '.co-occurrence-allowlist.json', dryRun);
+  // fallow component: devkit added the `.fallow/` gitignore line (install-fallow). fallow's OWN
+  // hook + .fallowrc are fallow's to remove (`fallow hooks uninstall`) — not devkit-created.
+  if (cfg.components?.fallow) pruneGitignoreLine(gitRoot, '.fallow/', dryRun);
+  // search-code: remove the devkit-written opt-in config + the `.search-code/` gitignore line.
+  // The index dir itself is the engine's data — left in place.
+  if (cfg.components?.searchCode) {
+    removeSearchCode(cwd, dryRun);
+    pruneGitignoreLine(gitRoot, '.search-code/', dryRun);
+  }
   rm(join(cwd, '.devkit'), '.devkit/', dryRun);
   depesc(cwd, dryRun);
   console.log(
-    '  (left your own biome/husky/eslint deps + skills files in place — remove by hand if wanted)',
+    "  (left your own biome/husky/eslint deps + fallow's own files in place — `fallow hooks uninstall` to remove those)",
   );
 }
 
