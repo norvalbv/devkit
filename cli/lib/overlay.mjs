@@ -27,7 +27,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from './detect-git-root.mjs';
-import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
+import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
 import { buildOverlayHook, buildPassthroughHook } from './husky-block.mjs';
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
@@ -90,6 +90,18 @@ function readHooksPath(gitRoot) {
   } catch {
     return '';
   }
+}
+
+// The TRUE original core.hooksPath to record (so `devkit clean` restores it). CRITICAL: if a
+// prior overlay is already in place (current === .devkit/hooks), recording that would make clean
+// restore a value devkit itself deleted — so recover the real original from the prior overlay's
+// config, else detect husky (.husky/_), else '' (unset). This makes re-running overlay idempotent.
+function captureOrigHooksPath(gitRoot, cwd) {
+  const current = readHooksPath(gitRoot);
+  if (current && current !== LOCAL_HOOKS) return current;
+  const prev = readJson(join(cwd, '.devkit', 'config.json'));
+  if (prev && typeof prev.origHooksPath === 'string') return prev.origHooksPath;
+  return existsSync(join(gitRoot, '.husky', '_')) ? '.husky/_' : '';
 }
 
 // Where the repo's hook SCRIPTS live (git-root-relative). husky's .husky/_ → the scripts are the
@@ -239,8 +251,8 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
   // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
   // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
-  // Capture the CURRENT hooksPath BEFORE we override it (for restore on clean + chaining).
-  const origHooksPath = readHooksPath(gitRoot);
+  // The real original hooksPath (never our own .devkit/hooks) — recorded for restore on clean.
+  const origHooksPath = captureOrigHooksPath(gitRoot, cwd);
   const pfx = pkgRel ? `${pkgRel}/` : '';
   const excludes = new Set([
     `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root

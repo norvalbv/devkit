@@ -57,14 +57,20 @@ function pruneGitExclude(gitRoot, dryRun) {
 }
 
 function restoreHooksPath(gitRoot, orig, dryRun) {
+  // A poisoned origHooksPath (devkit's own dir — from a pre-0.8.1 re-overlay) can't be restored
+  // to itself (clean just deleted it). Fall back to husky's dir if present, else unset.
+  let target = orig;
+  if (target === '.devkit/hooks') {
+    target = existsSync(join(gitRoot, '.husky', '_')) ? '.husky/_' : '';
+  }
   if (dryRun) {
-    console.log(`  [dry-run] restore core.hooksPath → ${orig || '(unset)'}`);
+    console.log(`  [dry-run] restore core.hooksPath → ${target || '(unset)'}`);
     return;
   }
   try {
-    if (orig) execFileSync('git', ['config', 'core.hooksPath', orig], { cwd: gitRoot });
+    if (target) execFileSync('git', ['config', 'core.hooksPath', target], { cwd: gitRoot });
     else execFileSync('git', ['config', '--unset', 'core.hooksPath'], { cwd: gitRoot });
-    console.log(`  ✓ restored core.hooksPath → ${orig || '(unset)'}`);
+    console.log(`  ✓ restored core.hooksPath → ${target || '(unset)'}`);
   } catch (e) {
     console.log(`  ! could not restore core.hooksPath: ${(e.message || '').split('\n')[0]}`);
   }
@@ -145,6 +151,27 @@ export default async function run(args, cwd) {
   const yes = args.includes('--yes') || args.includes('-y');
   const cfg = readJson(join(cwd, '.devkit', 'config.json'));
   if (!cfg) {
+    // Orphaned overlay: the config is gone but core.hooksPath still points at our (deleted) dir.
+    const { gitRoot } = detectGitRoot(cwd);
+    let hp = '';
+    try {
+      hp = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: gitRoot,
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      // unset
+    }
+    if (hp === '.devkit/hooks') {
+      console.log(
+        'devkit clean: orphaned overlay (core.hooksPath → .devkit/hooks, no config) — recovering:\n',
+      );
+      restoreHooksPath(gitRoot, '.devkit/hooks', dryRun); // guard maps it to .husky/_ or unset
+      rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
+      pruneGitExclude(gitRoot, dryRun);
+      console.log(`\n${dryRun ? 'Dry-run complete.' : 'Recovered.'}`);
+      return 0;
+    }
     console.log('devkit clean: nothing to clean — no .devkit/config.json in this repo.');
     return 0;
   }

@@ -226,4 +226,30 @@ describe('overlay (local-only) install', () => {
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
     ).toBe('');
   });
+
+  it('re-running overlay keeps the TRUE original core.hooksPath (clean restores it, not .devkit/hooks)', async () => {
+    const root = workRepo(); // core.hooksPath .husky/_
+    const opts = {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.8.1',
+    };
+    await applyInit(root, opts);
+    await applyInit(root, opts); // re-run — current hooksPath is now .devkit/hooks
+
+    // the recorded original must still be the TRUE one, not devkit's own (deleted-on-clean) dir
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).origHooksPath,
+    ).toBe('.husky/_');
+
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+    expect(
+      execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('.husky/_');
+  });
 });
