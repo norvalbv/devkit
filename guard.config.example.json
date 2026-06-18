@@ -29,5 +29,23 @@
   },
 
   "//indexPath": "search-code embedding index for the semantic duplication matcher. null (or omit) => matcher opts out / fails open; guard-clone + ratchets still run.",
-  "indexPath": ".search-code/index.db"
+  "indexPath": ".search-code/index.db",
+
+  "//searchTool": "Semantic-search tool NAME the search-steering hooks point agents at. Default: 'mcp__codebase__searchCode'. Env override: GUARD_SEARCH_TOOL.",
+  "searchTool": "mcp__codebase__searchCode",
+
+  "//graphTool": "Graph/dependency tool NAME the search-steering hooks point agents at. Default: 'graphify'. Env override: GUARD_GRAPH_TOOL.",
+  "graphTool": "graphify",
+
+  "//testCommand": "Test command the testing agents run (e.g. 'bun run test:run'). Default: null => agents fall back to the package.json test script. Env override: GUARD_TEST_COMMAND.",
+  "testCommand": null,
+
+  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "review": {
+    "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
+    "frontendRoots": ["src/renderer", "src/preload"],
+    "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
+    "shortcutTracking": false,
+    "accessibility": { "skipTouchTargets": true }
+  }
 }

@@ -116,6 +116,9 @@ export async function runWizard({
       biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
       tsconfig: false,
       skills: false,
+      agents: false,
+      searchSteering: false,
+      agentHooks: false,
       husky: true, // overlay always installs the local (git-ignored) hook
       structure: false,
       fallow: false,

@@ -13,6 +13,7 @@ import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
 import { markEnd, markStart } from '../lib/husky.mjs';
 import { extractGuardBlock } from '../lib/husky-block.mjs';
+import { checkHookRegistrations } from '../lib/install-hooks.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;
@@ -134,6 +135,91 @@ async function checkSkills(cwd) {
     return check('skills', 'DRIFT', parts.join('; '), 'run `devkit sync-skills`', true);
   }
   return check('skills', 'OK', `${Object.keys(manifest.files).length} file(s) in sync`);
+}
+
+// Agents are repo-wide → manifest + .claude/agents live at the git root (same contract as skills).
+async function checkAgents(cwd) {
+  const { gitRoot } = detectGitRoot(cwd);
+  const manifest = readJson(join(gitRoot, '.devkit', 'agents-manifest.json'));
+  if (!manifest) {
+    return check('agents', 'MISSING', 'no agents-manifest.json', 'run `devkit sync-agents`', true);
+  }
+  const agentsSrc = join(packageDir(), 'agents');
+  const consumerDrift = [];
+  const sourceDrift = [];
+  for (const [rel, recordedSha] of Object.entries(manifest.files)) {
+    const srcPath = join(agentsSrc, rel);
+    if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
+    const consumerPath = join(gitRoot, '.claude', 'agents', rel);
+    if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
+  }
+  if (sourceDrift.length || consumerDrift.length) {
+    const parts = [];
+    if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
+    if (consumerDrift.length) parts.push(`consumer copy drifted (${consumerDrift.length})`);
+    return check('agents', 'DRIFT', parts.join('; '), 'run `devkit sync-agents`', true);
+  }
+  return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
+}
+
+// agentHooks: the six synced scripts (under .claude/hooks) match the manifest, and are present.
+function checkAgentHookScripts(cwd) {
+  const { gitRoot } = detectGitRoot(cwd);
+  const manifest = readJson(join(gitRoot, '.devkit', 'agent-hooks-manifest.json'));
+  if (!manifest) {
+    return check(
+      'agent-hooks',
+      'MISSING',
+      'no agent-hooks-manifest.json',
+      'run `devkit init`',
+      true,
+    );
+  }
+  const drift = Object.keys(manifest.files).filter((rel) => {
+    const p = join(gitRoot, '.claude', 'hooks', rel);
+    return !existsSync(p) || sha256(p) !== manifest.files[rel];
+  });
+  if (drift.length) {
+    return check(
+      'agent-hooks',
+      'DRIFT',
+      `${drift.length} script(s) drifted/absent`,
+      'run `devkit init`',
+      true,
+    );
+  }
+  return check('agent-hooks', 'OK', `${Object.keys(manifest.files).length} hook script(s) in sync`);
+}
+
+// Hook registrations present in .claude/settings.json for the selected hook-owning components.
+function checkRegistrations(cwd, hookComponents) {
+  const { gitRoot } = detectGitRoot(cwd);
+  const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents);
+  if (ok) return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
+  return check(
+    'hook registrations',
+    'DRIFT',
+    `${missing.length} command(s) not in .claude/settings.json`,
+    'run `devkit init` to re-register',
+    true,
+  );
+}
+
+// searchSteering: the guard + counter engine bins are present in the installed package.
+function checkSearchToolBins() {
+  const dir = join(packageDir(), 'gate-engine', 'search-tool');
+  const missing = ['search-tool-guard.mjs', 'search-tool-counter.mjs'].filter(
+    (f) => !existsSync(join(dir, f)),
+  );
+  if (missing.length) {
+    return check(
+      'search-steering bins',
+      'MISSING',
+      `engine bin(s) absent: ${missing.join(', ')}`,
+      'reinstall @norvalbv/devkit',
+    );
+  }
+  return check('search-steering bins', 'OK', 'guard + counter present');
 }
 
 function checkBaselines(cwd) {
@@ -300,6 +386,15 @@ export default async function run(args, cwd) {
   if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', tsconfigExpected));
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   if (sel.skills) results.push(await checkSkills(cwd));
+  if (sel.agents) results.push(await checkAgents(cwd));
+  if (sel.agentHooks) results.push(checkAgentHookScripts(cwd));
+  if (sel.searchSteering) results.push(checkSearchToolBins());
+  // Both hook-owning components register into .claude/settings.json — verify the selected set.
+  const hookComponents = [
+    sel.searchSteering && 'searchSteering',
+    sel.agentHooks && 'agentHooks',
+  ].filter(Boolean);
+  if (hookComponents.length) results.push(checkRegistrations(cwd, hookComponents));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));

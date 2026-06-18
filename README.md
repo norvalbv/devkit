@@ -10,6 +10,19 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 The two halves ship from the **same repo, same tag** so an agent skill and the engine
 it drives can never drift apart.
 
+## What's new in 0.9.0
+
+Portable mechanisms carved out of frink, plus a second AGENT channel. All ship the
+generator, never the data ([↓](#the-one-rule-ship-the-generator-never-the-data)).
+
+- **gate-engine/judge/** — a `claude -p` judge harness (`run-judge` + `judge-isolation`) and a generic warn-by-default judge-gate **factory** (verdict-parse, `--gate` 0/1/2, `*_HARD` escalation). Consumers supply prompt + verdicts; no prompts baked in.
+- **gate-engine/sentry/** — `guard-sentry`, a commit-msg advisory judge (built on the factory).
+- **gate-engine/fallow/** — `guard-fallow-staged`, re-scopes a fallow audit to the staged diff.
+- **gate-engine/search-tool/** — conceptual-grep steering hooks (lib/guard/counter); tool names via `guard.config.json` (`searchTool` / `graphTool`).
+- **gate-engine/decisions** — now exported as a library (`decisions`, `check-alignment`) and a new `alignment` gate (flip-flop guard).
+- **AGENT half — `agents/`** — reviewer + testing subagents synced to `.claude/agents` + `.cursor/agents` via `devkit sync-agents` (sha256 manifest), sibling to `skills/`.
+- **CLI — a Claude `settings.json` hook installer** (+ `.cursor/hooks.json` mirror) wiring the `searchSteering` + `agentHooks` components, plus `commit-msg` hook support.
+
 ## The one rule: ship the generator, never the data
 
 devkit ships **mechanisms** — the gate engines, the config loader, the shared lint/TS
@@ -31,7 +44,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.8.1
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.9.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -63,16 +76,18 @@ extension; consumers commit to the stable bare name and the package decides what
 
 ### gate-engine — portable governance gates
 
-The engine ships five bins. They scan the **consumer's** repo (the cwd they run in),
+The engine ships seven bins. They scan the **consumer's** repo (the cwd they run in),
 not the package:
 
-| bin                | engine                                                    |
-| ------------------ | --------------------------------------------------------- |
-| `guard-decisions`  | append-only decision-log CLI + architectural-smell gate   |
-| `guard-dup`        | semantic cross-file duplication matcher (search-code index) |
-| `guard-clone`      | token-level copy-paste / clone detector (jscpd)           |
-| `guard-fanout`     | folder fan-out ratchet (≤N impl files/folder, any depth)  |
-| `guard-size`       | size-disable ratchet (`eslint-disable max-lines` may only shrink) |
+| bin                  | engine                                                    |
+| -------------------- | --------------------------------------------------------- |
+| `guard-decisions`    | append-only decision-log CLI + architectural-smell gate (`detect`) + flip-flop guard (`check-alignment`) |
+| `guard-dup`          | semantic cross-file duplication matcher (search-code index) |
+| `guard-clone`        | token-level copy-paste / clone detector (jscpd)           |
+| `guard-fanout`       | folder fan-out ratchet (≤N impl files/folder, any depth)  |
+| `guard-size`         | size-disable ratchet (`eslint-disable max-lines` may only shrink) |
+| `guard-fallow-staged`| re-scopes a `fallow audit` JSON to the staged-diff overlap (0.9.0) |
+| `guard-sentry`       | commit-msg advisory judge — flags a swallowed runtime error-class worth a Sentry capture (0.9.0) |
 
 Run them from your repo root, e.g. in a pre-commit hook:
 
@@ -153,7 +168,10 @@ review a summary, and apply. **Ctrl-C aborts cleanly — nothing is written.**
 | `biome`     | `biome.jsonc` extending the devkit base + `@biomejs/biome` devDep + `lint`/`format` scripts + the staged-format step in the hook |
 | `tsconfig`  | `tsconfig.json` extending the devkit base                               |
 | `skills`    | the agent skills synced into `.claude` + `.cursor` (+ the manifest)     |
-| `husky`     | the `.husky/pre-commit` hook (the `# devkit-guards` block container)    |
+| `agents`    | the reviewer/testing **subagents** synced into `.claude/agents` + `.cursor/agents` (+ a sha256 manifest) — sibling to `skills` (0.9.0) |
+| `searchSteering` | the search-code PreToolUse/PostToolUse hooks (conceptual-grep steer + counter), registered into `.claude/settings.json` (+ `.cursor` mirror) — opt-in (0.9.0) |
+| `agentHooks` | the Claude-Code agent-hook library (decision-stop-check · claude-rules-reminder · format/lint/knip · compactor) synced + registered — opt-in (0.9.0) |
+| `husky`     | the `.husky/pre-commit` hook (the `# devkit-guards` block container) + a `commit-msg` block for `guard-sentry` (0.9.0)   |
 | `guards`    | a multi-select of the gate lines: `size · fanout · dup · clone · decisions` |
 | `structure` | the stack's eslint folder/import-wall preset — **only offered when a template exists** for the detected stack (currently `electron` + `react-app`; `next`/`node-service`/`generic` skip it with a note) |
 | `fallow`    | the optional [fallow](https://www.npmjs.com/package/fallow) code-health layer — **off by default**; installs the pinned CLI zero-config (`bun add -g` → `npm i -g` → `cargo install fallow-cli`, no brew/curl) and wires fallow's **own** git hook via `fallow hooks install` (not a devkit gate line) |
@@ -237,7 +255,7 @@ mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and 
 the global CLI — **package.json is never touched.**
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.8.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.9.0   # once per machine
 cd <shared-repo>           # (or a package subdir in a monorepo)
 devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
 ```
@@ -265,7 +283,7 @@ where you still want the guardrails locally. Overlay mode touches **nothing comm
 **invisible to git**:
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.8.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.9.0   # once per machine
 cd <work-repo>
 devkit init --overlay
 ```

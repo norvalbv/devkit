@@ -106,6 +106,20 @@ done
 export PATH
 `;
 
+// The commit-msg variant of the preamble. git invokes a commit-msg hook with the path to the
+// commit-message file as `$1`; devkit-managed commit-msg gates forward that path to their gate.
+const COMMIT_MSG_PREAMBLE = `#!/bin/sh
+# devkit generic commit-msg hook (POSIX sh). git passes the commit-message file as \`$1\`. The
+# block between the two \`# devkit-guards\` markers is devkit-owned (init / removal only touch that
+# region); everything outside it is the consumer's own hook. Each gate receives "$1" so it can read
+# the message — these are warn-by-default advisory gates (a thin caller on a judge), not hard blocks.
+
+for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
+    [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
+done
+export PATH
+`;
+
 /**
  * Build the `# devkit-guards` marker block (inclusive of markers) from a selection.
  * Order: biome format → structure placeholder → guards in GUARD_FRAGMENTS order.
@@ -185,6 +199,63 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
 export function buildStandaloneHook(selection, pkgRel = '') {
   return `${HOOK_PREAMBLE}\n${buildStandaloneBlock(selection, pkgRel)}\n\nexit 0\n`;
 }
+
+// ── commit-msg hook support ─────────────────────────────────────────────────────────────────
+// The pre-commit machinery above governs `.husky/pre-commit`; a parallel set here governs
+// `.husky/commit-msg`. The marker scheme (markStart/markEnd, per-fragment sentinels) is hook-file
+// agnostic — each hook lives in its OWN file, so the same markers slice cleanly in either. A
+// commit-msg gate is a thin caller that judges the MESSAGE (passed as "$1"); these are warn-by-
+// default advisory gates (e.g. a sentry-advisory judge), so each fragment is fail-open: it only
+// blocks on a deliberate hard-mode exit 1, never on the gate being absent or unable to run.
+//
+// COMMIT_MSG_FRAGMENTS is empty by default — devkit ships the MECHANISM, not a consumer's gate
+// data. A caller (a frink-style thin wrapper, or the integrator) registers a fragment via
+// `commitMsgFragment(id, gateLine)` whose `gateLine` receives the message path as "$1".
+
+const COMMIT_MSG_FRAGMENTS = {};
+
+/**
+ * Register a commit-msg gate fragment. `gateLine` is the shell that runs the gate (it may use
+ * "$1", the commit-message file path). Wrapped in per-id sentinels so removal is an exact slice.
+ *
+ * @param {string} id fragment id (sentinel key)
+ * @param {string} gateLine the gate invocation (fail-open by contract; "$1" = message file)
+ * @param {string} [banner] optional echo banner printed before the gate
+ */
+export function commitMsgFragment(id, gateLine, banner) {
+  const head = banner ? `echo "${banner}"\n` : '';
+  COMMIT_MSG_FRAGMENTS[id] = `# devkit:${id}\n${head}${gateLine}\n# /devkit:${id}`;
+  return COMMIT_MSG_FRAGMENTS[id];
+}
+
+/**
+ * Build the commit-msg `# devkit-guards` marker block from a selection of registered commit-msg
+ * fragment ids. Mirrors buildGuardBlock's monorepo cd-wrapping. Returns the markers + body only
+ * (no preamble), so it can be spliced into an existing commit-msg hook via replaceGuardBlock.
+ *
+ * @param {{commitMsg?:string[]}} selection ids of registered commit-msg fragments to include
+ * @param {string} [pkgRel]
+ * @returns {string}
+ */
+export function buildCommitMsgBlock(selection, pkgRel = '') {
+  const pieces = [];
+  for (const id of selection.commitMsg ?? []) {
+    if (COMMIT_MSG_FRAGMENTS[id]) pieces.push(COMMIT_MSG_FRAGMENTS[id]);
+  }
+  const body = pieces.join('\n\n');
+  const start = markStart(pkgRel);
+  const end = markEnd(pkgRel);
+  if (!pkgRel) return `${start}\n${body}\n${end}`;
+  // The commit-msg path "$1" is absolute (or git-root-relative) — forward it into the subshell.
+  return `${start}\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+}
+
+/** A full fresh commit-msg hook (commit-msg preamble + assembled block + exit 0). */
+export function buildCommitMsgHook(selection, pkgRel = '') {
+  return `${COMMIT_MSG_PREAMBLE}\n${buildCommitMsgBlock(selection, pkgRel)}\n\nexit 0\n`;
+}
+
+export { COMMIT_MSG_FRAGMENTS, COMMIT_MSG_PREAMBLE };
 
 // The eslint/biome overlay steps — run the LOCAL devkit configs (which extend the repo's) over
 // STAGED files only (so new changes are checked without flooding on the team's existing code,

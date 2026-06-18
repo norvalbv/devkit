@@ -64,6 +64,24 @@ export const DEFAULTS = Object.freeze({
   // no index configured means the semantic matcher fails open / does nothing
   // (a consumer without search-code still gets the clone-detector + ratchets).
   indexPath: null,
+  // Semantic-search + graph tool NAMES the search-tool steering hooks point agents at.
+  // Generic defaults — a consumer overrides per-repo via guard.config.json.
+  searchTool: 'mcp__codebase__searchCode',
+  graphTool: 'graphify',
+  // Test command the testing agents run (markdown-prompt agents READ this). null =>
+  // agents fall back to the consumer's documented package.json `test` script.
+  testCommand: null,
+  // Review-agent topology (the 5 reviewer subagents READ these). Frink-agnostic defaults:
+  // a generic repo treats `src` as its only backend root, has no configured frontend
+  // topology (frontend reviewers exit early), and enforces WCAG touch targets + skips the
+  // tracker/Shortcut rule until opted in.
+  review: Object.freeze({
+    backendRoots: ['src'],
+    frontendRoots: [],
+    trustBoundaries: '',
+    shortcutTracking: false,
+    accessibility: Object.freeze({ skipTouchTargets: false }),
+  }),
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
   noLlm: false,
@@ -121,6 +139,10 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  *   allowlistPath: string,
  *   thresholds: object,
  *   indexPath: string|null,
+ *   searchTool: string,
+ *   graphTool: string,
+ *   testCommand: string|null,
+ *   review: {backendRoots:string[], frontendRoots:string[], trustBoundaries:string, shortcutTracking:boolean, accessibility:{skipTouchTargets:boolean}},
  *   noLog: boolean,
  *   noLlm: boolean,
  *   cwd: string,
@@ -134,6 +156,9 @@ export function resolveGuardConfig(cwd = process.cwd()) {
   const indexEnv = envVar('INDEX_PATH');
   const allowlistEnv = envVar('ALLOWLIST_PATH');
   const decisionsEnv = envVar('DECISIONS_DIR');
+  const searchToolEnv = envVar('SEARCH_TOOL');
+  const graphToolEnv = envVar('GRAPH_TOOL');
+  const testCommandEnv = envVar('TEST_COMMAND');
 
   return {
     boundaries: arr(file.boundaries, DEFAULTS.boundaries),
@@ -146,6 +171,21 @@ export function resolveGuardConfig(cwd = process.cwd()) {
     thresholds: { ...DEFAULTS.thresholds, ...(file.thresholds ?? {}) },
     // indexPath: env > file > null (null = matcher opt-out / fail-open).
     indexPath: indexEnv ?? file.indexPath ?? DEFAULTS.indexPath,
+    // Search-tool steering NAMES: env > file > generic default.
+    searchTool: searchToolEnv ?? file.searchTool ?? DEFAULTS.searchTool,
+    graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
+    // Testing-agent command: env > file > null (agents fall back to package.json test).
+    testCommand: testCommandEnv ?? file.testCommand ?? DEFAULTS.testCommand,
+    // Review-agent topology. Shallow-merge so a consumer can set one key (and nested
+    // accessibility) without restating the whole block.
+    review: {
+      ...DEFAULTS.review,
+      ...(file.review ?? {}),
+      accessibility: {
+        ...DEFAULTS.review.accessibility,
+        ...(file.review?.accessibility ?? {}),
+      },
+    },
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
     // Echo the resolution base so engines never have to re-derive it (and never reach
