@@ -1,0 +1,121 @@
+{
+  "$schema": "SEED corpus. Each query has expected_tool ∈ { grep, searchCode, graphify_affected, graphify_explain, graphify_path, find_glob }. Used by eval.mjs to score the classifier. Frink-agnostic starter set — a consumer copies and adds their own domain queries.",
+  "queries": [
+    {
+      "id": "lit-01",
+      "pattern": "validateUser",
+      "expected_tool": "grep",
+      "why": "exact identifier"
+    },
+    {
+      "id": "lit-02",
+      "pattern": "configurePlugins",
+      "expected_tool": "grep",
+      "why": "exact identifier"
+    },
+    {
+      "id": "lit-03",
+      "pattern": "Cannot read property 'foo' of undefined",
+      "expected_tool": "grep",
+      "why": "literal error string"
+    },
+    {
+      "id": "lit-04",
+      "pattern": "TODO(dev)",
+      "expected_tool": "grep",
+      "why": "literal annotation"
+    },
+    {
+      "id": "lit-05",
+      "pattern": "MAX_RETRY_COUNT",
+      "expected_tool": "grep",
+      "why": "constant identifier"
+    },
+    {
+      "id": "lit-06",
+      "pattern": "sessionToken",
+      "expected_tool": "grep",
+      "why": "camelCase identifier"
+    },
+    {
+      "id": "lit-07",
+      "pattern": "*.test.ts",
+      "expected_tool": "find_glob",
+      "why": "filename pattern"
+    },
+
+    {
+      "id": "sem-01",
+      "pattern": "where is auth handled",
+      "expected_tool": "searchCode",
+      "why": "English question"
+    },
+    {
+      "id": "sem-02",
+      "pattern": "function that formats relative time",
+      "expected_tool": "searchCode",
+      "why": "descriptive phrasing"
+    },
+    {
+      "id": "sem-03",
+      "pattern": "auth flow",
+      "expected_tool": "searchCode",
+      "why": "two plain English words"
+    },
+    {
+      "id": "sem-04",
+      "pattern": "permission prompt rendering",
+      "expected_tool": "searchCode",
+      "why": "three plain English words"
+    },
+    {
+      "id": "sem-05",
+      "pattern": "retry with backoff",
+      "expected_tool": "searchCode",
+      "why": "paraphrased intent"
+    },
+    {
+      "id": "sem-06",
+      "pattern": "user registration request handler",
+      "expected_tool": "searchCode",
+      "why": "concept + domain term mix"
+    },
+    {
+      "id": "sem-07",
+      "pattern": "guard against unsaved changes",
+      "expected_tool": "searchCode",
+      "why": "behavioural query"
+    },
+    {
+      "id": "sem-08",
+      "pattern": "how does token refresh work",
+      "expected_tool": "searchCode",
+      "why": "English question"
+    },
+
+    {
+      "id": "gr-01",
+      "pattern": "callers of validateUser",
+      "expected_tool": "graphify_affected",
+      "why": "explicit impact query"
+    },
+    {
+      "id": "gr-02",
+      "pattern": "what calls configurePlugins",
+      "expected_tool": "graphify_affected",
+      "why": "explicit impact query"
+    },
+    {
+      "id": "gr-03",
+      "pattern": "explain permission system",
+      "expected_tool": "graphify_explain",
+      "why": "explain verb"
+    },
+    {
+      "id": "gr-04",
+      "pattern": "relationship between Client and Server",
+      "expected_tool": "graphify_path",
+      "why": "two-node relationship"
+    }
+  ]
+}

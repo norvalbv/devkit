@@ -16,6 +16,7 @@ import { confirm, isCancel } from '@clack/prompts';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { readJson } from '../lib/fs-helpers.mjs';
 import { removeGuardBlock } from '../lib/husky-block.mjs';
+import { removeHookRegistrations, removeHookScripts } from '../lib/install-hooks.mjs';
 
 function rm(path, label, dryRun) {
   if (!existsSync(path)) return;
@@ -131,6 +132,10 @@ function cleanPackage(cwd, cfg, dryRun) {
   }
   // skills (manifest at the git root).
   rm(join(gitRoot, '.devkit', 'skills-manifest.json'), 'skills-manifest.json', dryRun);
+  // agents (manifest at the git root) + agent-hook scripts + the hook registrations they wrote.
+  rm(join(gitRoot, '.devkit', 'agents-manifest.json'), 'agents-manifest.json', dryRun);
+  removeHookScripts(gitRoot, { dryRun });
+  removeHookRegistrations(gitRoot, { dryRun });
   // devkit-created configs/data in the package.
   for (const f of ['biome.jsonc', 'tsconfig.json']) {
     if (extendsDevkit(join(cwd, f))) rm(join(cwd, f), f, dryRun);

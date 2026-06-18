@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -11,7 +11,16 @@
     "./tsconfig/base": "./tsconfig/base.json",
     "./tsconfig/next": "./tsconfig/next.json",
     "./tsconfig/node": "./tsconfig/node.json",
-    "./gate-engine/config": "./gate-engine/config.mjs"
+    "./gate-engine/config": "./gate-engine/config.mjs",
+    "./gate-engine/decisions/decisions": "./gate-engine/decisions/decisions.mjs",
+    "./gate-engine/decisions/check-alignment": "./gate-engine/decisions/check-alignment.mjs",
+    "./gate-engine/judge/factory": "./gate-engine/judge/factory.mjs",
+    "./gate-engine/judge/run-judge": "./gate-engine/judge/run-judge.mjs",
+    "./gate-engine/judge/judge-isolation": "./gate-engine/judge/judge-isolation.mjs",
+    "./gate-engine/fallow/staged-filter": "./gate-engine/fallow/staged-filter.mjs",
+    "./gate-engine/search-tool/guard": "./gate-engine/search-tool/search-tool-guard.mjs",
+    "./gate-engine/search-tool/counter": "./gate-engine/search-tool/search-tool-counter.mjs",
+    "./gate-engine/sentry/check-sentry": "./gate-engine/sentry/check-sentry.mjs"
   },
   "bin": {
     "devkit": "./cli/index.mjs",
@@ -19,7 +28,9 @@
     "guard-dup": "./gate-engine/co-occurrence/matcher.mjs",
     "guard-clone": "./gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./gate-engine/ratchets/folder-fanout.mjs",
-    "guard-size": "./gate-engine/ratchets/size-disable.mjs"
+    "guard-size": "./gate-engine/ratchets/size-disable.mjs",
+    "guard-fallow-staged": "./gate-engine/fallow/staged-filter.mjs",
+    "guard-sentry": "./gate-engine/sentry/check-sentry.mjs"
   },
   "files": [
     "cli",
@@ -27,7 +38,9 @@
     "biome",
     "tsconfig",
     "gate-engine",
-    "skills"
+    "skills",
+    "agents",
+    "agents-hooks"
   ],
   "scripts": {
     "test": "vitest",

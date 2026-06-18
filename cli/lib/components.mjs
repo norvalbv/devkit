@@ -25,6 +25,24 @@ export const COMPONENTS = [
     recommended: true,
   },
   { id: 'skills', label: 'Agent skills', hint: 'sync to .claude + .cursor', recommended: true },
+  {
+    id: 'agents',
+    label: 'Review agents',
+    hint: 'review/testing subagents → .claude/.cursor agents',
+    recommended: true,
+  },
+  {
+    id: 'searchSteering',
+    label: 'search-code steering hooks',
+    hint: 'PreToolUse + PostToolUse: flag conceptual grep, steer to your semantic-search / graph tools',
+    recommended: false,
+  },
+  {
+    id: 'agentHooks',
+    label: 'Agent hooks (Claude/Cursor)',
+    hint: 'Stop/PostToolUse/UserPromptSubmit/PreCompact: decision nudge, rule recall, format-after-edit, QA, compaction',
+    recommended: false,
+  },
   { id: 'husky', label: 'Husky pre-commit', hint: 'the gate hook', recommended: true },
   {
     id: 'guards',
@@ -57,13 +75,17 @@ export const GUARD_OPTIONS = [
  * apply layer no-ops it otherwise (see init.mjs `isStructure`). `fallow` is the one
  * recommended-OFF component (heavier third-party tool) — opt-in even under --yes.
  *
- * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,husky:boolean,structure:boolean,fallow:boolean,guards:string[]}}
+ * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,agents:boolean,searchSteering:boolean,agentHooks:boolean,husky:boolean,structure:boolean,fallow:boolean,guards:string[]}}
  */
 export function defaultSelection() {
   return {
     biome: true,
     tsconfig: true,
     skills: true,
+    agents: true,
+    // searchSteering + agentHooks are opt-in (they register agent hooks): off even under --yes.
+    searchSteering: false,
+    agentHooks: false,
     husky: true,
     structure: true,
     fallow: false,

@@ -1,0 +1,10 @@
+{"id":"mon-swallowed-cache","message":"fix: stale session context reused after a cache reset corrupted writes","nameStatus":"M\tsrc/cache.ts","expected":"MONITOR","category":"state-corruption","note":"wrong execution context → silent data corruption"}
+{"id":"mon-reconnect-strand","message":"fix: spinner stuck \"Running\" after a server restart, never resolves","nameStatus":"M\tsrc/ws-client.ts","expected":"MONITOR","category":"silent-strand","note":"reconnect strand — handled but never resolves"}
+{"id":"mon-swallowed-db","message":"fix(db): map foreign-key violations to a handled user error","nameStatus":"M\tsrc/db/write.ts","expected":"MONITOR","category":"swallowed","note":"caught DB error never reaches auto-capture"}
+{"id":"mon-fs-reclaim","message":"fix: ignore ENOENT when reclaiming a temp dir on shutdown","nameStatus":"M\tsrc/fs/cleanup.ts","expected":"MONITOR","category":"swallowed","note":"caught fs failure, handled silently"}
+{"id":"skip-ui-gradient","message":"fix: hide an orphan scroll-fade gradient in single-pane layouts","nameStatus":"M\tsrc/ui/Pane.tsx","expected":"SKIP","category":"ui","note":"pure UI"}
+{"id":"skip-a11y-contrast","message":"fix(a11y): status colors as text pass WCAG AA on light theme","nameStatus":"M\tsrc/ui/Status.tsx","expected":"SKIP","category":"styling","note":"styling / accessibility"}
+{"id":"skip-feat-copy","message":"feat: reword the empty-state heading on the dashboard","nameStatus":"M\tsrc/ui/Empty.tsx","expected":"SKIP","category":"copy","note":"copy only"}
+{"id":"skip-refactor-noop","message":"refactor: extract a helper, no behaviour change","nameStatus":"M\tsrc/util.ts","expected":"SKIP","category":"refactor","note":"behaviour-preserving refactor"}
+{"id":"skip-perf-render","message":"perf: memoize a list row to cut re-renders","nameStatus":"M\tsrc/ui/Row.tsx","expected":"SKIP","category":"ui","note":"pure render perf, no error class"}
+{"id":"skip-crash-autocapture","message":"fix: let an unhandled promise rejection crash the worker loudly","nameStatus":"M\tsrc/worker.ts","expected":"SKIP","category":"autocapture","note":"already auto-captures — not the swallowed class"}

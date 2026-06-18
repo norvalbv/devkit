@@ -45,6 +45,7 @@ Usage:
                              (overlay restores core.hooksPath + prunes .git/info/exclude;
                              package/standalone removes configs, the hook block, deps, skills).
   devkit sync-skills [--dry-run]  Copy devkit skills into .claude/skills + .cursor/skills.
+  devkit sync-agents [--dry-run]  Copy devkit review/testing agents into .claude/agents + .cursor/agents.
   devkit --help              This help.`;
 
 const COMMANDS = {
@@ -52,6 +53,7 @@ const COMMANDS = {
   doctor: () => import('./commands/doctor.mjs'),
   clean: () => import('./commands/clean.mjs'),
   'sync-skills': () => import('./commands/sync-skills.mjs'),
+  'sync-agents': () => import('./commands/sync-agents.mjs'),
 };
 
 async function main() {

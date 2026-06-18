@@ -40,9 +40,16 @@ import {
   saveFallowBaselines,
   wireFallowGate,
 } from '../lib/install-fallow.mjs';
+import {
+  installHookRegistrations,
+  removeHookRegistrations,
+  removeHookScripts,
+  syncHookScripts,
+} from '../lib/install-hooks.mjs';
 import { installOverlay } from '../lib/overlay.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { runWizard } from '../lib/wizard.mjs';
+import { syncAgents } from './sync-agents.mjs';
 import { syncSkills } from './sync-skills.mjs';
 
 const INIT_VERSION = 2;
@@ -87,6 +94,8 @@ function parseFlags(args) {
     stack: null,
     removeDeselected: false,
     fallow: false,
+    searchSteering: false,
+    agentHooks: false,
     standalone: false,
     overlay: false,
     no: new Set(),
@@ -100,6 +109,8 @@ function parseFlags(args) {
     else if (a === '--force') flags.force = true;
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
+    else if (a === '--search-steering') flags.searchSteering = true;
+    else if (a === '--agent-hooks') flags.agentHooks = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
     else if (a === '--stack') flags.stack = args[++i];
@@ -120,13 +131,15 @@ function parseFlags(args) {
 // guards narrowed by --guards / --no-guards.
 function selectionFromFlags(flags) {
   const sel = defaultSelection();
-  for (const id of ['biome', 'tsconfig', 'skills', 'husky', 'structure']) {
+  for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure']) {
     if (flags.no.has(id)) sel[id] = false;
   }
   if (flags.no.has('guards')) sel.guards = [];
   else if (flags.guards) sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
-  // fallow is OPT-IN (heavier third-party tool): off unless --fallow, and --no-fallow keeps off.
+  // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
   sel.fallow = flags.fallow && !flags.no.has('fallow');
+  sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
+  sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   return sel;
 }
 
@@ -137,7 +150,16 @@ function detectInstalled(cwd) {
   const installed = new Set();
   const recorded = cfg?.components;
   if (recorded) {
-    for (const id of ['biome', 'tsconfig', 'skills', 'husky', 'structure']) {
+    for (const id of [
+      'biome',
+      'tsconfig',
+      'skills',
+      'agents',
+      'searchSteering',
+      'agentHooks',
+      'husky',
+      'structure',
+    ]) {
       if (recorded[id]) installed.add(id);
     }
     if (recorded.guards?.length) installed.add('guards');
@@ -150,6 +172,9 @@ function detectInstalled(cwd) {
   if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
   const { gitRoot } = detectGitRoot(cwd);
   if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) installed.add('skills');
+  if (existsSync(join(gitRoot, '.devkit', 'agents-manifest.json'))) installed.add('agents');
+  if (existsSync(join(gitRoot, '.devkit', 'agent-hooks-manifest.json')))
+    installed.add('agentHooks');
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (existsSync(hookPath)) {
     installed.add('husky');
@@ -549,6 +574,32 @@ function removeSkills(root, dryRun) {
   );
 }
 
+// Remove devkit-synced agents (per the manifest) from .claude/agents + .cursor/agents + drop the
+// manifest. `root` is the git root (agents are repo-wide), = cwd for a single-package repo.
+function removeAgents(root, dryRun) {
+  const manifestPath = join(root, '.devkit', 'agents-manifest.json');
+  const manifest = readJson(manifestPath);
+  if (!manifest) {
+    console.log('  • no agents-manifest.json — nothing to remove');
+    return;
+  }
+  const targets = ['.claude/agents', '.cursor/agents'];
+  let n = 0;
+  for (const rel of Object.keys(manifest.files)) {
+    for (const t of targets) {
+      const p = join(root, t, rel);
+      if (existsSync(p)) {
+        n++;
+        if (!dryRun) rmSync(p);
+      }
+    }
+  }
+  if (!dryRun) rmSync(manifestPath, { force: true });
+  console.log(
+    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced agent file(s) + manifest`,
+  );
+}
+
 // Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
 // other packages' blocks intact.
 function removeHusky(hookRoot, pkgRel, dryRun) {
@@ -634,7 +685,7 @@ function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   }
 }
 
-function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
+function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection) {
   if (!remove.length) return;
   console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
   // Guards (individual lines) before husky (whole-block) so order is irrelevant.
@@ -644,6 +695,20 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
   if (remove.includes('biome')) removeBiome(cwd, dryRun);
   if (remove.includes('tsconfig')) removeTsconfig(cwd, dryRun);
   if (remove.includes('skills')) removeSkills(gitRoot, dryRun);
+  if (remove.includes('agents')) removeAgents(gitRoot, dryRun);
+  if (remove.includes('agentHooks')) removeHookScripts(gitRoot, { dryRun });
+  // searchSteering/agentHooks own hook registrations. Re-derive the survivors and re-install:
+  // installHookRegistrations strips ALL devkit hooks first, so the deselected one's entries drop
+  // and only the still-selected component's entries are re-added (idempotent). With none left,
+  // strip-only via removeHookRegistrations.
+  if (remove.includes('searchSteering') || remove.includes('agentHooks')) {
+    const survivors = [
+      selection.searchSteering && !remove.includes('searchSteering') && 'searchSteering',
+      selection.agentHooks && !remove.includes('agentHooks') && 'agentHooks',
+    ].filter(Boolean);
+    if (survivors.length) installHookRegistrations(gitRoot, survivors, { dryRun });
+    else removeHookRegistrations(gitRoot, { dryRun });
+  }
   if (remove.includes('structure')) removeStructure(cwd, prevConfig, gitRoot, pkgRel, dryRun);
   if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
@@ -654,6 +719,9 @@ const STEP_LABELS = {
   biome: 'biome.jsonc',
   tsconfig: 'tsconfig.json',
   skills: 'skills',
+  agents: 'agents',
+  searchSteering: 'search-code steering hooks',
+  agentHooks: 'agent hooks',
   husky: 'husky pre-commit',
   guards: 'gate-engine guards',
   structure: 'structure-lint',
@@ -795,13 +863,36 @@ export async function applyInit(cwd, plan) {
     syncSkills(dryRun ? ['--dry-run'] : [], gitRoot);
   }
 
+  if (selection.agents) {
+    console.log('7a. agents');
+    // Agents are repo-wide too → sync to the git root's .claude/agents + .cursor/agents (+ manifest).
+    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot);
+  }
+
+  // Agent-hook scripts (agentHooks component) live under the consumer's .claude/hooks; the
+  // registrations below reference them, so sync the scripts first.
+  if (selection.agentHooks) {
+    console.log('7b. agent-hook scripts');
+    syncHookScripts(gitRoot, { dryRun });
+  }
+
+  // Register the agent hooks each selected component owns into .claude/settings.json (+ .cursor).
+  const hookComponents = [
+    selection.searchSteering && 'searchSteering',
+    selection.agentHooks && 'agentHooks',
+  ].filter(Boolean);
+  if (hookComponents.length) {
+    console.log('7c. agent hook registrations');
+    installHookRegistrations(gitRoot, hookComponents, { dryRun });
+  }
+
   if (selection.fallow) {
     console.log('8. fallow (optional code-health layer)');
     await applyFallow(cwd, dryRun, interactive);
   }
 
   // Removals (deselected + present).
-  applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
+  applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection);
 
   // .devkit/config.json with the component selection.
   console.log('9. .devkit/config.json');
@@ -809,6 +900,9 @@ export async function applyInit(cwd, plan) {
     biome: selection.biome,
     tsconfig: selection.tsconfig,
     skills: selection.skills,
+    agents: Boolean(selection.agents),
+    searchSteering: Boolean(selection.searchSteering),
+    agentHooks: Boolean(selection.agentHooks),
     husky: selection.husky,
     structure: isStructure,
     fallow: Boolean(selection.fallow),
