@@ -1,29 +1,10 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { tmpRepos } from './_helpers.mjs';
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs');
-
-let roots = [];
-function tmpRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'clean-'));
-  roots.push(root);
-  writeFileSync(
-    join(root, 'package.json'),
-    JSON.stringify({ name: 'fx', version: '0.0.0', type: 'module' }, null, 2),
-  );
-  return root;
-}
-function devkit(root, ...args) {
-  return spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
-}
-afterEach(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
-});
+const { tmpRepo, devkit, cleanup } = tmpRepos('clean-');
+afterEach(cleanup);
 
 describe('clean (package mode)', () => {
   it('removes the SYNCED skill files, not just the manifest', () => {

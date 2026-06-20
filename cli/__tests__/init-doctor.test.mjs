@@ -1,30 +1,11 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readConfig as config, tmpRepos } from './_helpers.mjs';
 
-const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs');
-
-let roots = [];
-function tmpRepo(pkg = { name: 'fx', version: '0.0.0', type: 'module' }) {
-  const root = mkdtempSync(join(tmpdir(), 'init-'));
-  roots.push(root);
-  writeFileSync(join(root, 'package.json'), JSON.stringify(pkg, null, 2));
-  return root;
-}
-function devkit(root, ...args) {
-  // --yes forces the non-interactive path even when the test runner has a TTY.
-  return spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
-}
-function config(root) {
-  return JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
-}
-afterEach(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
-});
+// --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
+const { tmpRepo, devkit, cleanup } = tmpRepos('init-');
+afterEach(cleanup);
 
 describe('init --yes (all recommended)', () => {
   it('emits the full generic config set + husky hook + .devkit/config.json', () => {
