@@ -30,7 +30,3 @@ function startOfToday() {
 export function isExpired(entry) {
   return expiresAt(entry) <= startOfToday();
 }
-
-export function daysRemaining(entry) {
-  return Math.ceil((expiresAt(entry) - startOfToday()) / DAY_MS);
-}

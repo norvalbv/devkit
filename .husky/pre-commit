@@ -1,0 +1,13 @@
+# devkit dogfoods its OWN gate-engine. The bins are local (this IS the devkit repo), so the
+# gates run via `node gate-engine/...` rather than the published `bunx guard-*`.
+
+# Formatter + linter (Biome) — hard gate.
+bun run lint || exit 1
+
+# Ratchets (baselines in eslint/baselines/, grandfathered via `bun run guard:freeze`) — hard gate.
+node gate-engine/ratchets/folder-fanout.mjs gate || exit 1
+node gate-engine/ratchets/size-disable.mjs gate || exit 1
+
+# fallow audit (dead-code + complexity + duplication on the changed set) — advisory (fail-open):
+# surfaces findings, never blocks; no-ops when the fallow CLI is not installed.
+command -v fallow >/dev/null 2>&1 && fallow audit || true

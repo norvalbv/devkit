@@ -47,11 +47,14 @@
     "test:run": "vitest run",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "prepare": "husky",
+    "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
     "@types/node": "^25.9.3",
+    "husky": "^9.1.7",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   },

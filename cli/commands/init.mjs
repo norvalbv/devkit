@@ -671,18 +671,6 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
 
 // ── orchestration ────────────────────────────────────────────────────────────
 
-const STEP_LABELS = {
-  biome: 'biome.jsonc',
-  tsconfig: 'tsconfig.json',
-  skills: 'skills',
-  agents: 'agents',
-  searchSteering: 'search-code steering hooks',
-  agentHooks: 'agent hooks',
-  husky: 'husky pre-commit',
-  guards: 'gate-engine guards',
-  structure: 'structure-lint',
-};
-
 /**
  * The testable apply layer: given a resolved selection (+ removals), install/remove and
  * record .devkit/config.json.components. No prompting — callers (the CLI dispatcher, tests)
@@ -986,4 +974,4 @@ export default async function run(args, cwd) {
   return 0;
 }
 
-export { detectInstalled, parseFlags, STEP_LABELS, selectionFromFlags };
+export { detectInstalled, parseFlags, selectionFromFlags };
