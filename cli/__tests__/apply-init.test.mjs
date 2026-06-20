@@ -84,6 +84,16 @@ describe('selection helpers', () => {
     expect(sel.guards).toEqual(['fanout']);
   });
 
+  it('agentTargets: both by default, narrowed by --no-claude / --no-cursor', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual(['claude', 'cursor']);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-cursor'])).agentTargets).toEqual([
+      'claude',
+    ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
+      'cursor',
+    ]);
+  });
+
   it('fallow is OPT-IN: off by default, on with --fallow, off again with --no-fallow', () => {
     expect(selectionFromFlags(parseFlags(['--yes'])).fallow).toBe(false);
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow'])).fallow).toBe(true);
@@ -136,6 +146,55 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
     expect(config(root).components.biome).toBe(false);
+  });
+
+  it('agentTargets: skills sync to ONE surface only + the choice is recorded', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        husky: false,
+        structure: false,
+        agentTargets: ['claude'],
+        guards: [],
+      },
+      devkitRef: 'v0.3.0',
+    });
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
+    expect(config(root).components.agentTargets).toEqual(['claude']);
+  });
+
+  it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {
+    const root = tmpRepo();
+    const base = {
+      biome: false,
+      tsconfig: false,
+      skills: true,
+      husky: false,
+      structure: false,
+      guards: [],
+    };
+    // 1. Install to BOTH surfaces.
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, agentTargets: ['claude', 'cursor'] },
+      devkitRef: 'v0.3.0',
+    });
+    expect(existsSync(join(root, '.cursor/skills/brainstorming'))).toBe(true);
+    // 2. Re-init claude-only → .cursor copy removed, .claude kept, manifest still present.
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, agentTargets: ['claude'] },
+      devkitRef: 'v0.3.0',
+    });
+    expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(true);
+    expect(config(root).components.agentTargets).toEqual(['claude']);
   });
 
   it('--scan-root overrides guard.config scanRoots before the freeze (generic)', async () => {

@@ -4,11 +4,12 @@
  * so an uninstall removes the synced files, not just the manifest. `root` is the git root (skills +
  * agents are repo-wide), = cwd for a single-package repo.
  */
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { AGENT_TARGETS } from './components.mjs';
 import { readJson } from './fs-helpers.mjs';
 
-function removeManifested(root, manifestRel, targets, kind, dryRun) {
+function removeManifested(root, manifestRel, dirs, kind, dryRun, dropManifest) {
   const manifestPath = join(root, '.devkit', manifestRel);
   const manifest = readJson(manifestPath);
   if (!manifest) {
@@ -25,36 +26,41 @@ function removeManifested(root, manifestRel, targets, kind, dryRun) {
   );
   let n = 0;
   for (const name of names) {
-    for (const t of targets) {
-      const p = join(root, t, name);
+    for (const dir of dirs) {
+      const p = join(root, dir, name);
       if (existsSync(p)) {
         n++;
         if (!dryRun) rmSync(p, { recursive: true, force: true });
       }
     }
   }
-  if (!dryRun) rmSync(manifestPath, { force: true });
+  // Drop the now-empty surface dir (e.g. .cursor/skills) so a pruned surface leaves no footprint —
+  // but ONLY when empty, since a consumer may author their own skills/agents alongside devkit's.
+  if (!dryRun) {
+    for (const dir of dirs) {
+      const p = join(root, dir);
+      if (existsSync(p) && readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
+    }
+  }
+  // Keep the manifest when only pruning a surface (the surviving surface's copy is still tracked).
+  if (dropManifest && !dryRun) rmSync(manifestPath, { force: true });
   console.log(
-    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced ${kind} dir(s) + manifest`,
+    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${n} synced ${kind} dir(s)${dropManifest ? ' + manifest' : ''}`,
   );
 }
 
-export function removeSkills(root, dryRun) {
-  removeManifested(
-    root,
-    'skills-manifest.json',
-    ['.claude/skills', '.cursor/skills'],
-    'skill',
-    dryRun,
-  );
+/**
+ * @param {string} root git root
+ * @param {boolean} dryRun
+ * @param {string[]} [targets] surfaces to remove from (default both)
+ * @param {boolean} [dropManifest] also delete the manifest (default true — a full uninstall)
+ */
+export function removeSkills(root, dryRun, targets = AGENT_TARGETS, dropManifest = true) {
+  const dirs = targets.map((t) => `.${t}/skills`);
+  removeManifested(root, 'skills-manifest.json', dirs, 'skill', dryRun, dropManifest);
 }
 
-export function removeAgents(root, dryRun) {
-  removeManifested(
-    root,
-    'agents-manifest.json',
-    ['.claude/agents', '.cursor/agents'],
-    'agent',
-    dryRun,
-  );
+export function removeAgents(root, dryRun, targets = AGENT_TARGETS, dropManifest = true) {
+  const dirs = targets.map((t) => `.${t}/agents`);
+  removeManifested(root, 'agents-manifest.json', dirs, 'agent', dryRun, dropManifest);
 }

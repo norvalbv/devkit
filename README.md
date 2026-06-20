@@ -189,12 +189,16 @@ behaviour). Per-component flags work with or without `--yes`:
 bunx devkit init --yes --no-biome              # everything except biome
 bunx devkit init --yes --guards fanout,size    # only those two gate lines
 bunx devkit init --yes --no-skills --no-structure
+bunx devkit init --yes --no-cursor             # skills/agents/hooks → .claude only (not .cursor)
 # nested app at the git root: govern the subdir, gate stays at the root
 bunx devkit init --stack react-app --scan-root services/webapp/src --no-biome --no-tsconfig
 ```
 
 Flags: `--no-biome` `--no-tsconfig` `--no-skills` `--no-husky` `--no-structure`
 `--no-guards` `--no-fallow`, `--guards <a,b,…>` (a subset of `size,fanout,dup,clone,decisions`),
+`--no-claude` / `--no-cursor` (sync the agent files — skills, agents, hooks — to ONE surface
+instead of both; the interactive wizard asks the same as a checkbox. A copy already synced into the
+dropped surface is removed, so you don't carry a redundant install),
 `--fallow` (opt-in code-health layer), and `--scan-root <a,b,…>` (override `guard.config.json`
 `scanRoots` up front — set **before** the freezes + the `react-app` `structureRoot`, so a
 non-`src` root like `services/webapp/src` is grandfathered correctly without an edit-then-refreeze).

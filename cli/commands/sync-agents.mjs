@@ -10,10 +10,9 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AGENT_TARGETS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../lib/fs-helpers.mjs';
-
-const TARGET_DIRS = ['.claude/agents', '.cursor/agents'];
 
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
 function listAgents(dir) {
@@ -25,10 +24,12 @@ function listAgents(dir) {
 /**
  * @param {string[]} args
  * @param {string} cwd consumer root (the git root — agents are repo-wide, like skills)
+ * @param {string[]} [targets] agent surfaces to write to (default both — see AGENT_TARGETS)
  * @returns {{ devkitRef: string|null, generatedAt: string, files: Record<string,string> }} the manifest
  */
-export function syncAgents(args, cwd) {
+export function syncAgents(args, cwd, targets = AGENT_TARGETS) {
   const dryRun = args.includes('--dry-run');
+  const targetDirs = targets.map((t) => `.${t}/agents`);
   const agentsSrc = join(packageDir(), 'agents');
   const rels = listAgents(agentsSrc);
 
@@ -42,7 +43,7 @@ export function syncAgents(args, cwd) {
     const content = readFileSync(srcPath);
     files[rel] = sha256(srcPath);
 
-    for (const target of TARGET_DIRS) {
+    for (const target of targetDirs) {
       const destPath = join(cwd, target, rel);
       if (dryRun) {
         console.log(`  [dry-run] write ${target}/${rel}`);
@@ -66,14 +67,17 @@ export function syncAgents(args, cwd) {
     console.log(`  [dry-run] write .devkit/agents-manifest.json (${rels.length} files)`);
   } else {
     writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
-    console.log(`  ✓ synced ${rels.length} agent file(s) → .claude/agents + .cursor/agents`);
+    console.log(`  ✓ synced ${rels.length} agent file(s) → ${targetDirs.join(' + ')}`);
   }
 
   return manifest;
 }
 
 export default function run(args, cwd) {
-  // Agents are repo-wide → target the git root (= cwd for a single-package repo).
-  syncAgents(args, detectGitRoot(cwd).gitRoot);
+  // Agents are repo-wide → target the git root (= cwd for a single-package repo). Honour the
+  // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.
+  const { gitRoot } = detectGitRoot(cwd);
+  const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
+  syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS);
   return 0;
 }
