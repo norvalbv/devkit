@@ -157,20 +157,22 @@ export async function runWizard({
     if (!structAvail) selection.structure = false;
 
     // Agent surface(s): only asked when something actually syncs into .claude/.cursor. A repo that
-    // uses only one tool picks just that surface → no redundant copy in the other's dir.
+    // uses only one tool picks just that surface → no redundant copy in the other's dir. A single
+    // SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only" require
+    // actively DESELECTing Cursor — easy to miss, so both got installed. Radio makes intent explicit.
     selection.agentTargets = [...AGENT_TARGETS];
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
-      const surfaces = await multiselect({
+      const surface = await select({
         message: 'Sync skills/agents/hooks to which agent surface(s)?',
         options: [
-          { value: 'claude', label: 'Claude', hint: '.claude/' },
-          { value: 'cursor', label: 'Cursor', hint: '.cursor/' },
+          { value: 'both', label: 'Both', hint: '.claude/ + .cursor/' },
+          { value: 'claude', label: 'Claude only', hint: '.claude/' },
+          { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
         ],
-        initialValues: [...AGENT_TARGETS],
-        required: true, // at least one — syncing to neither makes the components pointless
+        initialValue: 'both',
       });
-      if (bail(surfaces)) return null;
-      selection.agentTargets = surfaces;
+      if (bail(surface)) return null;
+      selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
     }
   }
 
