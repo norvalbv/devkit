@@ -3,8 +3,7 @@
  * the wizard funnels into. Calling applyInit with a chosen component map is preferable to
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,26 +19,17 @@ vi.mock('../lib/install-fallow.mjs', () => fallowSpies);
 
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mjs';
 import { defaultSelection, normalizeSelection } from '../lib/components.mjs';
+import { readConfig as config, tmpRepos } from './_helpers.mjs';
 
-let roots = [];
-function tmpRepo(pkg = { name: 'fx', version: '0.0.0', type: 'module' }) {
-  const root = mkdtempSync(join(tmpdir(), 'apply-'));
-  roots.push(root);
-  writeFileSync(join(root, 'package.json'), JSON.stringify(pkg, null, 2));
-  return root;
-}
+const { tmpRepo, cleanup } = tmpRepos('apply-');
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   for (const fn of Object.values(fallowSpies)) fn.mockClear();
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
+  cleanup();
 });
-function config(root) {
-  return JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
-}
 
 describe('selection helpers', () => {
   it('defaultSelection is all-on with all guards', () => {
