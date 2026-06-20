@@ -12,6 +12,14 @@
 export const GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'decisions'];
 
 /**
+ * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
+ * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a
+ * repo that only uses one tool doesn't get a redundant copy in the other's dir. Surface `<name>`
+ * maps to the `.<name>/` dir (claude → .claude, cursor → .cursor).
+ */
+export const AGENT_TARGETS = ['claude', 'cursor'];
+
+/**
  * The top-level components, in wizard order. `recommended` seeds the --yes / non-TTY
  * default and the wizard's per-component `confirm` initialValue. `structure` is the only
  * stack-gated one (offered iff a structure template exists — currently electron only).
@@ -75,7 +83,7 @@ export const GUARD_OPTIONS = [
  * apply layer no-ops it otherwise (see init.mjs `isStructure`). `fallow` is the one
  * recommended-OFF component (heavier third-party tool) — opt-in even under --yes.
  *
- * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,agents:boolean,searchSteering:boolean,agentHooks:boolean,husky:boolean,structure:boolean,fallow:boolean,searchCode:boolean,guards:string[]}}
+ * @returns {{biome:boolean,tsconfig:boolean,skills:boolean,agents:boolean,searchSteering:boolean,agentHooks:boolean,husky:boolean,structure:boolean,fallow:boolean,searchCode:boolean,agentTargets:string[],guards:string[]}}
  */
 export function defaultSelection() {
   return {
@@ -90,6 +98,7 @@ export function defaultSelection() {
     structure: true,
     fallow: false,
     searchCode: false,
+    agentTargets: [...AGENT_TARGETS],
     guards: [...GUARD_IDS],
   };
 }
@@ -100,6 +109,9 @@ export function normalizeSelection(partial = {}) {
   return {
     ...base,
     ...partial,
+    agentTargets: partial.agentTargets
+      ? partial.agentTargets.filter((t) => AGENT_TARGETS.includes(t))
+      : base.agentTargets,
     guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
   };
 }

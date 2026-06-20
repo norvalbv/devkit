@@ -111,8 +111,9 @@ async function checkGuardConfig(cwd) {
   }
 }
 
-async function checkSkills(cwd) {
-  // Skills are repo-wide → manifest + .claude live at the git root (cwd for a single-package repo).
+async function checkSkills(cwd, surface = 'claude') {
+  // Skills are repo-wide → manifest + the agent-surface dir live at the git root (cwd for a
+  // single-package repo). Verify against the selected surface (.claude or .cursor — same content).
   const { gitRoot } = detectGitRoot(cwd);
   const manifestPath = join(gitRoot, '.devkit', 'skills-manifest.json');
   const manifest = readJson(manifestPath);
@@ -125,7 +126,7 @@ async function checkSkills(cwd) {
   for (const [rel, recordedSha] of Object.entries(manifest.files)) {
     const srcPath = join(skillsSrc, rel);
     if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, '.claude', 'skills', rel);
+    const consumerPath = join(gitRoot, `.${surface}`, 'skills', rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
   if (sourceDrift.length || consumerDrift.length) {
@@ -137,8 +138,8 @@ async function checkSkills(cwd) {
   return check('skills', 'OK', `${Object.keys(manifest.files).length} file(s) in sync`);
 }
 
-// Agents are repo-wide → manifest + .claude/agents live at the git root (same contract as skills).
-async function checkAgents(cwd) {
+// Agents are repo-wide → manifest + the agent-surface dir live at the git root (same contract as skills).
+async function checkAgents(cwd, surface = 'claude') {
   const { gitRoot } = detectGitRoot(cwd);
   const manifest = readJson(join(gitRoot, '.devkit', 'agents-manifest.json'));
   if (!manifest) {
@@ -150,7 +151,7 @@ async function checkAgents(cwd) {
   for (const [rel, recordedSha] of Object.entries(manifest.files)) {
     const srcPath = join(agentsSrc, rel);
     if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, '.claude', 'agents', rel);
+    const consumerPath = join(gitRoot, `.${surface}`, 'agents', rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
   if (sourceDrift.length || consumerDrift.length) {
@@ -162,8 +163,8 @@ async function checkAgents(cwd) {
   return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
 }
 
-// agentHooks: the six synced scripts (under .claude/hooks) match the manifest, and are present.
-function checkAgentHookScripts(cwd) {
+// agentHooks: the six synced scripts (under <surface>/hooks) match the manifest, and are present.
+function checkAgentHookScripts(cwd, surface = 'claude') {
   const { gitRoot } = detectGitRoot(cwd);
   const manifest = readJson(join(gitRoot, '.devkit', 'agent-hooks-manifest.json'));
   if (!manifest) {
@@ -176,7 +177,7 @@ function checkAgentHookScripts(cwd) {
     );
   }
   const drift = Object.keys(manifest.files).filter((rel) => {
-    const p = join(gitRoot, '.claude', 'hooks', rel);
+    const p = join(gitRoot, `.${surface}`, 'hooks', rel);
     return !existsSync(p) || sha256(p) !== manifest.files[rel];
   });
   if (drift.length) {
@@ -264,6 +265,10 @@ function selectionFlags(sel) {
   }
   if (!sel.guards?.length) flags.push('--no-guards');
   else flags.push('--guards', sel.guards.join(','));
+  // Preserve the recorded agent-surface choice so --fix never re-adds a deselected surface.
+  for (const t of ['claude', 'cursor']) {
+    if (sel.agentTargets && !sel.agentTargets.includes(t)) flags.push(`--no-${t}`);
+  }
   return flags;
 }
 
@@ -385,16 +390,22 @@ export default async function run(args, cwd) {
   if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', biomeExpected));
   if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', tsconfigExpected));
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
-  if (sel.skills) results.push(await checkSkills(cwd));
-  if (sel.agents) results.push(await checkAgents(cwd));
-  if (sel.agentHooks) results.push(checkAgentHookScripts(cwd));
+  // Verify the synced agent files against a SELECTED surface (prefer .claude; else the first
+  // chosen one). Both surfaces get identical content, so checking one is sufficient.
+  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
+  if (sel.skills && primarySurface) results.push(await checkSkills(cwd, primarySurface));
+  if (sel.agents && primarySurface) results.push(await checkAgents(cwd, primarySurface));
+  if (sel.agentHooks && primarySurface) results.push(checkAgentHookScripts(cwd, primarySurface));
   if (sel.searchSteering) results.push(checkSearchToolBins());
-  // Both hook-owning components register into .claude/settings.json — verify the selected set.
+  // Hook-owning components register into the surfaces' settings. checkHookRegistrations reads the
+  // Claude-shaped settings.json, so only verify when .claude is a selected surface.
   const hookComponents = [
     sel.searchSteering && 'searchSteering',
     sel.agentHooks && 'agentHooks',
   ].filter(Boolean);
-  if (hookComponents.length) results.push(checkRegistrations(cwd, hookComponents));
+  if (hookComponents.length && surfaces.includes('claude'))
+    results.push(checkRegistrations(cwd, hookComponents));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));

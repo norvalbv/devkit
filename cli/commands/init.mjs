@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
-import { COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
+import { AGENT_TARGETS, COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
@@ -145,6 +145,9 @@ function selectionFromFlags(flags) {
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
+  // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
+  // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
+  sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
   return sel;
 }
 
@@ -810,33 +813,60 @@ export async function applyInit(cwd, plan) {
     enableStructureLint(gitRoot, pkgRel, dryRun);
   }
 
+  // Which agent surfaces (.claude / .cursor) get the synced skills/agents/hooks. Default both;
+  // narrowed by the wizard surface picker or --no-claude/--no-cursor (don't double-install).
+  const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
+
   if (selection.skills) {
     console.log('7. skills');
-    // Skills are repo-wide → sync to the git root's .claude/.cursor (+ manifest), not the package.
-    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot);
+    // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest).
+    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
   }
 
   if (selection.agents) {
     console.log('7a. agents');
-    // Agents are repo-wide too → sync to the git root's .claude/agents + .cursor/agents (+ manifest).
-    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot);
+    // Agents are repo-wide too → sync to the git root's selected agent surface(s) (+ manifest).
+    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
   }
 
-  // Agent-hook scripts (agentHooks component) live under the consumer's .claude/hooks; the
+  // Agent-hook scripts (agentHooks component) live under the consumer's <surface>/hooks; the
   // registrations below reference them, so sync the scripts first.
   if (selection.agentHooks) {
     console.log('7b. agent-hook scripts');
-    syncHookScripts(gitRoot, { dryRun });
+    syncHookScripts(gitRoot, { dryRun, targets: agentTargets });
   }
 
-  // Register the agent hooks each selected component owns into .claude/settings.json (+ .cursor).
+  // Register the agent hooks each selected component owns into the selected surfaces' settings.
   const hookComponents = [
     selection.searchSteering && 'searchSteering',
     selection.agentHooks && 'agentHooks',
   ].filter(Boolean);
   if (hookComponents.length) {
     console.log('7c. agent hook registrations');
-    installHookRegistrations(gitRoot, hookComponents, { dryRun });
+    installHookRegistrations(gitRoot, hookComponents, { dryRun, targets: agentTargets });
+  }
+
+  // Surface prune: a previous run may have synced to BOTH surfaces; if a surface is now
+  // deselected, remove devkit's files from it (manifests kept — the surviving surface still
+  // tracks them). Only runs for components staying selected; a fully-deselected component is
+  // removed wholesale by applyRemovals below. Skipped entirely on a fresh install where the
+  // dropped surface has no devkit dir (no work, no noise).
+  const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
+  // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
+  // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
+  const settingsFile = { claude: '.claude/settings.json', cursor: '.cursor/hooks.json' };
+  const hasPrunableContent = prunedTargets.some(
+    (t) =>
+      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
+      existsSync(join(gitRoot, settingsFile[t])),
+  );
+  if (prunedTargets.length && hasPrunableContent) {
+    console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
+    if (selection.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
+    if (selection.agents) removeAgents(gitRoot, dryRun, prunedTargets, false);
+    if (selection.agentHooks)
+      removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
+    if (hookComponents.length) removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
   }
 
   if (selection.fallow) {
@@ -865,6 +895,7 @@ export async function applyInit(cwd, plan) {
     structure: isStructure,
     fallow: Boolean(selection.fallow),
     searchCode: Boolean(selection.searchCode),
+    agentTargets: [...agentTargets],
     guards: selection.husky ? [...selection.guards] : [],
   };
   // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,

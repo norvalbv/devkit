@@ -15,17 +15,20 @@
 
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { AGENT_TARGETS } from './components.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from './fs-helpers.mjs';
 import { registrationsFor } from './hook-registrations.mjs';
 
-const HOOK_SCRIPT_DIRS = ['.claude/hooks', '.cursor/hooks'];
+// Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
+const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
 
 // Copy the bundled agent-hook scripts (agents-hooks/*.mjs|.sh) into the consumer's hook dirs and
 // write .devkit/agent-hooks-manifest.json (per-file sha256, like skills/agents). The registrations
 // reference these by path, so the scripts must be present for the hooks to resolve. Scripts are
 // kept executable (chmod +x) — the .sh/.mjs are invoked directly by the agent harness.
-export function syncHookScripts(root, { dryRun = false } = {}) {
+export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS } = {}) {
   const src = join(packageDir(), 'agents-hooks');
+  const dirs = hookDirs(targets);
   const rels = readdirSync(src, { withFileTypes: true })
     .filter((e) => e.isFile())
     .map((e) => e.name);
@@ -35,7 +38,7 @@ export function syncHookScripts(root, { dryRun = false } = {}) {
     const content = readFileSync(join(src, rel));
     files[rel] = sha256(join(src, rel));
     if (dryRun) continue;
-    for (const dir of HOOK_SCRIPT_DIRS) {
+    for (const dir of dirs) {
       const dest = join(root, dir, rel);
       writeIfAbsent(dest, content, { force: true });
       chmodSync(dest, 0o755);
@@ -53,30 +56,38 @@ export function syncHookScripts(root, { dryRun = false } = {}) {
     files,
   };
   if (dryRun) {
-    console.log(
-      `  [dry-run] sync ${rels.length} agent-hook script(s) → .claude/hooks + .cursor/hooks`,
-    );
+    console.log(`  [dry-run] sync ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
     return manifest;
   }
   writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
-  console.log(`  ✓ synced ${rels.length} agent-hook script(s) → .claude/hooks + .cursor/hooks`);
+  console.log(`  ✓ synced ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
   return manifest;
 }
 
-// Remove the synced agent-hook scripts (per manifest) from both hook dirs + drop the manifest.
-export function removeHookScripts(root, { dryRun = false } = {}) {
+/**
+ * Remove the synced agent-hook scripts (per manifest) from the given surfaces' hook dirs.
+ * `dropManifest` (default true) also deletes the manifest — pass false when pruning ONE surface
+ * while the other still holds tracked scripts (a both → single-surface switch).
+ *
+ * @param {string} root the git root
+ * @param {{ dryRun?: boolean, targets?: string[], dropManifest?: boolean }} [opts]
+ */
+export function removeHookScripts(
+  root,
+  { dryRun = false, targets = AGENT_TARGETS, dropManifest = true } = {},
+) {
   const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
   const manifest = readJson(manifestPath);
   if (!manifest) return;
   for (const rel of Object.keys(manifest.files)) {
-    for (const dir of HOOK_SCRIPT_DIRS) {
+    for (const dir of hookDirs(targets)) {
       const p = join(root, dir, rel);
       if (existsSync(p) && !dryRun) rmSync(p);
     }
   }
-  if (!dryRun) rmSync(manifestPath, { force: true });
+  if (dropManifest && !dryRun) rmSync(manifestPath, { force: true });
   console.log(
-    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} synced agent-hook scripts + manifest`,
+    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} synced agent-hook scripts from ${hookDirs(targets).join(' + ')}${dropManifest ? ' + manifest' : ''}`,
   );
 }
 
@@ -160,52 +171,62 @@ function addCursor(hooks, { event, matcher, command }) {
 }
 
 /**
- * Install (merge) the hook registrations for the selected components into both agent surfaces.
+ * Install (merge) the hook registrations for the selected components into the selected agent
+ * surfaces (default both).
  *
  * @param {string} root the git root (hooks are repo-wide, like skills/agents)
  * @param {string[]} componentIds selected components that own hook registrations
- * @param {{ dryRun?: boolean }} [opts]
+ * @param {{ dryRun?: boolean, targets?: string[] }} [opts]
  */
-export function installHookRegistrations(root, componentIds, { dryRun = false } = {}) {
+export function installHookRegistrations(
+  root,
+  componentIds,
+  { dryRun = false, targets = AGENT_TARGETS } = {},
+) {
   const regs = registrationsFor(componentIds);
   if (!regs.length) return;
+  const wrote = [];
 
   // Claude — merge into a freshly devkit-stripped block so a re-run replaces, never duplicates.
-  const claudePath = join(root, '.claude', 'settings.json');
-  const claude = readJson(claudePath) ?? {};
-  let claudeHooks = stripClaude(claude.hooks);
-  for (const reg of regs) claudeHooks = addClaude(claudeHooks, reg);
-  claude.hooks = claudeHooks;
+  if (targets.includes('claude')) {
+    const claudePath = join(root, '.claude', 'settings.json');
+    const claude = readJson(claudePath) ?? {};
+    let claudeHooks = stripClaude(claude.hooks);
+    for (const reg of regs) claudeHooks = addClaude(claudeHooks, reg);
+    claude.hooks = claudeHooks;
+    if (!dryRun) writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
+    wrote.push('.claude/settings.json');
+  }
 
   // Cursor — same idempotent strip-then-add into the differently-shaped hooks.json.
-  const cursorPath = join(root, '.cursor', 'hooks.json');
-  const cursor = readJson(cursorPath) ?? { version: 1, hooks: {} };
-  let cursorHooks = stripCursor(cursor.hooks);
-  for (const reg of regs) cursorHooks = addCursor(cursorHooks, reg);
-  cursor.hooks = cursorHooks;
+  if (targets.includes('cursor')) {
+    const cursorPath = join(root, '.cursor', 'hooks.json');
+    const cursor = readJson(cursorPath) ?? { version: 1, hooks: {} };
+    let cursorHooks = stripCursor(cursor.hooks);
+    for (const reg of regs) cursorHooks = addCursor(cursorHooks, reg);
+    cursor.hooks = cursorHooks;
+    if (!dryRun) writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
+    wrote.push('.cursor/hooks.json');
+  }
 
   if (dryRun) {
-    console.log(
-      '  [dry-run] merge hook registrations → .claude/settings.json + .cursor/hooks.json',
-    );
+    console.log(`  [dry-run] merge hook registrations → ${wrote.join(' + ')}`);
     return;
   }
-  writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
-  writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
-  console.log(`  ✓ registered ${regs.length} hook(s) → .claude/settings.json + .cursor/hooks.json`);
+  console.log(`  ✓ registered ${regs.length} hook(s) → ${wrote.join(' + ')}`);
 }
 
 /**
- * Remove every devkit-owned hook command from both surfaces (consumer commands untouched).
+ * Remove every devkit-owned hook command from the given surfaces (consumer commands untouched).
  *
  * @param {string} root the git root
- * @param {{ dryRun?: boolean }} [opts]
+ * @param {{ dryRun?: boolean, targets?: string[] }} [opts]
  */
-export function removeHookRegistrations(root, { dryRun = false } = {}) {
+export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_TARGETS } = {}) {
   const claudePath = join(root, '.claude', 'settings.json');
-  const claude = readJson(claudePath);
+  const claude = targets.includes('claude') ? readJson(claudePath) : null;
   const cursorPath = join(root, '.cursor', 'hooks.json');
-  const cursor = readJson(cursorPath);
+  const cursor = targets.includes('cursor') ? readJson(cursorPath) : null;
   if (!claude && !cursor) {
     console.log('  • no agent settings — no hook registrations to remove');
     return;
@@ -222,9 +243,7 @@ export function removeHookRegistrations(root, { dryRun = false } = {}) {
     cursor.hooks = stripCursor(cursor.hooks);
     writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
   }
-  console.log(
-    '  ✓ removed devkit hook registrations from .claude/settings.json + .cursor/hooks.json',
-  );
+  console.log('  ✓ removed devkit hook registrations');
 }
 
 /**

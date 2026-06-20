@@ -10,7 +10,11 @@
  */
 
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './components.mjs';
+import { AGENT_TARGETS, COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './components.mjs';
+
+// The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
+// asks the surface picker at all — no point choosing surfaces if none of these are selected.
+const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
 
 const STACKS = ['electron', 'react-app', 'next', 'node-service', 'generic'];
 
@@ -131,6 +135,7 @@ export async function runWizard({
       structure: false,
       fallow: false,
       searchCode: false,
+      agentTargets: [...AGENT_TARGETS], // unused (overlay syncs no agent files) — kept consistent
     });
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
@@ -150,6 +155,23 @@ export async function runWizard({
     selection.fallow = chosen.has('fallow');
     selection.searchCode = chosen.has('search-code');
     if (!structAvail) selection.structure = false;
+
+    // Agent surface(s): only asked when something actually syncs into .claude/.cursor. A repo that
+    // uses only one tool picks just that surface → no redundant copy in the other's dir.
+    selection.agentTargets = [...AGENT_TARGETS];
+    if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
+      const surfaces = await multiselect({
+        message: 'Sync skills/agents/hooks to which agent surface(s)?',
+        options: [
+          { value: 'claude', label: 'Claude', hint: '.claude/' },
+          { value: 'cursor', label: 'Cursor', hint: '.cursor/' },
+        ],
+        initialValues: [...AGENT_TARGETS],
+        required: true, // at least one — syncing to neither makes the components pointless
+      });
+      if (bail(surfaces)) return null;
+      selection.agentTargets = surfaces;
+    }
   }
 
   // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook).
@@ -217,6 +239,9 @@ function summarize(mode, selection, structureAvailable, deselected) {
   );
   lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
+  if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
+    lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
+  }
   if (deselected.length) lines.push('', `will ask to remove: ${deselected.join(', ')}`);
   return lines.join('\n');
 }
