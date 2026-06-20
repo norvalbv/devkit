@@ -29,7 +29,8 @@ function ensureGitignoreLine(cwd, line, dryRun) {
   const p = join(cwd, '.gitignore');
   const existing = existsSync(p) ? readFileSync(p, 'utf8') : '';
   if (existing.split('\n').some((l) => l.trim() === line)) return;
-  const next = existing + (existing && !existing.endsWith('\n') ? '\n' : '') + `${line}\n`;
+  const sep = existing && !existing.endsWith('\n') ? '\n' : '';
+  const next = `${existing}${sep}${line}\n`;
   if (!dryRun) writeFileSync(p, next);
   console.log(`  ${dryRun ? '[dry-run] ensure' : '✓ ensured'} ${line} in .gitignore`);
 }

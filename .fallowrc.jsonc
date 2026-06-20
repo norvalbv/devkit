@@ -1,0 +1,18 @@
+{
+  // devkit is a CLI + library + template-shipper. Tune the dead-code analyzer to that shape so the
+  // report reflects REAL dead code, not the false positives static analysis hits on this layout.
+  "entry": [
+    "cli/index.mjs", // CLI root
+    "cli/commands/*.mjs", // each command's default export is invoked via DYNAMIC import() in index.mjs
+    "agents-hooks/*.mjs", // synced agent-hook scripts — invoked by file PATH at runtime, never imported
+    "skills/**/scripts/*.mjs", // skill scripts — invoked by the agent harness, never imported
+    "gate-engine/**/eval/*.mjs", // dev eval harnesses
+    "gate-engine/**/bench.mjs" // dev benchmarks
+  ],
+  // templates/** is SHIPPED text copied into consumer repos — its imports are CONSUMER deps, not devkit's.
+  "ignorePatterns": ["templates/**"],
+  // jscpd is spawned as a BINARY by guard-clone (clone-detector.mjs), never imported.
+  "ignoreDependencies": ["jscpd"],
+  // An export referenced within its own file is an internal helper, not dead — don't flag it.
+  "ignoreExportsUsedInFile": true
+}

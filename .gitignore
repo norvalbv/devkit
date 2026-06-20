@@ -1,2 +1,6 @@
 node_modules
 .DS_Store
+
+# devkit's own gate artifacts (regenerated; not source)
+.fallow/
+.search-code/

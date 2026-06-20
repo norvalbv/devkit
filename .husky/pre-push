@@ -1,0 +1,3 @@
+# Heavier checks before sharing — kept off pre-commit so commits stay fast.
+bun run typecheck || exit 1
+bun run test:run || exit 1

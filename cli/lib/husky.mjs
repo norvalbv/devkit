@@ -30,7 +30,3 @@ export function markStart(pkgRel = '') {
 export function markEnd(pkgRel = '') {
   return pkgRel ? `${MARK_END_BASE}: ${pkgRel} <<<` : `${MARK_END_BASE} <<<`;
 }
-
-// Back-compat constants = the root (unsuffixed) markers.
-export const MARK_START = markStart('');
-export const MARK_END = markEnd('');

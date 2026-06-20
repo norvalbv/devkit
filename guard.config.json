@@ -1,0 +1,5 @@
+{
+  "scanRoots": ["cli", "gate-engine"],
+  "fanoutCap": 12,
+  "indexPath": ".search-code/index.db"
+}
