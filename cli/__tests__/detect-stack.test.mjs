@@ -35,6 +35,28 @@ describe('detectStack', () => {
     expect(detectStack(tmpRepo({ dependencies: { react: '^18', vite: '^5' } }))).toBe('react-app');
   });
 
+  it('picks component-lib for a published lib with react as a PEER dep', () => {
+    const root = tmpRepo({
+      exports: { '.': './dist/index.js' },
+      peerDependencies: { react: '>=18' },
+      devDependencies: { react: '^19', typescript: '^5' },
+    });
+    expect(detectStack(root)).toBe('component-lib');
+  });
+
+  it('component-lib needs BOTH react-peer AND a package surface (else react-app)', () => {
+    // react peer but no exports/main/module → an app being authored, not a published lib.
+    expect(
+      detectStack(
+        tmpRepo({ peerDependencies: { react: '>=18' }, devDependencies: { react: '^19' } }),
+      ),
+    ).toBe('react-app');
+    // exports but react is a normal dep (not peer) → a react app that happens to publish → react-app.
+    expect(
+      detectStack(tmpRepo({ exports: { '.': './i.js' }, dependencies: { react: '^18' } })),
+    ).toBe('react-app');
+  });
+
   it('next wins over react (next pulls react)', () => {
     expect(detectStack(tmpRepo({ dependencies: { react: '^18', next: '^14' } }))).toBe('next');
   });

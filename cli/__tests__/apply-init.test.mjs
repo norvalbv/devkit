@@ -275,6 +275,28 @@ describe('structure is stack-generic (react-app un-gated)', () => {
     expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).not.toMatch(/react-app preset/);
     expect(config(root).components.structure).toBe(true);
   });
+
+  it('--stack component-lib installs the flat preset (no domains registry)', async () => {
+    const root = tmpRepo({
+      name: 'ui',
+      version: '0',
+      type: 'module',
+      exports: { '.': './dist/index.js' },
+      peerDependencies: { react: '>=19' },
+    });
+    await applyInit(root, {
+      stack: 'component-lib',
+      selection: { ...defaultSelection(), skills: false, fallow: false },
+      devkitRef: 'v0.3.0',
+    });
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(
+      /FLAT COMPONENT-LIBRARY preset/,
+    );
+    expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
+    // The flat rule has NO lib/<domain> vocabulary → no domains.mjs is emitted.
+    expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
+    expect(config(root).components.structure).toBe(true);
+  });
 });
 
 describe('fallow apply step (mocked installer — never shells out)', () => {

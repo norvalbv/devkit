@@ -15,7 +15,7 @@ function hasDep(pkg, name) {
 
 /**
  * @param {string} cwd consumer repo root
- * @returns {'electron'|'next'|'react-app'|'node-service'|'generic'}
+ * @returns {'electron'|'next'|'component-lib'|'react-app'|'node-service'|'generic'}
  */
 export function detectStack(cwd = process.cwd()) {
   const pkg = readJson(join(cwd, 'package.json'));
@@ -25,7 +25,13 @@ export function detectStack(cwd = process.cwd()) {
   if (hasDep(pkg, 'electron') || hasDep(pkg, 'electron-vite')) return 'electron';
   if (hasDep(pkg, 'next')) return 'next';
 
-  // React (not next/electron) → the react-app structure preset. NOTE: this reads the manifest
+  // A component/primitives LIBRARY (not an app): React as a PEER dependency (the lib is consumed,
+  // not run) + a package surface (`exports`/`main`/`module`). Flat PascalCase src/ → component-lib
+  // preset. Must precede the plain-react check (a lib has react in BOTH peer and dev).
+  const isPublishedLib = Boolean(pkg.exports || pkg.main || pkg.module);
+  if (pkg.peerDependencies?.react && isPublishedLib) return 'component-lib';
+
+  // React (not next/electron/lib) → the react-app structure preset. NOTE: this reads the manifest
   // at `cwd`, so a monorepo-style repo whose React lives in a SUBDIR (e.g. services/webapp,
   // with the root manifest framework-less) still detects 'generic' at the root — install in
   // that subdir, or pass `--stack react-app` + `--scan-root <subdir>/src` at the root.
