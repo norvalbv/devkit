@@ -5,9 +5,14 @@
  * createFolderStructure shape (structureRoot, the closed-registry alternation, recurse rules,
  * __tests__/ignoredDirs ignore globs, baseline pass-through).
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { compileToEslint } from '../../gate-engine/structure/compile.mjs';
+import { buildStructureConfigs } from '../../gate-engine/structure/eslint-config.mjs';
 import { tokenPredicate, tokenRegex } from '../../gate-engine/structure/grammar.mjs';
+import { structFixtures } from './_helpers.mjs';
+
+const { tmpRepo, write, cleanup } = structFixtures('scompile-');
+afterEach(cleanup);
 
 describe('no-drift — predicate == emitted regex (single source: tokenRegex)', () => {
   const exts = ['mjs', 'js'];
@@ -103,5 +108,52 @@ describe('compileToEslint — devkit gate-engine tree (root-domain-gated)', () =
   });
   it('emits the ignoredDirs glob at any depth', () => {
     expect(out.ignorePatterns).toContain('**/eval/**');
+  });
+});
+
+describe('compileToEslint — structure root name = structureRoot basename (not tree.name)', () => {
+  // The plugin matches paths relative to structureRoot; the root node name MUST be the structureRoot's
+  // last segment or the rule silently passes everything. A tree whose logical name differs from its
+  // root (e.g. name 'lib', root 'src') must still anchor on the folder.
+  it('name lib / root src → structure.name is src', () => {
+    const out = compileToEslint({ name: 'lib', root: 'src', grammar: { files: ['{pascal}'] } }, [
+      'ts',
+      'tsx',
+    ]);
+    expect(out.structure.name).toBe('src');
+  });
+  it('nested root packages/ui/src → structure.name is src', () => {
+    const out = compileToEslint(
+      { name: 'ui', root: 'packages/ui/src', grammar: { files: ['{pascal}'] } },
+      ['ts', 'tsx'],
+    );
+    expect(out.structure.name).toBe('src');
+  });
+});
+
+describe('buildStructureConfigs — the universal shim/dogfood assembly (one source)', () => {
+  it('returns one folder-structure flat-config per grammar tree, scoped to its root', async () => {
+    const root = tmpRepo();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({
+        sourceExtensions: ['ts', 'tsx'],
+        structure: {
+          trees: [{ name: 'lib', root: 'src', grammar: { files: ['{pascal}'] } }],
+          walls: [],
+        },
+      }),
+    );
+    const configs = await buildStructureConfigs(root);
+    expect(configs).toHaveLength(1);
+    expect(configs[0].files).toEqual(['src/**/*.{ts,tsx}']);
+    expect(configs[0].rules['project-structure/folder-structure'][0]).toBe('error');
+    expect(configs[0].plugins['project-structure']).toBeTruthy();
+  });
+  it('returns [] when the repo declares no structure block (ungoverned)', async () => {
+    const root = tmpRepo();
+    write(root, 'guard.config.json', JSON.stringify({ sourceExtensions: ['ts'] }));
+    expect(await buildStructureConfigs(root)).toEqual([]);
   });
 });

@@ -276,7 +276,7 @@ describe('structure is stack-generic (react-app un-gated)', () => {
     expect(config(root).components.structure).toBe(true);
   });
 
-  it('--stack component-lib installs the flat preset (no domains registry)', async () => {
+  it('--stack component-lib installs the universal shim + a data structure block (no domains)', async () => {
     const root = tmpRepo({
       name: 'ui',
       version: '0',
@@ -289,11 +289,14 @@ describe('structure is stack-generic (react-app un-gated)', () => {
       selection: { ...defaultSelection(), skills: false, fallow: false },
       devkitRef: 'v0.3.0',
     });
-    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(
-      /FLAT COMPONENT-LIBRARY preset/,
-    );
+    // eslint.config is the shared universal shim (encodes no topology) — NOT a per-stack preset.
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/THE UNIVERSAL SHIM/);
+    // The topology is data: a `structure` block in guard.config.json (the flat `lib` tree).
+    const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(guard.structure.trees.map((t) => t.name)).toEqual(['lib']);
+    expect(guard.structure.trees[0].grammar.files).toContain('{pascal}');
     expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
-    // The flat rule has NO lib/<domain> vocabulary → no domains.mjs is emitted.
+    // Flat rule has NO lib/<domain> vocabulary → no domains.mjs.
     expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
     expect(config(root).components.structure).toBe(true);
   });

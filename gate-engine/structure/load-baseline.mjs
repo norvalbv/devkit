@@ -1,0 +1,32 @@
+/**
+ * Baseline-loader factory shared by the structure eslint configs (devkit's own dogfood
+ * `eslint.config.mjs` AND the shipped universal shim `templates/_shared/eslint.config.mjs`). Both need
+ * the same two async loaders; extracting them here keeps the rule's grandfather/exempt sourcing in ONE
+ * place so the dogfood and the shipped shim can't drift.
+ */
+
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+/**
+ * @param {string} root repo root (where eslint/baselines/ lives)
+ * @returns {{loadBaseline:(name:string)=>Promise<string[]>, loadExempt:(name:string)=>Promise<string[]>}}
+ */
+export function makeBaselineLoaders(root) {
+  // A tree's generated grandfather list = the single array exported by eslint/baselines/<name>.mjs.
+  const loadBaseline = async (name) => {
+    const f = join(root, 'eslint', 'baselines', `${name}.mjs`);
+    if (!existsSync(f)) return [];
+    const mod = await import(pathToFileURL(f).href);
+    return Object.values(mod)[0] ?? [];
+  };
+  // Permanent hand-edited exemptions keyed by tree name (eslint/baselines/exempt.mjs → structureExempt).
+  const loadExempt = async (name) => {
+    const f = join(root, 'eslint', 'baselines', 'exempt.mjs');
+    if (!existsSync(f)) return [];
+    const mod = await import(pathToFileURL(f).href);
+    return mod.structureExempt?.[name] ?? [];
+  };
+  return { loadBaseline, loadExempt };
+}

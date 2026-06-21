@@ -18,6 +18,11 @@
 
 import { STRUCTURE_TOKENS, tokenRegex } from './grammar.mjs';
 
+// The plugin matches a file's path RELATIVE to structureRoot, and the structure ROOT node's `name`
+// must be the structureRoot's last path segment (NOT the tree's logical name) — else nothing matches
+// and the rule silently passes everything. `src` → `src`; `src/renderer` → `renderer`.
+const rootName = (root) => root.split('/').filter(Boolean).pop() ?? root;
+
 const NON_ALNUM = /[^a-z0-9]/gi;
 // A libDomains key → a valid regexParameter token name: '@root' → 'root_domain', 'lib' → 'lib_domain'.
 const domainParam = (key) => `${key.replace(NON_ALNUM, '')}_domain`;
@@ -94,6 +99,6 @@ export function compileToEslint(treeSpec, exts, opts = {}) {
     ],
     regexParameters: buildRegexParameters(treeSpec, exts),
     rules: compileRules(grammar),
-    structure: { name: treeSpec.name, children: compileNode(rootNode, grammar).children },
+    structure: { name: rootName(treeSpec.root), children: compileNode(rootNode, grammar).children },
   };
 }
