@@ -42,6 +42,10 @@ export const DEFAULTS = Object.freeze({
   boundaries: [],
   // Where the ratchets / structure scans look for implementation files.
   scanRoots: ['src'],
+  // Implementation-file extensions the ratchets count (fan-out + size). Default TS — a JS/MJS
+  // codebase (devkit itself, a node CLI) sets `["mjs","js"]` so the gates actually SEE its files.
+  // A file is a test when it matches `*.<ext>` AND `.test.`/`.spec.` (excluded from impl counts).
+  sourceExtensions: ['ts', 'tsx'],
   // Append-only decision-log directory (the decisions CLI + smell gate target).
   decisionsDir: 'docs/decisions',
   // Max non-test impl files per folder (any depth) before the fanout ratchet trips.
@@ -133,6 +137,7 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  * @returns {{
  *   boundaries: string[],
  *   scanRoots: string[],
+ *   sourceExtensions: string[],
  *   decisionsDir: string,
  *   fanoutCap: number,
  *   fanoutExempt: string[],
@@ -165,6 +170,7 @@ export function resolveGuardConfig(cwd = process.cwd()) {
   return {
     boundaries: arr(file.boundaries, DEFAULTS.boundaries),
     scanRoots: arr(file.scanRoots, DEFAULTS.scanRoots),
+    sourceExtensions: arr(file.sourceExtensions, DEFAULTS.sourceExtensions),
     decisionsDir: decisionsEnv ?? file.decisionsDir ?? DEFAULTS.decisionsDir,
     fanoutCap: Number.isFinite(file.fanoutCap) ? file.fanoutCap : DEFAULTS.fanoutCap,
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
@@ -211,4 +217,28 @@ export function resolveFromCwd(cfg, field, value) {
   const raw = value ?? cfg[field];
   if (raw == null) return null;
   return isAbsolute(raw) ? raw : resolve(cfg.cwd, raw);
+}
+
+// The test-file infix (`.test.` / `.spec.`) — constant, so it lives at module scope; the
+// extension set is what varies, and that's a plain suffix check (no dynamic RegExp needed).
+const TEST_INFIX = /\.(test|spec)\./;
+
+/**
+ * Build the impl-file matchers for a `sourceExtensions` list (e.g. `['ts','tsx']` or `['mjs','js']`),
+ * so the ratchets are language-agnostic instead of hardcoding `.ts`/`.tsx`. Each returns a predicate:
+ * `isSource(name)` true for an impl file; `isTest(name)` for its test variant (`.test.`/`.spec.`);
+ * `isBarrel(name)` for an `index` barrel. The ratchets count files where `isSource && !isTest`
+ * (fan-out also excludes `isBarrel`).
+ *
+ * @param {string[]} extensions bare extensions, no dot (e.g. `['ts','tsx']`)
+ * @returns {{ isSource: (name:string)=>boolean, isTest: (name:string)=>boolean, isBarrel: (name:string)=>boolean }}
+ */
+export function sourceMatchers(extensions) {
+  const exts = extensions.map((e) => `.${e.startsWith('.') ? e.slice(1) : e}`);
+  const isSource = (name) => exts.some((x) => name.endsWith(x));
+  return {
+    isSource,
+    isTest: (name) => TEST_INFIX.test(name) && isSource(name),
+    isBarrel: (name) => exts.some((x) => name === `index${x}`),
+  };
 }

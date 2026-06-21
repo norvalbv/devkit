@@ -7,6 +7,9 @@
   "//scanRoots": "Where the ratchets + structure scans look for implementation files. Default: ['src'].",
   "scanRoots": ["src", "socket-server/src", "vercel-serverless"],
 
+  "//sourceExtensions": "Impl-file extensions the fan-out + size ratchets count. Default: ['ts','tsx']. A JS/MJS codebase (a node CLI like devkit itself) sets ['mjs','js'] so the gates actually SEE its files. Tests (*.test.<ext> / *.spec.<ext>) are auto-excluded from impl counts.",
+  "sourceExtensions": ["ts", "tsx"],
+
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target). Default: 'docs/decisions'.",
   "decisionsDir": "docs/decisions",
 
