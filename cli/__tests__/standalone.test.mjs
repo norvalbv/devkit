@@ -4,17 +4,16 @@
  * GLOBAL guard-* bins — the "like fallow init" model for shared work repos.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
 import { defaultSelection } from '../lib/components.mjs';
+import { rootRegistry } from './_helpers.mjs';
 
-let roots = [];
+const { mkTmp, cleanup } = rootRegistry();
 function repo(pkg = { name: 'shared', devDependencies: { react: '^18' } }) {
-  const root = mkdtempSync(join(tmpdir(), 'standalone-'));
-  roots.push(root);
+  const root = mkTmp('standalone-');
   execFileSync('git', ['init', '-q'], { cwd: root });
   writeFileSync(join(root, 'package.json'), JSON.stringify(pkg, null, 2));
   return root;
@@ -24,8 +23,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
+  cleanup();
 });
 
 describe('standalone (no-package) install', () => {

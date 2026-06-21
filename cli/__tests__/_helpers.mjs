@@ -44,3 +44,22 @@ export function tmpRepos(prefix) {
 /** Parse a consumer repo's written `.devkit/config.json`. */
 export const readConfig = (root) =>
   JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
+
+/**
+ * A tmp-dir registry for suites that build their OWN repo shapes (overlay/standalone/monorepo) and
+ * so can't use `tmpRepos`, but still share cleanup. `mkTmp(prefix)` makes + tracks a tmp dir; the
+ * suite fills it however it likes; `cleanup()` rm's them all. Pair with `afterEach(cleanup)`.
+ */
+export function rootRegistry() {
+  const roots = [];
+  const mkTmp = (prefix) => {
+    const root = mkdtempSync(join(tmpdir(), prefix));
+    roots.push(root);
+    return root;
+  };
+  const cleanup = () => {
+    for (const r of roots) rmSync(r, { recursive: true, force: true });
+    roots.length = 0;
+  };
+  return { mkTmp, cleanup };
+}
