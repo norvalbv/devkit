@@ -15,9 +15,9 @@ import { join } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { readJson } from '../lib/fs-helpers.mjs';
-import { removeGuardBlock } from '../lib/husky-block.mjs';
-import { removeHookRegistrations, removeHookScripts } from '../lib/install-hooks.mjs';
-import { removeSearchCode } from '../lib/install-search-code.mjs';
+import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
+import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
+import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 
 function rm(path, label, dryRun) {

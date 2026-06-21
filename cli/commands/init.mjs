@@ -23,8 +23,8 @@ import { AGENT_TARGETS, COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/c
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
-import { generateImportWallBaseline } from '../lib/generate-import-wall-baseline.mjs';
-import { generateStructureBaselines } from '../lib/generate-structure-baseline.mjs';
+import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mjs';
+import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mjs';
 import {
   buildFullHook,
   buildGuardBlock,
@@ -33,20 +33,20 @@ import {
   removeFragment,
   removeGuardBlock,
   replaceGuardBlock,
-} from '../lib/husky-block.mjs';
+} from '../lib/husky/husky-block.mjs';
 import {
   ensureFallowGitignore,
   installFallow,
   saveFallowBaselines,
   wireFallowGate,
-} from '../lib/install-fallow.mjs';
+} from '../lib/install/install-fallow.mjs';
 import {
   installHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
   syncHookScripts,
-} from '../lib/install-hooks.mjs';
-import { installSearchCode } from '../lib/install-search-code.mjs';
+} from '../lib/install/install-hooks.mjs';
+import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import { installOverlay } from '../lib/overlay.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';

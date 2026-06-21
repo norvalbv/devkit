@@ -28,7 +28,7 @@ import {
 import { join } from 'node:path';
 import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
-import { buildOverlayHook, buildPassthroughHook } from './husky-block.mjs';
+import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs';
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 const LOCAL_HOOKS = '.devkit/hooks';

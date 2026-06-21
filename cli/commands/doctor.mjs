@@ -11,9 +11,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
-import { markEnd, markStart } from '../lib/husky.mjs';
-import { extractGuardBlock } from '../lib/husky-block.mjs';
-import { checkHookRegistrations } from '../lib/install-hooks.mjs';
+import { markEnd, markStart } from '../lib/husky/husky.mjs';
+import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
+import { checkHookRegistrations } from '../lib/install/install-hooks.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;

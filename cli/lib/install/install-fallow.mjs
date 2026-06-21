@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { writeIfAbsent } from './fs-helpers.mjs';
+import { writeIfAbsent } from '../fs-helpers.mjs';
 
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
