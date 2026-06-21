@@ -1,26 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateStructureBaselines,
   generateTreeBaseline,
 } from '../lib/generate/generate-structure-baseline.mjs';
+import { structFixtures } from './_helpers.mjs';
 
-let roots = [];
-function tmpRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'struct-'));
-  roots.push(root);
-  return root;
-}
-function write(root, rel, content = 'export {};\n') {
-  mkdirSync(join(root, rel, '..'), { recursive: true });
-  writeFileSync(join(root, rel), content);
-}
-afterEach(() => {
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
-});
+const { tmpRepo, write, cleanup } = structFixtures('struct-');
+afterEach(cleanup);
 
 describe('generateTreeBaseline — renderer', () => {
   it('grandfathers exactly the violators of a tiny fixture (manual-walk, no scan dedup)', () => {

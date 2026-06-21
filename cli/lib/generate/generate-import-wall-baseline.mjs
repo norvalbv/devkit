@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveGuardConfig } from '../../../gate-engine/config.mjs';
 
 const OUT = 'eslint/baselines/imports.mjs';
 const RULE = 'project-structure/independent-modules';
@@ -186,10 +187,20 @@ export const ${exportName} = `;
  * write under dryRun. Throws on any loud-failure guard (never silently widens).
  *
  * @param {string} cwd consumer repo root
- * @param {{walls?:object, exemptPatterns?:Set<string>, dryRun?:boolean, log?:Function}} [opts]
+ * @param {{walls?:object, exemptPatterns?:Set<string>, dryRun?:boolean, log?:Function, cfg?:object}} [opts]
  */
 export function generateImportWallBaseline(cwd = process.cwd(), opts = {}) {
   const log = opts.log ?? (() => {});
+  // Empty-walls early-return: a config-driven repo (declares structure.trees) with NO import walls —
+  // devkit's own cli/gate-engine, a flat component lib — needs no eslint scan at all. Skip cleanly
+  // instead of running the electron-shaped scan and failing on "eslint not found".
+  // ponytail: when a config-driven repo declares NON-empty structure.walls, classifyWidening still
+  // uses the electron DEFAULT_WALLS shape — generalize to declared wallClasses when frink migrates.
+  const cfg = opts.cfg ?? resolveGuardConfig(cwd);
+  if ((cfg.structure?.trees?.length ?? 0) > 0 && (cfg.structure?.walls?.length ?? 0) === 0) {
+    log(`  ✓ ${OUT}: no import walls declared — skipped`);
+    return [];
+  }
   const { entries, classCounts } = computeImportWallBaseline(cwd, opts);
   const exportName = opts.walls?.exportName ?? DEFAULT_WALLS.exportName;
   const out = join(cwd, OUT);
