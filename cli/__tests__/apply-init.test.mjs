@@ -245,7 +245,7 @@ describe('detectInstalled', () => {
 });
 
 describe('structure is stack-generic (react-app un-gated)', () => {
-  it('--stack react-app installs the react-app structure template + records structure on', async () => {
+  it('--stack react-app installs the universal shim + components/pages data trees (no domains)', async () => {
     const root = tmpRepo({
       name: 'fx',
       version: '0',
@@ -257,11 +257,12 @@ describe('structure is stack-generic (react-app un-gated)', () => {
       selection: { ...defaultSelection(), skills: false, fallow: false },
       devkitRef: 'v0.3.0',
     });
-    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
-    expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(true);
+    // Config-driven now: the shared shim + a data structure block (components + pages), no per-stack rule.
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/THE UNIVERSAL SHIM/);
+    const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(guard.structure.trees.map((t) => t.name)).toEqual(['components', 'pages']);
     expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
-    // It must come from templates/react-app, not templates/electron.
-    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/react-app preset/);
+    expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
     expect(config(root).components.structure).toBe(true);
   });
 
