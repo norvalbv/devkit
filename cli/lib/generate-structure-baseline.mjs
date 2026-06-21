@@ -87,6 +87,8 @@ function collect(walker) {
 function makeRendererWalker(root, domains) {
   const RENDERER_LIB_DOMAINS = domains.RENDERER_LIB_DOMAINS ?? [];
 
+  // Reason: recursive renderer-tree dispatch: one branch per top-level folder kind (components/features/hooks/lib/frozen) mirrors the renderer layout; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkRenderer(out) {
     const top = readdirSync(root, { withFileTypes: true });
     for (const e of top) {
@@ -146,6 +148,8 @@ function makeRendererWalker(root, domains) {
     }
   }
 
+  // Reason: recursive component-tree walk: one branch per file/folder kind (ui/__tests__/PascalCase vs kebab, broken vs grandfathered) IS the folder-structure rule reproduced by hand; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkComponentTree(out, rel, ancestorKebab, ancestorBroken) {
     const abs = join(root, rel);
     const entries = readdirSync(abs, { withFileTypes: true });
@@ -191,6 +195,8 @@ function makeRendererWalker(root, domains) {
     }
   }
 
+  // Reason: recursive hooks-folder walk: one branch per hook-naming kind (kebab/camel file vs PascalCase use-folder vs broken) mirrors the hooks layout rule; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkHooks(out, rel) {
     const abs = join(root, rel);
     for (const e of readdirSync(abs, { withFileTypes: true })) {
@@ -254,11 +260,15 @@ function libFileAllowed(name) {
 
 // Shared recursive walker for the kebab-module trees (renderer lib + shared +
 // socket): per-tree policy injected as the base dir + file-allow + __tests__ regex.
+// Reason: recursive kebab-module-tree walk: one branch per file/__tests__/subfolder kind (broken vs allowed, per-tree fileAllowed + testRegex) mirrors the kebab-domain rule; flattening scatters a single traversal
+// fallow-ignore-next-line complexity
 function walkKebabTree(out, base, rel, broken, fileAllowed, testRegex) {
   const abs = join(base, rel);
   for (const e of readdirSync(abs, { withFileTypes: true })) {
     const childRel = `${rel}/${e.name}`;
     if (e.isFile()) {
+      // Reason: parallel per-tree-kind walk blocks; each mirrors a different folder convention, deliberately not merged (see file header)
+      // fallow-ignore-next-line code-duplication
       if (!broken && fileAllowed(e.name)) continue;
       add(out, childRel);
       continue;
@@ -316,6 +326,8 @@ function makeMainWalker(root, domains) {
     }
   }
 
+  // Reason: recursive main-dir walk: one branch per file/__tests__/subfolder kind (broken vs index/kebab/root) mirrors the src/main folder-structure rule reproduced by hand; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkMainDir(out, rel, isRoot, ancestorBroken) {
     const abs = rel ? join(root, rel) : root;
     const entries = readdirSync(abs, { withFileTypes: true });
@@ -334,6 +346,8 @@ function makeMainWalker(root, domains) {
           continue;
         }
         if (KEBAB_TS.test(e.name)) continue;
+        // Reason: parallel per-tree-kind walk blocks; each mirrors a different folder convention, deliberately not merged (see file header)
+        // fallow-ignore-next-line code-duplication
         if (KEBAB_TEST.test(e.name)) continue;
         add(out, childRel);
         continue;
@@ -428,6 +442,8 @@ function preloadFileAllowed(name) {
 function makeSocketWalker(root, domains) {
   const SOCKET_LIB_DOMAINS = domains.SOCKET_LIB_DOMAINS ?? [];
 
+  // Reason: recursive socket-server-tree dispatch: one branch per top-level folder kind (types/api/routes/lib/other, registered vs broken domains) mirrors the socket-server layout rule; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkSocketServer(out) {
     for (const e of readdirSync(root, { withFileTypes: true })) {
       if (e.isFile()) {
@@ -501,6 +517,8 @@ function makeVercelWalker(root, domains) {
     }
   }
 
+  // Reason: recursive vercel-lib-domain walk: one branch per file/__fixtures__/__snapshots__/__tests__/subfolder kind (broken vs kebab) mirrors the vercel lib-domain rule; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   function walkVercelLibDomain(out, rel, broken) {
     for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
       const childRel = `${rel}/${e.name}`;

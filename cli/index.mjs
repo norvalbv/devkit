@@ -80,6 +80,8 @@ const COMMANDS = {
   update: () => import('./commands/update.mjs'),
 };
 
+// Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
+// fallow-ignore-next-line complexity
 async function main() {
   let cmd = process.argv[2];
 

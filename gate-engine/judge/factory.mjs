@@ -160,6 +160,8 @@ export function makeJudgeGate(cfg) {
     });
   };
 
+  // Reason: the branches ARE the gate lifecycle states (skip, print-mode vs gate-mode, warn-verdict tail, fail-open catch); flat sequential guards each dispatching to a process.exit, near-zero nesting — high branch COUNT, each trivial, extracting them scatters one exit-code decision
+  // fallow-ignore-next-line complexity
   const run = (gate) => {
     try {
       if (process.env[env.skip]) {

@@ -246,6 +246,8 @@ export function cmdAdd(slug, o, cwd = process.cwd()) {
 }
 
 // Epic Target — the PRD. Requires context + ruling + consequences + tradeoff + vision-fit; updates INDEX.
+// Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, already-targeted re-target guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
+// fallow-ignore-next-line complexity
 function addTarget(slug, o, p) {
   if (!o.ruling || !o.context || !o.consequences || !o.tradeoff || !o.visionFit) {
     console.error(
@@ -483,6 +485,8 @@ function printRanked(rows, mode) {
   for (const r of rows) console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${r.why}` : ''}`);
 }
 
+// Reason: the branches ARE the query ranking algorithm's fallback tiers (semantic cosine over the vector index, then BM25 lexical floor, then raw first-k); the embed-availability and stale-dim filtering are inherent to degrading gracefully and flattening scatters one ranked lookup
+// fallow-ignore-next-line complexity
 export async function cmdQuery(text, k = 5, cwd = process.cwd()) {
   if (!text?.trim()) {
     console.error('Usage: guard-decisions query "<text>" [--top K]');

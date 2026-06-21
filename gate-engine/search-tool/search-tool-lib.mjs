@@ -111,6 +111,8 @@ export function extractPattern(c) {
  * Classify a pattern as literal (grep is correct) or conceptual (steer toward
  * the semantic-search tool). Verdicts: literal | conceptual_medium | conceptual_high.
  */
+// Reason: the branches ARE the literal-vs-conceptual classification algorithm: each guard is a distinct verdict tier (filesystem path, regex/glob, single identifier, error-message shape, question word, descriptive phrasing, 4-word/3-word/2-word thresholds) checked in priority order; extracting them hides the heuristic ladder
+// fallow-ignore-next-line complexity
 export function classify(pattern) {
   const trimmed = (pattern ?? '').trim();
   if (!trimmed) return { verdict: 'literal', reason: 'empty' };

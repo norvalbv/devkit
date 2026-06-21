@@ -140,6 +140,8 @@ const DEFAULT_CHUNK_BUDGET = 950;
  * Read the chunk file list for a given chunk ID from the review JSON.
  * Returns null if no chunks exist or chunk ID is invalid.
  */
+// Reason: vendored upstream-sync script: CRAP-flagged thin lookup wrapper — guards (no review file / no chunks / chunk-id not found) each exit-or-return before the chunk.files read; exercised end-to-end by --chunk callers, not unit tested
+// fallow-ignore-next-line complexity
 function getChunkFiles(chunkId) {
   if (!existsSync(REVIEW_PATH)) {
     log('❌ No review file found. Run review-init first to use --chunk.');
@@ -228,6 +230,8 @@ function list() {
   }
 }
 
+// Reason: vendored upstream-sync script: flat presentation orchestration — sequential git calls (message, name-only, stat, full diff) each conditionally chunk-filtered; high branch COUNT from the optional --chunk filter applied per step, near-zero nesting
+// fallow-ignore-next-line complexity
 function show(hash) {
   if (!hash) {
     log('Usage: show <hash> [--chunk N]');
@@ -265,6 +269,8 @@ function show(hash) {
   log(diff);
 }
 
+// Reason: vendored upstream-sync script: the branches ARE the accept state machine — order/next-commit guards, then the full-accept vs review-file partial-accept fork, with per-file pending/accepted/rejected/deferred partitioning that records the partial-commit ledger; extracting hides the accept contract
+// fallow-ignore-next-line complexity
 function accept(hash) {
   if (!hash) {
     log('Usage: accept <hash> [--review-file]');
@@ -272,6 +278,8 @@ function accept(hash) {
   }
 
   const useReviewFile = process.argv.includes('--review-file');
+  // Reason: vendored upstream-sync skill script: internal parallel review/diff blocks owned by the skill's flow, not devkit's core gate
+  // fallow-ignore-next-line code-duplication
   const state = loadState();
   const fullHash = getFullHash(hash);
   const pending = getPendingCommits(state);
@@ -357,10 +365,14 @@ function accept(hash) {
 
 function skip(hash) {
   if (!hash) {
+    // Reason: vendored upstream-sync skill script: internal parallel review/diff blocks owned by the skill's flow, not devkit's core gate
+    // fallow-ignore-next-line code-duplication
     log('Usage: skip <hash>');
     process.exit(1);
   }
 
+  // Reason: vendored upstream-sync skill script: internal parallel review/diff blocks owned by the skill's flow, not devkit's core gate
+  // fallow-ignore-next-line code-duplication
   const state = loadState();
   const fullHash = getFullHash(hash);
   const pending = getPendingCommits(state);
@@ -414,6 +426,8 @@ function parseHunkRanges(diffText) {
  * `ranges` are upstream hunk ranges (old-side, since 1code baseline = upstream's parent).
  * `margin` adds extra lines around each range for overlap detection.
  */
+// Reason: vendored upstream-sync script: the branches ARE the hunk-overlap filter algorithm — a line-by-line scan that tracks diff-header vs hunk-header vs body state, flushing each buffered hunk only when its range overlaps a target range within margin; flattening breaks the accumulate-then-flush invariant
+// fallow-ignore-next-line complexity
 function filterDiffHunks(diffText, ranges, margin = 30) {
   if (ranges.length === 0) return diffText;
 
@@ -480,6 +494,8 @@ function filterDiffHunks(diffText, ranges, margin = 30) {
   return filteredLines.join('\n');
 }
 
+// Reason: vendored upstream-sync script: per-file delta classifier — the branches ARE the comparison tiers (missing-in-both / new-upstream / deleted-in-frink / identical / diverged), with a further truncate-vs-show-full decision on diff size; extracting hides the per-file decision tree
+// fallow-ignore-next-line complexity
 function frinkDelta(hash) {
   if (!hash) {
     log('Usage: frink-delta <hash> [--chunk N]');
@@ -584,6 +600,8 @@ function frinkDelta(hash) {
 /**
  * Extract the diff section for a specific file from a combined diff output.
  */
+// Reason: vendored upstream-sync script: line-by-line diff state machine — `diff --git` boundaries toggle capture on/off and break at the next file; the nested capture/break branches ARE the section-extraction logic
+// fallow-ignore-next-line complexity
 function extractFileDiff(fullDiff, filePrefix) {
   const lines = fullDiff.split('\n');
   let capture = false;
@@ -607,6 +625,8 @@ function extractFileDiff(fullDiff, filePrefix) {
 const SIZE_THRESHOLD_LINES = 950;
 const SIZE_THRESHOLD_FILES = 6;
 
+// Reason: vendored upstream-sync script: CRAP-flagged thin sizing wrapper — parse numstat (binary '-' guards), sum lines, then LARGE/SMALL → Path A/B verdict; branch count is the binary-marker handling, exercised end-to-end not unit tested
+// fallow-ignore-next-line complexity
 function checkSize(hash) {
   if (!hash) {
     log('Usage: check-size <hash>');
@@ -634,6 +654,8 @@ function checkSize(hash) {
   log(`${verdict} (${filesCount} files, ${totalLines} lines) → ${path}`);
 }
 
+// Reason: vendored upstream-sync script: flat orchestration — sequential validate-next-commit, fetch numstat, parse per-file stats, greedy budget-chunk packing, then build review JSON; high branch COUNT from sequential steps, near-zero nesting
+// fallow-ignore-next-line complexity
 function reviewInit(hash) {
   if (!hash) {
     log('Usage: review-init <hash> [--budget N]');
@@ -641,6 +663,8 @@ function reviewInit(hash) {
   }
 
   if (existsSync(REVIEW_PATH)) {
+    // Reason: vendored upstream-sync skill script: internal parallel review/diff blocks owned by the skill's flow, not devkit's core gate
+    // fallow-ignore-next-line code-duplication
     log('⚠️  Review file already exists. Run review-clean first to start fresh.');
     process.exit(1);
   }
@@ -765,6 +789,8 @@ function logFileEntry(f) {
   }
 }
 
+// Reason: vendored upstream-sync script: flat presentation orchestration — sequential if (bucket.length) printSection() per status (pending/accepted/deferred/rejected) plus chunk-progress summary; high branch COUNT, each block trivial
+// fallow-ignore-next-line complexity
 function reviewShow() {
   const review = loadReview();
 
@@ -817,6 +843,8 @@ function reviewShow() {
   );
 }
 
+// Reason: vendored upstream-sync script: CLI arg parser, low cyc/cog but CRAP-flagged because untested; dedupe/trim/integer-validate of comma-separated 1-based IDs is exercised end-to-end via review-accept/reject/defer
+// fallow-ignore-next-line complexity
 function parseIds(idsArg) {
   if (!idsArg) {
     log('Usage: review-accept <ids> or review-reject <ids> (comma-separated, 1-based)');
@@ -842,6 +870,8 @@ function parseIds(idsArg) {
 
 const REVIEW_ALLOWED_STATUSES = new Set(['accepted', 'rejected', 'deferred']);
 
+// Reason: vendored upstream-sync script: thin CLI wrapper, low cyc/cog but CRAP-flagged because untested; status-allowlist guard plus per-id lookup/mutate loop is exercised end-to-end by review-accept/reject/defer, not unit tested
+// fallow-ignore-next-line complexity
 function reviewSetStatus(idsArg, targetStatus) {
   if (!REVIEW_ALLOWED_STATUSES.has(targetStatus)) {
     log(`❌ Invalid status "${targetStatus}". Use: accepted, rejected, or deferred.`);
@@ -897,6 +927,8 @@ function reviewDeferAll() {
   reviewShow();
 }
 
+// Reason: vendored upstream-sync script: dev-only cleanup wrapper, low cyc/cog but CRAP-flagged because untested; exercised end-to-end by the review flow, each branch is an independent unlink of one sync artifact (review file, chunk temps, workgroups)
+// fallow-ignore-next-line complexity
 function reviewClean() {
   let cleaned = 0;
 
@@ -941,6 +973,8 @@ function getChunkTempFiles() {
  * Validates schema, merges findings, reports completeness.
  * Does NOT delete temp files — review-clean handles cleanup.
  */
+// Reason: vendored upstream-sync script: per-temp-file schema validation (JSON parse, commit/chunkId/files checks) plus per-entry merge and missing/incomplete-chunk reporting; each guard is a distinct validation rule, extracting hides the merge contract
+// fallow-ignore-next-line complexity
 function reviewMergeChunks() {
   const review = loadReview();
   const tempFiles = getChunkTempFiles();
@@ -1065,6 +1099,8 @@ const SHARED_PATH_PREFIXES = ['src/lib/', 'src/types/', 'src/constants/'];
  * Group accepted files into bounded workgroups for the merger.
  * Shared dependencies go first (workgroup 1), then remaining files by line budget.
  */
+// Reason: vendored upstream-sync script: the branches ARE the workgroup-packing algorithm (shared-deps partition, then directory-sorted bin-packing under a line budget); flattening scatters one greedy pass
+// fallow-ignore-next-line complexity
 function reviewWorkgroups() {
   const review = loadReview();
   const budget = parseBudgetArg(DEFAULT_WORKGROUP_BUDGET);

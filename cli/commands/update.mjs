@@ -54,6 +54,8 @@ function currentVersion() {
   return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 }
 
+// Reason: flat update pipeline: sequential guard-and-return steps (remote unreachable, no tags, up-to-date, --dry-run) plus the package-vs-global mode fork; near-zero nesting, high branch COUNT where each branch is a trivial early-out
+// fallow-ignore-next-line complexity
 export default async function update(args, cwd) {
   const dryRun = args.includes('--dry-run');
   const current = currentVersion();

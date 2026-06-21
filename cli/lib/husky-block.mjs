@@ -252,6 +252,8 @@ exit 0
 }
 
 /** Slice the (package-scoped) marker block (inclusive) out of a hook; null if absent. */
+// Reason: parallel marker-block string builders; the shape rhymes but each emits a distinct hook fragment
+// fallow-ignore-next-line code-duplication
 export function extractGuardBlock(hookContent, pkgRel = '') {
   const s = markStart(pkgRel);
   const e = markEnd(pkgRel);
@@ -292,6 +294,8 @@ export function hasFragment(hookContent, id) {
  * Replace (or insert/append) the package-scoped marker block in an existing hook. A new
  * package's block is appended, leaving any other packages' blocks + the consumer's lines intact.
  */
+// Reason: parallel marker-block string builders; the shape rhymes but each emits a distinct hook fragment
+// fallow-ignore-next-line code-duplication
 export function replaceGuardBlock(hookContent, newBlock, pkgRel = '') {
   const s = markStart(pkgRel);
   const e = markEnd(pkgRel);
@@ -313,6 +317,8 @@ export function replaceGuardBlock(hookContent, newBlock, pkgRel = '') {
  * Remove the (package-scoped) devkit-guards block (markers inclusive) from a hook, collapsing
  * the blank lines that surrounded it. Returns { content, removed }.
  */
+// Reason: parallel marker-block string builders; the shape rhymes but each emits a distinct hook fragment
+// fallow-ignore-next-line code-duplication
 export function removeGuardBlock(hookContent, pkgRel = '') {
   const s = markStart(pkgRel);
   const e = markEnd(pkgRel);

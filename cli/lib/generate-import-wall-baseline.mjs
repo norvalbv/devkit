@@ -107,6 +107,8 @@ function runScan(cwd, eslintBin, globs) {
  * @param {string} cwd consumer repo root
  * @param {{walls?:object, exemptPatterns?:Set<string>}} [opts]
  */
+// Reason: the branches ARE the loud-failure-guard algorithm: each per-message arm (unresolvable / no-parseable-path / no-known-wall-class -> push failure, else widen) is a distinct refuse-vs-widen decision that must NOT silently collapse; extracting them scatters the never-silently-widen contract across helpers
+// fallow-ignore-next-line complexity
 export function computeImportWallBaseline(cwd, opts = {}) {
   const walls = { ...DEFAULT_WALLS, ...(opts.walls ?? {}) };
   const exemptPatterns = opts.exemptPatterns ?? new Set();

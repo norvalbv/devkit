@@ -37,6 +37,8 @@ import {
   VERCEL_LIB_DOMAINS,
 } from './eslint/domains.mjs';
 
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // Load a named export from a baseline .mjs, or [] if the file doesn't exist yet.
@@ -284,6 +286,8 @@ const mainStructure = createFolderStructure({
 // ─── src/shared/ structure ───────────────────────────────────────────────────
 // PROCESS-AGNOSTIC code imported by BOTH main and renderer. Recursive kebab
 // modules; index.ts OPTIONAL (mostly leaf types/helpers).
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const sharedKebabFolderRule = {
   name: '{kebab_case}',
   children: [
@@ -351,6 +355,8 @@ const preloadStructure = createFolderStructure({
 // Railway-style backend (Express). Kept here so the SAME baseline + domain
 // vocabulary work the moment you add the dir. The FLAT-CONFIG block that
 // activates this rule is commented out below — uncomment when you add the dir.
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const socketKebabFolderRule = {
   name: '{kebab_case}',
   children: [
@@ -477,6 +483,8 @@ const vercelStructure = createFolderStructure({
 // import-wall baseline generator to (re)generate eslint/baselines/imports.mjs.
 const IMPORT_WALL_SCAN = process.env.DEVKIT_IMPORTS_BASELINE_SCAN === '1';
 
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const importWalls = createIndependentModules({
   pathAliases: { baseUrl: '.', paths: { '@/*': ['src/renderer/*'] } },
   debugMode: IMPORT_WALL_SCAN,
@@ -649,6 +657,8 @@ export default [
   // File-size + function-size limits. Source = 500/file + 200/function. Tests =
   // 2000/file (loose). Stub plugins register rule names for legacy inline disables.
   {
+    // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+    // fallow-ignore-next-line code-duplication
     files: ['src/**/*.{ts,tsx}', 'socket-server/**/*.ts', 'vercel-serverless/**/*.ts'],
     ignores: ['**/*.{test,spec}.{ts,tsx}'],
     languageOptions: {
@@ -676,6 +686,8 @@ export default [
   {
     // React components (.tsx): large connected render functions are legitimate —
     // per-function cap 300 (file cap stays 500). .ts logic stays 200.
+    // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+    // fallow-ignore-next-line code-duplication
     files: ['src/**/*.tsx', 'socket-server/**/*.tsx', 'vercel-serverless/**/*.tsx'],
     ignores: ['**/*.{test,spec}.tsx'],
     languageOptions: {

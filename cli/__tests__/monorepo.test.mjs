@@ -3,6 +3,8 @@
  * the package, but the husky hook + repo-wide skills at the GIT ROOT, with the gates scoped
  * `cd <pkgRel>` in a package-scoped marker block (so multiple packages coexist).
  */
+// Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+// fallow-ignore-next-line code-duplication
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

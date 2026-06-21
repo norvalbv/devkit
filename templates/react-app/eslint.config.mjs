@@ -74,6 +74,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // scanRoots value also drives the guard-fanout / guard-size ratchets — one value, one root.
 // guard.config.json sits beside this config at the repo root, so read it relative to HERE
 // (cwd-independent). On a bare repo with no guard.config.json yet, falls back to 'src'.
+// Reason: CRAP-driven (cyc 5/cog 4, low): each branch is one defensive narrowing of untrusted guard.config.json (file readable? scanRoots an array? [0] a non-empty string? else 'src'); exercised end-to-end at eslint config load, not unit-tested
+// fallow-ignore-next-line complexity
 function appRoot() {
   try {
     const cfg = JSON.parse(readFileSync(join(HERE, 'guard.config.json'), 'utf8'));
@@ -83,6 +85,8 @@ function appRoot() {
     return 'src';
   }
 }
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const SRC = appRoot();
 
 // Load a named export from a baseline .mjs, or [] if the file doesn't exist yet.
@@ -195,6 +199,8 @@ const componentsStructure = createFolderStructure({
 });
 
 // ── src/pages/ ───────────────────────────────────────────────────────────────
+// Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+// fallow-ignore-next-line code-duplication
 const pagesStructure = createFolderStructure({
   regexParameters: regex,
   structureRoot: `${SRC}/pages`,
@@ -248,6 +254,8 @@ export default [
   // render functions get 300. Tests = 2000/file (loose). Stub plugins register
   // rule names for legacy inline disables.
   {
+    // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+    // fallow-ignore-next-line code-duplication
     files: [`${SRC}/**/*.{ts,tsx}`],
     ignores: ['**/*.{test,spec}.{ts,tsx}'],
     languageOptions: {
@@ -275,6 +283,8 @@ export default [
   {
     // React components (.tsx): large connected render functions are legitimate —
     // per-function cap 300 (file cap stays 500). .ts logic stays 200.
+    // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
+    // fallow-ignore-next-line code-duplication
     files: [`${SRC}/**/*.tsx`],
     ignores: ['**/*.{test,spec}.tsx'],
     languageOptions: {

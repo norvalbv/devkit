@@ -1,6 +1,7 @@
 {
-  // devkit is a CLI + library + template-shipper. Tune the dead-code analyzer to that shape so the
-  // report reflects REAL dead code, not the false positives static analysis hits on this layout.
+  // devkit is a CLI + library + template-shipper. Declare the real reachability roots so dead-code
+  // analysis reflects ACTUAL dead code, not false positives from this layout. (Entry points are
+  // reachability roots, not ignores — every file is still fully analyzed for complexity + dupes.)
   "entry": [
     "cli/index.mjs", // CLI root
     "cli/commands/*.mjs", // each command's default export is invoked via DYNAMIC import() in index.mjs
@@ -9,10 +10,33 @@
     "gate-engine/**/eval/*.mjs", // dev eval harnesses
     "gate-engine/**/bench.mjs" // dev benchmarks
   ],
-  // templates/** is SHIPPED text copied into consumer repos — its imports are CONSUMER deps, not devkit's.
-  "ignorePatterns": ["templates/**"],
-  // jscpd is spawned as a BINARY by guard-clone (clone-detector.mjs), never imported.
-  "ignoreDependencies": ["jscpd"],
-  // An export referenced within its own file is an internal helper, not dead — don't flag it.
-  "ignoreExportsUsedInFile": true
+  // An export referenced within its own file is an internal helper, not dead — a policy, not a
+  // file ignore.
+  "ignoreExportsUsedInFile": true,
+  // Dependency-level findings (package.json is JSON — cannot carry an inline suppression, and
+  // unlisted-dependency is a manifest-level finding, not suppressible at the import site). Each
+  // names a PACKAGE (not a file) and is a genuine false positive for devkit:
+  "ignoreDependencies": [
+    "jscpd", // spawned as a BINARY by guard-clone (clone-detector.mjs), never imported
+    // The next two are imported ONLY by templates/**/eslint.config.mjs — shipped text the CONSUMER
+    // installs into its own repo; they are deliberately NOT devkit dependencies (see template headers).
+    "@typescript-eslint/parser",
+    "eslint-plugin-project-structure"
+  ],
+  // Quality BARS (not ignores — every file is still analyzed; findings over the bar are refactored,
+  // or carry an inline directive with the reason on the comment line directly above it:
+  //   // Reason: <why this is intentional / irreducible>
+  //   // fallow-ignore-next-line complexity
+  // (fallow v2.89 parses every token AFTER the rule as another rule name, so the reason must NOT
+  // share the directive line — it goes on its own `//` line above.)
+  "health": {
+    // 20/20 is the standard cyclomatic+cognitive bar (fallow's cognitive default of 15 is library-
+    // strict; a setup CLI's flat dispatch branches read fine at 20).
+    "maxCyclomatic": 20,
+    "maxCognitive": 20
+  },
+  "duplicates": {
+    // A clone under ~10 lines isn't worth extracting (the indirection costs more than the echo).
+    "minLines": 10
+  }
 }

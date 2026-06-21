@@ -111,6 +111,11 @@ async function checkGuardConfig(cwd) {
   }
 }
 
+// Reason: the branches ARE the manifest-drift algorithm — per file, two independent SHA comparisons
+// (devkit source vs manifest, consumer copy vs manifest) feed two drift buckets, then a
+// missing-manifest short-circuit and a source/consumer DRIFT split. Each branch is a distinct drift
+// verdict; extracting them hides which side drifted.
+// fallow-ignore-next-line complexity
 async function checkSkills(cwd, surface = 'claude') {
   // Skills are repo-wide → manifest + the agent-surface dir live at the git root (cwd for a
   // single-package repo). Verify against the selected surface (.claude or .cursor — same content).
@@ -139,6 +144,8 @@ async function checkSkills(cwd, surface = 'claude') {
 }
 
 // Agents are repo-wide → manifest + the agent-surface dir live at the git root (same contract as skills).
+// Reason: the branches ARE the manifest-drift algorithm (same contract as checkSkills): per file, two independent SHA comparisons (devkit source vs manifest, consumer copy vs manifest) feed two drift buckets, then a missing-manifest short-circuit and a source/consumer DRIFT split. Each branch is a distinct drift verdict; extracting them hides which side drifted.
+// fallow-ignore-next-line complexity
 async function checkAgents(cwd, surface = 'claude') {
   const { gitRoot } = detectGitRoot(cwd);
   const manifest = readJson(join(gitRoot, '.devkit', 'agents-manifest.json'));
@@ -277,6 +284,8 @@ function selectionFlags(sel) {
 // from its template DIRECTLY (not via `init --force`, which would also clobber the
 // consumer's tuned guard.config.json); MISSING files + husky go through `init` for the
 // RECORDED selection (selectionFlags) so --fix never silently re-adds a deselected component.
+// Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (template-rewrite loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
+// fallow-ignore-next-line complexity
 function applyFix(cwd, results, sel, stack) {
   console.log('\n--fix: re-running idempotent steps for the recorded selection...');
 
@@ -363,6 +372,8 @@ function runOverlayDoctor(cwd) {
  *
  * @returns {Promise<{ results: object[], sel: object }>}
  */
+// Reason: flat dispatch: one `if (selected) push(check())` per component; the branch COUNT is high but each is trivial and nesting is zero. Splitting obscures the check list.
+// fallow-ignore-next-line complexity
 async function collectResults(cwd, cfg, configResult) {
   // Selection-aware: only check the components actually installed (fresh init always records it).
   const sel = cfg.components ?? DEFAULT_DOCTOR_SEL;
@@ -404,6 +415,8 @@ async function collectResults(cwd, cfg, configResult) {
   return { results, sel };
 }
 
+// Reason: flat CLI orchestration: sequential not-initialized short-circuit, overlay short-circuit, collectResults, print loop, then fix-if-drift; near-zero nesting, each branch a single guarded step. High branch COUNT, each trivial; splitting fragments the command's top-level flow.
+// fallow-ignore-next-line complexity
 export default async function run(args, cwd) {
   const fix = args.includes('--fix');
 

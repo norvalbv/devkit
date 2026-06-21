@@ -148,6 +148,8 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  *   cwd: string,
  * }}
  */
+// Reason: flat config-precedence resolver: each field independently applies the same env ?? file ?? DEFAULT ladder (plus Number.isFinite/Boolean guards); the branch COUNT is high but every branch is a trivial fallback, and the ?? chains ARE the precedence policy — extracting them scatters one resolution table.
+// fallow-ignore-next-line complexity
 export function resolveGuardConfig(cwd = process.cwd()) {
   const file = loadConfigFile(cwd);
 

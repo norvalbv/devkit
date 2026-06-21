@@ -1,3 +1,5 @@
+// Reason: each gate-engine ships its OWN copy of this primitive so engines stay independently vendorable with no cross-engine import (documented in the files)
+// fallow-ignore-next-line code-duplication
 import { renameSync, writeFileSync } from 'node:fs';
 
 /**
