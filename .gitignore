@@ -4,3 +4,6 @@ node_modules
 # devkit's own gate artifacts (regenerated; not source)
 .fallow/
 .search-code/
+
+# eslint-plugin-project-structure cache
+projectStructure.cache.json

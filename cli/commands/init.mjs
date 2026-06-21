@@ -74,10 +74,12 @@ const STRUCTURE_TEMPLATE_FILES = {
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
     ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
   ],
-  // Flat component lib: no domain registry (the flat rule has no lib/<domain> vocabulary).
+  // Flat component lib — CONFIG-DRIVEN (the universal path): the topology is a `structure` block in
+  // guard.config.json, and eslint.config.mjs is the shared shim that compiles it via devkit's
+  // compileToEslint. No per-stack eslint.config / domains. `_shared/` srcs resolve from templates/.
   'component-lib': [
-    ['eslint.config.mjs', 'eslint.config.mjs'],
-    ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+    ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
+    ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
   ],
 };
 
@@ -240,12 +242,17 @@ function installStructureFiles(cwd, stack, force, dryRun) {
   ];
   for (const [src, dest] of items) {
     const target = join(cwd, dest);
+    // A `_shared/<file>` src resolves from templates/ (the universal shim/exempt shared across stacks);
+    // everything else from the stack's own template dir.
+    const srcPath = src.startsWith('_shared/')
+      ? join(packageDir(), 'templates', src)
+      : join(tplDir, src);
     if (dryRun) {
       console.log(
         `  [dry-run] ${existsSync(target) && !force ? 'skip (exists)' : 'write'} ${dest}`,
       );
     } else {
-      logWrite(writeIfAbsent(target, readText(join(tplDir, src)), { force }), dest);
+      logWrite(writeIfAbsent(target, readText(srcPath), { force }), dest);
     }
   }
 }

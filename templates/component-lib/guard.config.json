@@ -20,5 +20,28 @@
   "allowlistPath": ".co-occurrence-allowlist.json",
 
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
-  "decisionsDir": "docs/decisions"
+  "decisionsDir": "docs/decisions",
+
+  "//structure": "THE topology (data). The shared eslint.config.mjs shim compiles this via devkit's compileToEslint — no per-stack eslint rule. A flat primitives lib: PascalCase component files (.ts/.tsx) + the index.ts barrel + cn.ts helper, directly in src/; optional PascalCase subfolders nest recursively. Add helper literals (e.g. 'theme.ts') to grammar.files as your lib grows; a misnamed file (kebab, or camelCase .tsx) is rejected. Walls empty (a lib has no import boundary).",
+  "structure": {
+    "trees": [
+      {
+        "name": "lib",
+        "root": "src",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.ts", "cn.ts", "{pascal}", "{test}", "{css}"],
+          "recurse": "componentFolder",
+          "rules": {
+            "componentFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.ts", "index.tsx", "{pascal}", "{test}", "{css}"],
+              "recurse": "componentFolder"
+            }
+          }
+        }
+      }
+    ],
+    "walls": []
+  }
 }
