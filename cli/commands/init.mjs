@@ -59,7 +59,7 @@ const INIT_VERSION = 2;
 // Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs + baselines).
 // next/node-service are deliberately OUT until a template ships for them — listing one here
 // would make init read a non-existent templates/<stack> dir.
-const STRUCTURE_STACKS = new Set(['electron', 'react-app']);
+const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
@@ -72,6 +72,11 @@ const STRUCTURE_TEMPLATE_FILES = {
   'react-app': [
     ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
+    ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+  ],
+  // Flat component lib: no domain registry (the flat rule has no lib/<domain> vocabulary).
+  'component-lib': [
+    ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
   ],
 };

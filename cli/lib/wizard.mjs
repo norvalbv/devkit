@@ -16,7 +16,7 @@ import { AGENT_TARGETS, COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './component
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
 
-const STACKS = ['electron', 'react-app', 'next', 'node-service', 'generic'];
+const STACKS = ['electron', 'react-app', 'component-lib', 'next', 'node-service', 'generic'];
 
 // The picker components (everything except `guards`, which gets its own multiselect when
 // husky is on). `structure` is filtered in at call time only when a template exists.
