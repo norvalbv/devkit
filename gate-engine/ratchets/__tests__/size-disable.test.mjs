@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { countDisables } from '../size-disable.mjs';
+import { countDisables, countOversized } from '../size-disable.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mjs');
 
@@ -170,5 +170,54 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     run(root, 'freeze');
     write(root, 'socket-server/src/b.ts', '/* eslint-disable max-lines */\nexport {};\n');
     expect(run(root, 'gate').status).toBe(1);
+  });
+});
+
+describe('raw-line cap (the maxLines gate — size owned by the ratchet, not eslint)', () => {
+  const run = (root, cmd) =>
+    spawnSync(process.execPath, [SCRIPT, cmd], { cwd: root, encoding: 'utf8' });
+  const big = (n) => Array(n).fill('const x = 1;').join('\n'); // n lines
+
+  it('countOversized flags source files over the cap; tests + small files exempt', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/big.ts', big(80));
+    write(root, 'src/small.ts', big(10));
+    write(root, 'src/big.test.ts', big(80)); // test → exempt
+    expect(countOversized(root)).toEqual([{ file: 'src/big.ts', lines: 80 }]);
+  });
+
+  it('off by default (maxLines 0) → never flags, however large', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] });
+    write(root, 'src/huge.ts', big(900));
+    expect(countOversized(root)).toEqual([]);
+  });
+
+  it('freeze grandfathers current over-cap files; gate passes; a NEW over-cap file fails', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    expect(run(root, 'freeze').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(80);
+    expect(run(root, 'gate').status).toBe(0); // grandfathered → allowed
+    write(root, 'src/fresh.ts', big(70)); // NEW over-cap → blocked
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('exceed 50 lines');
+  });
+
+  it('a grandfathered file dropped under the cap → gate exits 0 with a re-freeze reminder', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    write(root, 'src/legacy.ts', big(10)); // shrank under the cap
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('dropped under 50 lines');
   });
 });

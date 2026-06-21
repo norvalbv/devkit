@@ -32,6 +32,8 @@ import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/size.json';
+// Raw-line cap baseline (the `maxLines` gate): grandfathered over-cap source files, shrink-only.
+const LINES_BASELINE = 'eslint/baselines/size-lines.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '_shared']);
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.
@@ -79,11 +81,30 @@ export function countDisables(root = process.cwd(), scanRoots) {
   return { fileDisables, fnDisables, scannedFiles: files.length };
 }
 
+// Raw-line cap: source (non-test) files whose line count exceeds `maxLines`. Counts ALL lines (matches
+// eslint's max-lines with skipBlankLines/skipComments false). Returns a sorted [{file, lines}] list;
+// empty when the cap is off (`maxLines` 0). This is what lets size be ratchet-owned — no eslint rule.
+export function countOversized(root = process.cwd(), scanRoots, maxLines, match) {
+  const cfg = resolveGuardConfig(root);
+  const cap = maxLines ?? cfg.maxLines;
+  if (!cap) return [];
+  const m = match ?? sourceMatchers(cfg.sourceExtensions);
+  const files = (scanRoots ?? cfg.scanRoots).flatMap((r) => walk(root, r, [], m));
+  const over = [];
+  for (const f of files) {
+    const lines = readFileSync(join(root, f), 'utf8').split('\n').length;
+    if (lines > cap) over.push({ file: f, lines });
+  }
+  return over.sort((a, b) => a.file.localeCompare(b.file));
+}
+
 // Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
 // fallow-ignore-next-line complexity
 function runCli(cmd) {
   const root = process.cwd();
+  const cfg = resolveGuardConfig(root);
   const baselineFile = join(root, BASELINE);
+  const linesBaselineFile = join(root, LINES_BASELINE);
   const current = countDisables(root);
 
   if (cmd === 'freeze') {
@@ -93,6 +114,17 @@ function runCli(cmd) {
     console.log(
       `✓ ${BASELINE}: frozen max-lines disables = ${out.fileDisables} file-level, ${out.fnDisables} per-function (from ${current.scannedFiles} source files)`,
     );
+    if (cfg.maxLines) {
+      const over = countOversized(root);
+      const files = Object.fromEntries(over.map((o) => [o.file, o.lines]));
+      writeFileSync(
+        linesBaselineFile,
+        `${JSON.stringify({ maxLines: cfg.maxLines, files }, null, 2)}\n`,
+      );
+      console.log(
+        `✓ ${LINES_BASELINE}: ${over.length} file(s) over ${cfg.maxLines} lines grandfathered (shrink-only)`,
+      );
+    }
     process.exit(0);
   }
 
@@ -122,6 +154,26 @@ function runCli(cmd) {
       console.log(
         `✓ size debt shrank (${current.fileDisables}/${current.fnDisables} vs frozen ${frozen.fileDisables}/${frozen.fnDisables}) — run \`guard-size freeze\` to lock it in.`,
       );
+    }
+
+    // Raw-line cap (the maxLines gate): a source file over the cap that ISN'T grandfathered fails.
+    if (cfg.maxLines) {
+      const over = countOversized(root);
+      const grandfathered = existsSync(linesBaselineFile)
+        ? JSON.parse(readFileSync(linesBaselineFile, 'utf8')).files
+        : {};
+      const fresh = over.filter((o) => !(o.file in grandfathered));
+      if (fresh.length) {
+        console.error(`🚫 ${fresh.length} new file(s) exceed ${cfg.maxLines} lines — split them:`);
+        for (const o of fresh) console.error(`   ${o.file}: ${o.lines} lines`);
+        process.exit(1);
+      }
+      const healed = Object.keys(grandfathered).filter((f) => !over.some((o) => o.file === f));
+      if (healed.length) {
+        console.log(
+          `✓ ${healed.length} file(s) dropped under ${cfg.maxLines} lines — run \`guard-size freeze\` to lock it in.`,
+        );
+      }
     }
     process.exit(0);
   }
