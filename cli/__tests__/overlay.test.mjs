@@ -17,6 +17,11 @@ import { rootRegistry } from './_helpers.mjs';
 
 const { mkTmp, cleanup } = rootRegistry();
 
+// These are subprocess-heavy integration tests (real `git init`/`commit` + a full applyInit overlay).
+// Isolated they run in ~1-2s, but under the full suite's parallel load git/FS scheduling contention
+// pushes them past the 5s default → flaky timeouts. Give them ample headroom (assertions unchanged).
+vi.setConfig({ testTimeout: 20000 });
+
 // A work repo that already has a committed husky hook + flat eslint + biome (the team's).
 function workRepo() {
   const root = mkTmp('overlay-');
