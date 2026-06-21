@@ -4,20 +4,19 @@
  * `cd <pkgRel>` in a package-scoped marker block (so multiple packages coexist).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
 import { defaultSelection } from '../lib/components.mjs';
+import { rootRegistry } from './_helpers.mjs';
 
-let roots = [];
+const { mkTmp, cleanup } = rootRegistry();
 
 // A fake monorepo: a `.git` marker at the root (detectGitRoot only checks existence) + a
 // package under services/<name>.
 function monorepo(pkgName = 'webapp') {
-  const root = mkdtempSync(join(tmpdir(), 'mono-'));
-  roots.push(root);
+  const root = mkTmp('mono-');
   mkdirSync(join(root, '.git'));
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'mono' }, null, 2));
   const pkg = join(root, 'services', pkgName);
@@ -42,8 +41,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
+  cleanup();
 });
 
 describe('monorepo: init in a package subdir', () => {

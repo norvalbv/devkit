@@ -4,19 +4,18 @@
  * untouched), and layer ours-extends-theirs configs + a local hook that chains to the team's.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
 import { defaultSelection } from '../lib/components.mjs';
+import { rootRegistry } from './_helpers.mjs';
 
-let roots = [];
+const { mkTmp, cleanup } = rootRegistry();
 
 // A work repo that already has a committed husky hook + flat eslint + biome (the team's).
 function workRepo() {
-  const root = mkdtempSync(join(tmpdir(), 'overlay-'));
-  roots.push(root);
+  const root = mkTmp('overlay-');
   const git = (...a) => execFileSync('git', a, { cwd: root });
   git('init', '-q');
   git('config', 'user.email', 't@t.t');
@@ -40,8 +39,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  for (const r of roots) rmSync(r, { recursive: true, force: true });
-  roots = [];
+  cleanup();
 });
 
 describe('overlay (local-only) install', () => {
@@ -101,8 +99,7 @@ describe('overlay (local-only) install', () => {
 
   it('monorepo subdir: hook + .git/info/exclude live at the git ROOT, not the package', async () => {
     // git root with the app in a subdir (the case that ENOENT'd: .git is above cwd).
-    const root = mkdtempSync(join(tmpdir(), 'overlay-mono-'));
-    roots.push(root);
+    const root = mkTmp('overlay-mono-');
     const git = (...a) => execFileSync('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
@@ -154,8 +151,7 @@ describe('overlay (local-only) install', () => {
   });
 
   it('preserves ALL the repo hooks (pass-through wrappers), not just pre-commit', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'overlay-hooks-'));
-    roots.push(root);
+    const root = mkTmp('overlay-hooks-');
     const git = (...a) => execFileSync('git', a, { cwd: root });
     git('init', '-q');
     git('config', 'user.email', 't@t.t');
