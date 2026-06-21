@@ -99,15 +99,19 @@ self-governs with no devkit stack.
 So **5/6 electron trees + react-app → data; electron/main stays the one named code preset** until a
 `rootFolderAllowlist` node feature lands.
 
-## OPEN DECISIONS (resolve before Stage 2/3 implementation)
+## DECISIONS
 
-1. **Size caps.** The CURRENT react-app + electron templates enforce `max-lines` (500/file, 200/300
-   per-fn) IN ESLINT. The universal shim is structure-ONLY (size → the `guard-size` ratchet, like
-   component-lib + devkit's own repo). Migrating as-is DROPS the eslint hard cap → a regression for
-   existing react-app/electron users. Options: (a) `buildStructureConfigs` also emits the size-cap
-   blocks (re-adds the `@typescript-eslint/parser` dep + tsParser); (b) keep a tiny size-only eslint
-   block per stack alongside the structure shim; (c) accept size moves to the ratchet + document.
-   **Decide before migrating react-app/electron.**
+1. **Size caps — RESOLVED: the guard-size ratchet caps raw lines (option C).** Today the ratchet only
+   COUNTS `eslint-disable max-lines` directives — it relies on eslint's `max-lines` rule as the actual
+   cap, so a structure-only shim would silently drop size enforcement (and component-lib + devkit's own
+   repo, already structure-only shims, currently have NO file-size cap — a pre-existing gap). Fix: add
+   `maxLines` (+ later `maxLinesPerFunction`) to `guard.config.json`; make `gate-engine/ratchets/size-disable.mjs`
+   enforce a raw-line cap directly (grandfather-and-shrink baseline, language-aware via sourceExtensions),
+   so NO eslint size rule is needed anywhere and size is fully data/ratchet-owned across ALL stacks.
+   - **Sub-caveat:** per-FILE cap is trivial (count lines). per-FUNCTION cap needs an AST/parser (eslint
+     does this today). Implement file-cap in the ratchet first; per-function is a follow-up (light parser,
+     or keep a per-function eslint block only for stacks that opt in). This unblocks the react-app/electron
+     structure-only migration; the per-function cap is the one piece that may lag.
 2. **Pin-test equality (the gating invariant).** For EACH electron walker, extend
    `generate-structure-baseline.test.mjs` to assert `walkTree(dataBlock)` deepEquals
    `generateTreeBaseline(presetWalker)` on the same fixture BEFORE deleting that walker. This is
