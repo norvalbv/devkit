@@ -52,6 +52,7 @@ describe('no-drift — predicate == emitted regex (single source: tokenRegex)', 
       [
         ['pascal_tsx', ['Button.tsx'], ['Button.ts', 'button.tsx']],
         ['pascal_ts', ['Theme.ts'], ['Theme.tsx', 'theme.ts']],
+        ['camel_ts', ['cn.ts', 'theme.ts'], ['cn.tsx', 'Cn.ts']],
         ['use_hook_kebab', ['use-foo.ts', 'use-bar.tsx'], ['useFoo.ts', 'foo.ts']],
         ['use_hook_camel', ['useFoo.tsx'], ['use-foo.ts', 'Foo.ts']],
         ['use_hook_pascal', ['useFoo'], ['use-foo', 'Foo', 'useFoo.ts']],

@@ -1,3 +1,8 @@
+// Reason: shipped electron-preset TEMPLATE (verbose-by-design, self-contained — copied into a consumer
+// repo, no devkit import to share a base). Its near-identical size-cap flat-config blocks (.ts per-fn
+// 200 / .tsx per-fn 300, differ only in the cap) are intentional duplication; this whole file is slated
+// for the config-driven migration (docs/design/structure/06-universal-collapse.md, Stage 3).
+// fallow-ignore-file code-duplication
 // @ts-nocheck — emitted config file: it imports peer-installed tools (eslint-plugin-project-
 // structure, @typescript-eslint/parser) that live in the CONSUMER repo, not in devkit. TS in
 // the devkit repo can't resolve them; eslint configs aren't type-checked anyway.

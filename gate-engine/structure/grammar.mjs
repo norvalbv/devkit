@@ -43,6 +43,7 @@ export const STRUCTURE_TOKENS = Object.freeze([
   // convention, not the repo language); the rest are extension-parameterized.
   'pascal_ts', // PascalCase .ts (a types/logic sibling of a component)
   'pascal_tsx', // PascalCase .tsx (a component file)
+  'camel_ts', // camelCase .ts (a helper; a .tsx must be a PascalCase component)
   'use_hook_camel', // useFoo.ts(x) hook
   'use_hook_kebab', // use-foo.ts(x) hook (canonical)
   'use_hook_pascal', // useFoo/ hook FOLDER name
@@ -94,6 +95,8 @@ export function tokenRegex(token, exts) {
       return '^[A-Z][A-Za-z0-9]*\\.ts$';
     case 'pascal_tsx':
       return '^[A-Z][A-Za-z0-9]*\\.tsx$';
+    case 'camel_ts':
+      return '^[a-z][a-zA-Z0-9]*\\.ts$';
     case 'kebab_ts':
       return '^[a-z][a-z0-9-]*\\.ts$';
     case 'kebab_tsx':

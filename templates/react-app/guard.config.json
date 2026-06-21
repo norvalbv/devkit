@@ -17,5 +17,50 @@
   "allowlistPath": ".co-occurrence-allowlist.json",
 
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
-  "decisionsDir": "docs/decisions"
+  "decisionsDir": "docs/decisions",
+
+  "//sourceExtensions": "Impl-file extensions the ratchets + structure rule count. A React app is ['ts','tsx'].",
+  "sourceExtensions": ["ts", "tsx"],
+
+  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). Replaces the old eslint max-lines rule so eslint stays structure-only. Per-FUNCTION caps need a parser — not yet.",
+  "maxLines": 500,
+
+  "//structure": "THE topology (data). The shared eslint.config.mjs shim compiles this via devkit's engine — no per-stack eslint rule. Governs src/components + src/pages as trees of PascalCase folders (index.tsx + colocated subcomponents/hooks/helpers/tests/css/md); every OTHER src/ folder (services/, store/, hooks/, …) is ungoverned/open (no tree = not visited). To govern another folder, add a tree here. Walls empty (a plain app has no trust boundary).",
+  "structure": {
+    "trees": [
+      {
+        "name": "components",
+        "root": "src/components",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+          "recurse": "componentFolder",
+          "rules": {
+            "componentFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+              "recurse": "componentFolder"
+            }
+          }
+        }
+      },
+      {
+        "name": "pages",
+        "root": "src/pages",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+          "recurse": "pageFolder",
+          "rules": {
+            "pageFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+              "recurse": "pageFolder"
+            }
+          }
+        }
+      }
+    ],
+    "walls": []
+  }
 }

@@ -69,10 +69,11 @@ const STRUCTURE_TEMPLATE_FILES = {
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
     ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
   ],
+  // react-app — CONFIG-DRIVEN (data): components + pages trees declared in guard.config.json, compiled
+  // by the shared shim. No per-stack eslint.config / domains. (electron is the one remaining preset.)
   'react-app': [
-    ['eslint.config.mjs', 'eslint.config.mjs'],
-    ['eslint/domains.mjs', 'eslint/domains.mjs'],
-    ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+    ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
+    ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
   ],
   // Flat component lib — CONFIG-DRIVEN (the universal path): the topology is a `structure` block in
   // guard.config.json, and eslint.config.mjs is the shared shim that compiles it via devkit's
