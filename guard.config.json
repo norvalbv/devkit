@@ -1,5 +1,6 @@
 {
   "scanRoots": ["cli", "gate-engine"],
+  "sourceExtensions": ["mjs", "js"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db"
 }

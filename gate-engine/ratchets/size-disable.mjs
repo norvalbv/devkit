@@ -28,18 +28,17 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from '../config.mjs';
+import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/size.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '_shared']);
-const IS_SOURCE = /\.(ts|tsx)$/;
-const IS_TEST = /\.(test|spec)\.(ts|tsx)$/;
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.
 const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
 
-function walk(root, dir, files) {
+// `match` = the cfg.sourceExtensions matchers (TS by default; a JS/MJS repo sets ["mjs","js"]).
+function walk(root, dir, files, match) {
   let entries;
   try {
     entries = readdirSync(join(root, dir), { withFileTypes: true });
@@ -49,8 +48,8 @@ function walk(root, dir, files) {
   for (const e of entries) {
     const rel = `${dir}/${e.name}`;
     if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) walk(root, rel, files);
-    } else if (IS_SOURCE.test(e.name) && !IS_TEST.test(e.name)) {
+      if (!SKIP_DIRS.has(e.name)) walk(root, rel, files, match);
+    } else if (match.isSource(e.name) && !match.isTest(e.name)) {
       files.push(rel);
     }
   }
@@ -61,8 +60,10 @@ function walk(root, dir, files) {
 // `max-lines-per-function` (the former is a substring of the latter). `scanRoots`
 // is passed explicitly so callers share one path; defaults off cfg(root).
 export function countDisables(root = process.cwd(), scanRoots) {
-  const rootsToScan = scanRoots ?? resolveGuardConfig(root).scanRoots;
-  const files = rootsToScan.flatMap((r) => walk(root, r, []));
+  const cfg = resolveGuardConfig(root);
+  const rootsToScan = scanRoots ?? cfg.scanRoots;
+  const match = sourceMatchers(cfg.sourceExtensions);
+  const files = rootsToScan.flatMap((r) => walk(root, r, [], match));
   let fileDisables = 0;
   let fnDisables = 0;
   for (const f of files) {

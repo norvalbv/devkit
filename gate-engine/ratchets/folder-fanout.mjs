@@ -28,23 +28,22 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from '../config.mjs';
+import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/fanout.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '__tests__', '_shared']);
-const IS_SOURCE = /\.(ts|tsx)$/;
-const IS_TEST = /\.(test|spec)\.(ts|tsx)$/;
-// Barrels don't add to a pile's cognitive load; everything else does.
-const IS_BARREL = /^index\.(ts|tsx)$/;
 
 // Returns { '<dir>': <impl-file count> } for every scanned directory under `root`,
 // honouring the consumer's scanRoots + fanoutExempt. `scanRoots`/`exempt` are passed
-// explicitly so callers (tests, gate) share one code path; both default off cfg(root).
+// explicitly so callers (tests, gate) share one code path; both default off cfg(root). Impl-file
+// extensions come from cfg.sourceExtensions (TS by default; a JS/MJS repo sets ["mjs","js"]).
 export function countFanout(root = process.cwd(), scanRoots, exempt) {
   const cfg = resolveGuardConfig(root);
   const rootsToScan = scanRoots ?? cfg.scanRoots;
   const exemptSet = new Set(exempt ?? cfg.fanoutExempt);
+  // Barrels (index.*) don't add to a pile's cognitive load; everything else does.
+  const { isSource, isTest, isBarrel } = sourceMatchers(cfg.sourceExtensions);
   const counts = {};
   // Reason: recursive directory walk: one branch per entry kind (subdir recurse vs impl/test/barrel file count) mirrors the filesystem tree; flattening scatters a single traversal
   // fallow-ignore-next-line complexity
@@ -59,7 +58,7 @@ export function countFanout(root = process.cwd(), scanRoots, exempt) {
     for (const e of entries) {
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name)) walk(`${dir}/${e.name}`);
-      } else if (IS_SOURCE.test(e.name) && !IS_TEST.test(e.name) && !IS_BARREL.test(e.name)) {
+      } else if (isSource(e.name) && !isTest(e.name) && !isBarrel(e.name)) {
         n += 1;
       }
     }
