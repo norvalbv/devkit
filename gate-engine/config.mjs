@@ -56,6 +56,11 @@ export const DEFAULTS = Object.freeze({
   decisionsDir: 'docs/decisions',
   // Max non-test impl files per folder (any depth) before the fanout ratchet trips.
   fanoutCap: 12,
+  // Max lines per source file before the size ratchet flags it (raw line count, all lines). 0 = OFF
+  // (opt-in). When set, size is enforced by the ratchet directly — no eslint max-lines rule needed,
+  // so the structure-only eslint shim governs ANY stack. Existing over-cap files are grandfathered
+  // shrink-only in eslint/baselines/size-lines.json. (Per-FUNCTION caps need a parser → not here yet.)
+  maxLines: 0,
   // Flat-by-design folders exempt from the fanout cap (was frink's hardcoded
   // grandfathered roots — now opt-in per consumer).
   fanoutExempt: [],
@@ -147,6 +152,7 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  *   structure: {trees: object[], walls: object[]},
  *   decisionsDir: string,
  *   fanoutCap: number,
+ *   maxLines: number,
  *   fanoutExempt: string[],
  *   allowlistPath: string,
  *   thresholds: object,
@@ -184,6 +190,7 @@ export function resolveGuardConfig(cwd = process.cwd()) {
       : DEFAULTS.structure,
     decisionsDir: decisionsEnv ?? file.decisionsDir ?? DEFAULTS.decisionsDir,
     fanoutCap: Number.isFinite(file.fanoutCap) ? file.fanoutCap : DEFAULTS.fanoutCap,
+    maxLines: Number.isFinite(file.maxLines) ? file.maxLines : DEFAULTS.maxLines,
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
     allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
     // Shallow-merge thresholds so a consumer can override one knob without restating all.
