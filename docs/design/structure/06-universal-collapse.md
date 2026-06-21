@@ -70,3 +70,51 @@ tsc + biome + fallow(0/0/0) + full suite green; `compileToEslint` resolves as a 
 from a consumer; the generic shim governs a real flat lib (frink-primitives) live; electron pin test
 green against the data block (Stage 3); a repo with a hand-authored `structure` block + the shim
 self-governs with no devkit stack.
+
+---
+
+## Progress + workflow findings (derive-structure-blocks, run wf_cf2b5431-704)
+
+**DONE + committed:**
+- **Stage 1** (`e7d73c4`): universal shim + exports (`compileToEslint`, `buildStructureConfigs`,
+  `makeBaselineLoaders`); component-lib migrated to data; fixed the `rootName` bug (structure root node
+  name must be the structureRoot basename, not the tree's logical name).
+- **Foundation** (`07e01ef`): the 11 convention tokens (`pascal_ts/pascal_tsx/use_hook_{camel,kebab,
+  pascal}/kebab_{ts,tsx}/kebab_test_dotted/vercel_route/any_md/any_file`) + **multi-recurse**
+  (`recurse: string|string[]`, first-matching-folderName dispatch) in walk.mjs + compile.mjs, with
+  no-drift + dispatch tests.
+
+**Per-tree verdict (full derivations in the workflow output / task wf5cq7n5j.output):**
+| tree | verdict | ship as | needs |
+|------|---------|---------|-------|
+| react-app/components | partial | **data** | tight tokens (done) |
+| react-app/pages | partial | **data** | (multi-recurse done; both rules share `{pascal_dir}` so single `pageFolder` suffices) |
+| electron/renderer | full | **data** | frozenDirs + ignoredDirs(+ui) + entryAllowlist + domainGate + enforceExistence + new tokens (done) |
+| electron/shared | full | **data** | `{kebab_test_dotted}` (done) |
+| electron/preload | partial | **data** | `{kebab_test_dotted}`; unknown-folder grandfather via no-recurse branch |
+| electron/socket | full | **data** | named folders (types/api/lib) + recurse + domainGate |
+| electron/vercel | full | **data** | `{vercel_route}` + `{any_file}` + per-domain `__fixtures__/__snapshots__` |
+| **electron/main** | partial | **PRESET (keep)** | a `MAIN_ROOT_FOLDERS` known-root-allowlist node feature (deferred) — unknown top-level dirs must grandfather-all, not become broken kebab-modules |
+
+So **5/6 electron trees + react-app → data; electron/main stays the one named code preset** until a
+`rootFolderAllowlist` node feature lands.
+
+## OPEN DECISIONS (resolve before Stage 2/3 implementation)
+
+1. **Size caps.** The CURRENT react-app + electron templates enforce `max-lines` (500/file, 200/300
+   per-fn) IN ESLINT. The universal shim is structure-ONLY (size → the `guard-size` ratchet, like
+   component-lib + devkit's own repo). Migrating as-is DROPS the eslint hard cap → a regression for
+   existing react-app/electron users. Options: (a) `buildStructureConfigs` also emits the size-cap
+   blocks (re-adds the `@typescript-eslint/parser` dep + tsParser); (b) keep a tiny size-only eslint
+   block per stack alongside the structure shim; (c) accept size moves to the ratchet + document.
+   **Decide before migrating react-app/electron.**
+2. **Pin-test equality (the gating invariant).** For EACH electron walker, extend
+   `generate-structure-baseline.test.mjs` to assert `walkTree(dataBlock)` deepEquals
+   `generateTreeBaseline(presetWalker)` on the same fixture BEFORE deleting that walker. This is
+   parallelizable (one validation agent per tree) — a good second workflow.
+
+## Remaining order (workflow-recommended)
+
+react-app (components, then pages) → electron data trees (renderer/shared/preload/socket/vercel, each
+gated by the equality test) → keep main as preset → final cleanup (delete per-stack eslint.config
+templates + the now-unused walker code once all non-main trees are data).
