@@ -4,7 +4,7 @@
  * subprocess-style CLI test repeated verbatim.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,4 +62,19 @@ export function rootRegistry() {
     roots.length = 0;
   };
   return { mkTmp, cleanup };
+}
+
+/**
+ * Fixtures for the structure-baseline suites: a self-cleaning tmp repo + a `write(root, rel, content)`
+ * helper that mkdir-ps the parent. `const { tmpRepo, write, cleanup } = structFixtures('struct-')`.
+ *
+ * @param {string} prefix mkdtemp prefix
+ */
+export function structFixtures(prefix) {
+  const { mkTmp, cleanup } = rootRegistry();
+  const write = (root, rel, content = 'export {};\n') => {
+    mkdirSync(join(root, rel, '..'), { recursive: true });
+    writeFileSync(join(root, rel), content);
+  };
+  return { tmpRepo: () => mkTmp(prefix), write, cleanup };
 }

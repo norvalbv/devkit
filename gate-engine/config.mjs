@@ -46,6 +46,12 @@ export const DEFAULTS = Object.freeze({
   // codebase (devkit itself, a node CLI) sets `["mjs","js"]` so the gates actually SEE its files.
   // A file is a test when it matches `*.<ext>` AND `.test.`/`.spec.` (excluded from impl counts).
   sourceExtensions: ['ts', 'tsx'],
+  // Folder-structure topology (the structure-lint engine). Declared ONCE here; devkit's interpreter
+  // generates the eslint rule + drives the baseline walk from this SAME spec (no drift). Empty by
+  // default → structure-lint is opt-in / no-op. `trees[]` = { name, root, sourceExtensions?, grammar
+  // (or preset), libDomains?, frozenDirs?, ignoredDirs?, entryAllowlist? }; `walls[]` = import walls.
+  // See gate-engine/structure/walk.mjs + docs/design/structure/01-generalize-engine.md.
+  structure: Object.freeze({ trees: [], walls: [] }),
   // Append-only decision-log directory (the decisions CLI + smell gate target).
   decisionsDir: 'docs/decisions',
   // Max non-test impl files per folder (any depth) before the fanout ratchet trips.
@@ -138,6 +144,7 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  *   boundaries: string[],
  *   scanRoots: string[],
  *   sourceExtensions: string[],
+ *   structure: {trees: object[], walls: object[]},
  *   decisionsDir: string,
  *   fanoutCap: number,
  *   fanoutExempt: string[],
@@ -171,6 +178,10 @@ export function resolveGuardConfig(cwd = process.cwd()) {
     boundaries: arr(file.boundaries, DEFAULTS.boundaries),
     scanRoots: arr(file.scanRoots, DEFAULTS.scanRoots),
     sourceExtensions: arr(file.sourceExtensions, DEFAULTS.sourceExtensions),
+    // Structure topology: { trees, walls }. Present-but-partial config still gets array defaults.
+    structure: file.structure
+      ? { trees: arr(file.structure.trees, []), walls: arr(file.structure.walls, []) }
+      : DEFAULTS.structure,
     decisionsDir: decisionsEnv ?? file.decisionsDir ?? DEFAULTS.decisionsDir,
     fanoutCap: Number.isFinite(file.fanoutCap) ? file.fanoutCap : DEFAULTS.fanoutCap,
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
@@ -241,4 +252,15 @@ export function sourceMatchers(extensions) {
     isTest: (name) => TEST_INFIX.test(name) && isSource(name),
     isBarrel: (name) => exts.some((x) => name === `index${x}`),
   };
+}
+
+/**
+ * A structure tree's effective source extensions: its own `sourceExtensions` override, else the
+ * repo-wide `cfg.sourceExtensions`. So a tree can speak `.tsx` in a `.mjs` repo (or vice-versa).
+ * @param {{sourceExtensions:string[]}} cfg a resolved config
+ * @param {{sourceExtensions?:string[]}} tree a structure.trees[] entry
+ * @returns {string[]}
+ */
+export function resolveTreeExtensions(cfg, tree) {
+  return arr(tree?.sourceExtensions, cfg.sourceExtensions);
 }

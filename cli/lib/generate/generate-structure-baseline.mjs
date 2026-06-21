@@ -25,6 +25,8 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mjs';
+import { walkTree } from '../../../gate-engine/structure/walk.mjs';
 
 // ─── Regexes (verbatim from frink's generate-eslint-baseline.mjs) ───────────────
 const PASCAL = /^[A-Z][A-Za-z0-9]*$/;
@@ -595,9 +597,16 @@ export function generateTreeBaseline(tree, cwd, opts = {}) {
   return collect(walker());
 }
 
+// Export name for a config-declared tree: 'cli' → 'cliStructureBaseline', 'gate-engine' → 'gateEngineStructureBaseline'.
+const NAME_SEP_RE = /[-_/](\w)/g;
+function exportNameFor(name) {
+  const camel = name.replace(NAME_SEP_RE, (_, c) => c.toUpperCase());
+  return `${camel}StructureBaseline`;
+}
+
 /** The .mjs body for a baseline file — same header/shape as frink's committed ones. */
 export function renderBaselineFile(tree, sorted) {
-  const { label, exportName } = TREE_META[tree];
+  const { label, exportName } = TREE_META[tree] ?? { label: tree, exportName: exportNameFor(tree) };
   return `// AUTO-GENERATED grandfather list of files violating the ${label}
 // folder-structure rule at the time it was introduced.
 //
@@ -637,17 +646,51 @@ export async function loadDomains(cwd) {
 
 const TREES = ['renderer', 'main', 'shared', 'preload', 'socket', 'vercel'];
 
+// Baseline for ONE config-declared tree: grammar trees use the generic walker; preset trees pass
+// through to the frink-tree walker. Writes eslint/baselines/<name>.mjs unless dryRun. `ctx` carries
+// the per-run cwd/cfg/opts/log so the signature has no optional-then-required ambiguity.
+function generateConfigTree(t, ctx) {
+  const { cwd, cfg, opts, log } = ctx;
+  const root = join(cwd, t.root);
+  if (!existsSync(root)) return { tree: t.name, count: 0, written: false };
+  const sorted = t.grammar
+    ? walkTree(t, root, resolveTreeExtensions(cfg, t))
+    : generateTreeBaseline(t.preset, cwd, {
+        roots: { [t.preset]: t.root },
+        domains: t.domains ?? {},
+      });
+  if (!opts.dryRun) {
+    const outFile = join(cwd, 'eslint', 'baselines', `${t.name}.mjs`);
+    mkdirSync(dirname(outFile), { recursive: true });
+    writeFileSync(outFile, renderBaselineFile(t.name, sorted));
+  }
+  log(
+    `  ${opts.dryRun ? '[dry-run] ' : '✓ '}eslint/baselines/${t.name}.mjs: ${sorted.length} grandfathered file(s)`,
+  );
+  return { tree: t.name, count: sorted.length, written: !opts.dryRun };
+}
+
 /**
- * Generate every existing tree's baseline into <cwd>/eslint/baselines/. Returns
- * a per-tree summary [{tree, count, written}] (written=false when tree absent).
+ * Generate every existing tree's baseline into <cwd>/eslint/baselines/. Returns a per-tree summary
+ * [{tree, count, written}] (written=false when tree absent). Config-driven when guard.config.json
+ * declares structure.trees; else the legacy frink-6-tree path.
  *
  * @param {string} cwd consumer repo root
- * @param {{roots?:object, dryRun?:boolean, log?:Function}} [opts]
+ * @param {{roots?:object, dryRun?:boolean, log?:Function, cfg?:object}} [opts]
  */
 export async function generateStructureBaselines(cwd = process.cwd(), opts = {}) {
+  const log = opts.log ?? (() => {});
+  // CONFIG-DRIVEN PATH: when guard.config.json declares structure.trees, walk each via its grammar
+  // (the generic walker) or a named preset — governs ANY repo (devkit's own cli/gate-engine included).
+  // Falls through to the LEGACY frink-6-tree path when no structure block is configured.
+  const cfg = opts.cfg ?? resolveGuardConfig(cwd);
+  const trees = cfg.structure?.trees ?? [];
+  if (trees.length) {
+    return trees.map((t) => generateConfigTree(t, { cwd, cfg, opts, log }));
+  }
+
   const domains = await loadDomains(cwd);
   const roots = { ...DEFAULT_ROOTS, ...(opts.roots ?? {}) };
-  const log = opts.log ?? (() => {});
   const summary = [];
   for (const tree of TREES) {
     const root = join(cwd, roots[tree]);
