@@ -46,6 +46,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "biome check .",
+    "lint:structure": "eslint cli gate-engine",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
     "prepare": "husky",
@@ -54,6 +55,8 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
     "@types/node": "^25.9.3",
+    "eslint": "^10.5.0",
+    "eslint-plugin-project-structure": "^3.14.3",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

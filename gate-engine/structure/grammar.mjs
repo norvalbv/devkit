@@ -1,11 +1,13 @@
 /**
  * Structure-grammar interpreter — the shared `{token}` pattern table that makes the folder-structure
  * walk language-agnostic. A tree's `grammar` (in guard.config.json `structure.trees[]`) references
- * tokens like `{kebab}` / `{pascal}` / `{test}`; this module resolves them to predicates using the
- * tree's `sourceExtensions`, so the SAME grammar governs a `.ts` repo and a `.mjs` repo.
+ * tokens like `{kebab}` / `{pascal}` / `{test}`; this module resolves them using the tree's
+ * `sourceExtensions`, so the SAME grammar governs a `.ts` repo and a `.mjs` repo.
  *
- * Predicates are built from string ops + a few top-level stem regexes (extension-INdependent), so
- * there is no per-call dynamic `new RegExp` (mirrors `sourceMatchers` in config.mjs).
+ * NO-DRIFT (the load-bearing guarantee): `tokenRegex()` is the ONE canonical pattern per token. The
+ * generic WALKER (walk.mjs → baseline) compiles it into a predicate; the eslint RULE (compile.mjs →
+ * regexParameters) emits the SAME string for the plugin to compile. Rule and baseline therefore can't
+ * disagree about what a `{kebab}` is. (structure-grammar.test.mjs pins predicate == emitted regex.)
  *
  * Token vocabulary:
  *   FILE tokens (match a basename):
@@ -22,23 +24,72 @@
  *   Anything not wrapped in `{…}` is matched as a LITERAL basename (e.g. `index.mjs`, `config.mjs`).
  */
 
-// Extension-independent stem shapes (top-level → no useTopLevelRegex lint).
-const KEBAB_STEM = /^[a-z][a-z0-9-]*$/;
-const PASCAL_STEM = /^[A-Z][A-Za-z0-9]*$/;
-const CAMEL_STEM = /^[a-z][a-zA-Z0-9]*$/;
-const TEST_INFIX = /\.(test|spec)\./;
 const LEADING_DOT = /^\./;
+const norm = (exts) => exts.map((e) => e.replace(LEADING_DOT, ''));
 
-// Split a basename into { stem (before first dot), ext (after last dot), isTest }.
-function parts(name) {
-  const firstDot = name.indexOf('.');
-  const stem = firstDot === -1 ? name : name.slice(0, firstDot);
-  const lastDot = name.lastIndexOf('.');
-  const ext = lastDot === -1 ? '' : name.slice(lastDot + 1);
-  return { stem, ext, isTest: TEST_INFIX.test(name) };
+/** The full token vocabulary (used by compile.mjs to emit regexParameters). */
+export const STRUCTURE_TOKENS = Object.freeze([
+  'kebab',
+  'kebab_test',
+  'pascal',
+  'camel',
+  'test',
+  'css',
+  'json',
+  'kebab_dir',
+  'pascal_dir',
+]);
+
+/**
+ * The ONE canonical regex STRING for a token, parameterized by the tree's extensions. Consumed by BOTH
+ * the walker predicate (here) and the emitted eslint regexParameters (compile.mjs) — single source, no
+ * drift. `kebab`/`pascal`/`camel` are single-segment stems (no embedded dots) so a `.test.` file falls
+ * to `{test}`/`{kebab_test}`, never to a plain source token.
+ *
+ * @param {string} token bare token name (no braces), e.g. `kebab`
+ * @param {string[]} exts the tree's source extensions
+ * @returns {string} an anchored regex source string
+ */
+export function tokenRegex(token, exts) {
+  const E = norm(exts).join('|');
+  switch (token) {
+    case 'kebab':
+      return `^[a-z][a-z0-9-]*\\.(${E})$`;
+    case 'kebab_test':
+      return `^[a-z][a-z0-9-]*\\.(test|spec)\\.(${E})$`;
+    case 'pascal':
+      return `^[A-Z][A-Za-z0-9]*\\.(${E})$`;
+    case 'camel':
+      return `^[a-z][a-zA-Z0-9]*\\.(${E})$`;
+    case 'test':
+      return `^.+\\.(test|spec)\\.(${E})$`;
+    case 'css':
+      return '^.+\\.css$';
+    case 'json':
+      return '^.+\\.json$';
+    case 'kebab_dir':
+      return '^[a-z][a-z0-9-]*$';
+    case 'pascal_dir':
+      return '^[A-Z][A-Za-z0-9]*$';
+    default:
+      throw new Error(`unknown structure grammar token "${token}"`);
+  }
 }
 
-const norm = (exts) => exts.map((e) => e.replace(LEADING_DOT, ''));
+// Compiled-regex cache keyed by token+exts. The walker visits many directories per tree, so this
+// avoids recompiling the same handful of patterns; the underlying source is tokenRegex (single truth).
+const RE_CACHE = new Map();
+function compiledRegex(token, exts) {
+  const key = `${token}|${exts.join(',')}`;
+  let re = RE_CACHE.get(key);
+  if (!re) {
+    // Extension-parameterized (built from the tree's sourceExtensions) → not a top-level literal;
+    // compiled once per token+exts and cached above. Source string is tokenRegex (single truth).
+    re = new RegExp(tokenRegex(token, exts));
+    RE_CACHE.set(key, re);
+  }
+  return re;
+}
 
 /**
  * Resolve ONE `{token}` (or a literal name) to a predicate `(basename) => boolean`, given the tree's
@@ -48,38 +99,12 @@ const norm = (exts) => exts.map((e) => e.replace(LEADING_DOT, ''));
  * @param {string[]} exts bare extensions for this tree (e.g. `['mjs','js']`)
  * @returns {(name:string)=>boolean}
  */
-// Reason: flat token dispatch — one case per {token} in the grammar vocabulary, each a trivial
-// predicate; the branch COUNT is the vocabulary size, not tangled logic. CRAP is a static estimate;
-// it's exercised end-to-end via walkTree (structure-walk.test.mjs), not unit-tested per token.
-// fallow-ignore-next-line complexity
 export function tokenPredicate(token, exts) {
   if (!(token.startsWith('{') && token.endsWith('}'))) {
     return (name) => name === token; // literal filename
   }
-  const E = norm(exts);
-  const srcExt = (name) => E.includes(parts(name).ext);
-  switch (token.slice(1, -1)) {
-    case 'kebab':
-      return (name) => !parts(name).isTest && KEBAB_STEM.test(parts(name).stem) && srcExt(name);
-    case 'kebab_test':
-      return (name) => parts(name).isTest && KEBAB_STEM.test(parts(name).stem) && srcExt(name);
-    case 'pascal':
-      return (name) => !parts(name).isTest && PASCAL_STEM.test(parts(name).stem) && srcExt(name);
-    case 'camel':
-      return (name) => !parts(name).isTest && CAMEL_STEM.test(parts(name).stem) && srcExt(name);
-    case 'test':
-      return (name) => parts(name).isTest && srcExt(name);
-    case 'css':
-      return (name) => parts(name).ext === 'css';
-    case 'json':
-      return (name) => parts(name).ext === 'json';
-    case 'kebab_dir':
-      return (name) => KEBAB_STEM.test(name);
-    case 'pascal_dir':
-      return (name) => PASCAL_STEM.test(name);
-    default:
-      throw new Error(`unknown structure grammar token "${token}"`);
-  }
+  const re = compiledRegex(token.slice(1, -1), exts);
+  return (name) => re.test(name);
 }
 
 /**
