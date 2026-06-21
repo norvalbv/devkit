@@ -14,30 +14,54 @@ import { structFixtures } from './_helpers.mjs';
 const { tmpRepo, write, cleanup } = structFixtures('scompile-');
 afterEach(cleanup);
 
-describe('no-drift — predicate == emitted regex (single source: tokenRegex)', () => {
-  const exts = ['mjs', 'js'];
-  const cases = [
-    ['kebab', ['staged-filter.mjs', 'a.js'], ['Button.mjs', 'a.test.mjs', 'x.ts']],
-    ['kebab_test', ['a.test.mjs', 'foo-bar.spec.js'], ['a.mjs', 'a.test.ts']],
-    ['pascal', ['Button.mjs'], ['button.mjs', 'Button.test.mjs']],
-    ['camel', ['cn.mjs', 'useFoo.js'], ['Cn.mjs', 'cn.test.mjs']],
-    ['test', ['x.test.mjs', 'y.spec.js'], ['x.mjs']],
-    ['json', ['x.json'], ['x.mjs', 'x.jsonl']],
-    ['kebab_dir', ['co-occurrence', 'lib'], ['CoOcc', 'x.mjs']],
-  ];
-  it('the walker predicate and the eslint regex agree on every sample', () => {
-    for (const [token, yes, no] of cases) {
-      const pred = tokenPredicate(`{${token}}`, exts);
-      const re = new RegExp(tokenRegex(token, exts));
-      for (const n of yes) {
-        expect(pred(n), `${token} should accept ${n}`).toBe(true);
-        expect(re.test(n), `regex ${token} should accept ${n}`).toBe(true);
-      }
-      for (const n of no) {
-        expect(pred(n), `${token} should reject ${n}`).toBe(false);
-        expect(re.test(n), `regex ${token} should reject ${n}`).toBe(false);
-      }
+// Assert, for each [token, accepts[], rejects[]] case, that the walker predicate and the emitted
+// regex agree (the no-drift guarantee — both derive from tokenRegex).
+function assertNoDrift(cases, exts) {
+  for (const [token, yes, no] of cases) {
+    const pred = tokenPredicate(`{${token}}`, exts);
+    const re = new RegExp(tokenRegex(token, exts));
+    for (const n of yes) {
+      expect(pred(n), `${token} accept ${n}`).toBe(true);
+      expect(re.test(n), `regex ${token} accept ${n}`).toBe(true);
     }
+    for (const n of no) {
+      expect(pred(n), `${token} reject ${n}`).toBe(false);
+      expect(re.test(n), `regex ${token} reject ${n}`).toBe(false);
+    }
+  }
+}
+
+describe('no-drift — predicate == emitted regex (single source: tokenRegex)', () => {
+  it('the base vocabulary agrees on every sample (.mjs/.js tree)', () => {
+    assertNoDrift(
+      [
+        ['kebab', ['staged-filter.mjs', 'a.js'], ['Button.mjs', 'a.test.mjs', 'x.ts']],
+        ['kebab_test', ['a.test.mjs', 'foo-bar.spec.js'], ['a.mjs', 'a.test.ts']],
+        ['pascal', ['Button.mjs'], ['button.mjs', 'Button.test.mjs']],
+        ['camel', ['cn.mjs', 'useFoo.js'], ['Cn.mjs', 'cn.test.mjs']],
+        ['test', ['x.test.mjs', 'y.spec.js'], ['x.mjs']],
+        ['json', ['x.json'], ['x.mjs', 'x.jsonl']],
+        ['kebab_dir', ['co-occurrence', 'lib'], ['CoOcc', 'x.mjs']],
+      ],
+      ['mjs', 'js'],
+    );
+  });
+
+  it('the convention-specific tokens (react-app/electron) classify correctly', () => {
+    assertNoDrift(
+      [
+        ['pascal_tsx', ['Button.tsx'], ['Button.ts', 'button.tsx']],
+        ['pascal_ts', ['Theme.ts'], ['Theme.tsx', 'theme.ts']],
+        ['use_hook_kebab', ['use-foo.ts', 'use-bar.tsx'], ['useFoo.ts', 'foo.ts']],
+        ['use_hook_camel', ['useFoo.tsx'], ['use-foo.ts', 'Foo.ts']],
+        ['use_hook_pascal', ['useFoo'], ['use-foo', 'Foo', 'useFoo.ts']],
+        ['kebab_test_dotted', ['foo.server.test.ts', 'bar.spec.ts'], ['foo.ts', 'Foo.test.ts']],
+        ['vercel_route', ['users.ts', '[id].ts'], ['Users.ts', 'users.test.ts']],
+        ['any_md', ['README.md'], ['x.ts']],
+        ['any_file', ['anything.xyz', 'README'], []],
+      ],
+      ['ts', 'tsx'],
+    );
   });
 });
 

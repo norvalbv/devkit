@@ -38,17 +38,21 @@ function buildRegexParameters(treeSpec, exts) {
   return params;
 }
 
-// The child entry for a node's UNnamed subfolders, or null when the node has none:
+// The child entries for a node's UNnamed subfolders (an array, possibly empty):
 //  - domainGate → a registered-domain folder: NAME matches the closed registry, CONTENTS follow the
 //    recurse rule (inline that rule's children, not a folder-matching {ruleId}).
-//  - recurse    → a plain `{ ruleId }` reference into the rules map.
-function recurseChild(node, grammar) {
+//  - recurse: id | id[] → one `{ ruleId }` per id (the plugin dispatches first-match across siblings,
+//    e.g. react-app pages → pageFolder OR componentFolder).
+function recurseChildren(node, grammar) {
   if (node.domainGate) {
-    const rule = grammar.rules?.[node.recurse];
+    const id = Array.isArray(node.recurse) ? node.recurse[0] : node.recurse;
+    const rule = grammar.rules?.[id];
     const ruleChildren = rule ? compileNode(rule, grammar).children : [];
-    return { name: `{${domainParam(node.domainGate)}}`, children: ruleChildren };
+    return [{ name: `{${domainParam(node.domainGate)}}`, children: ruleChildren }];
   }
-  return node.recurse ? { ruleId: node.recurse } : null;
+  if (!node.recurse) return [];
+  const ids = Array.isArray(node.recurse) ? node.recurse : [node.recurse];
+  return ids.map((id) => ({ ruleId: id }));
 }
 
 /** Compile a grammar node → the plugin's children[] (+ enforceExistence). `grammar` carries rules. */
@@ -57,8 +61,7 @@ function compileNode(node, grammar) {
   for (const [fname, sub] of Object.entries(node.folders ?? {})) {
     children.push({ name: fname, ...compileNode(sub, grammar) });
   }
-  const rc = recurseChild(node, grammar);
-  if (rc) children.push(rc);
+  children.push(...recurseChildren(node, grammar));
   const out = { children };
   if (node.enforceExistence) out.enforceExistence = node.enforceExistence;
   return out;
