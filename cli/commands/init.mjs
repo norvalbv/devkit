@@ -671,6 +671,107 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
 
 // ── orchestration ────────────────────────────────────────────────────────────
 
+// Overlay (local-only) install: invisible to git (.git/info/exclude), non-invasive (extends the
+// repo, edits nothing committed). Self-contained — writes its own git-ignored .devkit/config.json
+// and returns; applyInit's package/standalone path never runs for an overlay.
+function applyOverlay(cwd, plan, pkgRel, devkitRef) {
+  const { stack, selection, force = false, dryRun = false } = plan;
+  console.log(
+    `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
+  );
+  console.log(
+    '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
+  );
+  const { origHooksPath } = installOverlay(cwd, selection, stack, force, dryRun);
+  if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
+    console.log('  freeze baselines (grandfather current tree)');
+    runFreezes(cwd, dryRun);
+  }
+  if (!dryRun) {
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.devkit', 'config.json'),
+      `${JSON.stringify(
+        {
+          stack,
+          devkitRef,
+          initVersion: INIT_VERSION,
+          overlay: true,
+          pkgRel,
+          origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
+          components: { guards: [...(selection.guards ?? [])] },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    console.log('  ✓ wrote .devkit/config.json (git-ignored)');
+  }
+  console.log(
+    `\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit overlay complete — local-only.'}`,
+  );
+  console.log(
+    '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath).',
+  );
+}
+
+// Sync skills / agents / agent-hook scripts + their hook registrations to the SELECTED agent
+// surface(s) (.claude / .cursor), then prune any surface a prior run installed but that's now
+// deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
+function installAgentSurfaces(gitRoot, selection, dryRun) {
+  const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
+  if (selection.skills) {
+    console.log('7. skills');
+    // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest).
+    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
+  }
+  if (selection.agents) {
+    console.log('7a. agents');
+    // Agents are repo-wide too → sync to the git root's selected agent surface(s) (+ manifest).
+    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
+  }
+  // Agent-hook scripts (agentHooks) live under <surface>/hooks; the registrations below reference
+  // them, so sync the scripts first.
+  if (selection.agentHooks) {
+    console.log('7b. agent-hook scripts');
+    syncHookScripts(gitRoot, { dryRun, targets: agentTargets });
+  }
+  // Register the agent hooks each selected component owns into the selected surfaces' settings.
+  const hookComponents = [
+    selection.searchSteering && 'searchSteering',
+    selection.agentHooks && 'agentHooks',
+  ].filter(Boolean);
+  if (hookComponents.length) {
+    console.log('7c. agent hook registrations');
+    installHookRegistrations(gitRoot, hookComponents, { dryRun, targets: agentTargets });
+  }
+  pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun);
+  return agentTargets;
+}
+
+// A previous run may have synced to BOTH surfaces; if a surface is now deselected, remove devkit's
+// files from it (manifests kept — the surviving surface still tracks them). Only for components
+// staying selected; a fully-deselected component is removed wholesale by applyRemovals. Skipped on a
+// fresh install where the dropped surface has no devkit dir (no work, no noise).
+function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun) {
+  const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
+  // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
+  // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
+  const settingsFile = { claude: '.claude/settings.json', cursor: '.cursor/hooks.json' };
+  const hasPrunableContent = prunedTargets.some(
+    (t) =>
+      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
+      existsSync(join(gitRoot, settingsFile[t])),
+  );
+  if (!prunedTargets.length || !hasPrunableContent) return;
+  console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
+  if (selection.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
+  if (selection.agents) removeAgents(gitRoot, dryRun, prunedTargets, false);
+  if (selection.agentHooks)
+    removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
+  if (hookComponents.length) removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
+}
+
 /**
  * The testable apply layer: given a resolved selection (+ removals), install/remove and
  * record .devkit/config.json.components. No prompting — callers (the CLI dispatcher, tests)
@@ -712,48 +813,8 @@ export async function applyInit(cwd, plan) {
   // === cwd, pkgRel '' → everything as before.
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
 
-  // Overlay (local-only): a self-contained path — invisible to git (.git/info/exclude),
-  // non-invasive (extends the repo, edits nothing committed). Used on a shared work repo.
-  if (overlay) {
-    console.log(
-      `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
-    );
-    console.log(
-      '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
-    );
-    const { origHooksPath } = installOverlay(cwd, selection, stack, force, dryRun);
-    if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
-      console.log('  freeze baselines (grandfather current tree)');
-      runFreezes(cwd, dryRun);
-    }
-    if (!dryRun) {
-      mkdirSync(join(cwd, '.devkit'), { recursive: true });
-      writeFileSync(
-        join(cwd, '.devkit', 'config.json'),
-        `${JSON.stringify(
-          {
-            stack,
-            devkitRef,
-            initVersion: INIT_VERSION,
-            overlay: true,
-            pkgRel,
-            origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
-            components: { guards: [...(selection.guards ?? [])] },
-          },
-          null,
-          2,
-        )}\n`,
-      );
-      console.log('  ✓ wrote .devkit/config.json (git-ignored)');
-    }
-    console.log(
-      `\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit overlay complete — local-only.'}`,
-    );
-    console.log(
-      '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath).',
-    );
-    return;
-  }
+  // Overlay (local-only): a self-contained path — invisible to git, non-invasive. Returns early.
+  if (overlay) return applyOverlay(cwd, plan, pkgRel, devkitRef);
 
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
@@ -801,61 +862,9 @@ export async function applyInit(cwd, plan) {
     enableStructureLint(gitRoot, pkgRel, dryRun);
   }
 
-  // Which agent surfaces (.claude / .cursor) get the synced skills/agents/hooks. Default both;
-  // narrowed by the wizard surface picker or --no-claude/--no-cursor (don't double-install).
-  const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
-
-  if (selection.skills) {
-    console.log('7. skills');
-    // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest).
-    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
-  }
-
-  if (selection.agents) {
-    console.log('7a. agents');
-    // Agents are repo-wide too → sync to the git root's selected agent surface(s) (+ manifest).
-    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
-  }
-
-  // Agent-hook scripts (agentHooks component) live under the consumer's <surface>/hooks; the
-  // registrations below reference them, so sync the scripts first.
-  if (selection.agentHooks) {
-    console.log('7b. agent-hook scripts');
-    syncHookScripts(gitRoot, { dryRun, targets: agentTargets });
-  }
-
-  // Register the agent hooks each selected component owns into the selected surfaces' settings.
-  const hookComponents = [
-    selection.searchSteering && 'searchSteering',
-    selection.agentHooks && 'agentHooks',
-  ].filter(Boolean);
-  if (hookComponents.length) {
-    console.log('7c. agent hook registrations');
-    installHookRegistrations(gitRoot, hookComponents, { dryRun, targets: agentTargets });
-  }
-
-  // Surface prune: a previous run may have synced to BOTH surfaces; if a surface is now
-  // deselected, remove devkit's files from it (manifests kept — the surviving surface still
-  // tracks them). Only runs for components staying selected; a fully-deselected component is
-  // removed wholesale by applyRemovals below. Skipped entirely on a fresh install where the
-  // dropped surface has no devkit dir (no work, no noise).
-  const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
-  // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
-  // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
-  const settingsFile = { claude: '.claude/settings.json', cursor: '.cursor/hooks.json' };
-  const hasPrunableContent = prunedTargets.some(
-    (t) =>
-      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
-      existsSync(join(gitRoot, settingsFile[t])),
-  );
-  if (prunedTargets.length && hasPrunableContent) {
-    console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
-    if (selection.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
-    if (selection.agents) removeAgents(gitRoot, dryRun, prunedTargets, false);
-    if (selection.agentHooks)
-      removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
-    if (hookComponents.length) removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
-  }
+  // Skills / agents / agent-hooks → the selected agent surface(s), with a prune of any now-dropped
+  // surface a prior run installed. Returns the resolved agentTargets (recorded in the config below).
+  const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun);
 
   if (selection.fallow) {
     console.log('8. fallow (optional code-health layer)');

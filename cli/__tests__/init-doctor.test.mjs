@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { collectResults } from '../commands/doctor.mjs';
 import { readConfig as config, tmpRepos } from './_helpers.mjs';
 
 // --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
@@ -211,5 +212,47 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/block calls: fanout, size/);
+  });
+});
+
+// Unit-cover the doctor dispatch (extracted from run() so it's testable without the subprocess).
+describe('doctor collectResults dispatch', () => {
+  const names = (results) => results.map((r) => r.name);
+
+  it('only builds checks for the selected components', async () => {
+    const root = tmpRepo();
+    const cfg = {
+      standalone: false,
+      components: { biome: true, tsconfig: false, skills: false, husky: false, guards: [] },
+    };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    const n = names(results);
+    expect(n).toContain('biome.jsonc');
+    expect(n).not.toContain('tsconfig.json');
+    expect(n).not.toContain('skills');
+    expect(n).not.toContain('.husky/pre-commit');
+    expect(n).toContain('devkit pin'); // non-standalone always checks the pin
+  });
+
+  it('skips the pin check in standalone mode', async () => {
+    const root = tmpRepo();
+    const cfg = { standalone: true, components: { biome: false, guards: [] } };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    expect(names(results)).not.toContain('devkit pin');
+  });
+
+  it('checks skills even when only the cursor surface is selected', async () => {
+    const root = tmpRepo();
+    const cfg = {
+      components: {
+        skills: true,
+        agentTargets: ['cursor'],
+        husky: false,
+        biome: false,
+        guards: [],
+      },
+    };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    expect(names(results)).toContain('skills');
   });
 });

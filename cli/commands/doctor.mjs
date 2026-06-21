@@ -324,58 +324,50 @@ function applyFix(cwd, results, sel, stack) {
   }
 }
 
-export default async function run(args, cwd) {
-  const fix = args.includes('--fix');
+// The default component selection (pre-`components`-block configs, and the all-on fallback).
+const DEFAULT_DOCTOR_SEL = {
+  biome: true,
+  tsconfig: true,
+  skills: true,
+  husky: true,
+  structure: false,
+  guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
+};
 
-  // Not-initialized short-circuit (exit 2).
-  const configResult = checkConfig(cwd);
-  if (configResult.status === 'MISSING') {
-    console.log('devkit doctor\n');
-    console.log(`  ✗ ${configResult.name}: ${configResult.detail} — ${configResult.remediation}`);
-    return 2;
+// Overlay (local-only) doctor: just the local hook + core.hooksPath (husky re-claims it on
+// install). Package/pin/extends checks don't apply. Prints its own report; returns the exit code.
+function runOverlayDoctor(cwd) {
+  let hooksPath = '';
+  try {
+    hooksPath = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+      cwd,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    // unset
   }
+  const hookOk = existsSync(join(cwd, '.devkit', 'hooks', 'pre-commit'));
+  const pathOk = hooksPath === '.devkit/hooks';
+  console.log('devkit doctor — overlay (local-only)\n');
+  console.log(`  ${hookOk ? '✓' : '✗'} .devkit/hooks/pre-commit ${hookOk ? 'present' : 'MISSING'}`);
+  console.log(
+    `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ' — re-run `devkit init --overlay` (husky may have reclaimed it)'}`,
+  );
+  return hookOk && pathOk ? 0 : 1;
+}
 
-  // Selection-aware: only check the components that were actually installed. A config with
-  // no `components` block defaults to all-on (a fresh init always records it).
-  const cfg = readJson(join(cwd, '.devkit', 'config.json')) ?? {};
-
-  // Overlay (local-only) has its own minimal checks: the local hook + core.hooksPath (which
-  // husky re-claims on install). Package/pin/extends checks don't apply.
-  if (cfg.overlay) {
-    let hooksPath = '';
-    try {
-      hooksPath = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
-        cwd,
-        encoding: 'utf8',
-      }).trim();
-    } catch {
-      // unset
-    }
-    const hookOk = existsSync(join(cwd, '.devkit', 'hooks', 'pre-commit'));
-    const pathOk = hooksPath === '.devkit/hooks';
-    console.log('devkit doctor — overlay (local-only)\n');
-    console.log(
-      `  ${hookOk ? '✓' : '✗'} .devkit/hooks/pre-commit ${hookOk ? 'present' : 'MISSING'}`,
-    );
-    console.log(
-      `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ' — re-run `devkit init --overlay` (husky may have reclaimed it)'}`,
-    );
-    return hookOk && pathOk ? 0 : 1;
-  }
-
-  // Selection-aware: only check the components that were actually installed. A config with
-  // no `components` block defaults to all-on (a fresh init always records it).
-  const sel = cfg.components ?? {
-    biome: true,
-    tsconfig: true,
-    skills: true,
-    husky: true,
-    structure: false,
-    guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
-  };
-
-  // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no
-  // devkit pin to check (the whole point — no package dep).
+/**
+ * Build the doctor result list for a package/standalone install from its recorded config — a pure
+ * dispatch over the recorded selection, so it's unit-testable without driving the CLI. Each check
+ * reads the repo and returns a `{ name, status, detail, remediation }`.
+ *
+ * @returns {Promise<{ results: object[], sel: object }>}
+ */
+async function collectResults(cwd, cfg, configResult) {
+  // Selection-aware: only check the components actually installed (fresh init always records it).
+  const sel = cfg.components ?? DEFAULT_DOCTOR_SEL;
+  // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no devkit
+  // pin to check (the whole point — no package dep).
   const standalone = Boolean(cfg.standalone);
   const stack = cfg.stack ?? 'generic';
   const biomeExpected = standalone
@@ -409,6 +401,24 @@ export default async function run(args, cwd) {
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));
+  return { results, sel };
+}
+
+export default async function run(args, cwd) {
+  const fix = args.includes('--fix');
+
+  // Not-initialized short-circuit (exit 2).
+  const configResult = checkConfig(cwd);
+  if (configResult.status === 'MISSING') {
+    console.log('devkit doctor\n');
+    console.log(`  ✗ ${configResult.name}: ${configResult.detail} — ${configResult.remediation}`);
+    return 2;
+  }
+
+  const cfg = readJson(join(cwd, '.devkit', 'config.json')) ?? {};
+  if (cfg.overlay) return runOverlayDoctor(cwd);
+
+  const { results, sel } = await collectResults(cwd, cfg, configResult);
 
   console.log('devkit doctor\n');
   const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };
@@ -430,3 +440,5 @@ export default async function run(args, cwd) {
   }
   return 1;
 }
+
+export { collectResults };
