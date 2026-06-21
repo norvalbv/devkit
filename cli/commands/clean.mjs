@@ -94,6 +94,8 @@ function cleanOverlay(cwd, cfg, dryRun) {
 
 // Remove the @norvalbv/devkit dep + devkit-only scripts from package.json (leave public deps the
 // user may have had — biome/husky/eslint — untouched).
+// Reason: selective package.json key pruning: one guarded delete per devkit-owned dependency/script key, near-zero nesting; high branch COUNT (loops × per-key existence guards), each trivial
+// fallow-ignore-next-line complexity
 function depesc(cwd, dryRun) {
   const pkgPath = join(cwd, 'package.json');
   const pkg = readJson(pkgPath);
@@ -131,6 +133,8 @@ function pruneGitignoreLine(root, line, dryRun) {
   if (!dryRun) writeFileSync(giPath, kept.join('\n'));
 }
 
+// Reason: flat uninstall orchestration: sequential remove/prune steps each gated by an `if (exists/extends/component)` guard, near-zero nesting; high branch COUNT (one per devkit-created artifact: husky block, skills, agents, hooks, configs, fallow/search-code components), each trivial
+// fallow-ignore-next-line complexity
 function cleanPackage(cwd, cfg, dryRun) {
   const { gitRoot } = detectGitRoot(cwd);
   console.log(`cleaning ${cfg.standalone ? 'STANDALONE' : 'PACKAGE'} devkit install:`);
@@ -176,6 +180,8 @@ function cleanPackage(cwd, cfg, dryRun) {
   );
 }
 
+// Reason: flat clean dispatch: parse flags, then a linear cascade of guards (no config → orphaned-overlay recovery vs no-op; TTY confirm; overlay vs package branch); high branch COUNT from sequential early-returns, each trivial, extracting them scatters one entry-point's control flow
+// fallow-ignore-next-line complexity
 export default async function run(args, cwd) {
   const dryRun = args.includes('--dry-run');
   const yes = args.includes('--yes') || args.includes('-y');

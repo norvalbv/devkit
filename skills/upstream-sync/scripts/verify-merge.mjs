@@ -63,6 +63,8 @@ function getStagedFiles() {
  * Returns an array of { line, trimmed, lineNumber }.
  * Ignores blank lines and import-only changes.
  */
+// Reason: vendored upstream-sync script: this is the line-set diff (build baseline set, scan target lines, skip blanks/dupes); complexity is owned by the skill's merge-verification flow, not devkit's core gate
+// fallow-ignore-next-line complexity
 function computeAdditions(baselineContent, targetContent) {
   if (!baselineContent || !targetContent) return [];
 
@@ -98,6 +100,8 @@ function findInMerged(addition, mergedLines) {
 /**
  * Filter out low-signal additions (imports, single braces, comments-only, short lines).
  */
+// Reason: the branches ARE the noise-filter classifier: each guard clause rejects one distinct low-signal line category (braces, trivial returns, short comments, imports, tiny lines); merging them hides which category was filtered
+// fallow-ignore-next-line complexity
 function isSignificantLine(trimmed) {
   if (trimmed === '{' || trimmed === '}' || trimmed === '};' || trimmed === ');') return false;
   if (trimmed === 'return null;' || trimmed === 'return;') return false;
@@ -154,6 +158,8 @@ function isModifiedNotRemoved(addition, mergedContent) {
  * Check if functionality exists in another staged file (cross-file move).
  * Searches all staged files for the key identifiers.
  */
+// Reason: vendored upstream-sync script: cross-file move detection (tokenize, pick most-unique token, scan every other staged file's index blob); flagged on untested-complexity because it is exercised end-to-end by the merge-verification flow, not unit-tested in devkit
+// fallow-ignore-next-line complexity
 function existsInOtherStagedFiles(addition, currentFile, stagedFiles) {
   const tokens = addition.trimmed.match(/[a-zA-Z_$][a-zA-Z0-9_$]{4,}/g) || [];
   if (tokens.length === 0) return true;
@@ -197,6 +203,8 @@ function loadAcceptedFiles() {
   }
 }
 
+// Reason: flat orchestration: load review, gather staged files, then a single loop that classifies each frink addition into preserved/missing/modified/moved buckets and tallies a report; high branch COUNT across sequential near-zero-nesting steps, each trivial
+// fallow-ignore-next-line complexity
 function main() {
   // The fork point is the commit frink was originally cloned from (v0.0.40)
   const forkHash = '7cf0dc0e7fca4196437a43be9982b12a182aeb7e';

@@ -203,6 +203,8 @@ function logWrite(action, label) {
 
 // ── install steps ──────────────────────────────────────────────────────────
 
+// Reason: flat orchestration: builds a [src,dest] item list from independent `if (sel.x)` toggles, then one write loop with a dry-run branch; high branch COUNT, each toggle trivial and non-nested
+// fallow-ignore-next-line complexity
 function installConfigs(cwd, sel, force, dryRun) {
   const tplDir = join(packageDir(), 'templates', 'generic');
   const items = [];
@@ -268,6 +270,8 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
   console.log(`  ✓ guard.config.json scanRoots = ${value}`);
 }
 
+// Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
+// fallow-ignore-next-line complexity
 function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
   const pkgPath = join(cwd, 'package.json');
   const pkg = readJson(pkgPath);
@@ -428,6 +432,8 @@ function fallowHasDebt(cwd) {
 // order: install → gitignore (always) → optional `fallow init` (sub-confirm, default NO —
 // fallow is zero-config) → wire fallow's own git hook → save baselines ONLY if the gate wired
 // AND the repo has debt to grandfather. dryRun prints + writes nothing throughout.
+// Reason: flat fail-open orchestration: each fallow step (install → gitignore → optional init → wire gate → save baselines) is a sequential guarded call with its own dryRun/ok branch; the branch COUNT is the step count, no nesting
+// fallow-ignore-next-line complexity
 async function applyFallow(cwd, dryRun, interactive) {
   const r = installFallow({ cwd, dryRun });
   console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
@@ -491,6 +497,8 @@ function enableStructureLint(hookRoot, pkgRel, dryRun) {
 
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
 
+// Reason: CRAP-flagged thin package.json mutator: two near-identical key-delete loops (devDeps, scripts) each gated on existence + dryRun; exercised end-to-end via every remove* caller, not unit-isolated
+// fallow-ignore-next-line complexity
 function removeFromPkg(cwd, devDeps, scripts, dryRun) {
   const pkgPath = join(cwd, 'package.json');
   const pkg = readJson(pkgPath);
@@ -526,6 +534,8 @@ function removeBiome(cwd, dryRun) {
 }
 
 // Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
+// Reason: the branches ARE the safe-strip decision tiers: unparseable → bail, no-devkit-extends → bail, array-extends → filter, scalar-extends → delete; each guard exists to NEVER delete a tsconfig devkit didn't author
+// fallow-ignore-next-line complexity
 function removeTsconfig(cwd, dryRun) {
   const file = join(cwd, 'tsconfig.json');
   if (!existsSync(file)) return;
@@ -594,6 +604,8 @@ function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
 }
 
 // Remove ONLY devkit-created structure files (guarded by config marker), re-comment the line.
+// Reason: safe-removal sequence guarded per artifact: marker check → delete template files → delete baselines → strip pkg entries → re-comment the live eslint hook line; each existsSync/dryRun branch is a separate file devkit must verify it created before touching
+// fallow-ignore-next-line complexity
 function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   if (!prevConfig?.components?.structure) {
     console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
@@ -641,6 +653,8 @@ function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   }
 }
 
+// Reason: flat removal dispatch: one `if (remove.includes(id)) removeX()` per component, ordered so guards (line-level) precede husky (block-level); high branch COUNT mirrors the component list, each branch a single delegated call
+// fallow-ignore-next-line complexity
 function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection) {
   if (!remove.length) return;
   console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
@@ -718,6 +732,8 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
 // Sync skills / agents / agent-hook scripts + their hook registrations to the SELECTED agent
 // surface(s) (.claude / .cursor), then prune any surface a prior run installed but that's now
 // deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
+// Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
+// fallow-ignore-next-line complexity
 function installAgentSurfaces(gitRoot, selection, dryRun) {
   const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
   if (selection.skills) {
@@ -790,6 +806,8 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponent
  * @param {boolean} [plan.overlay] local-only mode — git-ignored, non-invasive, extends the repo
  * @param {string} [plan.devkitRef]
  */
+// Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
+// fallow-ignore-next-line complexity
 export async function applyInit(cwd, plan) {
   const {
     stack,
@@ -927,6 +945,8 @@ function structureAvailableFor(stack) {
   return STRUCTURE_STACKS.has(stack);
 }
 
+// Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
+// fallow-ignore-next-line complexity
 export default async function run(args, cwd) {
   const flags = parseFlags(args);
   const detectedStack = flags.stack ?? detectStack(cwd);

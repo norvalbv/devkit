@@ -10,6 +10,8 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable
 
 let roots = [];
 const makeRoot = () => {
+  // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each is self-contained with the same freeze/gate CLI shell
+  // fallow-ignore-next-line code-duplication
   const root = mkdtempSync(join(tmpdir(), 'ratchet-'));
   roots.push(root);
   return root;

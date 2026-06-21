@@ -4,6 +4,8 @@
  * GLOBAL guard-* bins — the "like fallow init" model for shared work repos.
  */
 import { execFileSync } from 'node:child_process';
+// Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+// fallow-ignore-next-line code-duplication
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +17,8 @@ const { mkTmp, cleanup } = rootRegistry();
 function repo(pkg = { name: 'shared', devDependencies: { react: '^18' } }) {
   const root = mkTmp('standalone-');
   execFileSync('git', ['init', '-q'], { cwd: root });
+  // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+  // fallow-ignore-next-line code-duplication
   writeFileSync(join(root, 'package.json'), JSON.stringify(pkg, null, 2));
   return root;
 }

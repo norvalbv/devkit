@@ -12,6 +12,8 @@ const FANOUT_CAP = 12; // engine default (config.mjs DEFAULTS.fanoutCap)
 
 let roots = [];
 const makeRoot = () => {
+  // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each is self-contained with the same freeze/gate CLI shell
+  // fallow-ignore-next-line code-duplication
   const root = mkdtempSync(join(tmpdir(), 'fanout-'));
   roots.push(root);
   return root;

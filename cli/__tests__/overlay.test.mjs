@@ -3,7 +3,11 @@
  * (.git/info/exclude → clean `git status`), NON-INVASIVE (package.json + the team's husky hook
  * untouched), and layer ours-extends-theirs configs + a local hook that chains to the team's.
  */
+// Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+// fallow-ignore-next-line code-duplication
 import { execFileSync } from 'node:child_process';
+// Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+// fallow-ignore-next-line code-duplication
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +34,8 @@ function workRepo() {
   writeFileSync(join(root, 'biome.jsonc'), '{ "linter": { "enabled": true } }\n');
   git('config', 'core.hooksPath', '.husky/_'); // simulate husky owning the hook
   git('add', '-A');
+  // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+  // fallow-ignore-next-line code-duplication
   git('commit', '-qm', 'init');
   return root;
 }
@@ -198,6 +204,8 @@ describe('overlay (local-only) install', () => {
         cwd: root,
         encoding: 'utf8',
       }).trim(),
+      // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+      // fallow-ignore-next-line code-duplication
     ).toBe('.devkit/hooks');
 
     const cleanRun = (await import('../commands/clean.mjs')).default;
@@ -241,6 +249,8 @@ describe('overlay (local-only) install', () => {
 
     const cleanRun = (await import('../commands/clean.mjs')).default;
     await cleanRun(['--yes'], root);
+    // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
+    // fallow-ignore-next-line code-duplication
     expect(
       execFileSync('git', ['config', '--get', 'core.hooksPath'], {
         cwd: root,

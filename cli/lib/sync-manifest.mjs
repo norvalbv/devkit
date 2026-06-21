@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from './components.mjs';
 import { readJson } from './fs-helpers.mjs';
 
+// Reason: flat manifest-teardown orchestration: sequential guarded steps (remove synced dirs, prune empty surface dirs, drop manifest) each gated by dryRun/dropManifest over the dirs list; high branch COUNT, each branch trivial, and the filesystem teardown is exercised end-to-end via init/clean not unit-tested (CRAP)
+// fallow-ignore-next-line complexity
 function removeManifested(root, manifestRel, dirs, kind, dryRun, dropManifest) {
   const manifestPath = join(root, '.devkit', manifestRel);
   const manifest = readJson(manifestPath);

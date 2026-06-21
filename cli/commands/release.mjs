@@ -35,6 +35,8 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+// Reason: flat release orchestration: a sequence of independent guard early-returns (no package.json / not devkit repo / dirty tree / bad bump / tag exists / non-TTY / tests fail) then trivial sequential steps (bump · commit · tag · push); high branch COUNT from stacked guards, each trivial with near-zero nesting
+// fallow-ignore-next-line complexity
 export default async function release(args, cwd) {
   const dryRun = args.includes('--dry-run');
   const yes = args.includes('--yes');

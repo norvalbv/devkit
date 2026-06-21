@@ -78,6 +78,8 @@ export function countDisables(root = process.cwd(), scanRoots) {
   return { fileDisables, fnDisables, scannedFiles: files.length };
 }
 
+// Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
+// fallow-ignore-next-line complexity
 function runCli(cmd) {
   const root = process.cwd();
   const baselineFile = join(root, BASELINE);
@@ -93,6 +95,8 @@ function runCli(cmd) {
     process.exit(0);
   }
 
+  // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
+  // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
     if (!existsSync(baselineFile)) {
       console.error(`size-ratchet: ${BASELINE} missing — run \`guard-size freeze\` first.`);

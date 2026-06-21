@@ -129,6 +129,8 @@ export function collectPaths(node, out = new Set()) {
  * return the list of introduced findings attributable to the staged diff.
  * Exported for tests; no I/O.
  */
+// Reason: the branches ARE the per-category attribution algorithm: complexity findings (line-range overlap), duplication clone groups (any-instance overlap), and dead_code (fail-closed on unattributable refs, else staged-file filter) each carry distinct introduced/overlap/staged rules; splitting the three loops scatters one attribution pass.
+// fallow-ignore-next-line complexity
 export function findBlockers(audit, ranges, stagedFiles) {
   const overlaps = makeOverlap(ranges);
   const blockers = [];

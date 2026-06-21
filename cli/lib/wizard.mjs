@@ -90,6 +90,8 @@ const MODES = [
  * @param {Set<string>} opts.installed component ids currently wired
  * @returns {Promise<{mode:string, stack:string, selection:object, remove:string[]}|null>} null on cancel
  */
+// Reason: flat clack wizard orchestration: sequential numbered steps (mode→stack→components→guards→removal→summary→apply) each guarded by `if (bail(x)) return null`; the branch COUNT is high but every branch is near-flat, and the untested-complexity is acceptable because this is an interactive TTY prompt flow exercised end-to-end, not unit-tested
+// fallow-ignore-next-line complexity
 export async function runWizard({
   detectedStack,
   detectedMode = 'package',

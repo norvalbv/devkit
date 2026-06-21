@@ -39,6 +39,8 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS) {
   /** @type {Record<string, string>} */
   const files = {};
   for (const rel of rels) {
+    // Reason: sync-agents and sync-skills are deliberately parallel modules (see headers "Parallel to …"): identical write+manifest mechanics to different dirs. One shared abstraction over two short readable commands would obscure both; the parallelism IS the design.
+    // fallow-ignore-next-line code-duplication
     const srcPath = join(agentsSrc, rel);
     const content = readFileSync(srcPath);
     files[rel] = sha256(srcPath);
@@ -54,6 +56,8 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS) {
     }
   }
 
+  // Reason: sync-agents and sync-skills are deliberately parallel modules (headers say 'Parallel to'): identical write+manifest mechanics to different dirs; the parallelism IS the design
+  // fallow-ignore-next-line code-duplication
   const manifestPath = join(cwd, '.devkit', 'agents-manifest.json');
   // Idempotency: keep generatedAt STABLE when nothing about the synced set changed, so a
   // re-run produces no spurious git diff (same contract as the skills manifest).

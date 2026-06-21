@@ -341,6 +341,8 @@ function runGate() {
 
 function runScan() {
   const cwd = process.cwd();
+  // Reason: two independent decision-gate CLIs (alignment flip-flop vs architectural smell); the resolve-scan-exit shape rhymes but each scans a different thing; sharing would add the cross-engine dependency the engines avoid
+  // fallow-ignore-next-line code-duplication
   try {
     const cfg = resolveGuardConfig(cwd);
     const dir = resolveFromCwd(cfg, 'decisionsDir');

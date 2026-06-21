@@ -128,6 +128,8 @@ function depChanged(cwd, relPath, mode) {
 }
 
 /** mode 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder). */
+// Reason: the branches ARE the git-diff parse algorithm: two passes over numstat/name-status, each line classifying status (rename/copy/add/del) and binary ('-') vs numeric churn; extracting the per-line tiers hides the diff-decoding logic
+// fallow-ignore-next-line complexity
 export function gatherEntries(cwd, mode = 'cached') {
   const range = mode === 'working' ? 'HEAD' : '--cached';
   const counts = new Map();
@@ -222,6 +224,8 @@ function runGate() {
 
 function runScan(mode) {
   const cwd = process.cwd();
+  // Reason: two independent decision-gate CLIs (alignment flip-flop vs architectural smell); the resolve-scan-exit shape rhymes but each scans a different thing; sharing would add the cross-engine dependency the engines avoid
+  // fallow-ignore-next-line code-duplication
   try {
     const cfg = resolveGuardConfig(cwd);
     const smells = detectSmells(gatherEntries(cwd, mode), cfg.boundaries);

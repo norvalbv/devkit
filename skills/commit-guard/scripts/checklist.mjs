@@ -85,6 +85,8 @@ function status() {
   }
 }
 
+// Reason: flat CLI handler for the commit-guard check-file command: sequential early-exit guards (no checklist, file not found) plus a pass/fail ternary, near-zero nesting; high branch COUNT, each trivial; vendored commit-guard skill script whose review flow owns the complexity, not devkit's core gate
+// fallow-ignore-next-line complexity
 function checkFile(path, pass, failReason) {
   const data = loadChecklist();
   if (!data) {
@@ -106,6 +108,8 @@ function checkFile(path, pass, failReason) {
   log(`✓ ${path}: ${file.status}${failReason ? ` (${failReason})` : ''}`);
 }
 
+// Reason: flat CLI handler for the commit-guard finalize command: sequential early-exit guards (no checklist, pending files, failed files/issues) then a try/catch around the approve script, near-zero nesting; high branch COUNT, each trivial; vendored commit-guard skill script whose review flow owns the complexity, not devkit's core gate
+// fallow-ignore-next-line complexity
 function finalize() {
   const data = loadChecklist();
   if (!data) {

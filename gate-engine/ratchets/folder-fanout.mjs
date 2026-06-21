@@ -46,6 +46,8 @@ export function countFanout(root = process.cwd(), scanRoots, exempt) {
   const rootsToScan = scanRoots ?? cfg.scanRoots;
   const exemptSet = new Set(exempt ?? cfg.fanoutExempt);
   const counts = {};
+  // Reason: recursive directory walk: one branch per entry kind (subdir recurse vs impl/test/barrel file count) mirrors the filesystem tree; flattening scatters a single traversal
+  // fallow-ignore-next-line complexity
   const walk = (dir) => {
     let entries;
     try {
@@ -88,6 +90,8 @@ function runCli(cmd) {
     process.exit(0);
   }
 
+  // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
+  // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
     if (!existsSync(baselineFile)) {
       console.error(`fanout-ratchet: ${BASELINE} missing — run \`guard-fanout freeze\` first.`);

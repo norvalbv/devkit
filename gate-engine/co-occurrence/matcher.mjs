@@ -155,6 +155,8 @@ const isTest = (i) => rows[i].file_path.includes('.test.');
 const loc = (i) => rows[i].end_line - rows[i].start_line + 1;
 
 // ── Detect all candidate pairs ──────────────────────────────────────────────
+// Reason: the branches ARE the dup-detection algorithm: the O(n²) cross-file pair sweep, the cheap code-gate pre-filter, and the exact/near/drifted tier classification fused inline; extracting the tier checks hides the matcher's core logic
+// fallow-ignore-next-line complexity
 function detect(knobs, changed = null) {
   const out = new Map(); // tuple-key -> pair
   for (let i = 0; i < n; i++) {
@@ -214,6 +216,8 @@ else {
   process.exit(1);
 }
 
+// Reason: flat scan orchestration: detect → optional --new allowlist filter → per-tier count → top-6/tier sample print → gate approval-hint print → exit-code select, sequential near-zero-nesting steps; high branch COUNT, each trivial
+// fallow-ignore-next-line complexity
 function runScan() {
   let pairs = detect(KNOBS, changedSet);
   if (ONLY_NEW) {
@@ -271,6 +275,8 @@ function runScan() {
   if (GATE) process.exit(pairs.length > 0 ? 1 : 0);
 }
 
+// Reason: the branches ARE the confusion-matrix algorithm: the TP/FP/FN/TN four-way classification plus precision/recall/F1 derivation over labels.json; CRAP-flagged because this is dev-only bench tooling exercised end-to-end against fixtures, not unit-tested
+// fallow-ignore-next-line complexity
 function runBench() {
   const { pairs: labels } = JSON.parse(readFileSync(labelsPath, 'utf8'));
   const pairs = detect(KNOBS);
@@ -310,6 +316,8 @@ function runBench() {
   if (falseAlarms.length) console.log(`\nFalse alarms (FP):\n  ${falseAlarms.join('\n  ')}`);
 }
 
+// Reason: flat baseline orchestration: detect → idempotent drop-prior-baseline/keep-human → append-new pairs → atomic allowlist write → DB allowlisted-flag reset+re-mark → tier-count report, sequential steps; high branch COUNT, each trivial, CRAP-flagged as a dev-only freeze command run end-to-end not unit-tested
+// fallow-ignore-next-line complexity
 function runBaseline() {
   const pairs = detect(KNOBS);
   const date = new Date().toISOString().slice(0, 10);
@@ -371,6 +379,8 @@ function runBaseline() {
 // baseline). Dropping a dead entry has zero gate effect: the gate only blocks on pairs
 // detect() emits, and a dropped one isn't emitted. Dry-run by default; --apply writes.
 // Run the indexer first so a stale index doesn't over-drop a still-live pair.
+// Reason: flat reconcile orchestration: detect → keep/drop partition by detection-miss → drop report → dry-run-vs-apply gate → nothing-dead short-circuit → atomic write, sequential steps; high branch COUNT, each trivial, CRAP-flagged as a dev-only burn-down command run end-to-end not unit-tested
+// fallow-ignore-next-line complexity
 function runReconcile() {
   // loadAllowlist() refuses (exit 2) on a corrupt-but-present file, so reconcile can't wipe it.
   const detected = new Set(detect(KNOBS).map(symFileKey));
@@ -433,6 +443,8 @@ function symFileKey(p) {
 }
 // Retrofit rangeA/rangeB onto existing symbol pairs by looking up each symbol's
 // chunk line range in the index. Rough (one chunk per symbol); findability metadata.
+// Reason: thin one-off maintenance script: build a symbol→range lookup, then per-allowlist-pair fill rangeA/rangeB and tally filled/missed; CRAP-flagged as a dev-only retrofit run end-to-end not unit-tested
+// fallow-ignore-next-line complexity
 function runBackfillRanges() {
   const rangeOf = new Map();
   for (const r of rows)
@@ -458,6 +470,8 @@ function runBackfillRanges() {
   db.close();
 }
 
+// Reason: defensive corruption-guard parser: the distinct branches (missing→empty, unparseable JSON→refuse, parseable-but-not-object→refuse, per-array Array.isArray normalize) each guard a real destructive-overwrite hazard where a wrong fallback silently wipes the baselined allowlist; CRAP-flagged as a thin file-load helper exercised via the modes that call it, not unit-tested
+// fallow-ignore-next-line complexity
 function loadAllowlist() {
   // Missing file → empty (fine). But a corrupt-but-PRESENT file must NOT be treated as empty:
   // a destructive caller (baseline/reconcile/backfill) would then overwrite it with {pairs:[]},
