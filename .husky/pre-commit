@@ -4,6 +4,11 @@
 # Formatter + linter (Biome) — hard gate.
 bun run lint || exit 1
 
+# Structure governance (folder-structure rule compiled from guard.config.json `structure`) — hard
+# gate. devkit governs its own cli/ + gate-engine/ layout; an unregistered domain or misplaced file
+# blocks the commit. See docs/structure-governance.md.
+bun run lint:structure || exit 1
+
 # Ratchets (baselines in eslint/baselines/, grandfathered via `bun run guard:freeze`) — hard gate.
 node gate-engine/ratchets/folder-fanout.mjs gate || exit 1
 node gate-engine/ratchets/size-disable.mjs gate || exit 1

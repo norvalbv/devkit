@@ -1,0 +1,40 @@
+# Server-side mirror of the pre-commit gate. Husky's `--no-verify` is bypassable
+# (research-auto-foldering.md §2), so every load-bearing gate runs here too — structure governance
+# included. A push that skipped the local hook still fails on the server.
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: bun run lint
+
+      - name: Structure governance (folder-structure)
+        run: bun run lint:structure
+
+      - name: Ratchet — folder fan-out
+        run: node gate-engine/ratchets/folder-fanout.mjs gate
+
+      - name: Ratchet — size-disable
+        run: node gate-engine/ratchets/size-disable.mjs gate
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Tests
+        run: bun run test:run

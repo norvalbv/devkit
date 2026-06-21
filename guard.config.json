@@ -2,5 +2,66 @@
   "scanRoots": ["cli", "gate-engine"],
   "sourceExtensions": ["mjs", "js"],
   "fanoutCap": 12,
-  "indexPath": ".search-code/index.db"
+  "indexPath": ".search-code/index.db",
+  "structure": {
+    "trees": [
+      {
+        "name": "cli",
+        "root": "cli",
+        "sourceExtensions": ["mjs", "js"],
+        "entryAllowlist": ["index.mjs"],
+        "libDomains": { "lib": ["generate", "husky", "install"] },
+        "grammar": {
+          "files": ["index.mjs"],
+          "folders": {
+            "commands": { "files": ["{kebab}", "{kebab_test}"] },
+            "lib": {
+              "files": ["{kebab}", "{kebab_test}"],
+              "domainGate": "lib",
+              "recurse": "kebabModule"
+            }
+          },
+          "rules": {
+            "kebabModule": {
+              "folderName": "{kebab_dir}",
+              "files": ["{kebab}", "{kebab_test}", "{json}"],
+              "recurse": "kebabModule"
+            }
+          }
+        }
+      },
+      {
+        "name": "gate-engine",
+        "root": "gate-engine",
+        "sourceExtensions": ["mjs", "js"],
+        "entryAllowlist": ["config.mjs"],
+        "ignoredDirs": ["eval"],
+        "libDomains": {
+          "@root": [
+            "co-occurrence",
+            "decisions",
+            "fallow",
+            "judge",
+            "ratchets",
+            "search-tool",
+            "sentry",
+            "structure"
+          ]
+        },
+        "grammar": {
+          "files": ["config.mjs"],
+          "domainGate": "@root",
+          "recurse": "engineModule",
+          "rules": {
+            "engineModule": {
+              "folderName": "{kebab_dir}",
+              "files": ["{kebab}", "{kebab_test}", "{json}"],
+              "recurse": "engineModule"
+            }
+          }
+        }
+      }
+    ],
+    "walls": []
+  }
 }
