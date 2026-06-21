@@ -131,6 +131,35 @@ describe('walkTree — frozen dirs', () => {
   });
 });
 
+describe('walkTree — multi-recurse (sibling rule families)', () => {
+  it('dispatches an unnamed folder to the FIRST rule whose folderName matches', () => {
+    const root = tmpRepo();
+    write(root, 'src/Pascal/index.ts'); // PascalCase dir → pascalRule
+    write(root, 'src/kebab-dir/x.ts'); // kebab dir → kebabRule (pascalRule folderName doesn't match)
+    write(root, 'src/Bad/weird.md'); // Pascal dir → pascalRule, but weird.md isn't allowed → violator
+    const tree = {
+      name: 'x',
+      root: 'src',
+      sourceExtensions: ['ts'],
+      grammar: {
+        recurse: ['pascalRule', 'kebabRule'],
+        rules: {
+          pascalRule: {
+            folderName: '{pascal_dir}',
+            files: ['index.ts', '{pascal_ts}'],
+            recurse: 'pascalRule',
+          },
+          kebabRule: { folderName: '{kebab_dir}', files: ['{kebab}'], recurse: 'kebabRule' },
+        },
+      },
+    };
+    const v = walkTree(tree, join(root, 'src'), ['ts']);
+    expect(v).not.toContain('Pascal/index.ts'); // matched pascalRule
+    expect(v).not.toContain('kebab-dir/x.ts'); // fell through to kebabRule
+    expect(v).toContain('Bad/weird.md'); // pascalRule allows index.ts/{pascal_ts} only
+  });
+});
+
 describe('generateStructureBaselines — config-driven path', () => {
   it('walks structure.trees from cfg and writes one baseline per existing tree', async () => {
     const root = tmpRepo();

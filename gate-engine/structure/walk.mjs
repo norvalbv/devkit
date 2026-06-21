@@ -90,11 +90,16 @@ export function walkTree(treeSpec, absRoot, exts) {
         walk(childRel, named, nodeBroken);
       } else if (node.domainGate) {
         const registered = (libDomains[node.domainGate] ?? []).includes(e.name);
-        walk(childRel, rules[node.recurse], nodeBroken || !registered);
+        const id = Array.isArray(node.recurse) ? node.recurse[0] : node.recurse;
+        walk(childRel, rules[id], nodeBroken || !registered);
       } else if (node.recurse) {
-        const rule = rules[node.recurse];
-        const cb = nodeBroken || !matchesFolderName(e.name, rule?.folderName, exts);
-        walk(childRel, rule, cb);
+        // `recurse` may be a list of rule ids (sibling families, e.g. react-app pages → pageFolder OR
+        // componentFolder). Dispatch to the FIRST rule whose folderName matches; broken if none do.
+        const ids = Array.isArray(node.recurse) ? node.recurse : [node.recurse];
+        const matched = ids
+          .map((id) => rules[id])
+          .find((r) => r && matchesFolderName(e.name, r.folderName, exts));
+        walk(childRel, matched ?? rules[ids[0]], nodeBroken || !matched);
       } else {
         add(`${childRel}/`); // unexpected folder in a flat/leaf tree
         allFiles(childRel);

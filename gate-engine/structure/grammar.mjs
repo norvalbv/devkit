@@ -38,6 +38,20 @@ export const STRUCTURE_TOKENS = Object.freeze([
   'json',
   'kebab_dir',
   'pascal_dir',
+  // Convention-specific variants (added for the react-app + electron data presets). The *_ts/*_tsx
+  // ones are FIXED-extension (a `.tsx` IS a component, a `.ts` IS logic — the distinction is the
+  // convention, not the repo language); the rest are extension-parameterized.
+  'pascal_ts', // PascalCase .ts (a types/logic sibling of a component)
+  'pascal_tsx', // PascalCase .tsx (a component file)
+  'use_hook_camel', // useFoo.ts(x) hook
+  'use_hook_kebab', // use-foo.ts(x) hook (canonical)
+  'use_hook_pascal', // useFoo/ hook FOLDER name
+  'kebab_ts', // kebab .ts
+  'kebab_tsx', // kebab .tsx
+  'kebab_test_dotted', // kebab test with dotted infixes: foo.server.test.ts
+  'vercel_route', // api route: kebab OR [param].ts
+  'any_md', // *.md
+  'any_file', // catch-all (snapshots/fixtures)
 ]);
 
 /**
@@ -50,6 +64,10 @@ export const STRUCTURE_TOKENS = Object.freeze([
  * @param {string[]} exts the tree's source extensions
  * @returns {string} an anchored regex source string
  */
+// Reason: a flat token→regex LOOKUP TABLE — one case per {token} in the vocabulary, each a one-line
+// return. The branch count IS the vocabulary size, not tangled logic; a Map would just move the same
+// table elsewhere and lose the ${E} interpolation clarity.
+// fallow-ignore-next-line complexity
 export function tokenRegex(token, exts) {
   const E = norm(exts).join('|');
   switch (token) {
@@ -71,6 +89,30 @@ export function tokenRegex(token, exts) {
       return '^[a-z][a-z0-9-]*$';
     case 'pascal_dir':
       return '^[A-Z][A-Za-z0-9]*$';
+    // Convention-specific. Fixed-extension (.ts/.tsx intrinsic to the convention):
+    case 'pascal_ts':
+      return '^[A-Z][A-Za-z0-9]*\\.ts$';
+    case 'pascal_tsx':
+      return '^[A-Z][A-Za-z0-9]*\\.tsx$';
+    case 'kebab_ts':
+      return '^[a-z][a-z0-9-]*\\.ts$';
+    case 'kebab_tsx':
+      return '^[a-z][a-z0-9-]*\\.tsx$';
+    case 'any_md':
+      return '^.+\\.md$';
+    case 'any_file':
+      return '^.+$';
+    case 'use_hook_pascal': // FOLDER name (no extension)
+      return '^use[A-Z][a-zA-Z0-9]*$';
+    // Extension-parameterized:
+    case 'use_hook_camel':
+      return `^use[A-Z][a-zA-Z0-9]*\\.(${E})$`;
+    case 'use_hook_kebab':
+      return `^use-[a-z][a-z0-9-]*\\.(${E})$`;
+    case 'kebab_test_dotted':
+      return `^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*\\.(test|spec)\\.(${E})$`;
+    case 'vercel_route':
+      return `^([a-z][a-z0-9-]*|\\[[a-zA-Z][a-zA-Z0-9]*\\])\\.(${E})$`;
     default:
       throw new Error(`unknown structure grammar token "${token}"`);
   }
