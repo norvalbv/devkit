@@ -15,8 +15,8 @@
 
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from './components.mjs';
-import { packageDir, readJson, sha256, writeIfAbsent } from './fs-helpers.mjs';
+import { AGENT_TARGETS } from '../components.mjs';
+import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
 import { registrationsFor } from './hook-registrations.mjs';
 
 // Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateStructureBaselines,
   generateTreeBaseline,
-} from '../lib/generate-structure-baseline.mjs';
+} from '../lib/generate/generate-structure-baseline.mjs';
 
 let roots = [];
 function tmpRepo() {

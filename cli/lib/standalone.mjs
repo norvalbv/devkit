@@ -26,7 +26,11 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
-import { buildStandaloneBlock, buildStandaloneHook, replaceGuardBlock } from './husky-block.mjs';
+import {
+  buildStandaloneBlock,
+  buildStandaloneHook,
+  replaceGuardBlock,
+} from './husky/husky-block.mjs';
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 

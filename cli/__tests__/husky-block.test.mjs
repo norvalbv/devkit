@@ -7,7 +7,7 @@ import {
   removeFragment,
   removeGuardBlock,
   replaceGuardBlock,
-} from '../lib/husky-block.mjs';
+} from '../lib/husky/husky-block.mjs';
 
 const ALL = { biome: true, guards: [...GUARD_IDS] };
 

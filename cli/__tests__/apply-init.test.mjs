@@ -15,7 +15,7 @@ const fallowSpies = vi.hoisted(() => ({
   wireFallowGate: vi.fn(() => ({ ok: true })),
   saveFallowBaselines: vi.fn(() => ({ ok: true })),
 }));
-vi.mock('../lib/install-fallow.mjs', () => fallowSpies);
+vi.mock('../lib/install/install-fallow.mjs', () => fallowSpies);
 
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mjs';
 import { defaultSelection, normalizeSelection } from '../lib/components.mjs';
