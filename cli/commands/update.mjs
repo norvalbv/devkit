@@ -109,5 +109,10 @@ export default async function update(args, cwd) {
   }
 
   console.log(`✓ devkit updated to v${latest}.`);
+  if (mode === 'package') {
+    console.log(
+      '  Next: `devkit migrate` — reconcile your emitted config files (eslint.config.mjs, guard.config.json) with the new version. Dry-run by default; shows every change before --apply.',
+    );
+  }
   return 0;
 }
