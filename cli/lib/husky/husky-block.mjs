@@ -22,8 +22,11 @@ src=$?
 if [ "$src" -eq 1 ]; then
     echo "   Re-freeze after a deliberate audit: bunx guard-size freeze"
     exit 1
+elif [ "$src" -ne 0 ] && [ "$src" -ne 2 ]; then
+    echo "   guard-size: unexpected exit $src — blocking the commit."
+    exit 1
 fi
-# src 0 = ok / shrank, src 2 = baseline missing (fail-open) → continue.
+# src 0 = ok / shrank, src 2 = baseline missing (fail-open) → continue; any other code blocks.
 # /devkit:guard-size`,
   fanout: `# devkit:guard-fanout
 echo "🗂  Folder fan-out ratchet..."
@@ -32,8 +35,11 @@ frc=$?
 if [ "$frc" -eq 1 ]; then
     echo "   Re-freeze after a deliberate audit: bunx guard-fanout freeze"
     exit 1
+elif [ "$frc" -ne 0 ] && [ "$frc" -ne 2 ]; then
+    echo "   guard-fanout: unexpected exit $frc — blocking the commit."
+    exit 1
 fi
-# frc 0 = ok / shrank, frc 2 = baseline missing (fail-open) → continue.
+# frc 0 = ok / shrank, frc 2 = baseline missing (fail-open) → continue; any other code blocks.
 # /devkit:guard-fanout`,
   dup: `# devkit:guard-dup
 echo "🔁 Duplication gate (semantic)..."
@@ -42,8 +48,11 @@ drc=$?
 if [ "$drc" -eq 1 ]; then
     echo "   New duplication. Refactor it, or run the approval command the gate printed above."
     exit 1
+elif [ "$drc" -ne 0 ] && [ "$drc" -ne 2 ]; then
+    echo "   guard-dup: unexpected exit $drc — blocking the commit."
+    exit 1
 fi
-# drc 0 = clean, drc 2 = could-not-run (fail-open) → continue.
+# drc 0 = clean, drc 2 = could-not-run (fail-open) → continue; any other code blocks.
 # /devkit:guard-dup`,
   clone: `# devkit:guard-clone
 echo "🔁 Clone gate (verbatim)..."
@@ -52,8 +61,11 @@ crc=$?
 if [ "$crc" -eq 1 ]; then
     echo "   New verbatim clone. Refactor it, or run the approval command the gate printed above."
     exit 1
+elif [ "$crc" -ne 0 ] && [ "$crc" -ne 2 ]; then
+    echo "   guard-clone: unexpected exit $crc — blocking the commit."
+    exit 1
 fi
-# crc 0 = clean, crc 2 = could-not-run (fail-open) → continue.
+# crc 0 = clean, crc 2 = could-not-run (fail-open) → continue; any other code blocks.
 # /devkit:guard-clone`,
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
@@ -62,8 +74,11 @@ ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
+elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
+    echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
+    exit 1
 fi
-# ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue.
+# ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
 # /devkit:guard-decisions`,
 };
 
@@ -92,18 +107,36 @@ const STRUCTURE_PLACEHOLDER = `# Structure lint (folder-structure + max-lines). 
 # structure preset is wired.
 # bunx eslint src  # uncomment after \`devkit init --stack <x>\``;
 
+// The PATH-setup snippet (GUI git clients launch with a minimal PATH that omits user bin dirs, so
+// `bun`/`bunx` go missing). devkit's gates need it to have run BEFORE them — it's part of a fresh hook's
+// preamble, and is INJECTED just ahead of an inserted block when an existing hook has no PATH setup.
+const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
+# can go missing → the hook fails. Prepend the standard user install locations.
+for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
+    [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
+done
+export PATH`;
+
+// True when a hook already establishes PATH (so we never inject a duplicate PATH_SETUP).
+const HAS_PATH_SETUP_RE = /\$HOME\/\.bun\/bin|export\s+PATH/;
+
+// Preamble-line shapes (top-level → no per-call regex compile). See findPreambleEnd.
+const DONE_RE = /^done\b/;
+const EXPORT_PATH_RE = /\bexport\s+PATH\b/;
+const PATH_ASSIGN_RE = /^PATH=/;
+const HOME_BIN_RE = /\$HOME\/\.(bun|local)/;
+const LOOP_OPEN_RE = /^(for|while|until)\b/;
+const DO_END_RE = /\bdo$/;
+const TRAILING_NEWLINES_RE = /\n+$/;
+const LEADING_NEWLINES_RE = /^\n+/;
+
 // The shebang + PATH preamble that precedes the marker block when devkit writes a fresh hook.
 const HOOK_PREAMBLE = `#!/bin/sh
 # devkit generic pre-commit hook (POSIX sh). Runs the selected gate-engine set on every
 # commit. The block between the two \`# devkit-guards\` markers is devkit-owned and is the
 # only region init / removal touches — everything outside it is the consumer's own hook.
 
-# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
-# can go missing → the hook fails. Prepend the standard user install locations.
-for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
-    [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
-done
-export PATH
+${PATH_SETUP}
 `;
 
 /**
@@ -154,8 +187,10 @@ const STANDALONE_GATES = {
 // fail-open helper: run a gate only if its global bin is on PATH (skip silently otherwise), and
 // block the commit ONLY on exit 1 (a real violation). Exit 2 means the gate couldn't run
 // (e.g. no search-code index) → fail-open, same as the package-mode fragments.
+// Block on exit 1 (real violation) OR any unexpected code (e.g. 127 command-not-found); exit 2 = the
+// gate couldn't run (no index/baseline) → fail-open. exit 0 = clean. Only 0/2 continue.
 const DK_GATE_HELPER =
-  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; "$@"; if [ $? -eq 1 ]; then exit 1; fi; }';
+  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; "$@"; rc=$?; if [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 
 /**
  * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
@@ -291,26 +326,71 @@ export function hasFragment(hookContent, id) {
 }
 
 /**
- * Replace (or insert/append) the package-scoped marker block in an existing hook. A new
- * package's block is appended, leaving any other packages' blocks + the consumer's lines intact.
+ * Char offset of the END of a hook's leading PREAMBLE — the maximal top run of: the shebang (line 0),
+ * blank lines, comment lines, and PATH-setup lines (the `for … do … done` loop, `export PATH`,
+ * `$HOME/.bun|.local/bin` lines), stopping at the first SUBSTANTIVE command. The guard block is spliced
+ * here (not appended at EOF) so it runs on EVERY commit — a consumer hook below may conditionally
+ * early-exit (e.g. a reviewer gate that `exit 0`s when all reviews pass), which would make an appended
+ * block unreachable. Whole-file-is-preamble → EOF; no shebang / first line is a command → 0 (very top).
+ *
+ * @param {string} hookContent
+ * @returns {number} insertion offset
+ */
+export function findPreambleEnd(hookContent) {
+  const lines = hookContent.split('\n');
+  let consumed = 0;
+  let inLoop = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (inLoop > 0) {
+      consumed = i + 1;
+      if (DONE_RE.test(t)) inLoop--;
+      continue;
+    }
+    // Loop-open FIRST — the PATH for-loop's own line contains `$HOME/.bun` (a preamble shape), so it
+    // must be recognised as a loop opener (to track its body via `done`), not a one-off preamble line.
+    if (LOOP_OPEN_RE.test(t) && DO_END_RE.test(t)) {
+      inLoop++;
+      consumed = i + 1;
+      continue;
+    }
+    const isShebang = i === 0 && t.startsWith('#!');
+    const isPreambleLine =
+      isShebang ||
+      t === '' ||
+      t.startsWith('#') ||
+      EXPORT_PATH_RE.test(t) ||
+      PATH_ASSIGN_RE.test(t) ||
+      HOME_BIN_RE.test(t);
+    if (isPreambleLine) {
+      consumed = i + 1;
+      continue;
+    }
+    break; // first substantive command
+  }
+  if (consumed === 0) return 0;
+  if (consumed >= lines.length) return hookContent.length;
+  return lines.slice(0, consumed).join('\n').length + 1; // +1 = the newline after the last preamble line
+}
+
+/**
+ * Insert (or relocate) the package-scoped marker block in a hook so it runs on EVERY commit. ALWAYS
+ * removes any existing block first, then re-inserts it right AFTER the preamble (findPreambleEnd) — this
+ * RELOCATES a block that a prior devkit version stuck after a terminal `exit` (unreachable). PATH_SETUP
+ * is injected just before the block iff the hook establishes no PATH of its own. Idempotent: a
+ * correctly-placed block round-trips to the same bytes (so re-running init is a no-op). The consumer's
+ * lines outside the block are untouched.
  */
 // Reason: parallel marker-block string builders; the shape rhymes but each emits a distinct hook fragment
 // fallow-ignore-next-line code-duplication
 export function replaceGuardBlock(hookContent, newBlock, pkgRel = '') {
-  const s = markStart(pkgRel);
-  const e = markEnd(pkgRel);
-  const start = hookContent.indexOf(s);
-  const end = hookContent.indexOf(e);
-  if (start === -1 || end === -1) {
-    // Append before a trailing `exit 0` if present, else at the end.
-    const exitIdx = hookContent.lastIndexOf('\nexit 0');
-    if (exitIdx !== -1) {
-      return `${hookContent.slice(0, exitIdx)}\n\n${newBlock}${hookContent.slice(exitIdx)}`;
-    }
-    const sep = hookContent.endsWith('\n') ? '\n' : '\n\n';
-    return `${hookContent}${sep}${newBlock}\n`;
-  }
-  return hookContent.slice(0, start) + newBlock + hookContent.slice(end + e.length);
+  const { content } = removeGuardBlock(hookContent, pkgRel);
+  const idx = findPreambleEnd(content);
+  const block = HAS_PATH_SETUP_RE.test(content) ? newBlock : `${PATH_SETUP}\n\n${newBlock}`;
+  const before = content.slice(0, idx).replace(TRAILING_NEWLINES_RE, '');
+  const after = content.slice(idx).replace(LEADING_NEWLINES_RE, '');
+  const joined = [before, block, after].filter((p) => p !== '').join('\n\n');
+  return `${joined.replace(TRAILING_NEWLINES_RE, '')}\n`;
 }
 
 /**
