@@ -67,6 +67,10 @@ Usage:
                              Re-pins package.json + \`bun install\` if devkit is a dep here,
                              else \`bun add -g\` the new tag (updates the global CLI). Set
                              DEVKIT_REPO if your ssh uses a host alias.
+  devkit migrate [--apply]   After an update, reconcile your EMITTED files (eslint.config.mjs,
+                             guard.config.json) with the installed devkit. DRY-RUN by default —
+                             shows every change (devkit-owned files replaced; your guard.config
+                             values merged, never clobbered). --apply to write.
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -78,6 +82,7 @@ const COMMANDS = {
   'sync-agents': () => import('./commands/sync-agents.mjs'),
   release: () => import('./commands/release.mjs'),
   update: () => import('./commands/update.mjs'),
+  migrate: () => import('./commands/migrate.mjs'),
 };
 
 // Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
