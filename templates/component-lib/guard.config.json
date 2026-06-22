@@ -22,6 +22,15 @@
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
   "decisionsDir": "docs/decisions",
 
+  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "review": {
+    "backendRoots": [],
+    "frontendRoots": ["src"],
+    "trustBoundaries": "",
+    "shortcutTracking": false,
+    "accessibility": { "skipTouchTargets": false }
+  },
+
   "//structure": "THE topology (data). The shared eslint.config.mjs shim compiles this via devkit's compileToEslint — no per-stack eslint rule. A flat primitives lib: PascalCase component files (.ts/.tsx) + the index.ts barrel + cn.ts helper, directly in src/; optional PascalCase subfolders nest recursively. Add helper literals (e.g. 'theme.ts') to grammar.files as your lib grows; a misnamed file (kebab, or camelCase .tsx) is rejected. Walls empty (a lib has no import boundary).",
   "structure": {
     "trees": [

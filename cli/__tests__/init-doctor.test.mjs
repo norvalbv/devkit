@@ -69,7 +69,6 @@ describe('init --stack react-app (structure ungated)', () => {
     expect(r.status).toBe(0);
     for (const f of [
       'eslint.config.mjs',
-      'eslint/domains.mjs',
       'eslint/baselines/exempt.mjs',
       'guard.config.json',
       'biome.jsonc',
@@ -77,11 +76,12 @@ describe('init --stack react-app (structure ungated)', () => {
     ]) {
       expect(existsSync(join(root, f)), `${f} should exist`).toBe(true);
     }
+    // react-app is config-driven now: the shared shim + a data structure block, no domains registry.
+    expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
     const cfg = config(root);
     expect(cfg.stack).toBe('react-app');
     expect(cfg.components.structure).toBe(true);
-    // react-app installs from templates/react-app, NOT templates/electron.
-    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/react-app preset/);
+    expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/THE UNIVERSAL SHIM/);
   });
 
   it('enables the structure-lint line in the husky hook (template exists)', () => {

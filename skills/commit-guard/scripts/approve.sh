@@ -13,6 +13,9 @@ set -e
 # Check what's staged
 HAS_BACKEND=$(git diff --cached --name-only -- src/main/ vercel-serverless/ socket-server/ | head -1)
 HAS_FRONTEND=$(git diff --cached --name-only -- src/renderer/ src/preload/ | grep -v '\.pen$' | head -1)
+# Any source change (incl. src/shared) — the DRY/commit-guard gate is codebase-wide, not just
+# backend/frontend (a src/shared-only commit must still require the commit-guard marker).
+HAS_SOURCE=$(git diff --cached --name-only -- src/ vercel-serverless/ socket-server/ | grep -v '\.pen$' | head -1)
 
 echo "🔍 Checking reviewer approvals..."
 echo ""
@@ -20,7 +23,7 @@ echo ""
 MISSING_APPROVALS=()
 
 # Always check DRY/pre-commit review for any src/, vercel-serverless/, or socket-server/ changes
-if [ -n "$HAS_BACKEND" ] || [ -n "$HAS_FRONTEND" ]; then
+if [ -n "$HAS_SOURCE" ]; then
     if [ ! -f ".claude/.commit-guard-passed" ]; then
         MISSING_APPROVALS+=("commit-guard (DRY principles)")
     fi

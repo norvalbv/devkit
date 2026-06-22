@@ -140,7 +140,10 @@ function finalize() {
   try {
     execSync('./.claude/skills/commit-guard/scripts/approve.sh', { stdio: 'inherit' });
   } catch {
-    log('⚠️  Could not run approve script');
+    // approve.sh exits non-zero when OTHER reviewers are still pending — propagate it (don't swallow)
+    // so the commit isn't waved through. The commit-guard marker above stays (commit-guard itself passed).
+    log('❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.');
+    process.exit(1);
   }
 }
 
