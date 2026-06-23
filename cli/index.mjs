@@ -71,6 +71,13 @@ Usage:
                              guard.config.json) with the installed devkit. DRY-RUN by default —
                              shows every change (devkit-owned files replaced; your guard.config
                              values merged, never clobbered). --apply to write.
+  devkit move <src...> <dest-dir>  Relocate source files + rewrite EVERY reference (import /
+                             export-from / dynamic import() / vi.mock|jest.mock|require) to the
+                             new path in the repo's @/ alias style — moves colocated *.test
+                             siblings too, re-anchors the moved file's own relative imports, and
+                             surgically prunes the moved entries from eslint/baselines (no
+                             whole-tree regen). --dry-run previews; --no-baseline skips the prune;
+                             --alias=@/=src/renderer overrides tsconfig auto-detect.
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -83,6 +90,7 @@ const COMMANDS = {
   release: () => import('./commands/release.mjs'),
   update: () => import('./commands/update.mjs'),
   migrate: () => import('./commands/migrate.mjs'),
+  move: () => import('./commands/move.mjs'),
 };
 
 // Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial

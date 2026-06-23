@@ -46,6 +46,11 @@ const KEBAB_TEST_DOTTED = /^[a-z][a-z0-9-]*(\.[a-z0-9-]+)*\.(test|spec)\.ts$/;
 const ALLOWED_TOP = new Set(['App.tsx', 'main.tsx', 'wdyr.ts', 'index.html', 'login.html']);
 const ALLOWED_COMPONENT_SIBLINGS = new Set(['index.tsx', 'index.ts', 'constants.ts', 'types.ts']);
 
+// A loose file legal inside a UI grouping folder: barrel/constants/types, a colocated
+// test, or css. Anything else is logic/loose-component and gets flagged.
+const isAllowedGroupFile = (name) =>
+  ALLOWED_COMPONENT_SIBLINGS.has(name) || TEST.test(name) || ANY_CSS.test(name);
+
 const IGNORED_DIRS = new Set(['assets', 'public', 'styles', 'icons']);
 // FROZEN legacy dirs (eslint.config.mjs: children []) — every existing file is
 // grandfathered debt; anything new fails lint until it migrates to lib//app/.
@@ -158,22 +163,12 @@ function makeRendererWalker(root, domains) {
     for (const e of readdirSync(abs, { withFileTypes: true })) {
       const childRel = `${rel}/${e.name}`;
       if (e.isFile()) {
-        if (
-          e.name === 'index.ts' ||
-          e.name === 'index.tsx' ||
-          e.name === 'constants.ts' ||
-          e.name === 'types.ts'
-        )
-          continue;
-        if (TEST.test(e.name)) continue;
-        if (ANY_CSS.test(e.name)) continue;
-        add(out, childRel);
+        if (!isAllowedGroupFile(e.name)) add(out, childRel);
         continue;
       }
       if (e.name === '__tests__') {
         for (const t of readdirSync(join(root, childRel))) {
-          if (TEST.test(t)) continue;
-          add(out, `${childRel}/${t}`);
+          if (!TEST.test(t)) add(out, `${childRel}/${t}`);
         }
         continue;
       }
