@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GUARD_IDS } from '../lib/components.mjs';
 import {
@@ -184,5 +188,46 @@ describe('hasFragment', () => {
     const hook = buildFullHook({ biome: true, guards: ['dup'] });
     expect(hasFragment(hook, 'guard-dup')).toBe(true);
     expect(hasFragment(hook, 'guard-clone')).toBe(false);
+  });
+});
+
+// husky runs hooks under `sh -e`. A bare `bunx guard-X gate` whose fail-open exit (2) returns
+// non-zero would ABORT the whole hook before the fragment's exit-code check — the fragment's
+// "exit 2 = fail-open, continue" intent never runs (this regressed frink: every commit died at
+// guard-dup's exit-2 opt-out). The fix is `rc=0; bunx … || rc=$?`. These run the assembled hook
+// under a real `sh -e` with a stubbed `bunx`.
+describe('guard fragments are set -e-safe (fail-open does not abort the hook)', () => {
+  // Build a fresh hook (guards only — biome/git steps need a repo) into a temp $HOME so the hook's
+  // own PATH_SETUP prepends OUR stub bunx (in $HOME/.bun/bin), then run it under `sh -e`.
+  const runHookWithStubBunx = (stubExit) => {
+    const home = mkdtempSync(join(tmpdir(), 'dk-husky-'));
+    const bin = join(home, '.bun', 'bin');
+    mkdirSync(bin, { recursive: true });
+    const bunx = join(bin, 'bunx');
+    writeFileSync(bunx, `#!/bin/sh\nexit ${stubExit}\n`);
+    chmodSync(bunx, 0o755);
+    const hookPath = join(home, 'pre-commit');
+    writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
+    try {
+      execFileSync('sh', ['-e', hookPath], {
+        env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
+        stdio: 'pipe',
+      });
+      return 0;
+    } catch (e) {
+      return e.status;
+    }
+  };
+
+  it('a guard fail-open (exit 2) lets the hook continue to exit 0', () => {
+    expect(runHookWithStubBunx(2)).toBe(0);
+  });
+
+  it('a guard violation (exit 1) still blocks the commit (exit 1)', () => {
+    expect(runHookWithStubBunx(1)).toBe(1);
+  });
+
+  it('an unexpected guard code (e.g. 127) fails closed (blocks)', () => {
+    expect(runHookWithStubBunx(127)).toBe(1);
   });
 });

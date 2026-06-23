@@ -17,8 +17,11 @@ import { markEnd, markStart } from './husky.mjs';
 const GUARD_FRAGMENTS = {
   size: `# devkit:guard-size
 echo "📏 Size-debt ratchet..."
-bunx guard-size gate
-src=$?
+# set -e-safe: husky runs hooks under \`sh -e\`, so a bare \`bunx … gate\` returning its
+# fail-open code (2) would abort the whole hook before this check. \`|| src=$?\` neutralises
+# set -e (the call is now a tested command) AND captures the code.
+src=0
+bunx guard-size gate || src=$?
 if [ "$src" -eq 1 ]; then
     echo "   Re-freeze after a deliberate audit: bunx guard-size freeze"
     exit 1
@@ -30,8 +33,8 @@ fi
 # /devkit:guard-size`,
   fanout: `# devkit:guard-fanout
 echo "🗂  Folder fan-out ratchet..."
-bunx guard-fanout gate
-frc=$?
+frc=0
+bunx guard-fanout gate || frc=$?
 if [ "$frc" -eq 1 ]; then
     echo "   Re-freeze after a deliberate audit: bunx guard-fanout freeze"
     exit 1
@@ -43,8 +46,8 @@ fi
 # /devkit:guard-fanout`,
   dup: `# devkit:guard-dup
 echo "🔁 Duplication gate (semantic)..."
-bunx guard-dup scan --new --changed --gate
-drc=$?
+drc=0
+bunx guard-dup scan --new --changed --gate || drc=$?
 if [ "$drc" -eq 1 ]; then
     echo "   New duplication. Refactor it, or run the approval command the gate printed above."
     exit 1
@@ -56,8 +59,8 @@ fi
 # /devkit:guard-dup`,
   clone: `# devkit:guard-clone
 echo "🔁 Clone gate (verbatim)..."
-bunx guard-clone scan --changed --gate
-crc=$?
+crc=0
+bunx guard-clone scan --changed --gate || crc=$?
 if [ "$crc" -eq 1 ]; then
     echo "   New verbatim clone. Refactor it, or run the approval command the gate printed above."
     exit 1
@@ -69,8 +72,8 @@ fi
 # /devkit:guard-clone`,
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
-bunx guard-decisions detect --gate
-ddrc=$?
+ddrc=0
+bunx guard-decisions detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
@@ -190,7 +193,7 @@ const STANDALONE_GATES = {
 // Block on exit 1 (real violation) OR any unexpected code (e.g. 127 command-not-found); exit 2 = the
 // gate couldn't run (no index/baseline) → fail-open. exit 0 = clean. Only 0/2 continue.
 const DK_GATE_HELPER =
-  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; "$@"; rc=$?; if [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
+  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 
 /**
  * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
