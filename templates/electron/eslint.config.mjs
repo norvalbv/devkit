@@ -124,6 +124,7 @@ const componentFolderRule = {
       ],
     },
     { ruleId: 'componentFolder' },
+    { ruleId: 'groupingFolder' },
   ],
 };
 
@@ -137,6 +138,34 @@ const featureFolderRule = {
     { name: 'index.tsx' },
     { name: 'constants.ts' },
     { ruleId: 'componentFolder' },
+    { ruleId: 'groupingFolder' },
+  ],
+};
+
+// UI GROUPING folder — a kebab sub-area inside a feature, a component folder, or
+// components/ that ORGANISES component folders (e.g. agents/main, active-chat/components,
+// dialogs/settings-tabs). Holds component folders + nested groups + barrels/constants/
+// types/tests/css — but NO loose logic ({kebab_ts} deliberately absent): logic still lives
+// in lib/. Flat-dumps are independently prevented by the folder fan-out cap (<=12/folder),
+// so grouping no longer risks the original "flat logic dump" concern. Recursive.
+const groupingFolderRule = {
+  name: '{kebab_case}',
+  children: [
+    { name: 'index.ts' },
+    { name: 'index.tsx' },
+    { name: 'constants.ts' },
+    { name: 'types.ts' },
+    { name: '{test_file}' },
+    { name: '{any_css}' },
+    {
+      name: '__tests__',
+      children: [
+        { name: '{test_file}' },
+        { name: '__snapshots__', children: [{ name: '{any_file}' }] },
+      ],
+    },
+    { ruleId: 'componentFolder' },
+    { ruleId: 'groupingFolder' },
   ],
 };
 
@@ -196,7 +225,7 @@ const folderStructure = createFolderStructure({
       { name: 'wdyr.ts' },
       { name: 'index.html' },
       { name: 'login.html' },
-      { name: 'components', children: [{ ruleId: 'componentFolder' }] },
+      { name: 'components', children: [{ ruleId: 'componentFolder' }, { ruleId: 'groupingFolder' }] },
       { name: 'features', children: [{ ruleId: 'featureFolder' }] },
       {
         name: 'hooks',
@@ -230,6 +259,7 @@ const folderStructure = createFolderStructure({
   rules: {
     componentFolder: componentFolderRule,
     featureFolder: featureFolderRule,
+    groupingFolder: groupingFolderRule,
     libKebabFolder: libKebabFolderRule,
   },
 });

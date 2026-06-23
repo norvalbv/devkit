@@ -143,10 +143,45 @@ function makeRendererWalker(root, domains) {
         continue;
       }
       if (!PASCAL.test(e.name)) {
-        walkComponentTree(out, childRel, true, false);
+        walkGroupingFolder(out, childRel);
         continue;
       }
       walkComponentTree(out, childRel, false, false);
+    }
+  }
+
+  // UI GROUPING folder (kebab) — mirrors groupingFolderRule: component folders +
+  // nested groups + barrels/constants/types/tests/css; loose component files and
+  // loose .ts logic are FLAGGED (logic lives in lib/). Recursive.
+  function walkGroupingFolder(out, rel) {
+    const abs = join(root, rel);
+    for (const e of readdirSync(abs, { withFileTypes: true })) {
+      const childRel = `${rel}/${e.name}`;
+      if (e.isFile()) {
+        if (
+          e.name === 'index.ts' ||
+          e.name === 'index.tsx' ||
+          e.name === 'constants.ts' ||
+          e.name === 'types.ts'
+        )
+          continue;
+        if (TEST.test(e.name)) continue;
+        if (ANY_CSS.test(e.name)) continue;
+        add(out, childRel);
+        continue;
+      }
+      if (e.name === '__tests__') {
+        for (const t of readdirSync(join(root, childRel))) {
+          if (TEST.test(t)) continue;
+          add(out, `${childRel}/${t}`);
+        }
+        continue;
+      }
+      if (PASCAL.test(e.name)) {
+        walkComponentTree(out, childRel, false, false);
+      } else {
+        walkGroupingFolder(out, childRel);
+      }
     }
   }
 
@@ -191,8 +226,12 @@ function makeRendererWalker(root, domains) {
         continue;
       }
       if (e.name === 'ui' && rel === 'components') continue;
+      if (!ancestorKebab && !broken && !PASCAL.test(e.name)) {
+        // kebab folder in the component tree = a UI GROUPING folder.
+        walkGroupingFolder(out, childRel);
+        continue;
+      }
       const childKebab = ancestorKebab || !PASCAL.test(e.name);
-      if (!ancestorKebab && !PASCAL.test(e.name)) add(out, `${childRel}/`);
       walkComponentTree(out, childRel, childKebab, broken);
     }
   }
