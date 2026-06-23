@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -70,6 +70,7 @@
     "jscpd": "^4.2.4"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.1"
+    "@clack/prompts": "^1.5.1",
+    "ts-morph": "^28.0.0"
   }
 }
