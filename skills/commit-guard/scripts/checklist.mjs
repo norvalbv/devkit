@@ -14,7 +14,7 @@
  *   cleanup               Remove checklist file
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -22,10 +22,21 @@ const CHECKLIST_PATH = '.claude/.pre-commit-review.json';
 
 const log = console.log;
 
+// First-level source roots to review — from guard.config.json (NOT hardcoded), so the checklist
+// scopes to ANY repo's layout. No config → all staged files (the gate never silently no-ops).
+function scanRoots() {
+  try {
+    const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
+    if (Array.isArray(c.scanRoots) && c.scanRoots.length > 0) return c.scanRoots;
+  } catch {}
+  return ['.'];
+}
+
 function getStagedFiles() {
   try {
-    const output = execSync(
-      'git diff --cached --name-only --diff-filter=ACM -- src/ vercel-serverless/ socket-server/',
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...scanRoots()],
       { encoding: 'utf-8' },
     );
     return output
@@ -52,7 +63,7 @@ function saveChecklist(data) {
 function init() {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
-    log('⚠️  No staged files in src/, vercel-serverless/, or socket-server/');
+    log('⚠️  No staged files under the configured scanRoots (guard.config.json)');
     process.exit(0);
   }
 
