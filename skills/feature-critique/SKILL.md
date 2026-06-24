@@ -54,32 +54,32 @@ directory so both tools read from a single source of truth.
 
 ```
 ## Proposal
-Import agents/hooks to a local frink directory as a single source of truth
-for Cursor and Claude CLI configuration.
+Symlink the bundled skills/ and agents/ into each repo's .cursor/skills and
+.claude/skills as a single source of truth, instead of copying the files in.
 
 ## Problem Statement
-We maintain duplicate agent configs and hooks across .cursor/ and .claude/
-directories. Changes in one don't propagate to the other.
+The sync copies skills/agents into both .cursor/ and .claude/ on every run; the
+copies drift from the source and double the committed file count.
 
 ## Proposed Solution
-Create a canonical directory (e.g., frink-config/) and symlink from
-.cursor/agents/ and .claude/ into it. Use a setup script to create links.
+Replace the copy step with symlinks from each agent surface into one canonical
+skills/ directory. A setup script creates the links.
 
 ## Tech Stack & Constraints
-- Cursor IDE (electron-based)
-- Claude CLI
+- Node CLI, consumed by repos it doesn't control
+- Cursor IDE + Claude CLI as the two agent surfaces
 - macOS + potentially Linux
 - Must work with git (symlinks in repos)
 
 ## Known Risks
-- Cursor and Claude CLI may not follow symlinks
-- Cursor may only scan its own .cursor/ directory
+- Cursor and Claude CLI may not follow symlinks to a parent directory
+- Symlinks dangle on uninstall and pollute a consumer's committed repo
 - Git handles symlinks inconsistently across platforms
 
 ## Additional Context
-From Cursor docs: "Subagents are stored in .cursor/agents/ or ~/.cursor/agents/"
-Claude CLI uses CLAUDE.md and .claude/ directory structure.
-Neither tool documents support for arbitrary config directories.
+Cursor scans .cursor/; Claude CLI scans .claude/ and CLAUDE.md. Neither documents
+following symlinks to arbitrary directories. A copy + checksum-manifest approach
+sidesteps both the dangling-link and the cross-platform git problems.
 ```
 
 ## What the Critic Evaluates
@@ -148,16 +148,18 @@ The critic writes the edge-cases artifact to `.cursor/.edge-cases.json` by defau
   description: "Critique shared config proposal",
   prompt: `
 ## Proposal
-Import agents/hooks to a local frink directory as a single source of truth...
+Symlink bundled skills/agents into .cursor and .claude as a single source of
+truth, instead of copying the files...
 
 ## Problem Statement
-Duplicate configs across .cursor/ and .claude/...
+Duplicate skill/agent copies across .cursor/ and .claude/ drift apart...
 
 ## Proposed Solution
-Symlink from tool directories into a canonical frink-config/ directory...
+Symlink each surface into one canonical skills/ directory...
 
 ## Additional Context
-Neither Cursor nor Claude CLI document support for arbitrary config paths.
+Neither Cursor nor Claude CLI document following symlinks to arbitrary paths;
+copies + a checksum manifest sidestep dangling links.
 `
 }
 ```

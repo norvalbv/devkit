@@ -1,6 +1,6 @@
 {
   "devkitRef": "v0.16.11",
-  "generatedAt": "2026-06-24T12:07:10.122Z",
+  "generatedAt": "2026-06-24T12:46:16.673Z",
   "files": {
     "api-security/SKILL.md": "da5565a99f9120532865c0a78c1b3589f8908ea11e2e3004f780c872ed464b4a",
     "backend-performance/SKILL.md": "b44f1cf9d8a3eea43f6bf80aebdfe81db2c327cccb1f7c0f7deac461d972dad5",
@@ -10,7 +10,7 @@
     "commit-guard/scripts/checklist.mjs": "d94699168aca40a53b2610644911f42547eb01c0f424878da2c5ab27059a2b53",
     "decisions/SKILL.md": "2a3028bdd81593319222952c9691db0ad4f22f5de0d7e9f1ad9adc80d8f081e9",
     "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
-    "feature-critique/SKILL.md": "c88197ea5ff8d0ea257adb9d62536d938b2f8ca83e13fb5c0a75da1d1cf6ba67",
+    "feature-critique/SKILL.md": "26b1f4453e580d56c13ee625b2f16ec6f6557386cbe04160c670c379f8996fe9",
     "frontend-accessibility/SKILL.md": "2f4d5ca8f93ba48865603abb294aae2c3795567a16c1ec0d999822a320835bbe",
     "frontend-performance/SKILL.md": "ba5d93620057440fb7c7687595bd65be50fa4b89335094761c42ca474be7077a",
     "frontend-security/SKILL.md": "516f84c98a67d2607358332490e90efd3dd885c8795a4cc343fdb68c650d81b6",
