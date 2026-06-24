@@ -38,7 +38,18 @@ describe('doctor checkVersion', () => {
   it('OK when installed satisfies both the min and the stamp', () => {
     const root = mkTmp('docver-');
     writeConfig(root, { minDevkit: '0.0.1', devkitVersion: '0.0.1' });
-    expect(checkVersion(root).status).toBe('OK');
+    const r = checkVersion(root);
+    expect(r.status).toBe('OK');
+    expect(r.detail).toContain('repo init 0.0.1');
+    expect(r.detail).toContain('min 0.0.1');
+  });
+
+  it('OK detail echoes a declared min even with no init stamp (so the floor is visible)', () => {
+    const root = mkTmp('docver-');
+    writeConfig(root, { minDevkit: '0.0.1' });
+    const r = checkVersion(root);
+    expect(r.status).toBe('OK');
+    expect(r.detail).toContain('min 0.0.1');
   });
 
   it('OK (no false warn) when config / version fields are absent', () => {
