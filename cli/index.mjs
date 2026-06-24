@@ -57,7 +57,10 @@ Usage:
                              (default off — removal is opt-in / non-destructive).
 
   devkit doctor [--fix]      Diagnose drift for the INSTALLED component set (read-only).
-                             --fix re-runs init for the recorded selection.
+                             --fix re-runs init for the recorded selection. Also warns if the
+                             RUNNING devkit is older than this repo's init stamp or a hand-declared
+                             "minDevkit":"x.y.z" floor in .devkit/config.json (config-only — never
+                             package.json, so overlay/standalone repos stay invisible).
   devkit clean [--yes] [--dry-run]  UNINSTALL devkit — reverse init for the recorded mode
                              (overlay restores core.hooksPath + prunes .git/info/exclude;
                              package/standalone removes configs, the hook block, deps, skills).
