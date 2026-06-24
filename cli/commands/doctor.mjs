@@ -82,6 +82,20 @@ function readJsonc(path) {
   }
 }
 
+// The extends pointer each config must carry, by install mode. Standalone extends VENDORED
+// relative paths (.devkit/*); package extends the resolved dep. Single source of truth shared by
+// the check (collectResults) and the --fix repair, so --fix writes exactly what doctor expects.
+function expectedExtends(stack, standalone) {
+  return {
+    biome: standalone
+      ? `./.devkit/biome/${['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base'}.jsonc`
+      : '@norvalbv/devkit/biome/base',
+    tsconfig: standalone
+      ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
+      : '@norvalbv/devkit/tsconfig/base',
+  };
+}
+
 function checkExtends(cwd, file, expected, key = 'extends') {
   const path = join(cwd, file);
   if (!existsSync(path)) {
@@ -294,11 +308,29 @@ export function checkVersion(cwd) {
   return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}`);
 }
 
-// Devkit-OWNED template configs whose content is a fixed contract — safe to force-rewrite
-// on DRIFT from their template. guard.config.json is deliberately EXCLUDED: a consumer
-// tunes it (boundaries, scanRoots), so --fix must never clobber it — it can only be
-// recreated when MISSING (by plain, create-if-absent init).
-const FORCE_FIXABLE = new Set(['biome.jsonc', 'tsconfig.json']);
+// Configs whose drifted `extends` pointer --fix can repair IN PLACE (kind → expectedExtends key).
+// The top-level config is the CONSUMER's (it carries paths, libs, plugins, overrides); only the
+// pointer it extends is devkit-owned. guard.config.json is excluded: --fix never touches its content
+// — it's only recreated when MISSING (by plain, create-if-absent init).
+const EXTENDS_REPAIRABLE = { 'biome.jsonc': 'biome', 'tsconfig.json': 'tsconfig' };
+
+// Swap a config's `extends` base pointer to `expected`, preserving every other byte (comments and
+// repo deltas) by replacing only the pointer token in the raw text. Returns true if rewritten.
+// biome's extends is an array, tsconfig's a bare string — both hold a single devkit base pointer.
+// No-op when unparseable, already correct, or no devkit pointer is present (left for the report).
+function repairExtends(path, expected) {
+  if (!existsSync(path)) return false;
+  const ext = readJsonc(path)?.extends;
+  const list = Array.isArray(ext) ? ext : ext == null ? [] : [ext];
+  if (list.includes(expected)) return false;
+  const old = list.find((v) => typeof v === 'string' && v.includes('devkit'));
+  if (!old) return false;
+  const raw = readFileSync(path, 'utf8');
+  const next = raw.replace(JSON.stringify(old), JSON.stringify(expected));
+  if (next === raw) return false;
+  writeFileSync(path, next);
+  return true;
+}
 
 // Turn a recorded component selection into the init flag list that reproduces it, so
 // `--fix` re-runs init for the RECORDED selection (not the all-on --yes default).
@@ -316,22 +348,23 @@ function selectionFlags(sel) {
   return flags;
 }
 
-// --fix: repair fixable findings. NEVER refreeze (only recreate MISSING baselines), and
-// NEVER force-overwrite a consumer-tuned file. A DRIFTED template config is force-rewritten
-// from its template DIRECTLY (not via `init --force`, which would also clobber the
-// consumer's tuned guard.config.json); MISSING files + husky go through `init` for the
-// RECORDED selection (selectionFlags) so --fix never silently re-adds a deselected component.
-// Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (template-rewrite loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
+// --fix: repair fixable findings. NEVER refreeze (only recreate MISSING baselines), and NEVER
+// clobber a consumer-tuned file: a DRIFTED config has only its `extends` pointer repaired in place
+// (deltas + comments survive). MISSING files + husky go through `init` for the RECORDED selection
+// (selectionFlags) AND the recorded install mode (standalone) — so --fix never silently re-adds a
+// deselected component nor writes a package dep into a no-package (standalone) repo.
+// Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
 // fallow-ignore-next-line complexity
-function applyFix(cwd, results, sel, stack) {
+function applyFix(cwd, results, sel, stack, standalone) {
   console.log('\n--fix: re-running idempotent steps for the recorded selection...');
 
-  // Force-rewrite only the specific drifted fixed-contract configs, straight from template.
-  const tplDir = join(packageDir(), 'templates', stack === 'electron' ? 'electron' : 'generic');
+  // Repair only a drifted `extends` pointer, in place, to the mode-correct value — never the
+  // consumer's tuned content. A MISSING config is (re)created by init below, not here.
+  const want = expectedExtends(stack, standalone);
   for (const r of results) {
-    if (r.status === 'DRIFT' && FORCE_FIXABLE.has(r.name)) {
-      writeFileSync(join(cwd, r.name), readFileSync(join(tplDir, r.name), 'utf8'));
-      console.log(`  ✓ restored ${r.name} from template`);
+    const kind = EXTENDS_REPAIRABLE[r.name];
+    if (kind && r.status === 'DRIFT' && repairExtends(join(cwd, r.name), want[kind])) {
+      console.log(`  ✓ repaired ${r.name} extends → ${want[kind]}`);
     }
   }
 
@@ -342,6 +375,8 @@ function applyFix(cwd, results, sel, stack) {
   const huskyDrift = results.some((r) => r.name === '.husky/pre-commit' && r.status !== 'OK');
   if (needsInit || huskyDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];
+    // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).
+    if (standalone) args.push('--standalone');
     execFileSync(process.execPath, [join(packageDir(), 'cli', 'index.mjs'), ...args], {
       cwd,
       stdio: 'inherit',
@@ -418,17 +453,12 @@ async function collectResults(cwd, cfg, configResult) {
   // pin to check (the whole point — no package dep).
   const standalone = Boolean(cfg.standalone);
   const stack = cfg.stack ?? 'generic';
-  const biomeExpected = standalone
-    ? `./.devkit/biome/${['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base'}.jsonc`
-    : '@norvalbv/devkit/biome/base';
-  const tsconfigExpected = standalone
-    ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
-    : '@norvalbv/devkit/tsconfig/base';
+  const expected = expectedExtends(stack, standalone);
 
   const results = [configResult];
   if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []));
-  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', biomeExpected));
-  if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', tsconfigExpected));
+  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', expected.biome));
+  if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', expected.tsconfig));
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   // Verify the synced agent files against a SELECTED surface (prefer .claude; else the first
   // chosen one). Both surfaces get identical content, so checking one is sufficient.
@@ -481,7 +511,7 @@ export default async function run(args, cwd) {
 
   const drifted = results.some((r) => r.status !== 'OK');
   if (fix && drifted) {
-    applyFix(cwd, results, sel, cfg.stack ?? 'generic');
+    applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));
     console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
   }
 

@@ -6,9 +6,10 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import doctorRun from '../commands/doctor.mjs';
 import { applyInit } from '../commands/init.mjs';
 import { defaultSelection } from '../lib/components.mjs';
 import { rootRegistry } from './_helpers.mjs';
@@ -77,5 +78,49 @@ describe('standalone (no-package) install', () => {
     expect(JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8')).standalone).toBe(
       true,
     );
+  });
+
+  it('doctor --fix on a standalone repo: no phantom package dep, config deltas preserved', async () => {
+    const root = repo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...defaultSelection(), skills: false },
+      standalone: true,
+      devkitRef: 'v0.6.0',
+    });
+
+    // Consumer-tuned configs that DRIFTED their extends to the package pointer (the pre-fix bug
+    // force-rewrote these from the package template, wiping the deltas + flipping to package mode).
+    writeFileSync(
+      join(root, 'biome.jsonc'),
+      '{\n  // repo-local tweak\n  "extends": ["@norvalbv/devkit/biome/base"],\n  "overrides": [{ "includes": ["**/*.test.ts"] }]\n}\n',
+    );
+    writeFileSync(
+      join(root, 'tsconfig.json'),
+      '{\n  "extends": "@norvalbv/devkit/tsconfig/base",\n  "compilerOptions": { "paths": { "@/*": ["src/*"] } }\n}\n',
+    );
+    // Remove the hook so --fix re-runs `init` (the path that wrote the git+ssh dep pre-fix).
+    rmSync(join(root, '.husky/pre-commit'));
+
+    const pkgBefore = readFileSync(join(root, 'package.json'), 'utf8');
+    await doctorRun(['--fix'], root);
+
+    // Fix 1: re-init stayed standalone — package.json is byte-identical, NO @norvalbv/devkit dep.
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(pkgBefore);
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).not.toContain('@norvalbv/devkit');
+
+    // Fix 2: only the extends pointer repaired (mode-correct) — comment + deltas intact.
+    const biome = readFileSync(join(root, 'biome.jsonc'), 'utf8');
+    expect(biome).toContain('"./.devkit/biome/react.jsonc"');
+    expect(biome).not.toContain('@norvalbv/devkit/biome/base');
+    expect(biome).toContain('// repo-local tweak');
+    expect(biome).toContain('overrides');
+
+    const tsconfig = JSON.parse(readFileSync(join(root, 'tsconfig.json'), 'utf8'));
+    expect(tsconfig.extends).toBe('./.devkit/tsconfig/base.json');
+    expect(tsconfig.compilerOptions.paths['@/*']).toEqual(['src/*']);
+
+    // Hook recreated by the standalone re-init.
+    expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
   });
 });
