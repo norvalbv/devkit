@@ -23,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Project, SyntaxKind } from 'ts-morph';
+import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mjs';
 
 const TEST_SUFFIXES = ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx'];
 const MOCK_CALLEES = new Set(['vi.mock', 'vi.doMock', 'jest.mock', 'require', 'import']);
@@ -108,15 +109,9 @@ function gitMv(cwd, from, to) {
 function pruneBaselines(cwd, oldRelPaths, dryRun) {
   const baselineDir = join(cwd, 'eslint', 'baselines');
   if (!existsSync(baselineDir)) return 0;
-  // structureRoot prefixes → baseline file (mirrors eslint.config.mjs structureRoots).
-  const ROOTS = [
-    ['src/renderer/', 'renderer.mjs'],
-    ['src/main/', 'main.mjs'],
-    ['src/shared/', 'shared.mjs'],
-    ['src/preload/', 'preload.mjs'],
-    ['socket-server/src/', 'socket.mjs'],
-    ['vercel-serverless/', 'vercel.mjs'],
-  ];
+  // structureRoot prefixes → baseline file, resolved from guard.config.json so the prune
+  // follows whatever roots the baseline writer used (config trees or the electron default).
+  const ROOTS = resolveBaselineRoots(cwd);
   let removed = 0;
   for (const [prefix, file] of ROOTS) {
     const abs = join(baselineDir, file);

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateStructureBaselines,
   generateTreeBaseline,
+  resolveBaselineRoots,
 } from '../lib/generate/generate-structure-baseline.mjs';
 import { structFixtures } from './_helpers.mjs';
 
@@ -101,5 +102,39 @@ describe('generateStructureBaselines — multi-tree', () => {
     const summary = await generateStructureBaselines(root, {});
     // 'charts' is registered → bar.ts is valid → renderer baseline empty.
     expect(summary.find((s) => s.tree === 'renderer').count).toBe(0);
+  });
+});
+
+describe('resolveBaselineRoots — single source of truth for prune', () => {
+  it('returns the electron DEFAULT_ROOTS layout when no guard.config.json declares trees', () => {
+    const root = tmpRepo();
+    expect(resolveBaselineRoots(root)).toEqual([
+      ['src/renderer/', 'renderer.mjs'],
+      ['src/main/', 'main.mjs'],
+      ['src/shared/', 'shared.mjs'],
+      ['src/preload/', 'preload.mjs'],
+      ['socket-server/src/', 'socket.mjs'],
+      ['vercel-serverless/', 'vercel.mjs'],
+    ]);
+  });
+
+  it('follows config-driven structure.trees (non-electron layout) over the default', () => {
+    const root = tmpRepo();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({
+        structure: {
+          trees: [
+            { name: 'app', root: 'app' },
+            { name: 'server', root: 'services/api/src' },
+          ],
+        },
+      }),
+    );
+    expect(resolveBaselineRoots(root)).toEqual([
+      ['app/', 'app.mjs'],
+      ['services/api/src/', 'server.mjs'],
+    ]);
   });
 });

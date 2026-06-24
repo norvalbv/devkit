@@ -5,6 +5,10 @@ description: Use when placing or creating a NEW file and you need to know where 
 
 # Structure governance
 
+> **Layout note:** the directory paths below are the **electron-stack template's** example layout,
+> not universal names. Your repo's actual structure roots live in `guard.config.json`'s
+> `structure.trees` — read each path here as an example and map it to your own tree.
+
 The structure is enforced by **lint, not docs** — the eslint gate is the law; this skill is the
 write-time guide that gets you placed right the first time and unblocks you when a wall fires.
 

@@ -1,6 +1,6 @@
 ---
 name: commit-guard
-description: Guard commits against unintentional code duplication using semantic search. Invoke before committing staged changes in src/, vercel-serverless/, or socket-server/.
+description: Guard commits against unintentional code duplication using semantic search. Invoke before committing staged changes under your scanRoots (see guard.config.json).
 ---
 
 # Commit Guard
@@ -11,8 +11,10 @@ Dispatch the `commit-guard` agent before committing. It runs semantic search que
 
 ## When to use
 
-- User says "ready to commit", "commit this", or stages changes in `src/`, `vercel-serverless/`, `socket-server/`
+- User says "ready to commit", "commit this", or stages changes under your `scanRoots` (the source roots declared in `guard.config.json`)
 - User adds new utilities, hooks, or components that might duplicate existing ones
+
+**Monorepo:** gates run from the **package directory**, not the git root — the husky guard block does `( cd "<pkgRel>" … )`, so `guard.config.json` and git pathspecs both resolve to that package and sibling packages don't cross-trigger. Read config and run scripts relative to the package dir, not the repo root.
 
 ## Scripts
 

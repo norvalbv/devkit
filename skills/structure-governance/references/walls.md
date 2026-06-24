@@ -2,6 +2,8 @@
 
 Canonical: [`docs/developer-docs/structure-governance.md`](../../../../docs/developer-docs/structure-governance.md); this file adds the per-wall live-truth pointers.
 
+> Directory paths below follow the **electron-stack template** — see [`SKILL.md`](../SKILL.md)'s layout note; map them to your repo's `guard.config.json` `structure.trees`.
+
 This file OWNS one thing: **what each wall is + where its live truth lives** (which config / baseline file you read or edit to see the *current* state). It is NOT the error→fix runbook ([`fixing-lint-errors.md`](./fixing-lint-errors.md)) and NOT the spec tree ([`docs/developer-docs/directory-structure.md`](../../../../docs/developer-docs/directory-structure.md)). Per-violation fixes are named by the eslint error messages themselves; the *why* lives in [`docs/decisions/renderer-structure-governance.md`](../../../../docs/decisions/renderer-structure-governance.md).
 
 ## Two mechanisms (read this first)

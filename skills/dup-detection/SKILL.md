@@ -43,10 +43,10 @@ Skipping this = reviewer cascade + tokens torched on a refactor that's actually 
 
 ## The architectural-mirror gotcha
 
-Some pairs are **intentional deploy artifacts**, not real dups:
+Some pairs are **intentional deploy artifacts**, not real dups: one path is a *generated mirror* of another, where a build step copies shared code into a deploy target's tree. **Do not refactor these**; leave the allowlist entry (or move to a path-rule — README's "Known follow-ups").
 
-- `src/shared/X` ↔ `vercel-serverless/_shared/X` — `_shared/` is **generated** by `vercel-serverless/scripts/sync-shared.mjs` from `src/shared/`. Verify with `cd vercel-serverless && bun run check:shared`. **Do not refactor these**; leave the allowlist entry (or move to a path-rule — README's "Known follow-ups").
-- Detector signal: `similarity: 1` + paths match `src/shared/X.ts` ↔ `vercel-serverless/_shared/X.ts`.
+- **Example (frink):** `src/shared/X` ↔ `vercel-serverless/_shared/X` — `_shared/` is **generated** by `vercel-serverless/scripts/sync-shared.mjs` from `src/shared/`. Verify with `cd vercel-serverless && bun run check:shared`.
+- Detector signal: `similarity: 1` between a source file and its generated mirror (e.g. `src/shared/X.ts` ↔ `vercel-serverless/_shared/X.ts`).
 
 **If the entry matches this pattern, the work is "leave it allowlisted, optionally pursue a path-rule" — not a refactor.**
 
@@ -92,7 +92,7 @@ Some pairs are **intentional deploy artifacts**, not real dups:
 
 - "I'll just commit and see if the gate blocks." → No — pre-flight first.
 - "I'll `searchCode` to find the dup." → No — entry already names it.
-- "This mirror in `vercel-serverless/_shared/` shouldn't exist; let me refactor." → No — it's generated.
+- "This generated mirror (e.g. `vercel-serverless/_shared/`) shouldn't exist; let me refactor." → No — it's generated.
 - "What does `prune` do again?" → Re-read the table above; do not guess.
 
 **Full reference:** [`scripts/co-occurrence/README.md`](../../../scripts/co-occurrence/README.md).

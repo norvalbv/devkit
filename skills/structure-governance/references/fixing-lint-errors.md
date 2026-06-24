@@ -4,6 +4,12 @@
 > *error-text → exact command* mapping. For where files go, the tree, and per-kind naming, link
 > [`directory-structure.md`](../../../../docs/developer-docs/directory-structure.md) — never copy it
 > here. The eslint messages already name their own fix; this just gives you the copy-paste.
+>
+> Directory paths below follow the **electron-stack template** — see [`SKILL.md`](../SKILL.md)'s
+> layout note; map them to your repo's `guard.config.json` `structure.trees`.
+>
+> Paths below (`src/renderer`, `src/main`, …) follow the **electron-stack template** — see
+> [`SKILL.md`](../SKILL.md)'s layout note; map them to your repo's `guard.config.json` `structure.trees`.
 
 Look up the row whose **left column matches the text the linter actually printed**, run the recovery
 in the right column, then run the [verify-by-hand block](#verify-before-commit-by-hand) before you

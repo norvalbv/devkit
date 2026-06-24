@@ -103,6 +103,43 @@ describe('devkit move', () => {
     expect(baseline).toContain('keep/other.ts');
   });
 
+  it('prunes a non-electron (config-driven) baseline using guard.config.json roots', () => {
+    // Layout-agnostic: a consumer whose structure.trees declare an `app/` root must still
+    // get its baseline pruned — the prune now follows guard.config.json, not the electron literal.
+    const root = mkTmp('move-app-');
+    const write = (rel, content) => {
+      mkdirSync(join(root, rel, '..'), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    };
+    write('package.json', JSON.stringify({ name: 'fx', version: '0.0.0', type: 'module' }));
+    write(
+      'tsconfig.json',
+      JSON.stringify({ compilerOptions: { paths: { '@/*': ['./app/*'] } }, include: ['app'] }),
+    );
+    write(
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['app'], structure: { trees: [{ name: 'app', root: 'app' }] } }),
+    );
+    write('app/foo.ts', 'export const x = 1;\n');
+    write('app/use.ts', "import { x } from '@/foo';\nexport const z = x;\n");
+    write(
+      'eslint/baselines/app.mjs',
+      'export const appStructureBaseline = [\n  "foo.ts",\n  "keep/other.ts"\n];\n',
+    );
+    git(root, 'init', '-q');
+    git(root, 'add', '-A');
+
+    execFileSync(process.execPath, [CLI, 'move', 'app/foo.ts', 'app/sub'], {
+      cwd: root,
+      stdio: 'pipe',
+    });
+
+    expect(existsSync(join(root, 'app/sub/foo.ts'))).toBe(true);
+    const baseline = read(root, 'eslint/baselines/app.mjs');
+    expect(baseline).not.toContain('"foo.ts"'); // moved entry pruned
+    expect(baseline).toContain('keep/other.ts'); // unrelated entry kept
+  });
+
   it('--dry-run previews without touching files', () => {
     const root = fixture();
     execFileSync(

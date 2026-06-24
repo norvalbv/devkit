@@ -746,6 +746,25 @@ export async function generateStructureBaselines(cwd = process.cwd(), opts = {})
   return summary;
 }
 
+/**
+ * Canonical [prefix, baselineFile] pairs the baseline writer targets for `cwd`.
+ * Config-driven when guard.config.json declares structure.trees (file `${t.name}.mjs`,
+ * prefix `${t.root}/`); else the DEFAULT_ROOTS electron layout (opts.roots overrides
+ * per tree). pruneBaselines (cli/commands/move.mjs) reuses this so it strips from the
+ * SAME files generateStructureBaselines writes — never a second hardcoded copy.
+ *
+ * @param {string} cwd consumer repo root
+ * @param {{cfg?:object, roots?:object}} [opts]
+ * @returns {Array<[string, string]>} [prefix, baselineFile] pairs
+ */
+export function resolveBaselineRoots(cwd = process.cwd(), opts = {}) {
+  const cfg = opts.cfg ?? resolveGuardConfig(cwd);
+  const trees = cfg.structure?.trees ?? [];
+  if (trees.length) return trees.map((t) => [`${t.root}/`, `${t.name}.mjs`]);
+  const roots = { ...DEFAULT_ROOTS, ...(opts.roots ?? {}) };
+  return Object.entries(roots).map(([tree, root]) => [`${root}/`, `${tree}.mjs`]);
+}
+
 // CLI entry: `node generate-structure-baseline.mjs [cwd]`.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cwd = process.argv[2] ? join(process.cwd(), process.argv[2]) : process.cwd();
