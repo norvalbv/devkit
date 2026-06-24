@@ -286,8 +286,9 @@ export function checkVersion(cwd) {
       'devkit update',
     );
   }
-  const note = stamped ? ` (repo init ${stamped}${min ? `, min ${min}` : ''})` : '';
-  return check('devkit version', 'OK', `installed ${running}${note}`);
+  // Echo whichever floors are declared so a satisfied min/stamp is visibly active, not silent.
+  const meta = [stamped && `repo init ${stamped}`, min && `min ${min}`].filter(Boolean).join(', ');
+  return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}`);
 }
 
 // Devkit-OWNED template configs whose content is a fixed contract — safe to force-rewrite
