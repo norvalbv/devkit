@@ -13,6 +13,20 @@ bun run lint:structure || exit 1
 node gate-engine/ratchets/folder-fanout.mjs gate || exit 1
 node gate-engine/ratchets/size-disable.mjs gate || exit 1
 
+# Decision-log gate (capture B) — smells an architectural diff with no decision staged and blocks
+# until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open
+# when `claude` is unavailable. The why-store lives under docs/decisions/. See the `decisions` skill.
+ddrc=0
+node gate-engine/decisions/cli.mjs detect --gate || ddrc=$?
+if [ "$ddrc" -eq 1 ]; then
+    echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
+    exit 1
+elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
+    echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
+    exit 1
+fi
+# ddrc 0 = clean/staged/routine/bypassed, ddrc 2 = fail-open → continue; any other code blocks.
+
 # fallow audit (dead-code + complexity + duplication on the changed set) — advisory (fail-open):
 # surfaces findings, never blocks; no-ops when the fallow CLI is not installed.
 command -v fallow >/dev/null 2>&1 && fallow audit || true
