@@ -1,0 +1,26 @@
+{
+  "devkitRef": "v0.16.11",
+  "generatedAt": "2026-06-24T12:07:10.122Z",
+  "files": {
+    "api-security/SKILL.md": "da5565a99f9120532865c0a78c1b3589f8908ea11e2e3004f780c872ed464b4a",
+    "backend-performance/SKILL.md": "b44f1cf9d8a3eea43f6bf80aebdfe81db2c327cccb1f7c0f7deac461d972dad5",
+    "brainstorming/SKILL.md": "faa2fd9ea4ac99b0e92934c931701c25a85767935526810baa9c462b632855e0",
+    "commit-guard/SKILL.md": "524df65113e2a763cf358d6e962cf10aad9f0632862394c1433078c2fc2a6841",
+    "commit-guard/scripts/approve.sh": "d24549b58224f394cff483ed0d395682a5a0d53fedcf457a7f2ba335ce6d29b0",
+    "commit-guard/scripts/checklist.mjs": "d94699168aca40a53b2610644911f42547eb01c0f424878da2c5ab27059a2b53",
+    "decisions/SKILL.md": "2a3028bdd81593319222952c9691db0ad4f22f5de0d7e9f1ad9adc80d8f081e9",
+    "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
+    "feature-critique/SKILL.md": "c88197ea5ff8d0ea257adb9d62536d938b2f8ca83e13fb5c0a75da1d1cf6ba67",
+    "frontend-accessibility/SKILL.md": "2f4d5ca8f93ba48865603abb294aae2c3795567a16c1ec0d999822a320835bbe",
+    "frontend-performance/SKILL.md": "ba5d93620057440fb7c7687595bd65be50fa4b89335094761c42ca474be7077a",
+    "frontend-security/SKILL.md": "516f84c98a67d2607358332490e90efd3dd885c8795a4cc343fdb68c650d81b6",
+    "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
+    "structure-governance/SKILL.md": "5f08f7906b837fad1ebdeedc7c2a333825c540d6599fc8a80fc3dfdfb0821dfc",
+    "structure-governance/references/fixing-lint-errors.md": "44ad9ba30d747bac4fac27d2d2a8f2ef788b5894db77df70d6c4f3359c7a1fc8",
+    "structure-governance/references/walls.md": "7c2987c22f90beb049fd1fd8e34784170cee6511b86f11f7003696705cd4d427",
+    "testing/SKILL.md": "1816d2bbdb38b1269fd4355b0853bfdf951a84b7ec416c5c271825eb20cc2b64",
+    "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
+    "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
+    "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676"
+  }
+}
