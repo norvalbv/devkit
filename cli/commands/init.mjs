@@ -18,6 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { AGENT_TARGETS, COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
@@ -109,6 +110,7 @@ function parseFlags(args) {
     searchCode: false,
     standalone: false,
     overlay: false,
+    baselinesOnly: false,
     no: new Set(),
     guards: null,
     scanRoots: null,
@@ -125,6 +127,7 @@ function parseFlags(args) {
     else if (a === '--search-code') flags.searchCode = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
+    else if (a === '--baselines-only') flags.baselinesOnly = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
     // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
@@ -393,6 +396,18 @@ function runFreezes(cwd, dryRun) {
   }
 }
 
+/** The consumer's permanent import-wall exemptions (eslint/baselines/exempt.mjs `importWallExempt`), or empty. */
+export async function readImportWallExempt(cwd) {
+  const file = join(cwd, 'eslint', 'baselines', 'exempt.mjs');
+  if (!existsSync(file)) return new Set();
+  try {
+    const { importWallExempt = [] } = await import(pathToFileURL(file).href);
+    return new Set(importWallExempt.map((m) => m.pattern));
+  } catch {
+    return new Set();
+  }
+}
+
 async function runStructureBaselines(cwd, stack, dryRun) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
@@ -410,7 +425,10 @@ async function runStructureBaselines(cwd, stack, dryRun) {
     console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
   }
   try {
-    generateImportWallBaseline(cwd, opts);
+    // Honour the consumer's hand-maintained import-wall exemptions (eslint/baselines/exempt.mjs):
+    // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
+    // during the scan — else it would be re-grandfathered every regen.
+    generateImportWallBaseline(cwd, { ...opts, exemptPatterns: await readImportWallExempt(cwd) });
   } catch (e) {
     console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
     console.log(`    (install deps — bun install — then re-run \`devkit init --stack ${stack}\`)`);
@@ -971,6 +989,32 @@ export default async function run(args, cwd) {
   let selection;
   let remove = [];
   let mode = detectedMode;
+
+  // --baselines-only: re-derive the structure + import-wall baselines and NOTHING else (no config
+  // emit, package.json, husky, freezes, skills/agents, .devkit/config.json). For the RARE legit
+  // regen — a structure-RULE change (the baseline is otherwise generate-once + shrink-only). Guarded
+  // to the package-mode structure stacks: overlay/standalone omit structure; a bare repo has no preset.
+  if (flags.baselinesOnly) {
+    if (mode !== 'package') {
+      console.error(
+        'devkit init --baselines-only: unsupported in overlay/standalone mode (no structure preset).',
+      );
+      return 1;
+    }
+    if (!structureAvailableFor(stack)) {
+      console.error(`devkit init --baselines-only: no structure-lint preset for stack "${stack}".`);
+      return 1;
+    }
+    if (!existsSync(join(cwd, 'eslint.config.mjs'))) {
+      console.error(
+        'devkit init --baselines-only: no eslint.config.mjs — run a full `devkit init` first.',
+      );
+      return 1;
+    }
+    console.log('devkit init --baselines-only — regenerating structure + import-wall baselines');
+    await runStructureBaselines(cwd, stack, flags.dryRun);
+    return 0;
+  }
 
   if (interactive) {
     const installed = detectInstalled(cwd);

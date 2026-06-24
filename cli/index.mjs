@@ -35,6 +35,10 @@ Usage:
     --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
     --no-claude / --no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
                              A prior copy in the dropped surface is removed (no redundant install).
+    --baselines-only         Re-derive ONLY the structure + import-wall baselines (eslint/baselines/*.mjs)
+                             and nothing else — for the RARE regen after a structure-RULE change (the
+                             baseline is otherwise generate-once + shrink-only). Package-mode structure
+                             stacks only; requires an existing eslint.config.mjs.
     --fallow                 Also install the optional fallow code-health layer (off by default).
     --search-code            Opt this repo in to the semantic search index: writes
                              search-code.config.json + gitignores .search-code/ + wires the dup
