@@ -4,6 +4,8 @@ node_modules
 # devkit's own gate artifacts (regenerated; not source)
 .fallow/
 .search-code/
+# decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
+.decisions/
 
 # eslint-plugin-project-structure cache
 projectStructure.cache.json
