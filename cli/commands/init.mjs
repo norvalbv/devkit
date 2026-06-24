@@ -946,7 +946,18 @@ export async function applyInit(cwd, plan) {
   };
   // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
   // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
-  const config = { stack, devkitRef, initVersion: INIT_VERSION, pkgRel, standalone, components };
+  // Stamp the devkit version that set this repo up — `doctor` warns if a contributor later runs an
+  // OLDER devkit than the repo was initialised with (or below a hand-declared `minDevkit` floor).
+  const devkitVersion = readJson(join(packageDir(), 'package.json'))?.version;
+  const config = {
+    stack,
+    devkitRef,
+    devkitVersion,
+    initVersion: INIT_VERSION,
+    pkgRel,
+    standalone,
+    components,
+  };
   const configPath = join(cwd, '.devkit', 'config.json');
   if (dryRun) {
     console.log('  [dry-run] write .devkit/config.json');

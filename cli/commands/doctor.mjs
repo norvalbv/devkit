@@ -14,6 +14,7 @@ import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
 import { markEnd, markStart } from '../lib/husky/husky.mjs';
 import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mjs';
+import { cmpSemver } from './update.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;
@@ -257,6 +258,38 @@ function checkPin(cwd) {
   );
 }
 
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+// Warn if the RUNNING devkit is OLDER than the version this repo was set up with (stamped in
+// .devkit/config.json at init) or below a hand-declared `minDevkit` floor. Read-only, warn-only —
+// a contributor on a stale devkit is told to `devkit update`, never blocked. Uses .devkit/config.json
+// only (NOT package.json), so overlay/standalone repos introduce nothing into the shared tree.
+export function checkVersion(cwd) {
+  const running = readJson(join(packageDir(), 'package.json'))?.version;
+  if (!running || !SEMVER.test(running)) return check('devkit version', 'OK', 'unknown');
+  const cfg = readJson(join(cwd, '.devkit', 'config.json'));
+  const min = cfg?.minDevkit;
+  const stamped = cfg?.devkitVersion;
+  if (min && SEMVER.test(min) && cmpSemver(running, min) < 0) {
+    return check(
+      'devkit version',
+      'DRIFT',
+      `installed ${running} < required minimum ${min}`,
+      'devkit update',
+    );
+  }
+  if (stamped && SEMVER.test(stamped) && cmpSemver(running, stamped) < 0) {
+    return check(
+      'devkit version',
+      'DRIFT',
+      `installed ${running} older than this repo's init (${stamped})`,
+      'devkit update',
+    );
+  }
+  const note = stamped ? ` (repo init ${stamped}${min ? `, min ${min}` : ''})` : '';
+  return check('devkit version', 'OK', `installed ${running}${note}`);
+}
+
 // Devkit-OWNED template configs whose content is a fixed contract — safe to force-rewrite
 // on DRIFT from their template. guard.config.json is deliberately EXCLUDED: a consumer
 // tunes it (boundaries, scanRoots), so --fix must never clobber it — it can only be
@@ -412,6 +445,7 @@ async function collectResults(cwd, cfg, configResult) {
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));
+  results.push(checkVersion(cwd));
   return { results, sel };
 }
 
