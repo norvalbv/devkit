@@ -27,9 +27,17 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" 2>/dev/null || exit 0
 # Per-session snooze: a marker file keyed by session_id; its existence = "already reminded
 # this session". Sessions don't share one file (no concurrent-session ping-pong) and it is
 # NOT cleared by commits — so a PARALLEL session's commit can't un-snooze us. Empty id →
-# re-nag (safe direction).
+# re-nag (safe direction). The marker is ephemeral session DATA, so it lives in $TMPDIR —
+# never in the repo (no .claude/ clutter, nothing for git or agent context to pick up),
+# matching the search-tool counter's $TMPDIR/devkit-search-state/ pattern.
+#
+# $TMPDIR is machine-global (shared across repos), but real session_ids are globally-unique
+# UUIDs so two repos never collide. The one shared key is the empty-id fallback ('unknown'),
+# so namespace by repo root too: a parse-miss in repo A then can't snooze repo B.
 SID=$(echo "$input" | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-SNOOZE=".claude/.decision-snooze-${SID:-unknown}"
+REPO_KEY=$(pwd -P | cksum | cut -d' ' -f1)
+SNOOZE_DIR="${TMPDIR:-/tmp}/devkit-decision-snooze"
+SNOOZE="$SNOOZE_DIR/${REPO_KEY}-${SID:-unknown}"
 [ -f "$SNOOZE" ] && exit 0 # already reminded this session
 
 # Resolve the decisions-CLI bin: prefer the devkit-installed bin, else a local node_modules
@@ -55,7 +63,7 @@ SMELLS=$($DECISIONS detect scan --working 2>/dev/null)
 git status --porcelain -- docs/decisions/ 2>/dev/null | grep -q . && exit 0
 
 # Remind once: snooze this session first so a re-invoke (or the next turn) doesn't repeat.
-touch "$SNOOZE"
+mkdir -p "$SNOOZE_DIR" && touch "$SNOOZE"
 {
   echo "🧭 Architectural decision smelled in your working tree: $(echo "$SMELLS" | paste -sd, -)."
   echo ""
