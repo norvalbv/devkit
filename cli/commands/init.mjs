@@ -946,13 +946,10 @@ export async function applyInit(cwd, plan) {
   };
   // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
   // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
-  // Stamp the devkit version that set this repo up — `doctor` warns if a contributor later runs an
-  // OLDER devkit than the repo was initialised with (or below a hand-declared `minDevkit` floor).
-  const devkitVersion = readJson(join(packageDir(), 'package.json'))?.version;
+  // devkitRef ALSO doubles as the init-version stamp doctor's checkVersion reads (it's `v<version>`).
   const config = {
     stack,
     devkitRef,
-    devkitVersion,
     initVersion: INIT_VERSION,
     pkgRel,
     standalone,
