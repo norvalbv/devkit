@@ -186,7 +186,7 @@ Rules:
 Before you write a verdict, get an INDEPENDENT check on the frame — the one thing a first-pass critique is biased to miss (you inherited the proposal's framing).
 
 1. **Run the deterministic alignment gate IF the repo has a decision log**: `guard-decisions check-alignment` — flags a change that contradicts a scoped Target. A deterministic flag here is a CRITICAL finding; do not rely on memory alone. (No decision log / bin absent → skip this step.)
-2. **Self-administer a frame second-opinion.** In your own reasoning, argue the OPPOSITE of your draft verdict for one paragraph: assume the frame is wrong (wrong problem, wrong layer, contradicts a recorded direction). Adopt it if it holds (verdict → RETHINK/REJECT); rebut it explicitly with evidence if it doesn't. Never silently soften.
+2. **Self-administer a frame second-opinion, then classify the frame.** In your own reasoning, argue the OPPOSITE of your draft verdict for one paragraph: assume the frame is wrong (wrong problem, wrong layer, contradicts a recorded direction). Adopt it if it holds (verdict → RETHINK/REJECT); rebut it explicitly with evidence if it doesn't. Never silently soften. Then classify the frame as **exactly one** `FRAME_META` token (the most severe that applies), for the summary line: `BANDAID` (the fix hides a symptom of an unbuilt or contradicted Target), `NOTABUG` (the reported "bug" is expected behaviour / a recorded Target's intent), `UXHARM` (technically correct but degrades the experience), `SOUND` (frame holds — right problem, right layer), or `SKIP` (frame check not applicable). A pure alignment contradiction whose *frame* is otherwise sound is `SOUND` (the Alignment lens, not the frame, catches it).
 3. **UX / DX impact — mandatory, surfaced.** State in one line whether the change DEGRADES the experience of the people this repo serves (more friction, a worse default, a lost affordance, a gate that now misfires). A technically-correct fix that worsens DX is a finding, not a pass.
 
 ### Phase 4: Write Full Report to File
@@ -262,6 +262,7 @@ FEASIBILITY: [Confirmed Feasible | Partially Feasible | Not Feasible]
 CRITICAL_ISSUES: [count]
 WARNINGS: [count]
 UX_IMPACT: [none | degrades — one line how]
+FRAME_META: [SOUND | NOTABUG | BANDAID | UXHARM | SKIP]
 
 SUMMARY: [2-3 sentences max — the executive summary, condensed]
 

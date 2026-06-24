@@ -1,0 +1,9 @@
+{
+  "title": "A real bug with a sound, well-scoped fix — must NOT over-flag",
+  "agent": "feature-critique",
+  "expectVerdict": ["PROCEED", "PROCEED WITH CHANGES"],
+  "expectFrameMeta": ["SOUND", "SKIP"],
+  "requireAny": [],
+  "forbid": [],
+  "note": "The over-flag guard for genuine bugfixes (verdict=PROCEED + meta=SOUND via the parsed lines, not word-presence) — the disagreement mandate must not manufacture band-aid/frame findings on a clean null-safety fix that touches no Target."
+}

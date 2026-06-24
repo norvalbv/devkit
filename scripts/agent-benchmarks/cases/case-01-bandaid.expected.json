@@ -1,0 +1,9 @@
+{
+  "title": "Band-aid an unbuilt Target (the 2026-06-10 de-pollution miss — regression test)",
+  "agent": "feature-critique",
+  "expectVerdict": ["RETHINK", "REJECT"],
+  "expectFrameMeta": ["BANDAID"],
+  "requireAny": ["canonical", "band-aid", "bandaid", "symptom", "unbuilt", "not synced", "peers"],
+  "forbid": [],
+  "note": "Must recognise the dedup/exclude fix HIDES duplicates the canonical-home Target says shouldn't exist, and name implementing the canonical home as the real fix. PROCEED here = the regression we are guarding against."
+}
