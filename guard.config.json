@@ -3,6 +3,11 @@
   "sourceExtensions": ["mjs", "js"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",
+  "review": {
+    "backendRoots": ["cli", "gate-engine"],
+    "frontendRoots": [],
+    "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
+  },
   "structure": {
     "trees": [
       {

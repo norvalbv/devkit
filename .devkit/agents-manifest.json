@@ -1,9 +1,10 @@
 {
   "devkitRef": "v0.16.11",
-  "generatedAt": "2026-06-24T12:07:10.215Z",
+  "generatedAt": "2026-06-24T13:12:57.248Z",
   "files": {
     "api-security-reviewer.md": "8d822ac5502b698437b6a54adb1aabf88db0b71674bea4485d3db757941c3904",
     "backend-performance-reviewer.md": "7d3d5481445f6cc17824eba83acc1f7e8fb9e24db214211c2d8253c41cf3a46a",
+    "feature-critique.md": "48f7bed8cc91fc876dc05b3816898fa6fdbed8396f548d97e01d0d157f48dade",
     "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
     "frontend-accessibility-reviewer.md": "b6bebe323e22618a698b09448261a8470fe0caaaf2bdeeab3a85330cb7b491c3",
     "frontend-performance-reviewer.md": "f5f54932b1533dc881a8cf1d876810e1c97071d9fc148e8c01d4df669379c5b6",

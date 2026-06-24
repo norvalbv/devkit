@@ -18,3 +18,4 @@ created: 2026-06-24
 **Anchored-bet:** [VALIDATED]
 **Scope:** skills/**,cli/commands/move.mjs
 **Source:** collab · v0.16.9..v0.16.11 de-frink
+- 2026-06-24 — feature-critique shipped as a synced agent that reads guard.config.json + decision-log presence at RUNTIME (config-at-runtime, decisions-conditional) instead of baking a layout — conforms like the reviewer agents; rejected a sync-time generator that would re-bake the coupling.
