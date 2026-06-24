@@ -27,17 +27,23 @@ describe('doctor checkVersion', () => {
     expect(r.remediation).toBe('devkit update');
   });
 
-  it('DRIFT when installed is older than the repo-init stamp', () => {
+  it('DRIFT when installed is older than the repo-init stamp (from devkitRef)', () => {
     const root = mkTmp('docver-');
-    writeConfig(root, { devkitVersion: '99.0.0' });
+    writeConfig(root, { devkitRef: 'v99.0.0' });
     const r = checkVersion(root);
     expect(r.status).toBe('DRIFT');
     expect(r.detail).toContain("repo's init (99.0.0)");
   });
 
+  it('ignores a non-version devkitRef (main/branch/SHA) as a baseline', () => {
+    const root = mkTmp('docver-');
+    writeConfig(root, { devkitRef: 'main' });
+    expect(checkVersion(root).status).toBe('OK');
+  });
+
   it('OK when installed satisfies both the min and the stamp', () => {
     const root = mkTmp('docver-');
-    writeConfig(root, { minDevkit: '0.0.1', devkitVersion: '0.0.1' });
+    writeConfig(root, { minDevkit: '0.0.1', devkitRef: 'v0.0.1' });
     const r = checkVersion(root);
     expect(r.status).toBe('OK');
     expect(r.detail).toContain('repo init 0.0.1');

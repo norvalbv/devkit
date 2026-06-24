@@ -269,7 +269,10 @@ export function checkVersion(cwd) {
   if (!running || !SEMVER.test(running)) return check('devkit version', 'OK', 'unknown');
   const cfg = readJson(join(cwd, '.devkit', 'config.json'));
   const min = cfg?.minDevkit;
-  const stamped = cfg?.devkitVersion;
+  // The init-time devkit version is the `devkitRef` pin (`vX.Y.Z`). Use it as the drift baseline
+  // when it's a clean version tag — devkitRef can also be 'main'/a branch/SHA, which has no baseline.
+  const ref = cfg?.devkitRef;
+  const stamped = typeof ref === 'string' && ref.startsWith('v') ? ref.slice(1) : undefined;
   if (min && SEMVER.test(min) && cmpSemver(running, min) < 0) {
     return check(
       'devkit version',
