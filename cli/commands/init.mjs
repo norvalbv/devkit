@@ -20,6 +20,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
+import { resolveGuardConfig } from '../../gate-engine/config.mjs';
 import { AGENT_TARGETS, COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
@@ -377,6 +378,16 @@ function installHusky(sel, hookRoot, pkgRel, dryRun) {
   console.log(`  ✓ refreshed devkit-guards block${where} in .husky/pre-commit`);
 }
 
+// True when a bin's baseline output(s) ALREADY exist → freeze-if-absent skips re-freezing. A
+// re-run (e.g. the documented post-`bun install` re-apply) must NOT re-snapshot the tree — that
+// would grandfather newly-added debt and silently move the ratchet up. guard-size writes a SECOND
+// baseline (size-lines.json) only under an active `maxLines` cap, so require that one too.
+function baselineFrozen(cwd, name) {
+  const has = (p) => existsSync(join(cwd, 'eslint', 'baselines', p));
+  if (name === 'guard-fanout') return has('fanout.json');
+  return has('size.json') && (!resolveGuardConfig(cwd).maxLines || has('size-lines.json'));
+}
+
 function runFreezes(cwd, dryRun) {
   if (dryRun) {
     console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
@@ -387,6 +398,10 @@ function runFreezes(cwd, dryRun) {
     ['guard-size', join(packageDir(), 'gate-engine', 'ratchets', 'size-disable.mjs')],
   ];
   for (const [name, bin] of bins) {
+    if (baselineFrozen(cwd, name)) {
+      console.log(`  • ${name} baseline exists — keeping (run \`${name} freeze\` to re-snapshot)`);
+      continue;
+    }
     try {
       execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
       console.log(`  ✓ ${name} freeze (baseline grandfathered)`);

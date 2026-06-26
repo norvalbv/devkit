@@ -32,6 +32,16 @@ import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs'
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 const LOCAL_HOOKS = '.devkit/hooks';
+// The per-clone `git ci` SELF-HEAL alias. husky's committed `prepare` re-claims core.hooksPath on
+// every `bun install`; this LOCAL (uncommitted) alias re-points it back to our hooks dir right
+// before a commit, so `git ci …` keeps devkit's gates wired without touching anything committed.
+// Fail-open `;` (never `&&`): a re-point hiccup must NEVER block your commit — it just runs the
+// repo's own hooks that once, matching every devkit gate's fail-open stance.
+const HEAL_ALIAS_NAME = 'ci';
+const HEAL_ALIAS_CMD = `!git config --local core.hooksPath ${LOCAL_HOOKS}; git commit`;
+// "Ours" by a STABLE marker (the re-point), not the exact literal — so a future HEAL_ALIAS_CMD
+// tweak still recognises (and lets `clean` remove) an alias an older devkit installed.
+const isHealAlias = (v) => v.startsWith('!') && v.includes(`core.hooksPath ${LOCAL_HOOKS}`);
 // husky sets core.hooksPath to `.husky/_`; the real committed script is the parent's hook.
 const HUSKY_UNDERSCORE_RE = /\/_$/;
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
@@ -91,6 +101,72 @@ function readHooksPath(gitRoot) {
     return '';
   }
 }
+
+// Install the per-clone `git ci` self-heal alias (LOCAL config — never global). The collision check
+// reads the RESOLVED value (--get, all scopes) so a user's common GLOBAL `ci` (= `commit -v`) is
+// seen and NEVER clobbered; we only set ours when `ci` is unset or already ours.
+function installHealAlias(gitRoot, dryRun) {
+  let current = '';
+  try {
+    current = execFileSync('git', ['config', '--get', `alias.${HEAL_ALIAS_NAME}`], {
+      cwd: gitRoot,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    current = ''; // unset
+  }
+  if (current && !isHealAlias(current)) {
+    console.log(
+      `  • git alias '${HEAL_ALIAS_NAME}' already set — skipping self-heal. Re-point at commit time with: git config core.hooksPath ${LOCAL_HOOKS}`,
+    );
+    return;
+  }
+  if (dryRun) {
+    console.log(
+      `  [dry-run] git config --local alias.${HEAL_ALIAS_NAME} (self-heal core.hooksPath)`,
+    );
+    return;
+  }
+  try {
+    execFileSync('git', ['config', '--local', `alias.${HEAL_ALIAS_NAME}`, HEAL_ALIAS_CMD], {
+      cwd: gitRoot,
+    });
+    console.log(
+      `  ✓ git ${HEAL_ALIAS_NAME} self-heal alias (re-points core.hooksPath before commit)`,
+    );
+  } catch (e) {
+    console.log(`  ! could not set alias.${HEAL_ALIAS_NAME}: ${firstLine(e)}`);
+  }
+}
+
+// Remove the self-heal alias on `clean` — ONLY when it's ours (by marker) and ONLY at --local scope
+// (read --local too, so we never even inspect, let alone touch, the user's GLOBAL `ci`).
+export function removeHealAlias(gitRoot, dryRun) {
+  let current = '';
+  try {
+    current = execFileSync('git', ['config', '--local', '--get', `alias.${HEAL_ALIAS_NAME}`], {
+      cwd: gitRoot,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return; // no local alias
+  }
+  if (!isHealAlias(current)) return; // foreign / the user's own — leave it
+  if (dryRun) {
+    console.log(`  [dry-run] unset local alias.${HEAL_ALIAS_NAME}`);
+    return;
+  }
+  try {
+    execFileSync('git', ['config', '--local', '--unset', `alias.${HEAL_ALIAS_NAME}`], {
+      cwd: gitRoot,
+    });
+    console.log(`  ✓ removed git ${HEAL_ALIAS_NAME} self-heal alias`);
+  } catch (e) {
+    console.log(`  ! could not unset alias.${HEAL_ALIAS_NAME}: ${firstLine(e)}`);
+  }
+}
+
+export { HEAL_ALIAS_CMD, HEAL_ALIAS_NAME, isHealAlias };
 
 // The TRUE original core.hooksPath to record (so `devkit clean` restores it). CRITICAL: if a
 // prior overlay is already in place (current === .devkit/hooks), recording that would make clean
@@ -284,6 +360,10 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
   installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun);
+
+  // per-clone `git ci` self-heal alias so a `bun install` (husky re-claims core.hooksPath) heals
+  // on the next CLI commit — set at the git root (the alias is repo-wide, like core.hooksPath).
+  installHealAlias(gitRoot, dryRun);
 
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');

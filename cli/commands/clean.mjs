@@ -18,6 +18,7 @@ import { readJson } from '../lib/fs-helpers.mjs';
 import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
+import { removeHealAlias } from '../lib/overlay.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 
 function rm(path, label, dryRun) {
@@ -83,6 +84,7 @@ function cleanOverlay(cwd, cfg, dryRun) {
   const { gitRoot } = detectGitRoot(cwd);
   console.log('cleaning OVERLAY — restoring the repo to untouched:');
   restoreHooksPath(gitRoot, cfg.origHooksPath ?? '', dryRun);
+  removeHealAlias(gitRoot, dryRun);
   rm(join(gitRoot, '.devkit'), '.devkit/ (git-root hooks)', dryRun);
   rm(join(cwd, '.devkit'), `${cwd === gitRoot ? '' : 'package '}.devkit/`, dryRun);
   rm(join(cwd, 'guard.config.json'), 'guard.config.json', dryRun);
@@ -203,6 +205,7 @@ export default async function run(args, cwd) {
         'devkit clean: orphaned overlay (core.hooksPath → .devkit/hooks, no config) — recovering:\n',
       );
       restoreHooksPath(gitRoot, '.devkit/hooks', dryRun); // guard maps it to .husky/_ or unset
+      removeHealAlias(gitRoot, dryRun);
       rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
       pruneGitExclude(gitRoot, dryRun);
       console.log(`\n${dryRun ? 'Dry-run complete.' : 'Recovered.'}`);

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
 import { defaultSelection } from '../lib/components.mjs';
+import { HEAL_ALIAS_CMD } from '../lib/overlay.mjs';
 import { rootRegistry } from './_helpers.mjs';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -262,5 +263,117 @@ describe('overlay (local-only) install', () => {
         encoding: 'utf8',
       }).trim(),
     ).toBe('.husky/_');
+  });
+
+  it('installs a per-clone `git ci` self-heal alias that re-points core.hooksPath', async () => {
+    const root = workRepo();
+    const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    });
+
+    expect(git('config', '--local', '--get', 'alias.ci').trim()).toBe(HEAL_ALIAS_CMD);
+
+    // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
+    git('config', 'core.hooksPath', '.husky/_');
+    git('ci', '--allow-empty', '-m', 'heal');
+    expect(git('config', '--get', 'core.hooksPath').trim()).toBe('.devkit/hooks');
+  });
+
+  it('clean removes the self-heal alias', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    });
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+    expect(() =>
+      execFileSync('git', ['config', '--local', '--get', 'alias.ci'], { cwd: root, stdio: 'pipe' }),
+    ).toThrow(); // unset → git exits 1
+  });
+
+  it("never clobbers a user's GLOBAL `ci` alias (skip-on-collision)", async () => {
+    const prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(mkTmp('ghome-'), '.gitconfig');
+    try {
+      const root = workRepo();
+      const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
+      git('config', '--global', 'alias.ci', 'commit -v');
+
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: defaultSelection(),
+        overlay: true,
+        devkitRef: 'v0.9.0',
+      });
+
+      // no LOCAL alias was installed (would shadow the global) …
+      expect(() =>
+        execFileSync('git', ['config', '--local', '--get', 'alias.ci'], {
+          cwd: root,
+          stdio: 'pipe',
+        }),
+      ).toThrow();
+      // … and the user's global `ci` is intact, before AND after clean
+      expect(git('config', '--global', '--get', 'alias.ci').trim()).toBe('commit -v');
+      const cleanRun = (await import('../commands/clean.mjs')).default;
+      await cleanRun(['--yes'], root);
+      expect(git('config', '--global', '--get', 'alias.ci').trim()).toBe('commit -v');
+    } finally {
+      if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+    }
+  });
+
+  it('freeze-if-absent: re-running overlay keeps the baseline (does NOT re-grandfather new debt)', async () => {
+    const root = workRepo();
+    const opts = {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    };
+    await applyInit(root, opts);
+    const sizeBefore = readFileSync(join(root, 'eslint', 'baselines', 'size.json'), 'utf8');
+    expect(JSON.parse(sizeBefore).fileDisables).toBe(0);
+
+    // add NEW size debt (an inline max-lines disable) — a re-freeze WOULD grandfather it
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'huge.ts'),
+      '// eslint-disable max-lines\nexport const x = 1;\n',
+    );
+    await applyInit(root, opts);
+
+    // baseline unchanged → the ratchet still catches the new disable on the next commit
+    expect(readFileSync(join(root, 'eslint', 'baselines', 'size.json'), 'utf8')).toBe(sizeBefore);
+  });
+
+  it('freeze-if-absent still creates a MISSING size-lines baseline when maxLines is later turned on', async () => {
+    const root = workRepo();
+    const opts = {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.9.0',
+    };
+    await applyInit(root, opts); // no maxLines yet → only size.json
+    const linesBaseline = join(root, 'eslint', 'baselines', 'size-lines.json');
+    expect(existsSync(linesBaseline)).toBe(false);
+
+    // turn on the raw-line cap, then re-apply — size.json exists but size-lines.json is still missing
+    const cfgPath = join(root, 'guard.config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    cfg.maxLines = 50;
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    await applyInit(root, opts);
+
+    expect(existsSync(linesBaseline)).toBe(true); // first-freeze of the lines baseline was NOT skipped
   });
 });

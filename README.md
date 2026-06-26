@@ -44,7 +44,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.16.12
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.17.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -260,7 +260,7 @@ mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and 
 the global CLI — **package.json is never touched.**
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.16.12   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.17.0   # once per machine
 cd <shared-repo>           # (or a package subdir in a monorepo)
 devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
 ```
@@ -288,7 +288,7 @@ where you still want the guardrails locally. Overlay mode touches **nothing comm
 **invisible to git**:
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.16.12   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.17.0   # once per machine
 cd <work-repo>
 devkit init --overlay
 ```
@@ -305,8 +305,25 @@ devkit init --overlay
   them over **staged files only** (your changes are checked without flooding on existing code).
 - **package.json untouched.**
 
-Caveat: husky's `prepare` re-claims `core.hooksPath` on the next `bun install` — re-run
-`devkit init --overlay` (idempotent) to re-apply. `devkit doctor` reports if it was reclaimed.
+**Self-heal — `git ci`:** husky's `prepare` re-claims `core.hooksPath` on the next `bun install`,
+silently unwiring the gates. Overlay can't touch the committed `prepare`, so it installs a
+**per-clone local git alias** (`alias.ci`, in `.git/config` — uncommitted, dies with the clone)
+that re-points `core.hooksPath` back to `.devkit/hooks` and then commits:
+
+```bash
+git ci -m "feat: …"   # re-points the hook, then runs `git commit -m "feat: …"`
+```
+
+- **Skip-on-collision:** if you already have a `ci` alias (commonly a **global** `ci = commit -v`),
+  devkit leaves it untouched and prints a note — it never clobbers your `ci`. Heal manually with
+  `git config core.hooksPath .devkit/hooks`, or alias under another name.
+- **Best-effort, never blocking:** the re-point is fail-open (`;`) — a hiccup never blocks your
+  commit (it just runs the repo's own hooks that once).
+- **Bounded coverage:** re-points on your **next CLI `git ci`**. A GUI client / plain `git commit`
+  in the window between a `bun install` and that `git ci` runs the repo's own hooks, not devkit's.
+- You can always re-run `devkit init --overlay` (idempotent) instead. `devkit doctor` reports if
+  `core.hooksPath` was reclaimed and whether the self-heal alias is in place. If you delete
+  `.devkit/` by hand (without `devkit clean`), run `devkit clean` to drop the leftover local config.
 
 **Undo it all:** `devkit clean` restores `core.hooksPath` to exactly what it was, removes every
 devkit file, and prunes the devkit lines from `.git/info/exclude` — the repo goes back to

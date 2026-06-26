@@ -14,6 +14,7 @@ import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
 import { markEnd, markStart } from '../lib/husky/husky.mjs';
 import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mjs';
+import { HEAL_ALIAS_NAME, isHealAlias } from '../lib/overlay.mjs';
 import { cmpSemver } from './update.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
@@ -417,23 +418,43 @@ const DEFAULT_DOCTOR_SEL = {
 
 // Overlay (local-only) doctor: just the local hook + core.hooksPath (husky re-claims it on
 // install). Package/pin/extends checks don't apply. Prints its own report; returns the exit code.
+// Reason: flat overlay health report: one git-config read each for core.hooksPath + the self-heal
+// alias, then a linear ✓/⚠/· print per signal; the alias branch COUNT is trivial and the exit code
+// stays gated on hook+path only (the alias is advisory)
+// fallow-ignore-next-line complexity
 function runOverlayDoctor(cwd) {
-  let hooksPath = '';
-  try {
-    hooksPath = execFileSync('git', ['config', '--get', 'core.hooksPath'], {
-      cwd,
-      encoding: 'utf8',
-    }).trim();
-  } catch {
-    // unset
-  }
-  const hookOk = existsSync(join(cwd, '.devkit', 'hooks', 'pre-commit'));
+  // hooksPath + the alias are repo-wide (set at the git ROOT) — a monorepo package is a subdir, so
+  // read/check at the root, not cwd.
+  const { gitRoot } = detectGitRoot(cwd);
+  const gitGet = (key) => {
+    try {
+      return execFileSync('git', ['config', '--get', key], {
+        cwd: gitRoot,
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      return ''; // unset
+    }
+  };
+  const hooksPath = gitGet('core.hooksPath');
+  const aliasOurs = isHealAlias(gitGet(`alias.${HEAL_ALIAS_NAME}`));
+  const hookOk = existsSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit'));
   const pathOk = hooksPath === '.devkit/hooks';
   console.log('devkit doctor — overlay (local-only)\n');
   console.log(`  ${hookOk ? '✓' : '✗'} .devkit/hooks/pre-commit ${hookOk ? 'present' : 'MISSING'}`);
   console.log(
-    `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ' — re-run `devkit init --overlay` (husky may have reclaimed it)'}`,
+    `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it) or re-run \`devkit init --overlay\``}`,
   );
+  // Advisory only — never affects the exit code (hook + path are the real health signal).
+  if (aliasOurs && !hookOk)
+    console.log(
+      `  ⚠ git ${HEAL_ALIAS_NAME} points at a missing .devkit/hooks — run \`devkit clean\``,
+    );
+  else if (aliasOurs) console.log(`  ✓ git ${HEAL_ALIAS_NAME} self-heal alias`);
+  else
+    console.log(
+      `  · self-heal off (git ${HEAL_ALIAS_NAME} re-points core.hooksPath; or re-run \`devkit init --overlay\`)`,
+    );
   return hookOk && pathOk ? 0 : 1;
 }
 
@@ -493,6 +514,9 @@ export default async function run(args, cwd) {
   if (configResult.status === 'MISSING') {
     console.log('devkit doctor\n');
     console.log(`  ✗ ${configResult.name}: ${configResult.detail} — ${configResult.remediation}`);
+    console.log(
+      '  (was this an overlay repo? `devkit clean` removes any leftover local git config — core.hooksPath / the git ci alias.)',
+    );
     return 2;
   }
 
