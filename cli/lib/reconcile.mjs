@@ -23,16 +23,9 @@
  * Divergence (local baseRef not an ancestor of upstream) → strictly hands-off (skip+warn all).
  */
 import { execFileSync } from 'node:child_process';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeFileAtomic } from './atomic-write.mjs';
 
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
 const LOCK_STALE_MS = 60_000;
@@ -115,9 +108,7 @@ export function pruneBranch(mainRepo, branch) {
     const m = loadManifest(mainRepo);
     if (!m.branches[branch]) return;
     delete m.branches[branch];
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(m, null, 2)}\n`);
-    renameSync(tmp, file);
+    writeFileAtomic(file, `${JSON.stringify(m, null, 2)}\n`); // temp+rename, inside the lock
   });
 }
 
