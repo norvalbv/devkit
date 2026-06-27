@@ -91,6 +91,15 @@ Usage:
                              confirms each PR MERGED (gh), and restores only files still pristine —
                              never moving the shared HEAD, never clobbering a concurrent edit.
                              DRY-RUN by default; --apply to write; --branch/--main-repo/--json.
+  devkit ship <branch> "<title>" [--markers-dir <d>]... [--link <d>]... [--] <path...>
+                             Commit explicit files onto a NEW branch + open a PR WITHOUT moving
+                             this checkout's HEAD (parallel agents on one shared tree stay
+                             undisturbed). The commit happens in an ephemeral linked worktree so
+                             pre-commit hooks still run; reviewer markers (.claude/.cursor, override
+                             with --markers-dir) and gate-dep dirs (--link, plus the .husky/_ +
+                             node_modules base) are carried in. PR body via stdin; SHIP_DRY_RUN=1
+                             commits locally without push/PR. Records .devkit/reconcile-manifest.json
+                             for a later \`devkit reconcile\`.
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -105,6 +114,7 @@ const COMMANDS = {
   migrate: () => import('./commands/migrate.mjs'),
   move: () => import('./commands/move.mjs'),
   reconcile: () => import('./commands/reconcile.mjs'),
+  ship: () => import('./commands/ship.mjs'),
 };
 
 // Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
