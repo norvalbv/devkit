@@ -97,10 +97,13 @@ function withLock(lockDir, fn) {
       }
     }
   }
+  // Never run fn() unlocked: an unsynchronized read-modify-write would let a concurrent ship or
+  // reconcile clobber another branch's entry (the rename is atomic, but the read+merge is not).
+  if (!held) throw new Error(`timed out acquiring manifest lock: ${lockDir}`);
   try {
     return fn();
   } finally {
-    if (held) rmSync(lockDir, { recursive: true, force: true });
+    rmSync(lockDir, { recursive: true, force: true });
   }
 }
 
@@ -219,6 +222,14 @@ export function reconcileBranch({ mainRepo, branch, entry, apply }) {
     if (r.warning) warnings.push(r.warning);
   }
   const action = warnings.length === 0 ? 'prune' : 'keep';
-  if (action === 'prune' && apply) pruneBranch(mainRepo, branch);
+  if (action === 'prune' && apply) {
+    try {
+      pruneBranch(mainRepo, branch);
+    } catch (e) {
+      // Restores already landed; only the manifest cleanup was contended. The entry stays and a
+      // later run prunes it (idempotent) — don't fail the whole reconcile over a lock timeout.
+      warnings.push(`manifest entry not pruned (${e.message}); a re-run will clear it`);
+    }
+  }
   return { branch, merged: true, action, restored, warnings };
 }

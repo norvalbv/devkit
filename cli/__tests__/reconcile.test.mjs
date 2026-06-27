@@ -10,8 +10,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadManifest, reconcileBranch } from '../lib/reconcile.mjs';
+
+// Each test drives a real bare-origin repo through ~10 git subprocesses (init/commit/push/fetch/
+// merge/checkout); under full-suite parallel load that exceeds vitest's 5s default. Give the file
+// generous wall-clock — the tests still assert everything, they're just subprocess-bound.
+vi.setConfig({ testTimeout: 30_000 });
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mjs');
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
