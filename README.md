@@ -44,7 +44,7 @@ your data is untouched because it was never in here.
 ### Install (consumer)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.19.1
+bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.20.0
 ```
 
 > Private repo: use the `git+ssh://` form, not bun's `github:` shorthand — the latter
@@ -260,7 +260,7 @@ mode mirrors `fallow init`: install devkit **globally**, scaffold the repo, and 
 the global CLI — **package.json is never touched.**
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.19.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.20.0   # once per machine
 cd <shared-repo>           # (or a package subdir in a monorepo)
 devkit init --standalone   # --stack <x> --scan-root <p> etc. all still apply
 ```
@@ -288,7 +288,7 @@ where you still want the guardrails locally. Overlay mode touches **nothing comm
 **invisible to git**:
 
 ```bash
-bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.19.1   # once per machine
+bun add -g git+ssh://git@github.com/norvalbv/devkit.git#v0.20.0   # once per machine
 cd <work-repo>
 devkit init --overlay
 ```
