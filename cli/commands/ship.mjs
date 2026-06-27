@@ -18,6 +18,8 @@ Usage:
                       default .claude + .cursor). A repo without these dirs carries nothing.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
+  --pr                Re-push: add the changes to the EXISTING PR on <branch> as a new commit
+                      (fast-forward, never --force) instead of opening a new PR.
   --                  Force everything after it to be a file path (ships a dash-leading filename).
 
 Env:
@@ -32,7 +34,12 @@ export default function ship(args, cwd) {
     console.log(HELP);
     return args.length === 0 ? 1 : 0; // no args is a usage error; explicit --help is success
   }
-  const script = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
+  // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
+  // re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR.
+  const sep = args.indexOf('--');
+  const flagArgs = sep === -1 ? args : args.slice(0, sep);
+  const mode = flagArgs.includes('--pr') ? 'reship' : 'ship-branch';
+  const script = fileURLToPath(new URL(`../lib/ship/${mode}.sh`, import.meta.url));
   // `bash <script>` (not a direct exec of the file) so a lost +x bit through packaging can't break
   // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
   // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
