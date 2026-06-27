@@ -101,7 +101,10 @@ for r in commit-guard api-security backend-performance frontend-security fronten
   done
 done
 
-git -C "$WT" commit -m "$TITLE" -m "$BODY"   # gates run HERE
+# Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
+# the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
+. "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally onto $BR (worktree $WT), skipped push." >&2

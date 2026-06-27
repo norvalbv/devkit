@@ -167,7 +167,10 @@ for r in commit-guard api-security backend-performance frontend-security fronten
   done
 done
 
-git -C "$WT" commit -m "$TITLE" -m "$BODY"   # hook gates run HERE
+# Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
+# agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
+. "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
