@@ -38,7 +38,10 @@ const GIT_COMMIT_RE = /\bgit\s.*\bcommit\b/;
 const COMMIT_WORD_RE = /\bcommit\b/;
 const TOKENS_RE = /(?:"[^"]*"|'[^']*'|\S)+/g; // rough shell tokens (keeps quoted runs whole)
 const STAGE_ALL_RE = /^-[a-zA-Z]*a[a-zA-Z]*$/; // a short-flag bundle containing `a` (-a, -am, -na…)
-const MSG_RE = /(?:^|\s)(?:-m|--message)\s+(?:"([^"]*)"|'([^']*)'|(\S+))/g;
+// Plain "…" / '…' / a bare token, AND escaped \"…\": a commit built inside a nested shell
+// arrives backslash-escaped, and without the escaped branch the title falls through to the
+// bare-token case and truncates to the first whitespace-delimited word (a mangled PR title).
+const MSG_RE = /(?:^|\s)(?:-m|--message)\s+(?:"([^"]*)"|'([^']*)'|\\"([^"]*)\\"|(\S+))/g;
 const PR_RE = /(?:^|\s)--pr\s+(\S+)/;
 
 /** Run git in <dir>; trimmed stdout, or null on any failure (never throws). */
@@ -105,7 +108,7 @@ function parseCommit(seg) {
     if (t === '--amend') return { reject: REJECT_AMEND };
     if (t === '-F' || t === '--file') return { reject: REJECT_FILE };
   }
-  const msgs = [...seg.matchAll(MSG_RE)].map((m) => m[1] ?? m[2] ?? m[3]);
+  const msgs = [...seg.matchAll(MSG_RE)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]);
   if (msgs.length === 0) return { reject: REJECT_NO_MSG };
   const pr = seg.match(PR_RE);
   return { title: msgs[0], body: msgs.slice(1).join('\n\n'), prBranch: pr ? pr[1] : null };
@@ -168,17 +171,22 @@ export function decide(input, cwd, rand) {
 
   const pathArgs = paths.map(q).join(' ');
   const extras = cfg.extraArgs.length ? `${cfg.extraArgs.join(' ')} ` : '';
-  let runnable;
+  // A multi-`-m` body is baked into the runnable as a `printf %s … | …` prefix, so the agent
+  // copy-pastes ONE line and the body lands on the PR — no separate "pipe via stdin" step to
+  // look up. `printf %s '<body>'` keeps the body the ARG (never the format), so a `%` in it is
+  // literal; q() single-quotes it so embedded newlines/quotes survive the paste. ship reads it
+  // via `BODY=$(cat)`.
+  const stdin = intent.body ? `printf %s ${q(intent.body)} | ` : '';
+  let ship;
   let note;
   if (intent.prBranch) {
-    runnable = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${extras}-- ${pathArgs}`;
+    ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${extras}-- ${pathArgs}`;
     note = `Adds these changes to the existing PR on \`${intent.prBranch}\` (fast-forward, never --force).`;
   } else {
     const suffix = rand ?? Math.random().toString(36).slice(2, 8);
-    runnable = `${cfg.command} ${q(`agent/${slug(intent.title)}-${suffix}`)} ${q(intent.title)} ${extras}-- ${pathArgs}`;
+    ship = `${cfg.command} ${q(`agent/${slug(intent.title)}-${suffix}`)} ${q(intent.title)} ${extras}-- ${pathArgs}`;
     note =
       'Commits your staged files onto a fresh branch + opens a PR; the shared HEAD never moves. The PR URL is printed; to add more commits later, `git commit --pr <that-branch> -m "…"`.';
   }
-  const body = intent.body ? `\n(Pipe your commit body via stdin if you want it on the PR.)` : '';
-  return `${head}\nRun this instead:\n  ${runnable}\n${note}${body}`;
+  return `${head}\nRun this instead:\n  ${stdin}${ship}\n${note}`;
 }
