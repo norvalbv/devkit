@@ -100,6 +100,10 @@ Usage:
                              node_modules base) are carried in. PR body via stdin; SHIP_DRY_RUN=1
                              commits locally without push/PR. Records .devkit/reconcile-manifest.json
                              for a later \`devkit reconcile\`.
+  devkit guard-branch        PreToolUse hook (stdin = the Claude-Code payload): denies a direct
+                             \`git commit\` on a protected branch and hands back a ready-to-run
+                             \`devkit ship …\`. Wire as a one-line shim in the consumer's PreToolUse
+                             Bash hook (\`exec devkit guard-branch\`).
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -115,6 +119,7 @@ const COMMANDS = {
   move: () => import('./commands/move.mjs'),
   reconcile: () => import('./commands/reconcile.mjs'),
   ship: () => import('./commands/ship.mjs'),
+  'guard-branch': () => import('./commands/guard-branch.mjs'),
 };
 
 // Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
