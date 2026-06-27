@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -234,5 +242,42 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(() =>
       git(['rev-parse', '--verify', '--quiet', 'feat/wt-fail'], { stdio: 'ignore' }),
     ).toThrow();
+  });
+
+  // commit-with-gate-capture.sh: the worktree commit's hook output is captured to a per-branch log so
+  // the shipping agent can read the gate verdicts (git buries them on the commit's stderr), while the
+  // PR URL stays the only stdout line and a blocking gate still aborts.
+  it('captures the pre-commit gate output to a per-branch log, off stdout', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'echo "GATE_MARKER_XYZ"\nexit 0' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/gate-log', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = join(dir, '.devkit/last-ship-gates-feat-gate-log.log');
+    expect(existsSync(log)).toBe(true);
+    expect(readFileSync(log, 'utf8')).toMatch(/GATE_MARKER_XYZ/); // full gate output captured
+    expect(r.stderr).toMatch(/pre-commit gates ran/); // compact status on stderr
+    expect(r.stdout).not.toMatch(/GATE_MARKER_XYZ/); // gate output never pollutes stdout (PR-URL stream)
+  });
+
+  it('captures the gate output to the log even when a gate blocks the commit', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'echo "BLOCK_REASON_XYZ"\nexit 1' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/gate-block', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status).not.toBe(0); // blocking gate aborts the ship
+    const log = join(dir, '.devkit/last-ship-gates-feat-gate-block.log');
+    expect(existsSync(log)).toBe(true);
+    expect(readFileSync(log, 'utf8')).toMatch(/BLOCK_REASON_XYZ/); // blocking gate's reason captured
   });
 });
