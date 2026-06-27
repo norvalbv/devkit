@@ -85,6 +85,12 @@ Usage:
                              surgically prunes the moved entries from eslint/baselines (no
                              whole-tree regen). --dry-run previews; --no-baseline skips the prune;
                              --alias=@/=src/renderer overrides tsconfig auto-detect.
+  devkit reconcile [--apply] After your PR merges, replace the now-stale shipped files in a shared
+                             checkout with the merged-upstream version (no stash/pull). Manual lane:
+                             reads .devkit/reconcile-manifest.json (written by ship-branch.sh),
+                             confirms each PR MERGED (gh), and restores only files still pristine —
+                             never moving the shared HEAD, never clobbering a concurrent edit.
+                             DRY-RUN by default; --apply to write; --branch/--main-repo/--json.
   devkit --version           Print devkit's version.
   devkit --help              This help.`;
 
@@ -98,6 +104,7 @@ const COMMANDS = {
   update: () => import('./commands/update.mjs'),
   migrate: () => import('./commands/migrate.mjs'),
   move: () => import('./commands/move.mjs'),
+  reconcile: () => import('./commands/reconcile.mjs'),
 };
 
 // Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
