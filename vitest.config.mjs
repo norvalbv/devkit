@@ -6,5 +6,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['gate-engine/**/*.test.mjs', 'cli/**/*.test.mjs'],
+    // Strip leaked git control vars (GIT_DIR, …) so a hook-launched run can't make the
+    // git-integration tests operate on devkit's own repo. See vitest.setup.mjs.
+    setupFiles: ['./vitest.setup.mjs'],
   },
 });
