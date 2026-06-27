@@ -96,6 +96,26 @@ describe('protected-branch-guard — denies on a protected branch', () => {
     expect(r).toContain(`'it'\\''s broken'`); // POSIX single-quote escape
   });
 
+  it('captures an escaped \\"…\\" title in full (nested-shell commit), not the first token', () => {
+    const dir = repoOn('main', { staged: ['a.ts'] });
+    // A commit built inside a nested shell arrives backslash-escaped — the title must survive whole.
+    const r = run('git commit -m \\"feat(x): add the thing\\"', dir, 'z');
+    expect(r).toContain("devkit ship 'agent/feat-x-add-the-thing-z' 'feat(x): add the thing'");
+  });
+
+  it('bakes a multi-`-m` body into a `printf %s … |` prefix (one copy-paste, body on the PR)', () => {
+    const dir = repoOn('main', { staged: ['a.ts'] });
+    const r = run('git commit -m "the title" -m "the body"', dir, 'z');
+    expect(r).toContain("printf %s 'the body' | devkit ship 'agent/the-title-z' 'the title'");
+  });
+
+  it('no body (single -m) → no printf prefix', () => {
+    const dir = repoOn('main', { staged: ['a.ts'] });
+    const r = run('git commit -m "solo"', dir, 'z');
+    expect(r).toContain("Run this instead:\n  devkit ship 'agent/solo-z' 'solo'");
+    expect(r).not.toContain('printf');
+  });
+
   it('uses the repo .devkit/config.json ship command + extraArgs', () => {
     const dir = repoOn('main', {
       staged: ['a.ts'],
