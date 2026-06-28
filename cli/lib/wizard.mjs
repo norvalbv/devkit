@@ -16,6 +16,11 @@ import { AGENT_TARGETS, COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './component
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
 
+// Components OFFERED in OVERLAY mode (no package): the agent-half + the biome extend. Excludes
+// tsconfig/structure (need package/plugin resolution), searchSteering (its hooks reference a
+// node_modules path), search-code, and husky (the local hook is always on, not optional).
+const OVERLAY_PICKABLE = new Set(['biome', 'skills', 'agents', 'agentHooks']);
+
 const STACKS = ['electron', 'react-app', 'component-lib', 'next', 'node-service', 'generic'];
 
 // The picker components (everything except `guards`, which gets its own multiselect when
@@ -120,25 +125,26 @@ export async function runWizard({
   });
   if (bail(stack)) return null;
 
-  // 3. Components. Overlay auto-wires (guards + eslint/biome extend + local hook) — no picker.
-  // Standalone omits structure-lint (no eslint flat-config plugin in a no-package setup).
-  // Structure is only offered in PACKAGE mode where a template exists.
+  // 3. Components. Overlay offers a picker too — but only the components VIABLE without the package
+  // (the agent-half + biome extend + fallow); tsconfig/structure/searchSteering/search-code are
+  // excluded (they need package/plugin resolution or a node_modules path) and the local hook is
+  // always on (applyOverlayConstraints enforces this). Standalone omits structure-lint. Structure
+  // is only offered in PACKAGE mode where a template exists.
   const structAvail = mode === 'package' && structureAvailable;
   const selection = { guards: [] };
   if (mode === 'overlay') {
-    Object.assign(selection, {
-      biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
-      tsconfig: false,
-      skills: false,
-      agents: false,
-      searchSteering: false,
-      agentHooks: false,
-      husky: true, // overlay always installs the local (git-ignored) hook
-      structure: false,
-      fallow: false,
-      searchCode: false,
-      agentTargets: [...AGENT_TARGETS], // unused (overlay syncs no agent files) — kept consistent
+    const choices = COMPONENT_OPTIONS.filter((c) => OVERLAY_PICKABLE.has(c.id));
+    const picked = await multiselect({
+      message: 'Select components to install (overlay — all git-ignored)',
+      options: [...choices.map(componentOption), componentOption(FALLOW_OPTION)],
+      initialValues: choices.filter((c) => c.recommended).map((c) => c.id),
+      required: false,
     });
+    if (bail(picked)) return null;
+    const chosen = new Set(picked);
+    for (const c of choices) selection[c.id] = chosen.has(c.id);
+    selection.fallow = chosen.has('fallow');
+    selection.husky = true; // overlay's local hook is the delivery mechanism — always on
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
     const picked = await multiselect({
@@ -157,25 +163,25 @@ export async function runWizard({
     selection.fallow = chosen.has('fallow');
     selection.searchCode = chosen.has('search-code');
     if (!structAvail) selection.structure = false;
+  }
 
-    // Agent surface(s): only asked when something actually syncs into .claude/.cursor. A repo that
-    // uses only one tool picks just that surface → no redundant copy in the other's dir. A single
-    // SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only" require
-    // actively DESELECTing Cursor — easy to miss, so both got installed. Radio makes intent explicit.
-    selection.agentTargets = [...AGENT_TARGETS];
-    if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
-      const surface = await select({
-        message: 'Sync skills/agents/hooks to which agent surface(s)?',
-        options: [
-          { value: 'both', label: 'Both', hint: '.claude/ + .cursor/' },
-          { value: 'claude', label: 'Claude only', hint: '.claude/' },
-          { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
-        ],
-        initialValue: 'both',
-      });
-      if (bail(surface)) return null;
-      selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
-    }
+  // Agent surface(s): asked whenever something syncs into .claude/.cursor (every mode now does). A
+  // repo that uses only one tool picks just that surface → no redundant copy in the other's dir. A
+  // single SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only"
+  // require actively DESELECTing Cursor — easy to miss, so both got installed. Radio = explicit intent.
+  selection.agentTargets = [...AGENT_TARGETS];
+  if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
+    const surface = await select({
+      message: 'Sync skills/agents/hooks to which agent surface(s)?',
+      options: [
+        { value: 'both', label: 'Both', hint: '.claude/ + .cursor/' },
+        { value: 'claude', label: 'Claude only', hint: '.claude/' },
+        { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
+      ],
+      initialValue: 'both',
+    });
+    if (bail(surface)) return null;
+    selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
   }
 
   // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook).
@@ -227,11 +233,16 @@ export async function runWizard({
 function summarize(mode, selection, structureAvailable, deselected) {
   if (mode === 'overlay') {
     const g = selection.guards.length ? ` (${selection.guards.join(', ')})` : '';
+    const surfaces = (selection.agentTargets ?? AGENT_TARGETS).join(', ');
+    const on = (id) => (selection[id] ? '✓' : '·');
     return [
       'overlay — everything git-ignored, nothing committed:',
       `✓ guards${g}`,
-      '✓ eslint/biome overlay (extends the repo, staged files)',
       '✓ local hook → chains to the repo’s own',
+      `${on('biome')} biome overlay (extends the repo, staged files)`,
+      `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
+      `${on('agentHooks')} agent hooks → .claude/settings.local.json + .cursor/hooks.json (if untracked)`,
+      `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
     ].join('\n');
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(

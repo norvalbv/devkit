@@ -8,13 +8,32 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
-import { defaultSelection } from '../lib/components.mjs';
+import { applyOverlayConstraints, defaultSelection } from '../lib/components.mjs';
+import { isTracked } from '../lib/git-tracked.mjs';
 import { HEAL_ALIAS_CMD } from '../lib/overlay.mjs';
+import { removeSkills } from '../lib/sync-manifest.mjs';
 import { rootRegistry } from './_helpers.mjs';
+
+// A full overlay selection with the opt-ins (agentHooks + fallow) ON — what the wizard produces
+// when the user checks everything. applyInit consumes an already-resolved selection directly, so we
+// apply the overlay constraints here too (forces tsconfig/structure/searchSteering off, husky on).
+const overlayAll = () =>
+  applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true });
+
+// Stub fallow's external CLI (detect/install/baselines/hook) so overlay's fallow flow runs without
+// a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
+// wires the gate without installing. Plain fns (not vi.fn) so afterEach's restoreAllMocks can't clear them.
+vi.mock('../lib/install/install-fallow.mjs', async (importOriginal) => ({
+  ...(await importOriginal()),
+  detectFallow: () => ({ available: true, version: '2.89.0' }),
+  installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
+  saveFallowBaselines: () => ({ ok: true }),
+  wireFallowGate: () => ({ ok: true }),
+}));
 
 const { mkTmp, cleanup } = rootRegistry();
 
@@ -44,6 +63,12 @@ function workRepo() {
   // fallow-ignore-next-line code-duplication
   git('commit', '-qm', 'init');
   return root;
+}
+
+// Seed an existing (untracked) .claude/settings.local.json — the user's own — before an overlay run.
+function seedLocalSettings(root, obj) {
+  mkdirSync(join(root, '.claude'), { recursive: true });
+  writeFileSync(join(root, '.claude', 'settings.local.json'), JSON.stringify(obj));
 }
 
 beforeEach(() => {
@@ -375,5 +400,316 @@ describe('overlay (local-only) install', () => {
     await applyInit(root, opts);
 
     expect(existsSync(linesBaseline)).toBe(true); // first-freeze of the lines baseline was NOT skipped
+  });
+
+  // ── agent-half + fallow (the components overlay grew to install) ────────────────
+
+  it('syncs skills + agents into the surfaces and hides them (invisible), no clobber', async () => {
+    const root = workRepo(); // .claude / .cursor untracked
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(), // skills + agents on (agentHooks/fallow off)
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
+    expect(existsSync(join(root, '.cursor', 'agents'))).toBe(true);
+    expect(existsSync(join(root, '.devkit', 'skills-manifest.json'))).toBe(true);
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude).toContain('.claude/skills/');
+    expect(exclude).toContain('.cursor/agents/');
+    // INVISIBLE: every synced file is excluded → status stays clean
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('Claude hooks register into settings.local.json (not the shared settings.json)', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    const local = join(root, '.claude', 'settings.local.json');
+    expect(existsSync(local)).toBe(true);
+    const cmds = JSON.stringify(JSON.parse(readFileSync(local, 'utf8')).hooks);
+    expect(cmds).toContain('.claude/hooks/'); // a devkit agent-hook command landed here
+    // the shared settings.json was NOT created by devkit
+    expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('merges into an existing settings.local.json (preserves the user’s keys + hooks)', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {
+      model: 'opus',
+      hooks: {
+        UserPromptSubmit: [{ matcher: '', hooks: [{ type: 'command', command: 'echo mine' }] }],
+      },
+    });
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    const merged = JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8'));
+    expect(merged.model).toBe('opus'); // user key survives
+    const all = JSON.stringify(merged.hooks);
+    expect(all).toContain('echo mine'); // user hook survives
+    expect(all).toContain('.claude/hooks/'); // devkit hooks merged in
+  });
+
+  it('skips a git-TRACKED .cursor/hooks.json (warns, no edit, no exclude line)', async () => {
+    const root = mkTmp('overlay-cursor-');
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }, null, 2));
+    mkdirSync(join(root, '.cursor'), { recursive: true });
+    const cursorBefore = '{ "version": 1, "hooks": {} }\n';
+    writeFileSync(join(root, '.cursor', 'hooks.json'), cursorBefore);
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    // tracked → untouched + warned + not excluded (an exclude line can't hide a tracked edit)
+    expect(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8')).toBe(cursorBefore);
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      '.cursor/hooks.json',
+    );
+    const logged = console.log.mock.calls.flat().join('\n');
+    expect(logged).toContain('.cursor/hooks.json is git-tracked');
+    // Claude side still wired into the (untracked) local-override file
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('skips a git-TRACKED skill dir (no clobber), syncs the rest', async () => {
+    const root = mkTmp('overlay-trackedskill-');
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }, null, 2));
+    // the team committed a devkit-named skill dir
+    mkdirSync(join(root, '.claude', 'skills', 'commit-guard'), { recursive: true });
+    const teamSkill = '# team’s own commit-guard\n';
+    writeFileSync(join(root, '.claude', 'skills', 'commit-guard', 'SKILL.md'), teamSkill);
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    // tracked skill left byte-identical; it's omitted from the manifest; OTHER skills synced
+    expect(readFileSync(join(root, '.claude', 'skills', 'commit-guard', 'SKILL.md'), 'utf8')).toBe(
+      teamSkill,
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(root, '.devkit', 'skills-manifest.json'), 'utf8'),
+    );
+    expect(Object.keys(manifest.files).some((k) => k.startsWith('commit-guard/'))).toBe(false);
+    expect(Object.keys(manifest.files).length).toBeGreaterThan(0);
+    const logged = console.log.mock.calls.flat().join('\n');
+    expect(logged).toContain('skipping skill "commit-guard"');
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('wires fallow as an inline hook gate (not `fallow hooks install`); baselines + cache hidden', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+    expect(hook).toContain('fallow audit'); // inline gate
+    expect(hook).not.toContain('fallow hooks install'); // NOT fallow's own (shadowed) hook
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude).toContain('.fallow/');
+    expect(exclude).toContain('fallow-baselines/');
+    // overlay never edits the committed .gitignore for fallow
+    expect(existsSync(join(root, '.gitignore'))).toBe(false);
+    // config records fallow as actually wired
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).components.fallow,
+    ).toBe(true);
+  });
+
+  it('clean reverses the agent-half + fallow (files gone, devkit-created settings gone, exclude pruned)', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'agents'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, '.devkit'))).toBe(false);
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
+    // devkit created settings.local.json + it's now empty after stripping → removed (no footprint)
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(false);
+    // exclude pruned of EVERY devkit line — no orphans (skills/agents/hooks/settings/fallow, both surfaces)
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    for (const line of [
+      '.claude/skills/',
+      '.cursor/agents/',
+      '.claude/hooks/',
+      '.cursor/hooks/',
+      '.cursor/hooks.json',
+      'settings.local.json',
+      '.fallow/',
+      'fallow-baselines/',
+      'devkit',
+    ]) {
+      expect(exclude).not.toContain(line);
+    }
+    // full round-trip: back to a clean committed state
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('clean KEEPS a settings.local.json that holds the user’s own content', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, { model: 'opus', hooks: {} });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+
+    const local = JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8'));
+    expect(local.model).toBe('opus'); // user key survives
+    expect(JSON.stringify(local.hooks)).not.toContain('.claude/hooks/'); // devkit hooks stripped
+  });
+
+  it('isTracked: true for a committed file, false for an untracked one', () => {
+    const root = mkTmp('istracked-');
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'tracked.txt'), 'x');
+    git('add', 'tracked.txt');
+    git('commit', '-qm', 'init');
+    writeFileSync(join(root, 'untracked.txt'), 'y');
+
+    expect(isTracked(root, 'tracked.txt')).toBe(true);
+    expect(isTracked(root, 'untracked.txt')).toBe(false);
+  });
+
+  it('clean recovers STRANDED overlay leftovers when .devkit (config + manifests) is gone', async () => {
+    // Reproduces the orphaned state: config + manifests deleted, core.hooksPath already restored, but
+    // the synced agent-half + fallow-baselines remain. clean must still find + remove them (by the
+    // bundled-name fallback, since the manifests are gone) — never strand a footprint.
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.22.0',
+    });
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
+    rmSync(join(root, '.devkit'), { recursive: true, force: true }); // config + manifests gone
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root }); // hook already restored
+
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+
+    // every synced artifact removed despite the missing manifests
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(false);
+    expect(existsSync(join(root, '.cursor', 'agents'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(false);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('clean NEVER deletes a git-tracked skill dir (the user’s own, not a devkit stray)', () => {
+    const root = mkTmp('clean-tracked-');
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }, null, 2));
+    // the team commits their OWN skill that happens to share a devkit-bundled name (no manifest →
+    // removeSkills uses the bundled-name fallback, which must SKIP anything git tracks)
+    mkdirSync(join(root, '.claude', 'skills', 'brainstorming'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'skills', 'brainstorming', 'SKILL.md'), '# ours\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    removeSkills(root, false);
+
+    expect(existsSync(join(root, '.claude', 'skills', 'brainstorming', 'SKILL.md'))).toBe(true);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('applyOverlayConstraints: forces non-viable off + husky on, keeps the viable opt-in/opt-out', () => {
+    const sel = applyOverlayConstraints({
+      ...defaultSelection(),
+      tsconfig: true,
+      structure: true,
+      searchSteering: true,
+      searchCode: true,
+      husky: false,
+      skills: true,
+      agents: false, // user opted OUT — must be preserved
+      agentHooks: true, // opted IN — preserved
+      fallow: true,
+    });
+    // can't-work-without-the-package components are forced off; the local hook is forced on
+    expect(sel.tsconfig).toBe(false);
+    expect(sel.structure).toBe(false);
+    expect(sel.searchSteering).toBe(false);
+    expect(sel.searchCode).toBe(false);
+    expect(sel.husky).toBe(true);
+    // viable choices pass through untouched (overlay offers the same opt-in choices as package)
+    expect(sel.skills).toBe(true);
+    expect(sel.agents).toBe(false);
+    expect(sel.agentHooks).toBe(true);
+    expect(sel.fallow).toBe(true);
   });
 });

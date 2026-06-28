@@ -103,6 +103,28 @@ export function defaultSelection() {
   };
 }
 
+/**
+ * Enforce the OVERLAY invariants on a selection (from the wizard OR the --yes/flag path), so the
+ * SAME constraints apply whichever way overlay was resolved. The viable choices — skills, agents,
+ * agentHooks, biome, fallow, guards, agentTargets — pass through UNTOUCHED (overlay offers the same
+ * opt-in choices as package for those). Forced: the local hook is always on; the components that
+ * can't work without the package are off — `tsconfig`/`structure` (need package/plugin resolution),
+ * `searchSteering` (its hooks reference node_modules/@norvalbv/devkit), `search-code` (referenced
+ * external engine, not wired in overlay).
+ *
+ * @param {object} sel a resolved selection (from selectionFromFlags or the wizard)
+ */
+export function applyOverlayConstraints(sel) {
+  return {
+    ...sel,
+    tsconfig: false,
+    structure: false,
+    searchSteering: false,
+    searchCode: false,
+    husky: true,
+  };
+}
+
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {
   const base = defaultSelection();

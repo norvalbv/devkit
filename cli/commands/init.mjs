@@ -21,7 +21,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { resolveGuardConfig } from '../../gate-engine/config.mjs';
-import { AGENT_TARGETS, COMPONENTS, defaultSelection, GUARD_IDS } from '../lib/components.mjs';
+import {
+  AGENT_TARGETS,
+  applyOverlayConstraints,
+  COMPONENTS,
+  defaultSelection,
+  GUARD_IDS,
+} from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
@@ -742,7 +748,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
   console.log(
     '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
   );
-  const { origHooksPath } = installOverlay(cwd, selection, stack, force, dryRun);
+  const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
     console.log('  freeze baselines (grandfather current tree)');
     runFreezes(cwd, dryRun);
@@ -759,7 +765,17 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
           overlay: true,
           pkgRel,
           origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
-          components: { guards: [...(selection.guards ?? [])] },
+          // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the
+          // ACTUAL outcome (fallowWired) — an aborted install (no binary) records false.
+          components: {
+            guards: [...(selection.guards ?? [])],
+            skills: Boolean(selection.skills),
+            agents: Boolean(selection.agents),
+            agentHooks: Boolean(selection.agentHooks),
+            searchSteering: false, // never wired in overlay (no resolvable bin without the package)
+            fallow: fallowWired,
+            agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
+          },
         },
         null,
         2,
@@ -1060,6 +1076,11 @@ export default async function run(args, cwd) {
       }
     }
   }
+
+  // Overlay offers the same opt-in component choices as package (via the wizard picker / --yes
+  // flags), but the components that can't work without the package are forced off and the local
+  // hook is forced on — applied here so the wizard AND the --yes/flag path get identical invariants.
+  if (mode === 'overlay') selection = applyOverlayConstraints(selection);
 
   if (!structureAvailableFor(stack) && selection.structure) {
     selection.structure = false; // no template for this stack — silently skip (noted below)
