@@ -416,13 +416,14 @@ const DEFAULT_DOCTOR_SEL = {
   guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
 };
 
-// Overlay (local-only) doctor: just the local hook + core.hooksPath (husky re-claims it on
-// install). Package/pin/extends checks don't apply. Prints its own report; returns the exit code.
-// Reason: flat overlay health report: one git-config read each for core.hooksPath + the self-heal
-// alias, then a linear ✓/⚠/· print per signal; the alias branch COUNT is trivial and the exit code
-// stays gated on hook+path only (the alias is advisory)
+// Overlay (local-only) doctor: the local hook + core.hooksPath (husky re-claims it on install) gate
+// the exit code; the agent-half + fallow are ADVISORY (a re-run heals them, like the alias).
+// Package/pin/extends checks don't apply. Prints its own report; returns the exit code.
+// Reason: flat overlay health report: git-config reads for core.hooksPath + the self-heal alias, then
+// a linear ✓/⚠/· print per signal + advisory agent-half/fallow checks; high branch COUNT, near-zero
+// nesting, and the exit code stays gated on hook+path only (everything else is advisory)
 // fallow-ignore-next-line complexity
-function runOverlayDoctor(cwd) {
+async function runOverlayDoctor(cwd, cfg) {
   // hooksPath + the alias are repo-wide (set at the git ROOT) — a monorepo package is a subdir, so
   // read/check at the root, not cwd.
   const { gitRoot } = detectGitRoot(cwd);
@@ -455,6 +456,30 @@ function runOverlayDoctor(cwd) {
     console.log(
       `  · self-heal off (git ${HEAL_ALIAS_NAME} re-points core.hooksPath; or re-run \`devkit init --overlay\`)`,
     );
+  // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
+  const sel = cfg?.components ?? {};
+  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
+  const advise = (r) => console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
+  if (sel.skills && primary) advise(await checkSkills(cwd, primary));
+  if (sel.agents && primary) advise(await checkAgents(cwd, primary));
+  if (sel.agentHooks && primary) advise(checkAgentHookScripts(cwd, primary));
+  if (sel.agentHooks && surfaces.includes('claude')) {
+    const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], { overlay: true });
+    console.log(
+      `  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks in .claude/settings.local.json' : 'not in settings.local.json (re-run init)'}`,
+    );
+  }
+  if (sel.fallow) {
+    const wired =
+      hookOk &&
+      readFileSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit'), 'utf8').includes(
+        'fallow audit',
+      );
+    console.log(
+      `  ${wired ? '✓' : '·'} fallow gate: ${wired ? 'wired in the local hook' : 'not wired'}`,
+    );
+  }
   return hookOk && pathOk ? 0 : 1;
 }
 
@@ -521,7 +546,7 @@ export default async function run(args, cwd) {
   }
 
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) ?? {};
-  if (cfg.overlay) return runOverlayDoctor(cwd);
+  if (cfg.overlay) return runOverlayDoctor(cwd, cfg);
 
   const { results, sel } = await collectResults(cwd, cfg, configResult);
 

@@ -25,9 +25,11 @@ function listAgents(dir) {
  * @param {string[]} args
  * @param {string} cwd consumer root (the git root — agents are repo-wide, like skills)
  * @param {string[]} [targets] agent surfaces to write to (default both — see AGENT_TARGETS)
+ * @param {{ skipTracked?: (relPath: string) => boolean }} [opts] overlay-only: an agent `.md`
+ *   git already TRACKS in any target is skipped (not written, not manifested, warned) — C2.
  * @returns {{ devkitRef: string|null, generatedAt: string, files: Record<string,string> }} the manifest
  */
-export function syncAgents(args, cwd, targets = AGENT_TARGETS) {
+export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked } = {}) {
   const dryRun = args.includes('--dry-run');
   const targetDirs = targets.map((t) => `.${t}/agents`);
   const agentsSrc = join(packageDir(), 'agents');
@@ -39,6 +41,10 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS) {
   /** @type {Record<string, string>} */
   const files = {};
   for (const rel of rels) {
+    if (skipTracked && targetDirs.some((td) => skipTracked(`${td}/${rel}`))) {
+      console.log(`  ! skipping agent "${rel}" — git-tracked in the repo (left untouched)`);
+      continue;
+    }
     // Reason: sync-agents and sync-skills are deliberately parallel modules (see headers "Parallel to …"): identical write+manifest mechanics to different dirs. One shared abstraction over two short readable commands would obscure both; the parallelism IS the design.
     // fallow-ignore-next-line code-duplication
     const srcPath = join(agentsSrc, rel);

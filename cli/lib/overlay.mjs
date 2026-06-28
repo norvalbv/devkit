@@ -26,9 +26,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { syncAgents } from '../commands/sync-agents.mjs';
+import { syncSkills } from '../commands/sync-skills.mjs';
+import { AGENT_TARGETS } from './components.mjs';
 import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
+import { isTracked } from './git-tracked.mjs';
 import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs';
+import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mjs';
+import { installHookRegistrations, syncHookScripts } from './install/install-hooks.mjs';
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 const LOCAL_HOOKS = '.devkit/hooks';
@@ -282,22 +288,22 @@ function writeBiomeOverlay(cwd, stack, force, dryRun) {
 // then runs ONLY our dir, so we wrap EVERY hook the repo already had (pre-push, commit-msg, …) as
 // a pass-through, or they'd silently stop. pre-commit additionally runs devkit's gates (cd'd into
 // the package for a monorepo) before chaining to the repo's pre-commit.
-function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun) {
+function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallow = false) {
   const scriptDir = hookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
   const passthrough = existing.filter((h) => h !== 'pre-commit');
   if (dryRun) {
     console.log(
-      `  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}`,
+      `  [dry-run] git config core.hooksPath ${LOCAL_HOOKS}; pre-commit (gates${preCommitChain ? ` → ${preCommitChain}` : ''}${fallow ? ' + fallow' : ''})${passthrough.length ? `; pass-through: ${passthrough.join(', ')}` : ''}`,
     );
     return;
   }
   const dir = join(gitRoot, LOCAL_HOOKS);
   mkdirSync(dir, { recursive: true });
-  // pre-commit: devkit gates + chain to the repo's pre-commit (if any).
+  // pre-commit: devkit gates (+ optional fallow gate) + chain to the repo's pre-commit (if any).
   const pre = join(dir, 'pre-commit');
-  writeFileSync(pre, buildOverlayHook(sel, preCommitChain, pkgRel));
+  writeFileSync(pre, buildOverlayHook(sel, preCommitChain, pkgRel, { fallow }));
   chmodSync(pre, 0o755);
   // every OTHER existing hook → pass-through wrapper so it keeps running unchanged.
   for (const h of passthrough) {
@@ -316,13 +322,89 @@ function installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun) {
   }
 }
 
+// Resolve fallow for an overlay install: detect → (warn + global install if missing) → save
+// baselines so `fallow audit` only blocks on NEW issues (a legacy repo's existing debt is
+// grandfathered — else the gate fail-CLOSES on the very first commit). Returns whether the fallow
+// gate should be wired into the hook. Fail-open: if fallow can't be installed, ABORT the component
+// (no gate, no baselines) rather than wire a gate that can't run — never block the user.
+function resolveOverlayFallow(cwd, dryRun) {
+  if (dryRun) {
+    console.log('  [dry-run] fallow: detect → install-if-missing → save baselines → gate in hook');
+    return true;
+  }
+  const det = detectFallow({ cwd });
+  if (det.available) {
+    console.log(`  ✓ fallow present (${det.version})`);
+  } else {
+    console.log('  ! fallow not found — attempting a global install (bun → npm → cargo)...');
+    const r = installFallow({ cwd });
+    if (!r.ok) {
+      console.log(
+        '  ! fallow not installed — skipping the fallow gate (install it above, re-run).',
+      );
+      return false;
+    }
+    console.log(`  ✓ ${r.message}`);
+  }
+  const saved = saveFallowBaselines({ cwd });
+  console.log(
+    `  ${saved.ok ? '✓ saved' : '! some'} fallow baselines → fallow-baselines/ (grandfather debt)`,
+  );
+  return true;
+}
+
+// Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
+// any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
+// relative paths to hide via .git/info/exclude (derived from each sync's returned manifest, so a
+// skipped-because-tracked file is never excluded for). searchSteering is deliberately NOT wired in
+// overlay: its hooks resolve a node_modules/@norvalbv/devkit path the package-less overlay lacks (C1).
+// Reason: flat overlay agent-surface orchestration: ordered `if (sel.x) sync + derive excludes` steps (skills → agents → hook scripts → registrations) mirroring installAgentSurfaces; high branch COUNT, each trivial, no nesting
+// fallow-ignore-next-line complexity
+function installOverlayAgentSurfaces(gitRoot, sel, dryRun) {
+  const targets = sel.agentTargets ?? AGENT_TARGETS;
+  const skipTracked = (rel) => isTracked(gitRoot, rel);
+  const args = dryRun ? ['--dry-run'] : [];
+  const excl = [];
+  if (sel.skills) {
+    console.log('  skills');
+    const m = syncSkills(args, gitRoot, targets, { skipTracked });
+    for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
+      for (const t of targets) excl.push(`.${t}/skills/${name}/`);
+    if (Object.keys(m.files).length) excl.push('.devkit/skills-manifest.json');
+  }
+  if (sel.agents) {
+    console.log('  agents');
+    const m = syncAgents(args, gitRoot, targets, { skipTracked });
+    for (const rel of Object.keys(m.files))
+      for (const t of targets) excl.push(`.${t}/agents/${rel}`);
+    if (Object.keys(m.files).length) excl.push('.devkit/agents-manifest.json');
+  }
+  if (sel.agentHooks) {
+    console.log('  agent-hook scripts');
+    const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked });
+    for (const rel of Object.keys(m.files))
+      for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
+    if (Object.keys(m.files).length) excl.push('.devkit/agent-hooks-manifest.json');
+    console.log('  agent hook registrations');
+    const { wrote } = installHookRegistrations(gitRoot, ['agentHooks'], {
+      dryRun,
+      targets,
+      overlay: true,
+    });
+    excl.push(...wrote);
+  }
+  return excl;
+}
+
 /**
- * Install the overlay. Returns { chainTarget, origHooksPath } (recorded in config so `devkit
- * clean` can restore the original core.hooksPath exactly).
+ * Install the overlay. Returns { origHooksPath, fallowWired } (recorded in config so `devkit clean`
+ * can restore core.hooksPath exactly + know whether fallow was wired).
  * @param {string} cwd repo (or package) dir
- * @param {{guards?:string[], biome?:boolean, tsconfig?:boolean}} sel
+ * @param {{guards?:string[], biome?:boolean, skills?:boolean, agents?:boolean, agentHooks?:boolean, fallow?:boolean, agentTargets?:string[]}} sel
  * @param {string} stack
  */
+// Reason: flat overlay install orchestration: ordered guarded steps (config → lint → fallow → hook → alias → surfaces → exclude) each a single delegated call; high branch COUNT, near-zero nesting — splitting scatters the install sequence
+// fallow-ignore-next-line complexity
 export function installOverlay(cwd, sel, stack, force, dryRun) {
   // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
   // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
@@ -357,18 +439,35 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
   }
   if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
 
+  // fallow (optional) — resolve BEFORE the hook so its gate fragment is wired in. ABORTs (returns
+  // false) if fallow can't be installed; .fallow/ cache + the grandfather baselines stay invisible.
+  let fallowWired = false;
+  if (sel.fallow) {
+    console.log('  fallow (code-health gate)');
+    fallowWired = resolveOverlayFallow(cwd, dryRun);
+    if (fallowWired) {
+      excludes.add(`${pfx}.fallow/`);
+      excludes.add(`${pfx}fallow-baselines/`);
+    }
+  }
+
   // local hook (core.hooksPath override) at the git root + chain + pass-through of all hooks.
   console.log('  local hook');
-  installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun);
+  installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallowWired);
 
   // per-clone `git ci` self-heal alias so a `bun install` (husky re-claims core.hooksPath) heals
   // on the next CLI commit — set at the git root (the alias is repo-wide, like core.hooksPath).
   installHealAlias(gitRoot, dryRun);
 
+  // agent-half (skills/agents/agentHooks) → the git root's surfaces (skipping anything git tracks),
+  // each path hidden via .git/info/exclude. Paths are git-root-relative (repo-wide, no pkgRel pfx).
+  for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun)) excludes.add(rel);
+
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
   addToGitExclude(gitRoot, [...excludes], dryRun);
 
-  // origHooksPath ('' = was unset) lets `devkit clean` restore exactly what was there.
-  return { origHooksPath };
+  // origHooksPath ('' = was unset) lets `devkit clean` restore exactly what was there; fallowWired
+  // tells applyOverlay whether to record the fallow component (so clean/doctor are accurate).
+  return { origHooksPath, fallowWired };
 }
