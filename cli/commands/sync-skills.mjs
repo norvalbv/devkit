@@ -29,9 +29,12 @@ function walk(dir, base = dir) {
  * @param {string[]} args
  * @param {string} cwd consumer root
  * @param {string[]} [targets] agent surfaces to write to (default both — see AGENT_TARGETS)
+ * @param {{ skipTracked?: (relPath: string) => boolean }} [opts] overlay-only: when given, a skill
+ *   `<name>/` whose dir git already TRACKS in any target is skipped wholesale (not written, not
+ *   manifested, warned) — `.git/info/exclude` can't hide an edit to a tracked file (C2).
  * @returns {{ devkitRef: string|null, generatedAt: string, files: Record<string,string> }} the manifest (for init to embed in its log)
  */
-export function syncSkills(args, cwd, targets = AGENT_TARGETS) {
+export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } = {}) {
   const dryRun = args.includes('--dry-run');
   const targetDirs = targets.map((t) => `.${t}/skills`);
   const skillsSrc = join(packageDir(), 'skills');
@@ -40,9 +43,22 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS) {
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
 
+  // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's
+  // `.<surface>/skills/<name>` is git-tracked, the whole skill is left untouched.
+  const skipNames = new Set();
+  if (skipTracked) {
+    for (const name of new Set(rels.map((r) => r.split('/')[0]))) {
+      if (targetDirs.some((td) => skipTracked(`${td}/${name}`))) {
+        skipNames.add(name);
+        console.log(`  ! skipping skill "${name}" — git-tracked in the repo (left untouched)`);
+      }
+    }
+  }
+
   /** @type {Record<string, string>} */
   const files = {};
   for (const rel of rels) {
+    if (skipNames.has(rel.split('/')[0])) continue;
     // Reason: sync-skills and sync-agents are deliberately parallel modules (see headers "Parallel to …"): identical write+manifest mechanics to different dirs. One shared abstraction over two short readable commands would obscure both; the parallelism IS the design.
     // fallow-ignore-next-line code-duplication
     const srcPath = join(skillsSrc, rel);
