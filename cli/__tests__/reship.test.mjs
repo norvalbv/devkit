@@ -1,9 +1,10 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { recordShip } from '../lib/ship/reconcile-manifest-write.mjs';
 
 // `devkit ship --pr <branch>` (re-push): adds the current changes to an EXISTING PR's branch as a
 // new commit on top of origin/<branch> (copy-not-patch), fast-forward push (never --force). Hermetic
@@ -120,5 +121,81 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
     expect(gwt(['show', 'HEAD:a.ts'])).toBe('v2'); // the new commit carries the current content
     expect(gwt(['rev-parse', 'HEAD~1'])).toBe(prTip); // parented on the PR-branch tip (a real ff)
     g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+  });
+});
+
+describe('reship — merges the re-pushed paths into the branch reconcile entry', () => {
+  it('on a real push, extends branches[$BR] with this commit content (tip blob) + new paths', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', 'git@github.com:acme/app.git'], // GitHub-shaped so REPO resolves
+    ])
+      g(a, { stdio: 'ignore' });
+    g(['remote', 'set-url', 'origin', bare], { stdio: 'ignore' }); // ...but push/fetch the local bare
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    // First ship: a.ts=v1 on origin/feat/pr, and seed its manifest entry (what the initial `devkit ship` does).
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    const prTip = g(['rev-parse', 'HEAD']).trim();
+    expect(
+      recordShip(
+        {
+          root: dir,
+          branch: 'feat/pr',
+          repo: 'acme/app',
+          baseRef: 'work',
+          baseSha: prTip,
+          pr: '7',
+        },
+        ['a.ts'],
+      ),
+    ).toBe(0);
+
+    // The agent edits a.ts and adds b.ts, then `devkit ship --pr feat/pr`.
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    writeFileSync(join(dir, 'b.ts'), 'B\n');
+
+    // Stub `gh` (clears reship's `command -v gh` check + the final `gh pr view`); keep node on PATH.
+    const stubBin = mkdtempSync(join(tmpdir(), 'reship-bin-'));
+    dirs.push(stubBin);
+    writeFileSync(join(stubBin, 'gh'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(stubBin, 'gh'), 0o755);
+
+    const r = run(['feat/pr', 'add v2 + b', '--pr', '--', 'a.ts', 'b.ts'], dir, {
+      PATH: `${stubBin}:${process.env.PATH}`,
+    });
+    expect(r.status, r.stderr).toBe(0);
+
+    const m = JSON.parse(readFileSync(join(dir, '.devkit', 'reconcile-manifest.json'), 'utf8'));
+    const e = m.branches['feat/pr'];
+    const by = Object.fromEntries(e.paths.map((p) => [p.path, p]));
+    expect(e.paths).toHaveLength(2);
+    expect(by['a.ts'].blobSha).toBe(g(['hash-object', '--', 'a.ts']).trim()); // the v2 TIP blob, not v1
+    expect(by['b.ts']).toMatchObject({ op: 'add' });
+    // PR metadata preserved from the seeded (initial-ship) entry.
+    expect(e.prNumber).toBe(7);
+    expect(e.repo).toBe('acme/app');
+    expect(e.baseRef).toBe('work');
   });
 });

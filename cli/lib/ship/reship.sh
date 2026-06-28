@@ -126,4 +126,13 @@ git -C "$WT" push origin "HEAD:$BR" || {
   exit 1
 }
 
+# Multi-commit PR: extend this branch's reconcile entry with the paths THIS commit shipped (the initial
+# `devkit ship` created it). Best-effort — a miss only costs a manual reconcile, never unwinds the push.
+# --git-root "$WT": hash the just-committed (shipped) blobs. --base-sha "$BASE" (the PR-branch tip): classify
+# this commit's delta. --merge: keep the entry's PR metadata, overlay paths by path. (gh-free.)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+node "$SCRIPT_DIR/reconcile-manifest-write.mjs" \
+  --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --merge -- "${PATHS[@]}" \
+  || echo "reship: reconcile manifest not updated (non-fatal)" >&2
+
 gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null || echo "re-pushed to origin/$BR"
