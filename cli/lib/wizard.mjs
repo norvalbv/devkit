@@ -10,7 +10,13 @@
  */
 
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './components.mjs';
+import {
+  AGENT_TARGETS,
+  COMPONENTS,
+  GUARD_IDS,
+  GUARD_OPTIONS,
+  overlaySelection,
+} from './components.mjs';
 
 // The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
@@ -120,25 +126,14 @@ export async function runWizard({
   });
   if (bail(stack)) return null;
 
-  // 3. Components. Overlay auto-wires (guards + eslint/biome extend + local hook) — no picker.
+  // 3. Components. Overlay auto-wires a FIXED set (agent-half + fallow + guards + biome/eslint
+  // extend + local hook), all git-ignored — no picker (overlaySelection is the source of truth).
   // Standalone omits structure-lint (no eslint flat-config plugin in a no-package setup).
   // Structure is only offered in PACKAGE mode where a template exists.
   const structAvail = mode === 'package' && structureAvailable;
   const selection = { guards: [] };
   if (mode === 'overlay') {
-    Object.assign(selection, {
-      biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
-      tsconfig: false,
-      skills: false,
-      agents: false,
-      searchSteering: false,
-      agentHooks: false,
-      husky: true, // overlay always installs the local (git-ignored) hook
-      structure: false,
-      fallow: false,
-      searchCode: false,
-      agentTargets: [...AGENT_TARGETS], // unused (overlay syncs no agent files) — kept consistent
-    });
+    Object.assign(selection, overlaySelection(selection));
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
     const picked = await multiselect({
@@ -227,11 +222,15 @@ export async function runWizard({
 function summarize(mode, selection, structureAvailable, deselected) {
   if (mode === 'overlay') {
     const g = selection.guards.length ? ` (${selection.guards.join(', ')})` : '';
+    const surfaces = (selection.agentTargets ?? AGENT_TARGETS).join(', ');
     return [
       'overlay — everything git-ignored, nothing committed:',
       `✓ guards${g}`,
       '✓ eslint/biome overlay (extends the repo, staged files)',
       '✓ local hook → chains to the repo’s own',
+      `✓ skills + agents → ${surfaces} (skipping anything git tracks)`,
+      '✓ agent hooks → .claude/settings.local.json + .cursor/hooks.json (if untracked)',
+      '✓ fallow gate (chained into the local hook; global install if missing, else skipped)',
     ].join('\n');
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(

@@ -303,6 +303,15 @@ devkit init --overlay
 - **ours-extends-theirs**: `eslint.config.devkit.mjs` / `biome.devkit.jsonc` (git-ignored)
   **import + extend** the repo's committed configs and add devkit's rules; the local hook runs
   them over **staged files only** (your changes are checked without flooding on existing code).
+- **agent-half + fallow, invisibly** (0.22.0): overlay now also installs **skills + agents +
+  agent hooks** and **fallow** — everything git-ignored via `.git/info/exclude`, so it stays
+  invisible. The real safety test is *"is this path already git-TRACKED?"* (an exclude line only
+  hides UNtracked files), so a file the team commits is **skipped + warned**, never clobbered.
+  Claude hooks register into `.claude/settings.local.json` (Claude's local-override file, never
+  tracked); a tracked `.cursor/hooks.json` is skipped. fallow's gate is **chained into the local
+  hook** (overlay's `core.hooksPath` shadows `.git/hooks`, so `fallow hooks install` would never
+  fire) with grandfather baselines saved + hidden; a missing fallow binary triggers a warn + global
+  install, else the fallow gate is skipped. `searchSteering` stays out (its hooks need the package).
 - **package.json untouched.**
 
 **Self-heal — `git ci`:** husky's `prepare` re-claims `core.hooksPath` on the next `bun install`,

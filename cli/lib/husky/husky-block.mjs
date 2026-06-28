@@ -243,6 +243,13 @@ if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome
     echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
 fi`;
 
+// The optional fallow gate (overlay). fail-open — only runs if fallow is on PATH; overlay's
+// core.hooksPath takeover SHADOWS .git/hooks, so fallow's own installed hook would never fire, and
+// chaining the gate inline here is the only way the audit runs. `fallow audit` exits non-zero on
+// NEW issues (pre-existing debt is grandfathered by the saved fallow-baselines/).
+const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — fail-open; skipped if fallow isn't installed.
+command -v fallow >/dev/null 2>&1 && { fallow audit || exit 1; }`;
+
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
  * git-ignored local hooks dir at the GIT ROOT; `core.hooksPath` points at it). It runs devkit's
@@ -252,14 +259,21 @@ fi`;
  * @param {{guards?:string[]}} selection
  * @param {string} [chainTarget] the repo's existing hook to chain to (git-root-relative)
  * @param {string} [pkgRel] package dir (monorepo) to cd into before the gates ('' = repo root)
+ * @param {{fallow?:boolean}} [opts] append the fail-open fallow gate (overlay wires it inline
+ *   because core.hooksPath shadows fallow's own .git/hooks hook)
  * @returns {string}
  */
-export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '') {
+export function buildOverlayHook(
+  selection,
+  chainTarget = '.husky/pre-commit',
+  pkgRel = '',
+  { fallow = false } = {},
+) {
   const gates = [DK_GATE_HELPER];
   for (const id of Object.keys(STANDALONE_GATES)) {
     if (selection.guards?.includes(id)) gates.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
   }
-  const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}`;
+  const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
   const scoped = pkgRel ? `( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1` : inner;
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then

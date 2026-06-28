@@ -103,6 +103,33 @@ export function defaultSelection() {
   };
 }
 
+/**
+ * The OVERLAY auto-on selection — the canonical set every overlay path (the TTY wizard and the
+ * --yes / non-TTY flag path) must agree on, so `devkit init --overlay` behaves identically either
+ * way. Overlay installs the agent-half (skills + agents + agentHooks) + fallow, all made invisible
+ * via .git/info/exclude. `searchSteering` is OUT — its hooks call node_modules/@norvalbv/devkit,
+ * absent without the package. `tsconfig` + `structure` are OUT — they need package/plugin
+ * resolution a no-package overlay can't provide. `guards` + `agentTargets` are carried from `base`.
+ *
+ * @param {object} [base] a selection to take guards/agentTargets from (default both surfaces, all guards)
+ */
+export function overlaySelection(base = {}) {
+  return {
+    biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
+    tsconfig: false,
+    skills: true,
+    agents: true,
+    searchSteering: false,
+    agentHooks: true,
+    husky: true, // overlay always installs the local (git-ignored) hook
+    structure: false,
+    fallow: true,
+    searchCode: false,
+    agentTargets: base.agentTargets ? [...base.agentTargets] : [...AGENT_TARGETS],
+    guards: base.guards ? [...base.guards] : [...GUARD_IDS],
+  };
+}
+
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {
   const base = defaultSelection();
