@@ -3,9 +3,10 @@
  * Records what a `devkit ship` commit sent to its PR, so `devkit reconcile` can later replace the
  * now-stale local copies with the merged-upstream version (no stash/pull pain).
  *
- * Invoked by ship-branch.sh AFTER `gh pr create` succeeds (the PR is the thing reconcile waits on).
- * Kept as its own script — not inlined in ship-branch.sh — so the real blob/op classification is
- * unit-testable WITHOUT gh or a network (the dry-run path skips gh).
+ * Invoked by ship-branch.sh AFTER `gh pr create` succeeds (the PR is the thing reconcile waits on), and by
+ * reship.sh with --merge after a `devkit ship --pr` re-push (extends the SAME branch's entry so a multi-commit
+ * PR records ALL its paths, not just the first commit's). Kept as its own script — not inlined in the shell —
+ * so the real blob/op classification is unit-testable WITHOUT gh or a network (the dry-run path skips gh).
  *
  * Write side of the ship↔reconcile contract. The READ side is `devkit reconcile` (../reconcile.mjs).
  * The contract is the manifest JSON below + the rule that BOTH sides id a file by
@@ -19,7 +20,9 @@
  *
  * op ∈ add|modify|delete. A rename ships as its two explicit paths (old delete + new add) —
  * git's -M rename detection is unneeded here because ship-branch passes explicit file paths,
- * and add+delete reconciles identically (the spec's own "sub-threshold rename" path).
+ * and add+delete reconciles identically (the spec's own "sub-threshold rename" path). A path added
+ * AND deleted within one commit (so it never lands on the branch tip) classifies to null → dropped:
+ * an intentional no-op, since nothing of it actually shipped.
  *
  * Usage (paths after `--`; --pr and --git-root optional):
  *   reconcile-manifest-write.mjs --root <manifest-root> [--git-root <hash-root>] --branch <br> \
@@ -53,8 +56,8 @@ function git(root, args) {
   }
 }
 
-/** Parse `--flag value` pairs plus a trailing `-- <path...>`. */
-function parseArgs(argv) {
+/** Parse `--flag value` pairs (plus the valueless boolean `--merge`) and a trailing `-- <path...>`. */
+export function parseArgs(argv) {
   const flags = {};
   const paths = [];
   for (let i = 0; i < argv.length; i++) {
@@ -62,7 +65,9 @@ function parseArgs(argv) {
       paths.push(...argv.slice(i + 1));
       break;
     }
-    if (argv[i].startsWith('--')) flags[argv[i].slice(2)] = argv[++i];
+    if (argv[i] === '--merge')
+      flags.merge = true; // boolean — must NOT consume the next token (e.g. the `--`)
+    else if (argv[i].startsWith('--')) flags[argv[i].slice(2)] = argv[++i];
   }
   return { flags, paths };
 }
@@ -176,12 +181,19 @@ function fail(msg) {
  * is where blobs are hashed — ship-branch passes the EPHEMERAL commit worktree so the manifest
  * records what the PR actually committed, not a parallel agent's later edit to the shared tree.
  */
-export function recordShip({ root, gitRoot = root, branch, repo, baseRef, baseSha, pr }, paths) {
-  if (!root || !branch || !repo || !baseRef || !baseSha) {
+export function recordShip(
+  { root, gitRoot = root, branch, repo, baseRef, baseSha, pr, merge = false },
+  paths,
+) {
+  // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
+  // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
+  if (!root || !branch || !baseSha) return fail('missing one of --root/--branch/--base-sha');
+  if (!merge && (!repo || !baseRef)) {
     return fail('missing one of --root/--branch/--repo/--base-ref/--base-sha');
   }
   if (paths.length === 0) return fail('no paths given');
   const entries = paths.map((p) => classify(gitRoot, baseSha, p)).filter(Boolean);
+  // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
   if (entries.length === 0) return fail('no recordable paths (all empty/unresolvable)');
 
   const prNumber = pr && PR_DIGITS.test(pr) ? Number(pr) : null;
@@ -190,18 +202,33 @@ export function recordShip({ root, gitRoot = root, branch, repo, baseRef, baseSh
   try {
     withLock(`${file}.lock`, () => {
       const manifest = readManifest(file);
-      manifest.branches[branch] = {
-        prNumber,
-        repo,
-        baseRef,
-        baseSha,
-        shippedAt: new Date().toISOString(),
-        paths: entries,
-      };
+      const existing = manifest.branches[branch];
+      if (merge) {
+        // A --pr re-push extends the SAME PR's entry: overlay this commit's paths by path (replace a
+        // re-shipped path with its branch-tip blob, add new paths, supersede a renamed-away path's stale
+        // `modify` with its `delete`), keep the PR metadata, refresh shippedAt.
+        if (!existing) throw new Error(`no manifest entry for ${branch} to merge into`);
+        const byPath = new Map(existing.paths.map((e) => [e.path, e]));
+        for (const e of entries) byPath.set(e.path, e);
+        manifest.branches[branch] = {
+          ...existing,
+          shippedAt: new Date().toISOString(),
+          paths: [...byPath.values()],
+        };
+      } else {
+        manifest.branches[branch] = {
+          prNumber,
+          repo,
+          baseRef,
+          baseSha,
+          shippedAt: new Date().toISOString(),
+          paths: entries,
+        };
+      }
       writeFileAtomic(file, `${JSON.stringify(manifest, null, 2)}\n`); // temp+rename: a crash leaves the prior valid manifest intact
     });
   } catch (e) {
-    return fail(e.message); // lock-timeout or incompatible-version → best-effort: record nothing, never corrupt
+    return fail(e.message); // lock-timeout / incompatible-version / no-entry-to-merge → best-effort: record nothing, never corrupt
   }
   return 0;
 }
@@ -217,6 +244,7 @@ function main() {
       baseRef: flags['base-ref'],
       baseSha: flags['base-sha'],
       pr: flags.pr,
+      merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
     },
     paths,
   );

@@ -1,0 +1,41 @@
+{
+  "changeId": "ship-pr-reconcile-manifest-merge",
+  "flowId": null,
+  "scope": { "frontend": false, "backend": true, "shared": false },
+  "risks": [
+    {
+      "id": "R1",
+      "layer": "backend",
+      "category": "State & Data Integrity",
+      "triggers": ["multi-commit PR re-modifies a commit-1 path", "rename old->new via --pr"],
+      "edgeCases": [
+        {"id":"EC1","scenario":"commit-2 re-modifies foo.ts v1->v2; merge must record the v2 TIP blob, not v1","expected":"manifest foo.ts.blobSha == v2 tip; reconcile cur===blobSha gate fires","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: recordShip --merge updates a re-shipped path to its tip blob (EC1)","cli/__tests__/reship.test.mjs: reship merges the re-pushed paths"],"notes":"safe because classify hashes --git-root=$WT"},
+        {"id":"EC2","scenario":"rename old.ts->new.ts: old passed to --pr, absent in WT","expected":"old.ts op:delete (pre-deletion blob from FETCH_HEAD) supersedes stale modify; new.ts op:add","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: a renamed-away old path supersedes its stale modify entry with a delete (EC2)"],"notes":"merge-by-path; single old.ts entry asserted"},
+        {"id":"EC3","scenario":"path added in commit-1, deleted in commit-2, path exists on PR tip","expected":"delete supersedes the add entry","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: a path added in commit-1 then deleted later supersedes the add with a delete (EC3)"],"notes":"works via ls-tree FETCH_HEAD"},
+        {"id":"EC4","scenario":"path added AND deleted within ONE --pr commit (never on PR tip)","expected":"classify returns null -> silently dropped (benign no-op)","testType":"unit","coverageStatus":"documented","coveredBy":["cli/lib/ship/reconcile-manifest-write.mjs header comment"],"notes":"documented in the writer header; nothing of it actually shipped"}
+      ]
+    },
+    {
+      "id": "R2",
+      "layer": "backend",
+      "category": "Contract & Boundary Handling",
+      "triggers": ["--merge boolean parsing", "merge with all-unresolvable paths", "no existing entry"],
+      "edgeCases": [
+        {"id":"EC5","scenario":"parseArgs gets `--merge --` ; must not consume the `--` as merge's value","expected":"flags.merge===true and paths preserved","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: parseArgs --merge is a valueless boolean"],"notes":"MANDATORY"},
+        {"id":"EC6","scenario":"merge mode, every passed path unresolvable in $WT","expected":"entries.length===0 fail (return 1) BEFORE the no-existing-entry throw; manifest untouched","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: all-unresolvable merge fails before the no-entry throw (EC6)"],"notes":"validation ordering: entries-empty check is before the lock"},
+        {"id":"EC7","scenario":"merge with NO existing entry (initial best-effort write failed)","expected":"returns 1, writes nothing; reship logs non-fatal; BOTH commits' paths unrecorded","testType":"unit","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: merge with NO existing entry returns 1, writes nothing (EC7)"],"notes":"explicit decision: honest miss (a fallback would falsely prune commit-1 paths)"}
+      ]
+    },
+    {
+      "id": "R3",
+      "layer": "backend",
+      "category": "Temporal & Concurrency",
+      "triggers": ["concurrent ship on another branch", "concurrent reconcile prune", "ff-push rejected"],
+      "edgeCases": [
+        {"id":"EC8","scenario":"parallel ship to a different branch during reship merge","expected":"per-branch key; full read-modify-write under mkdir-lock; both entries land","testType":"integration","coverageStatus":"covered","coveredBy":["cli/__tests__/ship-manifest.test.mjs: merge preserves sibling branches","existing: merges into an existing v1 manifest, preserving other branches"],"notes":"lock at reconcile-manifest-write.mjs:108-132 (unchanged)"},
+        {"id":"EC9","scenario":"reconcile prunes feat/X (PR merged) between commit-1 and commit-2 reship","expected":"merge throws no-entry; commit-2 paths lost (best-effort). Window not reachable in intended flow (re-pushing to a merged branch is nonsensical)","testType":"integration","coverageStatus":"documented","coveredBy":["plan: Design decisions / No-existing-entry"],"notes":"prune is post-merge only; not realistically reachable"},
+        {"id":"EC10","scenario":"ff-push rejected (origin advanced)","expected":"writer never called (insert point is AFTER the push); no manifest write on failed push","testType":"e2e","coverageStatus":"covered","coveredBy":["cli/lib/ship/reship.sh: push block exits 1 before the writer call","existing reship test: push rejection path"],"notes":"insert point is strictly after a successful push"}
+      ]
+    }
+  ]
+}
