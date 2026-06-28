@@ -37,10 +37,12 @@ BR=${1:?branch}; TITLE=${2:?title}; shift 2
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 MARKER_DIRS=()     # reviewer-marker dirs to carry (default .claude/.cursor)
 PATHS=()
+BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --markers-dir) MARKER_DIRS+=("${2:?--markers-dir requires a directory}"); shift 2 ;;
+    --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
@@ -105,11 +107,13 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
-# stdin -> commit + PR body. Guard the TTY case: invoked interactively with no piped
-# body, a bare `cat` would block waiting for terminal input. (Empty stdin already
-# yields ""; no `|| true`, so a genuine read error fails loud instead of silently
-# shipping an empty body — nothing is created yet, so aborting here is clean.)
-if [ -t 0 ]; then BODY=""; else BODY=$(cat); fi
+# Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat — a piped/here-doc
+# body still works). Guard the TTY case: invoked interactively with no piped body, a bare `cat` would
+# block on terminal input. (Empty stdin already yields ""; no `|| true`, so a genuine read error
+# fails loud instead of silently shipping an empty body — nothing is created yet, so aborting is clean.)
+if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ -t 0 ]; then BODY=""
+else BODY=$(cat); fi
 
 cleanup() {
   rm -f "$PATCH"

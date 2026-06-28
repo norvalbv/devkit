@@ -280,4 +280,17 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(existsSync(log)).toBe(true);
     expect(readFileSync(log, 'utf8')).toMatch(/BLOCK_REASON_XYZ/); // blocking gate's reason captured
   });
+
+  it('--body sets the commit/PR body inline (no stdin / temp file)', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'x\n');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/body', 't', '--body', 'BODY_INLINE_XYZ', 'note.txt'],
+      { cwd: dir, input: '', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } }, // empty stdin: --body wins
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['show', '-s', '--format=%b', 'feat/body'])).toMatch(/BODY_INLINE_XYZ/);
+  });
 });
