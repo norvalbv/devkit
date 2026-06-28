@@ -11,9 +11,11 @@ import { fileURLToPath } from 'node:url';
 const HELP = `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--markers-dir <d>]... [--link <d>]... [--] <path...>
-                          PR body via stdin; bare positional paths (no --) are accepted.
+  devkit ship <branch> "<title>" [--body "<text>"] [--markers-dir <d>]... [--link <d>]... [--] <path...>
+                          bare positional paths (no --) are accepted.
 
+  --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
+                      body from stdin (a pipe or here-doc) or to leave the body empty.
   --markers-dir <d>   Reviewer-marker dir to carry into the commit worktree (repeatable;
                       default .claude + .cursor). A repo without these dirs carries nothing.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;

@@ -19,11 +19,13 @@ BR=${1:?branch}; TITLE=${2:?title}; shift 2
 LINK_EXTRA=()
 MARKER_DIRS=()
 PATHS=()
+BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr) shift ;;                                                   # mode flag (already routed here) — ignore
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --markers-dir) MARKER_DIRS+=("${2:?--markers-dir requires a directory}"); shift 2 ;;
+    --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
@@ -59,7 +61,10 @@ git fetch origin "$BR" 2>/dev/null || {
 BASE=$(git rev-parse FETCH_HEAD)
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
-if [ -t 0 ]; then BODY=""; else BODY=$(cat); fi
+# Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
+if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ -t 0 ]; then BODY=""
+else BODY=$(cat); fi
 
 cleanup() {
   git worktree remove --force "$WT" 2>/dev/null || true

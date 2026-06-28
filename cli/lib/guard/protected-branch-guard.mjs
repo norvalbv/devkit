@@ -171,22 +171,20 @@ export function decide(input, cwd, rand) {
 
   const pathArgs = paths.map(q).join(' ');
   const extras = cfg.extraArgs.length ? `${cfg.extraArgs.join(' ')} ` : '';
-  // A multi-`-m` body is baked into the runnable as a `printf %s … | …` prefix, so the agent
-  // copy-pastes ONE line and the body lands on the PR — no separate "pipe via stdin" step to
-  // look up. `printf %s '<body>'` keeps the body the ARG (never the format), so a `%` in it is
-  // literal; q() single-quotes it so embedded newlines/quotes survive the paste. ship reads it
-  // via `BODY=$(cat)`.
-  const stdin = intent.body ? `printf %s ${q(intent.body)} | ` : '';
+  // A multi-`-m` body is passed via `--body '<body>'` so the agent copy-pastes ONE clean command
+  // (no stdin pipe, no temp file) and the body lands on the PR. q() single-quotes it so embedded
+  // newlines / quotes / % / $ survive the paste; ship's --body takes precedence over stdin.
+  const bodyArg = intent.body ? `--body ${q(intent.body)} ` : '';
   let ship;
   let note;
   if (intent.prBranch) {
-    ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${extras}-- ${pathArgs}`;
+    ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${bodyArg}${extras}-- ${pathArgs}`;
     note = `Adds these changes to the existing PR on \`${intent.prBranch}\` (fast-forward, never --force).`;
   } else {
     const suffix = rand ?? Math.random().toString(36).slice(2, 8);
-    ship = `${cfg.command} ${q(`agent/${slug(intent.title)}-${suffix}`)} ${q(intent.title)} ${extras}-- ${pathArgs}`;
+    ship = `${cfg.command} ${q(`agent/${slug(intent.title)}-${suffix}`)} ${q(intent.title)} ${bodyArg}${extras}-- ${pathArgs}`;
     note =
       'Commits your staged files onto a fresh branch + opens a PR; the shared HEAD never moves. The PR URL is printed; to add more commits later, `git commit --pr <that-branch> -m "…"`.';
   }
-  return `${head}\nRun this instead:\n  ${stdin}${ship}\n${note}`;
+  return `${head}\nRun this instead:\n  ${ship}\n${note}`;
 }

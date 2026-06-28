@@ -103,17 +103,17 @@ describe('protected-branch-guard — denies on a protected branch', () => {
     expect(r).toContain("devkit ship 'agent/feat-x-add-the-thing-z' 'feat(x): add the thing'");
   });
 
-  it('bakes a multi-`-m` body into a `printf %s … |` prefix (one copy-paste, body on the PR)', () => {
+  it('passes a multi-`-m` body via --body (one clean command, body on the PR)', () => {
     const dir = repoOn('main', { staged: ['a.ts'] });
     const r = run('git commit -m "the title" -m "the body"', dir, 'z');
-    expect(r).toContain("printf %s 'the body' | devkit ship 'agent/the-title-z' 'the title'");
+    expect(r).toContain("devkit ship 'agent/the-title-z' 'the title' --body 'the body' -- 'a.ts'");
   });
 
-  it('no body (single -m) → no printf prefix', () => {
+  it('no body (single -m) → no --body', () => {
     const dir = repoOn('main', { staged: ['a.ts'] });
     const r = run('git commit -m "solo"', dir, 'z');
     expect(r).toContain("Run this instead:\n  devkit ship 'agent/solo-z' 'solo'");
-    expect(r).not.toContain('printf');
+    expect(r).not.toContain('--body');
   });
 
   it('uses the repo .devkit/config.json ship command + extraArgs', () => {
