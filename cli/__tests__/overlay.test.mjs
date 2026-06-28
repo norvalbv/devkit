@@ -8,14 +8,21 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
-import { defaultSelection, overlaySelection } from '../lib/components.mjs';
+import { applyOverlayConstraints, defaultSelection } from '../lib/components.mjs';
 import { isTracked } from '../lib/git-tracked.mjs';
 import { HEAL_ALIAS_CMD } from '../lib/overlay.mjs';
+import { removeSkills } from '../lib/sync-manifest.mjs';
 import { rootRegistry } from './_helpers.mjs';
+
+// A full overlay selection with the opt-ins (agentHooks + fallow) ON — what the wizard produces
+// when the user checks everything. applyInit consumes an already-resolved selection directly, so we
+// apply the overlay constraints here too (forces tsconfig/structure/searchSteering off, husky on).
+const overlayAll = () =>
+  applyOverlayConstraints({ ...defaultSelection(), agentHooks: true, fallow: true });
 
 // Stub fallow's external CLI (detect/install/baselines/hook) so overlay's fallow flow runs without
 // a real `fallow` binary or a global network install. detectFallow → present, so resolveOverlayFallow
@@ -422,7 +429,7 @@ describe('overlay (local-only) install', () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlaySelection({}), // agentHooks + fallow on
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -449,7 +456,7 @@ describe('overlay (local-only) install', () => {
 
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlaySelection({}),
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -476,7 +483,7 @@ describe('overlay (local-only) install', () => {
 
     await applyInit(root, {
       stack: 'generic',
-      selection: overlaySelection({}),
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -536,7 +543,7 @@ describe('overlay (local-only) install', () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlaySelection({}), // fallow on
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -559,7 +566,7 @@ describe('overlay (local-only) install', () => {
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlaySelection({}),
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -602,7 +609,7 @@ describe('overlay (local-only) install', () => {
     seedLocalSettings(root, { model: 'opus', hooks: {} });
     await applyInit(root, {
       stack: 'react-app',
-      selection: overlaySelection({}),
+      selection: overlayAll(),
       overlay: true,
       devkitRef: 'v0.21.0',
     });
@@ -627,5 +634,82 @@ describe('overlay (local-only) install', () => {
 
     expect(isTracked(root, 'tracked.txt')).toBe(true);
     expect(isTracked(root, 'untracked.txt')).toBe(false);
+  });
+
+  it('clean recovers STRANDED overlay leftovers when .devkit (config + manifests) is gone', async () => {
+    // Reproduces the orphaned state: config + manifests deleted, core.hooksPath already restored, but
+    // the synced agent-half + fallow-baselines remain. clean must still find + remove them (by the
+    // bundled-name fallback, since the manifests are gone) — never strand a footprint.
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.22.0',
+    });
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
+    rmSync(join(root, '.devkit'), { recursive: true, force: true }); // config + manifests gone
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root }); // hook already restored
+
+    const cleanRun = (await import('../commands/clean.mjs')).default;
+    await cleanRun(['--yes'], root);
+
+    // every synced artifact removed despite the missing manifests
+    expect(existsSync(join(root, '.claude', 'skills'))).toBe(false);
+    expect(existsSync(join(root, '.cursor', 'agents'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(false);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('clean NEVER deletes a git-tracked skill dir (the user’s own, not a devkit stray)', () => {
+    const root = mkTmp('clean-tracked-');
+    const git = (...a) => execFileSync('git', a, { cwd: root });
+    git('init', '-q');
+    git('config', 'user.email', 't@t.t');
+    git('config', 'user.name', 't');
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'work' }, null, 2));
+    // the team commits their OWN skill that happens to share a devkit-bundled name (no manifest →
+    // removeSkills uses the bundled-name fallback, which must SKIP anything git tracks)
+    mkdirSync(join(root, '.claude', 'skills', 'brainstorming'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'skills', 'brainstorming', 'SKILL.md'), '# ours\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+
+    removeSkills(root, false);
+
+    expect(existsSync(join(root, '.claude', 'skills', 'brainstorming', 'SKILL.md'))).toBe(true);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+  });
+
+  it('applyOverlayConstraints: forces non-viable off + husky on, keeps the viable opt-in/opt-out', () => {
+    const sel = applyOverlayConstraints({
+      ...defaultSelection(),
+      tsconfig: true,
+      structure: true,
+      searchSteering: true,
+      searchCode: true,
+      husky: false,
+      skills: true,
+      agents: false, // user opted OUT — must be preserved
+      agentHooks: true, // opted IN — preserved
+      fallow: true,
+    });
+    // can't-work-without-the-package components are forced off; the local hook is forced on
+    expect(sel.tsconfig).toBe(false);
+    expect(sel.structure).toBe(false);
+    expect(sel.searchSteering).toBe(false);
+    expect(sel.searchCode).toBe(false);
+    expect(sel.husky).toBe(true);
+    // viable choices pass through untouched (overlay offers the same opt-in choices as package)
+    expect(sel.skills).toBe(true);
+    expect(sel.agents).toBe(false);
+    expect(sel.agentHooks).toBe(true);
+    expect(sel.fallow).toBe(true);
   });
 });
