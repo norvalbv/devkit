@@ -13,11 +13,12 @@
  * settings.json (their data) is merged, never clobbered.
  */
 
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from '../components.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
 import { isTracked } from '../git-tracked.mjs';
+import { bundledNames, removeManifested } from '../sync-manifest.mjs';
 import { registrationsFor } from './hook-registrations.mjs';
 
 // Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
@@ -96,26 +97,16 @@ export function removeHookScripts(
   root,
   { dryRun = false, targets = AGENT_TARGETS, dropManifest = true } = {},
 ) {
-  const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
-  const manifest = readJson(manifestPath);
-  if (!manifest) return;
-  for (const rel of Object.keys(manifest.files)) {
-    for (const dir of hookDirs(targets)) {
-      const p = join(root, dir, rel);
-      if (existsSync(p) && !dryRun) rmSync(p);
-    }
-  }
-  // Drop a now-empty surface hooks dir so a full uninstall leaves no footprint (mirrors
-  // sync-manifest's removeManifested) — but ONLY when empty (a consumer may keep own scripts there).
-  if (!dryRun) {
-    for (const dir of hookDirs(targets)) {
-      const p = join(root, dir);
-      if (existsSync(p) && readdirSync(p).length === 0) rmSync(p, { recursive: true, force: true });
-    }
-  }
-  if (dropManifest && !dryRun) rmSync(manifestPath, { force: true });
-  console.log(
-    `  ${dryRun ? '[dry-run] remove' : '✓ removed'} synced agent-hook scripts from ${hookDirs(targets).join(' + ')}${dropManifest ? ' + manifest' : ''}`,
+  // Hook scripts are flat files in <surface>/hooks — the same teardown removeManifested does for
+  // skills/agents (manifest names, or the bundled set as fallback, tracked-safe on the fallback).
+  removeManifested(
+    root,
+    'agent-hooks-manifest.json',
+    hookDirs(targets),
+    'agent-hook script',
+    dryRun,
+    dropManifest,
+    bundledNames('agents-hooks', (e) => e.isFile()),
   );
 }
 
