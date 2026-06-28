@@ -23,10 +23,10 @@ import { confirm, isCancel, outro } from '@clack/prompts';
 import { resolveGuardConfig } from '../../gate-engine/config.mjs';
 import {
   AGENT_TARGETS,
+  applyOverlayConstraints,
   COMPONENTS,
   defaultSelection,
   GUARD_IDS,
-  overlaySelection,
 } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
@@ -1077,10 +1077,10 @@ export default async function run(args, cwd) {
     }
   }
 
-  // Overlay installs a FIXED agent-half + fallow set, identical whether resolved via the wizard or
-  // --yes flags (N5) — normalise both through overlaySelection (preserving the chosen guards +
-  // agentTargets). This is the single source of truth for what overlay turns on.
-  if (mode === 'overlay') selection = overlaySelection(selection);
+  // Overlay offers the same opt-in component choices as package (via the wizard picker / --yes
+  // flags), but the components that can't work without the package are forced off and the local
+  // hook is forced on — applied here so the wizard AND the --yes/flag path get identical invariants.
+  if (mode === 'overlay') selection = applyOverlayConstraints(selection);
 
   if (!structureAvailableFor(stack) && selection.structure) {
     selection.structure = false; // no template for this stack — silently skip (noted below)
