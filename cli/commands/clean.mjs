@@ -10,11 +10,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { readJson } from '../lib/fs-helpers.mjs';
+import { packageDir, readJson } from '../lib/fs-helpers.mjs';
+import { isTracked } from '../lib/git-tracked.mjs';
 import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
@@ -60,6 +61,52 @@ function pruneGitExclude(gitRoot, dryRun) {
   }
   writeFileSync(file, kept.join('\n').replace(BLANK_RUN_RE, '\n\n').replace(LEADING_BLANKS_RE, ''));
   console.log('  ✓ pruned devkit lines from .git/info/exclude');
+}
+
+// Overlay leftovers when the config (and maybe the manifests) are gone — an orphaned or partial
+// clean. The tell-tale is a devkit-BUNDLED skill dir present-and-UNTRACKED under a surface (package
+// mode commits its skills, so a tracked one isn't a stray), or a surviving .devkit / fallow-baselines.
+function hasOverlayStrays(gitRoot) {
+  if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
+    return true;
+  }
+  const skillsSrc = join(packageDir(), 'skills');
+  const names = existsSync(skillsSrc)
+    ? readdirSync(skillsSrc, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+    : [];
+  for (const surface of ['claude', 'cursor']) {
+    for (const name of names) {
+      const rel = `.${surface}/skills/${name}`;
+      if (existsSync(join(gitRoot, rel)) && !isTracked(gitRoot, rel)) return true;
+    }
+  }
+  return false;
+}
+
+// Best-effort overlay teardown for a repo with NO config (orphaned / partial clean). Every step is
+// tracked-safe + no-ops when its artifact is absent, so it's safe to run unconditionally once strays
+// are detected. The synced files are removed by bundled-name fallback (the manifests may be gone);
+// the per-package overlay configs (in cwd) are removed only if git doesn't track them (never the
+// user's own guard.config.json / eslint dir).
+function cleanOverlayStrays(cwd, gitRoot, dryRun) {
+  removeSkills(gitRoot, dryRun);
+  removeAgents(gitRoot, dryRun);
+  removeHookScripts(gitRoot, { dryRun });
+  removeHookRegistrations(gitRoot, { dryRun, overlay: true });
+  removeEmptyOverlaySettings(gitRoot, dryRun);
+  const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
+  const rmUntracked = (rel, label) => {
+    if (!isTracked(gitRoot, `${pfx}${rel}`)) rm(join(cwd, rel), label, dryRun);
+  };
+  rmUntracked('guard.config.json', 'guard.config.json');
+  rmUntracked('biome.devkit.jsonc', 'biome.devkit.jsonc');
+  rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
+  rmUntracked('eslint/baselines', 'eslint/baselines/');
+  rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
+  rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
+  pruneGitExclude(gitRoot, dryRun);
 }
 
 function restoreHooksPath(gitRoot, orig, dryRun) {
@@ -240,14 +287,19 @@ export default async function run(args, cwd) {
     } catch {
       // unset
     }
-    if (hp === '.devkit/hooks') {
+    // Orphaned/partial overlay: the config is gone, but core.hooksPath may still point at our
+    // (deleted) dir AND/OR synced agent-half files + fallow-baselines may be stranded. Recover the
+    // full overlay footprint, not just the hook — the agent-half is removed by bundled-name fallback
+    // since the manifests may be gone too (the old recovery removed `.devkit/` without them).
+    if (hp === '.devkit/hooks' || hasOverlayStrays(gitRoot)) {
       console.log(
-        'devkit clean: orphaned overlay (core.hooksPath → .devkit/hooks, no config) — recovering:\n',
+        hp === '.devkit/hooks'
+          ? 'devkit clean: orphaned overlay (core.hooksPath → .devkit/hooks, no config) — recovering:\n'
+          : 'devkit clean: overlay leftovers found (no config) — cleaning them up:\n',
       );
-      restoreHooksPath(gitRoot, '.devkit/hooks', dryRun); // guard maps it to .husky/_ or unset
+      if (hp === '.devkit/hooks') restoreHooksPath(gitRoot, '.devkit/hooks', dryRun); // → .husky/_ or unset
       removeHealAlias(gitRoot, dryRun);
-      rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
-      pruneGitExclude(gitRoot, dryRun);
+      cleanOverlayStrays(cwd, gitRoot, dryRun);
       console.log(`\n${dryRun ? 'Dry-run complete.' : 'Recovered.'}`);
       return 0;
     }

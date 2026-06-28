@@ -181,7 +181,14 @@ export function saveFallowBaselines({ cwd, dryRun } = {}) {
   let ok = true;
   for (const { cmd, file } of BASELINES) {
     const target = join('fallow-baselines', file);
-    const { status } = run('fallow', [cmd, '--save-baseline', target], { cwd, dryRun });
+    // capture (not inherit): the baseline file is written regardless, and we DON'T want fallow's
+    // full health/dupes/dead-code report flooding the install terminal — the caller prints a
+    // one-line "saved baselines" summary instead.
+    const { status } = run('fallow', [cmd, '--save-baseline', target], {
+      cwd,
+      dryRun,
+      capture: true,
+    });
     if (status !== 0) ok = false;
   }
   return { ok };

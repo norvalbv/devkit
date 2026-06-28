@@ -104,29 +104,24 @@ export function defaultSelection() {
 }
 
 /**
- * The OVERLAY auto-on selection — the canonical set every overlay path (the TTY wizard and the
- * --yes / non-TTY flag path) must agree on, so `devkit init --overlay` behaves identically either
- * way. Overlay installs the agent-half (skills + agents + agentHooks) + fallow, all made invisible
- * via .git/info/exclude. `searchSteering` is OUT — its hooks call node_modules/@norvalbv/devkit,
- * absent without the package. `tsconfig` + `structure` are OUT — they need package/plugin
- * resolution a no-package overlay can't provide. `guards` + `agentTargets` are carried from `base`.
+ * Enforce the OVERLAY invariants on a selection (from the wizard OR the --yes/flag path), so the
+ * SAME constraints apply whichever way overlay was resolved. The viable choices — skills, agents,
+ * agentHooks, biome, fallow, guards, agentTargets — pass through UNTOUCHED (overlay offers the same
+ * opt-in choices as package for those). Forced: the local hook is always on; the components that
+ * can't work without the package are off — `tsconfig`/`structure` (need package/plugin resolution),
+ * `searchSteering` (its hooks reference node_modules/@norvalbv/devkit), `search-code` (referenced
+ * external engine, not wired in overlay).
  *
- * @param {object} [base] a selection to take guards/agentTargets from (default both surfaces, all guards)
+ * @param {object} sel a resolved selection (from selectionFromFlags or the wizard)
  */
-export function overlaySelection(base = {}) {
+export function applyOverlayConstraints(sel) {
   return {
-    biome: true, // drives the biome.devkit extend (only if the repo has a biome config)
+    ...sel,
     tsconfig: false,
-    skills: true,
-    agents: true,
-    searchSteering: false,
-    agentHooks: true,
-    husky: true, // overlay always installs the local (git-ignored) hook
     structure: false,
-    fallow: true,
+    searchSteering: false,
     searchCode: false,
-    agentTargets: base.agentTargets ? [...base.agentTargets] : [...AGENT_TARGETS],
-    guards: base.guards ? [...base.guards] : [...GUARD_IDS],
+    husky: true,
   };
 }
 
