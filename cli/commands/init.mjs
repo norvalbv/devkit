@@ -880,6 +880,8 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponent
  * @param {string[]} [plan.scanRoots] override guard.config.json scanRoots (--scan-root)
  * @param {boolean} [plan.standalone] no-package mode — vendored configs + global fail-open hook
  * @param {boolean} [plan.overlay] local-only mode — git-ignored, non-invasive, extends the repo
+ * @param {boolean} [plan.globalCommitGate] overlay only — also install the opt-in machine-global
+ *   husky init.sh shim so a plain `git commit` stays gated across husky's core.hooksPath reclaim
  * @param {string} [plan.devkitRef]
  */
 // Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
