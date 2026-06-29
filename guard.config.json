@@ -15,7 +15,7 @@
         "root": "cli",
         "sourceExtensions": ["mjs", "js"],
         "entryAllowlist": ["index.mjs"],
-        "libDomains": { "lib": ["generate", "guard", "husky", "install", "ship"] },
+        "libDomains": { "lib": ["generate", "guard", "help", "husky", "install", "ship"] },
         "grammar": {
           "files": ["index.mjs"],
           "folders": {

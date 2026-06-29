@@ -73,12 +73,17 @@ function checkHusky(cwd, selectedGuards) {
   );
 }
 
-// A jsonc-tolerant extends check (strip // line comments before parse).
+// Strip // line comments so a jsonc config parses as JSON.
+function jsoncText(path) {
+  return readFileSync(path, 'utf8').replace(/^\s*\/\/.*$/gm, '');
+}
+
+// A jsonc-tolerant read (null on absent OR unparseable) — used where a corrupt file just means
+// "no usable value" (repairExtends). The drift CHECK parses strictly so it can report WHY.
 function readJsonc(path) {
   if (!existsSync(path)) return null;
-  const raw = readFileSync(path, 'utf8').replace(/^\s*\/\/.*$/gm, '');
   try {
-    return JSON.parse(raw);
+    return JSON.parse(jsoncText(path));
   } catch {
     return null;
   }
@@ -103,8 +108,12 @@ function checkExtends(cwd, file, expected, key = 'extends') {
   if (!existsSync(path)) {
     return check(file, 'MISSING', 'absent', 'run `devkit init`', true);
   }
-  const parsed = readJsonc(path);
-  if (!parsed) return check(file, 'DRIFT', 'unparseable', 'fix JSON, then re-run');
+  let parsed;
+  try {
+    parsed = JSON.parse(jsoncText(path));
+  } catch (e) {
+    return check(file, 'DRIFT', `invalid JSON: ${e.message}`, 'fix the JSON syntax, then re-run');
+  }
   const ext = parsed[key];
   const list = Array.isArray(ext) ? ext : [ext];
   if (!list.includes(expected)) {
@@ -553,6 +562,21 @@ async function collectResults(cwd, cfg, configResult) {
 
 // Reason: flat CLI orchestration: sequential not-initialized short-circuit, overlay short-circuit, collectResults, print loop, then fix-if-drift; near-zero nesting, each branch a single guarded step. High branch COUNT, each trivial; splitting fragments the command's top-level flow.
 // fallow-ignore-next-line complexity
+export const meta = {
+  name: 'doctor',
+  summary: 'Diagnose drift for the installed component set (read-only).',
+  help: `devkit doctor — diagnose drift for the installed component set (read-only).
+
+Usage:
+  devkit doctor [--fix]
+
+  --fix    Re-run init for the recorded selection (recreates MISSING pieces; never re-freezes a
+           baseline). Exit 0 all-ok, 1 drift, 2 not-initialized.
+
+Also warns if the RUNNING devkit is older than this repo's init stamp or a hand-declared
+"minDevkit":"x.y.z" floor in .devkit/config.json.`,
+};
+
 export default async function run(args, cwd) {
   const fix = args.includes('--fix');
 

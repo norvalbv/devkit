@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.16.11",
-  "generatedAt": "2026-06-24T12:46:16.673Z",
+  "devkitRef": "v0.23.0",
+  "generatedAt": "2026-06-29T15:03:47.639Z",
   "files": {
     "api-security/SKILL.md": "da5565a99f9120532865c0a78c1b3589f8908ea11e2e3004f780c872ed464b4a",
     "backend-performance/SKILL.md": "b44f1cf9d8a3eea43f6bf80aebdfe81db2c327cccb1f7c0f7deac461d972dad5",
@@ -21,6 +21,7 @@
     "testing/SKILL.md": "1816d2bbdb38b1269fd4355b0853bfdf951a84b7ec416c5c271825eb20cc2b64",
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
-    "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676"
+    "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
+    "using-devkit/SKILL.md": "18355f87bedc867f9ec365d0e8358829148deb2daf5e6f06f7eb956c9a4326b6"
   }
 }

@@ -83,6 +83,17 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
   return manifest;
 }
 
+export const meta = {
+  name: 'sync-agents',
+  summary: 'Copy review/testing agents into .claude + .cursor.',
+  help: `devkit sync-agents — copy devkit's review/testing agents into .claude/agents + .cursor/agents.
+
+Usage:
+  devkit sync-agents [--dry-run]
+
+Writes .devkit/agents-manifest.json (sha256 per file) so doctor can tell which side drifted.`,
+};
+
 export default function run(args, cwd) {
   // Agents are repo-wide → target the git root (= cwd for a single-package repo). Honour the
   // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.

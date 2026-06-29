@@ -11,6 +11,18 @@
 import { readFileSync } from 'node:fs';
 import { decide } from '../lib/guard/protected-branch-guard.mjs';
 
+export const meta = {
+  name: 'guard-branch',
+  summary: 'PreToolUse hook: block direct commits on a protected branch.',
+  help: `devkit guard-branch — PreToolUse hook: deny a direct \`git commit\` on a protected branch.
+
+Usage (wired as a one-line shim in the consumer's PreToolUse Bash hook):
+  exec devkit guard-branch
+
+Reads the Claude-Code payload on stdin; on a protected-branch commit it denies and hands back a
+ready-to-run \`devkit ship …\`. Fail-open — never blocks anything else.`,
+};
+
 export default function guardBranch(_args, cwd) {
   let reason = null;
   try {
