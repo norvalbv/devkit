@@ -15,6 +15,7 @@ import { markEnd, markStart } from '../lib/husky/husky.mjs';
 import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mjs';
 import { HEAL_ALIAS_NAME, isHealAlias } from '../lib/overlay.mjs';
+import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mjs';
 import { cmpSemver } from './update.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
@@ -456,6 +457,27 @@ async function runOverlayDoctor(cwd, cfg) {
     console.log(
       `  · self-heal off (git ${HEAL_ALIAS_NAME} re-points core.hooksPath; or re-run \`devkit init --overlay\`)`,
     );
+  // Opt-in global pre-commit shim — the only thing that gates a PLAIN `git commit` after husky
+  // reclaims core.hooksPath. Advisory (never gates the exit code).
+  if (globalHookInstalled()) {
+    console.log(`  ✓ global pre-commit gate (${globalInitPath()}) — plain \`git commit\` gated`);
+    if (aliasOurs)
+      console.log(
+        `    (git ${HEAL_ALIAS_NAME} is the CLI fast-path; shim + alias don't double-run)`,
+      );
+    // _/h:6 hole: husky sources init.sh only when a committed .husky/<hook> exists; with NO committed
+    // .husky/pre-commit the shim can't fire for pre-commit, so a plain `git commit` stays ungated here.
+    const huskyPresent =
+      existsSync(join(gitRoot, '.husky', '_')) || existsSync(join(gitRoot, '.husky'));
+    if (huskyPresent && !existsSync(join(gitRoot, '.husky', 'pre-commit')))
+      console.log(
+        `  ⚠ no committed .husky/pre-commit — husky won't source the shim for pre-commit; a plain \`git commit\` stays ungated here (use \`git ${HEAL_ALIAS_NAME}\`)`,
+      );
+  } else if (!pathOk) {
+    console.log(
+      `  · plain \`git commit\` is ungated (husky reclaimed core.hooksPath); \`git ${HEAL_ALIAS_NAME}\` heals it, or wire it permanently with \`devkit init --overlay --global-commit-gate\``,
+    );
+  }
   // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
   const sel = cfg?.components ?? {};
   const surfaces = sel.agentTargets ?? ['claude', 'cursor'];

@@ -56,6 +56,7 @@ import {
 } from '../lib/install/install-hooks.mjs';
 import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import { installOverlay } from '../lib/overlay.mjs';
+import { installGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
@@ -134,6 +135,7 @@ function parseFlags(args) {
     else if (a === '--search-code') flags.searchCode = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
+    else if (a === '--global-commit-gate') flags.globalCommitGate = true;
     else if (a === '--baselines-only') flags.baselinesOnly = true;
     else if (a === '--stack') flags.stack = args[++i];
     else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
@@ -753,6 +755,15 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     console.log('  freeze baselines (grandfather current tree)');
     runFreezes(cwd, dryRun);
   }
+  // Opt-in: close the plain-`git commit` gap (husky reclaims core.hooksPath) with a machine-global
+  // husky init.sh shim. One file, guarded no-op outside overlaid repos, removed by `devkit clean --global`.
+  const globalCommitGate = Boolean(plan.globalCommitGate);
+  if (globalCommitGate) {
+    console.log(
+      '  global pre-commit gate (opt-in — survives husky reclaim on a plain `git commit`)',
+    );
+    installGlobalHook({ dryRun });
+  }
   if (!dryRun) {
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
     writeFileSync(
@@ -765,6 +776,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
           overlay: true,
           pkgRel,
           origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
+          globalCommitGate, // opt-in machine-global init.sh shim wired (so doctor can report it)
           // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the
           // ACTUAL outcome (fallowWired) — an aborted install (no binary) records false.
           components: {
@@ -787,7 +799,9 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     `\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit overlay complete — local-only.'}`,
   );
   console.log(
-    '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath).',
+    globalCommitGate
+      ? '  Global pre-commit gate wired — a plain `git commit` stays gated across `bun install`s.'
+      : '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath),\n  or add --global-commit-gate once to gate plain `git commit` too.',
   );
 }
 
@@ -1099,6 +1113,7 @@ export default async function run(args, cwd) {
     scanRoots: flags.scanRoots,
     standalone: mode === 'standalone',
     overlay: mode === 'overlay',
+    globalCommitGate: flags.globalCommitGate,
   });
   if (interactive) outro('Done — run `devkit doctor` to verify.');
   return 0;
