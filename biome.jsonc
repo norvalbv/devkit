@@ -19,9 +19,12 @@
       "*.json",
       "*.jsonc",
       "!node_modules",
-      // skills/ is vendored SKILL.md content + repo-coupled helper scripts — not
-      // devkit's authored code, don't lint it.
-      "!skills",
+      // skills/ SKILL.md + references are vendored markdown (out of scope). But the helper
+      // SCRIPTS under skills/**/*.mjs ARE authored here and ship to consumers whose hooks run
+      // biome on them, so we hold them to the same standard (a re-include can't rescue a
+      // dir-negated path under gitignore semantics — so this is a positive include, not "!skills"
+      // + an exception). Only *.mjs is pulled in; *.md/*.sh stay out.
+      "skills/**/*.mjs",
       // templates/ holds literal emitted configs (verbatim fixtures) that may not
       // match devkit's own formatting — exclude.
       "!templates",
