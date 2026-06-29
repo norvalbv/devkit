@@ -5,7 +5,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +34,15 @@ export function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+/** True iff `path` exists AND is a symlink (does NOT follow it). False if absent. */
+function isSymlink(path) {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false; // absent
+  }
+}
+
 /**
  * Write `content` to `path` only if the file is absent (idempotent create). With
  * `{ force: true }` it overwrites. Creates parent dirs. Returns one of:
@@ -44,7 +53,15 @@ export function sha256(path) {
 export function writeIfAbsent(path, content, { force = false } = {}) {
   const present = existsSync(path);
   if (present && !force) return 'exists';
-  mkdirSync(dirname(path), { recursive: true });
+  // A sibling tool can leave the dest dir (or file) as a SYMLINK — e.g. .cursor/skills/<name> →
+  // ../../.agents/skills/<name>. devkit owns the exact path it writes, so REPLACE a symlink at the
+  // leaf with a real entry rather than follow it: mkdirSync({recursive}) throws ENOENT on a
+  // dangling-symlink dir, and a live one would route the write outside devkit's tree. Only the leaf
+  // is touched — never an ancestor the user may have symlinked on purpose.
+  const dir = dirname(path);
+  if (isSymlink(dir)) rmSync(dir, { force: true });
+  mkdirSync(dir, { recursive: true });
+  if (isSymlink(path)) rmSync(path, { force: true });
   writeFileSync(path, content);
   return present ? 'forced' : 'created';
 }
