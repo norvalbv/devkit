@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mjs';
@@ -212,6 +212,15 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/block calls: fanout, size/);
+  });
+
+  it('reports invalid JSON in a managed config as drift (not a silent pass)', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    writeFileSync(join(root, 'biome.jsonc'), '{ "extends": [ }'); // malformed
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/biome\.jsonc.*invalid JSON/s);
   });
 });
 

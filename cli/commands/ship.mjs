@@ -8,7 +8,10 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const HELP = `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
+export const meta = {
+  name: 'ship',
+  summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
+  help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
   devkit ship <branch> "<title>" [--body "<text>"] [--markers-dir <d>]... [--link <d>]... [--] <path...>
@@ -29,12 +32,13 @@ Env:
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
 that lands but fails to push KEEPS the branch (recovery line on stderr); a commit that never lands
-auto-deletes the empty branch.`;
+auto-deletes the empty branch.`,
+};
 
 export default function ship(args, cwd) {
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
-    console.log(HELP);
-    return args.length === 0 ? 1 : 0; // no args is a usage error; explicit --help is success
+  if (args.length === 0) {
+    console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mjs)
+    return 1;
   }
   // `--pr` (before any `--` terminator, so a dash-leading file path can't misroute) selects the
   // re-push flow: add the changes to an existing PR's branch (ff-push) instead of a new PR.

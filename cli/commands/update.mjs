@@ -54,6 +54,18 @@ function currentVersion() {
   return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 }
 
+export const meta = {
+  name: 'update',
+  summary: 'Self-update devkit to the latest published tag.',
+  help: `devkit update — self-update to the latest published tag (also --update / -u).
+
+Usage:
+  devkit update [--dry-run]
+
+Re-pins package.json + \`bun install\` if devkit is a dep here, else \`bun add -g\` the new tag
+(updates the global CLI). Set DEVKIT_REPO if your ssh uses a host alias.`,
+};
+
 // Reason: flat update pipeline: sequential guard-and-return steps (remote unreachable, no tags, up-to-date, --dry-run) plus the package-vs-global mode fork; near-zero nesting, high branch COUNT where each branch is a trivial early-out
 // fallow-ignore-next-line complexity
 export default async function update(args, cwd) {

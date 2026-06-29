@@ -35,6 +35,20 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+export const meta = {
+  name: 'release',
+  summary: 'MAINTAINER-ONLY: bump version, test, commit, tag, push.',
+  help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, commit, tag, push.
+
+Usage:
+  devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]
+
+  --dry-run   Print the plan; change nothing.
+  --yes       Skip the confirm prompt.
+
+Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists.`,
+};
+
 // Reason: flat release orchestration: a sequence of independent guard early-returns (no package.json / not devkit repo / dirty tree / bad bump / tag exists / non-TTY / tests fail) then trivial sequential steps (bump · commit · tag · push); high branch COUNT from stacked guards, each trivial with near-zero nesting
 // fallow-ignore-next-line complexity
 export default async function release(args, cwd) {

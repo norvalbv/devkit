@@ -97,6 +97,17 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
   return manifest;
 }
 
+export const meta = {
+  name: 'sync-skills',
+  summary: 'Copy bundled skills into .claude/skills + .cursor/skills.',
+  help: `devkit sync-skills — copy devkit's bundled skills into .claude/skills + .cursor/skills.
+
+Usage:
+  devkit sync-skills [--dry-run]
+
+Writes .devkit/skills-manifest.json (sha256 per file) so doctor can tell which side drifted.`,
+};
+
 export default function run(args, cwd) {
   // Skills are repo-wide → target the git root (= cwd for a single-package repo). Honour the
   // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.

@@ -270,6 +270,18 @@ function cleanPackage(cwd, cfg, dryRun) {
   );
 }
 
+export const meta = {
+  name: 'clean',
+  summary: 'Uninstall devkit — reverse init for the recorded mode.',
+  help: `devkit clean — uninstall devkit (reverse init for the recorded mode).
+
+Usage:
+  devkit clean [--yes] [--dry-run]
+
+Overlay restores core.hooksPath + prunes .git/info/exclude; package/standalone removes configs,
+the hook block, deps, and synced skills/agents. Safe — only removes what devkit created.`,
+};
+
 // Reason: flat clean dispatch: parse flags, then a linear cascade of guards (no config → orphaned-overlay recovery vs no-op; TTY confirm; overlay vs package branch); high branch COUNT from sequential early-returns, each trivial, extracting them scatters one entry-point's control flow
 // fallow-ignore-next-line complexity
 export default async function run(args, cwd) {

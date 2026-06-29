@@ -19,7 +19,10 @@ function sameRoot(a, b) {
   }
 }
 
-const HELP = `devkit reconcile — after your PR merges, replace stale local copies with the merged
+export const meta = {
+  name: 'reconcile',
+  summary: 'After a PR merges, refresh stale files in a shared checkout.',
+  help: `devkit reconcile — after your PR merges, replace stale local copies with the merged
 version in the shared checkout (no stash/pull). Manual lane.
 
 Usage:
@@ -30,7 +33,8 @@ Usage:
   --branch <name>   Only this manifest branch (default: every recorded branch).
   --main-repo <p>   The shared checkout root (default: the git root of the cwd).
   --json            Emit the machine envelope on stdout instead of human text.
-  --mode manual     Accepted for forward-compat (the only mode in v1). --mode auto is rejected.`;
+  --mode manual     Accepted for forward-compat (the only mode in v1). --mode auto is rejected.`,
+};
 
 function parse(args) {
   const f = { branch: null, 'main-repo': null, mode: null, apply: false, json: false, help: false };
@@ -81,7 +85,7 @@ function render(results, { apply }) {
 export default function reconcile(args, cwd) {
   const f = parse(args);
   if (f.help) {
-    console.log(HELP);
+    console.log(meta.help);
     return 0;
   }
   if (f.mode && f.mode !== 'manual') {

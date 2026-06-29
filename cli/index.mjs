@@ -13,99 +13,13 @@
  * Plain .mjs, no build — `what you install is what runs` (devkit ships no dist/).
  */
 import { readFileSync } from 'node:fs';
+import { assertGit } from './lib/guard/require-git.mjs';
+import { renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mjs';
 
 /** devkit's own version, read from the package it ships in (always accurate). */
 function devkitVersion() {
   return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 }
-
-const HELP = `devkit — wire a repo onto @norvalbv/devkit's shared configs + gate-engine.
-
-Usage:
-  devkit init [options]      Interactive SETUP WIZARD (on a TTY) to SELECT which components
-                             to install — biome, tsconfig, skills, husky, guards, structure —
-                             and to REMOVE a deselected one on a later run. Idempotent.
-    --stack <x>              electron | react-app | next | node-service | generic
-                             (default: auto-detect; structure preset ships for electron + react-app)
-    --yes                    Non-interactive: all recommended defaults (no prompts).
-    --dry-run                Print every file action; write nothing.
-    --force                  Overwrite existing devkit-managed files.
-    --no-<component>         Skip a component: --no-biome --no-tsconfig --no-skills
-                             --no-husky --no-structure --no-guards --no-fallow.
-    --guards <a,b,…>         Only these guards (subset of size,fanout,dup,clone,decisions).
-    --no-claude / --no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
-                             A prior copy in the dropped surface is removed (no redundant install).
-    --baselines-only         Re-derive ONLY the structure + import-wall baselines (eslint/baselines/*.mjs)
-                             and nothing else — for the RARE regen after a structure-RULE change (the
-                             baseline is otherwise generate-once + shrink-only). Package-mode structure
-                             stacks only; requires an existing eslint.config.mjs.
-    --fallow                 Also install the optional fallow code-health layer (off by default).
-    --search-code            Opt this repo in to the semantic search index: writes
-                             search-code.config.json + gitignores .search-code/ + wires the dup
-                             matcher's indexPath (off by default; the engine is referenced, not vendored).
-    --standalone             NO-PACKAGE mode (à la \`fallow init\`): vendors configs + writes a
-                             fail-open hook calling the GLOBAL guard-* bins; adds NOTHING to
-                             package.json. For shared repos where a private dep is unwanted.
-                             Requires devkit installed globally (\`bun add -g\`).
-    --overlay                LOCAL-ONLY mode for a repo you can't modify: everything is
-                             git-ignored via .git/info/exclude (invisible to the team), the
-                             local hook chains to the repo's own (no committed change), and
-                             eslint/biome configs EXTEND the repo's. Requires global devkit.
-    --scan-root <a,b,…>      Override guard.config.json scanRoots up front (set BEFORE the
-                             freezes) — e.g. --scan-root services/webapp/src for a nested app.
-    --remove-deselected      With --yes: REMOVE any installed-but-now-deselected component
-                             (default off — removal is opt-in / non-destructive).
-
-  devkit doctor [--fix]      Diagnose drift for the INSTALLED component set (read-only).
-                             --fix re-runs init for the recorded selection. Also warns if the
-                             RUNNING devkit is older than this repo's init stamp or a hand-declared
-                             "minDevkit":"x.y.z" floor in .devkit/config.json (config-only — never
-                             package.json, so overlay/standalone repos stay invisible).
-  devkit clean [--yes] [--dry-run]  UNINSTALL devkit — reverse init for the recorded mode
-                             (overlay restores core.hooksPath + prunes .git/info/exclude;
-                             package/standalone removes configs, the hook block, deps, skills).
-  devkit sync-skills [--dry-run]  Copy devkit skills into .claude/skills + .cursor/skills.
-  devkit sync-agents [--dry-run]  Copy devkit review/testing agents into .claude/agents + .cursor/agents.
-  devkit release [bump]      MAINTAINER-ONLY (run in the devkit repo): bump the version,
-                             run tests, commit, tag, and push. bump = patch (default) | minor
-                             | major | an explicit x.y.z. --dry-run prints the plan; --yes skips
-                             the confirm. Refuses outside the devkit repo or on a dirty tree.
-  devkit update [--dry-run]  Self-update to the latest published tag (also --update / -u).
-                             Re-pins package.json + \`bun install\` if devkit is a dep here,
-                             else \`bun add -g\` the new tag (updates the global CLI). Set
-                             DEVKIT_REPO if your ssh uses a host alias.
-  devkit migrate [--apply]   After an update, reconcile your EMITTED files (eslint.config.mjs,
-                             guard.config.json) with the installed devkit. DRY-RUN by default —
-                             shows every change (devkit-owned files replaced; your guard.config
-                             values merged, never clobbered). --apply to write.
-  devkit move <src...> <dest-dir>  Relocate source files + rewrite EVERY reference (import /
-                             export-from / dynamic import() / vi.mock|jest.mock|require) to the
-                             new path in the repo's @/ alias style — moves colocated *.test
-                             siblings too, re-anchors the moved file's own relative imports, and
-                             surgically prunes the moved entries from eslint/baselines (no
-                             whole-tree regen). --dry-run previews; --no-baseline skips the prune;
-                             --alias=@/=src/renderer overrides tsconfig auto-detect.
-  devkit reconcile [--apply] After your PR merges, replace the now-stale shipped files in a shared
-                             checkout with the merged-upstream version (no stash/pull). Manual lane:
-                             reads .devkit/reconcile-manifest.json (written by ship-branch.sh),
-                             confirms each PR MERGED (gh), and restores only files still pristine —
-                             never moving the shared HEAD, never clobbering a concurrent edit.
-                             DRY-RUN by default; --apply to write; --branch/--main-repo/--json.
-  devkit ship <branch> "<title>" [--markers-dir <d>]... [--link <d>]... [--] <path...>
-                             Commit explicit files onto a NEW branch + open a PR WITHOUT moving
-                             this checkout's HEAD (parallel agents on one shared tree stay
-                             undisturbed). The commit happens in an ephemeral linked worktree so
-                             pre-commit hooks still run; reviewer markers (.claude/.cursor, override
-                             with --markers-dir) and gate-dep dirs (--link, plus the .husky/_ +
-                             node_modules base) are carried in. PR body via stdin; SHIP_DRY_RUN=1
-                             commits locally without push/PR. Records .devkit/reconcile-manifest.json
-                             for a later \`devkit reconcile\`.
-  devkit guard-branch        PreToolUse hook (stdin = the Claude-Code payload): denies a direct
-                             \`git commit\` on a protected branch and hands back a ready-to-run
-                             \`devkit ship …\`. Wire as a one-line shim in the consumer's PreToolUse
-                             Bash hook (\`exec devkit guard-branch\`).
-  devkit --version           Print devkit's version.
-  devkit --help              This help.`;
 
 const COMMANDS = {
   init: () => import('./commands/init.mjs'),
@@ -122,7 +36,28 @@ const COMMANDS = {
   'guard-branch': () => import('./commands/guard-branch.mjs'),
 };
 
-// Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/update alias/unknown), each trivial
+// The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
+const GIT_COMMANDS = new Set(['ship', 'move', 'release', 'update', 'clean', 'doctor', 'init']);
+
+/**
+ * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
+ * is loaded in its own try/catch so one command module that throws at import can't take the whole
+ * help surface down — that command just shows a placeholder, the rest still list.
+ */
+async function topLevelHelp() {
+  const metas = await Promise.all(
+    Object.entries(COMMANDS).map(async ([name, load]) => {
+      try {
+        return (await load()).meta ?? { name, summary: '' };
+      } catch {
+        return { name, summary: '(help unavailable — module failed to load)' };
+      }
+    }),
+  );
+  return renderTopLevelHelp(metas);
+}
+
+// Reason: flat CLI dispatch: a sequence of `if (cmd === …)` flag/alias guards routing to a command loader, near-zero nesting; high branch COUNT (version/help/help-sub/update alias/unknown/per-command --help), each trivial
 // fallow-ignore-next-line complexity
 async function main() {
   let cmd = process.argv[2];
@@ -133,20 +68,41 @@ async function main() {
   }
   if (cmd === '--update' || cmd === '-u') cmd = 'update'; // alias → the update command
 
-  if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
-    console.log(HELP);
+  // `devkit help [<cmd>]`: bare → top-level; with a command → that command's full help.
+  if (cmd === 'help') {
+    const sub = process.argv[3];
+    if (sub && COMMANDS[sub]) {
+      console.log(renderCommandHelp((await COMMANDS[sub]()).meta));
+      process.exit(0);
+    }
+    if (sub) console.error(`devkit: unknown command "${sub}"\n`);
+    console.log(await topLevelHelp());
+    process.exit(sub ? 1 : 0);
+  }
+
+  if (!cmd || cmd === '--help' || cmd === '-h') {
+    console.log(await topLevelHelp());
     process.exit(0);
   }
 
   const loader = COMMANDS[cmd];
   if (!loader) {
     console.error(`devkit: unknown command "${cmd}"\n`);
-    console.log(HELP);
+    console.log(await topLevelHelp());
     process.exit(1);
   }
 
+  const cmdArgs = process.argv.slice(3);
+  // Generic per-command help: every command gets `devkit <cmd> --help` for free.
+  if (cmdArgs.includes('--help') || cmdArgs.includes('-h')) {
+    console.log(renderCommandHelp((await loader()).meta));
+    process.exit(0);
+  }
+
+  if (GIT_COMMANDS.has(cmd)) assertGit(cmd); // friendly throw on missing git → main().catch prints it
+
   const mod = await loader();
-  const code = await mod.default(process.argv.slice(3), process.cwd());
+  const code = await mod.default(cmdArgs, process.cwd());
   process.exit(code ?? 0);
 }
 

@@ -1031,6 +1031,37 @@ function structureAvailableFor(stack) {
   return STRUCTURE_STACKS.has(stack);
 }
 
+export const meta = {
+  name: 'init',
+  summary: 'Wire this repo onto devkit (interactive wizard; idempotent).',
+  help: `devkit init — wire this repo onto @norvalbv/devkit (interactive on a TTY, idempotent).
+
+Usage:
+  devkit init [options]
+
+  --stack <x>            electron | react-app | next | node-service | generic
+                         (default: auto-detect; structure preset ships for electron + react-app).
+  --yes                  Non-interactive: install all recommended defaults (no prompts).
+  --dry-run              Print every file action; write nothing.
+  --force                Overwrite existing devkit-managed files.
+  --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
+                         --no-structure --no-guards --no-fallow.
+  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions).
+  --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
+  --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
+                         structure-RULE change). Package-mode structure stacks only.
+  --fallow               Also install the optional fallow code-health layer (off by default).
+  --search-code          Opt this repo in to the semantic search index (off by default).
+  --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
+                         bins; add nothing to package.json. Requires \`bun add -g\` devkit.
+  --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the
+                         repo's own hook, configs EXTEND the repo's. Requires global devkit.
+  --scan-root <a,b,…>    Override guard.config.json scanRoots up front (set BEFORE the freezes).
+  --remove-deselected    With --yes: remove an installed-but-now-deselected component (opt-in).
+
+See docs/glossary.md for package/standalone/overlay, gates, ratchets, baselines, scanRoot.`,
+};
+
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
 // fallow-ignore-next-line complexity
 export default async function run(args, cwd) {

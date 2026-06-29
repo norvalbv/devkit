@@ -132,6 +132,22 @@ function pruneBaselines(cwd, oldRelPaths, dryRun) {
   return removed;
 }
 
+export const meta = {
+  name: 'move',
+  summary: 'Relocate source files + rewrite every reference.',
+  help: `devkit move — relocate source files + rewrite EVERY reference to the new path.
+
+Usage:
+  devkit move <src...> <dest-dir> [--dry-run] [--no-baseline] [--alias=@/=src/renderer]
+
+Rewrites import / export-from / dynamic import() / vi.mock|jest.mock|require in the repo's @/ alias
+style, moves colocated *.test siblings, re-anchors the moved file's own relative imports, and
+surgically prunes the moved entries from eslint/baselines (no whole-tree regen).
+  --dry-run        Preview only.
+  --no-baseline    Skip the baseline prune.
+  --alias=@/=DIR   Override tsconfig alias auto-detect.`,
+};
+
 export default async function move(args, cwd) {
   const flags = new Set(args.filter((a) => a.startsWith('--') && !a.startsWith('--alias=')));
   const positionals = args.filter((a) => !a.startsWith('--'));

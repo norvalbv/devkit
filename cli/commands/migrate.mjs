@@ -79,6 +79,18 @@ export function computeMigration(cwd, stack) {
   return [eslintChange(cwd, stack), guardConfigChange(cwd, stack)].filter(Boolean);
 }
 
+export const meta = {
+  name: 'migrate',
+  summary: 'Reconcile your emitted files with the installed devkit.',
+  help: `devkit migrate — after an update, reconcile your EMITTED files with the installed devkit.
+
+Usage:
+  devkit migrate [--apply]
+
+DRY-RUN by default — shows every change (devkit-owned files like eslint.config.mjs replaced; your
+guard.config.json values merged, never clobbered). --apply to write.`,
+};
+
 // Reason: flat CLI shell — stack guard, empty-plan early-out, the per-change report/apply loop, two
 // trailing notes; near-zero nesting. The real logic (computeMigration + each *Change builder) is
 // extracted and unit-tested (migrate.test.mjs); CRAP is the static estimate for this thin printer.
