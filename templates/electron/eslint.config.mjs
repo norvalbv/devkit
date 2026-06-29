@@ -25,7 +25,7 @@
 // grandfather the current tree right after emitting this config. The config
 // therefore loads + lints clean BOTH on a bare repo AND post-init.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import tsParser from '@typescript-eslint/parser';
@@ -509,6 +509,39 @@ const vercelStructure = createFolderStructure({
   rules: { vercelApiFolder: vercelApiFolderRule, vercelKebabFolder: vercelKebabFolderRule },
 });
 
+// ─── Backend processes (which to structure-lint) ────────────────────────────
+// Read from guard.config.json (`devkit migrate` merge-preserves your values) so enabling a
+// backend is a one-line data edit, not a hand-edit of this devkit-owned config. The blocks
+// are spread into the export below ONLY when their flag is on; the socket/vercel structure
+// consts above are referenced statically here, so they're never flagged unused when off.
+const backends = (() => {
+  const f = join(HERE, 'guard.config.json');
+  return existsSync(f) ? (JSON.parse(readFileSync(f, 'utf8')).backends ?? {}) : {};
+})();
+
+const backendConfigs = [
+  ...(backends.socketServer
+    ? [
+        {
+          files: ['socket-server/src/**/*.ts', 'socket-server/src/*'],
+          plugins: { 'project-structure': projectStructurePlugin },
+          languageOptions: { parser: projectStructureParser },
+          rules: { 'project-structure/folder-structure': ['error', socketStructure] },
+        },
+      ]
+    : []),
+  ...(backends.vercel
+    ? [
+        {
+          files: ['vercel-serverless/api/**/*.ts', 'vercel-serverless/lib/**/*.ts'],
+          plugins: { 'project-structure': projectStructurePlugin },
+          languageOptions: { parser: projectStructureParser },
+          rules: { 'project-structure/folder-structure': ['error', vercelStructure] },
+        },
+      ]
+    : []),
+];
+
 // ─── Import walls (independent-modules) ─────────────────────────────────────
 // Trust-boundary + cross-feature + frozen-dir consumption walls. Path-RESOLVING
 // (relative + '@/' alias resolve to root-relative before matching).
@@ -602,22 +635,8 @@ export default [
     languageOptions: { parser: projectStructureParser },
     rules: { 'project-structure/folder-structure': ['error', preloadStructure] },
   },
-  // ─── Add a backend process? Uncomment the matching block. ──────────────────
-  // socket-server (Railway-style Express backend). Uncomment when you add the dir,
-  // then run the baseline generators (devkit init --stack electron) to grandfather it.
-  // {
-  //   files: ['socket-server/src/**/*.ts', 'socket-server/src/*'],
-  //   plugins: { 'project-structure': projectStructurePlugin },
-  //   languageOptions: { parser: projectStructureParser },
-  //   rules: { 'project-structure/folder-structure': ['error', socketStructure] },
-  // },
-  // vercel-serverless (webhook/cron handlers). Uncomment when you add the dir.
-  // {
-  //   files: ['vercel-serverless/api/**/*.ts', 'vercel-serverless/lib/**/*.ts'],
-  //   plugins: { 'project-structure': projectStructurePlugin },
-  //   languageOptions: { parser: projectStructureParser },
-  //   rules: { 'project-structure/folder-structure': ['error', vercelStructure] },
-  // },
+  // Backend-process structure rules — active per guard.config.json `backends` (see above).
+  ...backendConfigs,
   // Import walls. Tests are wall-free.
   {
     files: ['src/renderer/**/*.{ts,tsx}', 'src/shared/**/*.ts'],
