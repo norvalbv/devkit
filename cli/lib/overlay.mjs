@@ -11,8 +11,11 @@
  *     over STAGED files only — your new changes are checked without flooding on existing code.
  *   - package.json is untouched.
  *
- * Caveat: husky's `prepare` re-claims `core.hooksPath` on the next `bun install`; re-run
- * `devkit init --overlay` to re-apply (idempotent).
+ * Caveat: husky's `prepare` re-claims `core.hooksPath` on the next `bun install`, so a plain
+ * `git commit` (or a GUI client) runs ungated until the next `git ci` (the self-heal alias) re-points
+ * it. To gate a plain `git commit` too, opt in ONCE with `devkit init --overlay --global-commit-gate`
+ * (a guarded, uninstallable machine-global husky `init.sh` shim — see overlay-global-hook.mjs); else
+ * re-run `devkit init --overlay` after an install to re-apply (idempotent).
  */
 
 import { execFileSync } from 'node:child_process';

@@ -7,6 +7,7 @@ import { GUARD_IDS } from '../lib/components.mjs';
 import {
   buildFullHook,
   buildGuardBlock,
+  buildOverlayHook,
   findPreambleEnd,
   hasFragment,
   removeFragment,
@@ -229,5 +230,24 @@ describe('guard fragments are set -e-safe (fail-open does not abort the hook)', 
 
   it('an unexpected guard code (e.g. 127) fails closed (blocks)', () => {
     expect(runHookWithStubBunx(127)).toBe(1);
+  });
+});
+
+describe('buildOverlayHook — gates-only guard for the global init.sh shim', () => {
+  const hook = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit');
+  const guardIdx = hook.indexOf('DEVKIT_VIA_HUSKY_INIT');
+  const chainIdx = hook.indexOf('exec sh');
+
+  it('emits the gates-only env guard (gates passed via the shim → exit 0, husky runs the committed hook)', () => {
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(hook).toContain('&& exit 0');
+  });
+
+  it('places the guard BEFORE the chain exec (the chain runs only when the env is unset)', () => {
+    expect(chainIdx).toBeGreaterThan(guardIdx);
+  });
+
+  it('still chains to the repo hook for the normal (non-shim) path', () => {
+    expect(hook).toContain('exec sh ".husky/pre-commit" "$@"');
   });
 });

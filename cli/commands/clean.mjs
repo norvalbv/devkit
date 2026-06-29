@@ -20,6 +20,7 @@ import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { removeHealAlias } from '../lib/overlay.mjs';
+import { removeGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 
 function rm(path, label, dryRun) {
@@ -274,7 +275,21 @@ function cleanPackage(cwd, cfg, dryRun) {
 export default async function run(args, cwd) {
   const dryRun = args.includes('--dry-run');
   const yes = args.includes('--yes') || args.includes('-y');
+  // --global: remove the machine-global opt-in pre-commit shim (~/.config/husky/init.sh). It's shared
+  // by every overlaid repo, so it is NEVER removed by a per-repo clean — only this explicit flag.
+  const removeGlobal = args.includes('--global');
   const cfg = readJson(join(cwd, '.devkit', 'config.json'));
+  if (removeGlobal) {
+    console.log(
+      `devkit clean --global${dryRun ? ' (dry-run)' : ''}: machine-global pre-commit shim`,
+    );
+    removeGlobalHook({ dryRun });
+    if (!cfg) {
+      console.log(`\n${dryRun ? 'Dry-run complete.' : 'Done.'}`);
+      return 0;
+    }
+    console.log('');
+  }
   if (!cfg) {
     // Orphaned overlay: the config is gone but core.hooksPath still points at our (deleted) dir.
     const { gitRoot } = detectGitRoot(cwd);

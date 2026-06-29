@@ -280,6 +280,11 @@ export function buildOverlayHook(
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
 ${scoped}
 
+# Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
+# run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
+# would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
+[ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"
 exit 0
