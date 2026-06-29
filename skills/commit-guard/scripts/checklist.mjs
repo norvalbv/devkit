@@ -153,7 +153,9 @@ function finalize() {
   } catch {
     // approve.sh exits non-zero when OTHER reviewers are still pending — propagate it (don't swallow)
     // so the commit isn't waved through. The commit-guard marker above stays (commit-guard itself passed).
-    log('❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.');
+    log(
+      '❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.',
+    );
     process.exit(1);
   }
 }
