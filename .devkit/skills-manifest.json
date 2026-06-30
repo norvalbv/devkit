@@ -1,12 +1,16 @@
 {
-  "devkitRef": "v0.24.2",
-  "generatedAt": "2026-06-30T19:06:13.315Z",
+  "devkitRef": "v0.24.3",
+  "generatedAt": "2026-06-30T19:59:59.750Z",
+  "targets": [
+    "claude",
+    "cursor"
+  ],
   "files": {
     "api-security/SKILL.md": "da5565a99f9120532865c0a78c1b3589f8908ea11e2e3004f780c872ed464b4a",
     "backend-performance/SKILL.md": "b44f1cf9d8a3eea43f6bf80aebdfe81db2c327cccb1f7c0f7deac461d972dad5",
     "brainstorming/SKILL.md": "faa2fd9ea4ac99b0e92934c931701c25a85767935526810baa9c462b632855e0",
     "commit-guard/SKILL.md": "44b453222a9ea3b34a561f4818350deae284d18cd89aa45861cc82408ffc7a91",
-    "commit-guard/scripts/approve.sh": "c6d001ce1564e1a95bd56ae7dfd747dc05cbd4ced6acc9495293b8ddf8df3c4a",
+    "commit-guard/scripts/approve.sh": "26e6345139ae60408f1f1b29d1695cb51635dc963724e48fca253418e3e1bd7e",
     "commit-guard/scripts/checklist.mjs": "da044d261bf997db91284987425d20fe4ccd05353abcb1172a0eca4ba9743376",
     "decisions/SKILL.md": "2a3028bdd81593319222952c9691db0ad4f22f5de0d7e9f1ad9adc80d8f081e9",
     "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
