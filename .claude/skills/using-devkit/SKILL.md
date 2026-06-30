@@ -19,9 +19,11 @@ devkit command.
 ## Terms you must recognize
 
 - **Protected branch** — a branch you may not commit to directly (typically `main`/`master`; the set
-  is repo config). devkit installs a `guard-branch` PreToolUse hook that **denies** a `git commit`
-  there and hands back a ready-to-run `devkit ship …`. Signal: your commit was rejected with a message
-  naming a protected branch, **or** `git branch --show-current` is `main`/`master`.
+  is repo config). devkit **provides** a `guard-branch` command; wired as a Claude Code PreToolUse
+  hook it **denies** a `git commit` there and hands back a ready-to-run `devkit ship …`. `devkit init`
+  does **not** auto-wire it — a repo opts in by registering the shim in its `.claude` settings, and
+  wired that way it gates **Claude Code agents only**, not Cursor. Signal: your commit was rejected
+  with a message naming a protected branch, **or** `git branch --show-current` is `main`/`master`.
 - **Drift** — the repo no longer matches what devkit set up, or a synced copy under `.claude/`/`.cursor/`
   diverged from its **manifest** (`.devkit/*-manifest.json`, a sha256 per synced file). Signal: a
   `devkit doctor` line says `DRIFT` or `MISSING`.
@@ -45,8 +47,8 @@ devkit command.
 
 ## Rules
 
-- **Never hand-roll a `git commit` on a protected branch.** The branch guard blocks it and returns the
-  exact `devkit ship …` to run — run that.
+- **Never hand-roll a `git commit` on a protected branch.** If the branch guard is wired, it blocks it
+  and returns the exact `devkit ship …` to run — run that.
 - **On a shared checkout, never move HEAD** (`switch`/`checkout`/`pull`/`reset`). Use `ship` to commit
   and `reconcile` to refresh.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;

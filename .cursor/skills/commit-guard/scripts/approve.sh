@@ -15,10 +15,12 @@ set -e
 CONFIG="guard.config.json"
 
 # Read a JSON string-array from guard.config.json as a space-separated pathspec list (empty if the
-# file or key is absent). `$1` is a JS expression over the parsed config `c`.
+# file or key is absent). `$1` is a JS expression over the parsed config `c`. A PRESENT but invalid
+# value (not a non-empty string array) warns to stderr and yields empty — the caller then falls back
+# to scanning all staged files, so a bad config is loud but never silently skips the gate.
 cfg_roots() {
   [ -f "$CONFIG" ] || return 0
-  node -e "try{const c=require('./$CONFIG');const v=$1;process.stdout.write(Array.isArray(v)?v.join(' '):'')}catch{}" 2>/dev/null
+  node -e "try{const c=require('./$CONFIG');const v=$1;if(v===undefined||v===null){process.stdout.write('')}else if(Array.isArray(v)&&v.every(x=>typeof x==='string'&&x.length>0)){process.stdout.write(v.join(' '))}else{process.stderr.write('⚠️  commit-guard: ignoring invalid roots in $CONFIG (expected a non-empty string array) — scanning all staged files instead.\n')}}catch{}"
 }
 
 SCAN_ROOTS=$(cfg_roots "c.scanRoots")
