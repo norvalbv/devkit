@@ -95,6 +95,15 @@ describe('commit-guard approve.sh — config-driven roots (no frink hardcoding)'
     expect(r.out).not.toContain('scanning all staged files'); // that claim is false for this lane
   });
 
+  it('a MALFORMED guard.config.json fails the gate loudly — never silently skips reviewers', () => {
+    const root = repo({}); // valid file first…
+    writeFileSync(join(root, 'guard.config.json'), '{ not valid json'); // …then corrupt it
+    stage(root, 'app/x.ts');
+    const r = run(root);
+    expect(r.code).not.toBe(0); // hard-fails (a broken config must not be treated as "nothing declared")
+    expect(r.out).toMatch(/not valid JSON|refusing/);
+  });
+
   it('empty roots array is a deliberate unset → no warning (scanRoots falls back to scan-all)', () => {
     const root = repo({ scanRoots: [] });
     stage(root, 'app/x.ts');

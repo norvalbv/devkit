@@ -25,6 +25,14 @@ cfg_roots() {
   node -e "try{const c=require('./$CONFIG');const v=(c&&typeof c==='object')?$1:undefined;if(v===undefined||v===null){process.stdout.write('')}else if(Array.isArray(v)&&v.every(x=>typeof x==='string'&&x.length>0)){process.stdout.write(v.join(' '))}else{process.stderr.write('⚠️  commit-guard: ignoring invalid $2 in $CONFIG (expected an array of non-empty strings).\n')}}catch{}"
 }
 
+# A PRESENT but unparseable guard.config.json must NOT be silently treated as "nothing declared" —
+# that would skip the backend/frontend reviewer gates on a broken config. Fail the gate loudly so a
+# malformed config is fixed, not silently waved through. (An ABSENT file stays fine — gate scans all.)
+if [ -f "$CONFIG" ] && ! node -e "require('./$CONFIG')" 2>/dev/null; then
+  echo "❌ commit-guard: $CONFIG is not valid JSON — refusing to run the gate (fix the config)." >&2
+  exit 1
+fi
+
 SCAN_ROOTS=$(cfg_roots "c.scanRoots" "scanRoots")
 BACKEND_ROOTS=$(cfg_roots "c.review&&c.review.backendRoots" "review.backendRoots")
 FRONTEND_ROOTS=$(cfg_roots "c.review&&c.review.frontendRoots" "review.frontendRoots")
