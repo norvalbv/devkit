@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { confirm, isCancel, outro } from '@clack/prompts';
+import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
 import { resolveGuardConfig } from '../../gate-engine/config.mjs';
 import {
   AGENT_TARGETS,
@@ -49,6 +49,7 @@ import {
   wireFallowGate,
 } from '../lib/install/install-fallow.mjs';
 import {
+  detectHookConflicts,
   installHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
@@ -60,8 +61,8 @@ import { installGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
-import { syncAgents } from './sync-agents.mjs';
-import { syncSkills } from './sync-skills.mjs';
+import { detectAgentConflicts, syncAgents } from './sync-agents.mjs';
+import { detectSkillConflicts, syncSkills } from './sync-skills.mjs';
 
 const INIT_VERSION = 2;
 
@@ -470,6 +471,50 @@ async function subConfirm(message, { interactive, fallback }) {
   return isCancel(v) ? fallback : v;
 }
 
+// Resolve the non-devkit-collision policy → an `override(kind, name)` predicate the sync step
+// consults. A collision is a same-named asset the consumer authored (on disk, unmanifested, content
+// DIVERGES from the bundle). DEFAULT is to PRESERVE it (never silently clobber a user asset): force
+// → adopt all; non-interactive → preserve all (loud, with a --force hint); interactive → a per-asset
+// multiselect (none ticked = preserve all). Keyed by `${kind}:${name}` so kinds never alias.
+// Reason: flat policy resolver: the branches ARE the four resolution modes (none / force / non-interactive / interactive-pick), each a single guarded return; no nesting
+// fallow-ignore-next-line complexity
+async function resolveAssetConflicts(gitRoot, selection, { interactive, force }) {
+  const targets = selection.agentTargets ?? AGENT_TARGETS;
+  const found = [];
+  if (selection.skills)
+    for (const name of detectSkillConflicts(gitRoot, targets)) found.push({ kind: 'skill', name });
+  if (selection.agents)
+    for (const name of detectAgentConflicts(gitRoot, targets)) found.push({ kind: 'agent', name });
+  if (selection.agentHooks)
+    for (const name of detectHookConflicts(gitRoot, targets))
+      found.push({ kind: 'agent-hook', name });
+  if (!found.length) return () => false;
+  const list = found.map((c) => `${c.kind}:${c.name}`).join(', ');
+  if (force) {
+    console.log(
+      `  overriding ${found.length} non-devkit collision(s) with devkit's version: ${list}`,
+    );
+    return () => true;
+  }
+  if (!interactive) {
+    console.log(
+      `  ! preserving ${found.length} non-devkit asset(s) that collide with devkit's: ${list}`,
+    );
+    console.log("    (re-run with --force to overwrite them with devkit's versions)");
+    return () => false;
+  }
+  const picked = await multiselect({
+    message:
+      'These assets already exist and were NOT installed by devkit. Select any to OVERWRITE with devkit’s version (unselected are kept):',
+    options: found.map((c) => ({ value: `${c.kind}:${c.name}`, label: `${c.kind}: ${c.name}` })),
+    initialValues: [],
+    required: false,
+  });
+  if (isCancel(picked)) return () => false;
+  const set = new Set(picked);
+  return (kind, name) => set.has(`${kind}:${name}`);
+}
+
 // Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
 // against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
 // (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
@@ -810,23 +855,24 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
 // deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
 // Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
 // fallow-ignore-next-line complexity
-function installAgentSurfaces(gitRoot, selection, dryRun) {
+function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false) {
   const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
   if (selection.skills) {
     console.log('7. skills');
-    // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest).
-    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
+    // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest). A
+    // consumer's own same-named skill is preserved unless `override` adopts it (resolveAssetConflicts).
+    syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets, { override });
   }
   if (selection.agents) {
     console.log('7a. agents');
     // Agents are repo-wide too → sync to the git root's selected agent surface(s) (+ manifest).
-    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets);
+    syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets, { override });
   }
   // Agent-hook scripts (agentHooks) live under <surface>/hooks; the registrations below reference
   // them, so sync the scripts first.
   if (selection.agentHooks) {
     console.log('7b. agent-hook scripts');
-    syncHookScripts(gitRoot, { dryRun, targets: agentTargets });
+    syncHookScripts(gitRoot, { dryRun, targets: agentTargets, override });
   }
   // Register the agent hooks each selected component owns into the selected surfaces' settings.
   const hookComponents = [
@@ -959,8 +1005,11 @@ export async function applyInit(cwd, plan) {
   }
 
   // Skills / agents / agent-hooks → the selected agent surface(s), with a prune of any now-dropped
-  // surface a prior run installed. Returns the resolved agentTargets (recorded in the config below).
-  const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun);
+  // surface a prior run installed. First resolve the non-devkit-collision policy (preserve the
+  // consumer's own same-named assets unless they opt in — interactive picker / --force). Returns the
+  // resolved agentTargets (recorded in the config below).
+  const override = await resolveAssetConflicts(gitRoot, selection, { interactive, force });
+  const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override);
 
   if (selection.fallow) {
     console.log('8. fallow (optional code-health layer)');
@@ -1043,7 +1092,8 @@ Usage:
                          (default: auto-detect; structure preset ships for electron + react-app).
   --yes                  Non-interactive: install all recommended defaults (no prompts).
   --dry-run              Print every file action; write nothing.
-  --force                Overwrite existing devkit-managed files.
+  --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
+                         own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions).

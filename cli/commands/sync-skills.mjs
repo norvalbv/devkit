@@ -13,6 +13,7 @@ import { join, relative } from 'node:path';
 import { AGENT_TARGETS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../lib/fs-helpers.mjs';
+import { findConflicts } from '../lib/sync-manifest.mjs';
 
 // Recursively list every file under `dir`, returned as paths relative to `dir`.
 function walk(dir, base = dir) {
@@ -29,12 +30,20 @@ function walk(dir, base = dir) {
  * @param {string[]} args
  * @param {string} cwd consumer root
  * @param {string[]} [targets] agent surfaces to write to (default both — see AGENT_TARGETS)
- * @param {{ skipTracked?: (relPath: string) => boolean }} [opts] overlay-only: when given, a skill
- *   `<name>/` whose dir git already TRACKS in any target is skipped wholesale (not written, not
- *   manifested, warned) — `.git/info/exclude` can't hide an edit to a tracked file (C2).
+ * @param {{ skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
+ *   `skipTracked` (overlay-only): a skill `<name>/` whose dir git already TRACKS in any target is
+ *   skipped wholesale (not written, not manifested, warned) — `.git/info/exclude` can't hide an edit
+ *   to a tracked file (C2). `override(kind, name)` (default never): when a skill collides with the
+ *   consumer's OWN same-named skill (on disk, unmanifested, content diverges from the bundle), it's
+ *   PRESERVED unless `override('skill', name)` returns true — so an install never clobbers a user asset.
  * @returns {{ devkitRef: string|null, generatedAt: string, files: Record<string,string> }} the manifest (for init to embed in its log)
  */
-export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } = {}) {
+export function syncSkills(
+  args,
+  cwd,
+  targets = AGENT_TARGETS,
+  { skipTracked, override = () => false } = {},
+) {
   const dryRun = args.includes('--dry-run');
   const targetDirs = targets.map((t) => `.${t}/skills`);
   const skillsSrc = join(packageDir(), 'skills');
@@ -42,6 +51,10 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
 
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
+  // The prior manifest (also reused for the idempotency check below) — its keys tell findConflicts
+  // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
+  const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
+  const prev = readJson(manifestPath);
 
   // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's
   // `.<surface>/skills/<name>` is git-tracked, the whole skill is left untouched.
@@ -53,6 +66,22 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
         console.log(`  ! skipping skill "${name}" — git-tracked in the repo (left untouched)`);
       }
     }
+  }
+  // Non-devkit collisions: a same-named skill the consumer authored (unmanifested + divergent) is
+  // PRESERVED (never clobbered) unless the caller opted to override it. Preserved names join
+  // skipNames → excluded from the write loop AND the manifest (devkit never claims a file it didn't write).
+  for (const name of findConflicts(
+    cwd,
+    skillsSrc,
+    [...new Set(rels.map((r) => r.split('/')[0]))],
+    targetDirs,
+    prev,
+  )) {
+    if (skipNames.has(name) || override('skill', name)) continue;
+    skipNames.add(name);
+    console.log(
+      `  ! preserving non-devkit skill "${name}" (left untouched — re-run with --force or select it to overwrite)`,
+    );
   }
 
   /** @type {Record<string, string>} */
@@ -76,12 +105,9 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
     }
   }
 
-  // Reason: sync-agents and sync-skills are deliberately parallel modules (headers say 'Parallel to'): identical write+manifest mechanics to different dirs; the parallelism IS the design
-  // fallow-ignore-next-line code-duplication
-  const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
   // Idempotency: keep generatedAt STABLE when nothing about the synced set changed
-  // (same devkitRef + same file shas), so a re-run produces no spurious git diff.
-  const prev = readJson(manifestPath);
+  // (same devkitRef + same file shas), so a re-run produces no spurious git diff. (manifestPath +
+  // prev were read above — reused here, also the provenance source for findConflicts.)
   const unchanged =
     prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
   const generatedAt = unchanged ? prev.generatedAt : new Date().toISOString();
@@ -97,14 +123,36 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked } =
   return manifest;
 }
 
+/**
+ * The consumer's OWN skills that collide with a devkit-bundled name (on disk, unmanifested, content
+ * diverges from the bundle) — what an interactive `devkit init` lists for the user to pick from.
+ * @param {string} root git root
+ * @param {string[]} [targets] surfaces to check (default both)
+ * @returns {string[]} colliding skill names
+ */
+export function detectSkillConflicts(root, targets = AGENT_TARGETS) {
+  const skillsSrc = join(packageDir(), 'skills');
+  const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
+  const targetDirs = targets.map((t) => `.${t}/skills`);
+  return findConflicts(
+    root,
+    skillsSrc,
+    names,
+    targetDirs,
+    readJson(join(root, '.devkit', 'skills-manifest.json')),
+  );
+}
+
 export const meta = {
   name: 'sync-skills',
   summary: 'Copy bundled skills into .claude/skills + .cursor/skills.',
   help: `devkit sync-skills — copy devkit's bundled skills into .claude/skills + .cursor/skills.
 
 Usage:
-  devkit sync-skills [--dry-run]
+  devkit sync-skills [--dry-run] [--force]
 
+A skill the consumer authored themselves (same name, content diverges from the bundle) is PRESERVED;
+pass --force to overwrite those collisions with devkit's version.
 Writes .devkit/skills-manifest.json (sha256 per file) so doctor can tell which side drifted.`,
 };
 
@@ -113,6 +161,9 @@ export default function run(args, cwd) {
   // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.
   const { gitRoot } = detectGitRoot(cwd);
   const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
-  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS);
+  // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
+  // per-asset picker is `devkit init` interactive only).
+  const override = args.includes('--force') ? () => true : undefined;
+  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
   return 0;
 }
