@@ -15,17 +15,19 @@ set -e
 CONFIG="guard.config.json"
 
 # Read a JSON string-array from guard.config.json as a space-separated pathspec list (empty if the
-# file or key is absent). `$1` is a JS expression over the parsed config `c`. A PRESENT but invalid
-# value (not a non-empty string array) warns to stderr and yields empty — the caller then falls back
-# to scanning all staged files, so a bad config is loud but never silently skips the gate.
+# file or key is absent). `$1` is a JS expression over the parsed config `c`; `$2` is the field name
+# used in the warning. A PRESENT but invalid value (not an array of non-empty strings) warns to
+# stderr and yields empty — the caller then falls back to its default for that lane (scanRoots → scan
+# all staged files; backend/frontend → skip those reviewers). An empty array is a deliberate "unset"
+# and yields empty WITHOUT a warning.
 cfg_roots() {
   [ -f "$CONFIG" ] || return 0
-  node -e "try{const c=require('./$CONFIG');const v=$1;if(v===undefined||v===null){process.stdout.write('')}else if(Array.isArray(v)&&v.every(x=>typeof x==='string'&&x.length>0)){process.stdout.write(v.join(' '))}else{process.stderr.write('⚠️  commit-guard: ignoring invalid roots in $CONFIG (expected a non-empty string array) — scanning all staged files instead.\n')}}catch{}"
+  node -e "try{const c=require('./$CONFIG');const v=(c&&typeof c==='object')?$1:undefined;if(v===undefined||v===null){process.stdout.write('')}else if(Array.isArray(v)&&v.every(x=>typeof x==='string'&&x.length>0)){process.stdout.write(v.join(' '))}else{process.stderr.write('⚠️  commit-guard: ignoring invalid $2 in $CONFIG (expected an array of non-empty strings).\n')}}catch{}"
 }
 
-SCAN_ROOTS=$(cfg_roots "c.scanRoots")
-BACKEND_ROOTS=$(cfg_roots "c.review&&c.review.backendRoots")
-FRONTEND_ROOTS=$(cfg_roots "c.review&&c.review.frontendRoots")
+SCAN_ROOTS=$(cfg_roots "c.scanRoots" "scanRoots")
+BACKEND_ROOTS=$(cfg_roots "c.review&&c.review.backendRoots" "review.backendRoots")
+FRONTEND_ROOTS=$(cfg_roots "c.review&&c.review.frontendRoots" "review.frontendRoots")
 
 # First staged file under the given pathspecs (empty = none). Unquoted expansion word-splits the
 # space-separated roots into separate pathspecs.

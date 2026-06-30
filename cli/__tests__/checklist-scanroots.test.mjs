@@ -4,7 +4,7 @@
 // throws → getStagedFiles returns [] → init exits 0 "no staged files"). Runs the REAL script in
 // throwaway git repos.
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -70,6 +70,23 @@ describe('commit-guard checklist.mjs — scanRoots validation (fail-safe, never 
   it('no guard.config.json → scans all, no warning', () => {
     const root = repo(undefined);
     stage(root, 'anything/here.ts');
+    const r = run(root);
+    expect(r.err).not.toContain('invalid');
+    expect(checklistWritten(root)).toBe(true);
+  });
+
+  it('guard.config.json containing a literal null → scans all, does not crash', () => {
+    const root = repo({});
+    writeFileSync(join(root, 'guard.config.json'), 'null'); // a valid-JSON non-object config
+    stage(root, 'app/x.ts');
+    const r = run(root);
+    expect(r.err).not.toMatch(/TypeError|Cannot read/); // the dereference must not throw
+    expect(checklistWritten(root)).toBe(true);
+  });
+
+  it('empty scanRoots array → scans all, no warning (a deliberate "no scoping")', () => {
+    const root = repo({ scanRoots: [] });
+    stage(root, 'app/x.ts');
     const r = run(root);
     expect(r.err).not.toContain('invalid');
     expect(checklistWritten(root)).toBe(true);
