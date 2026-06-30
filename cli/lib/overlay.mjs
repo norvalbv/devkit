@@ -377,21 +377,23 @@ function installOverlayAgentSurfaces(gitRoot, sel, dryRun, force = false) {
     const m = syncSkills(args, gitRoot, targets, { skipTracked, override });
     for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
       for (const t of targets) excl.push(`.${t}/skills/${name}/`);
-    if (Object.keys(m.files).length) excl.push('.devkit/skills-manifest.json');
+    // The sync ALWAYS writes the git-root manifest (even when every asset is preserved → files {}),
+    // so it must be hidden unconditionally — else an all-preserved run leaks it into `git status`.
+    excl.push('.devkit/skills-manifest.json');
   }
   if (sel.agents) {
     console.log('  agents');
     const m = syncAgents(args, gitRoot, targets, { skipTracked, override });
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/agents/${rel}`);
-    if (Object.keys(m.files).length) excl.push('.devkit/agents-manifest.json');
+    excl.push('.devkit/agents-manifest.json');
   }
   if (sel.agentHooks) {
     console.log('  agent-hook scripts');
     const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked, override });
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
-    if (Object.keys(m.files).length) excl.push('.devkit/agent-hooks-manifest.json');
+    excl.push('.devkit/agent-hooks-manifest.json');
     console.log('  agent hook registrations');
     const { wrote } = installHookRegistrations(gitRoot, ['agentHooks'], {
       dryRun,
