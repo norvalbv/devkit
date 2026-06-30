@@ -56,37 +56,62 @@ function decisionFileRe(decisionsRel) {
 // ─── Pure smell logic (testable without git) ────────────────────────────────────
 
 /**
- * @param {{status:string,path:string,added:number,deleted:number,depChanged?:boolean}[]} entries
+ * The (label, contributing-file) pairs that drive each smell — the file that *causes* the smell, not
+ * the whole diff. A per-session seen-set keyed on these pairs re-arms only on a genuinely new
+ * decision (a never-seen pair), so a growing single-decision footprint never re-nags. For dep-change
+ * the "path" is the changed dependency NAME, so two distinct dep decisions yield distinct pairs and a
+ * second unrelated bump is not collapsed into the first.
+ *
+ * @param {{status:string,path:string,added:number,deleted:number,depChanged?:boolean,depKeys?:string[]}[]} entries
  *   Pure renames/copies (status R/C) must already be excluded by the caller (move noise).
- * @param {string[]} boundaries Cross-trust-boundary prefixes (cfg.boundaries). A change touching
- *   ≥2 of these smells like a cross-boundary architectural move. Default [] → the smell never fires.
- * @returns {string[]} smell labels
+ * @param {string[]} boundaries Cross-trust-boundary prefixes (cfg.boundaries). A change touching ≥2
+ *   of these smells like a cross-boundary architectural move. Default [] → the smell never fires.
+ * @returns {{label:string,path:string}[]}
  */
-export function detectSmells(entries, boundaries = []) {
+// Reason: the branches ARE the smell taxonomy — each block is one independent architectural-smell
+// predicate yielding its contributing paths; extracting them scatters a cohesive predicate set
+// fallow-ignore-next-line complexity
+export function smellSources(entries, boundaries = []) {
   const real = entries.filter((e) => !LOCKFILE_RE.test(e.path));
   if (real.length === 0) return []; // lockfile-only churn is never a decision
-  const smells = new Set();
+  const sources = [];
 
-  if (real.some((e) => PKG_RE.test(e.path) && e.depChanged)) smells.add('dep-change');
+  for (const e of real)
+    if (PKG_RE.test(e.path))
+      for (const name of e.depKeys ?? (e.depChanged ? [e.path] : []))
+        sources.push({ label: 'dep-change', path: name });
 
   const boundariesHit = boundaries.filter((b) => real.some((e) => e.path.startsWith(b)));
-  if (boundariesHit.length >= 2) smells.add('cross-boundary-move');
+  if (boundariesHit.length >= 2)
+    for (const e of real)
+      if (boundariesHit.some((b) => e.path.startsWith(b)))
+        sources.push({ label: 'cross-boundary-move', path: e.path });
 
-  if (real.some((e) => e.status === 'D' && e.deleted > LEGACY_DELETE_LINES))
-    smells.add('legacy-deletion');
+  for (const e of real)
+    if (e.status === 'D' && e.deleted > LEGACY_DELETE_LINES)
+      sources.push({ label: 'legacy-deletion', path: e.path });
 
   const dels = real.filter((e) => e.status === 'D' && e.deleted > MODULE_REPLACE_LINES);
-  const adds = real.filter((e) => e.status === 'A');
-  const replaced = dels.some((d) =>
-    adds.some(
-      (a) =>
-        path.basename(a.path) === path.basename(d.path) &&
-        path.dirname(a.path) !== path.dirname(d.path),
-    ),
-  );
-  if (replaced) smells.add('module-replace');
+  for (const a of real.filter((e) => e.status === 'A'))
+    if (
+      dels.some(
+        (d) =>
+          path.basename(a.path) === path.basename(d.path) &&
+          path.dirname(a.path) !== path.dirname(d.path),
+      )
+    )
+      sources.push({ label: 'module-replace', path: a.path });
 
-  return [...smells];
+  return sources;
+}
+
+/**
+ * @param {{status:string,path:string,added:number,deleted:number,depChanged?:boolean,depKeys?:string[]}[]} entries
+ * @param {string[]} boundaries
+ * @returns {string[]} the distinct smell labels (derived from {@link smellSources} — one source of truth)
+ */
+export function detectSmells(entries, boundaries = []) {
+  return [...new Set(smellSources(entries, boundaries).map((s) => s.label))];
 }
 
 /**
@@ -106,8 +131,21 @@ function sh(cwd, cmd) {
   return execSync(cmd, { cwd, encoding: 'utf8' });
 }
 
-// Current content of a file: staged (index) for 'cached', on-disk for 'working'.
-function depChanged(cwd, relPath, mode) {
+// Pure: the dependency NAMES whose spec differs between two parsed package.json objects. Exported
+// for tests — the seen-set's dep-change identity (distinct decisions vs the same bump) rides on it.
+export function depChangedKeys(oldJson, newJson) {
+  const names = new Set();
+  for (const k of DEP_KEYS) {
+    const a = oldJson?.[k] ?? {};
+    const b = newJson?.[k] ?? {};
+    for (const name of new Set([...Object.keys(a), ...Object.keys(b)]))
+      if (JSON.stringify(a[name]) !== JSON.stringify(b[name])) names.add(name);
+  }
+  return [...names];
+}
+
+// Changed dep names of a package.json vs HEAD: staged (index) for 'cached', on-disk for 'working'.
+function readDepChangedKeys(cwd, relPath, mode) {
   let cur;
   try {
     cur = JSON.parse(
@@ -116,7 +154,7 @@ function depChanged(cwd, relPath, mode) {
         : sh(cwd, `git show :${relPath}`),
     );
   } catch {
-    return false;
+    return [];
   }
   let head;
   try {
@@ -124,7 +162,7 @@ function depChanged(cwd, relPath, mode) {
   } catch {
     head = {};
   }
-  return DEP_KEYS.some((k) => JSON.stringify(cur[k] ?? {}) !== JSON.stringify(head[k] ?? {}));
+  return depChangedKeys(head, cur);
 }
 
 /** mode 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder). */
@@ -151,11 +189,13 @@ export function gatherEntries(cwd, mode = 'cached') {
     if (status === 'R' || status === 'C') continue; // pure rename/copy = move noise, excluded
     const file = parts[parts.length - 1];
     const c = counts.get(file) ?? { added: 0, deleted: 0 };
+    const depKeys = PKG_RE.test(file) ? readDepChangedKeys(cwd, file, mode) : [];
     entries.push({
       status,
       path: file,
       ...c,
-      depChanged: PKG_RE.test(file) ? depChanged(cwd, file, mode) : false,
+      depChanged: depKeys.length > 0,
+      depKeys,
     });
   }
   return entries;
@@ -228,8 +268,18 @@ function runScan(mode) {
   // fallow-ignore-next-line code-duplication
   try {
     const cfg = resolveGuardConfig(cwd);
-    const smells = detectSmells(gatherEntries(cwd, mode), cfg.boundaries);
-    if (smells.length) console.log(smells.join('\n'));
+    const entries = gatherEntries(cwd, mode);
+    if (process.argv.includes('--files')) {
+      // (label, contributing-file) pairs for the Stop-hook seen-set — sorted+deduped so membership
+      // (grep -vxF) is stable: re-arm keys on a never-seen pair, not on the cumulative set changing.
+      const pairs = [
+        ...new Set(smellSources(entries, cfg.boundaries).map((s) => `${s.label}\t${s.path}`)),
+      ].sort();
+      if (pairs.length) console.log(pairs.join('\n'));
+    } else {
+      const smells = detectSmells(entries, cfg.boundaries);
+      if (smells.length) console.log(smells.join('\n'));
+    }
   } catch {
     // scan is informational — stay silent on error
   }
@@ -243,7 +293,7 @@ if (invokedDirectly) {
   if (cmd === '--gate') runGate();
   else if (cmd === 'scan') runScan(process.argv.includes('--working') ? 'working' : 'cached');
   else {
-    console.error('Usage: detect.mjs --gate | scan [--working]');
+    console.error('Usage: detect.mjs --gate | scan [--working] [--files]');
     process.exit(2);
   }
 }
