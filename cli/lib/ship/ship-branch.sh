@@ -183,19 +183,27 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
 fi
 
 git -C "$WT" push -u origin "$BR"
-PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ) || {
-  echo "push OK but PR create failed — branch is pushed. Retry:" >&2
-  echo "  gh pr create --repo '$REPO' --base '$BASE_REF' --head '$BR'" >&2
-  exit 1
-}
-echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
 
-# Record what shipped so `devkit reconcile` can later replace these now-stale local copies in
-# the shared tree with the merged-upstream version (no stash/pull). Best-effort: the PR already
-# exists, so a manifest miss only costs a manual reconcile later — it must never unwind a PR.
-# The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
-PR_NUM=${PR_URL##*/}
-[[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
+# Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
+# Open the PR, but a create FAILURE must NOT skip the manifest write below: recording on PR-create
+# (not on push) orphans the pushed branch from reconcile forever on a single gh hiccup (wrong account,
+# transient GraphQL error), so the merged work later lingers as stale local copies. Capture the
+# failure instead of exiting; record the branch first, then surface the failure afterward.
+PR_CREATE_FAILED=
+PR_URL=$( cd "$WT" && gh pr create --repo "$REPO" --base "$BASE_REF" --head "$BR" --title "$TITLE" --body "$BODY" ) || PR_CREATE_FAILED=1
+PR_NUM=""
+if [ -z "$PR_CREATE_FAILED" ]; then
+  echo "$PR_URL"   # surface the PR URL (we captured gh's stdout to recover the PR number below)
+  # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
+  PR_NUM=${PR_URL##*/}
+  [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
+fi
+
+# Record what shipped the instant the PUSH succeeded — independent of `gh pr create` — so `devkit
+# reconcile` can later replace these now-stale local copies in the shared tree with the merged-upstream
+# version (no stash/pull). On a PR-create failure we record pr:null; reconcile self-heals it once a PR
+# exists + merges (it resolves merge state by `gh pr view --head <branch>`, not by the stored number).
+# Best-effort: a manifest miss only costs a manual reconcile later — it must never unwind the push.
 # --git-root "$WT" hashes the just-COMMITTED blobs (what the PR shipped), not $ROOT's working tree —
 # so a parallel agent's edit to a shipped file in this window can't be mis-recorded as the shipped blob.
 # The manifest itself still lands in $ROOT (the persistent shared tree); $WT is removed right after.
@@ -203,6 +211,15 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 node "$SCRIPT_DIR/reconcile-manifest-write.mjs" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "$BASE" --pr "$PR_NUM" -- "${PATHS[@]}" \
   || echo "ship-branch: reconcile manifest not recorded (non-fatal)" >&2
+
+# PR-create failed but the push + manifest record both landed: the branch is recoverable AND known to
+# reconcile. Tell the operator how to open the PR by hand; reconcile cleans the branch once it merges.
+if [ -n "$PR_CREATE_FAILED" ]; then
+  echo "push OK but PR create failed — branch is pushed AND recorded for reconcile." >&2
+  echo "Open the PR by hand (reconcile cleans the branch once it merges):" >&2
+  echo "  gh pr create --repo '$REPO' --base '$BASE_REF' --head '$BR'" >&2
+  exit 1
+fi
 
 # Success: the branch is on the remote with its PR, so the local copy is redundant.
 # Drop it now (worktree first — a branch checked out in a worktree can't be deleted).
