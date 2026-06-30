@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from '../components.mjs';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
 import { isTracked } from '../git-tracked.mjs';
-import { bundledNames, removeManifested } from '../sync-manifest.mjs';
+import { bundledNames, findConflicts, removeManifested } from '../sync-manifest.mjs';
 import { registrationsFor } from './hook-registrations.mjs';
 
 // Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
@@ -36,24 +36,36 @@ const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
 // kept executable (chmod +x) — the .sh/.mjs are invoked directly by the agent harness.
 /**
  * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], skipTracked?: (relPath: string) => boolean }} [opts]
- *   overlay-only: `skipTracked` leaves a git-tracked hook script untouched (C2).
+ * @param {{ dryRun?: boolean, targets?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
+ *   `skipTracked` (overlay-only): leaves a git-tracked hook script untouched (C2). `override(kind, name)`
+ *   (default never): a hook script colliding with the consumer's OWN same-named file (on disk,
+ *   unmanifested, divergent) is PRESERVED unless `override('agent-hook', name)` is true.
  */
 export function syncHookScripts(
   root,
-  { dryRun = false, targets = AGENT_TARGETS, skipTracked } = {},
+  { dryRun = false, targets = AGENT_TARGETS, skipTracked, override = () => false } = {},
 ) {
   const src = join(packageDir(), 'agents-hooks');
   const dirs = hookDirs(targets);
   const rels = readdirSync(src, { withFileTypes: true })
     .filter((e) => e.isFile())
     .map((e) => e.name);
+  const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
+  const prev = readJson(manifestPath);
+  const conflicts = new Set(findConflicts(root, src, rels, dirs, prev));
   /** @type {Record<string,string>} */
   const files = {};
   for (const rel of rels) {
     // Overlay: a hook script git already tracks can't be hidden by .git/info/exclude → skip it (C2).
     if (skipTracked && dirs.some((d) => skipTracked(`${d}/${rel}`))) {
       console.log(`  ! skipping agent-hook "${rel}" — git-tracked (left untouched)`);
+      continue;
+    }
+    // Non-devkit collision: leave the consumer's own hook script untouched (+ out of the manifest).
+    if (conflicts.has(rel) && !override('agent-hook', rel)) {
+      console.log(
+        `  ! preserving non-devkit agent-hook "${rel}" (left untouched — re-run with --force or select it to overwrite)`,
+      );
       continue;
     }
     const content = readFileSync(join(src, rel));
@@ -65,10 +77,8 @@ export function syncHookScripts(
       chmodSync(dest, 0o755);
     }
   }
-  const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
-  const prev = readJson(manifestPath);
   const unchanged =
     prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
   const manifest = {
@@ -83,6 +93,27 @@ export function syncHookScripts(
   writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
   console.log(`  ✓ synced ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
   return manifest;
+}
+
+/**
+ * The consumer's OWN agent-hook scripts that collide with a devkit-bundled name (on disk,
+ * unmanifested, divergent) — what an interactive `devkit init` lists for the user to pick from.
+ * @param {string} root git root
+ * @param {string[]} [targets] surfaces to check (default both)
+ * @returns {string[]} colliding hook-script filenames
+ */
+export function detectHookConflicts(root, targets = AGENT_TARGETS) {
+  const src = join(packageDir(), 'agents-hooks');
+  const rels = readdirSync(src, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => e.name);
+  return findConflicts(
+    root,
+    src,
+    rels,
+    hookDirs(targets),
+    readJson(join(root, '.devkit', 'agent-hooks-manifest.json')),
+  );
 }
 
 /**
@@ -107,6 +138,7 @@ export function removeHookScripts(
     dryRun,
     dropManifest,
     bundledNames('agents-hooks', (e) => e.isFile()),
+    join(packageDir(), 'agents-hooks'),
   );
 }
 

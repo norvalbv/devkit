@@ -363,28 +363,32 @@ function resolveOverlayFallow(cwd, dryRun) {
 // overlay: its hooks resolve a node_modules/@norvalbv/devkit path the package-less overlay lacks (C1).
 // Reason: flat overlay agent-surface orchestration: ordered `if (sel.x) sync + derive excludes` steps (skills → agents → hook scripts → registrations) mirroring installAgentSurfaces; high branch COUNT, each trivial, no nesting
 // fallow-ignore-next-line complexity
-function installOverlayAgentSurfaces(gitRoot, sel, dryRun) {
+function installOverlayAgentSurfaces(gitRoot, sel, dryRun, force = false) {
   const targets = sel.agentTargets ?? AGENT_TARGETS;
   const skipTracked = (rel) => isTracked(gitRoot, rel);
+  // Overlay has no interactive picker; --force is its all-or-nothing override of a non-devkit
+  // collision (matches the standalone CLI), else default-preserve. (A git-TRACKED collision is still
+  // left untouched by skipTracked regardless — exclude can't hide a tracked edit.)
+  const override = force ? () => true : undefined;
   const args = dryRun ? ['--dry-run'] : [];
   const excl = [];
   if (sel.skills) {
     console.log('  skills');
-    const m = syncSkills(args, gitRoot, targets, { skipTracked });
+    const m = syncSkills(args, gitRoot, targets, { skipTracked, override });
     for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
       for (const t of targets) excl.push(`.${t}/skills/${name}/`);
     if (Object.keys(m.files).length) excl.push('.devkit/skills-manifest.json');
   }
   if (sel.agents) {
     console.log('  agents');
-    const m = syncAgents(args, gitRoot, targets, { skipTracked });
+    const m = syncAgents(args, gitRoot, targets, { skipTracked, override });
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/agents/${rel}`);
     if (Object.keys(m.files).length) excl.push('.devkit/agents-manifest.json');
   }
   if (sel.agentHooks) {
     console.log('  agent-hook scripts');
-    const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked });
+    const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked, override });
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
     if (Object.keys(m.files).length) excl.push('.devkit/agent-hooks-manifest.json');
@@ -464,7 +468,7 @@ export function installOverlay(cwd, sel, stack, force, dryRun) {
 
   // agent-half (skills/agents/agentHooks) → the git root's surfaces (skipping anything git tracks),
   // each path hidden via .git/info/exclude. Paths are git-root-relative (repo-wide, no pkgRel pfx).
-  for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun)) excludes.add(rel);
+  for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun, force)) excludes.add(rel);
 
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
