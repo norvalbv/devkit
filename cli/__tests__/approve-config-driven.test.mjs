@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rootRegistry } from './_helpers.mjs';
+import { gitRepoFixtures } from './_helpers.mjs';
 
 const APPROVE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -18,26 +18,11 @@ const APPROVE = join(
   'approve.sh',
 );
 
-const { mkTmp, cleanup } = rootRegistry();
+const { repo, stage, cleanup, git, mkTmp } = gitRepoFixtures('approve-');
 afterEach(cleanup);
 
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
-
-function repo(config) {
-  const root = mkTmp('approve-');
-  if (config) writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config));
-  git(root, 'init', '-q');
-  return root;
-}
-
-const stage = (root, rel, body = 'export {};\n') => {
-  mkdirSync(join(root, dirname(rel)), { recursive: true });
-  writeFileSync(join(root, rel), body);
-  git(root, 'add', '-A');
-};
-
-// Run from `cwd` (defaults to the repo root) — devkit runs the gates from the PACKAGE dir, so a
-// monorepo package is exercised by pointing cwd at it.
+// Run from `cwd` (defaults to the repo root — the DEFAULT single-config layout). An opt-in
+// per-package monorepo is exercised by pointing cwd at the package dir.
 function run(root, cwd = root) {
   try {
     return { code: 0, out: execFileSync('bash', [APPROVE], { cwd, encoding: 'utf8' }) };
@@ -85,8 +70,26 @@ describe('commit-guard approve.sh — config-driven roots (no frink hardcoding)'
     expect(r.out).toContain('commit-guard');
   });
 
-  // Monorepo: the package's guard.config.json lives in its subdir with PACKAGE-relative scanRoots;
-  // devkit runs the gate from the package dir, so config + git pathspecs both resolve there.
+  it('present-but-invalid scanRoots → warns + scans ALL staged files (loud, never a silent skip)', () => {
+    const root = repo({ scanRoots: 'app' }); // a string, not a non-empty string array
+    stage(root, 'app/x.ts');
+    const r = run(root);
+    expect(r.out).toContain('invalid'); // stderr warning surfaces the bad config
+    expect(r.code).toBe(1); // scan-all → source change → marker missing → blocks
+    expect(r.out).toContain('commit-guard');
+  });
+
+  it('present-but-invalid review.backendRoots → warns but does NOT wrongly trigger reviewers', () => {
+    const root = repo({ scanRoots: ['app'], review: { backendRoots: 'server' } });
+    stage(root, 'app/x.ts');
+    const r = run(root);
+    expect(r.out).toContain('invalid');
+    expect(r.out).not.toContain('api-security'); // invalid → empty → backend reviewers correctly skipped
+  });
+
+  // Per-package monorepo (OPT-IN, not the default): each package keeps its OWN guard.config.json in
+  // its subdir with package-relative scanRoots, and the gate runs from the package dir, so config +
+  // git pathspecs both resolve there. The default single-root-config layout is covered above.
   describe('monorepo (package in a subdir, run from the package dir)', () => {
     function monorepo() {
       const root = mkTmp('approve-mono-');

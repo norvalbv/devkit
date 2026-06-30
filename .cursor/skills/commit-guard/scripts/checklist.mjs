@@ -22,14 +22,29 @@ const CHECKLIST_PATH = '.claude/.pre-commit-review.json';
 
 const log = console.log;
 
+const isNonEmptyStringArray = (v) =>
+  Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string' && x.length > 0);
+
 // First-level source roots to review — from guard.config.json (NOT hardcoded), so the checklist
-// scopes to ANY repo's layout. No config → all staged files (the gate never silently no-ops).
+// scopes to ANY repo's layout. No/unreadable config or an absent scanRoots → all staged files (the
+// gate never silently no-ops). A PRESENT but invalid scanRoots (not a non-empty array of non-empty
+// strings) warns loudly and falls back to scan-all, rather than letting a bad entry crash the git
+// call into an empty result — which would silently wave the commit through.
 function scanRoots() {
+  let c;
   try {
-    const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-    if (Array.isArray(c.scanRoots) && c.scanRoots.length > 0) return c.scanRoots;
-  } catch {}
-  return ['.'];
+    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
+  } catch {
+    return ['.'];
+  }
+  if (c.scanRoots === undefined) return ['.'];
+  if (!isNonEmptyStringArray(c.scanRoots)) {
+    console.error(
+      '⚠️  commit-guard: ignoring invalid `scanRoots` in guard.config.json (expected a non-empty array of non-empty strings) — scanning all staged files instead.',
+    );
+    return ['.'];
+  }
+  return c.scanRoots;
 }
 
 function getStagedFiles() {
@@ -153,7 +168,9 @@ function finalize() {
   } catch {
     // approve.sh exits non-zero when OTHER reviewers are still pending — propagate it (don't swallow)
     // so the commit isn't waved through. The commit-guard marker above stays (commit-guard itself passed).
-    log('❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.');
+    log(
+      '❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.',
+    );
     process.exit(1);
   }
 }
