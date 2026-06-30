@@ -14,7 +14,7 @@ Dispatch the `commit-guard` agent before committing. It runs semantic search que
 - User says "ready to commit", "commit this", or stages changes under your `scanRoots` (the source roots declared in `guard.config.json`)
 - User adds new utilities, hooks, or components that might duplicate existing ones
 
-**Monorepo:** gates run from the **package directory**, not the git root — the husky guard block does `( cd "<pkgRel>" … )`, so `guard.config.json` and git pathspecs both resolve to that package and sibling packages don't cross-trigger. Read config and run scripts relative to the package dir, not the repo root.
+**Default (single root `guard.config.json`):** the gates run from the **repo root** — read config and run the scripts relative to the root, where `guard.config.json` lives. **Per-package monorepo (only if you set it up):** when each package keeps its **own** `guard.config.json` with package-relative `scanRoots` and the husky guard block does `( cd "<pkgRel>" … )`, config and git pathspecs both resolve to that package and siblings don't cross-trigger. Do **not** `cd` into a package when the repo uses one root config — that breaks `scanRoots` resolution.
 
 ## Scripts
 
