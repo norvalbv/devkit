@@ -52,7 +52,7 @@ export function syncHookScripts(
     .map((e) => e.name);
   const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
   const prev = readJson(manifestPath);
-  const conflicts = new Set(findConflicts(root, src, rels, dirs, prev));
+  const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
   /** @type {Record<string,string>} */
   const files = {};
   for (const rel of rels) {
@@ -84,6 +84,8 @@ export function syncHookScripts(
   const manifest = {
     devkitRef,
     generatedAt: unchanged ? prev.generatedAt : new Date().toISOString(),
+    // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
+    targets: [...targets],
     files,
   };
   if (dryRun) {
@@ -111,7 +113,8 @@ export function detectHookConflicts(root, targets = AGENT_TARGETS) {
     root,
     src,
     rels,
-    hookDirs(targets),
+    targets,
+    'hooks',
     readJson(join(root, '.devkit', 'agent-hooks-manifest.json')),
   );
 }

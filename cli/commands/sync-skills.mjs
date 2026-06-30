@@ -74,7 +74,8 @@ export function syncSkills(
     cwd,
     skillsSrc,
     [...new Set(rels.map((r) => r.split('/')[0]))],
-    targetDirs,
+    targets,
+    'skills',
     prev,
   )) {
     if (skipNames.has(name) || override('skill', name)) continue;
@@ -111,7 +112,9 @@ export function syncSkills(
   const unchanged =
     prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
   const generatedAt = unchanged ? prev.generatedAt : new Date().toISOString();
-  const manifest = { devkitRef, generatedAt, files };
+  // `targets` records WHICH surfaces devkit wrote to, so findConflicts can tell a name it owns on
+  // one surface from a same-named divergent asset on another (surface-aware ownership).
+  const manifest = { devkitRef, generatedAt, targets: [...targets], files };
 
   if (dryRun) {
     console.log(`  [dry-run] write .devkit/skills-manifest.json (${rels.length} files)`);
@@ -133,12 +136,12 @@ export function syncSkills(
 export function detectSkillConflicts(root, targets = AGENT_TARGETS) {
   const skillsSrc = join(packageDir(), 'skills');
   const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
-  const targetDirs = targets.map((t) => `.${t}/skills`);
   return findConflicts(
     root,
     skillsSrc,
     names,
-    targetDirs,
+    targets,
+    'skills',
     readJson(join(root, '.devkit', 'skills-manifest.json')),
   );
 }

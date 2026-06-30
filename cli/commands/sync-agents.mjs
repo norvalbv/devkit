@@ -50,7 +50,7 @@ export function syncAgents(
   // findConflicts: a same-named agent the consumer authored (unmanifested + divergent) is PRESERVED.
   const manifestPath = join(cwd, '.devkit', 'agents-manifest.json');
   const prev = readJson(manifestPath);
-  const conflicts = new Set(findConflicts(cwd, agentsSrc, rels, targetDirs, prev));
+  const conflicts = new Set(findConflicts(cwd, agentsSrc, rels, targets, 'agents', prev));
 
   /** @type {Record<string, string>} */
   const files = {};
@@ -90,7 +90,8 @@ export function syncAgents(
   const unchanged =
     prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
   const generatedAt = unchanged ? prev.generatedAt : new Date().toISOString();
-  const manifest = { devkitRef, generatedAt, files };
+  // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
+  const manifest = { devkitRef, generatedAt, targets: [...targets], files };
 
   if (dryRun) {
     console.log(`  [dry-run] write .devkit/agents-manifest.json (${rels.length} files)`);
@@ -111,12 +112,12 @@ export function syncAgents(
  */
 export function detectAgentConflicts(root, targets = AGENT_TARGETS) {
   const agentsSrc = join(packageDir(), 'agents');
-  const targetDirs = targets.map((t) => `.${t}/agents`);
   return findConflicts(
     root,
     agentsSrc,
     listAgents(agentsSrc),
-    targetDirs,
+    targets,
+    'agents',
     readJson(join(root, '.devkit', 'agents-manifest.json')),
   );
 }

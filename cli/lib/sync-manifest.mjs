@@ -28,9 +28,13 @@ export function ownedNames(manifest) {
 
 // Recursively compare an on-disk entry to a bundle entry: both must exist, be the same kind, and —
 // for a dir — hold the SAME child names whose subtrees all match; for a file — the same bytes. Any
-// extra/missing child or byte diff ⇒ false. A symlink (kind mismatch vs a real dir/file) ⇒ false.
+// extra/missing child or byte diff ⇒ false.
 function entryMatches(onDisk, src) {
   if (!existsSync(onDisk) || !existsSync(src)) return false;
+  // A symlink is never a byte-identical copy of a bundled regular file/dir (devkit ships neither as
+  // a symlink). Reject it BEFORE the sha256 below, which follows the link and would otherwise hash
+  // the target and mis-classify a symlinked asset as bundle-owned.
+  if (lstatSync(onDisk).isSymbolicLink() || lstatSync(src).isSymbolicLink()) return false;
   const onDiskDir = lstatSync(onDisk).isDirectory();
   if (onDiskDir !== lstatSync(src).isDirectory()) return false;
   if (!onDiskDir) return sha256(onDisk) === sha256(src);
@@ -53,22 +57,30 @@ export function matchesBundle(root, dir, name, srcDir) {
 
 /**
  * The names that are the USER's own (preserve unless overridden): present under some target surface,
- * NOT manifest-owned, and DIVERGENT from the bundle. An absent or byte-identical copy is not a conflict.
+ * DIVERGENT from the bundle, and NOT manifest-owned ON THAT SURFACE. An absent or byte-identical copy
+ * is not a conflict. Ownership is surface-aware: a manifest proves devkit wrote a name only to the
+ * surfaces it recorded (`manifest.targets`), so a same-named divergent asset on a NEWLY-enabled
+ * surface is still treated as the consumer's (a legacy manifest without `targets` is read as owning
+ * every surface — the pre-existing behaviour, no regression; the guard activates after the next sync).
  * @param {string} root consumer/git root
  * @param {string} srcDir devkit's bundle dir for this kind
  * @param {string[]} names the bundle's top-level names (what devkit would write)
- * @param {string[]} targetDirs surface dirs (e.g. ['.claude/skills', '.cursor/skills'])
+ * @param {string[]} targets surface names (e.g. ['claude', 'cursor'])
+ * @param {string} subdir the kind's surface subdir ('skills' | 'agents' | 'hooks')
  * @param {object|null} manifest the prior <kind>-manifest.json (or null)
  * @returns {string[]} conflict names
  */
-export function findConflicts(root, srcDir, names, targetDirs, manifest) {
+export function findConflicts(root, srcDir, names, targets, subdir, manifest) {
   const owned = ownedNames(manifest);
-  return names.filter(
-    (name) =>
-      !owned.has(name) &&
-      targetDirs.some(
-        (dir) => existsSync(join(root, dir, name)) && !matchesBundle(root, dir, name, srcDir),
-      ),
+  const ownedTargets = manifest?.targets ? new Set(manifest.targets) : null;
+  return names.filter((name) =>
+    targets.some((t) => {
+      const dir = `.${t}/${subdir}`;
+      if (!existsSync(join(root, dir, name)) || matchesBundle(root, dir, name, srcDir))
+        return false;
+      // diverges from the bundle → the consumer's, UNLESS devkit owns this name ON THIS surface
+      return !(owned.has(name) && (!ownedTargets || ownedTargets.has(t)));
+    }),
   );
 }
 
