@@ -51,7 +51,7 @@ commit_with_gate_capture() {
   local rc=${PIPESTATUS[0]}
   set -e
 
-  if [ "$rc" -eq 124 ]; then
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     echo "ship: gate chain timed out after ${secs}s — likely a hung gate; the ship worktree is being cleaned up." >&2
   elif [ "$rc" -eq 0 ]; then
     {
