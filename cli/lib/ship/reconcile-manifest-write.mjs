@@ -3,10 +3,12 @@
  * Records what a `devkit ship` commit sent to its PR, so `devkit reconcile` can later replace the
  * now-stale local copies with the merged-upstream version (no stash/pull pain).
  *
- * Invoked by ship-branch.sh AFTER `gh pr create` succeeds (the PR is the thing reconcile waits on), and by
- * reship.sh with --merge after a `devkit ship --pr` re-push (extends the SAME branch's entry so a multi-commit
- * PR records ALL its paths, not just the first commit's). Kept as its own script — not inlined in the shell —
- * so the real blob/op classification is unit-testable WITHOUT gh or a network (the dry-run path skips gh).
+ * Invoked by ship-branch.sh the instant `git push` succeeds — independent of `gh pr create` — so a PR-create
+ * hiccup can't orphan the pushed branch from reconcile (a create failure records pr:null, which reconcile
+ * self-heals once a PR exists + merges via its `gh pr view --head <branch>` lookup). Also invoked by reship.sh
+ * with --merge after a `devkit ship --pr` re-push (extends the SAME branch's entry so a multi-commit PR records
+ * ALL its paths, not just the first commit's). Kept as its own script — not inlined in the shell — so the real
+ * blob/op classification is unit-testable WITHOUT gh or a network (the dry-run path skips gh).
  *
  * Write side of the ship↔reconcile contract. The READ side is `devkit reconcile` (../reconcile.mjs).
  * The contract is the manifest JSON below + the rule that BOTH sides id a file by
