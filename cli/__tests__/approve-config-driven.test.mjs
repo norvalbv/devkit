@@ -87,6 +87,22 @@ describe('commit-guard approve.sh — config-driven roots (no frink hardcoding)'
     expect(r.out).not.toContain('api-security'); // invalid → empty → backend reviewers correctly skipped
   });
 
+  it('the invalid-config warning names the offending field, not a wrong scan-all claim', () => {
+    const root = repo({ review: { backendRoots: 'server' } }); // invalid backend lane
+    stage(root, 'x.ts');
+    const r = run(root);
+    expect(r.out).toContain('review.backendRoots'); // caller-specific label
+    expect(r.out).not.toContain('scanning all staged files'); // that claim is false for this lane
+  });
+
+  it('empty roots array is a deliberate unset → no warning (scanRoots falls back to scan-all)', () => {
+    const root = repo({ scanRoots: [] });
+    stage(root, 'app/x.ts');
+    const r = run(root);
+    expect(r.out).not.toContain('invalid'); // [] is not "invalid"
+    expect(r.code).toBe(1); // empty scanRoots → scan all → source change → blocks
+  });
+
   // Per-package monorepo (OPT-IN, not the default): each package keeps its OWN guard.config.json in
   // its subdir with package-relative scanRoots, and the gate runs from the package dir, so config +
   // git pathspecs both resolve there. The default single-root-config layout is covered above.
