@@ -4,7 +4,7 @@
  * is never deleted by clean's no-manifest fallback. devkit's own copies (manifest-owned, or
  * byte-identical to the bundle) keep overwriting so a tag bump still propagates.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
@@ -12,7 +12,7 @@ import { detectAgentConflicts } from '../commands/sync-agents.mjs';
 import { detectSkillConflicts } from '../commands/sync-skills.mjs';
 import { defaultSelection } from '../lib/components.mjs';
 import { detectHookConflicts, syncHookScripts } from '../lib/install/install-hooks.mjs';
-import { removeSkills } from '../lib/sync-manifest.mjs';
+import { matchesBundle, removeSkills } from '../lib/sync-manifest.mjs';
 import { tmpRepos } from './_helpers.mjs';
 
 const { tmpRepo, cleanup } = tmpRepos('conflict-');
@@ -312,5 +312,49 @@ describe('edge cases', () => {
 
     expect(existsSync(join(root, '.claude', 'skills', 'brainstorming'))).toBe(true); // kept (diverges via extra file)
     expect(existsSync(NOTES(root))).toBe(true);
+  });
+
+  it('ownership is surface-aware: a name owned on .claude does NOT mask a divergent .cursor asset (C2)', async () => {
+    const root = tmpRepo();
+    const cursorSkill = join(root, '.cursor', 'skills', 'brainstorming', 'SKILL.md');
+    // 1) devkit syncs to .claude only → manifest records targets ['claude'] + owns "brainstorming".
+    await applyInit(root, {
+      stack: 'generic',
+      selection: only({ skills: true }),
+      interactive: false,
+    });
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit', 'skills-manifest.json'), 'utf8')).targets,
+    ).toEqual(['claude']);
+
+    // 2) the consumer later authors their OWN brainstorming on the .cursor surface.
+    mkdirSync(join(root, '.cursor', 'skills', 'brainstorming'), { recursive: true });
+    writeFileSync(cursorSkill, '# mine on cursor\n');
+    // it's correctly flagged as the user's — NOT masked by the .claude manifest entry
+    expect(detectSkillConflicts(root, ['cursor'])).toContain('brainstorming');
+
+    // 3) re-run with BOTH surfaces → the .cursor asset must be preserved, not clobbered.
+    await applyInit(root, {
+      stack: 'generic',
+      selection: only({ skills: true, agentTargets: ['claude', 'cursor'] }),
+      interactive: false,
+    });
+    expect(readFileSync(cursorSkill, 'utf8')).toBe('# mine on cursor\n');
+  });
+});
+
+describe('matchesBundle treats a symlink as a mismatch (C3)', () => {
+  it('does not follow a file symlink into sha256 (a symlinked asset is never bundle-owned)', () => {
+    const root = tmpRepo();
+    // a fake bundle dir with one file + an on-disk copy that is a SYMLINK to byte-identical content
+    const src = join(root, 'bundle');
+    mkdirSync(src, { recursive: true });
+    writeFileSync(join(src, 'x.sh'), 'echo hi\n');
+    mkdirSync(join(root, '.claude', 'hooks'), { recursive: true });
+    writeFileSync(join(root, 'real-x.sh'), 'echo hi\n'); // identical bytes
+    symlinkSync(join(root, 'real-x.sh'), join(root, '.claude', 'hooks', 'x.sh'));
+
+    // byte-identical via the link, but a symlink is NOT a bundle-owned regular file → mismatch
+    expect(matchesBundle(root, '.claude/hooks', 'x.sh', src)).toBe(false);
   });
 });
