@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { detectSmells, gateVerdict, parseVerdict } from '../detect.mjs';
+import {
+  depChangedKeys,
+  detectSmells,
+  gateVerdict,
+  parseVerdict,
+  smellSources,
+} from '../detect.mjs';
 
 const DETECT = fileURLToPath(new URL('../detect.mjs', import.meta.url));
 
@@ -102,6 +108,71 @@ describe('detectSmells', () => {
       BOUNDARIES,
     );
     expect(s).toEqual(['dep-change']);
+  });
+});
+
+// The Stop-hook seen-set re-arms iff a never-seen (label, contributing-file) pair appears. These
+// pure tests are load-bearing: the hook is just `grep -vxF` plumbing over smellSources' output.
+describe('smellSources (seen-set pairs)', () => {
+  const pairs = (e, b = BOUNDARIES) => smellSources(e, b).map((s) => `${s.label}\t${s.path}`);
+
+  it('emits one dep-change pair per CHANGED dependency NAME, not per package.json (C2)', () => {
+    // Two distinct dep decisions on the same package.json stay distinguishable by name.
+    expect(
+      smellSources([entry({ path: 'package.json', depKeys: ['lodash'] })], BOUNDARIES),
+    ).toEqual([{ label: 'dep-change', path: 'lodash' }]);
+  });
+
+  it('re-arms on a NEW pair, never on the cumulative set (anti-nag + new-decision)', () => {
+    // Turn 5 — decision #1: a lodash bump.
+    const t5 = pairs([entry({ path: 'package.json', depKeys: ['lodash'] })]);
+    // Same decision, later turn: also touched an unrelated file (not a smell source). Pairs are
+    // byte-identical → already in the seen-set → grep -vxF finds nothing → NO re-nudge.
+    const t9 = pairs([
+      entry({ path: 'package.json', depKeys: ['lodash'] }),
+      entry({ path: 'src/renderer/whatever.tsx' }),
+    ]);
+    expect(t9).toEqual(t5);
+    // Turn 30 — decision #2: a distinct legacy deletion. Exactly one NEW pair; #1 stays snoozed.
+    const t30 = pairs([
+      entry({ path: 'package.json', depKeys: ['lodash'] }),
+      entry({ status: 'D', path: 'src/main/old-module.ts', deleted: 150 }),
+    ]);
+    expect(t30.filter((p) => !t5.includes(p))).toEqual(['legacy-deletion\tsrc/main/old-module.ts']);
+  });
+
+  it('a distinct second dep bump is a fresh pair (the dep-collapse ceiling is lifted)', () => {
+    const first = pairs([entry({ path: 'package.json', depKeys: ['lodash'] })]);
+    const second = pairs([entry({ path: 'package.json', depKeys: ['lodash', 'axios'] })]);
+    expect(second.filter((p) => !first.includes(p))).toEqual(['dep-change\taxios']);
+  });
+
+  it('its distinct labels equal detectSmells (one source of truth)', () => {
+    const e = [
+      entry({ path: 'src/main/foo.ts' }),
+      entry({ path: 'socket-server/bar.ts' }),
+      entry({ status: 'D', path: 'src/old.ts', deleted: 240 }),
+    ];
+    expect([...new Set(smellSources(e, BOUNDARIES).map((s) => s.label))].sort()).toEqual(
+      detectSmells(e, BOUNDARIES).sort(),
+    );
+  });
+});
+
+describe('depChangedKeys', () => {
+  it('returns the dep names whose spec differs (added, removed, or version-bumped)', () => {
+    expect(
+      depChangedKeys(
+        { dependencies: { a: '1', b: '1' } },
+        { dependencies: { a: '1', b: '2' }, devDependencies: { c: '1' } },
+      ).sort(),
+    ).toEqual(['b', 'c']);
+  });
+
+  it('is empty when no dependency spec changed (a non-dep package.json edit)', () => {
+    expect(
+      depChangedKeys({ dependencies: { a: '1' } }, { dependencies: { a: '1' }, name: 'y' }),
+    ).toEqual([]);
   });
 });
 
@@ -239,5 +310,15 @@ describe('--gate (integration, real git repo)', () => {
     // deliberately NOT staged
     expect(scan()).toBe(''); // cached scan: nothing staged
     expect(scan(['--working'])).toContain('dep-change'); // working scan: sees the unstaged change
+  });
+
+  it('scan --working --files emits (label, dep-name) pairs for the Stop-hook seen-set', () => {
+    writeFileSync(
+      join(repo, 'package.json'),
+      '{\n  "name": "x",\n  "dependencies": { "a": "1.0.0", "b": "2.0.0" }\n}\n',
+    );
+    // --files surfaces the changed dependency NAME (b), not "package.json" — so a later, distinct
+    // dep decision is a fresh pair rather than colliding with this one.
+    expect(scan(['--working', '--files'])).toBe('dep-change\tb');
   });
 });
