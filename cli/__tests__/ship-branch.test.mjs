@@ -121,6 +121,62 @@ function dropWorktree(git, stderr) {
   }
 }
 
+/**
+ * A ship repo whose `origin` is a LOCAL bare repo at an ABSOLUTE `…/github.com/acme/app.git` path: the
+ * `…github.com/` prefix makes ship-branch's origin→owner/repo sed resolve REPO to `acme/app` (a plain
+ * bare path fails its shape check), while the absolute path stays reachable from BOTH ROOT (ls-remote)
+ * and the ephemeral $WT (push) with no network. Drives the real non-dry push + manifest path offline.
+ */
+function seedShipRepoLocalRemote() {
+  const ghRoot = mkdtempSync(join(tmpdir(), 'shipgh-'));
+  dirs.push(ghRoot);
+  const bare = join(ghRoot, 'github.com', 'acme', 'app.git');
+  mkdirSync(join(ghRoot, 'github.com', 'acme'), { recursive: true });
+  execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
+  return { ...seedShipRepo({ origin: bare }), bare };
+}
+
+/** A `gh` stub on a fresh PATH dir: runs `prBody` for `gh pr …`, exits 0 for anything else (clears the
+ * `command -v gh` preflight). Returns the dir to prepend to PATH. */
+function ghStub(prBody) {
+  const stubBin = mkdtempSync(join(tmpdir(), 'ship-bin-'));
+  dirs.push(stubBin);
+  writeFileSync(
+    join(stubBin, 'gh'),
+    `#!/bin/sh\ncase "$1" in\n  pr) ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
+  );
+  chmodSync(join(stubBin, 'gh'), 0o755);
+  return stubBin;
+}
+
+/** True iff branch `br` exists locally in repo dir (via the seedShipRepo `git` helper). */
+function localBranchExists(git, br) {
+  try {
+    return Boolean(git(['rev-parse', '--verify', '--quiet', br], { stdio: 'pipe' }).trim());
+  } catch {
+    return false; // rev-parse --verify exits non-zero when the ref is absent
+  }
+}
+
+/** The parsed reconcile manifest written into repo `dir`. */
+function manifestOf(dir) {
+  return JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
+}
+
+/** True iff branch `br` exists on the bare remote at `bare`. */
+function remoteBranchExists(bare, br) {
+  try {
+    return Boolean(
+      execFileSync('git', ['-C', bare, 'rev-parse', '--verify', '--quiet', br], {
+        env: { ...process.env, ...GIT_ENV },
+        encoding: 'utf8',
+      }).trim(),
+    );
+  } catch {
+    return false;
+  }
+}
+
 describe('ship-branch.sh — origin → owner/repo resolution (the fork-upstream bug)', () => {
   const urls = [
     ['custom SSH host alias', 'git@github.com-personal:acme/app.git', 'acme/app'],
@@ -242,6 +298,88 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(() =>
       git(['rev-parse', '--verify', '--quiet', 'feat/wt-fail'], { stdio: 'ignore' }),
     ).toThrow();
+  });
+
+  // push OK but `gh pr create` fails (the wrong-gh-account bug, frink#28): the branch is live on the
+  // remote, so the manifest MUST be recorded the instant the push succeeds — recording on PR-create
+  // instead would orphan the pushed branch from `devkit reconcile` forever. pr:null is fine: reconcile
+  // self-heals it by resolving merge state via `gh pr view --head <branch>` once a PR exists + merges.
+  it('records the branch (pr:null) the instant push succeeds, even when gh pr create fails', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote(); // REPO resolves to acme/app, offline push
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const stubBin = ghStub('exit 1'); // gh pr create FAILS (preflight `command -v gh` still passes)
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/pr-fail', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${process.env.PATH}` },
+    });
+
+    expect(r.status, r.stderr).not.toBe(0); // PR create failed → ship still surfaces the failure
+    expect(r.stderr).toMatch(/pushed AND recorded for reconcile/); // the louder push-OK/PR-fail warning
+
+    // The branch is recorded with pr:null + full fresh-entry metadata (reconcile heals the number later).
+    const e = manifestOf(dir).branches['feat/pr-fail'];
+    expect(e, 'branch must be recorded the instant the push succeeds').toBeTruthy();
+    expect(e.prNumber).toBe(null);
+    expect(e.repo).toBe('acme/app');
+    expect(e.baseRef).toBe('work');
+    expect(e.paths.find((p) => p.path === 'note.txt')).toMatchObject({ op: 'add' });
+
+    // Branch kept locally (recoverable for the manual PR-create) AND live on the bare remote.
+    expect(localBranchExists(git, 'feat/pr-fail')).toBe(true);
+    expect(remoteBranchExists(bare, 'feat/pr-fail')).toBe(true);
+  });
+
+  // The success branch of the same reorder (push OK + PR-create OK): the manifest must carry the REAL
+  // PR number and the local branch + worktree must be cleaned up. Previously had no integration coverage.
+  it('on push + PR-create success, records the real PR number and cleans up the local branch', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const stubBin = ghStub('echo "https://github.com/acme/app/pull/42"'); // gh pr create SUCCEEDS
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ok', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${process.env.PATH}` },
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/pull\/42/); // the PR URL stays the only stdout line (the agent-facing stream)
+
+    const e = manifestOf(dir).branches['feat/ok'];
+    expect(e.prNumber).toBe(42); // the parsed PR number, not null
+    expect(e.repo).toBe('acme/app');
+    expect(e.paths.find((p) => p.path === 'note.txt')).toMatchObject({ op: 'add' });
+
+    // Full success → the redundant local branch is dropped; the work lives on the remote with its PR.
+    expect(localBranchExists(git, 'feat/ok')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/ok')).toBe(true);
+  });
+
+  // A 0-exit `gh pr create` that prints no parseable URL (e.g. it writes the URL to stderr) must NOT be
+  // mistaken for the create-failure path: the ship still succeeds and cleans up, recording pr:null —
+  // which reconcile self-heals via its `gh pr view --head <branch>` lookup. Guards the exit-code vs
+  // empty-PR_NUM distinction the reorder introduced.
+  it('treats a 0-exit gh with no parseable URL as success: records pr:null and still cleans up', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const stubBin = ghStub('exit 0'); // success, but empty stdout → PR_NUM unparseable
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/empty-url', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${process.env.PATH}` },
+    });
+
+    expect(r.status, r.stderr).toBe(0); // 0-exit gh ≠ failure path
+    expect(r.stderr).not.toMatch(/PR create failed/); // no false warning, no exit 1
+    expect(manifestOf(dir).branches['feat/empty-url'].prNumber).toBe(null); // unparseable URL → pr:null
+    expect(localBranchExists(git, 'feat/empty-url')).toBe(false); // success → cleaned up
+    expect(remoteBranchExists(bare, 'feat/empty-url')).toBe(true);
   });
 
   // commit-with-gate-capture.sh: the worktree commit's hook output is captured to a per-branch log so
