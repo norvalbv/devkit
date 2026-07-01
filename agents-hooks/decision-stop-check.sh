@@ -39,14 +39,17 @@ REPO_KEY=$(pwd -P | cksum | cut -d' ' -f1)
 SNOOZE_DIR="${TMPDIR:-/tmp}/devkit-decision-snooze"
 SEEN="$SNOOZE_DIR/${REPO_KEY}-${SID:-unknown}"
 
-# Resolve the decisions-CLI bin: prefer the devkit-installed bin, else a local node_modules bin, else
-# skip silently (devkit not installed → this hook is a no-op). NO `bunx` fallback: on a machine without
-# devkit, `bunx guard-decisions` would try to FETCH from the registry (a network stall/error, and
-# @norvalbv/devkit isn't on npm anyway) — turning the intended silent no-op into a blocked stop.
-if command -v guard-decisions &>/dev/null; then
-  DECISIONS="guard-decisions"
-elif [ -x "./node_modules/.bin/guard-decisions" ]; then
+# Resolve the decisions-CLI bin: prefer the repo-local pinned bin (a consumer that vendors devkit as a
+# dependency), else the global on PATH (a consumer that pins via a global install + config devkitRef),
+# else skip silently (devkit not installed → this hook is a no-op). LOCAL-FIRST so a stale global bin
+# can't shadow a repo's pinned copy — an older global missing the `--files` flag would emit nothing and
+# silently suppress every nudge. NO `bunx` fallback: on a machine without devkit, `bunx guard-decisions`
+# would try to FETCH from the registry (a network stall/error, and @norvalbv/devkit isn't on npm anyway)
+# — turning the intended silent no-op into a blocked stop.
+if [ -x "./node_modules/.bin/guard-decisions" ]; then
   DECISIONS="./node_modules/.bin/guard-decisions"
+elif command -v guard-decisions &>/dev/null; then
+  DECISIONS="guard-decisions"
 else
   exit 0
 fi
