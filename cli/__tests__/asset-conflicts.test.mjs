@@ -8,8 +8,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mjs';
-import { detectAgentConflicts } from '../commands/sync-agents.mjs';
-import { detectSkillConflicts } from '../commands/sync-skills.mjs';
+import { detectAgentConflicts } from '../commands/sync/sync-agents.mjs';
+import { detectSkillConflicts } from '../commands/sync/sync-skills.mjs';
 import { defaultSelection } from '../lib/components.mjs';
 import { detectHookConflicts, syncHookScripts } from '../lib/install/install-hooks.mjs';
 import { matchesBundle, removeSkills } from '../lib/sync-manifest.mjs';

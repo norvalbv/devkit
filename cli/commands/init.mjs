@@ -69,8 +69,8 @@ import { installGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
-import { detectAgentConflicts, syncAgents } from './sync-agents.mjs';
-import { detectSkillConflicts, syncSkills } from './sync-skills.mjs';
+import { detectAgentConflicts, syncAgents } from './sync/sync-agents.mjs';
+import { detectSkillConflicts, syncSkills } from './sync/sync-skills.mjs';
 
 const INIT_VERSION = 2;
 

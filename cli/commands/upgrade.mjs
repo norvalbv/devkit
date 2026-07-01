@@ -24,8 +24,8 @@ import { syncHookScripts } from '../lib/install/install-hooks.mjs';
 import doctor from './doctor.mjs';
 import { applyInit } from './init.mjs';
 import { computeMigration } from './migrate.mjs';
-import { syncAgents } from './sync-agents.mjs';
-import { syncSkills } from './sync-skills.mjs';
+import { syncAgents } from './sync/sync-agents.mjs';
+import { syncSkills } from './sync/sync-skills.mjs';
 import update, { cmpSemver, DEP, fetchLatestTag, repinPackageJson } from './update.mjs';
 
 export const meta = {

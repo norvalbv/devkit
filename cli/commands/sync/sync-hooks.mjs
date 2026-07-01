@@ -17,10 +17,10 @@
  */
 
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../lib/components.mjs';
-import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { readJson } from '../lib/fs-helpers.mjs';
-import { syncHookScripts } from '../lib/install/install-hooks.mjs';
+import { AGENT_TARGETS } from '../../lib/components.mjs';
+import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { readJson } from '../../lib/fs-helpers.mjs';
+import { syncHookScripts } from '../../lib/install/install-hooks.mjs';
 
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
 function listFlag(args, name) {
