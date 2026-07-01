@@ -187,6 +187,11 @@ const STANDALONE_GATES = {
   decisions: ['guard-decisions', 'detect', '--gate'],
 };
 
+// Structure-lint runs the same way — a global `guard-structure` bin that lints via devkit's OWN
+// eslint + plugin (no consumer eslint/plugin dep). Config-driven stacks only; a no-op (exit 0) when
+// the vendored guard.config declares no grammar trees.
+const STANDALONE_STRUCTURE_GATE = ['guard-structure', 'gate'];
+
 // fail-open helper: run a gate only if its global bin is on PATH (skip silently otherwise), and
 // block the commit ONLY on exit 1 (a real violation). Exit 2 means the gate couldn't run
 // (e.g. no search-code index) → fail-open, same as the package-mode fragments.
@@ -197,10 +202,11 @@ const DK_GATE_HELPER =
 
 /**
  * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
- * NO `bunx`/node_modules. Structure-lint + biome-format are omitted (they need project-local
- * tooling; standalone covers the pure-node ratchet guards). pkgRel cd-wraps for a monorepo.
+ * NO `bunx`/node_modules. biome-format is omitted (needs project-local tooling); structure-lint runs
+ * via the global `guard-structure` bin when `selection.structure` (config-driven stacks — devkit's own
+ * eslint/plugin do the work, so no consumer dep). pkgRel cd-wraps for a monorepo.
  *
- * @param {{guards?:string[]}} selection
+ * @param {{guards?:string[], structure?:boolean}} selection
  * @param {string} [pkgRel]
  * @returns {string}
  */
@@ -212,6 +218,7 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
   for (const id of Object.keys(STANDALONE_GATES)) {
     if (selection.guards?.includes(id)) pieces.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
   }
+  if (selection.structure) pieces.push(`__dk_gate ${STANDALONE_STRUCTURE_GATE.join(' ')}`);
   const body = pieces.join('\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);

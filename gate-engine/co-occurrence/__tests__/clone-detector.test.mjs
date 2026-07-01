@@ -125,6 +125,20 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(run(['scan', '--gate', '--paths', tmp], { JSCPD_BIN: '/nonexistent' }).status).toBe(2);
   });
 
+  it("resolves devkit's OWN bundled jscpd when the consumer has none (no JSCPD_BIN)", () => {
+    // No JSCPD_BIN + no consumer jscpd: the detector must find devkit's own bundled jscpd via its
+    // module-relative candidate paths, so a clone is still detected (exit 1) in a zero-jscpd-dep repo.
+    const env = { ...process.env, MATCHER_CHANGED_FILES: '' };
+    delete env.JSCPD_BIN;
+    let status = 0;
+    try {
+      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', tmp], { env, encoding: 'utf8' });
+    } catch (e) {
+      status = e.status;
+    }
+    expect(status).toBe(1);
+  });
+
   it('--changed scopes to staged: in-scope blocks, out-of-scope clean', () => {
     expect(cloneFile).toBeTruthy();
     expect(

@@ -123,4 +123,35 @@ describe('standalone (no-package) install', () => {
     // Hook recreated by the standalone re-init.
     expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
   });
+
+  it('config-driven structure: zero deps, guard-structure gate wired, stack guard.config vendored, doctor clean', async () => {
+    const root = repo({ name: 'shared', peerDependencies: { react: '^18' }, exports: {} });
+    const pkgBefore = readFileSync(join(root, 'package.json'), 'utf8');
+    await applyInit(root, {
+      stack: 'component-lib',
+      selection: { ...defaultSelection(), skills: false, agents: false },
+      standalone: true,
+      devkitRef: 'v0.6.0',
+    });
+
+    // Still ZERO consumer deps (the whole point).
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(pkgBefore);
+
+    // Structure-lint runs via the global guard-structure bin (devkit's own eslint/plugin) — fail-open.
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).toContain('__dk_gate guard-structure gate');
+
+    // The STACK guard.config (with the `structure` grammar) is vendored, not the generic one.
+    const structure = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).structure;
+    expect((structure?.trees ?? []).map((t) => t.root)).toContain('src');
+
+    // component-lib standalone extends the REACT biome base (S4 parity) — not a false DRIFT.
+    expect(JSON.parse(readFileSync(join(root, 'biome.jsonc'), 'utf8')).extends).toEqual([
+      './.devkit/biome/react.jsonc',
+    ]);
+
+    // doctor is clean (structure-line present, biome react, no pin check).
+    const r = await doctorRun([], root);
+    expect(r).toBe(0);
+  });
 });

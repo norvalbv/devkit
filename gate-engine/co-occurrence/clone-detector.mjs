@@ -32,7 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { loadChangedSet } from './changed-files.mjs';
@@ -60,8 +60,24 @@ const DEFAULTS = {
 // jscpd auto-detects formats by extension; we keep only source code clones.
 const CODE_EXT = /\.(tsx?|jsx?)$/;
 
-// JSCPD_BIN env overrides; default = the consumer's own node_modules (W-3, not __dirname).
-const JSCPD_BIN = process.env.JSCPD_BIN || resolve(repoRoot, 'node_modules/.bin/jscpd');
+// jscpd bin resolution — HOIST-AGNOSTIC. Prefer devkit's OWN bundled jscpd (shipped as an
+// optionalDependency) so a standalone/global consumer needs NO jscpd dep of their own; JSCPD_BIN env
+// wins (tests/custom); the consumer's own node_modules is the last resort (package mode). We probe
+// candidate `.bin` paths rather than `require.resolve('jscpd/package.json')` — jscpd's `exports`
+// blocks that subpath. None found → fall back to the consumer path so a missing binary still fails
+// OPEN (execFileSync throws ENOENT → caught below → exit 2), exactly as before.
+const OWN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'); // gate-engine/co-occurrence → devkit root
+const JSCPD_BIN =
+  // JSCPD_BIN env wins VERBATIM (explicit override — used even if it doesn't exist, so a test can
+  // force the missing-binary fail-open path). Otherwise probe candidates, preferring devkit's OWN
+  // bundled jscpd; fall back to the consumer path so a truly-missing binary still fails OPEN below.
+  process.env.JSCPD_BIN ??
+  [
+    resolve(OWN_ROOT, 'node_modules', '.bin', 'jscpd'), // devkit dogfood tree
+    resolve(OWN_ROOT, '..', '..', '.bin', 'jscpd'), // consumed/global: hoist root beside @norvalbv/devkit
+    resolve(repoRoot, 'node_modules', '.bin', 'jscpd'), // consumer's own (package mode)
+  ].find((p) => existsSync(p)) ??
+  resolve(repoRoot, 'node_modules/.bin/jscpd');
 
 /**
  * Run jscpd over `paths` and return normalised clone pairs.

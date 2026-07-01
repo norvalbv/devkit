@@ -16,7 +16,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
@@ -70,6 +78,13 @@ const INIT_VERSION = 2;
 // next/node-service are deliberately OUT until a template ships for them — listing one here
 // would make init read a non-existent templates/<stack> dir.
 const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
+
+// Config-driven structure stacks — their topology lives in guard.config.json's `structure` block and
+// the folder-structure rule runs from DEVKIT's own eslint via the `guard-structure` bin (no consumer
+// eslint/plugin dep). These get structure-lint even in standalone mode. Electron is EXCLUDED: its
+// preset imports the plugin + @typescript-eslint/parser directly in a consumer eslint.config.mjs and
+// uses eslint/domains.mjs, so it stays package-mode with consumer-side deps.
+const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
 
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
@@ -298,22 +313,26 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
 
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
-function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
+function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
   const pkgPath = join(cwd, 'package.json');
   const pkg = readJson(pkgPath);
   if (!pkg) {
     console.log('  ! no package.json — skipping devDeps/scripts wiring');
     return;
   }
+  // Zero-consumer-dependency model: devkit bundles the gate tools. jscpd is no longer a consumer dep
+  // (the clone gate resolves devkit's OWN bundled jscpd), and the config-driven structure gate runs via
+  // the `guard-structure` bin (devkit's own eslint + plugin). Only ELECTRON keeps consumer-side
+  // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
+  const electronPreset = isStructure && stack === 'electron';
   const devDeps = {
     '@norvalbv/devkit': `git+ssh://git@github.com/norvalbv/devkit.git#${devkitRef}`,
     ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
     ...(sel.husky ? { husky: '^9.1.7' } : {}),
-    ...(sel.guards?.includes('clone') ? { jscpd: '^4.2.4' } : {}),
-    ...(isStructure
+    ...(electronPreset
       ? {
-          eslint: '^9.0.0',
-          'eslint-plugin-project-structure': '^3.0.0',
+          eslint: '^10.0.0',
+          'eslint-plugin-project-structure': '^3.14.3',
           '@typescript-eslint/parser': '^8.0.0',
         }
       : {}),
@@ -324,7 +343,7 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun) {
     ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
       ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
       : {}),
-    ...(isStructure ? { 'lint:structure': 'eslint src' } : {}),
+    ...(electronPreset ? { 'lint:structure': 'eslint src' } : {}),
   };
 
   pkg.devDependencies = pkg.devDependencies ?? {};
@@ -432,9 +451,27 @@ export async function readImportWallExempt(cwd) {
   }
 }
 
-async function runStructureBaselines(cwd, stack, dryRun) {
+// True when a generated structure / import-wall baseline already exists (any `eslint/baselines/*.mjs`
+// except the hand-maintained `exempt.mjs` template). `devkit upgrade` passes regen=false so it
+// RECREATES a missing baseline but never RE-SNAPSHOTS an existing one — re-snapshotting would
+// grandfather violations added since init (silent debt laundering).
+// ponytail: coarse skip-if-any-exists (not per-tree); the alternative needs tree names before
+// generating. Prevents laundering fully; a rare some-present-some-missing tree just isn't re-created.
+function structureBaselinesExist(cwd) {
+  const dir = join(cwd, 'eslint', 'baselines');
+  if (!existsSync(dir)) return false;
+  return readdirSync(dir).some((f) => f.endsWith('.mjs') && f !== 'exempt.mjs');
+}
+
+async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
+    return;
+  }
+  if (!regen && structureBaselinesExist(cwd)) {
+    console.log(
+      '  • structure + import-wall baselines exist — keeping (run `devkit init` to re-snapshot)',
+    );
     return;
   }
   // The generators grandfather electron's process trees (the generator's own DEFAULT_ROOTS).
@@ -566,7 +603,7 @@ async function applyFallow(cwd, dryRun, interactive) {
 // Flip the commented structure-lint placeholder to the live `bunx eslint src` call, scoped to
 // THIS package's block (a monorepo hook may hold several). Inside a package block the gates run
 // cd'd into the package, so `bunx eslint src` resolves the package's own eslint.config + src.
-function enableStructureLint(hookRoot, pkgRel, dryRun) {
+function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint src') {
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
   const content = readFileSync(hookPath, 'utf8');
@@ -575,7 +612,7 @@ function enableStructureLint(hookRoot, pkgRel, dryRun) {
     console.log('  ! no devkit-guards block to enable structure-lint in');
     return;
   }
-  if (block.includes('\nbunx eslint src')) {
+  if (block.includes(`\n${liveCmd} `) || block.includes(`\n${liveCmd}\n`)) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
   }
@@ -584,14 +621,14 @@ function enableStructureLint(hookRoot, pkgRel, dryRun) {
     return;
   }
   if (dryRun) {
-    console.log('  [dry-run] uncomment `bunx eslint src` in .husky/pre-commit');
+    console.log(`  [dry-run] uncomment \`${liveCmd}\` in .husky/pre-commit`);
     return;
   }
   // `|| exit 1` so a structure violation BLOCKS the commit — a bare line would let a non-zero
-  // eslint pass (no `set -e`). In a package subshell the exit propagates via the `) || exit 1`.
-  const newBlock = block.replace(COMMENTED_LINT_RE, '\nbunx eslint src || exit 1\n');
+  // exit pass (no `set -e`). In a package subshell the exit propagates via the `) || exit 1`.
+  const newBlock = block.replace(COMMENTED_LINT_RE, `\n${liveCmd} || exit 1\n`);
   writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
-  console.log('  ✓ enabled structure-lint (`bunx eslint src`) in .husky/pre-commit');
+  console.log(`  ✓ enabled structure-lint (\`${liveCmd}\`) in .husky/pre-commit`);
 }
 
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
@@ -733,17 +770,18 @@ function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   if (pkgRemoved.length) {
     console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
   }
-  // Re-comment the live structure-lint line inside THIS package's block at the git-root hook.
+  // Re-comment the live structure-lint line inside THIS package's block at the git-root hook. The
+  // live line is stack-dependent: `bunx guard-structure` (config-driven) or `bunx eslint src` (electron).
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (existsSync(hookPath)) {
     const content = readFileSync(hookPath, 'utf8');
     const block = extractGuardBlock(content, pkgRel);
-    const live = '\nbunx eslint src || exit 1\n';
-    if (block?.includes(live)) {
-      const newBlock = block.replace(
-        live,
-        '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n',
-      );
+    const placeholder = '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n';
+    const live = ['\nbunx guard-structure || exit 1\n', '\nbunx eslint src || exit 1\n'].find((l) =>
+      block?.includes(l),
+    );
+    if (live) {
+      const newBlock = block.replace(live, placeholder);
       if (!dryRun) writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
       console.log(
         `  ${dryRun ? '[dry-run]' : '✓'} re-commented structure-lint line in .husky/pre-commit`,
@@ -929,6 +967,9 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponent
  * @param {boolean} [plan.globalCommitGate] overlay only — also install the opt-in machine-global
  *   husky init.sh shim so a plain `git commit` stays gated across husky's core.hooksPath reclaim
  * @param {string} [plan.devkitRef]
+ * @param {boolean} [plan.regenStructureBaselines] re-snapshot structure/import-wall baselines
+ *   (default true — init grandfathers the current tree). `devkit upgrade` passes false so an
+ *   existing baseline is kept (recreate-if-missing only), never re-snapshotted (no debt laundering).
  */
 // Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
 // fallow-ignore-next-line complexity
@@ -943,10 +984,15 @@ export async function applyInit(cwd, plan) {
     scanRoots = null,
     standalone = false,
     overlay = false,
+    regenStructureBaselines = true,
   } = plan;
-  // Standalone (no-package): structure-lint is omitted (its eslint flat-config needs the plugin
-  // resolvable from the repo, which a no-package setup can't provide).
-  const isStructure = !standalone && selection.structure && STRUCTURE_STACKS.has(stack);
+  // Structure-lint: config-driven stacks (react-app, component-lib) run via devkit's own eslint (the
+  // `guard-structure` bin), so they work even in standalone (no consumer eslint/plugin). Electron's
+  // preset needs consumer-side eslint/parser/plugin, so it stays package-only.
+  const isStructure =
+    selection.structure &&
+    STRUCTURE_STACKS.has(stack) &&
+    (!standalone || CONFIG_DRIVEN_STRUCTURE.has(stack));
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
@@ -975,7 +1021,7 @@ export async function applyInit(cwd, plan) {
   console.log(`  components: ${on.join(', ') || '(none)'}\n`);
 
   console.log('1. configs');
-  if (standalone) installStandaloneConfigs(cwd, stack, selection, force, dryRun);
+  if (standalone) installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
   else if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
   else installConfigs(cwd, selection, force, dryRun);
   applyScanRoots(cwd, scanRoots, dryRun);
@@ -983,12 +1029,15 @@ export async function applyInit(cwd, plan) {
   // Standalone touches NO package.json (the whole point — no private dep in a shared repo).
   if (!standalone) {
     console.log('2. package.json');
-    patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun);
+    patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun, stack);
   }
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    if (standalone) installStandaloneHook(gitRoot, pkgRel, selection, dryRun);
+    // Pass the EFFECTIVE structure flag (isStructure, not the raw request) so the standalone block
+    // emits `__dk_gate guard-structure gate` only when structure actually applies to this stack/mode.
+    if (standalone)
+      installStandaloneHook(gitRoot, pkgRel, { ...selection, structure: isStructure }, dryRun);
     else installHusky(selection, gitRoot, pkgRel, dryRun);
   }
 
@@ -999,9 +1048,18 @@ export async function applyInit(cwd, plan) {
 
   if (isStructure) {
     console.log('5. structure + import-wall baselines (grandfather current tree)');
-    await runStructureBaselines(cwd, stack, dryRun);
-    console.log('6. enable structure-lint in pre-commit');
-    enableStructureLint(gitRoot, pkgRel, dryRun);
+    await runStructureBaselines(cwd, stack, dryRun, regenStructureBaselines);
+    // Package mode flips the commented placeholder to the live structure-lint line: config-driven
+    // stacks run the devkit `guard-structure` bin (no consumer eslint dep); electron keeps its
+    // consumer-side `bunx eslint src` preset. Standalone wires structure via buildStandaloneBlock
+    // (step 3), so it needs no placeholder flip here.
+    if (!standalone) {
+      console.log('6. enable structure-lint in pre-commit');
+      const liveCmd = CONFIG_DRIVEN_STRUCTURE.has(stack)
+        ? 'bunx guard-structure'
+        : 'bunx eslint src';
+      enableStructureLint(gitRoot, pkgRel, dryRun, liveCmd);
+    }
   }
 
   // Skills / agents / agent-hooks → the selected agent surface(s), with a prune of any now-dropped
@@ -1043,7 +1101,11 @@ export async function applyInit(cwd, plan) {
   // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
   // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
   // devkitRef ALSO doubles as the init-version stamp doctor's checkVersion reads (it's `v<version>`).
+  // Carry forward consumer-authored top-level keys init doesn't manage (a hand-declared minDevkit
+  // floor, the configOverrides opt-out doctor honours) — else every re-run (init/upgrade) wipes them.
   const config = {
+    ...(prevConfig?.minDevkit !== undefined ? { minDevkit: prevConfig.minDevkit } : {}),
+    ...(prevConfig?.configOverrides ? { configOverrides: prevConfig.configOverrides } : {}),
     stack,
     devkitRef,
     initVersion: INIT_VERSION,

@@ -33,10 +33,18 @@ scans **that** repo.
 | Mode | How | When |
 | ---- | --- | ---- |
 | **Package** (default) | `bun add -D` the git dep; configs `extends "@norvalbv/devkit/…"`; hook calls `bunx guard-*` | your own repos — auto-updates on a tag bump |
-| **Standalone** (`--standalone`) | `bun add -g` devkit once; vendors configs + a **fail-open** hook calling the global `guard-*` bins; **nothing in package.json** | shared / work repos where a private dep is unwanted |
+| **Standalone** (`--standalone`) | `bun add -g` devkit once; vendors configs + a **fail-open** hook calling the global `guard-*` bins; **nothing in package.json** | shared / work repos where a private dep is unwanted, or you want zero tool deps |
 | **Overlay** (`--overlay`) | global devkit; everything **git-ignored**, the hook **chains** to the repo's own, configs **extend** theirs | a repo you **can't modify** — local + invisible |
 
 See [docs/glossary.md](docs/glossary.md) for what each mode means and `devkit help init` for the flags.
+
+**Zero consumer tool-deps.** devkit bundles the gate tools (jscpd, eslint + the structure plugin), so
+a consumer's `package.json` never gains them. The clone gate resolves devkit's own jscpd; structure-lint
+runs through the `guard-structure` bin (devkit's own eslint + plugin) for the config-driven stacks
+(react-app, component-lib). So **package mode adds only `@norvalbv/devkit` (+ biome/husky)**, and
+**standalone adds nothing at all** — with structure-lint now included in both. (electron keeps its
+consumer-side eslint preset.) Standalone gates are **fail-open**, so CI/contributors must install the
+pinned global devkit (`bun add -g …#<devkitRef>`); without it the gates silently skip.
 
 ## Install (package mode)
 
@@ -92,9 +100,20 @@ anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
 
 ## Updating (consumers)
 
+One command reconciles a consumer fully — pin + devkitRef, emitted configs, skills/agents/hooks,
+and the husky/guard block — reading the recorded selection from `.devkit/config.json`:
+
 ```bash
-bun pm cache rm            # bun caches git deps; without this it won't see the new tag
-# edit package.json's devkit dep to the new #vX.Y.Z, then:
-bun install                # use install for a RE-PIN; `bun add` can hit a DependencyLoop
-bunx devkit doctor --fix   # re-sync skills + template configs to the new version
+bunx devkit upgrade            # --dry-run to preview; --force to adopt consumer-authored asset collisions
 ```
+
+`upgrade` composes the individual slices idempotently and ends by running `doctor`. If a newer tag
+has been *published*, it installs it and asks you to re-run (a running CLI can't hot-swap to
+just-installed code); for a local checkout / already-current install it reconciles in one pass and
+never re-adds a deselected agent surface. Consumer-tuned configs are never overwritten — record an
+intentional override in `.devkit/config.json` `configOverrides: ["tsconfig.json"]` so `doctor`
+treats it as OK, not drift.
+
+The slices are still available if you want to run them by hand: `devkit update` (self-update the
+package), `devkit migrate --apply` (reconcile emitted configs), `devkit sync-skills` /
+`devkit sync-agents`, and `devkit doctor --fix` (re-run init for the recorded selection).

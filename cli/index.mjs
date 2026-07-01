@@ -29,6 +29,7 @@ const COMMANDS = {
   'sync-agents': () => import('./commands/sync-agents.mjs'),
   release: () => import('./commands/release.mjs'),
   update: () => import('./commands/update.mjs'),
+  upgrade: () => import('./commands/upgrade.mjs'),
   migrate: () => import('./commands/migrate.mjs'),
   move: () => import('./commands/move.mjs'),
   reconcile: () => import('./commands/reconcile.mjs'),
@@ -37,7 +38,16 @@ const COMMANDS = {
 };
 
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
-const GIT_COMMANDS = new Set(['ship', 'move', 'release', 'update', 'clean', 'doctor', 'init']);
+const GIT_COMMANDS = new Set([
+  'ship',
+  'move',
+  'release',
+  'update',
+  'upgrade',
+  'clean',
+  'doctor',
+  'init',
+]);
 
 /**
  * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
