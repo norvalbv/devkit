@@ -73,6 +73,37 @@ function checkHusky(cwd, selectedGuards) {
   );
 }
 
+// Structure-lint line check (only when `structure` is selected). `structure` is NOT a guard, so
+// checkHusky never verifies it. The LIVE line is stack-dependent: config-driven stacks run devkit's
+// `guard-structure` bin (package `bunx guard-structure`, standalone `__dk_gate guard-structure`);
+// electron keeps its consumer-side `bunx eslint src`. Match the live form, never the `# bunx eslint
+// src` placeholder (a `#`-commented line means structure-lint is OFF, not wired).
+function checkStructureLint(cwd, stack) {
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const hookPath = join(gitRoot, '.husky', 'pre-commit');
+  if (!existsSync(hookPath)) {
+    return check('structure-lint', 'MISSING', 'no hook', 'run `devkit init`', true);
+  }
+  const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
+  // `guard-structure` only ever appears as a live line (no commented placeholder for it); electron's
+  // live line is disambiguated from the `# bunx eslint src` comment by the `|| exit 1` suffix.
+  const expected = stack === 'electron' ? 'eslint src || exit 1' : 'guard-structure';
+  if (!block.includes(expected)) {
+    return check(
+      'structure-lint',
+      'DRIFT',
+      `no live structure-lint line (expected \`${expected}\`)`,
+      'run `devkit init` to enable it',
+      true,
+    );
+  }
+  return check(
+    'structure-lint',
+    'OK',
+    stack === 'electron' ? 'runs `bunx eslint src`' : 'runs `guard-structure`',
+  );
+}
+
 // Strip // line comments so a jsonc config parses as JSON.
 function jsoncText(path) {
   return readFileSync(path, 'utf8').replace(/^\s*\/\/.*$/gm, '');
@@ -92,19 +123,32 @@ function readJsonc(path) {
 // The extends pointer each config must carry, by install mode. Standalone extends VENDORED
 // relative paths (.devkit/*); package extends the resolved dep. Single source of truth shared by
 // the check (collectResults) and the --fix repair, so --fix writes exactly what doctor expects.
+// Package-mode biome preset by stack — MUST mirror templates/<stack>/biome.jsonc: react-app and
+// component-lib extend biome/react, everything else biome/base. (Standalone is a SEPARATE map,
+// standalone.mjs `biomeVariant`; keep the two independent — do NOT add a stack to the standalone
+// list below without also vendoring the matching file, or doctor would expect a react.jsonc that
+// init writes as base.jsonc → a brand-new standalone false-DRIFT.)
+const PKG_REACT_BIOME = new Set(['react-app', 'component-lib']);
+
 function expectedExtends(stack, standalone) {
   return {
     biome: standalone
-      ? `./.devkit/biome/${['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base'}.jsonc`
-      : '@norvalbv/devkit/biome/base',
+      ? `./.devkit/biome/${['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base'}.jsonc`
+      : `@norvalbv/devkit/biome/${PKG_REACT_BIOME.has(stack) ? 'react' : 'base'}`,
     tsconfig: standalone
       ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
       : '@norvalbv/devkit/tsconfig/base',
   };
 }
 
-function checkExtends(cwd, file, expected, key = 'extends') {
+function checkExtends(cwd, file, expected, key = 'extends', overridden = false) {
   const path = join(cwd, file);
+  // A consumer can intentionally hand-own an emitted config (e.g. a tuned tsconfig with no devkit
+  // `extends`). Recording the file in .devkit/config.json `configOverrides` tells doctor that's
+  // deliberate, not drift. Only meaningful when the file exists — a MISSING config is still MISSING.
+  if (overridden && existsSync(path)) {
+    return check(file, 'OK', 'intentional override (configOverrides)');
+  }
   if (!existsSync(path)) {
     return check(file, 'MISSING', 'absent', 'run `devkit init`', true);
   }
@@ -117,7 +161,12 @@ function checkExtends(cwd, file, expected, key = 'extends') {
   const ext = parsed[key];
   const list = Array.isArray(ext) ? ext : [ext];
   if (!list.includes(expected)) {
-    return check(file, 'DRIFT', `${key} is ${JSON.stringify(ext)}`, `should extend "${expected}"`);
+    return check(
+      file,
+      'DRIFT',
+      `${key} is ${JSON.stringify(ext)}`,
+      `should extend "${expected}" (if intentional, add "${file}" to .devkit/config.json configOverrides)`,
+    );
   }
   return check(file, 'OK', `extends ${expected}`);
 }
@@ -531,12 +580,28 @@ async function collectResults(cwd, cfg, configResult) {
   const standalone = Boolean(cfg.standalone);
   const stack = cfg.stack ?? 'generic';
   const expected = expectedExtends(stack, standalone);
+  // Emitted configs the consumer has intentionally hand-owned — doctor treats their extends as OK.
+  const overrides = new Set(cfg.configOverrides ?? []);
 
   const results = [configResult];
   if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []));
-  if (sel.biome) results.push(checkExtends(cwd, 'biome.jsonc', expected.biome));
-  if (sel.tsconfig) results.push(checkExtends(cwd, 'tsconfig.json', expected.tsconfig));
+  if (sel.biome)
+    results.push(
+      checkExtends(cwd, 'biome.jsonc', expected.biome, 'extends', overrides.has('biome.jsonc')),
+    );
+  if (sel.tsconfig)
+    results.push(
+      checkExtends(
+        cwd,
+        'tsconfig.json',
+        expected.tsconfig,
+        'extends',
+        overrides.has('tsconfig.json'),
+      ),
+    );
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
+  // structure-lint is a separate hook line (not a guard) — verify it when structure is recorded.
+  if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
   // Verify the synced agent files against a SELECTED surface (prefer .claude; else the first
   // chosen one). Both surfaces get identical content, so checking one is sufficient.
   const surfaces = sel.agentTargets ?? ['claude', 'cursor'];

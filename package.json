@@ -34,6 +34,7 @@
     "guard-clone": "./gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./gate-engine/ratchets/folder-fanout.mjs",
     "guard-size": "./gate-engine/ratchets/size-disable.mjs",
+    "guard-structure": "./gate-engine/structure/run.mjs",
     "guard-fallow-staged": "./gate-engine/fallow/staged-filter.mjs",
     "guard-sentry": "./gate-engine/sentry/check-sentry.mjs"
   },
@@ -60,8 +61,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
     "@types/node": "^25.9.3",
-    "eslint": "^10.5.0",
-    "eslint-plugin-project-structure": "^3.14.3",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
@@ -71,6 +70,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.5.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-project-structure": "^3.14.3",
     "ts-morph": "^28.0.0"
   }
 }

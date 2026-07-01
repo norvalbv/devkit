@@ -34,9 +34,10 @@ import {
 
 const firstLine = (e) => (e.stderr || e.message || '').toString().trim().split('\n')[0];
 
-// Which vendored base each stack extends.
+// Which vendored base each stack extends. component-lib is a React primitives package → react (must
+// stay in lockstep with doctor.mjs's standalone biome map, else a false-DRIFT).
 const biomeVariant = (stack) =>
-  ['electron', 'react-app', 'next'].includes(stack) ? 'react' : 'base';
+  ['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base';
 const tsconfigVariant = (stack) =>
   stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base';
 
@@ -79,8 +80,10 @@ function writeExtends(cwd, dest, relPath, asArray, force, dryRun) {
  * @param {string} cwd consumer package dir
  * @param {string} stack
  * @param {{biome?:boolean, tsconfig?:boolean, guards?:string[], structure?:boolean}} sel
+ * @param {boolean} [isStructure] structure-lint applies (config-driven stack) → vendor the STACK
+ *   guard.config (carries the `structure` grammar the `guard-structure` gate reads), not the generic one.
  */
-export function installStandaloneConfigs(cwd, stack, sel, force, dryRun) {
+export function installStandaloneConfigs(cwd, stack, sel, force, dryRun, isStructure = false) {
   if (sel.biome) {
     vendor(cwd, 'biome', dryRun);
     writeExtends(
@@ -103,9 +106,12 @@ export function installStandaloneConfigs(cwd, stack, sel, force, dryRun) {
       dryRun,
     );
   }
-  // guard.config.json (data) — same generic template as the package install.
+  // guard.config.json (data). Config-driven structure vendors the STACK template (it carries the
+  // `structure` grammar the guard-structure gate reads); otherwise the generic template. isStructure
+  // is only true for a config-driven standalone stack, so it encodes exactly this choice.
   if (sel.guards?.length || sel.structure) {
-    const src = join(packageDir(), 'templates', 'generic', 'guard.config.json');
+    const tplStack = isStructure ? stack : 'generic';
+    const src = join(packageDir(), 'templates', tplStack, 'guard.config.json');
     const dest = join(cwd, 'guard.config.json');
     if (dryRun) {
       console.log(
