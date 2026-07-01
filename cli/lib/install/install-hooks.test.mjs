@@ -12,6 +12,7 @@ import {
   checkHookRegistrations,
   installHookRegistrations,
   removeHookRegistrations,
+  syncHookScripts,
 } from './install-hooks.mjs';
 
 let roots = [];
@@ -116,5 +117,65 @@ describe('removeHookRegistrations', () => {
     const root = tmpRepo();
     expect(() => removeHookRegistrations(root)).not.toThrow();
     expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
+  });
+});
+
+// syncHookScripts copies the bundled hook FILES + writes .devkit/agent-hooks-manifest.json (sha256),
+// registration-free. `--only` is the incremental per-hook adoption path (add one devkit-owned hook at a
+// time); `--targets` limits which surfaces get a hooks dir. Source = the real agents-hooks/ bundle.
+describe('syncHookScripts --only / --targets', () => {
+  const manifest = (root) =>
+    JSON.parse(readFileSync(join(root, '.devkit', 'agent-hooks-manifest.json'), 'utf8'));
+  const hookExists = (root, name, surface = 'claude') =>
+    existsSync(join(root, `.${surface}`, 'hooks', name));
+
+  it('--only syncs just the named hook + a 1-entry manifest, leaving the rest unsynced', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
+    expect(hookExists(root, 'decision-stop-check.sh')).toBe(true);
+    expect(hookExists(root, 'lint-check.sh')).toBe(false);
+    expect(hookExists(root, 'knip-check.sh')).toBe(false);
+    expect(Object.keys(manifest(root).files)).toEqual(['decision-stop-check.sh']);
+  });
+
+  it('--targets claude does NOT create a .cursor/hooks tree', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
+    expect(existsSync(join(root, '.cursor', 'hooks'))).toBe(false);
+    expect(manifest(root).targets).toEqual(['claude']);
+  });
+
+  it('throws on an --only name devkit does not ship (typo guard)', () => {
+    const root = tmpRepo();
+    expect(() => syncHookScripts(root, { only: ['no-such-hook.sh'], targets: ['claude'] })).toThrow(
+      /no hook named/,
+    );
+  });
+
+  it('--dry-run writes nothing (no files, no manifest)', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'], dryRun: true });
+    expect(hookExists(root, 'decision-stop-check.sh')).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'agent-hooks-manifest.json'))).toBe(false);
+  });
+
+  it('--only is additive: a second --only ADDS to the manifest, not replaces it', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { only: ['decision-stop-check.sh'], targets: ['claude'] });
+    syncHookScripts(root, { only: ['strategic-compactor.sh'], targets: ['claude'] });
+    expect(Object.keys(manifest(root).files).sort()).toEqual([
+      'decision-stop-check.sh',
+      'strategic-compactor.sh',
+    ]);
+    expect(hookExists(root, 'decision-stop-check.sh')).toBe(true);
+    expect(hookExists(root, 'strategic-compactor.sh')).toBe(true);
+  });
+
+  it('a full sync (no --only) writes all bundled hooks + a full manifest', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { targets: ['claude'] });
+    const keys = Object.keys(manifest(root).files);
+    expect(keys).toContain('decision-stop-check.sh');
+    expect(keys.length).toBeGreaterThanOrEqual(6);
   });
 });

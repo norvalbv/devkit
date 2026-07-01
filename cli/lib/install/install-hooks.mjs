@@ -36,25 +36,35 @@ const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
 // kept executable (chmod +x) — the .sh/.mjs are invoked directly by the agent harness.
 /**
  * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
- *   `skipTracked` (overlay-only): leaves a git-tracked hook script untouched (C2). `override(kind, name)`
- *   (default never): a hook script colliding with the consumer's OWN same-named file (on disk,
- *   unmanifested, divergent) is PRESERVED unless `override('agent-hook', name)` is true.
+ * @param {{ dryRun?: boolean, targets?: string[], only?: string[], skipTracked?: (relPath: string) => boolean, override?: (kind: string, name: string) => boolean }} [opts]
+ *   `only` (default all): sync ONLY the named hooks — incremental per-hook adoption. Throws on a name
+ *   devkit doesn't ship, and carries the prior manifest forward so an `only` run ADDS to the owned set
+ *   rather than shrinking it to the one hook synced. `skipTracked` (overlay-only): leaves a git-tracked
+ *   hook script untouched (C2). `override(kind, name)` (default never): a hook script colliding with the
+ *   consumer's OWN same-named file (on disk, unmanifested, divergent) is PRESERVED unless
+ *   `override('agent-hook', name)` is true.
  */
 export function syncHookScripts(
   root,
-  { dryRun = false, targets = AGENT_TARGETS, skipTracked, override = () => false } = {},
+  { dryRun = false, targets = AGENT_TARGETS, only, skipTracked, override = () => false } = {},
 ) {
   const src = join(packageDir(), 'agents-hooks');
   const dirs = hookDirs(targets);
-  const rels = readdirSync(src, { withFileTypes: true })
+  let rels = readdirSync(src, { withFileTypes: true })
     .filter((e) => e.isFile())
     .map((e) => e.name);
   const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
   const prev = readJson(manifestPath);
+  if (only?.length) {
+    const unknown = only.filter((n) => !rels.includes(n));
+    if (unknown.length)
+      throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
+    rels = rels.filter((r) => only.includes(r));
+  }
   const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
+  // `only` carries the prior manifest forward (add-to-owned-set); a full sync starts clean.
   /** @type {Record<string,string>} */
-  const files = {};
+  const files = only?.length ? { ...(prev?.files ?? {}) } : {};
   for (const rel of rels) {
     // Overlay: a hook script git already tracks can't be hidden by .git/info/exclude → skip it (C2).
     if (skipTracked && dirs.some((d) => skipTracked(`${d}/${rel}`))) {

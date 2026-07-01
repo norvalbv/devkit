@@ -6,6 +6,7 @@
  *   devkit init [--stack <x>] [--standalone | --overlay] [--scan-root <a,b>] [--fallow] [--yes]
  *   devkit doctor [--fix]
  *   devkit sync-skills [--dry-run]
+ *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version
  *   devkit --help
@@ -27,6 +28,7 @@ const COMMANDS = {
   clean: () => import('./commands/clean.mjs'),
   'sync-skills': () => import('./commands/sync-skills.mjs'),
   'sync-agents': () => import('./commands/sync-agents.mjs'),
+  'sync-hooks': () => import('./commands/sync-hooks.mjs'),
   release: () => import('./commands/release.mjs'),
   update: () => import('./commands/update.mjs'),
   upgrade: () => import('./commands/upgrade.mjs'),
