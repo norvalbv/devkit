@@ -143,12 +143,6 @@ function expectedExtends(stack, standalone) {
 
 function checkExtends(cwd, file, expected, key = 'extends', overridden = false) {
   const path = join(cwd, file);
-  // A consumer can intentionally hand-own an emitted config (e.g. a tuned tsconfig with no devkit
-  // `extends`). Recording the file in .devkit/config.json `configOverrides` tells doctor that's
-  // deliberate, not drift. Only meaningful when the file exists — a MISSING config is still MISSING.
-  if (overridden && existsSync(path)) {
-    return check(file, 'OK', 'intentional override (configOverrides)');
-  }
   if (!existsSync(path)) {
     return check(file, 'MISSING', 'absent', 'run `devkit init`', true);
   }
@@ -157,6 +151,13 @@ function checkExtends(cwd, file, expected, key = 'extends', overridden = false) 
     parsed = JSON.parse(jsoncText(path));
   } catch (e) {
     return check(file, 'DRIFT', `invalid JSON: ${e.message}`, 'fix the JSON syntax, then re-run');
+  }
+  // A consumer can intentionally hand-own an emitted config (e.g. a tuned tsconfig with no devkit
+  // `extends`). Recording the file in .devkit/config.json `configOverrides` tells doctor that's
+  // deliberate, not drift — but only AFTER validating the JSON, so a hand-edit that breaks the syntax
+  // (which would break biome/tsc at build time) still surfaces as DRIFT rather than a false OK.
+  if (overridden) {
+    return check(file, 'OK', 'intentional override (configOverrides)');
   }
   const ext = parsed[key];
   const list = Array.isArray(ext) ? ext : [ext];
@@ -432,7 +433,13 @@ function applyFix(cwd, results, sel, stack, standalone) {
   const needsInit = results.some(
     (r) => r.fixable && r.status === 'MISSING' && r.name !== 'baselines' && r.name !== 'skills',
   );
-  const huskyDrift = results.some((r) => r.name === '.husky/pre-commit' && r.status !== 'OK');
+  // The hook's guard block AND the structure-lint line both live in .husky/pre-commit and are both
+  // restored by re-running init (installHusky rebuilds the block; enableStructureLint re-flips the
+  // live line) — so a drifted structure-lint result must take the same repair path (it flags itself
+  // fixable, and would otherwise be a no-op under --fix).
+  const huskyDrift = results.some(
+    (r) => (r.name === '.husky/pre-commit' || r.name === 'structure-lint') && r.status !== 'OK',
+  );
   if (needsInit || huskyDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];
     // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).

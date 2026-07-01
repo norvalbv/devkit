@@ -275,6 +275,12 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/structure-lint: DRIFT/);
+
+    // --fix must actually repair the structure-lint line (it flags itself fixable).
+    devkit(root, 'doctor', '--fix');
+    const after = devkit(root, 'doctor');
+    expect(after.status).toBe(0);
+    expect(after.stdout).toMatch(/structure-lint: OK/);
   });
 
   it('does NOT flag biome missing when biome was deselected', () => {
@@ -377,5 +383,20 @@ describe('doctor collectResults dispatch', () => {
     const ts = results.find((r) => r.name === 'tsconfig.json');
     expect(ts.status).toBe('DRIFT');
     expect(ts.remediation).toMatch(/configOverrides/);
+  });
+
+  it('a configOverrides file with BROKEN JSON still DRIFTs (override never masks a syntax error)', async () => {
+    const root = tmpRepo();
+    writeFileSync(join(root, 'tsconfig.json'), '{ "compilerOptions": { strict }'); // malformed
+    const cfg = {
+      stack: 'component-lib',
+      standalone: false,
+      configOverrides: ['tsconfig.json'],
+      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+    };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    const ts = results.find((r) => r.name === 'tsconfig.json');
+    expect(ts.status).toBe('DRIFT');
+    expect(ts.detail).toMatch(/invalid JSON/);
   });
 });
