@@ -6,6 +6,8 @@ node_modules
 .search-code/
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
+# decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
+gate-engine/decisions/eval/results.baseline.json
 
 # eslint-plugin-project-structure cache
 projectStructure.cache.json

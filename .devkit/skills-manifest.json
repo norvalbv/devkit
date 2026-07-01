@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.24.3",
-  "generatedAt": "2026-06-30T19:59:59.750Z",
+  "devkitRef": "v0.25.4",
+  "generatedAt": "2026-07-01T22:51:15.743Z",
   "targets": [
     "claude",
     "cursor"
@@ -12,7 +12,7 @@
     "commit-guard/SKILL.md": "44b453222a9ea3b34a561f4818350deae284d18cd89aa45861cc82408ffc7a91",
     "commit-guard/scripts/approve.sh": "26e6345139ae60408f1f1b29d1695cb51635dc963724e48fca253418e3e1bd7e",
     "commit-guard/scripts/checklist.mjs": "da044d261bf997db91284987425d20fe4ccd05353abcb1172a0eca4ba9743376",
-    "decisions/SKILL.md": "2a3028bdd81593319222952c9691db0ad4f22f5de0d7e9f1ad9adc80d8f081e9",
+    "decisions/SKILL.md": "c85736e2b4ff81af0b299c2a7455e7ef6d5c8e81b47200c7f1d65833d5ecef4a",
     "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
     "feature-critique/SKILL.md": "26b1f4453e580d56c13ee625b2f16ec6f6557386cbe04160c670c379f8996fe9",
     "frontend-accessibility/SKILL.md": "2f4d5ca8f93ba48865603abb294aae2c3795567a16c1ec0d999822a320835bbe",
@@ -26,6 +26,6 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "54bbaf2429a6057a142f4124616607d34f062127d64028647bfdf69d1b907dc6"
+    "using-devkit/SKILL.md": "7a2acba7706f4fa5aa15a693969378ead5ad8c427b5c3c9ab7ff912a26ba5fad"
   }
 }
