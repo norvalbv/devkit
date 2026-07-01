@@ -93,7 +93,51 @@ describe('init --stack react-app (structure ungated)', () => {
     });
     devkit(root, 'init', '--stack', 'react-app', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toMatch(/\nbunx eslint src/);
+    expect(hook).toMatch(/\nbunx guard-structure/); // config-driven stack → devkit's guard-structure bin
+  });
+});
+
+describe('init — zero consumer deps (config-driven structure)', () => {
+  it('component-lib package mode adds NO jscpd/eslint/plugin/parser; runs guard-structure', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      peerDependencies: { react: '^18' },
+      exports: {},
+    });
+    devkit(root, 'init', '--stack', 'component-lib', '--yes');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    for (const dep of [
+      'jscpd',
+      'eslint',
+      'eslint-plugin-project-structure',
+      '@typescript-eslint/parser',
+    ]) {
+      expect(pkg.devDependencies[dep], `${dep} should NOT be a consumer dep`).toBeUndefined();
+    }
+    // devkit itself carries them; the gate runs devkit's bin.
+    expect(pkg.devDependencies['@norvalbv/devkit']).toBeDefined();
+    expect(pkg.scripts['lint:structure']).toBeUndefined();
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).toContain('bunx guard-structure || exit 1');
+    expect(hook).not.toContain('bunx eslint src');
+  });
+
+  it('electron package mode KEEPS eslint/parser/plugin + runs bunx eslint src', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      devDependencies: { electron: '^30' },
+    });
+    devkit(root, 'init', '--stack', 'electron', '--yes');
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies.eslint).toBeDefined();
+    expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
+    const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
+    expect(hook).toContain('bunx eslint src || exit 1');
+    expect(hook).not.toContain('guard-structure');
   });
 });
 
@@ -198,6 +242,41 @@ describe('doctor — selection-aware', () => {
     expect(r.stdout).toMatch(/All checks OK/);
   });
 
+  it('component-lib biome extends react is OK, not drift (stack-aware expected extends, 2a)', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      peerDependencies: { react: '^18' },
+      exports: {},
+    });
+    devkit(root, 'init', '--stack', 'component-lib', '--yes');
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/biome\.jsonc: OK — extends @norvalbv\/devkit\/biome\/react/);
+    expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure`/);
+  });
+
+  it('flags DRIFT when the structure-lint line is missing from the hook', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      peerDependencies: { react: '^18' },
+      exports: {},
+    });
+    devkit(root, 'init', '--stack', 'component-lib', '--yes');
+    // Strip the live structure-lint line (simulate a hand-edited / drifted hook).
+    const hookPath = join(root, '.husky/pre-commit');
+    writeFileSync(
+      hookPath,
+      readFileSync(hookPath, 'utf8').replace('bunx guard-structure || exit 1', ''),
+    );
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/structure-lint: DRIFT/);
+  });
+
   it('does NOT flag biome missing when biome was deselected', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
@@ -263,5 +342,40 @@ describe('doctor collectResults dispatch', () => {
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     expect(names(results)).toContain('skills');
+  });
+
+  it('honours configOverrides: a hand-tuned no-extends tsconfig is OK, not drift (2b)', async () => {
+    const root = tmpRepo();
+    writeFileSync(
+      join(root, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { strict: true }, include: ['src'] }, null, 2),
+    );
+    const cfg = {
+      stack: 'component-lib',
+      standalone: false,
+      configOverrides: ['tsconfig.json'],
+      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+    };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    const ts = results.find((r) => r.name === 'tsconfig.json');
+    expect(ts.status).toBe('OK');
+    expect(ts.detail).toMatch(/intentional override/);
+  });
+
+  it('without configOverrides the same tsconfig drifts, with a configOverrides remediation hint (2b)', async () => {
+    const root = tmpRepo();
+    writeFileSync(
+      join(root, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { strict: true }, include: ['src'] }, null, 2),
+    );
+    const cfg = {
+      stack: 'component-lib',
+      standalone: false,
+      components: { tsconfig: true, biome: false, husky: false, guards: [] },
+    };
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    const ts = results.find((r) => r.name === 'tsconfig.json');
+    expect(ts.status).toBe('DRIFT');
+    expect(ts.remediation).toMatch(/configOverrides/);
   });
 });

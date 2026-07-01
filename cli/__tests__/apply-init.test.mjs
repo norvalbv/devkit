@@ -343,3 +343,24 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     expect(config(root).components.fallow).toBe(false);
   });
 });
+
+describe('applyInit — config field preservation (2c)', () => {
+  it('carries forward consumer-authored minDevkit / configOverrides across a re-run', async () => {
+    const root = tmpRepo();
+    const sel = { ...defaultSelection(), fallow: false };
+    await applyInit(root, { stack: 'generic', selection: sel, devkitRef: 'v0.3.0' });
+
+    // Consumer hand-adds top-level fields init doesn't manage.
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    cfg.minDevkit = '0.20.0';
+    cfg.configOverrides = ['tsconfig.json'];
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+
+    // A re-run rebuilds the config from scratch — it must NOT wipe those fields.
+    await applyInit(root, { stack: 'generic', selection: sel, devkitRef: 'v0.3.0' });
+    const after = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    expect(after.minDevkit).toBe('0.20.0');
+    expect(after.configOverrides).toEqual(['tsconfig.json']);
+  });
+});

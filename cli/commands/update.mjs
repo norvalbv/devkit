@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DEP = '@norvalbv/devkit';
+export const DEP = '@norvalbv/devkit';
 const BUN_REF = process.env.DEVKIT_REPO || 'git+ssh://git@github.com/norvalbv/devkit.git';
 const TAG_RE = /refs\/tags\/v(\d+\.\d+\.\d+)\^?\{?\}?\s*$/;
 const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants ssh://, not git+ssh://
@@ -46,6 +46,24 @@ export function repinPackageJson(pkgRaw, version) {
   return pkgRaw.replace(re, `$1${version}$2`);
 }
 
+/**
+ * Query the remote for the highest published tag. Returns `{ latest }` (a x.y.z string, or null
+ * when the remote has no version tags) or `{ error }` when the remote is unreachable. Shared by
+ * `update` and `upgrade` so both resolve the latest tag the same way (single source for the repo URL).
+ */
+export function fetchLatestTag() {
+  const lsUrl = BUN_REF.replace(GIT_PREFIX_RE, '');
+  let ls;
+  try {
+    ls = execFileSync('git', ['ls-remote', '--tags', lsUrl], { encoding: 'utf8' });
+  } catch {
+    return {
+      error: `could not reach the devkit remote (${lsUrl}). If your ssh uses a host alias, set DEVKIT_REPO.`,
+    };
+  }
+  return { latest: latestTag(ls) };
+}
+
 function run(cmd, args, cwd) {
   execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 }
@@ -72,17 +90,11 @@ export default async function update(args, cwd) {
   const dryRun = args.includes('--dry-run');
   const current = currentVersion();
 
-  const lsUrl = BUN_REF.replace(GIT_PREFIX_RE, '');
-  let ls;
-  try {
-    ls = execFileSync('git', ['ls-remote', '--tags', lsUrl], { encoding: 'utf8' });
-  } catch {
-    console.error(
-      `devkit update: could not reach the devkit remote (${lsUrl}). If your ssh uses a host alias, set DEVKIT_REPO.`,
-    );
+  const { latest, error } = fetchLatestTag();
+  if (error) {
+    console.error(`devkit update: ${error}`);
     return 1;
   }
-  const latest = latestTag(ls);
   if (!latest) {
     console.error('devkit update: no version tags found on the remote.');
     return 1;
