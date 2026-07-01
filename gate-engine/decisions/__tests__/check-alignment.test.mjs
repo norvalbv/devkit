@@ -11,10 +11,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   gateExit,
   judge,
+  judgeDetailed,
   loadScopedTargets,
   matchScope,
   parseAlignVerdict,
@@ -347,9 +348,18 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
     expect(calls()).toContain('Flag flip departs from the ruling.');
   });
 
-  it('a crashing haiku → null (fail-open), no escalation attempted', () => {
+  it('a crashing haiku → null (fail-open), no escalation attempted, outage WARNED on stderr', () => {
     useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nexit 3\n');
-    expect(judge(['rogue.ts'], target, repo)).toBeNull();
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(judge(['rogue.ts'], target, repo)).toBeNull();
+      // The execJudge adoption's visibility contract: a dark judge is never silent.
+      expect(warn.mock.calls.flat().join('\n')).toContain(
+        'decision-alignment: claude judge unavailable',
+      );
+    } finally {
+      warn.mockRestore();
+    }
     expect(calls()).not.toContain('--model opus');
   });
 
@@ -358,5 +368,58 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
     process.env.GUARD_DECISION_NO_LLM = '1';
     expect(judge(['rogue.ts'], target, repo)).toBeNull();
     expect(existsSync(log)).toBe(false);
+  });
+
+  it('judge runs ISOLATED: host hooks disabled + no session persistence, but tools kept (agentic)', () => {
+    useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nprintf "VERDICT: ALIGN\\n"\n');
+    judge(['rogue.ts'], target, repo);
+    expect(calls()).toContain('disableAllHooks');
+    expect(calls()).toContain('--no-session-persistence');
+    expect(calls()).toContain('--allowedTools'); // investigating judge keeps its tools…
+    expect(calls()).not.toContain('--disallowedTools'); // …and is NOT read-only
+  });
+
+  // judgeDetailed is the bench's window into the cascade: same calls, plus the intermediates.
+  describe('judgeDetailed', () => {
+    it('escalation exposes both verdicts and the raw transcripts', () => {
+      useStub(
+        'echo "$*" >> "$CLAUDE_STUB_LOG"\ncase "$*" in\n' +
+          '  *"--model haiku"*) printf "Flag flip departs.\\nVERDICT: CONTRADICT\\n";;\n' +
+          '  *) printf "Normal rollout step.\\nVERDICT: ALIGN\\n";;\nesac\n',
+      );
+      const d = judgeDetailed(['rogue.ts'], target, repo);
+      expect(d.firstVerdict).toBe('CONTRADICT');
+      expect(d.finalVerdict).toBe('ALIGN');
+      expect(d.escalated).toBe(true);
+      expect(d.firstRaw).toContain('Flag flip departs.');
+      expect(d.finalRaw).toContain('Normal rollout step.');
+    });
+
+    it('escalate:false stops at the first pass — a haiku CONTRADICT never reaches opus', () => {
+      useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nprintf "VERDICT: CONTRADICT\\n"\n');
+      const d = judgeDetailed(['rogue.ts'], target, repo, { escalate: false });
+      expect(d).toMatchObject({
+        firstVerdict: 'CONTRADICT',
+        finalVerdict: 'CONTRADICT',
+        escalated: false,
+      });
+      expect(calls()).not.toContain('--model opus');
+    });
+
+    it('a first-pass outage returns the all-null shape (bench scores it as an outage, gate as null)', () => {
+      useStub('echo "$*" >> "$CLAUDE_STUB_LOG"\nexit 3\n');
+      const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(judgeDetailed(['rogue.ts'], target, repo)).toEqual({
+          firstRaw: null,
+          firstVerdict: null,
+          finalRaw: null,
+          finalVerdict: null,
+          escalated: false,
+        });
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

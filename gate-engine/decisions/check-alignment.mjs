@@ -40,11 +40,13 @@
  * judges THAT repo's staged changes against THAT repo's decision log.
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
 import { currentTarget, parseDecision } from './decisions.mjs';
 
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
@@ -180,30 +182,36 @@ export function loadScopedTargets(dir) {
 }
 
 /**
- * One agentic judge run; raw transcript or null (claude absent / offline / timeout → no block).
- * Argv order matters: `--allowedTools` is VARIADIC — anything after it (incl. a positional prompt)
- * is swallowed into the tools list, silently leaving stdin as the prompt. Prompt first, tools last.
+ * One agentic judge run; raw transcript or null (claude absent / offline / timeout → no block;
+ * execJudge warns once on stderr). JUDGE_ISOLATION silences host hooks + keeps the run off the
+ * session store; NO JUDGE_READ_ONLY — this judge must investigate. Argv order matters:
+ * `--allowedTools` is VARIADIC — anything after it (incl. a positional prompt) is swallowed into
+ * the tools list, silently leaving stdin as the prompt. Prompt first, tools last.
  */
 function runJudge(cwd, model, prompt, stdinText, timeout) {
-  try {
-    return execFileSync('claude', ['-p', prompt, '--model', model, '--allowedTools', JUDGE_TOOLS], {
-      cwd,
-      input: stdinText,
-      encoding: 'utf8',
-      timeout,
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
-  } catch {
-    return null;
-  }
+  return execJudge({
+    label: 'decision-alignment',
+    args: ['-p', prompt, '--model', model, ...JUDGE_ISOLATION, '--allowedTools', JUDGE_TOOLS],
+    input: stdinText,
+    timeout,
+    cwd,
+  });
 }
 
 /**
- * Cascade: haiku investigates every scoped commit; ONLY its CONTRADICT escalates to opus, which
- * re-investigates with haiku's full transcript as the handoff. Block = opus-confirmed CONTRADICT.
- * Fail-open at both steps (a missing/timed-out judge never blocks).
+ * Cascade with full observability: haiku investigates every scoped commit; ONLY its CONTRADICT
+ * escalates to opus (unless `escalate` is off), which re-investigates with haiku's full transcript
+ * as the handoff. Fail-open at both steps. Returns null on the noLlm/no-files guard, else
+ * `{firstRaw, firstVerdict, finalRaw, finalVerdict, escalated}` — the gate consumes finalVerdict
+ * via judge(); eval/bench.mjs consumes the intermediate fields to score haiku-alone vs cascade.
+ * The opts exist for the bench; the gate never passes them, so gate semantics are the defaults.
  */
-export function judge(files, target, cwd = process.cwd()) {
+export function judgeDetailed(
+  files,
+  target,
+  cwd = process.cwd(),
+  { firstModel = 'haiku', escalateModel = 'opus', escalate = true } = {},
+) {
   const cfg = resolveGuardConfig(cwd);
   if (cfg.noLlm || files.length === 0) return null;
   const stat = sh(
@@ -212,22 +220,48 @@ export function judge(files, target, cwd = process.cwd()) {
   );
   const first = runJudge(
     cwd,
-    'haiku',
+    firstModel,
     ALIGN_PROMPT(target.ruling, target.vision, files),
     stat,
     HAIKU_TIMEOUT_MS,
   );
-  if (first === null) return null;
+  if (first === null)
+    return {
+      firstRaw: null,
+      firstVerdict: null,
+      finalRaw: null,
+      finalVerdict: null,
+      escalated: false,
+    };
   const firstVerdict = parseAlignVerdict(first);
-  if (firstVerdict !== 'CONTRADICT') return firstVerdict;
+  if (firstVerdict !== 'CONTRADICT' || !escalate)
+    return {
+      firstRaw: first,
+      firstVerdict,
+      finalRaw: first,
+      finalVerdict: firstVerdict,
+      escalated: false,
+    };
   const second = runJudge(
     cwd,
-    'opus',
+    escalateModel,
     ESCALATE_PROMPT(target.ruling, target.vision, files, first),
     stat,
     OPUS_TIMEOUT_MS,
   );
-  return second === null ? null : parseAlignVerdict(second);
+  return {
+    firstRaw: first,
+    firstVerdict,
+    finalRaw: second,
+    finalVerdict: second === null ? null : parseAlignVerdict(second),
+    escalated: true,
+  };
+}
+
+/** Block = opus-confirmed CONTRADICT; every guard/outage path stays null (fail-open). */
+export function judge(files, target, cwd = process.cwd()) {
+  const d = judgeDetailed(files, target, cwd);
+  return d === null ? null : d.finalVerdict;
 }
 
 /**
@@ -266,20 +300,26 @@ function stagedDecisionTargets(cwd, changed, decisionsRel) {
   return out;
 }
 
+/**
+ * One depth-judge run → raw transcript, or null on outage (execJudge warns once). Pure-text judge:
+ * READ_ONLY before ISOLATION (variadic bounding), positional prompt last. Exported so eval/bench.mjs
+ * exercises the exact prompt/argv/truncation/timeout the gate runs — and can distinguish outage
+ * (raw null) from parse-null, which judgeDepth below deliberately conflates.
+ */
+export function runDepthJudge(cwd, block, model = 'haiku') {
+  return execJudge({
+    label: 'decision-depth',
+    args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, DEPTH_PROMPT],
+    input: String(block).slice(0, 12000),
+    timeout: 120000,
+    cwd,
+  });
+}
+
 function judgeDepth(cwd, noLlm, block) {
   if (noLlm || !block.trim()) return null;
-  try {
-    const out = execFileSync('claude', ['-p', '--model', 'haiku', DEPTH_PROMPT], {
-      cwd,
-      input: block.slice(0, 12000),
-      encoding: 'utf8',
-      timeout: 120000,
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
-    return parseDepthVerdict(out);
-  } catch {
-    return null;
-  }
+  const raw = runDepthJudge(cwd, block);
+  return raw === null ? null : parseDepthVerdict(raw);
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────

@@ -24,11 +24,13 @@
  * package dir (__dirname). Run from a consumer's node_modules, this gate reads THAT repo.
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
 
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 const PKG_RE = /(^|\/)package\.json$/;
@@ -210,24 +212,29 @@ export function parseVerdict(raw) {
   return null;
 }
 
+/**
+ * One smell-downgrade judge run → raw transcript, or null on outage (execJudge warns once).
+ * Pure-text judge: JUDGE_READ_ONLY strips tools, JUDGE_ISOLATION silences host hooks and keeps the
+ * run off the session store; READ_ONLY splices BEFORE ISOLATION so the variadic `--disallowedTools *`
+ * is bounded by `--settings`, positional prompt last. Exported so eval/bench.mjs exercises the exact
+ * prompt/argv/truncation/timeout the gate runs.
+ */
+export function runDetectJudge(cwd, diff, model = 'haiku') {
+  return execJudge({
+    label: 'decision-smell',
+    args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, CLAUDE_PROMPT],
+    input: String(diff).slice(0, 12000),
+    timeout: 30000,
+    cwd,
+  });
+}
+
 // LLM downgrade: a confident ROUTINE clears a regex block; DECISION / unavailable / error
-// → null → the block stands. Never escalates. execFileSync (no shell) passes the prompt as a
-// literal arg — injection-proof, no quoting fragility if the prompt is ever edited.
+// → null → the block stands. Never escalates.
 function judgeWithClaude(cwd, noLlm, diff) {
   if (noLlm || !diff) return null;
-  try {
-    return parseVerdict(
-      execFileSync('claude', ['-p', '--model', 'haiku', CLAUDE_PROMPT], {
-        cwd,
-        input: diff.slice(0, 12000),
-        encoding: 'utf8',
-        timeout: 30000,
-        stdio: ['pipe', 'pipe', 'ignore'],
-      }),
-    );
-  } catch {
-    return null; // claude CLI absent / offline / timeout → regex floor
-  }
+  const raw = runDetectJudge(cwd, diff);
+  return raw === null ? null : parseVerdict(raw);
 }
 
 function decisionStaged(cwd, decisionFileMatcher) {
