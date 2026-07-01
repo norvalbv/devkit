@@ -11,8 +11,9 @@
  *   guard-decisions reindex | list | show <slug> | check <slug>
  *   guard-decisions detect --gate | scan [--working]  architectural-smell gate (capture B)
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
+ *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
  *
- * `detect` and `check-alignment` are thin re-dispatches into detect.mjs / check-alignment.mjs by
+ * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
  * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); everything
  * else routes to decisions.mjs `main`.
  */
@@ -23,6 +24,7 @@ import { main as decisionsMain } from './decisions.mjs';
 const SUB_ENGINES = {
   detect: new URL('./detect.mjs', import.meta.url),
   'check-alignment': new URL('./check-alignment.mjs', import.meta.url),
+  'scoped-targets': new URL('./scoped-targets.mjs', import.meta.url),
 };
 
 async function run(argv) {

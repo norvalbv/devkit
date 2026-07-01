@@ -485,19 +485,15 @@ function printRanked(rows, mode) {
   for (const r of rows) console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${r.why}` : ''}`);
 }
 
+// Rank the recorded axes against a free-text query and RETURN the ranked rows (data, not printed) so
+// both `query` (which prints them) and `scoped-targets` (which emits JSON) share one ranker. Returns
+// { source: 'semantic'|'lexical'|'index', rows } — rows are INDEX rows ({slug, ruling, why, …}).
 // Reason: the branches ARE the query ranking algorithm's fallback tiers (semantic cosine over the vector index, then BM25 lexical floor, then raw first-k); the embed-availability and stale-dim filtering are inherent to degrading gracefully and flattening scatters one ranked lookup
 // fallow-ignore-next-line complexity
-export async function cmdQuery(text, k = 5, cwd = process.cwd()) {
-  if (!text?.trim()) {
-    console.error('Usage: guard-decisions query "<text>" [--top K]');
-    process.exit(1);
-  }
+export async function rankAxes(text, k = 5, cwd = process.cwd()) {
   const p = paths(cwd);
   const rows = readIndexRows(p);
-  if (rows.length === 0) {
-    console.log('No decisions recorded.');
-    return;
-  }
+  if (rows.length === 0) return { source: 'index', rows: [] };
   const qvec = await embed(text, 'query');
   if (qvec) {
     const idx = loadVecIndex(p);
@@ -509,14 +505,26 @@ export async function cmdQuery(text, k = 5, cwd = process.cwd()) {
       .map((r) => ({ ...r, score: cosine(qvec, idx[r.slug].vec) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, k);
-    if (ranked.length) {
-      printRanked(ranked, 'semantic');
-      return;
-    }
+    if (ranked.length) return { source: 'semantic', rows: ranked };
   }
   // Fallback floor: BM25 over the INDEX rows (or, if nothing matches, the first k rows).
   const lex = bm25Rank(text, rows, k);
-  printRanked(lex.length ? lex : rows.slice(0, k), lex.length ? 'lexical' : 'index');
+  return lex.length
+    ? { source: 'lexical', rows: lex }
+    : { source: 'index', rows: rows.slice(0, k) };
+}
+
+export async function cmdQuery(text, k = 5, cwd = process.cwd()) {
+  if (!text?.trim()) {
+    console.error('Usage: guard-decisions query "<text>" [--top K]');
+    process.exit(1);
+  }
+  const { source, rows } = await rankAxes(text, k, cwd);
+  if (rows.length === 0) {
+    console.log('No decisions recorded.');
+    return;
+  }
+  printRanked(rows, source);
 }
 
 export async function cmdReindex(cwd = process.cwd()) {
