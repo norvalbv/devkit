@@ -39,14 +39,14 @@ REPO_KEY=$(pwd -P | cksum | cut -d' ' -f1)
 SNOOZE_DIR="${TMPDIR:-/tmp}/devkit-decision-snooze"
 SEEN="$SNOOZE_DIR/${REPO_KEY}-${SID:-unknown}"
 
-# Resolve the decisions-CLI bin: prefer the devkit-installed bin, else a local node_modules
-# bin, else skip silently (devkit not installed → this hook is a no-op).
+# Resolve the decisions-CLI bin: prefer the devkit-installed bin, else a local node_modules bin, else
+# skip silently (devkit not installed → this hook is a no-op). NO `bunx` fallback: on a machine without
+# devkit, `bunx guard-decisions` would try to FETCH from the registry (a network stall/error, and
+# @norvalbv/devkit isn't on npm anyway) — turning the intended silent no-op into a blocked stop.
 if command -v guard-decisions &>/dev/null; then
   DECISIONS="guard-decisions"
 elif [ -x "./node_modules/.bin/guard-decisions" ]; then
   DECISIONS="./node_modules/.bin/guard-decisions"
-elif command -v bunx &>/dev/null; then
-  DECISIONS="bunx guard-decisions"
 else
   exit 0
 fi
@@ -56,10 +56,12 @@ fi
 PAIRS=$($DECISIONS detect scan --working --files 2>/dev/null)
 [ -z "$PAIRS" ] && exit 0
 
-# A decision file is already being touched this session → it's being handled, don't nag.
-# The decisions dir defaults to docs/decisions; a consumer relocating it via guard.config
-# only changes WHERE the records land, not this best-effort heuristic.
-git status --porcelain -- docs/decisions/ 2>/dev/null | grep -q . && exit 0
+# A decision file is already being touched this session → it's being handled, don't nag. Resolve the
+# decision-log dir the way guard-decisions does (DECISIONS_DIR env → guard.config.json → docs/decisions)
+# so a consumer that RELOCATED it isn't nagged while editing its real record. Pure-bash extract (no
+# node: type:module vs commonjs across consumers would break a `require`).
+DECISIONS_DIR="${DECISIONS_DIR:-$(grep -oE '"decisionsDir"[[:space:]]*:[[:space:]]*"[^"]*"' guard.config.json 2>/dev/null | head -1 | sed -E 's/.*"([^"]+)"$/\1/')}"
+git status --porcelain -- "${DECISIONS_DIR:-docs/decisions}/" 2>/dev/null | grep -q . && exit 0
 
 # Which smelled pairs are NEW this session? (grep -vxF against the seen-set; missing file → all new.)
 mkdir -p "$SNOOZE_DIR"
