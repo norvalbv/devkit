@@ -58,7 +58,8 @@ node scripts/decisions/decisions.mjs add <slug> --target \
   --title   "<short scannable heading; optional — defaults to the ruling's first clause>" \
   --researched "<what was researched + sources: arxiv/shortcut/web/collab>" \
   --rejected   "<roads not taken + why-not, with sources>" \
-  --anchored-bet "[BET]|[VALIDATED]"   --scope "src/area/**,src/other/**" \
+  --anchored-bet "[BET]|[VALIDATED]"   --revisit-when "<condition that voids this ruling>" \
+  --scope "src/area/**,src/other/**" \
   --source "<arxiv|shortcut|web|collab|brainstorm>"   --ref "<url / ticket id>"   --new
 ```
 - **Required:** `--context`, `--ruling`, `--consequences`, `--tradeoff`, `--vision-fit`. The 10-year
@@ -73,6 +74,11 @@ node scripts/decisions/decisions.mjs add <slug> --target \
   (Capture C): a later code change in that scope that contradicts the target is blocked at commit.
 - **`--anchored-bet`** = the `frink-identity` confidence the target rests on; `[BET]` = cheap to
   revisit. `[VALIDATED]` asserts the originating failure (Context) no longer occurs.
+- **`--revisit-when`** = the 100-year test made mechanical: the concrete condition under which this
+  ruling becomes INVALID / safe to reverse ("inference cost < $0.01/summary", "the provider ships a
+  batch API"). A reader far in the future should not have to *infer* when the decision died — the
+  record states its own expiry condition. Pairs with Anchored-bet: `[BET]` says how confident,
+  Revisit-when says what would flip it.
 - INDEX shows the ruling + a hook of the **Context**.
 
 **Authoring discipline** (adopted from the multica ADR persona — `cloned-projects/multica/.../adr-writer.json`):
@@ -85,7 +91,7 @@ node scripts/decisions/decisions.mjs add <slug> --target \
 **Writing with DEPTH — the rubric you are judged against.** A Target can fill every required field and
 still be shallow (a non-empty field can still say nothing). A warn-only **depth judge** runs at commit
 (Capture C) against this rubric — but write to it, don't wait to be warned. Self-interview *one
-question at a time* (the adr-agent technique) until all three hold:
+question at a time* (the adr-agent technique) until all of these hold:
 1. **Context = the forcing COST, not a restatement.** What did the old state actually *cost* — the
    failure, the symptom, who it hurt — that made the status quo untenable? If your Context merely
    re-describes the prior ruling or the new mechanism, it is circular. For a *derived* decision,
@@ -95,6 +101,10 @@ question at a time* (the adr-agent technique) until all three hold:
    cloud." Name the alternative AND the specific thing that kills it.
 3. **The Negative is concrete.** Not "some added complexity" but "+ up to one 2s watcher tick of
    advance latency; a hand-maintained auto-approved-plan carve-out."
+4. **A Revisit-when, if present, is checkable.** Not "when circumstances change" but "inference cost
+   < $0.01/summary, or ARPU crosses $15". Its *absence* is not judged by the LLM (an eval showed
+   inference-based absence checks destabilise the judge) — the eval's `depth-audit` flags missing
+   Revisit-when lines deterministically; add one so a future reader knows when the ruling dies.
 
 Worked example — a shallow Context vs a deep one (real, from `frink-flows-skill-source-of-truth`):
 - ✗ shallow: *"The prior ruling installed via symlinks. The canonical-home decision rejected symlinks

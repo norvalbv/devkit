@@ -198,6 +198,9 @@ export function renderTarget(date, o) {
   if (o.researched) lines.push(`**Researched:** ${o.researched}`);
   if (o.rejected) lines.push(`**Rejected:** ${o.rejected}`);
   if (o.anchoredBet) lines.push(`**Anchored-bet:** ${o.anchoredBet}`);
+  // The 100-year test: the condition under which this ruling becomes invalid / safe to reverse.
+  // Pairs with Anchored-bet (the bet's expiry condition); the depth judge's check 4 rewards it.
+  if (o.revisitWhen) lines.push(`**Revisit-when:** ${o.revisitWhen}`);
   if (o.scope) lines.push(`**Scope:** ${o.scope}`);
   lines.push(`**Source:** ${[o.source || 'manual', o.ref].filter(Boolean).join(' · ')}`);
   if (o.evidenceChange) lines.push(`**Evidence-change:** ${o.evidenceChange}`);
@@ -257,7 +260,7 @@ function addTarget(slug, o, p) {
         '  --consequences "<the user/business value this protects>" \\\n' +
         '  --tradeoff "<the cost knowingly paid — latency, complexity, a road not taken>" \\\n' +
         '  --vision-fit "<which product North Star; or n/a — internal tooling>" \\\n' +
-        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --scope "glob,glob" --new --evidence-change "…"]\n' +
+        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --new --evidence-change "…"]\n' +
         '(Context=WHY-now, Ruling=WHAT, Consequences/Tradeoff=SO-THAT + cost — the ADR Context/Decision/Consequences spine.)',
     );
     process.exit(1);
@@ -571,6 +574,7 @@ export async function main(argv) {
         researched: flag(rest, '--researched'),
         rejected: flag(rest, '--rejected'),
         anchoredBet: flag(rest, '--anchored-bet'),
+        revisitWhen: flag(rest, '--revisit-when'),
         scope: flag(rest, '--scope'),
         source: flag(rest, '--source'),
         ref: flag(rest, '--ref'),
