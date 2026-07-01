@@ -19,7 +19,7 @@
         "grammar": {
           "files": ["index.mjs"],
           "folders": {
-            "commands": { "files": ["{kebab}", "{kebab_test}"] },
+            "commands": { "files": ["{kebab}", "{kebab_test}"], "recurse": "kebabModule" },
             "lib": {
               "files": ["{kebab}", "{kebab_test}"],
               "domainGate": "lib",

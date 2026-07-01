@@ -29,8 +29,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from '../commands/sync-agents.mjs';
-import { syncSkills } from '../commands/sync-skills.mjs';
+import { syncAgents } from '../commands/sync/sync-agents.mjs';
+import { syncSkills } from '../commands/sync/sync-skills.mjs';
 import { AGENT_TARGETS } from './components.mjs';
 import { detectGitRoot } from './detect-git-root.mjs';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';

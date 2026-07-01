@@ -1,6 +1,4 @@
 {
   "cap": 12,
-  "dirs": {
-    "cli/commands": 13
-  }
+  "dirs": {}
 }
