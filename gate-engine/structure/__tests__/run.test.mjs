@@ -126,4 +126,27 @@ describe('guard-structure gate — zero consumer deps', () => {
     write(root, 'a/Ok.ts'); // 'b' never created
     expect((await runStructureGate(root)).code).toBe(0); // clean, not a fail-open throw
   });
+
+  it('a present-but-all-ignored FIRST root does not mask later roots (per-root lint, not one batch)', async () => {
+    // Root 'a' matches nothing (single-element `{ts}` glob is a minimatch literal) → ESLint would
+    // throw "all files ignored" for a batched lintFiles(['a','b']) and short-circuit, skipping 'b'.
+    // Per-root, 'a' is skipped as clean and 'b' is still linted.
+    const root = repo({
+      scanRoots: ['a', 'b'],
+      structure: {
+        trees: [
+          { name: 'a', root: 'a', sourceExtensions: ['ts'], grammar: { files: ['{pascal}'] } },
+          {
+            name: 'b',
+            root: 'b',
+            sourceExtensions: ['ts', 'tsx'],
+            grammar: { files: ['{pascal}'] },
+          },
+        ],
+      },
+    });
+    write(root, 'a/thing.ts'); // all-ignored (single-ext glob)
+    write(root, 'b/Ok.ts'); // conforms
+    expect((await runStructureGate(root)).code).toBe(0); // 'b' reached + clean, not a masked/fail-open
+  });
 });

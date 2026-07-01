@@ -85,7 +85,14 @@ export default async function upgrade(args, cwd) {
       existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')),
   );
   const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
-  const sel = { ...normalizeSelection(cfg.components), agentTargets };
+
+  // structure: normalizeSelection ALSO defaults this to `true` when the key is absent, so a LEGACY
+  // config (no `structure` key) would otherwise reach applyInit as structure:true and newly ADD
+  // structure-lint to a config-driven repo that never had it. Honour the RAW recorded value; if absent
+  // (legacy), infer from disk (a package-mode structure repo has an emitted eslint.config.mjs) — never
+  // the normalized default. An explicit recorded `false` is preserved (false ?? x === false).
+  const structure = cfg.components?.structure ?? existsSync(join(cwd, 'eslint.config.mjs'));
+  const sel = { ...normalizeSelection(cfg.components), agentTargets, structure };
 
   console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — stack=${stack}\n`);
 
@@ -129,11 +136,11 @@ export default async function upgrade(args, cwd) {
   else repinStalePin(cwd, target, dryRun);
 
   // ── 2. configs (migrate) ───────────────────────────────────────────────────
-  // Gate on the RAW recorded `structure` (normalizeSelection defaults it true for legacy configs),
-  // so a non-structure repo never gets an eslint.config.mjs created. A recorded structure:true
-  // implies a structure stack (init records it only when isStructure held).
+  // Gate on the RESOLVED `structure` (raw recorded value, or inferred from an emitted eslint.config.mjs
+  // for a legacy config) — NOT the normalized default — so a non-structure repo never gets an
+  // eslint.config.mjs created. applyInit's own STRUCTURE_STACKS check is the backstop for the stack.
   console.log('\n2. configs (migrate)');
-  if (cfg.components?.structure === true) {
+  if (structure) {
     const changes = computeMigration(cwd, stack);
     if (!changes.length) console.log('  • emitted configs already match');
     for (const c of changes) {
