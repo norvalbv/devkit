@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -320,5 +320,60 @@ describe('--gate (integration, real git repo)', () => {
     // --files surfaces the changed dependency NAME (b), not "package.json" — so a later, distinct
     // dep decision is a fresh pair rather than colliding with this one.
     expect(scan(['--working', '--files'])).toBe('dep-change\tb');
+  });
+
+  // The LLM downgrade path (runDetectJudge via execJudge), with a stub `claude` on PATH. Pins the
+  // isolation argv (hooks off, read-only, no session persistence) and the outage-warning contract:
+  // a dark judge must WARN on stderr, never change an exit code, and never dirty stdout.
+  describe('LLM downgrade (stubbed claude on PATH)', () => {
+    const stubClaude = (script) => {
+      const bin = join(repo, 'fakebin');
+      mkdirSync(bin, { recursive: true });
+      const fake = join(bin, 'claude');
+      writeFileSync(
+        fake,
+        `#!/bin/sh\necho "$*" >> "${join(repo, 'calls.log')}"\ncat >/dev/null\n${script}`,
+      );
+      chmodSync(fake, 0o755);
+      return bin;
+    };
+    const gateStubbed = (script) =>
+      spawnSync('node', [DETECT, '--gate'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${stubClaude(script)}:${process.env.PATH}` },
+      });
+    const stageDepChange = () => {
+      writeFileSync(
+        join(repo, 'package.json'),
+        '{\n  "name": "x",\n  "dependencies": { "a": "1.0.0", "b": "2.0.0" }\n}\n',
+      );
+      git('add package.json');
+    };
+
+    it('a confident ROUTINE downgrades the regex block (0), judged in isolation', () => {
+      stageDepChange();
+      const r = gateStubbed('echo ROUTINE\n');
+      expect(r.status).toBe(0);
+      const argv = execSync('cat calls.log', { cwd: repo, encoding: 'utf8' });
+      expect(argv).toContain('--disallowedTools *'); // pure-text judge: no tools
+      expect(argv).toContain('disableAllHooks'); // host hooks never fire in the judge
+      expect(argv).toContain('--no-session-persistence'); // no transcript pollution
+    });
+
+    it('a crashing judge warns on stderr, block stands (1), stdout stays clean', () => {
+      stageDepChange();
+      const r = gateStubbed('exit 3\n');
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('decision-smell: claude judge unavailable');
+      expect(r.stdout).toBe('');
+    });
+
+    it('an empty-output judge warns on stderr, block stands (1)', () => {
+      stageDepChange();
+      const r = gateStubbed('exit 0\n');
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('decision-smell: claude judge returned no output');
+    });
   });
 });
