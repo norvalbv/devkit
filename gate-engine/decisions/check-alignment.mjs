@@ -88,11 +88,17 @@ const ESCALATE_PROMPT = (ruling, vision, files, firstPass) =>
 
 // The depth rubric — a SOFT lint. Judges the *content* of an already-recorded Target, since the
 // schema already requires the fields (a non-empty field can still be shallow). Warn-only by default.
+// Check 4 is the 100-year test's QUALITY half: a Revisit-when line, when present, must state a
+// condition a future reader could actually check. The PRESENCE half is deterministic and lives in
+// the eval depth-audit's "(no Revisit-when)" marker — an eval run against a labelled corpus showed
+// an inference-based "could the reader infer when to revisit?" check destabilises the judge
+// (76.5% vs 100% accuracy), so absence is flagged mechanically, never judged.
 const DEPTH_PROMPT =
   'A decision-log Target block (on stdin) records an architectural decision. Judge its RATIONALE DEPTH:\n' +
   '1. Does Context state a forcing COST/failure that made the status quo untenable — NOT merely restate a prior ruling or the new mechanism (circular)?\n' +
   '2. Is each rejected alternative paired with the concrete CRITERION it loses on, not just named?\n' +
   '3. Is the Negative consequence concrete and specific, NOT a platitude?\n' +
+  '4. ONLY IF the block has a Revisit-when line: does it state a concrete, checkable condition (a measurable threshold or observable event), not a platitude like "when things change"? A block with NO Revisit-when line passes this check.\n' +
   'Reply THIN if ANY check fails, else PASS. Reply with exactly one word: PASS or THIN.';
 
 // ─── Env helper for alignment-only knobs (GUARD_* with FRINK_* back-compat alias) ─
