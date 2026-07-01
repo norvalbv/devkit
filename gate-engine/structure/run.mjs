@@ -34,9 +34,7 @@ const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 export async function runStructureGate(cwd = process.cwd()) {
   try {
     const cfg = resolveGuardConfig(cwd);
-    // Lint only roots that EXIST on disk. Passing an absent root to ESLint throws "No files matching"
-    // for the WHOLE call — which would mask a real violation in a sibling root. Filtering keeps each
-    // present root enforced regardless of whether another declared root has been created yet.
+    // Lint only roots that EXIST on disk (an absent root has nothing to enforce yet).
     const roots = (cfg.structure?.trees ?? [])
       .map((t) => t.root)
       .filter((r) => r && existsSync(join(cwd, r)));
@@ -46,18 +44,23 @@ export async function runStructureGate(cwd = process.cwd()) {
     if (!baseConfig.length) return { code: 0, errorCount: 0 }; // no grammar trees (preset-only)
 
     const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
-    let results;
-    try {
-      results = await eslint.lintFiles(roots);
-    } catch (e) {
-      // Nothing-to-lint throws are clean, not a failure. Any other lint-time throw falls through to
-      // the fail-open catch below.
-      if (NOTHING_TO_LINT_RE.test(e?.message ?? '')) return { code: 0, errorCount: 0 };
-      throw e;
+    // Lint each root INDEPENDENTLY. ESLint 10's lintFiles fail-fasts on the FIRST unmatched/all-ignored
+    // pattern, so a single ignored/empty root in a batched `lintFiles(roots)` would throw and mask a
+    // violation in a sibling root. Per-root: a root that's all-ignored / matches nothing is that root's
+    // own "clean" (skip it), while other roots still get enforced.
+    const allResults = [];
+    for (const root of roots) {
+      try {
+        allResults.push(...(await eslint.lintFiles([root])));
+      } catch (e) {
+        // Nothing-to-lint for THIS root → clean; any other throw is a real failure → fail-open below.
+        if (NOTHING_TO_LINT_RE.test(e?.message ?? '')) continue;
+        throw e;
+      }
     }
-    const errorCount = results.reduce((n, r) => n + r.errorCount, 0);
+    const errorCount = allResults.reduce((n, r) => n + r.errorCount, 0);
     if (errorCount === 0) return { code: 0, errorCount: 0 };
-    const text = await (await eslint.loadFormatter('stylish')).format(results);
+    const text = await (await eslint.loadFormatter('stylish')).format(allResults);
     return { code: 1, errorCount, text };
   } catch (e) {
     // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate

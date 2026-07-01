@@ -128,6 +128,28 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(existsSync(join(root, '.cursor'))).toBe(false); // not re-added
   });
+
+  it('does NOT add structure-lint to a legacy config that never recorded/wired it', () => {
+    // A config-driven repo initialised WITHOUT structure, then a legacy config with the `structure`
+    // key stripped. normalizeSelection defaults structure→true; upgrade must honour the raw/inferred
+    // (no eslint.config.mjs on disk) value and NOT newly enable structure-lint.
+    const root = tmpRepo(CLIB_PKG);
+    expect(
+      run(root, 'init', '--stack', 'component-lib', '--yes', '--no-structure', '--no-cursor')
+        .status,
+    ).toBe(0);
+    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false); // structure was off
+
+    const cfg = config(root);
+    delete cfg.components.structure; // simulate a pre-structure-key config
+    writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
+
+    // (doctor exit isn't asserted here — a component-lib WITHOUT structure gets the generic base biome,
+    // an orthogonal mismatch; this test only pins that upgrade does not NEWLY add structure-lint.)
+    run(root, 'upgrade');
+    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false); // still off — not newly added
+    expect(readFileSync(join(root, '.husky/pre-commit'), 'utf8')).not.toContain('guard-structure');
+  });
 });
 
 describe('devkit upgrade — preflight', () => {
