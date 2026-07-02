@@ -16,7 +16,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 // Coverage for ship-branch.sh: the pure resolution seam (the fork-upstream bug — gh's default repo
 // can resolve to a fork's UPSTREAM remote instead of origin, opening the PR against the wrong repo;
 // the fix derives owner/repo from `git remote get-url origin`), the isolation guards, the flag/path arg
-// grammar, and the real worktree-commit path (HEAD never moves, the hook fires, markers carried).
+// grammar, and the real worktree-commit path (HEAD never moves, the hook fires in the worktree).
 // Hermetic — throwaway repos, SHIP_DRY_RUN / SHIP_RESOLVE_ONLY seams, no gh, no network.
 
 vi.setConfig({ testTimeout: 30_000 }); // bash + many git subprocesses; generous under parallel load
@@ -237,18 +237,15 @@ describe('ship-branch.sh — isolation + arg guards', () => {
 describe('ship-branch.sh — worktree integration', () => {
   // The load-bearing path: a real SHIP_DRY_RUN that creates the worktree, ships a file, and commits
   // inside it. Asserts the Target's core claims end-to-end — the shared HEAD never moves, the file
-  // lands on the new branch, and the hook fires in the worktree via the .husky/_ symlink with the
-  // carried review marker present.
-  it('ships a file into an isolated worktree; HEAD stays put; the hook fires with the carried marker', () => {
+  // lands on the new branch, and the hook fires in the worktree via the .husky/_ symlink.
+  it('ships a file into an isolated worktree; HEAD stays put; the hook fires in the worktree', () => {
     const { dir, env, git } = seedShipRepo({
-      // touch the sentinel ONLY if the carried marker is present — proves "hook fired" AND "marker
-      // carried". $SENTINEL is an ABSOLUTE path from the ship env: the hook's cwd is the ephemeral
-      // worktree, so a relative `touch` would land there, not in the repo dir we assert against.
-      hookBody: '[ -f .claude/.commit-guard-passed ] && touch "$SENTINEL"\nexit 0',
+      // touch the sentinel unconditionally — proves the hook fired. $SENTINEL is an ABSOLUTE path from
+      // the ship env: the hook's cwd is the ephemeral worktree, so a relative `touch` would land there,
+      // not in the repo dir we assert against.
+      hookBody: 'touch "$SENTINEL"\nexit 0',
     });
     const sentinel = join(dir, 'HOOK_FIRED');
-    mkdirSync(join(dir, '.claude'), { recursive: true });
-    writeFileSync(join(dir, '.claude/.commit-guard-passed'), 'ok\n');
     writeFileSync(join(dir, 'note.txt'), 'hello\n'); // the untracked file we ship
     writeFileSync(join(dir, 'tool.sh'), '#!/bin/sh\necho hi\n'); // an EXECUTABLE untracked file
     chmodSync(join(dir, 'tool.sh'), 0o755);
@@ -269,7 +266,7 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore); // shared HEAD unmoved
     expect(git(['show', '--name-only', '--pretty=format:', 'feat/wt-test'])).toMatch(NOTE_RE);
-    expect(existsSync(sentinel)).toBe(true); // hook fired in the worktree + marker carried
+    expect(existsSync(sentinel)).toBe(true); // hook fired in the worktree
     // cp -Pp preserves the +x bit through the worktree commit (git tracks the exec mode).
     expect(git(['ls-tree', 'feat/wt-test', 'tool.sh']).trim()).toMatch(EXEC_MODE_RE);
   });

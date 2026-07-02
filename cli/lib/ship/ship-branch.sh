@@ -17,13 +17,7 @@
 # and is removed on exit. Scope is explicit paths; never auto-detect, because in a
 # shared tree your files are indistinguishable from parallel work.
 #
-# NOTE on markers: the pre-commit reviewer-approval check reads gitignored .*-passed
-# markers from disk. These are shared-tree-GLOBAL booleans, so the shipping agent
-# MUST have just run its own reviewers — otherwise it could inherit a parallel
-# agent's stale approval. Marker dirs default to .claude/.cursor; override/extend
-# with --markers-dir. The reviewer-name SET is a devkit constant (devkit's own agents).
-#
-# Usage:   ship-branch.sh <branch> "<title>" [--markers-dir <d>]... [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--link <d>]... [--] <path...>
 #          # PR body via stdin; bare positional paths (no --) are also accepted.
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 set -euo pipefail
@@ -31,17 +25,15 @@ set -euo pipefail
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
-# repeatable --markers-dir/--link flags and file paths; `--` forces everything after it to be a
+# repeatable --link flags and file paths; `--` forces everything after it to be a
 # path (so a file literally named like a flag, or starting with `-`, ships safely). A bare arg
 # that is not a known flag is also a path — preserving the old `<branch> <title> <path...>` form.
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
-MARKER_DIRS=()     # reviewer-marker dirs to carry (default .claude/.cursor)
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
-    --markers-dir) MARKER_DIRS+=("${2:?--markers-dir requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -57,8 +49,7 @@ for p in "${PATHS[@]}"; do
   [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
 done
 
-# Default the marker dirs + assemble the symlink set (universal base + --link extras).
-[ "${#MARKER_DIRS[@]}" -gt 0 ] || MARKER_DIRS=(.claude .cursor)
+# Assemble the symlink set (universal base + --link extras).
 LINK_DIRS=(.husky/_ node_modules)
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
@@ -160,15 +151,6 @@ git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read
   mkdir -p "$WT/$(dirname "$f")"
   cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
   git -C "$WT" add -- "$f"
-done
-
-# Carry ONLY the markers the hook actually checks (by exact name, not a .*-passed
-# glob) so the approval gate passes without dragging in unrelated/stale markers.
-for r in commit-guard api-security backend-performance frontend-security frontend-performance; do
-  for d in "${MARKER_DIRS[@]}"; do
-    m="$ROOT/$d/.$r-passed"
-    [ -e "$m" ] && { mkdir -p "$WT/$d"; cp "$m" "$WT/$d/"; }
-  done
 done
 
 # Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping

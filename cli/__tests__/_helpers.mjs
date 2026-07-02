@@ -3,7 +3,7 @@
  * it up as a suite. Collapses the tmp-repo + subprocess-runner + cleanup boilerplate that every
  * subprocess-style CLI test repeated verbatim.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,34 +62,6 @@ export function rootRegistry() {
     roots.length = 0;
   };
   return { mkTmp, cleanup };
-}
-
-/**
- * Fixtures for the commit-guard SCRIPT suites (approve.sh / checklist.mjs), which run the real
- * scripts in throwaway git repos seeded with a guard.config.json. `repo(config)` makes a git repo,
- * writing `guard.config.json` when `config != null` (pass `{}` for a present-but-empty config, or
- * null/undefined for none); `stage(root, rel, body?)` mkdir-ps, writes, and `git add`s a file.
- * `const { repo, stage, cleanup } = gitRepoFixtures('approve-')`. Pair with `afterEach(cleanup)`.
- *
- * @param {string} prefix mkdtemp prefix
- */
-export function gitRepoFixtures(prefix) {
-  const { mkTmp, cleanup } = rootRegistry();
-  const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
-  const repo = (config) => {
-    const root = mkTmp(prefix);
-    if (config != null) writeFileSync(join(root, 'guard.config.json'), JSON.stringify(config));
-    git(root, 'init', '-q');
-    return root;
-  };
-  const stage = (root, rel, body = 'export {};\n') => {
-    mkdirSync(join(root, dirname(rel)), { recursive: true });
-    writeFileSync(join(root, rel), body);
-    git(root, 'add', '-A');
-  };
-  // `mkTmp` is exposed for suites that build a bespoke repo shape (e.g. a per-package monorepo whose
-  // guard.config.json lives in a subdir, not at the root).
-  return { repo, stage, cleanup, git, mkTmp };
 }
 
 /**

@@ -42,19 +42,19 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 
 SCRIPT=".claude/skills/frontend-security/scripts/checklist.mjs"
 
-## 2. Setup
+## 2. Generate the checklist
 ```bash
 node $SCRIPT generate
 node $SCRIPT status
 ```
+`generate` enumerates the review items from the staged files under `review.frontendRoots`
+(`guard.config.json`). If it prints "No staged frontend files", exit early — nothing to review.
 
-If "No staged frontend files" → exit early, nothing to review.
-
-## 3. Check each item
-For each item in the checklist:
-- Use Grep tool to search staged files for issues
-- Reference the SKILL.md for what to look for
-- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
+## 3. Check each item, one at a time
+For each item the checklist enumerated:
+- Use Grep to inspect the staged files for that concern; Read surrounding code where a hunk is ambiguous.
+- Reference the SKILL.md rule categories below for what to look for.
+- Mark it: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`.
 
 ### Security checks by category:
 
@@ -86,6 +86,5 @@ For each item in the checklist:
 node $SCRIPT finalize
 node $SCRIPT cleanup
 ```
-
-Done. No verbose summary needed.
+`finalize` verifies every enumerated item was resolved — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. No verbose summary needed.
 </workflow>
