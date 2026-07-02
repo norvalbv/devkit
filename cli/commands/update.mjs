@@ -6,7 +6,8 @@
  * Resolves the highest semver tag from the devkit remote, compares it to the running
  * version, and re-installs if newer. Two modes, auto-detected from the cwd:
  *   - package: `@norvalbv/devkit` is a dep here → re-pin package.json + `bun install`.
- *   - global:  otherwise → `bun add -g` the new tag (updates the global CLI on PATH).
+ *   - global:  otherwise → `bun remove -g` the old pin, then `bun add -g` the new tag
+ *              (a bare `bun add -g` over an existing git pin throws DependencyLoop).
  * bun caches git deps, so we `bun pm cache rm` first.
  *
  * Repo URL defaults to the README form; override with DEVKIT_REPO if your ssh uses a host
@@ -44,6 +45,19 @@ export function latestTag(lsRemoteOutput) {
 export function repinPackageJson(pkgRaw, version) {
   const re = new RegExp(`("${DEP.replace('/', '\\/')}"\\s*:\\s*"[^"]*#v)\\d+\\.\\d+\\.\\d+(")`);
   return pkgRaw.replace(re, `$1${version}$2`);
+}
+
+/**
+ * Ordered `bun` invocations for a global-mode update, as `[cmd, ...args]` arg-arrays.
+ * The remove MUST precede the add: `bun add -g` throws `DependencyLoop` when the same git
+ * package is already pinned in the global manifest, so we drop the old ref first (the caller
+ * tolerates the remove failing when devkit is not yet installed globally).
+ */
+export function globalUpdateCommands(version) {
+  return [
+    ['bun', ['remove', '-g', DEP]],
+    ['bun', ['add', '-g', `${BUN_REF}#v${version}`]],
+  ];
 }
 
 /**
@@ -129,7 +143,13 @@ export default async function update(args, cwd) {
     writeFileSync(pkgPath, repinned);
     run('bun', ['install'], cwd); // README: use install for a re-pin (bun add can DependencyLoop)
   } else {
-    run('bun', ['add', '-g', `${BUN_REF}#v${latest}`], cwd);
+    const [removeOld, addNew] = globalUpdateCommands(latest);
+    try {
+      run(removeOld[0], removeOld[1], cwd); // drop the old pin so `bun add -g` can't DependencyLoop
+    } catch {
+      // devkit not currently installed globally — nothing to remove, proceed to add
+    }
+    run(addNew[0], addNew[1], cwd);
   }
 
   console.log(`✓ devkit updated to v${latest}.`);
