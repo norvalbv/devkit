@@ -18,6 +18,15 @@ if [ -z "$file_path" ] || [ ! -f "$file_path" ]; then
   exit 0
 fi
 
+# Only act on files INSIDE this project. An agent may edit a sibling checkout (e.g. another repo it
+# is working on in the same session) whose files live outside CLAUDE_PROJECT_DIR and have their own
+# toolchain — running THIS repo's biome/eslint on them errors (eslint resolves its config from the
+# edited file's own tree, not cwd) and spams the conversation. That repo runs its own hooks.
+if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$CLAUDE_PROJECT_DIR"/* ]]; then
+  echo '{}'
+  exit 0
+fi
+
 cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || { echo '{}'; exit 0; }
 
 # Biome format/lint auto-fix on the edited file (silent, best-effort).
