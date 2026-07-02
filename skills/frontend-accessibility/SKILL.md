@@ -15,6 +15,23 @@ This skill is parameterized by `guard.config.json` `review.accessibility`:
 If a Memory MCP (`search_nodes`) is available, search it before flagging something that could be
 a deliberate project decision (color choices, component patterns); respect a matching decision.
 
+## Review Script
+
+```bash
+SCRIPT=".claude/skills/frontend-accessibility/scripts/checklist.mjs"
+
+node $SCRIPT generate     # Create checklist from staged frontend files
+node $SCRIPT status       # Show progress
+node $SCRIPT check-item <name> --pass   # Mark item passed
+node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
+node $SCRIPT finalize     # Verify & approve
+node $SCRIPT cleanup      # Remove checklist
+node $SCRIPT contrast "#foreground" "#background"  # Check color contrast ratio
+```
+
+The frontend roots the script scans come from `guard.config.json` `review.frontendRoots` —
+they are not hardcoded. When unset/empty there is nothing to review.
+
 ## Structure & Semantics
 
 **Use semantic HTML elements:**
@@ -250,6 +267,13 @@ a deliberate project decision (color choices, component patterns); respect a mat
 | UI components & icons | 3:1 | 1.4.11 |
 | Input borders | 3:1 | 1.4.11 |
 | Focus indicators | 3:1 | 1.4.11 |
+
+**Verify contrast with the script:**
+
+```bash
+node .claude/skills/frontend-accessibility/scripts/checklist.mjs contrast "#6b7280" "#ffffff"
+# Output: Contrast ratio: 4.59:1 | AA normal: PASS | AA large: PASS
+```
 
 **Rules:**
 - Normal text contrast >= 4.5:1 against background (WCAG 1.4.3)

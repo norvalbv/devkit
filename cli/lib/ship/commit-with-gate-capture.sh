@@ -34,7 +34,7 @@ commit_with_gate_capture() {
   local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
   mkdir -p "$root/.devkit"
 
-  local secs=${SHIP_COMMIT_TIMEOUT:-900}   # a hang CEILING, not a gate budget (coverage isn't gated here)
+  local secs=${SHIP_COMMIT_TIMEOUT:-600}   # a hang CEILING, not a gate budget (coverage isn't gated here)
   local to_bin to=()
   to_bin=$(command -v timeout || command -v gtimeout || true)
   if [ -n "$to_bin" ]; then

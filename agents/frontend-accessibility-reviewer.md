@@ -47,11 +47,21 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 ## 1. Read skill for detailed rules:
 - `.claude/skills/frontend-accessibility/SKILL.md`
 
-## 2. Review
-- Inspect the staged diff: `git diff --cached`.
-- If no staged files fall under `review.frontendRoots`, exit early — nothing to review.
-- For each staged frontend file, use Grep to find issues against the SKILL.md rule categories below, then Read the surrounding code to confirm.
-- Report findings with `file:line` references.
+SCRIPT=".claude/skills/frontend-accessibility/scripts/checklist.mjs"
+
+## 2. Setup
+```bash
+node $SCRIPT generate
+node $SCRIPT status
+```
+
+If "No staged frontend files" → exit early, nothing to review.
+
+## 3. Check each item
+For each item in the checklist:
+- Use Grep tool to search staged files for issues
+- Reference the SKILL.md for what to look for
+- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
 
 ### Accessibility checks by category:
 
@@ -102,7 +112,7 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 - Large text contrast >= 3:1 (WCAG AA)
 - Non-text elements (icons, borders) contrast >= 3:1
 - Color is not the sole means of conveying information
-- Compute the WCAG contrast ratio for each fg/bg pair to verify it meets the threshold
+- Use `node $SCRIPT contrast "#fg" "#bg"` to verify ratios
 
 **Motion & Media:**
 - Animations respect `prefers-reduced-motion`
@@ -118,7 +128,19 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 - Sufficient space between interactive items for scrolling
 - Touch/tap target size >= 44×44px — UNLESS `review.accessibility.skipTouchTargets` is true (see `<general_rules>`).
 
-## 3. Report
-List each finding as `FAIL: [issue] | [file:line] | [1-line reason]`. If none, report `PASS: no accessibility issues`.
+## 4. Finalize
+```bash
+node $SCRIPT finalize
+node $SCRIPT cleanup
+```
+
+## 5. Return to root
+Return ONLY the script's finalize output. If there are failures, list them as:
+```
+FAIL: [item-name] | [file path] | [1-line reason]
+FAIL: ...
+PASS: [N items passed]
+```
+If all pass: `PASS: all [N] items passed`
 No prose, no summaries, no recommendations. Your output goes directly into root agent context.
 </workflow>

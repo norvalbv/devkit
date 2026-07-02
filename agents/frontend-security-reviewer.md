@@ -40,11 +40,21 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 ## 1. Read skill for detailed rules:
 - `.claude/skills/frontend-security/SKILL.md`
 
-## 2. Review
-- Inspect the staged diff: `git diff --cached`.
-- If no staged files fall under `review.frontendRoots`, exit early — nothing to review.
-- For each staged frontend file, use Grep to find issues against the SKILL.md rule categories below, then Read the surrounding code to confirm.
-- Report findings with `file:line` references.
+SCRIPT=".claude/skills/frontend-security/scripts/checklist.mjs"
+
+## 2. Setup
+```bash
+node $SCRIPT generate
+node $SCRIPT status
+```
+
+If "No staged frontend files" → exit early, nothing to review.
+
+## 3. Check each item
+For each item in the checklist:
+- Use Grep tool to search staged files for issues
+- Reference the SKILL.md for what to look for
+- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
 
 ### Security checks by category:
 
@@ -70,6 +80,12 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 
 **CSP:**
 - Content Security Policy headers configured
+
+## 4. Finalize
+```bash
+node $SCRIPT finalize
+node $SCRIPT cleanup
+```
 
 Done. No verbose summary needed.
 </workflow>

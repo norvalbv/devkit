@@ -42,11 +42,21 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 ## 1. Read skill for detailed rules:
 - `.claude/skills/backend-performance/SKILL.md`
 
-## 2. Review
-- Inspect the staged diff: `git diff --cached`.
-- If no staged files fall under `review.backendRoots`, exit early — nothing to review.
-- For each staged backend file, use Grep to find issues against the SKILL.md rule categories below, then Read the surrounding code to confirm.
-- Report findings with `file:line` references.
+SCRIPT=".claude/skills/backend-performance/scripts/checklist.mjs"
+
+## 2. Setup
+```bash
+node $SCRIPT generate
+node $SCRIPT status
+```
+
+If "No staged backend files" → exit early, nothing to review.
+
+## 3. Check each item
+For each item in the checklist:
+- Use Grep tool to search staged files for issues
+- Reference the SKILL.md for what to look for
+- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
 
 ### Performance checks by category:
 
@@ -76,6 +86,12 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 - No obvious O(n²) loops
 - Streaming for large data
 - Batch operations where possible
+
+## 4. Finalize
+```bash
+node $SCRIPT finalize
+node $SCRIPT cleanup
+```
 
 Done. No verbose summary needed.
 </workflow>

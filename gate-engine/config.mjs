@@ -96,9 +96,6 @@ export const DEFAULTS = Object.freeze({
     trustBoundaries: '',
     shortcutTracking: false,
     accessibility: Object.freeze({ skipTouchTargets: false }),
-    // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
-    // headless judges (the SAME files the root agent dispatches interactively).
-    agentsDir: '.claude/agents',
   }),
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
@@ -163,7 +160,7 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
  *   searchTool: string,
  *   graphTool: string,
  *   testCommand: string|null,
- *   review: {backendRoots:string[], frontendRoots:string[], trustBoundaries:string, shortcutTracking:boolean, accessibility:{skipTouchTargets:boolean}, agentsDir:string},
+ *   review: {backendRoots:string[], frontendRoots:string[], trustBoundaries:string, shortcutTracking:boolean, accessibility:{skipTouchTargets:boolean}},
  *   noLog: boolean,
  *   noLlm: boolean,
  *   cwd: string,
