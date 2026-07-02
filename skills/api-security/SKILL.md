@@ -5,22 +5,6 @@ description: Security best practices for APIs and backend endpoints. Use when cr
 
 # API Security
 
-## Review Script
-
-```bash
-SCRIPT=".claude/skills/api-security/scripts/checklist.mjs"
-
-node $SCRIPT generate     # Create checklist from staged backend files
-node $SCRIPT status       # Show progress
-node $SCRIPT check-item <name> --pass   # Mark item passed
-node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
-node $SCRIPT finalize     # Verify & approve
-node $SCRIPT cleanup      # Remove checklist
-```
-
-The backend roots the script scans come from `guard.config.json` `review.backendRoots`
-(default `["src"]`) — they are not hardcoded.
-
 ## Authentication
 
 - Avoid 'Basic Authentication', use standard (e.g. JWT, OAuth 2.0)

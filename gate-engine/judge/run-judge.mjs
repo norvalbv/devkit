@@ -16,7 +16,22 @@
 // diverges: a warn-by-default gate fails open (commit proceeds) while a deterministic-floor gate's
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+
+// The two dark-judge warning shapes, shared by the sync and async runners so the outage stays
+// visible with ONE wording (and the twin catch blocks don't diverge or trip the dup gate).
+function warnNoOutput(label) {
+  // Ran (exit 0) but emitted nothing — a soft outage the parser would silently read as "no
+  // verdict". Surface it so this variant of a dark judge is not silent either.
+  console.error(`⚠️  ${label}: claude judge returned no output — judgement skipped`);
+}
+
+function warnUnavailable(label, e) {
+  const reason = e?.code ?? (e?.status != null ? `exit ${e.status}` : (e?.message ?? 'unknown'));
+  console.error(
+    `⚠️  ${label}: claude judge unavailable (${reason}; offline/quota/absent) — judgement skipped`,
+  );
+}
 
 /**
  * Run one `claude` judge invocation. Returns raw stdout on success, or `null` (after emitting ONE
@@ -37,17 +52,50 @@ export function execJudge({ label, args, input, timeout, cwd }) {
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     if (!out || !String(out).trim()) {
-      // Ran (exit 0) but emitted nothing — a soft outage the parser would silently read as "no
-      // verdict". Surface it so this variant of a dark judge is not silent either.
-      console.error(`⚠️  ${label}: claude judge returned no output — judgement skipped`);
+      warnNoOutput(label);
       return null;
     }
     return out;
   } catch (e) {
-    const reason = e?.code ?? (e?.status != null ? `exit ${e.status}` : (e?.message ?? 'unknown'));
-    console.error(
-      `⚠️  ${label}: claude judge unavailable (${reason}; offline/quota/absent) — judgement skipped`,
-    );
+    warnUnavailable(label, e);
     return null;
   }
+}
+
+/**
+ * Async twin of execJudge — same contract (raw stdout, or `null` after ONE stderr warning), but
+ * non-blocking so a caller can run SEVERAL judges concurrently (the review gate fans out one judge
+ * per domain reviewer; serialising them would multiply the commit's wall-clock by the reviewer
+ * count). Callback-form execFile because the promisified variant cannot take stdin: the prompt's
+ * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
+ * judge's transcript (tool output included) can exceed the 1 MB default.
+ *
+ * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string }} opts
+ * @returns {Promise<string|null>}
+ */
+export function execJudgeAsync({ label, args, input, timeout, cwd }) {
+  return new Promise((resolve) => {
+    const child = execFile(
+      'claude',
+      args,
+      { cwd, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout) => {
+        if (err) {
+          warnUnavailable(label, err);
+          resolve(null);
+          return;
+        }
+        if (!stdout || !String(stdout).trim()) {
+          warnNoOutput(label);
+          resolve(null);
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+    // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
+    child.stdin?.on('error', () => {});
+    if (input !== undefined) child.stdin?.write(input);
+    child.stdin?.end();
+  });
 }

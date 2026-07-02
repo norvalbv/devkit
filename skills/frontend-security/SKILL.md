@@ -5,22 +5,6 @@ description: Security best practices for frontend/client-side code. Use when imp
 
 # Frontend Security
 
-## Review Script
-
-```bash
-SCRIPT=".claude/skills/frontend-security/scripts/checklist.mjs"
-
-node $SCRIPT generate     # Create checklist from staged frontend files
-node $SCRIPT status       # Show progress
-node $SCRIPT check-item <name> --pass   # Mark item passed
-node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
-node $SCRIPT finalize     # Verify & approve
-node $SCRIPT cleanup      # Remove checklist
-```
-
-The frontend roots the script scans come from `guard.config.json` `review.frontendRoots` —
-they are not hardcoded. When unset/empty there is nothing to review.
-
 ## XSS Prevention
 
 **Sanitize user-provided HTML:**

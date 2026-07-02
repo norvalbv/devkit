@@ -10,21 +10,19 @@
 # symlink + marker ceremony is duplicated rather than shared so this flow can't perturb new-ship.
 # fallow-ignore-next-line code-duplication
 #
-# Usage:  ship --pr <branch> "<title>" [--markers-dir <d>]... [--link <d>]... [--] <path...>
+# Usage:  ship --pr <branch> "<title>" [--link <d>]... [--] <path...>
 #         # body via stdin. The <branch> is the existing PR's head branch.
 set -euo pipefail
 
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
 LINK_EXTRA=()
-MARKER_DIRS=()
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr) shift ;;                                                   # mode flag (already routed here) — ignore
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
-    --markers-dir) MARKER_DIRS+=("${2:?--markers-dir requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
@@ -37,7 +35,6 @@ for p in "${PATHS[@]}"; do
   [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
 done
 
-[ "${#MARKER_DIRS[@]}" -gt 0 ] || MARKER_DIRS=(.claude .cursor)
 LINK_DIRS=(.husky/_ node_modules)
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
@@ -98,13 +95,6 @@ done
 
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothing to re-push" >&2; exit 1; }
-
-for r in commit-guard api-security backend-performance frontend-security frontend-performance; do
-  for d in "${MARKER_DIRS[@]}"; do
-    m="$ROOT/$d/.$r-passed"
-    [ -e "$m" ] && { mkdir -p "$WT/$d"; cp "$m" "$WT/$d/"; }
-  done
-done
 
 # Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
 # the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
