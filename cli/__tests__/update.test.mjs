@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { cmpSemver, latestTag, repinPackageJson } from '../commands/update.mjs';
+import {
+  cmpSemver,
+  globalUpdateCommands,
+  latestTag,
+  repinPackageJson,
+} from '../commands/update.mjs';
 
 describe('cmpSemver', () => {
   it('orders numerically, not lexically', () => {
@@ -44,5 +49,15 @@ describe('repinPackageJson', () => {
   it('leaves a package.json without the devkit dep unchanged', () => {
     const raw = '{\n  "dependencies": { "react": "^19.0.0" }\n}';
     expect(repinPackageJson(raw, '0.10.0')).toBe(raw);
+  });
+});
+
+describe('globalUpdateCommands', () => {
+  it('removes the old global pin BEFORE adding the new tag (else bun DependencyLoops)', () => {
+    const [removeOld, addNew] = globalUpdateCommands('0.26.1');
+    expect(removeOld).toEqual(['bun', ['remove', '-g', '@norvalbv/devkit']]);
+    expect(addNew[1]).toContain('add');
+    expect(addNew[1]).toContain('-g');
+    expect(addNew[1].at(-1)).toMatch(/#v0\.26\.1$/);
   });
 });
