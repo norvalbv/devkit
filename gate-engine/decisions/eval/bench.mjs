@@ -70,7 +70,7 @@ import {
   runDepthJudge,
 } from '../check-alignment.mjs';
 import { currentTarget, parseDecision } from '../decisions.mjs';
-import { detectSmells, parseVerdict, runDetectJudge } from '../detect.mjs';
+import { buildDetectJudgeInput, detectSmells, parseVerdict, runDetectJudge } from '../detect.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const baselinePath = path.join(here, 'results.baseline.json');
@@ -247,6 +247,9 @@ const rowLine = (id, ok, got, want, suffix = '') =>
  */
 export function runDetectBench(rows, { model = MODEL } = {}) {
   const results = [];
+  let judgedChars = 0;
+  let judgedRaw = 0;
+  let judgedCount = 0;
   for (const c of rows) {
     const smells = detectSmells(c.entries, c.boundaries ?? []);
     let got;
@@ -255,7 +258,12 @@ export function runDetectBench(rows, { model = MODEL } = {}) {
       got = 'ROUTINE';
       freeSkip = true;
     } else {
-      const raw = runDetectJudge(process.cwd(), c.diff, model);
+      // Exact gate path: evidence extraction first, then the judge (never the raw diff).
+      const input = buildDetectJudgeInput(c.diff, c.entries, c.boundaries ?? []);
+      judgedCount += 1;
+      judgedChars += input.length;
+      judgedRaw += String(c.diff).length;
+      const raw = runDetectJudge(process.cwd(), input, model);
       if (raw === null) throw new BenchAbort(2, 'decisions-eval: claude went dark mid-run');
       got = parseVerdict(raw) ?? 'NULL';
     }
@@ -277,6 +285,10 @@ export function runDetectBench(rows, { model = MODEL } = {}) {
     accuracyScored: scored.accuracy,
     decision: round3(scored.perClass.DECISION),
     routine: round3(scored.perClass.ROUTINE),
+    // The cost metric: mean judge-input size vs the raw diff it was extracted from — keeps the
+    // "evidence-only is cheaper" claim measured, and a prompt change that bloats input shows up.
+    meanInputChars: judgedCount ? Math.round(judgedChars / judgedCount) : 0,
+    meanRawDiffChars: judgedCount ? Math.round(judgedRaw / judgedCount) : 0,
     confusion: t.confusion,
     byCategory: byCategory(results),
     results,
@@ -584,6 +596,9 @@ function main(argv) {
       printConfusion(s.confusion);
       printPerClass({ DECISION: s.decision, ROUTINE: s.routine });
       console.log(`  headline: DECISION recall ${s.decision.recall.toFixed(2)}`);
+      console.log(
+        `  judge input: mean ${s.meanInputChars} chars (extracted from mean ${s.meanRawDiffChars}-char raw diffs)`,
+      );
       for (const [cat, c] of Object.entries(s.byCategory))
         console.log(`  ${cat.padEnd(16)} ${c.correct}/${c.total}`);
     } else if (name === 'alignment') {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  buildDetectJudgeInput,
   depChangedKeys,
   detectSmells,
   gateVerdict,
@@ -189,6 +190,137 @@ describe('gateVerdict', () => {
   });
   it('passes when there are no smells', () => {
     expect(gateVerdict({ bypass: false, decisionStaged: false, smells: [] })).toBe(0);
+  });
+});
+
+// The evidence extractor: the judge must see the smell-tripping files' hunks and NEVER the
+// routine haystack — a buried decision cannot be sliced away, and churn cannot dilute attention.
+describe('buildDetectJudgeInput', () => {
+  const depEntry = entry({ path: 'package.json', depChanged: true, depKeys: ['prisma'] });
+  const churnEntry = entry({ path: 'src/generated/fixtures.ts', added: 300, deleted: 300 });
+  const seg = (p, body) => `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n${body}\n`;
+
+  it('extracts ONLY smell-contributing segments; routine churn is omitted, not appended', () => {
+    const diff =
+      seg('src/generated/fixtures.ts', '+churn'.repeat(50)) +
+      seg('package.json', '-"prisma"\n+"drizzle-orm"');
+    const input = buildDetectJudgeInput(diff, [churnEntry, depEntry]);
+    expect(input).toContain('drizzle-orm'); // the decision decider is present…
+    expect(input).not.toContain('churn'); // …the haystack is not
+    expect(input).toContain('[1 routine changed-file segment(s) omitted');
+  });
+
+  it('the file-list header carries every changed file, omitted ones included', () => {
+    const diff = seg('package.json', '+x');
+    const input = buildDetectJudgeInput(diff, [churnEntry, depEntry]);
+    expect(input).toContain('M\tsrc/generated/fixtures.ts\t+300/-300');
+    expect(input).toContain('M\tpackage.json');
+  });
+
+  it('a many-file commit line-caps the header with an explicit "+N more" — total input stays bounded', () => {
+    const many = Array.from({ length: 200 }, (_, i) => entry({ path: `src/f${i}.ts` }));
+    const input = buildDetectJudgeInput(seg('package.json', '+x'), [...many, depEntry]);
+    expect(input).toContain('…and 141 more changed files');
+    expect(input.length).toBeLessThan(12000); // runDetectJudge's slice can never bite
+  });
+
+  it('a buried decision survives: evidence is positional-independent', () => {
+    // 20k of churn FIRST, the dep hunk LAST — the naive-prefix failure shape.
+    const diff =
+      seg('src/generated/fixtures.ts', 'x'.repeat(20000)) +
+      seg('package.json', '+"drizzle-orm": "^0.36.0"');
+    const input = buildDetectJudgeInput(diff, [churnEntry, depEntry]);
+    expect(input).toContain('drizzle-orm');
+    expect(input.length).toBeLessThan(12000);
+  });
+
+  it('consumer git config cannot blind the extractor: noprefix and mnemonicPrefix formats still match', () => {
+    // diff.noprefix=true → "diff --git package.json package.json"; mnemonicPrefix → "c/… i/…".
+    const noprefix =
+      'diff --git package.json package.json\n--- package.json\n+++ package.json\n+"drizzle-orm"\n';
+    const mnemonic =
+      'diff --git c/package.json i/package.json\n--- c/package.json\n+++ i/package.json\n+"drizzle-orm"\n';
+    for (const diff of [noprefix, mnemonic]) {
+      const input = buildDetectJudgeInput(diff, [depEntry]);
+      expect(input).toContain('drizzle-orm');
+      expect(input).not.toContain('no evidence segments could be extracted');
+    }
+  });
+
+  it('a smelled path never substring-matches a longer path (a.ts vs data.ts)', () => {
+    const shortDel = entry({ status: 'D', path: 'a.ts', deleted: 150 });
+    const input = buildDetectJudgeInput(seg('src/data.ts', '+unrelated'), [
+      shortDel,
+      entry({ path: 'src/data.ts' }),
+    ]);
+    expect(input).not.toContain('+unrelated'); // data.ts is not evidence for the a.ts smell
+  });
+
+  it('caps one giant smelled segment so a second smelled file still fits', () => {
+    const bigDel = entry({ status: 'D', path: 'src/old/huge.ts', deleted: 900 });
+    const diff = seg('src/old/huge.ts', 'y'.repeat(30000)) + seg('package.json', '+"pg": "^8"');
+    const input = buildDetectJudgeInput(diff, [bigDel, depEntry]);
+    expect(input).toContain('"pg"'); // second smelled file present despite the giant first
+    expect(input.length).toBeLessThan(10000);
+  });
+
+  it('the total cap is HARD, and a cap-dropped SMELL segment is named INCOMPLETE — never lumped with routine omissions', () => {
+    // Three legacy-deletion smells of 4k+ each: the first two fill EVIDENCE_TOTAL_CAP exactly,
+    // the third must be reported as dropped smell evidence (fail-safe trigger), not "routine".
+    const dels = ['src/a/one.ts', 'src/b/two.ts', 'src/c/three.ts'].map((p) =>
+      entry({ status: 'D', path: p, deleted: 500 }),
+    );
+    const diff = dels.map((d) => seg(d.path, 'z'.repeat(6000))).join('');
+    const input = buildDetectJudgeInput(diff, dels);
+    expect(input).toContain('SMELL-file segment(s) dropped by the evidence cap');
+    expect(input).toContain('INCOMPLETE');
+    expect(input).toContain('[0 routine changed-file segment(s) omitted');
+    expect(input.length).toBeLessThan(12000); // hard ceiling holds even at exhaustion
+  });
+
+  it('lockfile deletions are never evidence and cannot eat the budget (mirrors smellSources)', () => {
+    const lockDel = entry({ status: 'D', path: 'apps/a/package-lock.json', deleted: 3000 });
+    const diff =
+      seg('apps/a/package-lock.json', 'l'.repeat(9000)) + seg('package.json', '+"drizzle-orm"');
+    const input = buildDetectJudgeInput(diff, [lockDel, depEntry]);
+    expect(input).toContain('drizzle-orm'); // the real decision keeps the budget
+    expect(input).not.toContain('lll'); // lockfile churn never reaches the model
+  });
+
+  it('an unrelated mid-size deletion (no module-replace counterpart, under legacy floor) is not evidence', () => {
+    const midDel = entry({ status: 'D', path: 'src/tmp/scratch.ts', deleted: 70 }); // >50, <100, no A twin
+    const diff = seg('src/tmp/scratch.ts', '-scratch') + seg('package.json', '+"pg"');
+    const input = buildDetectJudgeInput(diff, [midDel, depEntry]);
+    expect(input).not.toContain('-scratch');
+    expect(input).toContain('"pg"');
+  });
+
+  it('module-replace: both the ADDED file and its big-deletion counterpart are evidence', () => {
+    const del = entry({ status: 'D', path: 'src/lib/transport.ts', deleted: 80 });
+    const add = entry({ status: 'A', path: 'src/net/transport.ts', added: 90 });
+    const diff =
+      seg('src/lib/transport.ts', '-old impl') + seg('src/net/transport.ts', '+new impl');
+    const input = buildDetectJudgeInput(diff, [del, add]);
+    expect(input).toContain('-old impl');
+    expect(input).toContain('+new impl');
+  });
+
+  it('cross-boundary evidence flows through the boundaries argument', () => {
+    const a = entry({ path: 'api/auth.ts', added: 10, deleted: 2 });
+    const b = entry({ path: 'worker/auth.ts', added: 12, deleted: 3 });
+    const diff = seg('api/auth.ts', '+moved check') + seg('worker/auth.ts', '+receives check');
+    const withB = buildDetectJudgeInput(diff, [a, b], ['api/', 'worker/']);
+    expect(withB).toContain('+moved check');
+    expect(withB).toContain('+receives check');
+    const withoutB = buildDetectJudgeInput(diff, [a, b]); // no boundaries → no smell → no evidence
+    expect(withoutB).not.toContain('+moved check');
+    expect(withoutB).toContain('no evidence segments could be extracted');
+  });
+
+  it('zero extractable evidence warns explicitly — the fail-safe instruction engages', () => {
+    const weird = 'diff --git "a/sp ace.ts" "b/sp ace.ts"\n+z\n';
+    const input = buildDetectJudgeInput(weird, [depEntry]);
+    expect(input).toContain('no evidence segments could be extracted');
   });
 });
 

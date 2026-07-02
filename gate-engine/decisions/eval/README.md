@@ -77,8 +77,17 @@ Target with `--evidence-change`) or give a `--revisit-when` condition.
 
 `entries` is the declarative form of the gate's `gatherEntries()` output and drives the smell floor;
 `boundaries` (optional) enables the cross-boundary smell. A row whose entries raise **no smell
-free-skips as ROUTINE with zero claude calls** — exactly the gate's path. `diff` (what the judge
-sees on stdin, truncated to 12 000 chars by the gate itself) is only read for smelled rows.
+free-skips as ROUTINE with zero claude calls** — exactly the gate's path.
+
+**The judge never sees the raw `diff`.** The gate runs deterministic EVIDENCE EXTRACTION
+(`buildDetectJudgeInput`): a capped changed-file list, then ONLY the smell-contributing files' diff
+segments (per-segment + hard total caps), then explicit omission accounting — cap-dropped smell
+evidence names itself INCOMPLETE, engaging the prompt's insufficient-evidence → DECISION fail-safe.
+The bench applies the same extractor to `diff`, so a decision buried past any slice point is
+positionally immune by construction and generated churn never dilutes the model (length alone
+measurably degrades judgment: arXiv:2402.14848, 2302.00093, 2409.01666). The detect summary prints
+mean judge-input size next to mean raw-diff size so the cost claim stays measured; the
+`truncation-buried-decision` corpus row pins the burial case.
 
 ### `cases-alignment.jsonl`
 
