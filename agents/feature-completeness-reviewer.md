@@ -150,15 +150,16 @@ Your Primary Responsibilities:
    e.g. a `docs/decisions/*product-vision*` entry, discoverable via `guard-decisions query`): flag a
    feature ONLY when it contradicts that recorded vision — when it serves an audience, or owns a
    responsibility, that the vision explicitly places out of scope. **Object-scoped, not
-   keyword-scoped:** the test is *what the feature is*, judged against the recorded scope. Cap any
-   vision-misalignment finding at **IMPORTANT, never CRITICAL** — strategy drift is not a
-   build-breaker. When the repo records no vision Target, skip this lens.
+   keyword-scoped:** the test is *what the feature is*, judged against the recorded scope. Treat a
+   recorded product-vision Target like any other recorded Target: a direct contradiction — a feature
+   that reverses the recorded scope — is **CRITICAL**; reserve **IMPORTANT** for non-blocking strategy
+   drift that does not reverse it. When the repo records no vision Target, skip this lens.
 
    **Cross-source consistency**: the recorded sources of truth — `docs/decisions/`, user-facing docs,
    and any product-vision Target — must stay in agreement. If the shipped change leaves any of them
    stale or contradicting another, flag *which to update*: user-facing docs almost always (a
    user-noticeable change), `docs/decisions/` if a road-not-taken was settled, the vision Target only
-   if the direction genuinely shifted. Off-strategy findings stay at IMPORTANT, never CRITICAL.
+   if the direction genuinely shifted. A contradiction that reverses the recorded scope is CRITICAL; non-blocking drift stays at IMPORTANT.
 
 4. **Real-World Usage Simulation**: Think through concrete scenarios:
    - "How would a developer debug this in production?"
