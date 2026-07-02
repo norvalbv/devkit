@@ -16,18 +16,48 @@ gates run — bench and gate cannot drift.
 ## Run
 
 ```bash
-node bench.mjs                    # all three sub-benches
-node bench.mjs detect             # one sub-bench (also: alignment, depth; combine freely)
-node bench.mjs all --baseline     # write this run as the baseline (results.baseline.json)
-node bench.mjs all --fail         # exit 1 if a headline metric regressed vs baseline
-node bench.mjs depth-audit        # the 100-year audit: judge YOUR real decision records (below)
+node bench.mjs detect --dev              # prompt-iteration tier: holdout rows excluded, K=1
+BENCH_RUNS=3 node bench.mjs all --baseline   # baseline tier: majority-of-3 verdicts (detect/depth)
+BENCH_RUNS=3 node bench.mjs all --fail       # gate tier: exit 1 on floor breach / significant flips
+node bench.mjs coverage                  # corpus coverage matrix — zero claude calls
+node bench.mjs depth-audit               # the 100-year audit: judge YOUR real decision records (below)
 ```
 
 Exit `0` = ran (no regression under `--fail`) · `1` = regression (with `--fail`) · `2` = could not
 run (cases missing, `claude` absent, judge dark — see outage policy below).
 
 Each run prints per-row `OK/FAIL`, a confusion matrix, per-class precision/recall/F1 (+ macro-F1 for
-the 3-class alignment judge), the headline metric, and the config line.
+the 3-class alignment judge), the headline metric **with raw counts and a Wilson 95% interval**, the
+config line, and (vs a baseline) the per-row flip table.
+
+## Statistical honesty — what this bench can and cannot see
+
+At these corpus sizes the bench is a **large-effect tripwire, not a 5pp regression detector**:
+Wilson 95% on 14/16 correct is roughly [64%, 96%], and resolving a 5pp drop with statistical power
+would need ~630 rows. The bench is honest about this instead of pretending:
+
+- **Every metric ships raw counts + a Wilson 95% interval** — never a bare percentage.
+- **`--fail` never gates on aggregate metric deltas** (two runs with identical accuracy can disagree
+  on a third of their rows; aggregates hide it). It gates on the per-row **flip table** vs baseline:
+  `b` = rows the baseline got right and this run got wrong, `c` = the reverse; fail iff the mid-p
+  McNemar test on (b, c) is significant (p < 0.05 — in practice ~5+ net one-directional flips).
+  A single flipped row is *judge noise* and prints as a warning with the row id, never a failure.
+- **Hard floors** back the flip test: DECISION recall or CONTRADICT precision below 0.75 (or depth
+  accuracy < 75%) fails immediately — catastrophic breakage doesn't wait for significance.
+- **Nondeterminism is measured, not ignored**: `BENCH_RUNS=3` votes majority-of-3 per judged
+  detect/depth row and reports the **flip rate** (fraction non-unanimous). A row must be
+  *unanimously* wrong to count as a regression flip; a 2-1 row is instability and is reported
+  separately. Alignment rows cost ~10x, so they stay K=1 and instead **re-run only
+  baseline-discordant rows once** — a flip counts only when confirmed 2-of-2.
+- **Baselines embed the gate-code hash and corpus hash.** Comparing across a changed gate or corpus
+  is meaningless, so it is skipped mechanically with a message — never silently mislead.
+- **An MDE line prints with every comparison**: "this bench cannot distinguish deltas below ~Xpp
+  from judge noise" — so nobody reads a 3pp wiggle as signal.
+- **`runs.log`** (gitignored) appends one line per run — the anti-Goodhart ledger. A prompt
+  "improved" by many iterations against 40 rows is overfit to those rows; the ledger makes the
+  iteration count visible. Complementing it, rows added after a prompt fix carry `holdout: true`:
+  `--dev` runs exclude them (iterate freely), baseline/gate runs include them (the exam has
+  questions you didn't practice on).
 
 ## Sweeps
 
@@ -35,6 +65,8 @@ the 3-class alignment judge), the headline metric, and the config line.
 BENCH_MODEL=haiku|sonnet           # first/only model for all three judges (default haiku)
 BENCH_ESCALATE_MODEL=opus|sonnet   # alignment second pass (default opus)
 BENCH_CASCADE=on|off               # off = never escalate; score the first pass alone (default on)
+BENCH_RUNS=1|3                     # K trials per judged detect/depth row (default 1; use 3 for
+                                   # --baseline/--fail — a single nondeterministic run is not a baseline)
 ```
 
 **The cascade is measured in one run.** A cascade-ON alignment run records both the first-pass
@@ -45,12 +77,42 @@ exists for cheap prompt iteration: it skips every opus call.
 
 ## Corpora (seeds — replace with your own)
 
-The `cases-*.jsonl` files ship small, GENERIC starter sets seeded with the borderline cases each
-judge is most likely to get wrong (dep bump vs dep swap; implementation-step vs reversal; deep-but-
-terse vs superficially-complete). They are seeds, not runtime data — the gates never read them.
-Copy them, add rows from your own repo's history, then lock your numbers with `--baseline`. Every
-row carries a `note` saying why its label is right; keep that discipline — borderline rows are what
-pin precision.
+The `cases-*.jsonl` files ship GENERIC starter sets seeded with the borderline cases each judge is
+most likely to get wrong (dep bump vs dep swap; implementation-step vs reversal; deep-but-terse vs
+superficially-complete). They are seeds, not runtime data — the gates never read them. Copy them,
+add rows from your own repo's history, then lock your numbers with `--baseline`.
+
+### Dataset card (composition, labeling, limitations)
+
+Every row carries, beyond its inputs and `expected` label:
+
+- **`note`** (mandatory) — why the label is right and which decision boundary the row pins.
+- **`difficulty`** — `clear` (calibration) · `borderline` (boundary-pinning; the value of the
+  corpus) · `adversarial` (deliberately deceptive surface: keyword decoys, verbosity confounds,
+  buried evidence).
+- **`provenance`** — `authored` (hand-written generic scenario) · `mined` (taken verbatim from this
+  repo's real records/commits; labels verifiable by construction) · `adapted` (a mined artifact
+  surgically perturbed).
+- **`variantOf` / `variantKind`** — metamorphic variant groups. `invariance` variants restate the
+  canonical row (reworded, reformatted) and must get the SAME verdict — group consistency prints
+  as its own metric, never folded into accuracy (a prompt that gains accuracy while variants
+  disagree is Goodharting the corpus). `directional` variants flip one detail and the label with it
+  (minimal pairs).
+- **`holdout`** — excluded from `--dev` runs, included in baseline/gate runs (see the ledger note).
+
+`node bench.mjs coverage` prints the category × label × difficulty cell counts per corpus — empty
+or thin cells are documented coverage debt; grow toward them, not wherever is easy.
+
+Labeling protocol and known limitations (read before trusting the numbers): labels are
+single-author with per-row rationale, then adversarially audited by an independent pass that
+re-derives each label from the judge's rubric — disputed rows are fixed or relabelled before
+landing. Remaining limits: (1) the corpus content was largely model-written even when the scenario
+is hand-specified — a judge from the same model family may be gentler on in-family text (preference
+leakage); mined rows are the counterweight, prefer them as the corpus grows. (2) Expected-NULL rows
+are deliberate-ambiguity probes and the least stable ground truth — kept ≤4 and excluded from the
+gate. (3) DECISION prevalence in the corpus is ~balanced for measurement power; real commit streams
+are mostly ROUTINE, so the detect summary prints projected precision at 5%/15% prevalence — read
+that line, not corpus precision, when judging real-world block noise.
 
 **No baseline ships.** Generate yours with `--baseline` once you're happy with a config. The file is
 gitignored here; commit yours if you want CI regression checks (`--fail` needs it). Changing a
@@ -141,11 +203,15 @@ a parse-NULL (the judge ran and was ambiguous):
 
 Every judged row is a `claude -p` cold start. Budget (printed before any token is spent):
 
-| sub-bench | judged rows in seed | per row | seed cost |
-|---|---|---|---|
-| detect | 16 of 21 (5 free-skip) | ~30 s | ~8 min |
-| depth | 17 | ~40 s | ~11 min |
-| alignment | 11 of 14 (3 NO-MATCH) | 60–120 s (+120–240 s per opus escalation) | ~20–40 min |
+| sub-bench | judged rows in seed | per row | K=1 cost | K=3 (baseline/gate) |
+|---|---|---|---|---|
+| detect | 37 of 49 (12 free-skip) | ~30 s | ~19 min | ~56 min |
+| depth | 34 | ~40 s | ~23 min | ~68 min |
+| alignment | 17 of 20 (3 NO-MATCH) | 60–120 s (+120–240 s per opus escalation) | ~30–60 min | K stays 1 |
+
+Tiering: iterate prompts on `detect --dev` (holdout excluded, K=1); run depth when detect is
+stable; `BENCH_RUNS=3 … --baseline` / `--fail` is the full tier and the only tier whose numbers
+count.
 
 Sweep accordingly: iterate prompts on `detect`/`depth` first, run `alignment` when the cheap benches
 are stable, and use `BENCH_CASCADE=off` while iterating the alignment prompt.

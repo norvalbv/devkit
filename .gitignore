@@ -8,6 +8,8 @@ node_modules
 .decisions/
 # decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
 gate-engine/decisions/eval/results.baseline.json
+# decisions-eval run ledger (local telemetry; the anti-Goodhart record of runs against the corpus)
+gate-engine/decisions/eval/runs.log
 
 # eslint-plugin-project-structure cache
 projectStructure.cache.json

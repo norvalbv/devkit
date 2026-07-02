@@ -7,13 +7,16 @@ import {
   BenchAbort,
   cleanBenchEnv,
   compare,
+  majorityVerdict,
   materializeFixture,
+  mcnemarMidP,
   parseCasesText,
   runAlignmentBench,
   runDepthAudit,
   runDepthBench,
   runDetectBench,
   tally,
+  wilson,
 } from '../eval/bench.mjs';
 
 // ─── Pure metrics ─────────────────────────────────────────────────────────────────
@@ -352,47 +355,155 @@ describe('sub-benches (stubbed claude)', () => {
   });
 });
 
-// ─── Baseline comparison ──────────────────────────────────────────────────────────
+// ─── Small-n statistics ───────────────────────────────────────────────────────────
+
+describe('wilson', () => {
+  it('brackets the point estimate and stays inside [0,1]', () => {
+    const ci = wilson(14, 16);
+    expect(ci.lo).toBeGreaterThan(0.6);
+    expect(ci.lo).toBeLessThan(14 / 16);
+    expect(ci.hi).toBeGreaterThan(14 / 16);
+    expect(ci.hi).toBeLessThanOrEqual(1);
+    expect(wilson(0, 10).lo).toBe(0);
+    expect(wilson(10, 10).hi).toBe(1);
+    expect(wilson(0, 0)).toEqual({ lo: 0, hi: 1 });
+  });
+
+  it('is honestly wide at bench-sized n — the interval IS the point', () => {
+    const { lo, hi } = wilson(12, 15); // 80% accuracy on 15 rows
+    expect(hi - lo).toBeGreaterThan(0.3); // a >30pp band: nothing at this n resolves small deltas
+  });
+});
+
+describe('mcnemarMidP', () => {
+  it('no discordant pairs → p=1; symmetric flips are never significant', () => {
+    expect(mcnemarMidP(0, 0)).toBe(1);
+    expect(mcnemarMidP(3, 3)).toBeGreaterThan(0.5);
+  });
+
+  it('a single one-directional flip is judge noise, ~5+ is significant', () => {
+    expect(mcnemarMidP(1, 0)).toBeGreaterThan(0.05); // the observed haiku flip must NOT trip the gate
+    expect(mcnemarMidP(5, 1)).toBeGreaterThan(0.05); // report's worked example: p≈.219
+    expect(mcnemarMidP(6, 0)).toBeLessThan(0.05);
+    expect(mcnemarMidP(0, 6)).toBeLessThan(0.05); // significance is directionless; direction gates in compare()
+  });
+});
+
+describe('majorityVerdict', () => {
+  it('votes majority, flags non-unanimous, breaks full ties to NULL (fail-safe)', () => {
+    expect(majorityVerdict(['ROUTINE', 'ROUTINE', 'ROUTINE'])).toEqual({
+      verdict: 'ROUTINE',
+      unanimous: true,
+    });
+    expect(majorityVerdict(['ROUTINE', 'DECISION', 'ROUTINE'])).toEqual({
+      verdict: 'ROUTINE',
+      unanimous: false,
+    });
+    expect(majorityVerdict(['ROUTINE', 'DECISION', 'NULL']).verdict).toBe('NULL');
+  });
+});
+
+// ─── Baseline comparison (flip-table gate) ────────────────────────────────────────
 
 describe('compare', () => {
-  const detectSummary = (recall, acc) => ({
+  // A summary/baseline pair builder: metrics healthy by default; rows drive the flip table.
+  const detectSummary = ({ recall = 0.9, rows = {} } = {}) => ({
     model: 'haiku',
     decision: { recall },
-    accuracyScored: acc,
+    accuracyScored: 90,
+    rows,
+  });
+  const row = (ok, stable = true, expected = 'ROUTINE') => ({ got: 'x', ok, stable, expected });
+
+  it('aggregate metric drops alone NEVER fail — they print as informational', () => {
+    const r = compare('detect', detectSummary({ recall: 0.8 }), detectSummary({ recall: 1.0 }));
+    expect(r.regressed).toBe(false);
+    expect(r.lines.some((l) => l.includes('informational'))).toBe(true);
   });
 
-  it('regresses only when a compared metric drops beyond epsilon', () => {
-    expect(compare('detect', detectSummary(0.9, 90), detectSummary(0.9, 90)).regressed).toBe(false);
-    expect(
-      compare('detect', detectSummary(0.9 - 1e-12, 90), detectSummary(0.9, 90)).regressed,
-    ).toBe(false); // epsilon tolerance
-    expect(compare('detect', detectSummary(0.8, 90), detectSummary(0.9, 90)).regressed).toBe(true);
-    expect(compare('detect', detectSummary(0.9, 85), detectSummary(0.9, 90)).regressed).toBe(true);
-    expect(compare('detect', detectSummary(0.95, 95), detectSummary(0.9, 90)).regressed).toBe(
-      false,
-    );
+  it('a hard floor breach fails regardless of flip statistics', () => {
+    const r = compare('detect', detectSummary({ recall: 0.5 }), detectSummary({ recall: 0.9 }));
+    expect(r.regressed).toBe(true);
+    expect(r.lines.some((l) => l.includes('FLOOR BREACH'))).toBe(true);
   });
 
-  it('skips (never lies) when the baseline config differs or the section is missing', () => {
-    const r = compare('detect', detectSummary(0.5, 50), {
-      ...detectSummary(0.9, 90),
+  it('one stable flip warns with the row id but does not fail (noise at this n)', () => {
+    const base = detectSummary({ rows: { a: row(true), b: row(true) } });
+    const cur = detectSummary({ rows: { a: row(false), b: row(true) } });
+    const r = compare('detect', cur, base);
+    expect(r.regressed).toBe(false);
+    expect(r.lines.some((l) => l.includes('regressed [a]'))).toBe(true);
+    expect(r.lines.some((l) => l.includes('cannot distinguish'))).toBe(true); // the MDE line
+  });
+
+  it('6+ one-directional stable flips are significant → fail; symmetric flips are not', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const base = detectSummary({ rows: Object.fromEntries(ids.map((i) => [i, row(true)])) });
+    const cur = detectSummary({ rows: Object.fromEntries(ids.map((i) => [i, row(false)])) });
+    expect(compare('detect', cur, base).regressed).toBe(true);
+    // Same 6 flips but 3 in each direction → churn, not regression.
+    const mixedBase = detectSummary({
+      rows: Object.fromEntries(ids.map((i, k) => [i, row(k < 3)])),
+    });
+    const mixedCur = detectSummary({
+      rows: Object.fromEntries(ids.map((i, k) => [i, row(k >= 3)])),
+    });
+    expect(compare('detect', mixedCur, mixedBase).regressed).toBe(false);
+  });
+
+  it('unstable flips are instability, not regression — reported separately, never counted', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const base = detectSummary({ rows: Object.fromEntries(ids.map((i) => [i, row(true)])) });
+    const cur = detectSummary({
+      rows: Object.fromEntries(ids.map((i) => [i, row(false, false)])), // all flips non-unanimous
+    });
+    const r = compare('detect', cur, base);
+    expect(r.regressed).toBe(false);
+    expect(r.lines.some((l) => l.includes('unstable rows'))).toBe(true);
+  });
+
+  it('expected-NULL rows stay out of the flip table', () => {
+    const base = detectSummary({ rows: { amb: row(true, true, 'NULL') } });
+    const cur = detectSummary({ rows: { amb: row(false, true, 'NULL') } });
+    expect(compare('detect', cur, base).lines.some((l) => l.includes('flips'))).toBe(false);
+  });
+
+  it('skips (never lies) on config, gate-hash or corpus-hash mismatch, or missing section', () => {
+    const r = compare('detect', detectSummary({ recall: 0.5 }), {
+      ...detectSummary({ recall: 0.9 }),
       model: 'sonnet',
     });
     expect(r.regressed).toBe(false);
     expect(r.lines[0]).toContain('baseline config differs');
-    expect(compare('detect', detectSummary(0.5, 50), undefined).regressed).toBe(false);
+    const h = compare(
+      'detect',
+      { ...detectSummary({ recall: 0.5 }), gateHash: 'aaa' },
+      { ...detectSummary({ recall: 0.9 }), gateHash: 'bbb' },
+    );
+    expect(h.regressed).toBe(false);
+    expect(h.lines[0]).toContain('gate code changed');
+    const c = compare(
+      'detect',
+      { ...detectSummary({ recall: 0.5 }), corpusHash: 'aaa' },
+      { ...detectSummary({ recall: 0.9 }), corpusHash: 'bbb' },
+    );
+    expect(c.lines[0]).toContain('corpus changed');
+    expect(compare('detect', detectSummary({}), undefined).regressed).toBe(false);
   });
 
-  it('alignment compares the scored config: cascade-on gates on final, cascade-off on firstPass', () => {
-    const s = (cascade, finalP, firstP) => ({
+  it('alignment: outages skip the comparison; floor checks the scored config', () => {
+    const s = (cascade, finalP, firstP, outages = 0) => ({
       model: 'haiku',
       escalateModel: 'opus',
       cascade,
+      outages,
       final: { contradict: { precision: finalP }, macroF1: 0.8 },
       firstPass: { contradict: { precision: firstP }, macroF1: 0.8 },
     });
-    // final regressed, firstPass fine → cascade-on run fails, cascade-off run passes.
-    expect(compare('alignment', s(true, 0.5, 0.9), s(true, 0.9, 0.9)).regressed).toBe(true);
-    expect(compare('alignment', s(false, 0.5, 0.9), s(false, 0.9, 0.9)).regressed).toBe(false);
+    expect(compare('alignment', s(true, 0.5, 0.9), s(true, 0.9, 0.9)).regressed).toBe(true); // floor
+    expect(compare('alignment', s(false, 0.9, 0.5), s(false, 0.9, 0.9)).regressed).toBe(true); // cascade-off gates firstPass
+    const o = compare('alignment', s(true, 0.5, 0.9, 2), s(true, 0.9, 0.9));
+    expect(o.regressed).toBe(false);
+    expect(o.lines[0]).toContain('outage');
   });
 });

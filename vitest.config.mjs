@@ -13,5 +13,10 @@ export default defineConfig({
     // exceed vitest's 10s default hook ceiling on a slow or loaded CI filesystem (false redness
     // that isn't an assertion failure). 30s absorbs that without masking a genuine hang.
     hookTimeout: 30000,
+    // Same false-redness class for the tests themselves: the spawn-heavy tests (devkit
+    // init/upgrade runs, git fixture repos) take 5-25s wall-clock on a loaded dev box (parallel
+    // agents hold load ~30+), and vitest's 5s default fails them with no assertion failing.
+    // 30s absorbs the load; a genuine hang still dies, just slower — assertions untouched.
+    testTimeout: 30000,
   },
 });
