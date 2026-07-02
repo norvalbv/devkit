@@ -143,8 +143,8 @@ Every judged row is a `claude -p` cold start. Budget (printed before any token i
 
 | sub-bench | judged rows in seed | per row | seed cost |
 |---|---|---|---|
-| detect | ~15 of 20 (5 free-skip) | ~30 s | ~8 min |
-| depth | 15 | ~40 s | ~10 min |
+| detect | 16 of 21 (5 free-skip) | ~30 s | ~8 min |
+| depth | 17 | ~40 s | ~11 min |
 | alignment | 11 of 14 (3 NO-MATCH) | 60–120 s (+120–240 s per opus escalation) | ~20–40 min |
 
 Sweep accordingly: iterate prompts on `detect`/`depth` first, run `alignment` when the cheap benches

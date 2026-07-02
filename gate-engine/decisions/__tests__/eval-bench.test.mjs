@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BenchAbort,
   cleanBenchEnv,
@@ -10,6 +10,8 @@ import {
   materializeFixture,
   parseCasesText,
   runAlignmentBench,
+  runDepthAudit,
+  runDepthBench,
   runDetectBench,
   tally,
 } from '../eval/bench.mjs';
@@ -153,15 +155,25 @@ describe('sub-benches (stubbed claude)', () => {
   };
   const calls = () => (existsSync(log) ? execSync(`cat "${log}"`, { encoding: 'utf8' }) : '');
 
+  let savedNoLlm;
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'eval-bench-'));
     log = join(dir, 'calls.log');
     savedPath = process.env.PATH;
+    // Cleared so an inherited NO_LLM knob can't null the judges; restored after (a leaked delete
+    // would bleed into other suites sharing this vitest worker).
+    savedNoLlm = [process.env.GUARD_DECISION_NO_LLM, process.env.FRINK_DECISION_NO_LLM];
     delete process.env.GUARD_DECISION_NO_LLM;
     delete process.env.FRINK_DECISION_NO_LLM;
   });
   afterEach(() => {
     process.env.PATH = savedPath;
+    const [g, f] = savedNoLlm;
+    if (g === undefined) delete process.env.GUARD_DECISION_NO_LLM;
+    else process.env.GUARD_DECISION_NO_LLM = g;
+    if (f === undefined) delete process.env.FRINK_DECISION_NO_LLM;
+    else process.env.FRINK_DECISION_NO_LLM = f;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -251,6 +263,63 @@ describe('sub-benches (stubbed claude)', () => {
     expect(s.firstPass.confusion.ALIGN).toEqual({ CONTRADICT: 1 }); // haiku-alone would have blocked
     expect(s.escalationRate).toBe(1);
     expect(s.results[0].ok).toBe(true);
+  });
+
+  const depthRow = (id, expected) => ({
+    id,
+    block: `## Target · 2026-01-01 — t\n\n**Context:** c\n**Ruling:** r\n**Consequences:**\n- Positive: p\n- Negative: n\n**Vision-fit:** n/a`,
+    expected,
+  });
+
+  it('depth: PASS/THIN scored via the real parser; ambiguous output is NULL', () => {
+    useStub('echo PASS\n');
+    const s = runDepthBench([depthRow('deep', 'PASS')]);
+    expect(s.results[0]).toMatchObject({ got: 'PASS', ok: true });
+    useStub('echo "PASS but THIN"\n');
+    const s2 = runDepthBench([depthRow('amb', 'THIN')]);
+    expect(s2.results[0].got).toBe('NULL');
+  });
+
+  it('depth: a dark judge aborts with exit code 2 (cheap rows, sentry-style)', () => {
+    useStub('exit 3\n');
+    try {
+      runDepthBench([depthRow('down', 'PASS')]);
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(BenchAbort);
+      expect(e.code).toBe(2);
+    }
+  });
+
+  it("depth-audit: judges the cwd repo's real records and flags missing Revisit-when", () => {
+    // The audit reads <cwd>/docs/decisions — point cwd at a fixture repo for the test.
+    const auditCwd = mkdtempSync(join(tmpdir(), 'eval-audit-'));
+    mkdirSync(join(auditCwd, 'docs', 'decisions'), { recursive: true });
+    const record = (slug, extra = '') =>
+      `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n\n## Target · 2026-01-01 — r\n\n**Context:** c\n**Ruling:** r\n${extra}`;
+    writeFileSync(join(auditCwd, 'docs', 'decisions', 'bare.md'), record('bare'));
+    writeFileSync(
+      join(auditCwd, 'docs', 'decisions', 'expiring.md'),
+      record('expiring', '**Revisit-when:** cost drops below $1\n'),
+    );
+    writeFileSync(join(auditCwd, 'docs', 'decisions', 'INDEX.md'), '# Decision Index\n');
+    useStub('echo PASS\n');
+    const lines = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((l) => lines.push(String(l)));
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(auditCwd);
+      const counts = runDepthAudit({ model: 'haiku' });
+      expect(counts).toEqual({ PASS: 2, THIN: 0, NULL: 0 });
+    } finally {
+      process.chdir(prevCwd);
+      logSpy.mockRestore();
+      rmSync(auditCwd, { recursive: true, force: true });
+    }
+    const out = lines.join('\n');
+    expect(out).toMatch(/bare\s+PASS\s+\(no Revisit-when\)/); // the deterministic 100-year marker
+    expect(out).not.toMatch(/expiring\s+PASS\s+\(no Revisit-when\)/); // present → no flag
+    expect(out).not.toContain('INDEX'); // the index is never judged
   });
 
   it('alignment: a NO-MATCH row is free — no fixture judging, scored deterministically', () => {

@@ -473,7 +473,14 @@ describe('--gate (integration, real git repo)', () => {
       spawnSync('node', [DETECT, '--gate'], {
         cwd: repo,
         encoding: 'utf8',
-        env: { ...process.env, PATH: `${stubClaude(script)}:${process.env.PATH}` },
+        env: {
+          ...process.env,
+          // A NO_LLM knob inherited from the runner's shell would short-circuit judgeWithClaude
+          // before the stub ever runs — these tests exist to exercise the stubbed claude path.
+          GUARD_DECISION_NO_LLM: '',
+          FRINK_DECISION_NO_LLM: '',
+          PATH: `${stubClaude(script)}:${process.env.PATH}`,
+        },
       });
     const stageDepChange = () => {
       writeFileSync(

@@ -202,37 +202,43 @@ let activeFixtureCleanup = null;
 
 export function materializeFixture(row) {
   const repo = realpathSync(mkdtempSync(path.join(tmpdir(), 'decisions-eval-')));
-  const g = (args) =>
-    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
-  g(['init', '-q', '-b', 'main']);
-  g(['config', 'user.email', 'bench@bench']);
-  g(['config', 'user.name', 'bench']);
-  g(['config', 'commit.gpgsign', 'false']);
-  g(['config', 'core.hooksPath', '/dev/null']);
-  for (const [rel, content] of Object.entries(row.repo.base)) {
-    mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
-    writeFileSync(path.join(repo, rel), content);
-  }
-  g(['add', '-A']);
-  g(['commit', '-q', '--no-verify', '-m', 'base']);
-  for (const [rel, content] of Object.entries(row.repo.staged)) {
-    if (content === null) rmSync(path.join(repo, rel));
-    else {
+  try {
+    const g = (args) =>
+      execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    g(['init', '-q', '-b', 'main']);
+    g(['config', 'user.email', 'bench@bench']);
+    g(['config', 'user.name', 'bench']);
+    g(['config', 'commit.gpgsign', 'false']);
+    g(['config', 'core.hooksPath', '/dev/null']);
+    for (const [rel, content] of Object.entries(row.repo.base)) {
       mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
       writeFileSync(path.join(repo, rel), content);
     }
-  }
-  g(['add', '-A']);
-  const staged = g(['diff', '--cached', '--name-only'])
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const cleanup = () => {
-    activeFixtureCleanup = null;
+    g(['add', '-A']);
+    g(['commit', '-q', '--no-verify', '-m', 'base']);
+    for (const [rel, content] of Object.entries(row.repo.staged)) {
+      if (content === null) rmSync(path.join(repo, rel));
+      else {
+        mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+        writeFileSync(path.join(repo, rel), content);
+      }
+    }
+    g(['add', '-A']);
+    const staged = g(['diff', '--cached', '--name-only'])
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const cleanup = () => {
+      activeFixtureCleanup = null;
+      rmSync(repo, { recursive: true, force: true });
+    };
+    activeFixtureCleanup = cleanup;
+    return { repo, staged, cleanup };
+  } catch (e) {
+    // A half-built fixture must not linger in the tmpdir when a git step throws.
     rmSync(repo, { recursive: true, force: true });
-  };
-  activeFixtureCleanup = cleanup;
-  return { repo, staged, cleanup };
+    throw e;
+  }
 }
 
 // ─── Sub-benches ──────────────────────────────────────────────────────────────────
@@ -310,7 +316,17 @@ export function runAlignmentBench(
   let outages = 0;
   let escalated = 0;
   for (const c of rows) {
-    const fx = materializeFixture(c);
+    let fx;
+    try {
+      fx = materializeFixture(c);
+    } catch (e) {
+      // Fixture build failing is infra (git absent/misbehaving), not judge quality — abort with
+      // the could-not-run code instead of crashing the bench with a raw stack.
+      throw new BenchAbort(
+        2,
+        `decisions-eval: fixture build failed for ${c.id} — ${e?.message ?? e}`,
+      );
+    }
     let first;
     let final;
     let didEscalate = false;
