@@ -68,7 +68,7 @@ function checkHusky(cwd, selectedGuards) {
   // Pre-convergence block shape: guards present but no DK_DET_FAILS aggregation / prefix-cache
   // wiring — gates still fail fast one at a time and a `devkit ship` retry re-pays the whole
   // deterministic prefix (the ship timeout banner would then over-promise "the prefix is cached").
-  if (selectedGuards.length && !block.includes('DK_DET_FAILS')) {
+  if (!block.includes('DK_DET_FAILS')) {
     return check(
       '.husky/pre-commit',
       'DRIFT',

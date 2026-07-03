@@ -469,7 +469,7 @@ describe('--gate (integration, real git repo)', () => {
       chmodSync(fake, 0o755);
       return bin;
     };
-    const gateStubbed = (script) =>
+    const gateStubbed = (script, extraEnv = {}) =>
       spawnSync('node', [DETECT, '--gate'], {
         cwd: repo,
         encoding: 'utf8',
@@ -480,6 +480,7 @@ describe('--gate (integration, real git repo)', () => {
           GUARD_DECISION_NO_LLM: '',
           FRINK_DECISION_NO_LLM: '',
           PATH: `${stubClaude(script)}:${process.env.PATH}`,
+          ...extraEnv,
         },
       });
     const stageDepChange = () => {
@@ -516,7 +517,15 @@ describe('--gate (integration, real git repo)', () => {
       const r = gateStubbed('exit 3\n');
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('decision-smell: claude judge unavailable');
+      expect(r.stderr).toContain('UNVERIFIED'); // outage never reads as a judge-confirmed smell
       expect(r.stdout).toBe('');
+    });
+
+    it('a crashing judge under GUARD_AI_STRICT (ship) exits 3, never a confirmed-smell 1', () => {
+      stageDepChange();
+      const r = gateStubbed('exit 3\n', { GUARD_AI_STRICT: '1' });
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain('decision smells (unverified)');
     });
 
     it('an empty-output judge warns on stderr, block stands (1)', () => {

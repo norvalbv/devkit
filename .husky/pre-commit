@@ -10,7 +10,7 @@
 # never exits: the decisions gate below always still runs.
 DK_PREFIX_SKIP=""
 DK_DET_FAILS=""
-if node gate-engine/prefix-cache/cli.mjs check --hook "$0"; then DK_PREFIX_SKIP=1; fi
+if node gate-engine/prefix-cache/cli.mjs check --hook "${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
 
 if [ -z "${DK_PREFIX_SKIP:-}" ]; then
     # Formatter + linter (Biome) — hard gate.
@@ -33,7 +33,7 @@ if [ -n "${DK_DET_FAILS:-}" ]; then
     echo "   Every deterministic failure is listed above — fix them together, then commit once."
     exit 1
 fi
-if [ -z "${DK_PREFIX_SKIP:-}" ]; then node gate-engine/prefix-cache/cli.mjs record --hook "$0" || true; fi
+if [ -z "${DK_PREFIX_SKIP:-}" ]; then node gate-engine/prefix-cache/cli.mjs record --hook "${DK_HOOK_PATH:-$0}" || true; fi
 
 # Decision-log gate (capture B) — smells an architectural diff with no decision staged and blocks
 # until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open
@@ -42,6 +42,10 @@ ddrc=0
 node gate-engine/decisions/cli.mjs detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
+    exit 1
+elif [ "$ddrc" -eq 3 ]; then
+    echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
+    echo "   Check claude CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."

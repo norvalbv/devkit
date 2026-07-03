@@ -343,6 +343,26 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     expect(Object.keys(loadCache(repo)).length).toBe(3);
   });
 
+  it('a dead first pass cannot poison the retry: stale checklist rows are cleared pre-retry', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const failedOnce = new Set();
+    const exec = mkExec(async ({ label }) => {
+      if (!failedOnce.has(label)) {
+        failedOnce.add(label);
+        writeArtifact(repo, label, { failed: 1 }); // interrupted attempt leaves poison rows…
+        return null; // …then dies
+      }
+      return 'VERDICT: PASS'; // retry recovers but writes NO artifact of its own
+    });
+    // If the poison rows survived the retry, verifyChecklist would read them as the retry's
+    // state (mixed old/new). With pre-retry cleanup the PASS is voided for the RIGHT reason:
+    // the retry itself skipped the checklist workflow → inconclusive → strict exit 3.
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(Object.keys(loadCache(repo)).length).toBe(0); // nothing cached from mixed state
+  });
+
   it('a hard opus-confirmed FAIL still exits 1 (never conflated with the fail-closed 3)', async () => {
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});

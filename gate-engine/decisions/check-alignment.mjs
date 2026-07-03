@@ -40,7 +40,7 @@
  * judges THAT repo's staged changes against THAT repo's decision log.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -155,12 +155,14 @@ export function parseDepthVerdict(raw) {
 
 // ─── git + fs + claude I/O (thin; run in the CONSUMER cwd) ───────────────────────
 
-function sh(cwd, cmd) {
-  return execSync(cmd, { cwd, encoding: 'utf8' });
+// argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
+// JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
+function git(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
 function stagedFiles(cwd) {
-  return sh(cwd, 'git diff --cached --name-only')
+  return git(cwd, ['diff', '--cached', '--name-only'])
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -221,10 +223,7 @@ export function judgeDetailed(
 ) {
   const cfg = resolveGuardConfig(cwd);
   if (cfg.noLlm || files.length === 0) return null;
-  const stat = sh(
-    cwd,
-    `git diff --cached --stat -- ${files.map((f) => JSON.stringify(f)).join(' ')}`,
-  );
+  const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files]);
   const first = runJudge(
     cwd,
     firstModel,
@@ -297,7 +296,7 @@ function stagedDecisionTargets(cwd, changed, decisionsRel) {
     if (decisionsRel && !f.startsWith(`${decisionsRel}/`)) continue;
     let content;
     try {
-      content = sh(cwd, `git show ${JSON.stringify(`:${f}`)}`);
+      content = git(cwd, ['show', `:${f}`]);
     } catch {
       continue; // not in the index (e.g. a pure deletion) → nothing to judge
     }
@@ -368,10 +367,7 @@ function alignmentPass(cwd, cfg, changed) {
     if (matched.length === 0) continue;
     // An earned ALIGN is cached on (target, exact staged bytes in its scope): a ship retry
     // with an unchanged diff clears this target without re-spending the haiku/opus cascade.
-    const domainDiff = sh(
-      cwd,
-      `git diff --cached -- ${matched.map((f) => JSON.stringify(f)).join(' ')}`,
-    );
+    const domainDiff = git(cwd, ['diff', '--cached', '--', ...matched]);
     // Key on EVERY judge input: slug + ruling + vision (both feed ALIGN_PROMPT) + the exact
     // staged bytes — editing a Target's Vision-fit must invalidate its cached ALIGN.
     const key = verdictKey('align', t.slug, t.ruling, t.vision, domainDiff);

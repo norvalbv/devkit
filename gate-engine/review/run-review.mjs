@@ -25,7 +25,7 @@
  * W-3: config + git + agent .md files all resolve against the CONSUMER cwd.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGuardConfig } from '../config.mjs';
@@ -59,12 +59,18 @@ function envFlag(name) {
   return !(t === '' || t === '0' || t === 'false' || t === 'no');
 }
 
-function sh(cwd, cmd) {
-  return execSync(cmd, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
+// JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
+function gitCached(cwd, args, files) {
+  return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }
 
 function stagedFiles(cwd) {
-  return sh(cwd, 'git diff --cached --name-only')
+  return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -132,10 +138,7 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedToolsFor(reviewer, cfg),
   ];
-  const stat = sh(
-    cwd,
-    `git diff --cached --stat -- ${files.map((f) => JSON.stringify(f)).join(' ')}`,
-  );
+  const stat = gitCached(cwd, ['--stat'], files);
   const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, firstModel),
@@ -151,6 +154,7 @@ async function cascadeVerdict(
     // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
     // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
     console.error(`guard-review: ${reviewer.name}: judge run failed, retrying once…`);
+    cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
     first = await exec(firstOpts);
   }
   if (first === null)
@@ -213,9 +217,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     selected = selectReviewers(stagedFiles(cwd), cfg);
     if (selected.length === 0) return 0;
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
-    diffs = selected.map((s) =>
-      sh(cwd, `git diff --cached -- ${s.files.map((f) => JSON.stringify(f)).join(' ')}`),
-    );
+    diffs = selected.map((s) => gitCached(cwd, [], s.files));
   } catch (e) {
     console.error(
       `guard-review: could not run — ${e?.message ?? e}${strict ? ' (strict ship mode: failing closed)' : ''}`,
@@ -293,10 +295,7 @@ export function scanReview(cwd = process.cwd()) {
     const cfg = resolveGuardConfig(cwd);
     const cache = loadCache(cwd);
     for (const s of selectReviewers(stagedFiles(cwd), cfg)) {
-      const diff = sh(
-        cwd,
-        `git diff --cached -- ${s.files.map((f) => JSON.stringify(f)).join(' ')}`,
-      );
+      const diff = gitCached(cwd, [], s.files);
       const hit = cache[cacheKey(s.reviewer.name, diff)] ? ' [cached PASS]' : '';
       console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
     }

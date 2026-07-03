@@ -116,6 +116,7 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // The commented structure-lint placeholder line a structure stack flips live (and removal
 // re-comments). Hoisted to module scope (perf: avoid recompiling per call).
 const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
+const GUARD_STRUCTURE_RE = /\bguard-structure\b/;
 
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
@@ -626,11 +627,13 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
   }
   // The live line joins the deterministic region: skipped on a prefix-cache hit, and a
   // violation ACCUMULATES into DK_DET_FAILS (reported by devkit:det-verdict) instead of
-  // exiting fail-fast — same contract as the guard fragments around it.
-  const newBlock = block.replace(
-    COMMENTED_LINT_RE,
-    `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`,
-  );
+  // exiting fail-fast — same contract as the guard fragments around it. guard-structure keeps
+  // the guard rc trichotomy (exit 2 = could-not-run → fail-open); eslint has no fail-open code
+  // (its exit 2 is a fatal config error), so any non-zero accumulates.
+  const structureLive = GUARD_STRUCTURE_RE.test(liveCmd)
+    ? `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    rc=0\n    ${liveCmd} || rc=$?\n    if [ "$rc" -eq 1 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\n    elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint(unexpected:$rc)"\n    fi\nfi\n`
+    : `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`;
+  const newBlock = block.replace(COMMENTED_LINT_RE, structureLive);
   writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
   console.log(`  ✓ enabled structure-lint (\`${liveCmd}\`) in .husky/pre-commit`);
 }

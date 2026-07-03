@@ -71,7 +71,7 @@ commit_with_gate_capture() {
     # `|| true` on every substitution: this runs under the caller's `set -euo pipefail`, and a
     # log with no matching lines must degrade to "unknown stage", never abort the banner.
     local last_stage unfinished
-    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|Ratchet|gate\.\.\.' "$log" 2>/dev/null | tail -1 || true)
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|[Gg]ate\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
     {
       echo "⏱  ship: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
       if grep -q 'guard-review: running' "$log" 2>/dev/null; then

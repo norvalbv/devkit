@@ -108,4 +108,11 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
   it('guard-review exit 2 (non-strict inconclusive) fails open', () => {
     expect(runHook({ REVIEW_RC: '2' }).status).toBe(0);
   });
+
+  it('guard-decisions exit 3 (strict fail-closed) blocks with the outage remedy', () => {
+    const r = runHook({ DEC_RC: '3' });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('strict ship mode failed closed');
+    expect(r.stdout).not.toContain('Record the decision target');
+  });
 });
