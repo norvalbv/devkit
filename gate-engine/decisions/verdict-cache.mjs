@@ -12,13 +12,25 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
 
 const STORE_FILE = 'decisions-verdict-cache.json';
 
-/** Stable cache key: `<judgeId>:<sha256 of the evidence parts>`. */
+// Version salt (same rationale as prefix-cache): a devkit upgrade can change a judge's prompt
+// or parsing, so verdicts earned by an older judge must not be honoured by a newer one.
+function devkitVersion() {
+  try {
+    return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Stable cache key: `<judgeId>:<sha256 of devkit version + the evidence parts>`. */
 export function verdictKey(judgeId, ...evidenceParts) {
   const h = createHash('sha256');
+  h.update(devkitVersion()).update('\0');
   for (const part of evidenceParts) h.update(String(part)).update('\0');
   return `${judgeId}:${h.digest('hex')}`;
 }

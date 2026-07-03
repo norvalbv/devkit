@@ -342,12 +342,14 @@ export function runDetectJudge(cwd, diff, model = 'haiku') {
   });
 }
 
-// LLM downgrade: a confident ROUTINE clears a regex block; DECISION / unavailable / error
-// → null → the block stands. Never escalates.
+// LLM downgrade: a confident ROUTINE clears a regex block; DECISION / error → the block stands.
+// Never escalates. An outage is surfaced as 'OUTAGE' (distinct from a judged DECISION) so the
+// gate can say WHY the block stood — a dark judge must never read as a confirmed smell verdict.
 function judgeWithClaude(cwd, noLlm, diff) {
   if (noLlm || !diff) return null;
   const raw = runDetectJudge(cwd, diff);
-  return raw === null ? null : parseVerdict(raw);
+  if (raw === null) return 'OUTAGE';
+  return parseVerdict(raw);
 }
 
 function decisionStaged(cwd, decisionFileMatcher) {
@@ -388,9 +390,20 @@ function runGate() {
       console.error('decision-gate: cached ROUTINE (identical evidence) — cleared');
       process.exit(0);
     }
-    if (judgeWithClaude(cwd, cfg.noLlm, input) === 'ROUTINE') {
+    const judged = judgeWithClaude(cwd, cfg.noLlm, input);
+    if (judged === 'ROUTINE') {
       saveVerdict(cwd, key);
       process.exit(0);
+    }
+    if (judged === 'OUTAGE') {
+      // Fail-closed toward recording, but say so honestly: the smell below was NOT judge-confirmed.
+      console.error(
+        'decision-gate: judge unavailable — the regex block below stands UNVERIFIED. If it looks',
+      );
+      console.error(
+        '   like a false positive: fix `claude` CLI auth/quota and retry, or bypass a non-decision',
+      );
+      console.error('   with GUARD_NO_LOG=1.');
     }
     console.error(`decision smells: ${smells.join(', ')}`);
     process.exit(1);

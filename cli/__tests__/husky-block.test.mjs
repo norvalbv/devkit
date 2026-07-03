@@ -65,6 +65,15 @@ describe('buildGuardBlock', () => {
   it('always keeps the commented structure-lint placeholder', () => {
     expect(buildGuardBlock(ALL)).toMatch(/# bunx eslint src/);
   });
+
+  it('monorepo package block captures the hook path ABSOLUTE before cd (guard-prefix stays live)', () => {
+    const block = buildGuardBlock({ guards: ['size'] }, 'pkg/a');
+    // $0 is git-root-relative; after `cd pkg/a` it no longer resolves — the wrapper must pin it.
+    const iHookPath = block.indexOf('DK_HOOK_PATH=');
+    expect(iHookPath).toBeGreaterThan(-1);
+    expect(iHookPath).toBeLessThan(block.indexOf('( cd "pkg/a"'));
+    expect(block).toContain(`--hook "\${DK_HOOK_PATH:-$0}"`);
+  });
 });
 
 describe('buildFullHook', () => {

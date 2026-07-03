@@ -468,6 +468,8 @@ describe('ship-branch.sh — worktree integration', () => {
         'echo "🔍 Reviewer gate (headless domain judges)..."',
         'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
         'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
+        // a mid-retry line uses a COLON, not " — ": it must NOT count as a completion
+        'echo "guard-review: commit-guard: judge run failed, retrying once…"',
         'sleep 30',
       ].join('\n');
       const { dir, env, git } = seedShipRepo({ hookBody });

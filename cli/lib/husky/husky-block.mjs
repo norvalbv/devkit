@@ -110,7 +110,7 @@ const PREFIX_CHECK_FRAGMENT = `# devkit:prefix-check
 # all-green (a devkit ship retry), skip them. Only sets a flag — never \`exit\` here.
 DK_PREFIX_SKIP=""
 DK_DET_FAILS=""
-if bunx guard-prefix check --hook "$0"; then DK_PREFIX_SKIP=1; fi
+if bunx guard-prefix check --hook "\${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
 # /devkit:prefix-check`;
 
 // The aggregated deterministic verdict: report EVERY accumulated failure at once, then (on
@@ -121,7 +121,7 @@ if [ -n "\${DK_DET_FAILS:-}" ]; then
     echo "   Every deterministic failure is listed above — fix them together, then commit once."
     exit 1
 fi
-if [ -z "\${DK_PREFIX_SKIP:-}" ]; then bunx guard-prefix record --hook "$0" || true; fi
+if [ -z "\${DK_PREFIX_SKIP:-}" ]; then bunx guard-prefix record --hook "\${DK_HOOK_PATH:-$0}" || true; fi
 # /devkit:det-verdict`;
 
 // The biome format-staged-files step (only when the `biome` component is selected).
@@ -215,7 +215,7 @@ export function buildGuardBlock(selection, pkgRel = '') {
   if (!pkgRel) return `${start}\n${body}\n${end}`;
   // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
   // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-  return `${start}\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
@@ -257,14 +257,14 @@ const DK_GATE_AI_HELPER =
 const DK_PREFIX_CHECK_LINES = `DK_PREFIX_SKIP=""
 DK_DET_FAILS=""
 if command -v guard-prefix >/dev/null 2>&1; then
-    if guard-prefix check --hook "$0"; then DK_PREFIX_SKIP=1; fi
+    if guard-prefix check --hook "\${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
 fi`;
 const DK_DET_VERDICT_LINES = `if [ -n "\${DK_DET_FAILS:-}" ]; then
     echo "✗ deterministic gates failed:\${DK_DET_FAILS} — all listed above; fix together, commit once."
     exit 1
 fi
 if [ -z "\${DK_PREFIX_SKIP:-}" ] && command -v guard-prefix >/dev/null 2>&1; then
-    guard-prefix record --hook "$0" || true
+    guard-prefix record --hook "\${DK_HOOK_PATH:-$0}" || true
 fi`;
 
 /**
@@ -297,7 +297,7 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
   if (!pkgRel) return `${start}\n${body}\n${end}`;
-  return `${start}\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
@@ -360,7 +360,9 @@ export function buildOverlayHook(
       gates.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
   }
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
-  const scoped = pkgRel ? `( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1` : inner;
+  const scoped = pkgRel
+    ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
+    : inner;
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.

@@ -148,7 +148,9 @@ async function cascadeVerdict(
     // Strict (ship) runs get ONE first-pass retry — transient API failures must not fail a ship
     // closed. The escalation pass is never retried: its outage stays inconclusive (blocked under
     // strict), and retrying it would push the cascade's worst case past the ship ceiling.
-    console.error(`guard-review: ${reviewer.name} — judge run failed, retrying once…`);
+    // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
+    // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
+    console.error(`guard-review: ${reviewer.name}: judge run failed, retrying once…`);
     first = await exec(firstOpts);
   }
   if (first === null)
@@ -240,6 +242,9 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
   // retry re-runs only the unfinished reviewers. The completion line doubles as a heartbeat
   // through git's stderr → the ship log. The .catch keeps one cascade's throw from rejecting
   // the whole Promise.all and discarding its siblings' still-pending completions.
+  // HEARTBEAT FORMAT IS A CONTRACT: `guard-review: <name> — <STATUS>…` is parsed by the ship
+  // timeout banner (cli/lib/ship/commit-with-gate-capture.sh awk) to name unfinished reviewers
+  // after a kill — change both together.
   const results = await Promise.all(
     toRun.map((t) => {
       const t0 = Date.now();

@@ -1162,7 +1162,8 @@ Usage:
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow.
-  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions).
+  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,review;
+                         review — the in-chain reviewer judges — is opt-in, off by default).
   --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.

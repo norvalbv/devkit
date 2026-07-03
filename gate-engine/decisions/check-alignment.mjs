@@ -372,7 +372,9 @@ function alignmentPass(cwd, cfg, changed) {
       cwd,
       `git diff --cached -- ${matched.map((f) => JSON.stringify(f)).join(' ')}`,
     );
-    const key = verdictKey('align', t.slug, t.ruling, domainDiff);
+    // Key on EVERY judge input: slug + ruling + vision (both feed ALIGN_PROMPT) + the exact
+    // staged bytes — editing a Target's Vision-fit must invalidate its cached ALIGN.
+    const key = verdictKey('align', t.slug, t.ruling, t.vision, domainDiff);
     if (hasVerdict(cwd, key)) {
       console.error(`decision-alignment: "${t.slug}" — cached ALIGN (identical diff)`);
       continue;
