@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,8 +24,16 @@ afterEach(() => {
 
 const ALL_GUARDS = ['size', 'fanout', 'dup', 'clone', 'decisions', 'review'];
 
-function runHook(env = {}, guards = ALL_GUARDS) {
-  const home = mkdtempSync(join(tmpdir(), 'dk-hook-exec-'));
+// Hooks run under whatever /bin/sh the OS ships — dash on Debian/Ubuntu, bash on macOS. The
+// fragments are POSIX sh; prove it where dash is installed instead of assuming.
+const hasDash = existsSync('/bin/dash');
+
+function runHook(
+  env = {},
+  guards = ALL_GUARDS,
+  { shell = 'sh', dirPrefix = 'dk-hook-exec-' } = {},
+) {
+  const home = mkdtempSync(join(tmpdir(), dirPrefix));
   homes.push(home);
   const bin = join(home, '.bun', 'bin');
   mkdirSync(bin, { recursive: true });
@@ -44,7 +60,7 @@ esac
   let status = 0;
   let stdout = '';
   try {
-    stdout = execFileSync('sh', ['-e', hookPath], {
+    stdout = execFileSync(shell, ['-e', hookPath], {
       env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin', ...env },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -114,5 +130,29 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
     expect(r.stdout).not.toContain('Record the decision target');
+  });
+});
+
+describe('assembled hook — shell/OS variants', () => {
+  it.runIf(hasDash)(
+    'dash (Debian/Ubuntu /bin/sh): aggregation, prefix skip and fail-open all hold',
+    () => {
+      const opts = { shell: '/bin/dash' };
+      const agg = runHook({ SIZE_RC: '1', DUP_RC: '1' }, ALL_GUARDS, opts);
+      expect(agg.status).toBe(1);
+      expect(agg.stdout).toContain('deterministic gates failed: guard-size guard-dup');
+      expect(runHook({ SIZE_RC: '2' }, ALL_GUARDS, opts).status).toBe(0); // exit-2 fail-open under dash -e
+      const skip = runHook({ PREFIX_CHECK_RC: '0' }, ALL_GUARDS, opts);
+      expect(skip.status).toBe(0);
+      expect(skip.calls).not.toContain('guard-size');
+      expect(skip.calls).toContain('guard-review');
+    },
+  );
+
+  it('a hook path containing SPACES survives every "$0"-derived quoting seam', () => {
+    // devkit itself lives under "Personal and learning/" — the harness dir gets a space too.
+    const r = runHook({ PREFIX_CHECK_RC: '0' }, ALL_GUARDS, { dirPrefix: 'dk hook exec-' });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-prefix check');
   });
 });

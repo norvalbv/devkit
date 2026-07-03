@@ -489,6 +489,33 @@ describe('ship-branch.sh — worktree integration', () => {
     },
   );
 
+  it.runIf(hasTimeoutBin)(
+    'attribution survives LC_ALL=C (emoji banner grep + em-dash awk under the C locale)',
+    () => {
+      // Hooks often run with a minimal C locale (GUI git clients, CI): the banner grep carries
+      // emoji alternations and the awk completion pattern carries an em-dash — both multibyte.
+      const hookBody = [
+        'echo "🔍 Reviewer gate (headless domain judges)..."',
+        'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
+        'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
+        'sleep 30',
+      ].join('\n');
+      const { dir, env, git } = seedShipRepo({ hookBody });
+      writeFileSync(join(dir, 'note.txt'), 'hi\n');
+      const r = spawnSync('/bin/bash', [scriptPath, 'feat/c-locale', 't', 'note.txt'], {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        timeout: 18_000,
+        env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2', LC_ALL: 'C', LANG: 'C' },
+      });
+      dropWorktree(git, r.stderr);
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toMatch(/DURING: .*Reviewer gate/);
+      expect(r.stderr).toMatch(/unfinished.*commit-guard/);
+    },
+  );
+
   it('the worktree commit runs with ship-mode gate env (DEVKIT_SHIP + GUARD_AI_STRICT)', () => {
     const { dir, env, git } = seedShipRepo({
       hookBody: 'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT"',

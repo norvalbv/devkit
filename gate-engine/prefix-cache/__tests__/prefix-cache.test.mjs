@@ -1,9 +1,12 @@
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkPrefix, clearPrefix, computeKey, recordPrefix } from '../prefix-cache.mjs';
+
+const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 
 const dirs = [];
 const tempDir = () => {
@@ -92,6 +95,20 @@ describe('checkPrefix / recordPrefix', () => {
     execSync('git add .', { cwd: wt2 });
     expect(checkPrefix(wt2)).toBe(true);
   });
+  it('repo dir and hook path containing SPACES round-trip (devkit itself lives in one)', () => {
+    const parent = tempDir();
+    const repo = join(parent, 'my repo dir');
+    mkdirSync(repo, { recursive: true });
+    execSync('git init -q', { cwd: repo });
+    writeFileSync(join(repo, 'a.txt'), 'one');
+    writeFileSync(join(repo, 'pre commit hook.sh'), 'gates');
+    execSync('git add a.txt', { cwd: repo });
+    const opts = { hookPath: 'pre commit hook.sh' };
+    expect(computeKey(repo, opts)).toBeTruthy();
+    recordPrefix(repo, opts);
+    expect(checkPrefix(repo, opts)).toBe(true);
+  });
+
   it('corrupt store → miss (run the gates); clearPrefix drops keys', () => {
     const repo = gitRepo();
     recordPrefix(repo);
@@ -102,5 +119,42 @@ describe('checkPrefix / recordPrefix', () => {
     expect(checkPrefix(repo)).toBe(true);
     clearPrefix(repo);
     expect(checkPrefix(repo)).toBe(false);
+  });
+});
+
+// The bin contract the hooks script against: exit codes are the API (a wrong code silently
+// skips gates or re-runs them forever), so pin them at the spawned-CLI level.
+describe('guard-prefix CLI (spawned)', () => {
+  const run = (args, cwd, env = {}) =>
+    spawnSync('node', [CLI, ...args], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_SHIP: '1', ...env },
+    });
+
+  it('check misses (1) → record (0) → check hits (0) with the skip line on stderr; clear re-misses', () => {
+    const repo = gitRepo();
+    expect(run(['check'], repo).status).toBe(1);
+    expect(run(['record'], repo).status).toBe(0);
+    const hit = run(['check'], repo);
+    expect(hit.status).toBe(0);
+    expect(hit.stderr).toContain('skipping deterministic gates');
+    expect(run(['clear'], repo).status).toBe(0);
+    expect(run(['check'], repo).status).toBe(1);
+  });
+
+  it('outside a ship (no DEVKIT_SHIP) check always misses and record writes nothing', () => {
+    const repo = gitRepo();
+    const noShip = { DEVKIT_SHIP: '' };
+    expect(run(['record'], repo, noShip).status).toBe(0); // best-effort, still exit 0
+    expect(run(['check'], repo, noShip).status).toBe(1);
+    expect(run(['check'], repo).status).toBe(1); // nothing leaked into the ship-scoped view
+  });
+
+  it('unreadable --hook and unknown usage both fail toward running the gates (1)', () => {
+    const repo = gitRepo();
+    expect(run(['check', '--hook', 'no-such-hook'], repo).status).toBe(1);
+    expect(run(['bogus-cmd'], repo).status).toBe(1);
+    expect(run([], repo).status).toBe(1);
   });
 });

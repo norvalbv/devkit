@@ -261,6 +261,28 @@ describe('--gate (integration, real git repo)', () => {
     expect(r.stderr).not.toContain('target "ax"');
   });
 
+  it('a staged filename carrying $(…) never reaches a shell (argv-git regression)', () => {
+    const bin = stubClaude(repo, 'printf "VERDICT: ALIGN\\n"\n');
+    writeFileSync(join(repo, 'src', 'evil$(touch INJECTED).ts'), 'export const y = 2;\n');
+    git('add .');
+    expect(gateWithStub(bin).status).toBe(0);
+    expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
+    expect(existsSync(join(repo, 'src', 'INJECTED'))).toBe(false);
+  });
+
+  it('an UNCLEAR verdict passes but is NEVER cached (must re-judge on the next identical run)', () => {
+    const bin = stubClaude(
+      repo,
+      `echo x >> "${join(repo, 'unclear-calls.log')}"\nprintf "VERDICT: UNCLEAR\\n"\n`,
+    );
+    writeFileSync(join(repo, 'src', 'new.ts'), 'export const y = 2;\n');
+    git('add src/new.ts');
+    expect(gateWithStub(bin).status).toBe(0); // unclear → fail-safe pass…
+    expect(gateWithStub(bin).status).toBe(0);
+    const calls = execSync('cat unclear-calls.log', { cwd: repo, encoding: 'utf8' }).trim();
+    expect(calls.split('\n').length).toBe(2); // …but both runs judged — no bogus cache hit
+  });
+
   it('an earned ALIGN is cached: an identical re-run clears with ZERO judge spawns', () => {
     const bin = stubClaude(
       repo,

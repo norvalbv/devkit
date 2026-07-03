@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -499,6 +499,35 @@ describe('--gate (integration, real git repo)', () => {
       expect(argv).toContain('--disallowedTools *'); // pure-text judge: no tools
       expect(argv).toContain('disableAllHooks'); // host hooks never fire in the judge
       expect(argv).toContain('--no-session-persistence'); // no transcript pollution
+    });
+
+    it('a judge OUTAGE is never cached: the next run re-judges instead of serving a bogus ROUTINE', () => {
+      stageDepChange();
+      expect(gateStubbed('exit 3\n').status).toBe(1); // outage → block stands, nothing earned
+      const calls = () => execSync('cat calls.log', { cwd: repo, encoding: 'utf8' }).trim();
+      const afterOutage = calls();
+      const r2 = gateStubbed('echo ROUTINE\n');
+      expect(r2.status).toBe(0);
+      expect(calls()).not.toBe(afterOutage); // second run SPAWNED — no cache entry from the outage
+    });
+
+    it('a package.json under a $(…)-named dir never reaches a shell (argv `git show` regression)', () => {
+      // Both git-show routes carry the crafted path: HEAD:<path> (base) and :<path> (staged).
+      const dir = join(repo, 'evil$(touch INJECTED)');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'package.json'), '{\n  "name": "x",\n  "dependencies": {}\n}\n');
+      git('add .');
+      git('commit -qm crafted-base');
+      writeFileSync(
+        join(dir, 'package.json'),
+        '{\n  "name": "x",\n  "dependencies": { "b": "2.0.0" }\n}\n',
+      );
+      git('add .');
+      const r = gateStubbed('echo DECISION\n'); // judge refuses to downgrade → block
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('dep-change'); // the crafted path was PARSED, not dropped
+      expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
+      expect(existsSync(join(dir, 'INJECTED'))).toBe(false);
     });
 
     it('an earned ROUTINE is cached: an identical re-run clears with ZERO judge spawns', () => {

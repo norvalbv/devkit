@@ -266,6 +266,24 @@ describe('runReviewGate — cascade + exit contract', () => {
   });
 });
 
+describe('runReviewGate — adversarial staged filenames (argv-git regression)', () => {
+  it('a staged filename carrying $(…) never reaches a shell: no side effect, gate completes', async () => {
+    const repo = consumerRepo({ backend: true });
+    // Legal filename on disk; under the old shell-string git calls the $(…) would EXPAND
+    // during the very review meant to catch it (CodeRabbit critical).
+    writeFileSync(join(repo, 'src', 'main', 'db$(touch INJECTED).ts'), 'export const q = 2;\n');
+    execSync('git add .', { cwd: repo });
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
+    expect(existsSync(join(repo, 'src', 'main', 'INJECTED'))).toBe(false);
+    // the crafted file was actually REVIEWED (rode the domain diff), not silently dropped
+    const stat = exec.mock.calls.find((c) => c[0].label === 'review:api-security-reviewer')[0]
+      .input;
+    expect(stat).toContain('INJECTED).ts');
+  });
+});
+
 describe('runReviewGate — per-completion checkpoints', () => {
   it('a finished PASS is on disk BEFORE slower cascades resolve (checkpoint, not batch)', async () => {
     const repo = consumerRepo({ backend: true });
