@@ -44,7 +44,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
 import { currentTarget, parseDecision } from './decisions.mjs';
@@ -101,16 +101,6 @@ const DEPTH_PROMPT =
   '3. Is the Negative consequence concrete and specific, NOT a platitude?\n' +
   '4. ONLY IF the block has a Revisit-when line: does it state a concrete, checkable condition (a measurable threshold or observable event), not a platitude like "when things change"? A block with NO Revisit-when line passes this check.\n' +
   'Reply THIN if ANY check fails, else PASS. Reply with exactly one word: PASS or THIN.';
-
-// ─── Env helper for alignment-only knobs (GUARD_* with FRINK_* back-compat alias) ─
-// The shared config owns noLog/noLlm; GUARD_DEPTH_HARD is alignment-specific, so it lives here,
-// mirroring config's alias semantics (GUARD_* wins, FRINK_* is the legacy fallback).
-function envFlag(name) {
-  const v = process.env[`GUARD_${name}`] ?? process.env[`FRINK_${name}`];
-  if (v === undefined) return false;
-  const t = String(v).trim().toLowerCase();
-  return !(t === '' || t === '0' || t === 'false' || t === 'no');
-}
 
 // ─── Pure logic (testable without git/claude) ───────────────────────────────────
 

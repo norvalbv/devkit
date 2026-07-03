@@ -123,6 +123,13 @@ function envBool(name) {
   return true;
 }
 
+// A GUARD_*/FRINK_* flag as a plain boolean — false when unset — for direct `if (envFlag(x))` use.
+// Distinct from envBool's undefined-when-unset (which lets config resolution fall through to
+// file/DEFAULT via ??). Exported so the review/decisions gates share one truthy-env predicate.
+export function envFlag(name) {
+  return envBool(name) ?? false;
+}
+
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
 // unparseable / not an object => throw: a typo'd config must fail loudly, never silently
 // degrade to defaults and quietly weaken a gate.
