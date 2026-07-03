@@ -32,6 +32,7 @@ import { envFlag, resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { execJudgeAsync } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
+import { clearProgress, writeProgress } from './progress.mjs';
 import {
   allowedToolsFor,
   cacheKey,
@@ -240,13 +241,17 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (parallel, ${firstModel} → opus on FAIL)…`,
   );
   // Each cascade CHECKPOINTS as it lands: its PASS is persisted per-completion (not after
-  // Promise.all), so a run killed by the ship timeout keeps every finished verdict and the
-  // retry re-runs only the unfinished reviewers. The completion line doubles as a heartbeat
-  // through git's stderr → the ship log. The .catch keeps one cascade's throw from rejecting
-  // the whole Promise.all and discarding its siblings' still-pending completions.
-  // HEARTBEAT FORMAT IS A CONTRACT: `guard-review: <name> — <STATUS>…` is parsed by the ship
-  // timeout banner (cli/lib/ship/commit-with-gate-capture.sh awk) to name unfinished reviewers
-  // after a kill — change both together.
+  // Promise.all), so a run killed by the ship timeout keeps every finished verdict and the retry
+  // re-runs only the unfinished reviewers. On a ship (DEVKIT_REVIEW_PROGRESS set by the ship's
+  // commit-with-gate-capture.sh) each completion is ALSO recorded to that progress JSON — the
+  // STRUCTURED contract the timeout banner reads to name unfinished reviewers (`progress.mjs
+  // unfinished`), replacing the old awk-parse of these stderr heartbeat lines. The lines below stay,
+  // but for humans only. The .catch keeps one cascade's throw from rejecting the whole Promise.all
+  // and discarding its siblings' still-pending completions.
+  const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
+  const running = toRun.map((t) => t.sel.reviewer.name);
+  const completed = [];
+  if (progressFile) writeProgress(progressFile, { running, completed });
   const results = await Promise.all(
     toRun.map((t) => {
       const t0 = Date.now();
@@ -260,6 +265,10 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         .then((res) => {
           if (res.status === 'pass')
             savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
+          if (progressFile) {
+            completed.push(res.name);
+            writeProgress(progressFile, { running, completed });
+          }
           const secs = Math.round((Date.now() - t0) / 1000);
           console.error(
             `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
@@ -268,6 +277,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         });
     }),
   );
+  if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
   const fails = results.filter((r) => r.status === 'fail');
   for (const f of fails) {
