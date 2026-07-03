@@ -11,17 +11,21 @@
  * Contract:
  *   exit 1 = at least one opus-confirmed FAIL
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
- *            hook treats this as fail-open
+ *            hook treats this as fail-open (non-strict runs only)
+ *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
+ *            after the retry, or the gate could not run — FAIL-CLOSED, distinct from exit 1 so a
+ *            hook never renders an outage as "opus-confirmed FAIL"
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
  * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default sonnet) ·
- * cfg.noLlm skip. FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an
- * airtight read-only allowlist — a gate judge can never write, stage, or commit.
+ * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
+ * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
+ * allowlist — a gate judge can never write, stage, or commit.
  *
  * W-3: config + git + agent .md files all resolve against the CONSUMER cwd.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { resolveGuardConfig } from '../config.mjs';
@@ -39,9 +43,13 @@ import {
 } from './reviewers.mjs';
 
 // Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
-// diff investigation; both stay under ship's SHIP_COMMIT_TIMEOUT (900s) even on the escalate path.
+// diff investigation. Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this
+// gate alone: deterministic prefix ~240s (≈0 on a guard-prefix hit) + decisions ≤60s (≈0 on a
+// verdict-cache hit) + this cascade's worst case 2×300 (strict retry) + 420 = 1020s. First-ship
+// worst ≈ 1800s = SHIP_COMMIT_TIMEOUT's default; a killed run converges on retry because PASSes
+// checkpoint per-completion and the caches skip everything already earned.
 const FIRST_TIMEOUT_MS = 300000;
-const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block
+const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block; never retried (see cascadeVerdict)
 
 // GUARD_* env flag with FRINK_* back-compat alias (check-alignment's envFlag semantics).
 function envFlag(name) {
@@ -51,12 +59,18 @@ function envFlag(name) {
   return !(t === '' || t === '0' || t === 'false' || t === 'no');
 }
 
-function sh(cwd, cmd) {
-  return execSync(cmd, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
+// JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
+function gitCached(cwd, args, files) {
+  return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
 }
 
 function stagedFiles(cwd) {
-  return sh(cwd, 'git diff --cached --name-only')
+  return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -112,7 +126,7 @@ export async function runCascade(sel, opts) {
 
 async function cascadeVerdict(
   { reviewer, files },
-  { cwd, cfg, exec = execJudgeAsync, firstModel = 'sonnet' },
+  { cwd, cfg, exec = execJudgeAsync, firstModel = 'sonnet', retryFirst = false },
 ) {
   const prompt = wrapPrompt(agentBody(cwd, cfg, reviewer.name) ?? '', reviewer, files);
   const args = (p, model) => [
@@ -124,17 +138,25 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedToolsFor(reviewer, cfg),
   ];
-  const stat = sh(
-    cwd,
-    `git diff --cached --stat -- ${files.map((f) => JSON.stringify(f)).join(' ')}`,
-  );
-  const first = await exec({
+  const stat = gitCached(cwd, ['--stat'], files);
+  const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, firstModel),
     input: stat,
     timeout: FIRST_TIMEOUT_MS,
     cwd,
-  });
+  };
+  let first = await exec(firstOpts);
+  if (first === null && retryFirst) {
+    // Strict (ship) runs get ONE first-pass retry — transient API failures must not fail a ship
+    // closed. The escalation pass is never retried: its outage stays inconclusive (blocked under
+    // strict), and retrying it would push the cascade's worst case past the ship ceiling.
+    // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
+    // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
+    console.error(`guard-review: ${reviewer.name}: judge run failed, retrying once…`);
+    cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
+    first = await exec(firstOpts);
+  }
   if (first === null)
     return {
       name: reviewer.name,
@@ -185,6 +207,7 @@ async function cascadeVerdict(
  */
 export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
   if (envFlag('NO_REVIEW')) return 0;
+  const strict = envFlag('AI_STRICT'); // the ship path sets this: retry once, then fail CLOSED
   let cfg;
   let selected;
   let diffs;
@@ -194,12 +217,12 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     selected = selectReviewers(stagedFiles(cwd), cfg);
     if (selected.length === 0) return 0;
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
-    diffs = selected.map((s) =>
-      sh(cwd, `git diff --cached -- ${s.files.map((f) => JSON.stringify(f)).join(' ')}`),
-    );
+    diffs = selected.map((s) => gitCached(cwd, [], s.files));
   } catch (e) {
-    console.error(`guard-review: could not run — ${e?.message ?? e}`);
-    return 2; // fail-open
+    console.error(
+      `guard-review: could not run — ${e?.message ?? e}${strict ? ' (strict ship mode: failing closed)' : ''}`,
+    );
+    return strict ? 3 : 2; // fail-open, except on a ship
   }
 
   const cache = loadCache(cwd);
@@ -216,16 +239,35 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
   console.error(
     `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (parallel, ${firstModel} → opus on FAIL)…`,
   );
+  // Each cascade CHECKPOINTS as it lands: its PASS is persisted per-completion (not after
+  // Promise.all), so a run killed by the ship timeout keeps every finished verdict and the
+  // retry re-runs only the unfinished reviewers. The completion line doubles as a heartbeat
+  // through git's stderr → the ship log. The .catch keeps one cascade's throw from rejecting
+  // the whole Promise.all and discarding its siblings' still-pending completions.
+  // HEARTBEAT FORMAT IS A CONTRACT: `guard-review: <name> — <STATUS>…` is parsed by the ship
+  // timeout banner (cli/lib/ship/commit-with-gate-capture.sh awk) to name unfinished reviewers
+  // after a kill — change both together.
   const results = await Promise.all(
-    toRun.map((t) => runCascade(t.sel, { cwd, cfg, exec, firstModel })),
+    toRun.map((t) => {
+      const t0 = Date.now();
+      return runCascade(t.sel, { cwd, cfg, exec, firstModel, retryFirst: strict })
+        .catch((e) => ({
+          name: t.sel.reviewer.name,
+          status: 'inconclusive',
+          reason: `engine error: ${e?.message ?? e}`,
+          escalated: false,
+        }))
+        .then((res) => {
+          if (res.status === 'pass')
+            savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
+          const secs = Math.round((Date.now() - t0) / 1000);
+          console.error(
+            `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
+          );
+          return res;
+        });
+    }),
   );
-
-  const passes = {};
-  const now = new Date().toISOString();
-  for (let i = 0; i < results.length; i++) {
-    if (results[i].status === 'pass') passes[toRun[i].key] = { at: now, model: firstModel };
-  }
-  if (Object.keys(passes).length > 0) savePasses(cwd, passes);
 
   const fails = results.filter((r) => r.status === 'fail');
   for (const f of fails) {
@@ -236,9 +278,14 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
   if (fails.length > 0) return 1;
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
   for (const r of inconclusive) {
-    console.error(`guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`);
+    console.error(
+      strict
+        ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
+            '   Remedy: check `claude` CLI auth/quota, then re-run devkit ship (completed verdicts are cached).'
+        : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
+    );
   }
-  if (inconclusive.length > 0) return 2;
+  if (inconclusive.length > 0) return strict ? 3 : 2;
   return 0;
 }
 
@@ -248,10 +295,7 @@ export function scanReview(cwd = process.cwd()) {
     const cfg = resolveGuardConfig(cwd);
     const cache = loadCache(cwd);
     for (const s of selectReviewers(stagedFiles(cwd), cfg)) {
-      const diff = sh(
-        cwd,
-        `git diff --cached -- ${s.files.map((f) => JSON.stringify(f)).join(' ')}`,
-      );
+      const diff = gitCached(cwd, [], s.files);
       const hit = cache[cacheKey(s.reviewer.name, diff)] ? ' [cached PASS]' : '';
       console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
     }

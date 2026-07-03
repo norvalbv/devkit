@@ -116,6 +116,7 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // The commented structure-lint placeholder line a structure stack flips live (and removal
 // re-comments). Hoisted to module scope (perf: avoid recompiling per call).
 const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
+const GUARD_STRUCTURE_RE = /\bguard-structure\b/;
 
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
@@ -612,7 +613,7 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
     console.log('  ! no devkit-guards block to enable structure-lint in');
     return;
   }
-  if (block.includes(`\n${liveCmd} `) || block.includes(`\n${liveCmd}\n`)) {
+  if (block.includes(`\n    ${liveCmd} `) || block.includes(`\n    ${liveCmd}\n`)) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
   }
@@ -624,9 +625,15 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
     console.log(`  [dry-run] uncomment \`${liveCmd}\` in .husky/pre-commit`);
     return;
   }
-  // `|| exit 1` so a structure violation BLOCKS the commit — a bare line would let a non-zero
-  // exit pass (no `set -e`). In a package subshell the exit propagates via the `) || exit 1`.
-  const newBlock = block.replace(COMMENTED_LINT_RE, `\n${liveCmd} || exit 1\n`);
+  // The live line joins the deterministic region: skipped on a prefix-cache hit, and a
+  // violation ACCUMULATES into DK_DET_FAILS (reported by devkit:det-verdict) instead of
+  // exiting fail-fast — same contract as the guard fragments around it. guard-structure keeps
+  // the guard rc trichotomy (exit 2 = could-not-run → fail-open); eslint has no fail-open code
+  // (its exit 2 is a fatal config error), so any non-zero accumulates.
+  const structureLive = GUARD_STRUCTURE_RE.test(liveCmd)
+    ? `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    rc=0\n    ${liveCmd} || rc=$?\n    if [ "$rc" -eq 1 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\n    elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint(unexpected:$rc)"\n    fi\nfi\n`
+    : `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`;
+  const newBlock = block.replace(COMMENTED_LINT_RE, structureLive);
   writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
   console.log(`  ✓ enabled structure-lint (\`${liveCmd}\`) in .husky/pre-commit`);
 }
@@ -1158,7 +1165,8 @@ Usage:
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow.
-  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions).
+  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,review;
+                         review — the in-chain reviewer judges — is opt-in, off by default).
   --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.

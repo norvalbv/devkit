@@ -1,17 +1,39 @@
 # devkit dogfoods its OWN gate-engine. The bins are local (this IS the devkit repo), so the
-# gates run via `node gate-engine/...` rather than the published `bunx guard-*`.
+# gates run via `node gate-engine/...` rather than the published `bunx guard-*`. Do not run
+# `devkit init` in this repo — this hand-authored hook IS the canonical chain.
+#
+# Shape mirrors the generated consumer block: deterministic gates run skip-aware (the prefix
+# cache clears an identical staged tree on a devkit ship retry) and ACCUMULATE their failures
+# into one aggregated report; the AI gate (decisions) stays last and fail-fast.
 
-# Formatter + linter (Biome) — hard gate.
-bun run lint || exit 1
+# Deterministic-prefix cache (ship runs only — no-ops without DEVKIT_SHIP=1). Sets a flag,
+# never exits: the decisions gate below always still runs.
+DK_PREFIX_SKIP=""
+DK_DET_FAILS=""
+if node gate-engine/prefix-cache/cli.mjs check --hook "${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
 
-# Structure governance (folder-structure rule compiled from guard.config.json `structure`) — hard
-# gate. devkit governs its own cli/ + gate-engine/ layout; an unregistered domain or misplaced file
-# blocks the commit. See docs/structure-governance.md.
-bun run lint:structure || exit 1
+if [ -z "${DK_PREFIX_SKIP:-}" ]; then
+    # Formatter + linter (Biome) — hard gate.
+    bun run lint || DK_DET_FAILS="${DK_DET_FAILS:-} lint"
 
-# Ratchets (baselines in eslint/baselines/, grandfathered via `bun run guard:freeze`) — hard gate.
-node gate-engine/ratchets/folder-fanout.mjs gate || exit 1
-node gate-engine/ratchets/size-disable.mjs gate || exit 1
+    # Structure governance (folder-structure rule compiled from guard.config.json `structure`) — hard
+    # gate. devkit governs its own cli/ + gate-engine/ layout; an unregistered domain or misplaced
+    # file blocks the commit. See docs/structure-governance.md.
+    bun run lint:structure || DK_DET_FAILS="${DK_DET_FAILS:-} lint:structure"
+
+    # Ratchets (baselines in eslint/baselines/, grandfathered via `bun run guard:freeze`) — hard gate.
+    node gate-engine/ratchets/folder-fanout.mjs gate || DK_DET_FAILS="${DK_DET_FAILS:-} guard-fanout"
+    node gate-engine/ratchets/size-disable.mjs gate || DK_DET_FAILS="${DK_DET_FAILS:-} guard-size"
+fi
+
+# Aggregated deterministic verdict: every failure above reported at once (one fix cycle), then
+# on all-green record the prefix key so an identical re-ship skips straight to the AI gate.
+if [ -n "${DK_DET_FAILS:-}" ]; then
+    echo "✗ deterministic gates failed:${DK_DET_FAILS}"
+    echo "   Every deterministic failure is listed above — fix them together, then commit once."
+    exit 1
+fi
+if [ -z "${DK_PREFIX_SKIP:-}" ]; then node gate-engine/prefix-cache/cli.mjs record --hook "${DK_HOOK_PATH:-$0}" || true; fi
 
 # Decision-log gate (capture B) — smells an architectural diff with no decision staged and blocks
 # until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open
@@ -20,6 +42,10 @@ ddrc=0
 node gate-engine/decisions/cli.mjs detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
+    exit 1
+elif [ "$ddrc" -eq 3 ]; then
+    echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
+    echo "   Check claude CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."

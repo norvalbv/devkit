@@ -24,13 +24,14 @@
  * package dir (__dirname). Run from a consumer's node_modules, this gate reads THAT repo.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
+import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
 
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 const PKG_RE = /(^|\/)package\.json$/;
@@ -132,8 +133,10 @@ export function gateVerdict(s) {
 
 // ─── git I/O wrappers (thin; run in the CONSUMER cwd) ────────────────────────────
 
-function sh(cwd, cmd) {
-  return execSync(cmd, { cwd, encoding: 'utf8' });
+// argv-based on purpose: staged FILENAMES (e.g. a nested package.json path) ride some of
+// these calls, and a shell string lets a crafted path expand before git runs.
+function git(cwd, args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
 // Pure: the dependency NAMES whose spec differs between two parsed package.json objects. Exported
@@ -156,14 +159,14 @@ function readDepChangedKeys(cwd, relPath, mode) {
     cur = JSON.parse(
       mode === 'working'
         ? readFileSync(path.join(cwd, relPath), 'utf8')
-        : sh(cwd, `git show :${relPath}`),
+        : git(cwd, ['show', `:${relPath}`]),
     );
   } catch {
     return [];
   }
   let head;
   try {
-    head = JSON.parse(sh(cwd, `git show HEAD:${relPath}`));
+    head = JSON.parse(git(cwd, ['show', `HEAD:${relPath}`]));
   } catch {
     head = {};
   }
@@ -176,7 +179,7 @@ function readDepChangedKeys(cwd, relPath, mode) {
 export function gatherEntries(cwd, mode = 'cached') {
   const range = mode === 'working' ? 'HEAD' : '--cached';
   const counts = new Map();
-  for (const line of sh(cwd, `git diff ${range} --numstat -M`).split('\n')) {
+  for (const line of git(cwd, ['diff', range, '--numstat', '-M']).split('\n')) {
     if (!line.trim()) continue;
     const [add, del, ...p] = line.split('\t');
     const file = p.join('\t');
@@ -187,7 +190,7 @@ export function gatherEntries(cwd, mode = 'cached') {
     });
   }
   const entries = [];
-  for (const line of sh(cwd, `git diff ${range} --name-status -M`).split('\n')) {
+  for (const line of git(cwd, ['diff', range, '--name-status', '-M']).split('\n')) {
     if (!line.trim()) continue;
     const parts = line.split('\t');
     const status = parts[0][0];
@@ -341,16 +344,27 @@ export function runDetectJudge(cwd, diff, model = 'haiku') {
   });
 }
 
-// LLM downgrade: a confident ROUTINE clears a regex block; DECISION / unavailable / error
-// → null → the block stands. Never escalates.
+// LLM downgrade: a confident ROUTINE clears a regex block; DECISION / error → the block stands.
+// Never escalates. An outage is surfaced as 'OUTAGE' (distinct from a judged DECISION) so the
+// gate can say WHY the block stood — a dark judge must never read as a confirmed smell verdict.
 function judgeWithClaude(cwd, noLlm, diff) {
   if (noLlm || !diff) return null;
   const raw = runDetectJudge(cwd, diff);
-  return raw === null ? null : parseVerdict(raw);
+  if (raw === null) return 'OUTAGE';
+  return parseVerdict(raw);
+}
+
+// GUARD_AI_STRICT/FRINK_AI_STRICT truthy check (ship-only strict mode). Local copy on
+// purpose for now — the shared hoist is tracked (envFlag consolidation).
+function strictShip() {
+  const v = process.env.GUARD_AI_STRICT ?? process.env.FRINK_AI_STRICT;
+  if (v === undefined) return false;
+  const t = String(v).trim().toLowerCase();
+  return !(t === '' || t === '0' || t === 'false' || t === 'no');
 }
 
 function decisionStaged(cwd, decisionFileMatcher) {
-  const names = sh(cwd, 'git diff --cached --name-only');
+  const names = git(cwd, ['diff', '--cached', '--name-only']);
   return names.split('\n').some((n) => decisionFileMatcher.test(n.trim()));
 }
 
@@ -376,11 +390,45 @@ function runGate() {
     // Prefixes forced OFF-config: a consumer's diff.noprefix/mnemonicPrefix must not change the
     // segment-header format the extractor matches against (W-3: consumer git config is theirs).
     const input = buildDetectJudgeInput(
-      sh(cwd, 'git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached'),
+      git(cwd, [
+        '-c',
+        'diff.noprefix=false',
+        '-c',
+        'diff.mnemonicPrefix=false',
+        'diff',
+        '--cached',
+      ]),
       entries,
       cfg.boundaries,
     );
-    if (judgeWithClaude(cwd, cfg.noLlm, input) === 'ROUTINE') process.exit(0);
+    // An earned ROUTINE is cached on the exact evidence bytes: an identical re-run (a ship
+    // retry after an unrelated gate/timeout failure) clears without re-spending the judge.
+    const key = verdictKey('detect', input);
+    if (hasVerdict(cwd, key)) {
+      console.error('decision-gate: cached ROUTINE (identical evidence) — cleared');
+      process.exit(0);
+    }
+    const judged = judgeWithClaude(cwd, cfg.noLlm, input);
+    if (judged === 'ROUTINE') {
+      saveVerdict(cwd, key);
+      process.exit(0);
+    }
+    if (judged === 'OUTAGE') {
+      // Fail-closed toward recording, but say so honestly: the smell below was NOT judge-confirmed.
+      console.error(
+        'decision-gate: judge unavailable — the regex block below stands UNVERIFIED. If it looks',
+      );
+      console.error(
+        '   like a false positive: fix `claude` CLI auth/quota and retry, or bypass a non-decision',
+      );
+      console.error('   with GUARD_NO_LOG=1.');
+      if (strictShip()) {
+        // Strict ship contract: an outage is exit 3 (judge-unavailable, failed closed), never
+        // exit 1 — the hook must not render a dark judge as a confirmed decision smell.
+        console.error(`decision smells (unverified): ${smells.join(', ')}`);
+        process.exit(3);
+      }
+    }
     console.error(`decision smells: ${smells.join(', ')}`);
     process.exit(1);
   } catch (e) {

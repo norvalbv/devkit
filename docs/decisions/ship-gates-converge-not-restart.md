@@ -1,0 +1,21 @@
+---
+slug: ship-gates-converge-not-restart
+created: 2026-07-03
+---
+
+# ship-gates-converge-not-restart
+
+## Target · 2026-07-03 — a killed or failed ship RETRIES cheap and monotone: verdicts checkpoint + cache, deterministic failures aggregate, AI outages fail closed (ship-only)
+
+**Context:** A shipping agent in frink looped 5 `devkit ship` attempts (~40 min) and never landed: the gate chain's real worst case (~4 min deterministic prefix + decisions cascade + a 300s+420s reviewer cascade ≈ 1800s) exceeded both the 900s `SHIP_COMMIT_TIMEOUT` and the 10-minute foreground tool cap, guard-review discarded finished PASSes on a kill (batch save after `Promise.all`), every retry re-ran the identical deterministic gates (~4 min each), and the 124 banner blamed "likely a hung gate", sending the agent chasing a phantom hang instead of the budget.
+**Ruling:** Ship retries CONVERGE instead of restarting: (1) reviewer PASSes checkpoint per-completion, (2) an all-green deterministic prefix is cached on the staged tree hash (`guard-prefix`, armed only under `DEVKIT_SHIP=1` where worktree ≡ index), (3) decisions ROUTINE/ALIGN/depth-PASS verdicts are cached on their exact evidence bytes, (4) deterministic gate failures AGGREGATE into one report while AI gates stay fail-fast, and (5) under `GUARD_AI_STRICT=1` (exported only by ship) the reviewer gate's sonnet first pass retries once and an inconclusive-after-retry FAILS CLOSED with exit 3 — a code distinct from exit 1 so hooks never render an outage as an opus-confirmed FAIL; the decisions judges fail closed WITHOUT a retry (deliberate: retries there erode the ceiling for little value — alignment outage exits 3 named, detect's outage keeps its regex block standing but labels it UNVERIFIED with a remedy). Default `SHIP_COMMIT_TIMEOUT` rises to 1800s with the honest full-chain equation documented; the timeout banner names the mid-flight stage + unfinished reviewers and says "re-run to converge".
+**Consequences:**
+- Positive: A killed ship keeps every earned verdict — the frink 5-attempt loop becomes ~2 attempts with the second paying only for unfinished work; agents get one aggregated deterministic report per cycle instead of N fail-fast round trips; a judge outage on a ship blocks loudly with a remedy instead of silently skipping review.
+- Negative: Three cache files under `.devkit/` that can go stale against gitignored inputs (the search-code index behind guard-dup) — `guard-prefix clear` / `guard-review clear-cache` are the escape hatches; strict mode makes `claude` availability a hard ship dependency (by design: do it well or don't); exit 3 is new contract surface hand-authored consumer hooks must learn.
+**Vision-fit:** n/a — internal tooling (devkit is dev infrastructure).
+**Researched:** frink session forensics (5 attempts, exit 143 then 124, gates re-passing identically); guard-review's existing diff-keyed cache (the checkpoint gap was the save timing, not the keying).
+**Rejected:** (a) run-all-and-aggregate for AI gates too — LOSES: a wall of AI findings raises agent confusion/hallucination risk (maintainer ruling: incremental fixes for AI verdicts). (b) fail-open on AI-gate timeout — LOSES: a ship silently skipping the reviewer gate defeats its purpose; maintainer ruled "we do it well, or don't do it". (c) keeping 900s and shrinking judge timeouts to fit — LOSES: truncates legitimate checklist-driven investigations to buy a number.
+**Anchored-bet:** convergence machinery (checkpoints + caches) is the backstop for any future budget misfit — the ceiling is a hang guard, not a schedule.
+**Revisit-when:** ship retries still exceed 2 attempts on unchanged diffs (cache misses in practice), or a deadline-aware judge clamp (`DEVKIT_GATE_DEADLINE`) becomes necessary because single attempts routinely blow the 1800s ceiling.
+**Scope:** gate-engine/prefix-cache/**,gate-engine/review/**,gate-engine/decisions/verdict-cache.mjs,gate-engine/judge/verdict-store.mjs,cli/lib/ship/commit-with-gate-capture.sh,cli/lib/husky/husky-block.mjs,.husky/pre-commit
+**Source:** collab

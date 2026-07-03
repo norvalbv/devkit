@@ -65,6 +65,15 @@ describe('buildGuardBlock', () => {
   it('always keeps the commented structure-lint placeholder', () => {
     expect(buildGuardBlock(ALL)).toMatch(/# bunx eslint src/);
   });
+
+  it('monorepo package block captures the hook path ABSOLUTE before cd (guard-prefix stays live)', () => {
+    const block = buildGuardBlock({ guards: ['size'] }, 'pkg/a');
+    // $0 is git-root-relative; after `cd pkg/a` it no longer resolves — the wrapper must pin it.
+    const iHookPath = block.indexOf('DK_HOOK_PATH=');
+    expect(iHookPath).toBeGreaterThan(-1);
+    expect(iHookPath).toBeLessThan(block.indexOf('( cd "pkg/a"'));
+    expect(block).toContain(`--hook "\${DK_HOOK_PATH:-$0}"`);
+  });
 });
 
 describe('buildFullHook', () => {
@@ -178,9 +187,12 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
 describe('guard fragments fail CLOSED on unexpected exit codes (#8)', () => {
   it('blocks on exit 1 AND any non-0/2 code; only 0/2 continue', () => {
     const block = buildGuardBlock({ guards: ['size'] });
-    // exit 1 → block; unexpected (not 0/2) → block; 0/2 are the only continue codes.
-    expect(block).toMatch(/\[ "\$src" -eq 1 \]/);
-    expect(block).toMatch(/\[ "\$src" -ne 0 \] && \[ "\$src" -ne 2 \]/);
+    // exit 1 → accumulate; unexpected (not 0/2) → accumulate (named); 0/2 are the only clean
+    // codes. The aggregated det-verdict then blocks once for every accumulated failure.
+    expect(block).toMatch(/\[ "\$rc" -eq 1 \]/);
+    expect(block).toMatch(/\[ "\$rc" -ne 0 \] && \[ "\$rc" -ne 2 \]/);
+    expect(block).toContain(`DK_DET_FAILS="\${DK_DET_FAILS:-} guard-size"`);
+    expect(block).toContain('deterministic gates failed');
   });
 });
 

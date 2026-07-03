@@ -12,64 +12,59 @@
 
 import { markEnd, markStart } from './husky.mjs';
 
-// One guard fragment: an echo banner + the bunx call + its exit-code check, wrapped in
-// sentinels. Keyed by guard id (GUARD_IDS in components.mjs).
+// Emit one deterministic-guard fragment: skip-aware (DK_PREFIX_SKIP) and ACCUMULATING —
+// failures collect into DK_DET_FAILS and are reported together by devkit:det-verdict, so an
+// agent fixes every deterministic finding in ONE cycle instead of fail-fast round trips.
+// The rc trichotomy is preserved per gate: 1 = violation (accumulate), 2 = could-not-run
+// (fail-open, continue), anything else = unexpected (accumulate, named).
+const detFragment = (id, banner, cmd, remedy) => `# devkit:guard-${id}
+if [ -z "\${DK_PREFIX_SKIP:-}" ]; then
+    echo "${banner}"
+    # set -e-safe: husky runs hooks under \`sh -e\`, so a bare \`bunx … gate\` returning its
+    # fail-open code (2) would abort the whole hook before this check. \`|| rc=$?\` neutralises
+    # set -e (the call is now a tested command) AND captures the code.
+    rc=0
+    ${cmd} || rc=$?
+    if [ "$rc" -eq 1 ]; then
+        echo "   ${remedy}"
+        DK_DET_FAILS="\${DK_DET_FAILS:-} guard-${id}"
+    elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+        echo "   guard-${id}: unexpected exit $rc."
+        DK_DET_FAILS="\${DK_DET_FAILS:-} guard-${id}(unexpected:$rc)"
+    fi
+fi
+# rc 0 = clean, rc 2 = could-not-run (fail-open) → continue; 1/other accumulate → det-verdict.
+# /devkit:guard-${id}`;
+
+// The guard fragments, keyed by guard id (GUARD_IDS in components.mjs). Deterministic gates
+// accumulate (above); AI gates (decisions, review) stay FAIL-FAST — an aggregated wall of AI
+// findings confuses the fixing agent, so they surface one at a time — and exit 3 (strict ship
+// mode failing closed on a judge outage) gets its own remedy, never rendered as a violation.
 const GUARD_FRAGMENTS = {
-  size: `# devkit:guard-size
-echo "📏 Size-debt ratchet..."
-# set -e-safe: husky runs hooks under \`sh -e\`, so a bare \`bunx … gate\` returning its
-# fail-open code (2) would abort the whole hook before this check. \`|| src=$?\` neutralises
-# set -e (the call is now a tested command) AND captures the code.
-src=0
-bunx guard-size gate || src=$?
-if [ "$src" -eq 1 ]; then
-    echo "   Re-freeze after a deliberate audit: bunx guard-size freeze"
-    exit 1
-elif [ "$src" -ne 0 ] && [ "$src" -ne 2 ]; then
-    echo "   guard-size: unexpected exit $src — blocking the commit."
-    exit 1
-fi
-# src 0 = ok / shrank, src 2 = baseline missing (fail-open) → continue; any other code blocks.
-# /devkit:guard-size`,
-  fanout: `# devkit:guard-fanout
-echo "🗂  Folder fan-out ratchet..."
-frc=0
-bunx guard-fanout gate || frc=$?
-if [ "$frc" -eq 1 ]; then
-    echo "   Re-freeze after a deliberate audit: bunx guard-fanout freeze"
-    exit 1
-elif [ "$frc" -ne 0 ] && [ "$frc" -ne 2 ]; then
-    echo "   guard-fanout: unexpected exit $frc — blocking the commit."
-    exit 1
-fi
-# frc 0 = ok / shrank, frc 2 = baseline missing (fail-open) → continue; any other code blocks.
-# /devkit:guard-fanout`,
-  dup: `# devkit:guard-dup
-echo "🔁 Duplication gate (semantic)..."
-drc=0
-bunx guard-dup scan --new --changed --gate || drc=$?
-if [ "$drc" -eq 1 ]; then
-    echo "   New duplication. Refactor it, or run the approval command the gate printed above."
-    exit 1
-elif [ "$drc" -ne 0 ] && [ "$drc" -ne 2 ]; then
-    echo "   guard-dup: unexpected exit $drc — blocking the commit."
-    exit 1
-fi
-# drc 0 = clean, drc 2 = could-not-run (fail-open) → continue; any other code blocks.
-# /devkit:guard-dup`,
-  clone: `# devkit:guard-clone
-echo "🔁 Clone gate (verbatim)..."
-crc=0
-bunx guard-clone scan --changed --gate || crc=$?
-if [ "$crc" -eq 1 ]; then
-    echo "   New verbatim clone. Refactor it, or run the approval command the gate printed above."
-    exit 1
-elif [ "$crc" -ne 0 ] && [ "$crc" -ne 2 ]; then
-    echo "   guard-clone: unexpected exit $crc — blocking the commit."
-    exit 1
-fi
-# crc 0 = clean, crc 2 = could-not-run (fail-open) → continue; any other code blocks.
-# /devkit:guard-clone`,
+  size: detFragment(
+    'size',
+    '📏 Size-debt ratchet...',
+    'bunx guard-size gate',
+    'Re-freeze after a deliberate audit: bunx guard-size freeze',
+  ),
+  fanout: detFragment(
+    'fanout',
+    '🗂  Folder fan-out ratchet...',
+    'bunx guard-fanout gate',
+    'Re-freeze after a deliberate audit: bunx guard-fanout freeze',
+  ),
+  dup: detFragment(
+    'dup',
+    '🔁 Duplication gate (semantic)...',
+    'bunx guard-dup scan --new --changed --gate',
+    'New duplication. Refactor it, or run the approval command the gate printed above.',
+  ),
+  clone: detFragment(
+    'clone',
+    '🔁 Clone gate (verbatim)...',
+    'bunx guard-clone scan --changed --gate',
+    'New verbatim clone. Refactor it, or run the approval command the gate printed above.',
+  ),
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
 ddrc=0
@@ -77,13 +72,61 @@ bunx guard-decisions detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
+elif [ "$ddrc" -eq 3 ]; then
+    echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
+    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
     exit 1
 fi
 # ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
 # /devkit:guard-decisions`,
+  review: `# devkit:guard-review
+echo "🔍 Reviewer gate (headless domain judges)..."
+rrc=0
+bunx guard-review --gate || rrc=$?
+if [ "$rrc" -eq 1 ]; then
+    echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
+    exit 1
+elif [ "$rrc" -eq 3 ]; then
+    echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
+    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (completed verdicts are cached)."
+    exit 1
+elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then
+    echo "   guard-review: unexpected exit $rrc — blocking the commit."
+    exit 1
+fi
+# rrc 0 = pass/cached/nothing-to-do, rrc 2 = inconclusive (non-strict fail-open) → continue.
+# /devkit:guard-review`,
 };
+
+// Guard run order: deterministic gates first (accumulate into one report), AI gates last so a
+// doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
+const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
+const AI_GUARD_IDS = ['decisions', 'review'];
+
+// Deterministic-prefix cache check (devkit ship runs only — guard-prefix no-ops without
+// DEVKIT_SHIP=1). Sets a flag, NEVER exits: the AI gates below and any hand-authored gates
+// outside the block must always still run.
+const PREFIX_CHECK_FRAGMENT = `# devkit:prefix-check
+# Deterministic-prefix cache: when this exact staged tree already ran the deterministic gates
+# all-green (a devkit ship retry), skip them. Only sets a flag — never \`exit\` here.
+DK_PREFIX_SKIP=""
+DK_DET_FAILS=""
+if bunx guard-prefix check --hook "\${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
+# /devkit:prefix-check`;
+
+// The aggregated deterministic verdict: report EVERY accumulated failure at once, then (on
+// all-green) record the prefix key so an identical re-ship skips straight to the AI gates.
+const DET_VERDICT_FRAGMENT = `# devkit:det-verdict
+if [ -n "\${DK_DET_FAILS:-}" ]; then
+    echo "✗ deterministic gates failed:\${DK_DET_FAILS}"
+    echo "   Every deterministic failure is listed above — fix them together, then commit once."
+    exit 1
+fi
+if [ -z "\${DK_PREFIX_SKIP:-}" ]; then bunx guard-prefix record --hook "\${DK_HOOK_PATH:-$0}" || true; fi
+# /devkit:det-verdict`;
 
 // The biome format-staged-files step (only when the `biome` component is selected).
 const BIOME_FRAGMENT = `# devkit:biome-format
@@ -105,7 +148,8 @@ fi
 # /devkit:biome-format`;
 
 // The commented structure-lint placeholder (generic / no structure preset). A structure
-// stack flips this to the live `bunx eslint src` line via enableStructureLint().
+// stack flips this to a live, skip-aware, ACCUMULATING call via enableStructureLint() — the
+// enabled line joins the deterministic region (prefix skip + det-verdict aggregation).
 const STRUCTURE_PLACEHOLDER = `# Structure lint (folder-structure + max-lines). OFF for this stack — uncomment after a
 # structure preset is wired.
 # bunx eslint src  # uncomment after \`devkit init --stack <x>\``;
@@ -144,7 +188,9 @@ ${PATH_SETUP}
 
 /**
  * Build the `# devkit-guards` marker block (inclusive of markers) from a selection.
- * Order: biome format → structure placeholder → guards in GUARD_FRAGMENTS order.
+ * Order: biome format → prefix-check → structure placeholder → deterministic guards
+ * (accumulating) → det-verdict (aggregated report + prefix record) → AI guards (fail-fast).
+ * biome runs BEFORE prefix-check on purpose: the cache key hashes the post-format index.
  *
  * `pkgRel` (monorepo): when set, the markers are package-scoped and the gates run inside a
  * `( cd "<pkgRel>" … ) || exit 1` subshell so the hook (at the git root) governs that package.
@@ -158,8 +204,13 @@ ${PATH_SETUP}
 export function buildGuardBlock(selection, pkgRel = '') {
   const pieces = [];
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
+  pieces.push(PREFIX_CHECK_FRAGMENT);
   pieces.push(STRUCTURE_PLACEHOLDER);
-  for (const id of Object.keys(GUARD_FRAGMENTS)) {
+  for (const id of DETERMINISTIC_GUARD_IDS) {
+    if (selection.guards?.includes(id)) pieces.push(GUARD_FRAGMENTS[id]);
+  }
+  pieces.push(DET_VERDICT_FRAGMENT);
+  for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(GUARD_FRAGMENTS[id]);
   }
   const body = pieces.join('\n\n');
@@ -168,7 +219,7 @@ export function buildGuardBlock(selection, pkgRel = '') {
   if (!pkgRel) return `${start}\n${body}\n${end}`;
   // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
   // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-  return `${start}\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
@@ -185,6 +236,7 @@ const STANDALONE_GATES = {
   dup: ['guard-dup', 'scan', '--new', '--changed', '--gate'],
   clone: ['guard-clone', 'scan', '--changed', '--gate'],
   decisions: ['guard-decisions', 'detect', '--gate'],
+  review: ['guard-review', '--gate'],
 };
 
 // Structure-lint runs the same way — a global `guard-structure` bin that lints via devkit's OWN
@@ -192,13 +244,32 @@ const STANDALONE_GATES = {
 // the vendored guard.config declares no grammar trees.
 const STANDALONE_STRUCTURE_GATE = ['guard-structure', 'gate'];
 
-// fail-open helper: run a gate only if its global bin is on PATH (skip silently otherwise), and
-// block the commit ONLY on exit 1 (a real violation). Exit 2 means the gate couldn't run
-// (e.g. no search-code index) → fail-open, same as the package-mode fragments.
-// Block on exit 1 (real violation) OR any unexpected code (e.g. 127 command-not-found); exit 2 = the
-// gate couldn't run (no index/baseline) → fail-open. exit 0 = clean. Only 0/2 continue.
-const DK_GATE_HELPER =
-  '__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
+// Deterministic fail-open helper: run a gate only if its global bin is on PATH (skip silently
+// otherwise) and the prefix cache didn't clear it. Exit 1 (real violation) or any unexpected
+// code (e.g. 127) ACCUMULATES into DK_DET_FAILS for the aggregated verdict; exit 2 = the gate
+// couldn't run (no index/baseline) → fail-open. Only 0/2 continue clean.
+const DK_GATE_HELPER = `__dk_gate() { command -v "$1" >/dev/null 2>&1 || return 0; [ -n "\${DK_PREFIX_SKIP:-}" ] && return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then DK_DET_FAILS="\${DK_DET_FAILS:-} $1"; fi; }`;
+
+// AI-gate helper: FAIL-FAST (never aggregated — findings surface one at a time), with exit 3
+// (strict ship mode failing closed on a judge outage) given its own remedy so it is never
+// rendered as a code violation.
+const DK_GATE_AI_HELPER =
+  '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
+
+// The standalone prefix-check / aggregated-verdict pair (global bin, command -v-guarded so a
+// machine without devkit is never blocked). Same contract as the package-mode fragments.
+const DK_PREFIX_CHECK_LINES = `DK_PREFIX_SKIP=""
+DK_DET_FAILS=""
+if command -v guard-prefix >/dev/null 2>&1; then
+    if guard-prefix check --hook "\${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
+fi`;
+const DK_DET_VERDICT_LINES = `if [ -n "\${DK_DET_FAILS:-}" ]; then
+    echo "✗ deterministic gates failed:\${DK_DET_FAILS} — all listed above; fix together, commit once."
+    exit 1
+fi
+if [ -z "\${DK_PREFIX_SKIP:-}" ] && command -v guard-prefix >/dev/null 2>&1; then
+    guard-prefix record --hook "\${DK_HOOK_PATH:-$0}" || true
+fi`;
 
 /**
  * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
@@ -214,16 +285,23 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     DK_GATE_HELPER,
+    DK_GATE_AI_HELPER,
+    DK_PREFIX_CHECK_LINES,
   ];
-  for (const id of Object.keys(STANDALONE_GATES)) {
+  for (const id of DETERMINISTIC_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
   }
   if (selection.structure) pieces.push(`__dk_gate ${STANDALONE_STRUCTURE_GATE.join(' ')}`);
+  pieces.push(DK_DET_VERDICT_LINES);
+  for (const id of AI_GUARD_IDS) {
+    if (selection.guards?.includes(id))
+      pieces.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
+  }
   const body = pieces.join('\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
   if (!pkgRel) return `${start}\n${body}\n${end}`;
-  return `${start}\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
@@ -276,12 +354,19 @@ export function buildOverlayHook(
   pkgRel = '',
   { fallow = false } = {},
 ) {
-  const gates = [DK_GATE_HELPER];
-  for (const id of Object.keys(STANDALONE_GATES)) {
+  const gates = [DK_GATE_HELPER, DK_GATE_AI_HELPER, DK_PREFIX_CHECK_LINES];
+  for (const id of DETERMINISTIC_GUARD_IDS) {
     if (selection.guards?.includes(id)) gates.push(`__dk_gate ${STANDALONE_GATES[id].join(' ')}`);
   }
+  gates.push(DK_DET_VERDICT_LINES);
+  for (const id of AI_GUARD_IDS) {
+    if (selection.guards?.includes(id))
+      gates.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
+  }
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
-  const scoped = pkgRel ? `( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1` : inner;
+  const scoped = pkgRel
+    ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
+    : inner;
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
