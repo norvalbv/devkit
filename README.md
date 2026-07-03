@@ -88,6 +88,7 @@ drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/con
 | `guard-review`        | in-chain reviewer gate — headless domain judges over the staged diff (sonnet → opus on FAIL), diff-keyed PASS cache |
 | `guard-structure`     | folder-structure lint via devkit's own eslint + plugin (config-driven stacks) |
 | `guard-prefix`        | deterministic-prefix pass cache for `devkit ship` retries (`check`/`record`/`clear` — an identical staged tree skips the deterministic gates) |
+| `guard-deterministic` | orchestrates the deterministic set in one gate (prefix check → size/fanout/dup/clone → aggregate → record) — one exit code, one report, replacing the per-guard hook protocol |
 
 ## Onboarding — `devkit init`
 
