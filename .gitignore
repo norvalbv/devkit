@@ -4,6 +4,12 @@ node_modules
 # devkit's own gate artifacts (regenerated; not source)
 .fallow/
 .search-code/
+# ship/gate caches under .devkit/ (regenerated, per-branch/-tree keyed; tracked manifests stay tracked)
+.devkit/prefix-cache.json
+.devkit/decisions-verdict-cache.json
+.devkit/review-cache.json
+.devkit/last-ship-gates-*.log
+.devkit/reconcile-manifest.json
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
 # decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
