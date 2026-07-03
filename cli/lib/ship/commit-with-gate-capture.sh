@@ -32,15 +32,22 @@
 commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
   local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
+  local progress="$root/.devkit/review-progress-${br//\//-}.json"
+  # The progress READER lives beside gate-engine — resolve it relative to THIS script so it works in
+  # every install mode (package node_modules, standalone, devkit's own repo) with no bunx/registry hit.
+  local progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mjs"
   mkdir -p "$root/.devkit"
+  rm -f "$progress"   # a stale file from a prior attempt must not mislead this run's timeout banner
 
   # Ship-mode gate contract, inherited by the hook chain through git → husky → node:
-  #   DEVKIT_SHIP=1      arms the deterministic-prefix cache (guard-prefix check/record) — only a
-  #                      ship worktree guarantees working tree ≡ index, the key's soundness bound.
-  #   GUARD_AI_STRICT=1  AI judges retry once then FAIL CLOSED (exit 3) instead of skipping —
-  #                      a ship never silently drops the checks it exists to run. Ad-hoc commits
-  #                      outside ship keep their fail-open default.
-  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1
+  #   DEVKIT_SHIP=1           arms the deterministic-prefix cache (guard-prefix check/record) — only a
+  #                           ship worktree guarantees working tree ≡ index, the key's soundness bound.
+  #   GUARD_AI_STRICT=1       AI judges retry once then FAIL CLOSED (exit 3) instead of skipping —
+  #                           a ship never silently drops the checks it exists to run. Ad-hoc commits
+  #                           outside ship keep their fail-open default.
+  #   DEVKIT_REVIEW_PROGRESS  where guard-review records {running,completed} reviewer names, so a
+  #                           timeout can name the ones left unfinished (structured, not stderr prose).
+  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
 
   # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
   # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
@@ -66,22 +73,19 @@ commit_with_gate_capture() {
   set -e
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    # Attribute the kill: the last stage banner in the log names the phase that was mid-flight;
-    # if that phase was the reviewer gate, name the reviewers that never printed a completion
-    # heartbeat (`guard-review: <name> — PASS|FAIL|INCONCLUSIVE …`).
-    # `|| true` on every substitution: this runs under the caller's `set -euo pipefail`, and a
-    # log with no matching lines must degrade to "unknown stage", never abort the banner.
+    # Attribute the kill: the last stage banner in the log names the phase that was mid-flight; if the
+    # reviewer gate was running, `progress.mjs unfinished` reads the {running,completed} progress JSON
+    # guard-review wrote and names the reviewers a kill interrupted — a structured contract, no more
+    # parsing stderr prose (which drifted whenever a heartbeat's wording changed on either side).
+    # `|| true` on every substitution: this runs under the caller's `set -euo pipefail`, and a missing
+    # log / progress file must degrade silently, never abort the banner.
     local last_stage unfinished
     last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|[Gg]ate\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
     {
       echo "⏱  ship: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
-      if grep -q 'guard-review: running' "$log" 2>/dev/null; then
-        unfinished=$(awk '/guard-review: running/ {gsub(/.*running /,""); gsub(/ \(parallel.*/,""); gsub(/,/,""); split($0,a," "); for (i in a) names[a[i]]=1}
-                          /guard-review: [a-z-]+ — / {gsub(/guard-review: /,""); gsub(/ —.*/,""); delete names[$0]}
-                          END {for (n in names) printf "%s ", n}' "$log" 2>/dev/null || true)
-        if [ -n "$unfinished" ]; then
-          echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
-        fi
+      unfinished=$(node "$progress_reader" unfinished "$progress" 2>/dev/null || true)
+      if [ -n "$unfinished" ]; then
+        echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
       fi
       echo "   This is usually BUDGET, not a hang — completed reviewer verdicts, cleared decisions"
       echo "   judgements and the deterministic prefix are all CACHED."

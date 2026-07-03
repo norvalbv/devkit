@@ -8,6 +8,7 @@ node_modules
 .devkit/prefix-cache.json
 .devkit/decisions-verdict-cache.json
 .devkit/review-cache.json
+.devkit/review-progress-*.json
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
