@@ -7,7 +7,7 @@
  * Only runs on frontend files (src/renderer/, src/preload/).
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -63,8 +63,9 @@ function frontendRoots() {
 
 function getStagedFiles() {
   try {
-    const output = execSync(
-      `git diff --cached --name-only --diff-filter=ACM -- ${frontendRoots().join(' ')}`,
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...frontendRoots()],
       { encoding: 'utf-8' },
     );
     return output
@@ -78,7 +79,7 @@ function getStagedFiles() {
 
 function getFileDiff(file) {
   try {
-    return execSync(`git diff --cached -- "${file}"`, { encoding: 'utf-8' });
+    return execFileSync('git', ['diff', '--cached', '--', file], { encoding: 'utf-8' });
   } catch {
     return '';
   }
@@ -258,6 +259,7 @@ function checkItem(name, pass, failReason) {
     process.exit(1);
   }
   item.status = pass ? 'pass' : 'fail';
+  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
   if (!pass && failReason) item.issues.push(failReason);
   saveChecklist(data);
   log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);

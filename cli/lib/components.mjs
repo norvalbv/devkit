@@ -8,8 +8,15 @@
  * (--yes / non-TTY), and the guard sub-gate set (the husky `# devkit-guards` lines).
  */
 
-/** The five gate-engine sub-gates that live inside the husky `# devkit-guards` block. */
-export const GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'decisions'];
+/** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
+export const RECOMMENDED_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'decisions'];
+
+/**
+ * Every selectable sub-gate inside the husky `# devkit-guards` block. `review` (the in-chain
+ * headless reviewer judges) is selectable but OFF by default — it spends real model budget on
+ * every commit, so a consumer opts in with `--guards …,review` or the wizard.
+ */
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
 
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
@@ -74,6 +81,7 @@ export const GUARD_OPTIONS = [
   { id: 'dup', label: 'dup', hint: 'semantic duplication (search-code)' },
   { id: 'clone', label: 'clone', hint: 'verbatim copy-paste (jscpd)' },
   { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
+  { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
 ];
 
 /**
@@ -99,7 +107,7 @@ export function defaultSelection() {
     fallow: false,
     searchCode: false,
     agentTargets: [...AGENT_TARGETS],
-    guards: [...GUARD_IDS],
+    guards: [...RECOMMENDED_GUARD_IDS],
   };
 }
 

@@ -52,6 +52,17 @@ devkit command.
   and returns the exact `devkit ship …` to run — run that.
 - **On a shared checkout, never move HEAD** (`switch`/`checkout`/`pull`/`reset`). Use `ship` to commit
   and `reconcile` to refresh.
+- **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
+  gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
+  the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
+  lines (`guard-review: <name> — PASS … (checkpointed)`).
+- **A timed-out ship (exit 124) is NOT stuck at zero — re-run the SAME command.** Reviewer PASSes
+  checkpoint as they land, cleared decisions judgements and the deterministic gate prefix are cached,
+  so a re-run only pays for the unfinished work; the timeout banner names the stage that was mid-flight.
+  Do not respond to a 124 by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) — that defeats the ship.
+- **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
+  SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can
+  be silently stripped by command-rewriting shell hooks — verify with `env | grep SHIP` if in doubt.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 

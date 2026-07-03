@@ -22,7 +22,7 @@ Dispatch the `commit-guard` agent before committing. It runs semantic search que
 
 | Script | Purpose |
 |--------|---------|
-| `checklist.mjs` | Session tracking — `init`, `status`, `check-file`, `finalize`, `cleanup` |
+| `checklist.mjs` | Per-file review checklist — `init`, `status`, `check-file`, `finalize` (refuses an incomplete/failed checklist), `cleanup` |
 | `co-occurrence.mjs` | Allowlist CRUD — `add`/`remove`/`check`/`prune`/`list` (pairs) + `add-clone`/`remove-clone`/`check-clone`/`baseline-clones` (clones). **See `dup-detection` skill.** |
 
 ## Two detectors, one allowlist (overview)

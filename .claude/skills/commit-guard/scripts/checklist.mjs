@@ -10,11 +10,11 @@
  *   init                  Create checklist from staged files
  *   status                Show progress summary
  *   check-file <path>     Mark file as reviewed (--pass or --fail "reason")
- *   finalize              Check all done, run approve if passed
+ *   finalize              Verify every item was resolved; refuses if any are pending or failed
  *   cleanup               Remove checklist file
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -133,6 +133,7 @@ function checkFile(path, pass, failReason) {
   }
 
   file.status = pass ? 'pass' : 'fail';
+  if (pass) file.issues = []; // a recovery pass clears the stale failure trail
   if (!pass && failReason) {
     file.issues.push(failReason);
   }
@@ -140,7 +141,7 @@ function checkFile(path, pass, failReason) {
   log(`✓ ${path}: ${file.status}${failReason ? ` (${failReason})` : ''}`);
 }
 
-// Reason: flat CLI handler for the commit-guard finalize command: sequential early-exit guards (no checklist, pending files, failed files/issues) then a try/catch around the approve script, near-zero nesting; high branch COUNT, each trivial; vendored commit-guard skill script whose review flow owns the complexity, not devkit's core gate
+// Reason: flat CLI handler for the commit-guard finalize command: sequential early-exit guards (no checklist, pending files, failed files/issues), near-zero nesting; high branch COUNT, each trivial; vendored commit-guard skill script whose review flow owns the complexity, not devkit's core gate
 // fallow-ignore-next-line complexity
 function finalize() {
   const data = loadChecklist();
@@ -167,18 +168,6 @@ function finalize() {
   }
 
   log('✅ All checks passed');
-  writeFileSync('.claude/.commit-guard-passed', '');
-  log('📝 Created .claude/.commit-guard-passed marker');
-  try {
-    execSync('./.claude/skills/commit-guard/scripts/approve.sh', { stdio: 'inherit' });
-  } catch {
-    // approve.sh exits non-zero when OTHER reviewers are still pending — propagate it (don't swallow)
-    // so the commit isn't waved through. The commit-guard marker above stays (commit-guard itself passed).
-    log(
-      '❌ approve.sh reported missing reviewer approvals — run the listed reviewers, then retry.',
-    );
-    process.exit(1);
-  }
 }
 
 function cleanup() {
@@ -223,7 +212,7 @@ switch (cmd) {
     log('  init                         Create checklist from staged files');
     log('  status                       Show progress');
     log('  check-file <path> --pass|--fail  Mark file reviewed');
-    log('  finalize                     Verify & approve');
+    log('  finalize                     Verify every item was resolved');
     log('  cleanup                      Remove checklist');
     process.exit(1);
 }

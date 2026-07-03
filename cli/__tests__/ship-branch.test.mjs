@@ -455,9 +455,83 @@ describe('ship-branch.sh — worktree integration', () => {
       // The make-or-break: the group-kill closes the pipe so `tee` returns near the 2s timeout. The broken
       // `--foreground` form would leave the `sleep 30 &` holding the pipe → ~30s hang (elapsed ≥ 15s).
       expect(elapsed).toBeLessThan(15_000);
-      expect(r.stderr).toMatch(/gate chain timed out after 2s/); // the rc==124 branch, not any failure
+      expect(r.stderr).toMatch(/gate chain hit the 2s ceiling \(exit 12[47]\)/); // the rc==124/137 branch
+      expect(r.stderr).toMatch(/Re-run the same devkit ship command to converge/); // resume hint
+      expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
     },
   );
+
+  it.runIf(hasTimeoutBin)(
+    'a timeout DURING the reviewer gate names the stage and the reviewers with no heartbeat',
+    () => {
+      const hookBody = [
+        'echo "🔍 Reviewer gate (headless domain judges)..."',
+        'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
+        'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
+        // a mid-retry line uses a COLON, not " — ": it must NOT count as a completion
+        'echo "guard-review: commit-guard: judge run failed, retrying once…"',
+        'sleep 30',
+      ].join('\n');
+      const { dir, env, git } = seedShipRepo({ hookBody });
+      writeFileSync(join(dir, 'note.txt'), 'hi\n');
+      const r = spawnSync('/bin/bash', [scriptPath, 'feat/review-attrib', 't', 'note.txt'], {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        timeout: 18_000,
+        env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2' },
+      });
+      dropWorktree(git, r.stderr);
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toMatch(/DURING: .*Reviewer gate/); // last stage banner, not the last line
+      expect(r.stderr).toMatch(/unfinished.*commit-guard/); // the one with no completion heartbeat
+      expect(r.stderr).not.toMatch(/unfinished.*api-security-reviewer/); // checkpointed → not named
+    },
+  );
+
+  it.runIf(hasTimeoutBin)(
+    'attribution survives LC_ALL=C (emoji banner grep + em-dash awk under the C locale)',
+    () => {
+      // Hooks often run with a minimal C locale (GUI git clients, CI): the banner grep carries
+      // emoji alternations and the awk completion pattern carries an em-dash — both multibyte.
+      const hookBody = [
+        'echo "🔍 Reviewer gate (headless domain judges)..."',
+        'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
+        'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
+        'sleep 30',
+      ].join('\n');
+      const { dir, env, git } = seedShipRepo({ hookBody });
+      writeFileSync(join(dir, 'note.txt'), 'hi\n');
+      const r = spawnSync('/bin/bash', [scriptPath, 'feat/c-locale', 't', 'note.txt'], {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        timeout: 18_000,
+        env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2', LC_ALL: 'C', LANG: 'C' },
+      });
+      dropWorktree(git, r.stderr);
+      expect(r.status, r.stderr).not.toBe(0);
+      expect(r.stderr).toMatch(/DURING: .*Reviewer gate/);
+      expect(r.stderr).toMatch(/unfinished.*commit-guard/);
+    },
+  );
+
+  it('the worktree commit runs with ship-mode gate env (DEVKIT_SHIP + GUARD_AI_STRICT)', () => {
+    const { dir, env, git } = seedShipRepo({
+      hookBody: 'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT"',
+    });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ship-env', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-ship-env.log'), 'utf8');
+    expect(log).toMatch(/HOOK_ENV ship=1 strict=1/);
+  });
 
   it('--body sets the commit/PR body inline (no stdin / temp file)', () => {
     const { dir, env, git } = seedShipRepo();

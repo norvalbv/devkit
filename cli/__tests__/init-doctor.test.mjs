@@ -93,7 +93,7 @@ describe('init --stack react-app (structure ungated)', () => {
     });
     devkit(root, 'init', '--stack', 'react-app', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toMatch(/\nbunx guard-structure/); // config-driven stack → devkit's guard-structure bin
+    expect(hook).toMatch(/\n\s*bunx guard-structure/); // config-driven stack → devkit's guard-structure bin
   });
 });
 
@@ -120,7 +120,7 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies['@norvalbv/devkit']).toBeDefined();
     expect(pkg.scripts['lint:structure']).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx guard-structure || exit 1');
+    expect(hook).toContain('bunx guard-structure || rc=$?'); // trichotomy form — exit 2 stays fail-open
     expect(hook).not.toContain('bunx eslint src');
   });
 
@@ -136,7 +136,7 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx eslint src || exit 1');
+    expect(hook).toContain('bunx eslint src || DK_DET_FAILS');
     expect(hook).not.toContain('guard-structure');
   });
 });
@@ -270,7 +270,7 @@ describe('doctor — selection-aware', () => {
     const hookPath = join(root, '.husky/pre-commit');
     writeFileSync(
       hookPath,
-      readFileSync(hookPath, 'utf8').replace('bunx guard-structure || exit 1', ''),
+      readFileSync(hookPath, 'utf8').replace('bunx guard-structure || rc=$?', ''),
     );
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(1);

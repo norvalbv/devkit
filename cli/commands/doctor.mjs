@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { RECOMMENDED_GUARD_IDS } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mjs';
 import { markEnd, markStart } from '../lib/husky/husky.mjs';
@@ -64,6 +65,18 @@ function checkHusky(cwd, selectedGuards) {
       true,
     );
   }
+  // Pre-convergence block shape: guards present but no DK_DET_FAILS aggregation / prefix-cache
+  // wiring — gates still fail fast one at a time and a `devkit ship` retry re-pays the whole
+  // deterministic prefix (the ship timeout banner would then over-promise "the prefix is cached").
+  if (!block.includes('DK_DET_FAILS')) {
+    return check(
+      '.husky/pre-commit',
+      'DRIFT',
+      'block predates convergent gates (no aggregation/prefix-cache wiring)',
+      'run `devkit upgrade` (or `devkit init --force`) to regenerate the block',
+      true,
+    );
+  }
   return check(
     '.husky/pre-commit',
     'OK',
@@ -86,8 +99,9 @@ function checkStructureLint(cwd, stack) {
   }
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
   // `guard-structure` only ever appears as a live line (no commented placeholder for it); electron's
-  // live line is disambiguated from the `# bunx eslint src` comment by the `|| exit 1` suffix.
-  const expected = stack === 'electron' ? 'eslint src || exit 1' : 'guard-structure';
+  // live line is disambiguated from the `# bunx eslint src` comment by the accumulator suffix
+  // (the enabled line joins the deterministic aggregation region — see enableStructureLint).
+  const expected = stack === 'electron' ? 'eslint src || DK_DET_FAILS' : 'guard-structure';
   if (!block.includes(expected)) {
     return check(
       'structure-lint',
@@ -479,7 +493,7 @@ const DEFAULT_DOCTOR_SEL = {
   skills: true,
   husky: true,
   structure: false,
-  guards: ['size', 'fanout', 'dup', 'clone', 'decisions'],
+  guards: [...RECOMMENDED_GUARD_IDS],
 };
 
 // Overlay (local-only) doctor: the local hook + core.hooksPath (husky re-claims it on install) gate

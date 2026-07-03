@@ -42,7 +42,8 @@ devkit command.
 | You must **relocate or rename source files** and imports must follow | `devkit move <src...> <dest-dir>` | `git mv` leaves every `import`/`vi.mock`/dynamic-import pointing at the old path; `move` rewrites them all in the repo's alias style |
 | Your PR **merged** and a **shared checkout** still has the old shipped files | `devkit reconcile` (preview) then `devkit reconcile --apply` | `git pull`/`git restore` on a shared tree moves HEAD and clobbers concurrent edits; `reconcile` confirms each PR merged and restores only still-pristine files without moving HEAD |
 | **Uninstall** devkit from this repo | `devkit clean` | deleting `.devkit/` + configs by hand leaves the husky block + git-ignore entries behind; `clean` reverses init for the recorded mode |
-| devkit **itself is out of date** | `devkit update` then `devkit migrate --apply` | re-pinning the dep by hand skips the config reconciliation `migrate` performs |
+| A consumer is **behind across the board** (stale pin, drifted skills/agents/hooks, un-reconciled configs) and you want **one command** | `devkit upgrade` (add `--dry-run` to preview, `--force` to adopt consumer-authored asset collisions) | it composes the slices idempotently from `.devkit/config.json` (re-pin + `migrate` + sync skills/agents/hooks + refresh husky/guards for the *recorded* selection) and ends with `doctor`; chaining `update`+`migrate`+`sync-*`+`init` by hand is error-prone and re-adds deselected surfaces |
+| devkit **itself is out of date** (just the package) | `devkit update` then `devkit migrate --apply`, or `devkit upgrade` for the full reconcile | re-pinning the dep by hand skips the config reconciliation `migrate` performs; `upgrade` does both plus the agent-surface + hook refresh |
 | You're unsure of a command's **flags/behavior** | `devkit help <command>` | don't guess flags — this table routes; `help` is the source of truth |
 
 ## Rules
@@ -51,6 +52,17 @@ devkit command.
   and returns the exact `devkit ship …` to run — run that.
 - **On a shared checkout, never move HEAD** (`switch`/`checkout`/`pull`/`reset`). Use `ship` to commit
   and `reconcile` to refresh.
+- **Run `devkit ship` in the BACKGROUND** (`run_in_background`), never as a foreground tool call: the
+  gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
+  the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
+  lines (`guard-review: <name> — PASS … (checkpointed)`).
+- **A timed-out ship (exit 124) is NOT stuck at zero — re-run the SAME command.** Reviewer PASSes
+  checkpoint as they land, cleared decisions judgements and the deterministic gate prefix are cached,
+  so a re-run only pays for the unfinished work; the timeout banner names the stage that was mid-flight.
+  Do not respond to a 124 by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) — that defeats the ship.
+- **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
+  SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can
+  be silently stripped by command-rewriting shell hooks — verify with `env | grep SHIP` if in doubt.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 

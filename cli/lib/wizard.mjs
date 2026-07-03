@@ -10,7 +10,7 @@
  */
 
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, GUARD_IDS, GUARD_OPTIONS } from './components.mjs';
+import { AGENT_TARGETS, COMPONENTS, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS } from './components.mjs';
 
 // The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
@@ -189,7 +189,7 @@ export async function runWizard({
     const guards = await multiselect({
       message: 'Select gate guards',
       options: GUARD_OPTIONS.map((g) => ({ value: g.id, label: g.label, hint: g.hint })),
-      initialValues: [...GUARD_IDS],
+      initialValues: [...RECOMMENDED_GUARD_IDS],
       required: false,
     });
     if (bail(guards)) return null;

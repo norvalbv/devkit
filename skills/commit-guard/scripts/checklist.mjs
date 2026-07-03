@@ -133,6 +133,7 @@ function checkFile(path, pass, failReason) {
   }
 
   file.status = pass ? 'pass' : 'fail';
+  if (pass) file.issues = []; // a recovery pass clears the stale failure trail
   if (!pass && failReason) {
     file.issues.push(failReason);
   }

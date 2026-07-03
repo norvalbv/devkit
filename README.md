@@ -71,7 +71,7 @@ commit to the stable bare name and the package decides what backs it.
 
 ## gate-engine — portable governance gates
 
-Seven bins, run from your repo root (e.g. in a pre-commit hook), each scanning the **consumer's**
+Ten bins, run from your repo root (e.g. in a pre-commit hook), each scanning the **consumer's**
 cwd. They read **one** config — `guard.config.json` at the repo root (copy `guard.config.example.json`,
 drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/config`
 (`resolveGuardConfig`) is the single source of defaults + `GUARD_*` env overrides.
@@ -85,6 +85,9 @@ drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/con
 | `guard-size`          | size-disable ratchet (`eslint-disable max-lines` may only shrink) |
 | `guard-fallow-staged` | re-scopes a `fallow audit` JSON to the staged-diff overlap |
 | `guard-sentry`        | commit-msg advisory judge — flags a swallowed runtime error-class worth a Sentry capture |
+| `guard-review`        | in-chain reviewer gate — headless domain judges over the staged diff (sonnet → opus on FAIL), diff-keyed PASS cache |
+| `guard-structure`     | folder-structure lint via devkit's own eslint + plugin (config-driven stacks) |
+| `guard-prefix`        | deterministic-prefix pass cache for `devkit ship` retries (`check`/`record`/`clear` — an identical staged tree skips the deterministic gates) |
 
 ## Onboarding — `devkit init`
 

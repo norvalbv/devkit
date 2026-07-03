@@ -47,6 +47,7 @@
             "decisions",
             "fallow",
             "judge",
+            "prefix-cache",
             "ratchets",
             "review",
             "search-tool",

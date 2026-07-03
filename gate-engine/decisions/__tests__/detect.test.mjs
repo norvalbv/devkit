@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -469,7 +469,7 @@ describe('--gate (integration, real git repo)', () => {
       chmodSync(fake, 0o755);
       return bin;
     };
-    const gateStubbed = (script) =>
+    const gateStubbed = (script, extraEnv = {}) =>
       spawnSync('node', [DETECT, '--gate'], {
         cwd: repo,
         encoding: 'utf8',
@@ -480,6 +480,7 @@ describe('--gate (integration, real git repo)', () => {
           GUARD_DECISION_NO_LLM: '',
           FRINK_DECISION_NO_LLM: '',
           PATH: `${stubClaude(script)}:${process.env.PATH}`,
+          ...extraEnv,
         },
       });
     const stageDepChange = () => {
@@ -500,12 +501,60 @@ describe('--gate (integration, real git repo)', () => {
       expect(argv).toContain('--no-session-persistence'); // no transcript pollution
     });
 
+    it('a judge OUTAGE is never cached: the next run re-judges instead of serving a bogus ROUTINE', () => {
+      stageDepChange();
+      expect(gateStubbed('exit 3\n').status).toBe(1); // outage → block stands, nothing earned
+      const calls = () => execSync('cat calls.log', { cwd: repo, encoding: 'utf8' }).trim();
+      const afterOutage = calls();
+      const r2 = gateStubbed('echo ROUTINE\n');
+      expect(r2.status).toBe(0);
+      expect(calls()).not.toBe(afterOutage); // second run SPAWNED — no cache entry from the outage
+    });
+
+    it('a package.json under a $(…)-named dir never reaches a shell (argv `git show` regression)', () => {
+      // Both git-show routes carry the crafted path: HEAD:<path> (base) and :<path> (staged).
+      const dir = join(repo, 'evil$(touch INJECTED)');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'package.json'), '{\n  "name": "x",\n  "dependencies": {}\n}\n');
+      git('add .');
+      git('commit -qm crafted-base');
+      writeFileSync(
+        join(dir, 'package.json'),
+        '{\n  "name": "x",\n  "dependencies": { "b": "2.0.0" }\n}\n',
+      );
+      git('add .');
+      const r = gateStubbed('echo DECISION\n'); // judge refuses to downgrade → block
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('dep-change'); // the crafted path was PARSED, not dropped
+      expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
+      expect(existsSync(join(dir, 'INJECTED'))).toBe(false);
+    });
+
+    it('an earned ROUTINE is cached: an identical re-run clears with ZERO judge spawns', () => {
+      stageDepChange();
+      expect(gateStubbed('echo ROUTINE\n').status).toBe(0);
+      const calls = () => execSync('cat calls.log', { cwd: repo, encoding: 'utf8' }).trim();
+      const afterFirst = calls();
+      const r2 = gateStubbed('echo ROUTINE\n');
+      expect(r2.status).toBe(0);
+      expect(r2.stderr).toContain('cached ROUTINE');
+      expect(calls()).toBe(afterFirst); // no second spawn
+    });
+
     it('a crashing judge warns on stderr, block stands (1), stdout stays clean', () => {
       stageDepChange();
       const r = gateStubbed('exit 3\n');
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('decision-smell: claude judge unavailable');
+      expect(r.stderr).toContain('UNVERIFIED'); // outage never reads as a judge-confirmed smell
       expect(r.stdout).toBe('');
+    });
+
+    it('a crashing judge under GUARD_AI_STRICT (ship) exits 3, never a confirmed-smell 1', () => {
+      stageDepChange();
+      const r = gateStubbed('exit 3\n', { GUARD_AI_STRICT: '1' });
+      expect(r.status).toBe(3);
+      expect(r.stderr).toContain('decision smells (unverified)');
     });
 
     it('an empty-output judge warns on stderr, block stands (1)', () => {
