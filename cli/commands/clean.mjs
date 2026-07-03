@@ -17,6 +17,7 @@ import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { isTracked } from '../lib/git-tracked.mjs';
 import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
+import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
 import { removeSearchCode } from '../lib/install/install-search-code.mjs';
 import { removeHealAlias } from '../lib/overlay.mjs';
@@ -263,6 +264,9 @@ function cleanPackage(cwd, cfg, dryRun) {
     removeSearchCode(cwd, dryRun);
     pruneGitignoreLine(gitRoot, '.search-code/', dryRun);
   }
+  // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install
+  // (the gate engine writes them regardless of components), so reverse them unconditionally.
+  pruneDevkitCacheGitignore(cwd, dryRun);
   rm(join(cwd, '.devkit'), '.devkit/', dryRun);
   depesc(cwd, dryRun);
   console.log(

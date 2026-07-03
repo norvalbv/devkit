@@ -50,6 +50,7 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mjs';
+import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
 import {
   ensureFallowGitignore,
   installFallow,
@@ -1128,6 +1129,10 @@ export async function applyInit(cwd, plan) {
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
     console.log('  ✓ wrote .devkit/config.json');
   }
+
+  // Keep the gate engine's regenerated .devkit/ caches out of git (package/standalone; overlay
+  // already hides all of .devkit/ via .git/info/exclude). Specific files only — manifests stay tracked.
+  ensureDevkitCacheGitignore(cwd, dryRun);
 
   printReferencedSteps();
   console.log(
