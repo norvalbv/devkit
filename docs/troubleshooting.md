@@ -47,3 +47,33 @@ Don't hand-roll a branch (that moves a shared checkout's HEAD). Use `devkit ship
 Don't `git pull` / `git restore` by hand on a shared tree. Run `devkit reconcile` (dry-run) then
 `devkit reconcile --apply` — it confirms each PR is merged, restores only still-pristine files, and never
 moves the shared HEAD or clobbers a concurrent edit.
+
+## `devkit ship` stopped at `⏱ ship: gate chain hit the …s ceiling (exit 124)`
+This is **budget, not a hang** — the banner says so. The gate chain has a **hang ceiling**
+(`SHIP_COMMIT_TIMEOUT`, default 1800s); hitting it usually means the first attempt ran out of budget, not
+that a gate wedged. Everything earned is cached — completed reviewer verdicts (**checkpointed verdicts**),
+cleared decisions judgements, and the all-green **deterministic-prefix cache**. **Re-run the same
+`devkit ship` command**: only unfinished work re-runs, so the retry converges. The banner names the stage
+it was mid-flight in and any reviewers missing a completion heartbeat. For more room per attempt, see
+`SHIP_COMMIT_TIMEOUT` below.
+
+## A `.devkit/` ship cache looks stale (gates pass when they shouldn't)
+The **deterministic-prefix cache** and **checkpointed verdicts** live under `.devkit/`, keyed on the
+staged-tree hash and evidence bytes. They can go stale against **gitignored** inputs a gate reads but the
+key can't see (e.g. the search-code index behind `guard-dup`). Escape hatches — both only discard cached
+*passes*, never hide a failure:
+- `guard-prefix clear` — drop the cached all-green deterministic prefix (forces a full deterministic re-run).
+- `guard-review clear-cache` — drop cached reviewer PASS verdicts (forces the reviewers to re-run).
+
+## `✗ deterministic gates failed: <names>`
+The deterministic gates (structure, fanout, size, dup, clone …) run all-and-**aggregate**: instead of
+failing fast on the first, they collect every failure into one report naming each (`guard-<id>`). Fix each
+named gate (see **A pre-commit gate blocked my commit** above) and re-commit — the **deterministic-prefix
+cache** means the gates that already passed won't re-run. AI gates are the exception: they stay fail-fast,
+one finding at a time, by design.
+
+## I set `SHIP_COMMIT_TIMEOUT` but the ship still uses the default
+It must be **exported**, not passed inline: `export SHIP_COMMIT_TIMEOUT=2400 && devkit ship …`, not
+`SHIP_COMMIT_TIMEOUT=2400 devkit ship …`. An inline env prefix can be stripped by a command-rewriting
+shell hook (a proxy that rewrites your git/devkit commands) before the gate chain reads it, so the default
+silently wins. Export it in the shell the ship runs in.
