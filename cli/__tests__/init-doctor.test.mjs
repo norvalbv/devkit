@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mjs';
+import { enableStructureLint } from '../commands/init.mjs';
 import { readConfig as config, tmpRepos } from './_helpers.mjs';
 
 // --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
@@ -94,6 +95,45 @@ describe('init --stack react-app (structure ungated)', () => {
     devkit(root, 'init', '--stack', 'react-app', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     expect(hook).toMatch(/\n\s*bunx guard-structure/); // config-driven stack → devkit's guard-structure bin
+  });
+});
+
+describe('enableStructureLint — pre-convergence hook migration (upgrade edge)', () => {
+  it('migrates a legacy `|| exit 1` structure line to the DK_DET_FAILS aggregation form', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes'); // commented placeholder, structure OFF
+    const hookPath = join(root, '.husky/pre-commit');
+    // Simulate a pre-convergence hook: the placeholder was flipped to the OLD fail-fast live line
+    // (outside the DK_DET_FAILS aggregation), which a later enable used to no-op on ("no placeholder").
+    const legacy = readFileSync(hookPath, 'utf8').replace(
+      /# bunx eslint src[^\n]*/,
+      'bunx eslint src || exit 1',
+    );
+    expect(legacy).toContain('bunx eslint src || exit 1'); // setup sanity
+    writeFileSync(hookPath, legacy);
+
+    enableStructureLint(root, '', false, 'bunx eslint src');
+    const after = readFileSync(hookPath, 'utf8');
+    expect(after).toContain('bunx eslint src || DK_DET_FAILS'); // migrated to the aggregation form
+    expect(after).not.toContain('|| exit 1'); // the fail-fast line is gone, not left orphaned
+    expect(after).toContain('DK_PREFIX_SKIP'); // now skip-aware like its neighbours (prefix-cache guard)
+  });
+
+  it('is idempotent: a hook already in the aggregation form is recognised and left untouched', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    const hookPath = join(root, '.husky/pre-commit');
+    writeFileSync(
+      hookPath,
+      readFileSync(hookPath, 'utf8').replace(
+        /# bunx eslint src[^\n]*/,
+        'bunx eslint src || exit 1',
+      ),
+    );
+    enableStructureLint(root, '', false, 'bunx eslint src'); // migrate once
+    const once = readFileSync(hookPath, 'utf8');
+    enableStructureLint(root, '', false, 'bunx eslint src'); // second enable must change nothing
+    expect(readFileSync(hookPath, 'utf8')).toBe(once);
   });
 });
 

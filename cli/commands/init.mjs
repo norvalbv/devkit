@@ -614,16 +614,31 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
     console.log('  ! no devkit-guards block to enable structure-lint in');
     return;
   }
-  if (block.includes(`\n    ${liveCmd} `) || block.includes(`\n    ${liveCmd}\n`)) {
+  // "Already enabled" = the NEW aggregation form is present. Match its exact marker, NOT a bare
+  // `${liveCmd}` substring — that also appears inside a legacy `${liveCmd} || exit 1` line, which is a
+  // DIFFERENT (fail-fast, un-aggregated) shape we must MIGRATE, not skip as already done.
+  const enabledMarker = GUARD_STRUCTURE_RE.test(liveCmd)
+    ? `${liveCmd} || rc=$?`
+    : `${liveCmd} || DK_DET_FAILS`;
+  if (block.includes(enabledMarker)) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
   }
-  if (!COMMENTED_LINT_RE.test(block)) {
-    console.log('  ! could not find the commented structure-lint placeholder to enable');
+  // What we replace: the commented placeholder (fresh init) OR a legacy fail-fast live line left by a
+  // PRE-CONVERGENCE hook (the upgrade edge). The legacy line sits OUTSIDE the DK_DET_FAILS aggregation
+  // and would exit on the first violation + ignore the prefix-cache skip — so it is MIGRATED, not left.
+  const legacy = ['\nbunx guard-structure || exit 1\n', '\nbunx eslint src || exit 1\n'].find((l) =>
+    block.includes(l),
+  );
+  const target = COMMENTED_LINT_RE.test(block) ? COMMENTED_LINT_RE : legacy;
+  if (!target) {
+    console.log('  ! no structure-lint placeholder or legacy line to enable in .husky/pre-commit');
     return;
   }
+  const migrating = typeof target === 'string'; // a legacy `|| exit 1` line, not the commented placeholder
   if (dryRun) {
-    console.log(`  [dry-run] uncomment \`${liveCmd}\` in .husky/pre-commit`);
+    const verb = migrating ? 'migrate the legacy structure-lint line to' : 'uncomment';
+    console.log(`  [dry-run] ${verb} \`${liveCmd}\` in .husky/pre-commit`);
     return;
   }
   // The live line joins the deterministic region: skipped on a prefix-cache hit, and a
@@ -634,9 +649,11 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
   const structureLive = GUARD_STRUCTURE_RE.test(liveCmd)
     ? `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    rc=0\n    ${liveCmd} || rc=$?\n    if [ "$rc" -eq 1 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\n    elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint(unexpected:$rc)"\n    fi\nfi\n`
     : `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`;
-  const newBlock = block.replace(COMMENTED_LINT_RE, structureLive);
+  const newBlock = block.replace(target, structureLive);
   writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
-  console.log(`  ✓ enabled structure-lint (\`${liveCmd}\`) in .husky/pre-commit`);
+  console.log(
+    `  ✓ ${migrating ? 'migrated' : 'enabled'} structure-lint (\`${liveCmd}\`) in .husky/pre-commit`,
+  );
 }
 
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
@@ -1277,4 +1294,4 @@ export default async function run(args, cwd) {
   return 0;
 }
 
-export { detectInstalled, parseFlags, selectionFromFlags };
+export { detectInstalled, enableStructureLint, parseFlags, selectionFromFlags };
