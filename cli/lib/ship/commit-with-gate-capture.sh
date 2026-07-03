@@ -44,7 +44,8 @@ commit_with_gate_capture() {
 
   # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
   # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
-  # cascade 2×300 (strict retry) + 420 = 1020s ≈ 1800s total. A retry is FAR cheaper — prefix
+  # cascade 2×300 (strict retry — transient/empty first pass only; a TIMEOUT isn't re-run) + 420 =
+  # 1020s ≈ 1800s total. A retry is FAR cheaper — prefix
   # + earned verdicts are cached and reviewer PASSes checkpoint per-completion — so a kill here
   # converges on re-run rather than restarting. This stays a hang CEILING, not a per-gate budget.
   local secs=${SHIP_COMMIT_TIMEOUT:-1800}
