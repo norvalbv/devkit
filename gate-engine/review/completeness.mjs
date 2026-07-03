@@ -20,7 +20,7 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveGuardConfig } from '../config.mjs';
+import { envFlag, resolveGuardConfig } from '../config.mjs';
 import { scopedTargets } from '../decisions/scoped-targets.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { execJudgeAsync } from '../judge/run-judge.mjs';
@@ -30,13 +30,6 @@ const AGENT_NAME = 'feature-completeness-reviewer';
 const TIMEOUT_MS = 360000;
 const DIFF_CAP = 60000; // stdin evidence cap; the judge reads full hunks itself via git diff
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
-
-function envFlag(name) {
-  const v = process.env[`GUARD_${name}`] ?? process.env[`FRINK_${name}`];
-  if (v === undefined) return false;
-  const t = String(v).trim().toLowerCase();
-  return !(t === '' || t === '0' || t === 'false' || t === 'no');
-}
 
 /** Render the governing-Targets block (the consumer prep-critique shape) or its SKIP note. */
 export function renderTargets(blocks) {

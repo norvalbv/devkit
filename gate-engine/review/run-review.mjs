@@ -28,7 +28,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { resolveGuardConfig } from '../config.mjs';
+import { envFlag, resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { execJudgeAsync } from '../judge/run-judge.mjs';
 import { loadCache, savePasses } from './cache.mjs';
@@ -50,14 +50,6 @@ import {
 // checkpoint per-completion and the caches skip everything already earned.
 const FIRST_TIMEOUT_MS = 300000;
 const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block; never retried (see cascadeVerdict)
-
-// GUARD_* env flag with FRINK_* back-compat alias (check-alignment's envFlag semantics).
-function envFlag(name) {
-  const v = process.env[`GUARD_${name}`] ?? process.env[`FRINK_${name}`];
-  if (v === undefined) return false;
-  const t = String(v).trim().toLowerCase();
-  return !(t === '' || t === '0' || t === 'false' || t === 'no');
-}
 
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
 // JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
