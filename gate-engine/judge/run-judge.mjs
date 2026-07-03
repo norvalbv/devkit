@@ -33,16 +33,28 @@ function warnUnavailable(label, e) {
   );
 }
 
+// execFile's `timeout` fires by KILLING the child (SIGTERM), which marks the error `killed`. That
+// kill — not ENOENT / quota / a non-zero exit — is the one outage a retry can't fix: the re-run would
+// burn the same budget again. Callers that retry use this to skip a timeout. (ETIMEDOUT covers the
+// rare platform that reports a code instead of the signal.)
+function isJudgeTimeout(err) {
+  return err?.killed === true || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT';
+}
+
 /**
  * Run one `claude` judge invocation. Returns raw stdout on success, or `null` (after emitting ONE
  * stderr warning) when the judge could not run — a throw (ENOENT / non-zero exit / timeout) or an
  * empty/whitespace stdout (ran but said nothing). A judge that runs and returns real text — including
  * a clean verdict — returns that text and warns nothing; verdict parsing stays in the caller.
  *
- * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string }} opts
+ * The optional `onOutage(kind)` callback fires on failure with the OUTAGE KIND — 'timeout' (the
+ * execFile timeout killed it), 'transient' (ENOENT / quota / non-zero exit), or 'empty' — so a caller
+ * can retry selectively (a timeout is not worth re-running; a transient/empty flake can be).
+ *
+ * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
  * @returns {string|null}
  */
-export function execJudge({ label, args, input, timeout, cwd }) {
+export function execJudge({ label, args, input, timeout, cwd, onOutage }) {
   try {
     const out = execFileSync('claude', args, {
       cwd,
@@ -53,11 +65,13 @@ export function execJudge({ label, args, input, timeout, cwd }) {
     });
     if (!out || !String(out).trim()) {
       warnNoOutput(label);
+      onOutage?.('empty');
       return null;
     }
     return out;
   } catch (e) {
     warnUnavailable(label, e);
+    onOutage?.(isJudgeTimeout(e) ? 'timeout' : 'transient');
     return null;
   }
 }
@@ -70,10 +84,10 @@ export function execJudge({ label, args, input, timeout, cwd }) {
  * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
  * judge's transcript (tool output included) can exceed the 1 MB default.
  *
- * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string }} opts
+ * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
  * @returns {Promise<string|null>}
  */
-export function execJudgeAsync({ label, args, input, timeout, cwd }) {
+export function execJudgeAsync({ label, args, input, timeout, cwd, onOutage }) {
   return new Promise((resolve) => {
     const child = execFile(
       'claude',
@@ -82,11 +96,13 @@ export function execJudgeAsync({ label, args, input, timeout, cwd }) {
       (err, stdout) => {
         if (err) {
           warnUnavailable(label, err);
+          onOutage?.(isJudgeTimeout(err) ? 'timeout' : 'transient');
           resolve(null);
           return;
         }
         if (!stdout || !String(stdout).trim()) {
           warnNoOutput(label);
+          onOutage?.('empty');
           resolve(null);
           return;
         }
