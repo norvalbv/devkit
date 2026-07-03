@@ -344,6 +344,22 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     expect(out).toContain('re-run devkit ship');
   });
 
+  it('timeout outage is NOT retried (a re-run burns the same budget) — one attempt each, still exit 3', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    // A judge KILLED by its execFile timeout: null result + a 'timeout' outage signal — unlike the
+    // transient/empty flakes above, which DO earn the one retry.
+    const exec = mkExec(async (opts) => {
+      opts.onOutage?.('timeout');
+      return null;
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(3); // one attempt per reviewer — NO retry on a timeout
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).not.toContain('retrying once');
+  });
+
   it('outage-then-success: the retry recovers and the gate passes clean', async () => {
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -45,7 +45,8 @@ import {
 // Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
 // diff investigation. Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this
 // gate alone: deterministic prefix ~240s (≈0 on a guard-prefix hit) + decisions ≤60s (≈0 on a
-// verdict-cache hit) + this cascade's worst case 2×300 (strict retry) + 420 = 1020s. First-ship
+// verdict-cache hit) + this cascade's worst case 2×300 (strict retry on a TRANSIENT/empty first pass
+// only — a TIMEOUT first pass is NOT re-run, capping it at 1×300) + 420 = 1020s. First-ship
 // worst ≈ 1800s = SHIP_COMMIT_TIMEOUT's default; a killed run converges on retry because PASSes
 // checkpoint per-completion and the caches skip everything already earned.
 const FIRST_TIMEOUT_MS = 300000;
@@ -131,21 +132,28 @@ async function cascadeVerdict(
     allowedToolsFor(reviewer, cfg),
   ];
   const stat = gitCached(cwd, ['--stat'], files);
+  let firstOutage;
   const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, firstModel),
     input: stat,
     timeout: FIRST_TIMEOUT_MS,
     cwd,
+    onOutage: (kind) => {
+      firstOutage = kind;
+    },
   };
   let first = await exec(firstOpts);
-  if (first === null && retryFirst) {
-    // Strict (ship) runs get ONE first-pass retry — transient API failures must not fail a ship
-    // closed. The escalation pass is never retried: its outage stays inconclusive (blocked under
-    // strict), and retrying it would push the cascade's worst case past the ship ceiling.
+  if (first === null && retryFirst && firstOutage !== 'timeout') {
+    // Strict (ship) runs get ONE first-pass retry — a TRANSIENT API failure or empty output must not
+    // fail a ship closed. A TIMEOUT is NOT retried: the re-run would burn the same FIRST_TIMEOUT_MS
+    // again and push the cascade past the ship ceiling for no gain (a slow judge stays slow). The
+    // escalation pass is never retried either: its outage stays inconclusive (blocked under strict).
     // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
     // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
-    console.error(`guard-review: ${reviewer.name}: judge run failed, retrying once…`);
+    console.error(
+      `guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`,
+    );
     cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
     first = await exec(firstOpts);
   }
