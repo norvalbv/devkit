@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mjs';
 import { runCompleteness } from '../completeness.mjs';
+import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mjs';
 import { REVIEWERS } from '../reviewers.mjs';
 import { runReviewGate } from '../run-review.mjs';
 
@@ -24,6 +25,7 @@ const ENV_KEYS = [
   'FRINK_NO_LOG',
   'GUARD_DECISION_NO_LLM',
   'FRINK_DECISION_NO_LLM',
+  'DEVKIT_REVIEW_PROGRESS',
 ];
 const saved = {};
 beforeEach(() => {
@@ -415,6 +417,54 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     const exec = mkExec(async () => null);
     expect(await runReviewGate(repo, { exec })).toBe(2);
     expect(exec).toHaveBeenCalledTimes(3); // one attempt each, no retry
+  });
+});
+
+describe('review progress JSON — the ship banner contract (engine → file → reader)', () => {
+  it('writes the running set on start, appends each completion, and clears on clean finish', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pdir = mkdtempSync(join(tmpdir(), 'review-progress-'));
+    dirs.push(pdir);
+    const progressFile = join(pdir, 'p.json');
+    process.env.DEVKIT_REVIEW_PROGRESS = progressFile;
+    // Capture the `running` set the instant the engine wrote it (before any completion), by reading the
+    // file inside the first judge invocation — proving the engine records the names the banner reads.
+    let runningAtStart;
+    const exec = mkExec(async (opts) => {
+      if (!runningAtStart) runningAtStart = readProgress(progressFile)?.running;
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    // `running` = the reviewer names that actually ran (the same names the banner would name)…
+    const ran = new Set(exec.mock.calls.map(([o]) => o.label.replace('review:', '')));
+    expect(new Set(runningAtStart)).toEqual(ran);
+    // …and a clean finish removes the file, so the banner reports nothing unfinished.
+    expect(readProgress(progressFile)).toBeNull();
+    expect(unfinishedReviewers(progressFile)).toEqual([]);
+  });
+
+  it('a partial file → unfinishedReviewers = running − completed (what the banner prints)', () => {
+    const pdir = mkdtempSync(join(tmpdir(), 'review-progress-'));
+    dirs.push(pdir);
+    const progressFile = join(pdir, 'p.json');
+    writeProgress(progressFile, {
+      running: ['api-security-reviewer', 'backend-performance-reviewer', 'commit-guard'],
+      completed: ['api-security-reviewer'],
+    });
+    expect(unfinishedReviewers(progressFile).sort()).toEqual([
+      'backend-performance-reviewer',
+      'commit-guard',
+    ]);
+  });
+
+  it('no DEVKIT_REVIEW_PROGRESS → the gate runs clean without writing progress (non-ship commit)', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    delete process.env.DEVKIT_REVIEW_PROGRESS;
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0); // must not throw for the missing env var
   });
 });
 
