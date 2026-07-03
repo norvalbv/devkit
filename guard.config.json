@@ -45,6 +45,7 @@
           "@root": [
             "co-occurrence",
             "decisions",
+            "deterministic",
             "fallow",
             "judge",
             "prefix-cache",
