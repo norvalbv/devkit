@@ -612,7 +612,7 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
     console.log('  ! no devkit-guards block to enable structure-lint in');
     return;
   }
-  if (block.includes(`\n${liveCmd} `) || block.includes(`\n${liveCmd}\n`)) {
+  if (block.includes(`\n    ${liveCmd} `) || block.includes(`\n    ${liveCmd}\n`)) {
     console.log('  • structure-lint already enabled in .husky/pre-commit');
     return;
   }
@@ -624,9 +624,13 @@ function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint sr
     console.log(`  [dry-run] uncomment \`${liveCmd}\` in .husky/pre-commit`);
     return;
   }
-  // `|| exit 1` so a structure violation BLOCKS the commit — a bare line would let a non-zero
-  // exit pass (no `set -e`). In a package subshell the exit propagates via the `) || exit 1`.
-  const newBlock = block.replace(COMMENTED_LINT_RE, `\n${liveCmd} || exit 1\n`);
+  // The live line joins the deterministic region: skipped on a prefix-cache hit, and a
+  // violation ACCUMULATES into DK_DET_FAILS (reported by devkit:det-verdict) instead of
+  // exiting fail-fast — same contract as the guard fragments around it.
+  const newBlock = block.replace(
+    COMMENTED_LINT_RE,
+    `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`,
+  );
   writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
   console.log(`  ✓ enabled structure-lint (\`${liveCmd}\`) in .husky/pre-commit`);
 }

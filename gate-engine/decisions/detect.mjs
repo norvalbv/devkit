@@ -31,6 +31,7 @@ import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
+import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
 
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 const PKG_RE = /(^|\/)package\.json$/;
@@ -380,7 +381,17 @@ function runGate() {
       entries,
       cfg.boundaries,
     );
-    if (judgeWithClaude(cwd, cfg.noLlm, input) === 'ROUTINE') process.exit(0);
+    // An earned ROUTINE is cached on the exact evidence bytes: an identical re-run (a ship
+    // retry after an unrelated gate/timeout failure) clears without re-spending the judge.
+    const key = verdictKey('detect', input);
+    if (hasVerdict(cwd, key)) {
+      console.error('decision-gate: cached ROUTINE (identical evidence) — cleared');
+      process.exit(0);
+    }
+    if (judgeWithClaude(cwd, cfg.noLlm, input) === 'ROUTINE') {
+      saveVerdict(cwd, key);
+      process.exit(0);
+    }
     console.error(`decision smells: ${smells.join(', ')}`);
     process.exit(1);
   } catch (e) {

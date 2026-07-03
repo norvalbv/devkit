@@ -34,7 +34,20 @@ commit_with_gate_capture() {
   local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
   mkdir -p "$root/.devkit"
 
-  local secs=${SHIP_COMMIT_TIMEOUT:-900}   # a hang CEILING, not a gate budget (coverage isn't gated here)
+  # Ship-mode gate contract, inherited by the hook chain through git → husky → node:
+  #   DEVKIT_SHIP=1      arms the deterministic-prefix cache (guard-prefix check/record) — only a
+  #                      ship worktree guarantees working tree ≡ index, the key's soundness bound.
+  #   GUARD_AI_STRICT=1  AI judges retry once then FAIL CLOSED (exit 3) instead of skipping —
+  #                      a ship never silently drops the checks it exists to run. Ad-hoc commits
+  #                      outside ship keep their fail-open default.
+  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1
+
+  # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
+  # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
+  # cascade 2×300 (strict retry) + 420 = 1020s ≈ 1800s total. A retry is FAR cheaper — prefix
+  # + earned verdicts are cached and reviewer PASSes checkpoint per-completion — so a kill here
+  # converges on re-run rather than restarting. This stays a hang CEILING, not a per-gate budget.
+  local secs=${SHIP_COMMIT_TIMEOUT:-1800}
   local to_bin to=()
   to_bin=$(command -v timeout || command -v gtimeout || true)
   if [ -n "$to_bin" ]; then
@@ -52,7 +65,29 @@ commit_with_gate_capture() {
   set -e
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    echo "ship: gate chain timed out after ${secs}s — likely a hung gate; the ship worktree is being cleaned up." >&2
+    # Attribute the kill: the last stage banner in the log names the phase that was mid-flight;
+    # if that phase was the reviewer gate, name the reviewers that never printed a completion
+    # heartbeat (`guard-review: <name> — PASS|FAIL|INCONCLUSIVE …`).
+    # `|| true` on every substitution: this runs under the caller's `set -euo pipefail`, and a
+    # log with no matching lines must degrade to "unknown stage", never abort the banner.
+    local last_stage unfinished
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|Ratchet|gate\.\.\.' "$log" 2>/dev/null | tail -1 || true)
+    {
+      echo "⏱  ship: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
+      if grep -q 'guard-review: running' "$log" 2>/dev/null; then
+        unfinished=$(awk '/guard-review: running/ {gsub(/.*running /,""); gsub(/ \(parallel.*/,""); gsub(/,/,""); split($0,a," "); for (i in a) names[a[i]]=1}
+                          /guard-review: [a-z-]+ — / {gsub(/guard-review: /,""); gsub(/ —.*/,""); delete names[$0]}
+                          END {for (n in names) printf "%s ", n}' "$log" 2>/dev/null || true)
+        if [ -n "$unfinished" ]; then
+          echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
+        fi
+      fi
+      echo "   This is usually BUDGET, not a hang — completed reviewer verdicts, cleared decisions"
+      echo "   judgements and the deterministic prefix are all CACHED."
+      echo "   Re-run the same devkit ship command to converge (only unfinished work re-runs)."
+      echo "   More room per attempt: export SHIP_COMMIT_TIMEOUT (it must be EXPORTED — inline"
+      echo "   env prefixes can be stripped by command-rewriting shell hooks). Full log: $log"
+    } >&2
   elif [ "$rc" -eq 0 ]; then
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"

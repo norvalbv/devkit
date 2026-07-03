@@ -63,7 +63,7 @@ describe('monorepo: init in a package subdir', () => {
     expect(hook).toContain('# >>> devkit-guards: services/webapp >>>');
     expect(hook).toContain('cd "services/webapp"');
     expect(hook).toContain(') || exit 1');
-    expect(hook).toContain('bunx guard-structure || exit 1'); // config-driven stack → devkit's guard-structure bin (no consumer eslint dep), BLOCKING (|| exit 1)
+    expect(hook).toContain('bunx guard-structure || DK_DET_FAILS'); // config-driven stack → devkit's guard-structure bin (no consumer eslint dep), accumulating into the det-verdict block
 
     // skills are repo-wide → at the git root, not the package
     expect(existsSync(join(root, '.devkit', 'skills-manifest.json'))).toBe(true);

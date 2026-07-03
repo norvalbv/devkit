@@ -10,16 +10,17 @@ description: Performance optimization for backend services and APIs. Use when op
 ```bash
 SCRIPT=".claude/skills/backend-performance/scripts/checklist.mjs"
 
-node $SCRIPT generate     # Create checklist from staged backend files
+node $SCRIPT generate     # Enumerate review items from staged backend files
 node $SCRIPT status       # Show progress
 node $SCRIPT check-item <name> --pass   # Mark item passed
 node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
-node $SCRIPT finalize     # Verify & approve
+node $SCRIPT finalize     # Verify every item was resolved; refuses if any are pending or failed
 node $SCRIPT cleanup      # Remove checklist
 ```
 
-The backend roots the script scans come from `guard.config.json` `review.backendRoots`
-(default `["src"]`) — they are not hardcoded.
+The backend roots the script scans come from `guard.config.json` `review.backendRoots` — not
+hardcoded. When that key is absent it scans all staged files; a present-but-invalid value warns
+and falls back to scanning all.
 
 ## Caching
 

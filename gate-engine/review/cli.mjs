@@ -33,6 +33,9 @@ run(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (e) => {
     console.error(`guard-review: ${e?.message ?? e}`);
-    process.exit(2); // fail-open — an engine crash must never hard-block a commit
+    // Fail-open — an engine crash must never hard-block a commit — EXCEPT on a strict ship
+    // run (GUARD_AI_STRICT), where a dark gate must block rather than silently skip.
+    const strict = String(process.env.GUARD_AI_STRICT ?? process.env.FRINK_AI_STRICT ?? '').trim();
+    process.exit(strict && !['0', 'false', 'no'].includes(strict.toLowerCase()) ? 3 : 2);
   },
 );

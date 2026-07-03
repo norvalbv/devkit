@@ -178,9 +178,12 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
 describe('guard fragments fail CLOSED on unexpected exit codes (#8)', () => {
   it('blocks on exit 1 AND any non-0/2 code; only 0/2 continue', () => {
     const block = buildGuardBlock({ guards: ['size'] });
-    // exit 1 → block; unexpected (not 0/2) → block; 0/2 are the only continue codes.
-    expect(block).toMatch(/\[ "\$src" -eq 1 \]/);
-    expect(block).toMatch(/\[ "\$src" -ne 0 \] && \[ "\$src" -ne 2 \]/);
+    // exit 1 → accumulate; unexpected (not 0/2) → accumulate (named); 0/2 are the only clean
+    // codes. The aggregated det-verdict then blocks once for every accumulated failure.
+    expect(block).toMatch(/\[ "\$rc" -eq 1 \]/);
+    expect(block).toMatch(/\[ "\$rc" -ne 0 \] && \[ "\$rc" -ne 2 \]/);
+    expect(block).toContain(`DK_DET_FAILS="\${DK_DET_FAILS:-} guard-size"`);
+    expect(block).toContain('deterministic gates failed');
   });
 });
 

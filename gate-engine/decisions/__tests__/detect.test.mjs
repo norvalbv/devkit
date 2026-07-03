@@ -500,6 +500,17 @@ describe('--gate (integration, real git repo)', () => {
       expect(argv).toContain('--no-session-persistence'); // no transcript pollution
     });
 
+    it('an earned ROUTINE is cached: an identical re-run clears with ZERO judge spawns', () => {
+      stageDepChange();
+      expect(gateStubbed('echo ROUTINE\n').status).toBe(0);
+      const calls = () => execSync('cat calls.log', { cwd: repo, encoding: 'utf8' }).trim();
+      const afterFirst = calls();
+      const r2 = gateStubbed('echo ROUTINE\n');
+      expect(r2.status).toBe(0);
+      expect(r2.stderr).toContain('cached ROUTINE');
+      expect(calls()).toBe(afterFirst); // no second spawn
+    });
+
     it('a crashing judge warns on stderr, block stands (1), stdout stays clean', () => {
       stageDepChange();
       const r = gateStubbed('exit 3\n');

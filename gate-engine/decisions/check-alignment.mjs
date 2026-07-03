@@ -48,6 +48,7 @@ import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
 import { currentTarget, parseDecision } from './decisions.mjs';
+import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
 
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
 const GLOB_ESC_RE = /[.+^${}()|[\]\\]/g;
@@ -339,7 +340,12 @@ function depthPass(cwd, cfg, changed) {
   // relative (file). Compare both in cwd-relative form so the prefix filter actually matches.
   const decisionsRel = decisionsDirRel(cwd, cfg);
   for (const d of stagedDecisionTargets(cwd, changed, decisionsRel)) {
-    if (judgeDepth(cwd, cfg.noLlm, d.block) !== 'THIN') continue;
+    // A block that already judged PASS never re-runs (keyed on its exact content).
+    const key = verdictKey('depth', d.block);
+    if (hasVerdict(cwd, key)) continue;
+    const v = judgeDepth(cwd, cfg.noLlm, d.block);
+    if (v === 'PASS') saveVerdict(cwd, key);
+    if (v !== 'THIN') continue;
     console.error(
       `decision-depth: target "${d.slug}" reads THIN — Context may restate the prior ruling, ` +
         'a rejected road may lack the criterion it loses on, or the Negative may be a platitude. ' +
@@ -351,12 +357,38 @@ function depthPass(cwd, cfg, changed) {
 }
 
 // Blocks (process.exit 1) on a confident CONTRADICT of a scoped Target — the flip-flop guard.
+// Under GUARD_AI_STRICT (the ship path) a judge OUTAGE blocks too (exit 3, the fail-closed
+// code): a ship must not silently skip the check it exists to run. Ad-hoc commits keep the
+// fail-open default (claude absent/offline must never brick a human's commit).
 function alignmentPass(cwd, cfg, changed) {
+  const strict = envFlag('AI_STRICT');
   const dir = resolveFromCwd(cfg, 'decisionsDir');
   for (const t of loadScopedTargets(dir)) {
     const matched = changed.filter((f) => matchScope([f], t.scopeGlobs));
     if (matched.length === 0) continue;
-    if (gateExit(judge(matched, t, cwd)) !== 1) continue;
+    // An earned ALIGN is cached on (target, exact staged bytes in its scope): a ship retry
+    // with an unchanged diff clears this target without re-spending the haiku/opus cascade.
+    const domainDiff = sh(
+      cwd,
+      `git diff --cached -- ${matched.map((f) => JSON.stringify(f)).join(' ')}`,
+    );
+    const key = verdictKey('align', t.slug, t.ruling, domainDiff);
+    if (hasVerdict(cwd, key)) {
+      console.error(`decision-alignment: "${t.slug}" — cached ALIGN (identical diff)`);
+      continue;
+    }
+    const d = judgeDetailed(matched, t, cwd);
+    if (d === null) continue; // noLlm / nothing to judge — a guard, not an outage
+    if (d.finalVerdict === 'ALIGN') saveVerdict(cwd, key); // confident non-block only
+    if (d.finalVerdict === null && strict) {
+      // outage (first or escalation pass) or unparseable transcript
+      console.error(
+        `decision-alignment: judge unavailable for target "${t.slug}" — strict ship mode fails closed.\n` +
+          '  Remedy: check `claude` CLI auth/quota, then re-run devkit ship.',
+      );
+      process.exit(3);
+    }
+    if (gateExit(d.finalVerdict) !== 1) continue;
     console.error(
       `decision-alignment: code in ${matched.join(', ')} CONTRADICTS target "${t.slug}":`,
     );
@@ -380,8 +412,11 @@ function runGate() {
     alignmentPass(cwd, cfg, changed); // exits 1 on a confident CONTRADICT
     process.exit(depthBlock ? 1 : 0);
   } catch (e) {
-    console.error(`decision-alignment: could not run — ${e?.message ?? e}`);
-    process.exit(2); // fail-open
+    const strict = envFlag('AI_STRICT');
+    console.error(
+      `decision-alignment: could not run — ${e?.message ?? e}${strict ? ' (strict ship mode: failing closed)' : ''}`,
+    );
+    process.exit(strict ? 3 : 2); // fail-open, except on a ship
   }
 }
 

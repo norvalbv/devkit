@@ -12,6 +12,8 @@ import { runReviewGate } from '../run-review.mjs';
 const ENV_KEYS = [
   'GUARD_NO_REVIEW',
   'FRINK_NO_REVIEW',
+  'GUARD_AI_STRICT',
+  'FRINK_AI_STRICT',
   'GUARD_REVIEW_MODEL',
   'FRINK_REVIEW_MODEL',
   'GUARD_NO_COMPLETENESS',
@@ -261,6 +263,104 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(prompt).not.toContain('name: api-security-reviewer'); // frontmatter stripped
     expect(captured.input).toContain('db.ts');
     expect(captured.args).toContain('--no-session-persistence'); // isolated
+  });
+});
+
+describe('runReviewGate — per-completion checkpoints', () => {
+  it('a finished PASS is on disk BEFORE slower cascades resolve (checkpoint, not batch)', async () => {
+    const repo = consumerRepo({ backend: true });
+    let release;
+    const blocked = new Promise((r) => {
+      release = r;
+    });
+    const exec = mkExec(async ({ label }) => {
+      if (!label.startsWith('review:api-security-reviewer')) await blocked;
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    const done = runReviewGate(repo, { exec });
+    // the fast reviewer's PASS lands in the cache while the other two are still pending
+    await vi.waitFor(() => {
+      expect(Object.keys(loadCache(repo)).length).toBe(1);
+    });
+    release();
+    expect(await done).toBe(0);
+    expect(Object.keys(loadCache(repo)).length).toBe(3);
+  });
+
+  it('one cascade throwing neither rejects the gate nor discards sibling checkpoints', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      if (label.startsWith('review:backend-performance-reviewer')) throw new Error('boom');
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(2); // inconclusive, never a crash
+    expect(Object.keys(loadCache(repo)).length).toBe(2); // the two passers still checkpointed
+    expect(err.mock.calls.flat().join('\n')).toContain('engine error: boom');
+  });
+
+  it('prints a per-reviewer completion heartbeat with elapsed seconds', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runReviewGate(repo, { exec: passWithArtifact(repo) });
+    expect(err.mock.calls.flat().join('\n')).toMatch(
+      /guard-review: api-security-reviewer — PASS in \d+s \(checkpointed\)/,
+    );
+  });
+});
+
+describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
+  it('outage: first pass retried once, then INCONCLUSIVE fails closed with exit 3 + remedy', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async () => null);
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    // 3 reviewers × (1 attempt + 1 retry), no escalation possible
+    expect(exec).toHaveBeenCalledTimes(6);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('retrying once');
+    expect(out).toContain('strict ship mode fails closed');
+    expect(out).toContain('re-run devkit ship');
+  });
+
+  it('outage-then-success: the retry recovers and the gate passes clean', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const failedOnce = new Set();
+    const exec = mkExec(async ({ label }) => {
+      if (!failedOnce.has(label)) {
+        failedOnce.add(label);
+        return null;
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(Object.keys(loadCache(repo)).length).toBe(3);
+  });
+
+  it('a hard opus-confirmed FAIL still exits 1 (never conflated with the fail-closed 3)', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async ({ label }) => {
+      if (label.startsWith('review:api-security-reviewer')) return 'VERDICT: FAIL — injection';
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+  });
+
+  it("without the flag, outage keeps today's fail-open exit 2 and never retries", async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => null);
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(exec).toHaveBeenCalledTimes(3); // one attempt each, no retry
   });
 });
 
