@@ -39,6 +39,7 @@
     "guard-decisions": "./gate-engine/decisions/cli.mjs",
     "guard-review": "./gate-engine/review/cli.mjs",
     "guard-prefix": "./gate-engine/prefix-cache/cli.mjs",
+    "guard-deterministic": "./gate-engine/deterministic/run.mjs",
     "guard-dup": "./gate-engine/co-occurrence/matcher.mjs",
     "guard-clone": "./gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./gate-engine/ratchets/folder-fanout.mjs",
