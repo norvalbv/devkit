@@ -462,14 +462,14 @@ describe('ship-branch.sh — worktree integration', () => {
   );
 
   it.runIf(hasTimeoutBin)(
-    'a timeout DURING the reviewer gate names the stage and the reviewers with no heartbeat',
+    'a timeout DURING the reviewer gate names the stage and the reviewers with no completion',
     () => {
+      // Emulate guard-review under a ship: it records the running set + one checkpointed completion to
+      // the progress JSON the ship exported (DEVKIT_REVIEW_PROGRESS), then the gate hangs → 2s timeout.
+      // The banner reads THAT file (not stderr prose) to name the unfinished reviewer.
       const hookBody = [
         'echo "🔍 Reviewer gate (headless domain judges)..."',
-        'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
-        'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
-        // a mid-retry line uses a COLON, not " — ": it must NOT count as a completion
-        'echo "guard-review: commit-guard: judge run failed, retrying once…"',
+        `printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
         'sleep 30',
       ].join('\n');
       const { dir, env, git } = seedShipRepo({ hookBody });
@@ -484,20 +484,19 @@ describe('ship-branch.sh — worktree integration', () => {
       dropWorktree(git, r.stderr);
       expect(r.status, r.stderr).not.toBe(0);
       expect(r.stderr).toMatch(/DURING: .*Reviewer gate/); // last stage banner, not the last line
-      expect(r.stderr).toMatch(/unfinished.*commit-guard/); // the one with no completion heartbeat
+      expect(r.stderr).toMatch(/unfinished.*commit-guard/); // running − completed = the unfinished one
       expect(r.stderr).not.toMatch(/unfinished.*api-security-reviewer/); // checkpointed → not named
     },
   );
 
   it.runIf(hasTimeoutBin)(
-    'attribution survives LC_ALL=C (emoji banner grep + em-dash awk under the C locale)',
+    'attribution survives LC_ALL=C (the emoji stage grep + the JSON read under the C locale)',
     () => {
-      // Hooks often run with a minimal C locale (GUI git clients, CI): the banner grep carries
-      // emoji alternations and the awk completion pattern carries an em-dash — both multibyte.
+      // Hooks often run with a minimal C locale (GUI git clients, CI): the stage grep still carries
+      // emoji alternations, and the progress read must parse the JSON identically regardless of locale.
       const hookBody = [
         'echo "🔍 Reviewer gate (headless domain judges)..."',
-        'echo "guard-review: running api-security-reviewer, commit-guard (parallel, sonnet → opus on FAIL)…"',
-        'echo "guard-review: api-security-reviewer — PASS in 3s (checkpointed)"',
+        `printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
         'sleep 30',
       ].join('\n');
       const { dir, env, git } = seedShipRepo({ hookBody });

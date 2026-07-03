@@ -39,8 +39,9 @@ const { mkTmp, cleanup } = rootRegistry();
 
 // These are subprocess-heavy integration tests (real `git init`/`commit` + a full applyInit overlay).
 // Isolated they run in ~1-2s, but under the full suite's parallel load git/FS scheduling contention
-// pushes them past the 5s default → flaky timeouts. Give them ample headroom (assertions unchanged).
-vi.setConfig({ testTimeout: 20000 });
+// pushes them to 5-25s. Match the global 30s testTimeout (vitest.config.mjs): an earlier 20s cap here
+// UNDERCUT the global and re-flaked on a loaded box — a genuine hang still dies, assertions unchanged.
+vi.setConfig({ testTimeout: 30000 });
 
 // A work repo that already has a committed husky hook + flat eslint + biome (the team's).
 function workRepo() {
