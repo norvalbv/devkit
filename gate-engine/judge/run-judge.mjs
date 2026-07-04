@@ -26,11 +26,25 @@ function warnNoOutput(label) {
   console.error(`⚠️  ${label}: claude judge returned no output — judgement skipped`);
 }
 
-function warnUnavailable(label, e) {
+// A timeout KILL (SIGTERM at the N-second cap) is the gate's OWN contention kill, not auth/quota — so
+// it must NOT read as "offline/quota/absent". That label sent an operator chasing a phantom quota
+// problem on a healthy subscription (sc-1049); "offline/quota/absent" is reserved for a genuine outage
+// (ENOENT / 401 / non-zero exit). Pure fn (not the console.error wrapper) so the wording is unit-
+// testable without spawning `claude`. Retrying a timeout is a separate concern (sc-1048), so this
+// stays outage-only — no "will retry" claim the code doesn't honor.
+export function unavailableMessage(label, e, timeout) {
+  if (isJudgeTimeout(e)) {
+    // `> 0` too, not just finite — a 0ms cap would render a nonsense "after 0s".
+    const secs =
+      Number.isFinite(timeout) && timeout > 0 ? `after ${Math.round(timeout / 1000)}s ` : '';
+    return `⚠️  ${label}: claude judge timed out ${secs}(machine contention?) — judgement skipped`;
+  }
   const reason = e?.code ?? (e?.status != null ? `exit ${e.status}` : (e?.message ?? 'unknown'));
-  console.error(
-    `⚠️  ${label}: claude judge unavailable (${reason}; offline/quota/absent) — judgement skipped`,
-  );
+  return `⚠️  ${label}: claude judge unavailable (${reason}; offline/quota/absent) — judgement skipped`;
+}
+
+function warnUnavailable(label, e, timeout) {
+  console.error(unavailableMessage(label, e, timeout));
 }
 
 // execFile's `timeout` fires by KILLING the child (SIGTERM), which marks the error `killed`. That
@@ -70,7 +84,7 @@ export function execJudge({ label, args, input, timeout, cwd, onOutage }) {
     }
     return out;
   } catch (e) {
-    warnUnavailable(label, e);
+    warnUnavailable(label, e, timeout);
     onOutage?.(isJudgeTimeout(e) ? 'timeout' : 'transient');
     return null;
   }
@@ -95,7 +109,7 @@ export function execJudgeAsync({ label, args, input, timeout, cwd, onOutage }) {
       { cwd, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {
-          warnUnavailable(label, err);
+          warnUnavailable(label, err, timeout);
           onOutage?.(isJudgeTimeout(err) ? 'timeout' : 'transient');
           resolve(null);
           return;
