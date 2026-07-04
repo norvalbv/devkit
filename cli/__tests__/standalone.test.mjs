@@ -60,8 +60,8 @@ describe('standalone (no-package) install', () => {
 
     // hook: fail-open GLOBAL gates (no bunx / node_modules), valid POSIX sh
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('__dk_gate');
-    expect(hook).toContain('guard-fanout gate');
+    expect(hook).toContain('command -v guard-deterministic'); // fail-open global orchestrator
+    expect(hook).toContain('--structure "guard-structure gate"'); // config-driven structure via the bin
     expect(hook).not.toContain('bunx guard'); // gates call global bins, not bunx/node_modules
     expect(() =>
       execFileSync('sh', ['-n', join(root, '.husky/pre-commit')], { stdio: 'pipe' }),
@@ -137,9 +137,10 @@ describe('standalone (no-package) install', () => {
     // Still ZERO consumer deps (the whole point).
     expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(pkgBefore);
 
-    // Structure-lint runs via the global guard-structure bin (devkit's own eslint/plugin) — fail-open.
+    // Structure-lint runs via the global guard-structure bin (devkit's own eslint/plugin), joined to
+    // the deterministic orchestrator with --structure — fail-open (the orchestrator is command -v-guarded).
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('__dk_gate guard-structure gate');
+    expect(hook).toContain('--structure "guard-structure gate"');
 
     // The STACK guard.config (with the `structure` grammar) is vendored, not the generic one.
     const structure = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).structure;
