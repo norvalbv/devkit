@@ -2,7 +2,6 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mjs';
-import { enableStructureLint } from '../commands/init.mjs';
 import { readConfig as config, tmpRepos } from './_helpers.mjs';
 
 // --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
@@ -49,12 +48,13 @@ describe('init --yes (all recommended)', () => {
     expect(existsSync(join(root, '.devkit/config.json'))).toBe(false);
   });
 
-  it('leaves the generic husky structure-lint line commented (no eslint preset)', () => {
+  it('generic stack wires no structure-lint (no --structure arg on the deterministic line)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toMatch(/# bunx eslint src/);
-    expect(hook).not.toMatch(/\nbunx eslint src/);
+    expect(hook).toContain('bunx guard-deterministic'); // deterministic guards still run
+    expect(hook).not.toContain('--structure'); // structure off for a generic stack
+    expect(hook).not.toContain('guard-structure');
   });
 });
 
@@ -94,46 +94,8 @@ describe('init --stack react-app (structure ungated)', () => {
     });
     devkit(root, 'init', '--stack', 'react-app', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toMatch(/\n\s*bunx guard-structure/); // config-driven stack → devkit's guard-structure bin
-  });
-});
-
-describe('enableStructureLint — pre-convergence hook migration (upgrade edge)', () => {
-  it('migrates a legacy `|| exit 1` structure line to the DK_DET_FAILS aggregation form', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes'); // commented placeholder, structure OFF
-    const hookPath = join(root, '.husky/pre-commit');
-    // Simulate a pre-convergence hook: the placeholder was flipped to the OLD fail-fast live line
-    // (outside the DK_DET_FAILS aggregation), which a later enable used to no-op on ("no placeholder").
-    const legacy = readFileSync(hookPath, 'utf8').replace(
-      /# bunx eslint src[^\n]*/,
-      'bunx eslint src || exit 1',
-    );
-    expect(legacy).toContain('bunx eslint src || exit 1'); // setup sanity
-    writeFileSync(hookPath, legacy);
-
-    enableStructureLint(root, '', false, 'bunx eslint src');
-    const after = readFileSync(hookPath, 'utf8');
-    expect(after).toContain('bunx eslint src || DK_DET_FAILS'); // migrated to the aggregation form
-    expect(after).not.toContain('|| exit 1'); // the fail-fast line is gone, not left orphaned
-    expect(after).toContain('DK_PREFIX_SKIP'); // now skip-aware like its neighbours (prefix-cache guard)
-  });
-
-  it('is idempotent: a hook already in the aggregation form is recognised and left untouched', () => {
-    const root = tmpRepo();
-    devkit(root, 'init', '--stack', 'generic', '--yes');
-    const hookPath = join(root, '.husky/pre-commit');
-    writeFileSync(
-      hookPath,
-      readFileSync(hookPath, 'utf8').replace(
-        /# bunx eslint src[^\n]*/,
-        'bunx eslint src || exit 1',
-      ),
-    );
-    enableStructureLint(root, '', false, 'bunx eslint src'); // migrate once
-    const once = readFileSync(hookPath, 'utf8');
-    enableStructureLint(root, '', false, 'bunx eslint src'); // second enable must change nothing
-    expect(readFileSync(hookPath, 'utf8')).toBe(once);
+    // config-driven stack → devkit's guard-structure bin, joined to the deterministic orchestrator.
+    expect(hook).toContain('--structure "guard-structure gate"');
   });
 });
 
@@ -160,7 +122,8 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies['@norvalbv/devkit']).toBeDefined();
     expect(pkg.scripts['lint:structure']).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx guard-structure || rc=$?'); // trichotomy form — exit 2 stays fail-open
+    // guard-structure runs as the orchestrator's structure gate (trichotomy: exit 2 stays fail-open).
+    expect(hook).toContain('--structure "guard-structure gate"');
     expect(hook).not.toContain('bunx eslint src');
   });
 
@@ -176,7 +139,7 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx eslint src || DK_DET_FAILS');
+    expect(hook).toContain('--structure "bunx eslint src"');
     expect(hook).not.toContain('guard-structure');
   });
 });
@@ -194,15 +157,14 @@ describe('init — per-component flag selection', () => {
     expect(config(root).components.biome).toBe(false);
   });
 
-  it('--guards fanout,size → only those two gate lines in the hook', () => {
+  it('--guards fanout,size → the deterministic orchestrator + the recorded subset, no AI guard', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx guard-fanout');
-    expect(hook).toContain('bunx guard-size');
-    expect(hook).not.toContain('bunx guard-dup');
-    expect(hook).not.toContain('bunx guard-clone');
-    expect(hook).not.toContain('bunx guard-decisions');
+    // The selected deterministic guards run through the ONE orchestrator (which re-reads the subset
+    // from .devkit/config.json at commit time), so the WHICH lives in config, not per-hook-line.
+    expect(hook).toContain('bunx guard-deterministic');
+    expect(hook).not.toContain('bunx guard-decisions'); // decisions deselected
     expect(config(root).components.guards).toEqual(['fanout', 'size']);
     // No clone guard → jscpd devDep omitted.
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -235,7 +197,7 @@ describe('init — removal (deselected + present)', () => {
     expect(pkg.scripts.format).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     expect(hook).not.toContain('biome format');
-    expect(hook).toContain('bunx guard-size'); // other guards intact
+    expect(hook).toContain('bunx guard-deterministic'); // guards intact
     expect(config(root).components.biome).toBe(false);
   });
 
@@ -247,7 +209,7 @@ describe('init — removal (deselected + present)', () => {
     expect(existsSync(join(root, 'biome.jsonc'))).toBe(true);
   });
 
-  it('removing a single guard drops only its line, keeps the rest', () => {
+  it('narrowing the guard subset records the new set (orchestrator re-reads it)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     devkit(
@@ -261,9 +223,9 @@ describe('init — removal (deselected + present)', () => {
       '--remove-deselected',
     );
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    // guards is removed-as-a-unit then re-added with the new subset.
-    expect(hook).toContain('bunx guard-fanout');
-    expect(hook).not.toContain('bunx guard-size');
+    // The orchestrator stays a single line; the narrowed subset lives in .devkit/config.json.
+    expect(hook).toContain('bunx guard-deterministic');
+    expect(hook).not.toContain('bunx guard-decisions'); // decisions dropped
     expect(config(root).components.guards).toEqual(['fanout']);
   });
 });
@@ -294,7 +256,7 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/biome\.jsonc: OK — extends @norvalbv\/devkit\/biome\/react/);
-    expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure`/);
+    expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure gate`/);
   });
 
   it('flags DRIFT when the structure-lint line is missing from the hook', () => {
@@ -306,11 +268,11 @@ describe('doctor — selection-aware', () => {
       exports: {},
     });
     devkit(root, 'init', '--stack', 'component-lib', '--yes');
-    // Strip the live structure-lint line (simulate a hand-edited / drifted hook).
+    // Strip the --structure arg from the deterministic line (simulate a hand-edited / drifted hook).
     const hookPath = join(root, '.husky/pre-commit');
     writeFileSync(
       hookPath,
-      readFileSync(hookPath, 'utf8').replace('bunx guard-structure || rc=$?', ''),
+      readFileSync(hookPath, 'utf8').replace(' --structure "guard-structure gate"', ''),
     );
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(1);
