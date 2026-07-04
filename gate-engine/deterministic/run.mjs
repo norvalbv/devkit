@@ -16,8 +16,18 @@
  * guard), so an unknown bin can't be silently fetched from a registry (npm-squat). Each guard runs
  * as `node <sibling module>` so the set resolves identically in package / standalone / overlay mode
  * without a bunx round-trip. The AI guards (decisions, review) are fail-fast and stay OUTSIDE this
- * orchestrator (the hook runs them after); structure-lint / biome keep their own stack-variant
- * fragments. Exit contract: 0 = clean or prefix-skip, 1 = one or more real failures.
+ * orchestrator (the hook runs them after); biome keeps its own format fragment. Structure-lint and
+ * repo-specific deterministic gates join the SET via flags, so their failures land in the same
+ * aggregated report:
+ *   --structure "<cmd>"   run <cmd> as the `structure-lint` gate. A `guard-structure …` command
+ *                         runs as the sibling module with the full trichotomy (2 = fail-open);
+ *                         any other command (electron's `bunx eslint src`, devkit's own
+ *                         `bun run lint:structure`) spawns via PATH and BLOCKS on every non-zero
+ *                         code (eslint's exit 2 is a fatal config error, not an opt-out).
+ *   --extra "<label>=<cmd>"  (repeatable) an arbitrary deterministic gate; non-zero blocks.
+ *   --only "<id,id>"      restrict the built-in set (overrides .devkit/config.json selection) —
+ *                         for repos whose gate set is declared in the hook, not a config.
+ * Exit contract: 0 = clean or prefix-skip, 1 = one or more real failures.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -46,11 +56,28 @@ const DETERMINISTIC = [
 ];
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
 
+// Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
+// regex compile).
+const WHITESPACE_RE = /\s+/;
+
 function parseOpts(argv) {
-  const opts = {};
+  const opts = { extra: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--hook' && argv[i + 1]) opts.hookPath = argv[++i];
     else if (argv[i] === '--scope' && argv[i + 1]) opts.scope = argv[++i];
+    else if (argv[i] === '--structure' && argv[i + 1]) opts.structure = argv[++i];
+    else if (argv[i] === '--only' && argv[i + 1]) {
+      opts.only = argv[++i]
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else if (argv[i] === '--extra' && argv[i + 1]) {
+      const v = argv[++i];
+      const eq = v.indexOf('=');
+      // A malformed --extra (no `=`) must BLOCK, not vanish: an unparseable gate spec means the
+      // hook intended a gate that will never run — fail closed like every other unexpected shape.
+      opts.extra.push(eq > 0 ? { label: v.slice(0, eq), cmd: v.slice(eq + 1) } : { label: v });
+    }
   }
   return opts;
 }
@@ -70,15 +97,33 @@ export function selectedIds(cwd) {
   }
 }
 
-// Run one guard as a subprocess; return its exit code (0 on success). stdio inherited so the guard's
+// Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runGuard(cwd, guard, exec = execFileSync) {
+function runArgv(cwd, argv, exec = execFileSync) {
   try {
-    exec('node', [path.resolve(HERE, guard.module), ...guard.args], { cwd, stdio: 'inherit' });
+    exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
     return 0;
   } catch (e) {
     return typeof e?.status === 'number' ? e.status : 1; // spawn failure / kill → treat as a real fail
   }
+}
+
+// A `--structure` / `--extra` command → a runnable gate descriptor. `guard-structure …` resolves to
+// the sibling module (same no-bunx resolution as the built-ins) and keeps the trichotomy (its exit
+// 2 = could-not-run → fail-open); any other command spawns its own argv[0] via PATH and BLOCKS on
+// every non-zero code (eslint's exit 2 is a fatal config error, not an opt-out). An empty command
+// (a malformed `--extra` spec) yields argv null → reported as unrunnable, never silently skipped.
+function commandGate(label, cmd) {
+  const tokens = (cmd ?? '').split(WHITESPACE_RE).filter(Boolean);
+  if (!tokens.length) return { label, argv: null, failOpen2: false };
+  if (tokens[0] === 'guard-structure') {
+    return {
+      label,
+      argv: ['node', path.resolve(HERE, '../structure/run.mjs'), ...tokens.slice(1)],
+      failOpen2: true,
+    };
+  }
+  return { label, argv: tokens, failOpen2: false };
 }
 
 /**
@@ -92,12 +137,23 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
   const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
   const fails = [];
   if (!skip) {
-    const ids = new Set(selectedIds(cwd));
-    for (const guard of DETERMINISTIC) {
-      if (!ids.has(guard.id)) continue;
-      const rc = runGuard(cwd, guard, exec);
-      if (rc === 1) fails.push(`guard-${guard.id}`);
-      else if (rc !== 0 && rc !== 2) fails.push(`guard-${guard.id}(unexpected:${rc})`); // 2 = fail-open
+    const ids = new Set(opts.only ?? selectedIds(cwd));
+    const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
+      label: `guard-${g.id}`,
+      argv: ['node', path.resolve(HERE, g.module), ...g.args],
+      failOpen2: true,
+    }));
+    for (const x of opts.extra ?? []) gates.push(commandGate(x.label, x.cmd));
+    if (opts.structure) gates.push(commandGate('structure-lint', opts.structure));
+    for (const gate of gates) {
+      if (!gate.argv) {
+        fails.push(`${gate.label}(unrunnable: empty command)`);
+        continue;
+      }
+      const rc = runArgv(cwd, gate.argv, exec);
+      if (rc === 1) fails.push(gate.label);
+      else if (rc !== 0 && !(rc === 2 && gate.failOpen2))
+        fails.push(`${gate.label}(unexpected:${rc})`);
     }
   }
   if (fails.length > 0) {

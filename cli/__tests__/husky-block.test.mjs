@@ -39,12 +39,18 @@ exit 1
 `;
 
 describe('buildGuardBlock', () => {
-  it('includes the biome step + all guards when fully selected', () => {
+  it('includes the biome step, the deterministic orchestrator, and the AI guards when fully selected', () => {
     const block = buildGuardBlock(ALL);
     expect(block).toContain('# >>> devkit-guards >>>');
     expect(block).toContain('# <<< devkit-guards <<<');
     expect(block).toContain('# devkit:biome-format');
-    for (const g of GUARD_IDS) expect(block).toContain(`bunx guard-${g}`);
+    // Deterministic guards (size/fanout/dup/clone) run through the ONE orchestrator, not per-guard.
+    expect(block).toContain('bunx guard-deterministic --hook');
+    expect(block).not.toContain('bunx guard-size');
+    expect(block).not.toContain('bunx guard-fanout');
+    // AI guards keep their own fail-fast fragments.
+    expect(block).toContain('bunx guard-decisions');
+    expect(block).toContain('bunx guard-review');
   });
 
   it('omits the biome step when biome is deselected', () => {
@@ -53,17 +59,34 @@ describe('buildGuardBlock', () => {
     expect(block).not.toContain('biome format');
   });
 
-  it('emits only the selected guards, in registry order', () => {
+  it('emits ONE deterministic line for any selected deterministic guard, gated `|| exit 1`', () => {
     const block = buildGuardBlock({ biome: true, guards: ['fanout', 'size'] });
-    expect(block).toContain('bunx guard-size');
-    expect(block).toContain('bunx guard-fanout');
-    expect(block).not.toContain('bunx guard-dup');
-    // registry order is size before fanout regardless of input order.
-    expect(block.indexOf('guard-size')).toBeLessThan(block.indexOf('guard-fanout'));
+    const lines = block.split('\n').filter((l) => l.includes('guard-deterministic'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/\|\| exit 1$/);
+    // no AI guards selected → no AI fragment
+    expect(block).not.toContain('bunx guard-decisions');
   });
 
-  it('always keeps the commented structure-lint placeholder', () => {
-    expect(buildGuardBlock(ALL)).toMatch(/# bunx eslint src/);
+  it('emits NO deterministic line when only AI guards are selected', () => {
+    const block = buildGuardBlock({ biome: false, guards: ['decisions'] });
+    expect(block).not.toContain('guard-deterministic');
+    expect(block).toContain('bunx guard-decisions');
+  });
+
+  it('joins the structure command to the deterministic line via --structure when set', () => {
+    const off = buildGuardBlock({ guards: ['size'] });
+    expect(off).not.toContain('--structure');
+    const on = buildGuardBlock({ guards: ['size'], structureCmd: 'guard-structure gate' });
+    expect(on).toContain('--structure "guard-structure gate"');
+    const electron = buildGuardBlock({ guards: ['size'], structureCmd: 'bunx eslint src' });
+    expect(electron).toContain('--structure "bunx eslint src"');
+  });
+
+  it('emits the deterministic line for structure even with NO deterministic guard selected', () => {
+    const block = buildGuardBlock({ guards: ['decisions'], structureCmd: 'guard-structure gate' });
+    expect(block).toContain('bunx guard-deterministic --hook');
+    expect(block).toContain('--structure "guard-structure gate"');
   });
 
   it('monorepo package block captures the hook path ABSOLUTE before cd (guard-prefix stays live)', () => {
@@ -86,13 +109,22 @@ describe('buildFullHook', () => {
 });
 
 describe('removeFragment', () => {
-  it('removes one guard fragment, leaving the others + markers intact', () => {
+  it('removes one AI guard fragment, leaving the others + markers intact', () => {
     const hook = buildFullHook(ALL);
-    const { content, removed } = removeFragment(hook, 'guard-size');
+    const { content, removed } = removeFragment(hook, 'guard-decisions');
     expect(removed).toBe(true);
-    expect(content).not.toContain('bunx guard-size');
-    expect(content).toContain('bunx guard-fanout');
+    expect(content).not.toContain('bunx guard-decisions');
+    expect(content).toContain('bunx guard-review');
+    expect(content).toContain('bunx guard-deterministic');
     expect(content).toContain('# <<< devkit-guards <<<');
+  });
+
+  it('removes the deterministic fragment only', () => {
+    const hook = buildFullHook(ALL);
+    const { content, removed } = removeFragment(hook, 'deterministic');
+    expect(removed).toBe(true);
+    expect(content).not.toContain('bunx guard-deterministic');
+    expect(content).toContain('bunx guard-decisions');
   });
 
   it('removes the biome-format step only', () => {
@@ -100,7 +132,7 @@ describe('removeFragment', () => {
     const { content, removed } = removeFragment(hook, 'biome-format');
     expect(removed).toBe(true);
     expect(content).not.toContain('biome format');
-    expect(content).toContain('bunx guard-size');
+    expect(content).toContain('bunx guard-deterministic');
   });
 
   it('is a no-op (removed:false) when the fragment is absent', () => {
@@ -168,9 +200,9 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   });
   it('swaps content on re-run (markers present) without duplicating', () => {
     const once = replaceGuardBlock(FRINK_HOOK, buildGuardBlock(ALL));
-    const next = replaceGuardBlock(once, buildGuardBlock({ biome: true, guards: ['size'] }));
-    expect(next).toContain('bunx guard-size');
-    expect(next).not.toContain('bunx guard-clone');
+    const next = replaceGuardBlock(once, buildGuardBlock({ biome: true, guards: ['decisions'] }));
+    expect(next).toContain('bunx guard-decisions');
+    expect(next).not.toContain('guard-deterministic'); // only an AI guard now → no det line
     expect((next.match(/# >>> devkit-guards/g) || []).length).toBe(1);
   });
   it('monorepo: scoped markers, still reachable before consumer logic', () => {
@@ -184,34 +216,34 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   });
 });
 
-describe('guard fragments fail CLOSED on unexpected exit codes (#8)', () => {
-  it('blocks on exit 1 AND any non-0/2 code; only 0/2 continue', () => {
+// The deterministic set fails CLOSED at the orchestrator: the single `guard-deterministic` line is
+// `|| exit 1`-guarded, so its exit 1 (one or more real failures, aggregated inside the bin) blocks
+// the commit. The per-gate trichotomy/aggregation itself is proven in
+// gate-engine/deterministic/__tests__/run.test.mjs.
+describe('deterministic orchestrator line is fail-closed', () => {
+  it('the guard-deterministic line propagates a real failure via `|| exit 1`', () => {
     const block = buildGuardBlock({ guards: ['size'] });
-    // exit 1 → accumulate; unexpected (not 0/2) → accumulate (named); 0/2 are the only clean
-    // codes. The aggregated det-verdict then blocks once for every accumulated failure.
-    expect(block).toMatch(/\[ "\$rc" -eq 1 \]/);
-    expect(block).toMatch(/\[ "\$rc" -ne 0 \] && \[ "\$rc" -ne 2 \]/);
-    expect(block).toContain(`DK_DET_FAILS="\${DK_DET_FAILS:-} guard-size"`);
-    expect(block).toContain('deterministic gates failed');
+    const line = block.split('\n').find((l) => l.includes('guard-deterministic'));
+    expect(line).toMatch(/\|\| exit 1$/);
   });
 });
 
 describe('hasFragment', () => {
-  it('detects present + absent guard sentinels', () => {
-    const hook = buildFullHook({ biome: true, guards: ['dup'] });
-    expect(hasFragment(hook, 'guard-dup')).toBe(true);
-    expect(hasFragment(hook, 'guard-clone')).toBe(false);
+  it('detects the deterministic + AI sentinels', () => {
+    const det = buildFullHook({ biome: true, guards: ['dup'] });
+    expect(hasFragment(det, 'deterministic')).toBe(true);
+    expect(hasFragment(det, 'guard-decisions')).toBe(false);
+    const ai = buildFullHook({ biome: false, guards: ['decisions'] });
+    expect(hasFragment(ai, 'guard-decisions')).toBe(true);
+    expect(hasFragment(ai, 'deterministic')).toBe(false);
   });
 });
 
-// husky runs hooks under `sh -e`. A bare `bunx guard-X gate` whose fail-open exit (2) returns
-// non-zero would ABORT the whole hook before the fragment's exit-code check — the fragment's
-// "exit 2 = fail-open, continue" intent never runs (this regressed frink: every commit died at
-// guard-dup's exit-2 opt-out). The fix is `rc=0; bunx … || rc=$?`. These run the assembled hook
-// under a real `sh -e` with a stubbed `bunx`.
-describe('guard fragments are set -e-safe (fail-open does not abort the hook)', () => {
-  // Build a fresh hook (guards only — biome/git steps need a repo) into a temp $HOME so the hook's
-  // own PATH_SETUP prepends OUR stub bunx (in $HOME/.bun/bin), then run it under `sh -e`.
+// husky runs hooks under `sh -e`. The AI fragments capture their code with `rc=0; bunx … || rc=$?`
+// so a fail-open code (2) never aborts the hook before the fragment's own check; the deterministic
+// line guards itself with `|| exit 1`. Run the assembled hook under a real `sh -e` with a stubbed
+// `bunx` to prove neither aborts prematurely.
+describe('assembled hook is set -e-safe', () => {
   const runHookWithStubBunx = (stubExit) => {
     const home = mkdtempSync(join(tmpdir(), 'dk-husky-'));
     const bin = join(home, '.bun', 'bin');
@@ -232,16 +264,13 @@ describe('guard fragments are set -e-safe (fail-open does not abort the hook)', 
     }
   };
 
-  it('a guard fail-open (exit 2) lets the hook continue to exit 0', () => {
-    expect(runHookWithStubBunx(2)).toBe(0);
+  it('every gate clean (exit 0) → the hook runs to completion (exit 0)', () => {
+    expect(runHookWithStubBunx(0)).toBe(0);
   });
 
-  it('a guard violation (exit 1) still blocks the commit (exit 1)', () => {
+  it('a gate returning non-zero blocks the commit (exit 1), never aborts silently mid-hook', () => {
+    // guard-deterministic exit 1 → `|| exit 1`; and were it to reach an AI gate, that too exits 1.
     expect(runHookWithStubBunx(1)).toBe(1);
-  });
-
-  it('an unexpected guard code (e.g. 127) fails closed (blocks)', () => {
-    expect(runHookWithStubBunx(127)).toBe(1);
   });
 });
 
@@ -261,5 +290,9 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
 
   it('still chains to the repo hook for the normal (non-shim) path', () => {
     expect(hook).toContain('exec sh ".husky/pre-commit" "$@"');
+  });
+
+  it('runs the deterministic orchestrator command -v-guarded (global bin)', () => {
+    expect(hook).toContain('command -v guard-deterministic');
   });
 });

@@ -77,6 +77,73 @@ describe('runDeterministic — aggregation + trichotomy', () => {
   });
 });
 
+describe('runDeterministic — --structure / --extra / --only', () => {
+  it('--structure "guard-structure gate" runs the sibling module and keeps the trichotomy', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const exec = mkExec({ 'structure/run.mjs': 1 });
+    expect(runDeterministic(d, { exec, structure: 'guard-structure gate' })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('structure-lint');
+    // resolved as `node <sibling structure/run.mjs> gate`, never via bunx/PATH
+    const call = exec.mock.calls.find(([, argv]) => argv[0].includes('structure/run.mjs'));
+    expect(call[0]).toBe('node');
+    expect(call[1][1]).toBe('gate');
+    // exit 2 = could-not-run → fail-open for the guard form
+    const exec2 = mkExec({ 'structure/run.mjs': 2 });
+    expect(runDeterministic(d, { exec: exec2, structure: 'guard-structure gate' })).toBe(0);
+  });
+
+  it('a non-guard structure command spawns via PATH and BLOCKS on exit 2 (eslint fatal ≠ opt-out)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const exec = vi.fn((bin) => {
+      if (bin === 'bunx') {
+        const e = new Error('exit 2');
+        e.status = 2;
+        throw e;
+      }
+    });
+    expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('structure-lint(unexpected:2)');
+    expect(exec).toHaveBeenCalledWith('bunx', ['eslint', 'src'], expect.anything());
+  });
+
+  it('--extra gates run under their own label and aggregate with the built-ins', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    const exec = vi.fn((bin, argv) => {
+      const key = [bin, ...argv].join(' ');
+      if (key.includes('size-disable') || bin === 'bun') {
+        const e = new Error('exit 1');
+        e.status = 1;
+        throw e;
+      }
+    });
+    expect(runDeterministic(d, { exec, extra: [{ label: 'lint', cmd: 'bun run lint' }] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'deterministic gates failed: guard-size lint',
+    );
+  });
+
+  it('a malformed --extra (no command) BLOCKS as unrunnable — never silently skipped', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    expect(runDeterministic(d, { exec: mkExec({}), extra: [{ label: 'lint' }] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('lint(unrunnable: empty command)');
+  });
+
+  it('--only restricts the built-in set, overriding the config selection', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const exec = mkExec({});
+    expect(runDeterministic(d, { exec, only: ['size', 'fanout'] })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+    const mods = exec.mock.calls.map(([, argv]) => argv[0]).join(' ');
+    expect(mods).toContain('size-disable');
+    expect(mods).toContain('folder-fanout');
+  });
+});
+
 describe('selectedIds', () => {
   it('intersects components.guards with the deterministic set in fixed order, dropping AI ids', () => {
     const d = repo(['clone', 'size', 'review', 'decisions']); // review/decisions are AI (fail-fast)

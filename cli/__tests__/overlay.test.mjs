@@ -114,7 +114,7 @@ describe('overlay (local-only) install', () => {
       }).trim(),
     ).toBe('.devkit/hooks');
     const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
-    expect(hook).toContain('__dk_gate');
+    expect(hook).toContain('guard-deterministic'); // devkit's deterministic gates run in the overlay
     expect(hook).toContain('.husky/pre-commit'); // chains to the team's committed hook
     expect(() =>
       execFileSync('sh', ['-n', join(root, '.devkit', 'hooks', 'pre-commit')], { stdio: 'pipe' }),
@@ -217,8 +217,8 @@ describe('overlay (local-only) install', () => {
     // pre-commit runs devkit gates; the others are pure pass-throughs to the repo's own
     const pre = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
     const push = readFileSync(join(root, '.devkit', 'hooks', 'pre-push'), 'utf8');
-    expect(pre).toContain('__dk_gate');
-    expect(push).not.toContain('__dk_gate');
+    expect(pre).toContain('guard-deterministic');
+    expect(push).not.toContain('guard-deterministic');
     expect(push).toContain('.husky/pre-push');
   });
 

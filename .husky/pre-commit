@@ -2,38 +2,19 @@
 # gates run via `node gate-engine/...` rather than the published `bunx guard-*`. Do not run
 # `devkit init` in this repo — this hand-authored hook IS the canonical chain.
 #
-# Shape mirrors the generated consumer block: deterministic gates run skip-aware (the prefix
-# cache clears an identical staged tree on a devkit ship retry) and ACCUMULATE their failures
-# into one aggregated report; the AI gate (decisions) stays last and fail-fast.
-
-# Deterministic-prefix cache (ship runs only — no-ops without DEVKIT_SHIP=1). Sets a flag,
-# never exits: the decisions gate below always still runs.
-DK_PREFIX_SKIP=""
-DK_DET_FAILS=""
-if node gate-engine/prefix-cache/cli.mjs check --hook "${DK_HOOK_PATH:-$0}"; then DK_PREFIX_SKIP=1; fi
-
-if [ -z "${DK_PREFIX_SKIP:-}" ]; then
-    # Formatter + linter (Biome) — hard gate.
-    bun run lint || DK_DET_FAILS="${DK_DET_FAILS:-} lint"
-
-    # Structure governance (folder-structure rule compiled from guard.config.json `structure`) — hard
-    # gate. devkit governs its own cli/ + gate-engine/ layout; an unregistered domain or misplaced
-    # file blocks the commit. See docs/structure-governance.md.
-    bun run lint:structure || DK_DET_FAILS="${DK_DET_FAILS:-} lint:structure"
-
-    # Ratchets (baselines in eslint/baselines/, grandfathered via `bun run guard:freeze`) — hard gate.
-    node gate-engine/ratchets/folder-fanout.mjs gate || DK_DET_FAILS="${DK_DET_FAILS:-} guard-fanout"
-    node gate-engine/ratchets/size-disable.mjs gate || DK_DET_FAILS="${DK_DET_FAILS:-} guard-size"
-fi
-
-# Aggregated deterministic verdict: every failure above reported at once (one fix cycle), then
-# on all-green record the prefix key so an identical re-ship skips straight to the AI gate.
-if [ -n "${DK_DET_FAILS:-}" ]; then
-    echo "✗ deterministic gates failed:${DK_DET_FAILS}"
-    echo "   Every deterministic failure is listed above — fix them together, then commit once."
-    exit 1
-fi
-if [ -z "${DK_PREFIX_SKIP:-}" ]; then node gate-engine/prefix-cache/cli.mjs record --hook "${DK_HOOK_PATH:-$0}" || true; fi
+# The deterministic set runs through the SAME `guard-deterministic` orchestrator the generated
+# consumer hooks use: it owns the prefix-cache check/record (skips an identical staged tree on a
+# devkit ship retry), runs each gate under the shared trichotomy, and aggregates every failure
+# into ONE report + ONE exit code. devkit's set is a SUBSET of the guard registry plus two
+# non-guard commands, expressed as flags:
+#   --only size,fanout               the two ratchet guards (baselines in eslint/baselines/)
+#   --extra "lint=bun run lint"      Biome format+lint — hard gate (any non-zero blocks)
+#   --structure "bun run lint:structure"   folder-structure governance — hard gate
+# The AI gate (decisions) stays last and fail-fast, below.
+node gate-engine/deterministic/run.mjs --hook "${DK_HOOK_PATH:-$0}" \
+    --only size,fanout \
+    --extra "lint=bun run lint" \
+    --structure "bun run lint:structure" || exit 1
 
 # Decision-log gate (capture B) — smells an architectural diff with no decision staged and blocks
 # until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open

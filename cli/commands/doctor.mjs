@@ -54,26 +54,26 @@ function checkHusky(cwd, selectedGuards) {
     );
   }
   const block = extractGuardBlock(content, pkgRel) ?? '';
-  // Match both package mode (`bunx guard-X`) and standalone (`__dk_gate guard-X`).
-  const missing = selectedGuards.filter((g) => !block.includes(`guard-${g}`));
+  // The deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
+  // orchestrator (which re-reads the selection from .devkit/config.json at commit time); the AI
+  // guards (decisions/review) keep their own per-id fragment. So verify one `guard-deterministic`
+  // call when any deterministic guard is selected, plus each selected AI guard's sentinel. A block
+  // that predates this collapse (per-guard `bunx guard-X` lines, no `guard-deterministic`) fails
+  // the first check and is flagged for regeneration.
+  const AI = new Set(['decisions', 'review']);
+  const missing = [];
+  if (selectedGuards.some((g) => !AI.has(g)) && !block.includes('guard-deterministic')) {
+    missing.push('deterministic gates');
+  }
+  for (const g of selectedGuards) {
+    if (AI.has(g) && !block.includes(`guard-${g}`)) missing.push(g);
+  }
   if (missing.length) {
     return check(
       '.husky/pre-commit',
       'DRIFT',
-      `block missing guard(s): ${missing.join(', ')}`,
-      'run `devkit init --force` to refresh the block',
-      true,
-    );
-  }
-  // Pre-convergence block shape: guards present but no DK_DET_FAILS aggregation / prefix-cache
-  // wiring — gates still fail fast one at a time and a `devkit ship` retry re-pays the whole
-  // deterministic prefix (the ship timeout banner would then over-promise "the prefix is cached").
-  if (!block.includes('DK_DET_FAILS')) {
-    return check(
-      '.husky/pre-commit',
-      'DRIFT',
-      'block predates convergent gates (no aggregation/prefix-cache wiring)',
-      'run `devkit upgrade` (or `devkit init --force`) to regenerate the block',
+      `block missing gate(s): ${missing.join(', ')}`,
+      'run `devkit init --force` (or `devkit upgrade`) to regenerate the block',
       true,
     );
   }
@@ -86,11 +86,11 @@ function checkHusky(cwd, selectedGuards) {
   );
 }
 
-// Structure-lint line check (only when `structure` is selected). `structure` is NOT a guard, so
-// checkHusky never verifies it. The LIVE line is stack-dependent: config-driven stacks run devkit's
-// `guard-structure` bin (package `bunx guard-structure`, standalone `__dk_gate guard-structure`);
-// electron keeps its consumer-side `bunx eslint src`. Match the live form, never the `# bunx eslint
-// src` placeholder (a `#`-commented line means structure-lint is OFF, not wired).
+// Structure-lint check (only when `structure` is selected). `structure` is NOT a guard, so
+// checkHusky never verifies it. Structure joins the deterministic orchestrator via a `--structure
+// "<cmd>"` arg on the `guard-deterministic` line: config-driven stacks run devkit's own
+// `guard-structure gate` (no consumer eslint dep); electron keeps its consumer-side `bunx eslint
+// src`. Match that exact arg — its absence means structure-lint is not wired.
 function checkStructureLint(cwd, stack) {
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
@@ -98,24 +98,17 @@ function checkStructureLint(cwd, stack) {
     return check('structure-lint', 'MISSING', 'no hook', 'run `devkit init`', true);
   }
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
-  // `guard-structure` only ever appears as a live line (no commented placeholder for it); electron's
-  // live line is disambiguated from the `# bunx eslint src` comment by the accumulator suffix
-  // (the enabled line joins the deterministic aggregation region — see enableStructureLint).
-  const expected = stack === 'electron' ? 'eslint src || DK_DET_FAILS' : 'guard-structure';
-  if (!block.includes(expected)) {
+  const expectedCmd = stack === 'electron' ? 'bunx eslint src' : 'guard-structure gate';
+  if (!block.includes(`--structure "${expectedCmd}"`)) {
     return check(
       'structure-lint',
       'DRIFT',
-      `no live structure-lint line (expected \`${expected}\`)`,
-      'run `devkit init` to enable it',
+      `no \`--structure "${expectedCmd}"\` on the guard-deterministic line`,
+      'run `devkit init --force` to enable it',
       true,
     );
   }
-  return check(
-    'structure-lint',
-    'OK',
-    stack === 'electron' ? 'runs `bunx eslint src`' : 'runs `guard-structure`',
-  );
+  return check('structure-lint', 'OK', `runs \`${expectedCmd}\``);
 }
 
 // Strip // line comments so a jsonc config parses as JSON.
@@ -447,10 +440,9 @@ function applyFix(cwd, results, sel, stack, standalone) {
   const needsInit = results.some(
     (r) => r.fixable && r.status === 'MISSING' && r.name !== 'baselines' && r.name !== 'skills',
   );
-  // The hook's guard block AND the structure-lint line both live in .husky/pre-commit and are both
-  // restored by re-running init (installHusky rebuilds the block; enableStructureLint re-flips the
-  // live line) — so a drifted structure-lint result must take the same repair path (it flags itself
-  // fixable, and would otherwise be a no-op under --fix).
+  // The guard block AND its structure-lint `--structure` arg both live in the .husky/pre-commit
+  // deterministic line, which init rebuilds from the recorded selection — so a drifted structure-lint
+  // result takes the same init repair path (it flags itself fixable, else --fix would no-op it).
   const huskyDrift = results.some(
     (r) => (r.name === '.husky/pre-commit' || r.name === 'structure-lint') && r.status !== 'OK',
   );
