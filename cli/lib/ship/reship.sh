@@ -69,7 +69,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
-git worktree add --detach "$WT" "$BASE" >&2
+git worktree add -q --detach "$WT" "$BASE" >&2
 
 # Same gate-dep symlinks + fail-closed husky guard as new-ship (the gates must actually run).
 if [ ! -e "$ROOT/.husky/_" ]; then
