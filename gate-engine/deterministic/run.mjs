@@ -137,6 +137,21 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
   const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
   const fails = [];
   if (!skip) {
+    // `--only`, when provided, must name known guard ids. A typo (`--only siz,fanout`) or an empty
+    // spec (`--only ,,`) would otherwise filter DETERMINISTIC down to nothing and silently drop a
+    // required gate — the exact fail-open this orchestrator exists to prevent. Fail CLOSED, loudly.
+    if (opts.only) {
+      const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
+      if (unknown.length || opts.only.length === 0) {
+        const why = unknown.length
+          ? `unknown gate id(s): ${unknown.join(', ')}`
+          : 'empty selection';
+        console.error(
+          `✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`,
+        );
+        return 1;
+      }
+    }
     const ids = new Set(opts.only ?? selectedIds(cwd));
     const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
       label: `guard-${g.id}`,
