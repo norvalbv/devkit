@@ -17,6 +17,8 @@ const ENV_KEYS = [
   'FRINK_AI_STRICT',
   'GUARD_REVIEW_MODEL',
   'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_CONCURRENCY',
+  'FRINK_REVIEW_CONCURRENCY',
   'GUARD_NO_COMPLETENESS',
   'FRINK_NO_COMPLETENESS',
   'GUARD_COMPLETENESS_HARD',
@@ -111,6 +113,33 @@ const passWithArtifact = (repo) =>
     writeArtifact(repo, label);
     return 'looks fine\nVERDICT: PASS';
   });
+
+// A judge that brackets each invocation with an in-flight counter so a test can assert the gate's
+// concurrency cap. The `await` on a macrotask (setTimeout) forces overlap: without a cap all selected
+// reviewers would sit in-flight together. `failFirst` returns null on the FIRST call per label (an
+// outage that earns the strict retry) then passes — so the retry is a second sequential exec inside
+// the SAME cascade slot, proving the cap counts cascades, not raw exec calls.
+function concurrencyProbe(repo, { failFirst = false } = {}) {
+  let inflight = 0;
+  let max = 0;
+  const failed = new Set();
+  const exec = mkExec(async ({ label }) => {
+    inflight++;
+    max = Math.max(max, inflight);
+    try {
+      await new Promise((r) => setTimeout(r));
+      if (failFirst && !failed.has(label)) {
+        failed.add(label);
+        return null;
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    } finally {
+      inflight--;
+    }
+  });
+  return { exec, maxInflight: () => max };
+}
 
 describe('runReviewGate — cascade + exit contract', () => {
   it('all reviewers PASS on first pass → exit 0, verdicts cached, no escalation', async () => {
@@ -328,6 +357,54 @@ describe('runReviewGate — per-completion checkpoints', () => {
     expect(err.mock.calls.flat().join('\n')).toMatch(
       /guard-review: api-security-reviewer — PASS in \d+s \(checkpointed\)/,
     );
+  });
+});
+
+describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
+  // consumerRepo({backend, frontend}) stages one file per domain → all 5 reviewers selected.
+  it('default cap 2: at most 2 judge cascades run at once, all still complete + cache', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    const probe = concurrencyProbe(repo);
+    expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+    expect(probe.exec).toHaveBeenCalledTimes(5);
+    expect(probe.maxInflight()).toBe(2);
+    expect(Object.keys(loadCache(repo)).length).toBe(5);
+  });
+
+  it('GUARD_REVIEW_CONCURRENCY=1 fully serializes — never more than 1 in flight', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    process.env.GUARD_REVIEW_CONCURRENCY = '1';
+    const probe = concurrencyProbe(repo);
+    expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+    expect(probe.maxInflight()).toBe(1);
+  });
+
+  it('a cap ≥ reviewer count only BOUNDS, never pads — all 5 run at once', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    process.env.GUARD_REVIEW_CONCURRENCY = '9';
+    const probe = concurrencyProbe(repo);
+    expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+    expect(probe.maxInflight()).toBe(5);
+  });
+
+  it('strict ship: the cap holds even when each cascade runs first + retry (the production path)', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const probe = concurrencyProbe(repo, { failFirst: true }); // first attempt null → one strict retry
+    expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+    expect(probe.exec).toHaveBeenCalledTimes(10); // 5 reviewers × (attempt + retry), sequential in-slot
+    expect(probe.maxInflight()).toBeLessThanOrEqual(2);
+  });
+
+  it('a garbage / out-of-range cap falls back to the default of 2', async () => {
+    for (const bad of ['', '0', '-3', 'abc', '2.9']) {
+      const repo = consumerRepo({ backend: true, frontend: true });
+      process.env.GUARD_REVIEW_CONCURRENCY = bad;
+      const probe = concurrencyProbe(repo);
+      expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+      expect(probe.maxInflight()).toBe(2);
+    }
   });
 });
 
