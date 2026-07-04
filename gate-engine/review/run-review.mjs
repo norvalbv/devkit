@@ -47,16 +47,22 @@ import {
 // Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
 // diff investigation. Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this
 // gate alone: deterministic prefix ~240s (≈0 on a guard-prefix hit) + decisions ≤60s (≈0 on a
-// verdict-cache hit) + this cascade gate. PER-CASCADE worst ≈ 2×300 (strict retry on a TRANSIENT/
-// empty first pass only — a TIMEOUT first pass is NOT re-run, capping it at 1×300) + 420 = 1020s.
-// With the concurrency cap (GUARD_REVIEW_CONCURRENCY, default 2) the gate runs cascades in
-// ceil(N/K) WAVES, so its worst wall-clock ≈ ceil(N/K)×1020s — e.g. 5 reviewers at K=2 = 3×1020 =
-// 3060s, which CAN exceed SHIP_COMMIT_TIMEOUT (1800s default). That is by design: a killed ship
-// CONVERGES on re-run because PASSes checkpoint per-completion and the caches skip everything
-// already earned (docs/decisions/ship-gates-converge-not-restart.md). The cap trades a possible
-// extra ship attempt for each judge getting enough CPU + subscription slots to finish under its own
-// 300s timeout — the self-saturation this gate used to suffer when it fanned out ALL N judges at once.
-const FIRST_TIMEOUT_MS = 300000;
+// verdict-cache hit) + this cascade gate. Under strict (ship) the first pass gets the longer
+// STRICT_FIRST_TIMEOUT_MS so a judge merely CONTENDED — not workload-slow — finishes on its one pass
+// instead of a SIGTERM → spurious exit-3. PER-CASCADE worst ≈ 2×420 (strict retry on a TRANSIENT/
+// empty first pass only — a TIMEOUT first pass is NOT re-run, capping a timed-out strict judge at
+// 1×420) + 420 escalate = 1260s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY, default 2) the
+// gate runs cascades in ceil(N/K) WAVES, so its worst wall-clock ≈ ceil(N/K)×1260s — e.g. 5 reviewers
+// at K=2 = 3×1260 = 3780s, which CAN exceed SHIP_COMMIT_TIMEOUT (1800s default). That is by design: a
+// killed ship CONVERGES on re-run because PASSes checkpoint per-completion and the caches skip
+// everything already earned (docs/decisions/ship-gates-converge-not-restart.md). A SINGLE attempt
+// stays ≤420s, under the 600s foreground tool cap. The cap trades a possible extra ship attempt for
+// each judge getting the CPU + subscription slots to finish under its timeout — the self-saturation
+// this gate used to suffer when it fanned out ALL N judges at once.
+const FIRST_TIMEOUT_MS = 300000; // normal developer commits
+// ship/strict first pass gets the escalate-length cap: a judge merely CONTENDED (parallel `claude`
+// CPU/subscription pressure), not workload-slow, finishes instead of a SIGTERM → false exit-3.
+const STRICT_FIRST_TIMEOUT_MS = 420000;
 const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block; never retried (see cascadeVerdict)
 
 // Bounded-concurrency map: at most `limit` fn calls in flight, input order preserved.
@@ -175,7 +181,7 @@ async function cascadeVerdict(
     label: `review:${reviewer.name}`,
     args: args(prompt, firstModel),
     input: stat,
-    timeout: FIRST_TIMEOUT_MS,
+    timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
     onOutage: (kind) => {
       firstOutage = kind;
@@ -184,9 +190,10 @@ async function cascadeVerdict(
   let first = await exec(firstOpts);
   if (first === null && retryFirst && firstOutage !== 'timeout') {
     // Strict (ship) runs get ONE first-pass retry — a TRANSIENT API failure or empty output must not
-    // fail a ship closed. A TIMEOUT is NOT retried: the re-run would burn the same FIRST_TIMEOUT_MS
-    // again and push the cascade past the ship ceiling for no gain (a slow judge stays slow). The
-    // escalation pass is never retried either: its outage stays inconclusive (blocked under strict).
+    // fail a ship closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
+    // STRICT_FIRST_TIMEOUT_MS, so a re-run would burn that same budget again and push the cascade past
+    // the ship ceiling for no gain (a contended judge got its extra time UP FRONT). The escalation
+    // pass is never retried either: its outage stays inconclusive (blocked under strict).
     // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
     // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
     console.error(
