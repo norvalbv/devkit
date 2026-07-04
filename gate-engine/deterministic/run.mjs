@@ -60,7 +60,7 @@ const ALL_IDS = DETERMINISTIC.map((g) => g.id);
 // regex compile).
 const WHITESPACE_RE = /\s+/;
 
-function parseOpts(argv) {
+export function parseOpts(argv) {
   const opts = { extra: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--hook' && argv[i + 1]) opts.hookPath = argv[++i];

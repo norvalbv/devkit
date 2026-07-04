@@ -285,6 +285,24 @@ describe('doctor — selection-aware', () => {
     expect(after.stdout).toMatch(/structure-lint: OK/);
   });
 
+  it('flags a PRE-COLLAPSE hook (per-guard lines, no guard-deterministic) as DRIFT and --fix repairs it', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    // Simulate a hook from a pre-#11 devkit: the deterministic guards ran as per-id `bunx guard-X`
+    // lines with no `guard-deterministic` orchestrator. Strip the orchestrator line to reproduce it.
+    const hookPath = join(root, '.husky/pre-commit');
+    const stripped = readFileSync(hookPath, 'utf8').replace(/^.*guard-deterministic.*$/m, '');
+    writeFileSync(hookPath, stripped);
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/\.husky\/pre-commit: DRIFT.*deterministic gates/s);
+
+    devkit(root, 'doctor', '--fix');
+    const after = devkit(root, 'doctor');
+    expect(after.status).toBe(0);
+    expect(readFileSync(hookPath, 'utf8')).toContain('bunx guard-deterministic');
+  });
+
   it('does NOT flag biome missing when biome was deselected', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--no-biome');
