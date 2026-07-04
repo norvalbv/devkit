@@ -439,6 +439,28 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     expect(out).not.toContain('retrying once');
   });
 
+  it('strict first pass runs on the longer 420s cap (contention headroom); a normal commit keeps 300s', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Capture the FIRST-pass timeout the gate hands each judge. Fresh repo per run so the PASS cache
+    // (keyed on reviewer + diff hash) can't skip the second run's exec calls.
+    const capFor = async (repo) => {
+      let seen;
+      const probe = mkExec(async (opts) => {
+        seen = opts.timeout;
+        writeArtifact(repo, opts.label);
+        return 'VERDICT: PASS';
+      });
+      expect(await runReviewGate(repo, { exec: probe })).toBe(0);
+      return seen;
+    };
+
+    process.env.GUARD_AI_STRICT = '1';
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(420000); // STRICT_FIRST_TIMEOUT_MS
+
+    delete process.env.GUARD_AI_STRICT;
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(300000); // FIRST_TIMEOUT_MS
+  });
+
   it('outage-then-success: the retry recovers and the gate passes clean', async () => {
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});
