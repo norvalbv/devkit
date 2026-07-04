@@ -5,7 +5,7 @@
 #      non-zero ESLint exit + stderr + exit 2 feeds the message back into the conversation.
 #
 # Portable (W-3): the ESLint gate only applies to files under the consumer's configured
-# scanRoots (resolveGuardConfig). No hardcoded src/socket-server/vercel paths. Biome + ESLint
+# scanRoots (from guard.config.json). No hardcoded src/socket-server/vercel paths. Biome + ESLint
 # are run via the consumer's own local binaries; each step degrade-skips when its tool/config
 # is absent (a repo without eslint, or without a scanRoot match, is never blocked).
 
@@ -36,11 +36,12 @@ if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]]; then
   fi
 fi
 
-# ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them
-# from guard.config.json via the devkit config loader; skip the whole step if unresolvable.
+# ESLint structure/size check — scoped to the consumer's configured scanRoots. Resolve them by
+# parsing guard.config.json directly (repo root = cwd); NO package import, because under global-CLI
+# consumption @norvalbv/devkit is not a node_modules dependency. Absent/corrupt config → skip.
 if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; then
-  RESOLVER='import("@norvalbv/devkit/gate-engine/config").then(m=>{const r=m.resolveGuardConfig();process.stdout.write((r.scanRoots||[]).join("\n"))}).catch(()=>process.exit(1))'
-  scan_roots=$(node --input-type=module -e "$RESOLVER" 2>/dev/null)
+  RESOLVER='const fs=require("fs");try{const c=JSON.parse(fs.readFileSync("guard.config.json","utf8"));const r=Array.isArray(c&&c.scanRoots)?c.scanRoots:["src"];process.stdout.write(r.join("\n"))}catch(e){process.exit(1)}'
+  scan_roots=$(node -e "$RESOLVER" 2>/dev/null)
   in_scope=""
   if [ -n "$scan_roots" ]; then
     # Match the edited file against any configured scanRoot path segment.
