@@ -16,7 +16,7 @@
 input=$(cat)
 
 # Loop guard: never block a stop that we ourselves re-invoked.
-echo "$input" | grep -q '"stop_hook_active":\s*true' && exit 0
+echo "$input" | grep -q '"stop_hook_active":[[:space:]]*true' && exit 0
 
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" 2>/dev/null || exit 0
 
