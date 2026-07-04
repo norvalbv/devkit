@@ -4,7 +4,7 @@
 # conversation (stop_hook_active loop guard).
 #
 # Portable (W-3): knip is NOT a devkit dependency. This hook DEGRADE-SKIPS unless the consumer
-# has a knip config (knip.json / knip.jsonc) AND a `knip` script — so a repo without knip is
+# has a knip config (any of knip's config forms) AND a `knip` script — so a repo without knip is
 # never blocked. Runs the consumer's own knip via its npm-script. No frink-specific paths.
 
 input=$(cat)
@@ -18,10 +18,17 @@ command -v bun &>/dev/null || exit 0
 [ -f "package.json" ] || exit 0
 
 # DEGRADE-SKIP: no knip config in the consumer repo → knip isn't set up here, do nothing.
-[ -f "knip.json" ] || [ -f "knip.jsonc" ] || [ -f "knip.ts" ] || [ -f "knip.config.ts" ] || exit 0
+# Match every config form knip resolves (knip.dev/overview/configuration).
+have_config=""
+for f in knip.json knip.jsonc .knip.json .knip.jsonc knip.ts knip.js knip.config.ts knip.config.js; do
+  [ -f "$f" ] && { have_config=1; break; }
+done
+# 9th form: a `knip` key in package.json. bun -e (not node) — this hook requires only bun
+# (line 17), so a node probe silently skips in a bun-only toolchain.
+[ -n "$have_config" ] || bun -e "process.exit(require('./package.json').knip?0:1)" 2>/dev/null || exit 0
 
 # Require a `knip` npm-script (degrade-skip otherwise — we don't assume knip is installed).
-node -e "process.exit(((require('./package.json').scripts||{})['knip'])?0:1)" 2>/dev/null || exit 0
+bun -e "process.exit(((require('./package.json').scripts||{})['knip'])?0:1)" 2>/dev/null || exit 0
 
 # Rely on exit code — not grep "Unused" (substring false positives).
 if ! knip_output=$(bun run knip 2>&1); then

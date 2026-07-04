@@ -17,8 +17,9 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" 2>/dev/null || exit 0
 command -v bun &>/dev/null || exit 0
 [ -f "package.json" ] || exit 0
 
-# Does package.json define a given npm-script? (degrade-skip guard.)
-has_script() { node -e "process.exit(((require('./package.json').scripts||{})['$1'])?0:1)" 2>/dev/null; }
+# Does package.json define a given npm-script? (degrade-skip guard.) bun -e, not node — this hook
+# requires only bun (line 17), so a node probe silently skips in a bun-only toolchain.
+has_script() { bun -e "process.exit(((require('./package.json').scripts||{})['$1'])?0:1)" 2>/dev/null; }
 
 truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else echo "$1"; fi; }
 

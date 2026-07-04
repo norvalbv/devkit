@@ -41,7 +41,13 @@ fi
 # consumption @norvalbv/devkit is not a node_modules dependency. Absent/corrupt config → skip.
 if [[ "$file_path" =~ \.(tsx?|css)$ ]] && [ -x "./node_modules/.bin/eslint" ]; then
   RESOLVER='const fs=require("fs");try{const c=JSON.parse(fs.readFileSync("guard.config.json","utf8"));const r=Array.isArray(c&&c.scanRoots)?c.scanRoots:["src"];process.stdout.write(r.join("\n"))}catch(e){process.exit(1)}'
-  scan_roots=$(node -e "$RESOLVER" 2>/dev/null)
+  # Resolve via whichever JS runtime exists — this block runs the eslint binary directly (not via
+  # `bun run`), so it must not hard-require either bun or node. RESOLVER is plain CJS (runs in both).
+  if command -v bun &>/dev/null; then
+    scan_roots=$(bun -e "$RESOLVER" 2>/dev/null)
+  else
+    scan_roots=$(node -e "$RESOLVER" 2>/dev/null)
+  fi
   in_scope=""
   if [ -n "$scan_roots" ]; then
     # Match the edited file against any configured scanRoot path segment.
