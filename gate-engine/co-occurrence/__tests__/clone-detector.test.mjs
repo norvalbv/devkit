@@ -196,6 +196,69 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
   });
 });
 
+// The approve-command dump is capped (APPROVE_CAP) so a big clone batch doesn't flood the
+// commit/ship log — but every clone must still appear as a ROW. The cap trims only the
+// copy-paste helper, never the finding. Two things regress silently if this breaks:
+//   1. off-by-one: `>= CAP` instead of `> CAP` prints a bogus "+0 more" exactly at the cap.
+//   2. row truncation: if a future "optimization" caps rows too, clones vanish from the report.
+describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
+  const APPROVE_CAP = 6; // must match clone-detector.mjs
+
+  // n distinct >50-token blocks, each duplicated across its own a<i>/b<i> pair → n novel
+  // cross-file clones. Blocks differ by token (compute_i, seen_i, *i, label-i) so a<i>
+  // matches ONLY b<i> — the shared lines between pairs (`for (...)`, `const average`) are
+  // single lines, far under jscpd's min-tokens, so no cross-pair or same-file inflation.
+  function writeNClones(dir, n) {
+    for (let i = 1; i <= n; i++) {
+      const block = `export function compute_${i}(items) {
+  let total = 0; let count = 0; let seen_${i} = 0;
+  for (const item of items) {
+    if (item.active_${i} && item.value > 0) { total += item.value * ${i}; count += 1; seen_${i} += 1; }
+  }
+  const average = count > 0 ? total / count : 0;
+  return { total, count, average, seen_${i}, label: 'block-number-${i}-summary' };
+}`;
+      writeFileSync(join(dir, `a${i}.ts`), `${block}\nexport const A_${i} = 1;\n`);
+      writeFileSync(join(dir, `b${i}.ts`), `${block}\nexport const B_${i} = 2;\n`);
+    }
+  }
+
+  function runGate(n) {
+    const dir = mkdtempSync(join(tmpdir(), 'clone-cap-'));
+    writeNClones(dir, n);
+    try {
+      execFileSync('node', [DETECTOR, 'scan', '--gate', '--paths', dir], {
+        env: { ...process.env, MATCHER_CHANGED_FILES: '', JSCPD_BIN },
+        encoding: 'utf8',
+      });
+      return { status: 0, stdout: '' };
+    } catch (e) {
+      return { status: e.status, stdout: `${e.stdout ?? ''}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const cmdCount = (s) => (s.match(/add-clone/g) || []).length;
+  const rowCount = (s) => (s.match(/^\s+\d+L\s+[0-9a-f]{16}/gm) || []).length;
+
+  it(`at the cap (${APPROVE_CAP}): prints all ${APPROVE_CAP} commands and NO "+N more" line`, () => {
+    const { status, stdout } = runGate(APPROVE_CAP);
+    expect(status).toBe(1); // still blocks
+    expect(cmdCount(stdout)).toBe(APPROVE_CAP);
+    expect(stdout).not.toMatch(/\+\d+ more/); // `> CAP`, not `>= CAP`
+    expect(rowCount(stdout)).toBe(APPROVE_CAP); // every finding listed
+  });
+
+  it(`over the cap (${APPROVE_CAP + 1}): commands capped + "+1 more", but ALL rows listed`, () => {
+    const { status, stdout } = runGate(APPROVE_CAP + 1);
+    expect(status).toBe(1);
+    expect(cmdCount(stdout)).toBe(APPROVE_CAP); // helper truncated to the cap
+    expect(stdout).toContain('(+1 more'); // overflow count is exact
+    expect(rowCount(stdout)).toBe(APPROVE_CAP + 1); // finding is NEVER truncated
+  });
+});
+
 // From-temp-cwd: prove the engine scans the CONSUMER cwd (W-3), not the package dir. We run
 // the detector with cwd = a throwaway repo that has its OWN src/ + guard.config.json; default
 // --paths must resolve to THAT repo's scanRoots and surface its clone. If the engine reached

@@ -236,13 +236,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
     if (novel.length > 0) {
       console.log(`\nclone gate: ${novel.length} new clone(s) — block.`);
-      // Ready-to-paste approval per clone, pre-filled with lines + ranges (fill in <why>),
-      // so an approved entry keeps its metadata instead of the empty fields you get by hand.
+      // Ready-to-paste approval, pre-filled with lines + ranges (fill in <why>), so an
+      // approved entry keeps its metadata instead of the empty fields you get by hand.
+      // Capped to APPROVE_CAP (mirrors matcher.mjs) — every clone is listed in the rows
+      // above; the full command set stays out of the token stream and re-prints on re-run.
+      const APPROVE_CAP = 6;
       console.log('To approve an intentional clone (fill in the reason):');
-      for (const c of novel) {
+      for (const c of novel.slice(0, APPROVE_CAP)) {
         console.log(
           `  ${CO_SCRIPT} add-clone "${c.fragmentHash}" "${c.fileA}" "${c.fileB}" --lines ${c.lines} --range-a ${loc(c, 'startA')}-${loc(c, 'endA')} --range-b ${loc(c, 'startB')}-${loc(c, 'endB')} --description "<why>"`,
         );
+      }
+      if (novel.length > APPROVE_CAP) {
+        console.log(`  (+${novel.length - APPROVE_CAP} more — re-run after addressing these)`);
       }
     } else {
       console.log('clone gate: no new clones ✓');
