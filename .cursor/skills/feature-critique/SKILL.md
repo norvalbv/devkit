@@ -54,16 +54,16 @@ directory so both tools read from a single source of truth.
 
 ```
 ## Proposal
-Symlink the bundled skills/ and agents/ into each repo's .cursor/skills and
-.claude/skills as a single source of truth, instead of copying the files in.
+Symlink the bundled skills/ and agents/ into each repo's .cursor/ and .claude/
+as a single source of truth, instead of copying the files in.
 
 ## Problem Statement
 The sync copies skills/agents into both .cursor/ and .claude/ on every run; the
 copies drift from the source and double the committed file count.
 
 ## Proposed Solution
-Replace the copy step with symlinks from each agent surface into one canonical
-skills/ directory. A setup script creates the links.
+Replace the copy step with symlinks from each agent surface into the canonical
+skills/ and agents/ directories. A setup script creates the links.
 
 ## Tech Stack & Constraints
 - Node CLI, consumed by repos it doesn't control
@@ -155,7 +155,7 @@ truth, instead of copying the files...
 Duplicate skill/agent copies across .cursor/ and .claude/ drift apart...
 
 ## Proposed Solution
-Symlink each surface into one canonical skills/ directory...
+Symlink each surface into the canonical skills/ and agents/ directories...
 
 ## Additional Context
 Neither Cursor nor Claude CLI document following symlinks to arbitrary paths;
