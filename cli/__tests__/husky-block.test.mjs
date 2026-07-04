@@ -295,4 +295,15 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
   it('runs the deterministic orchestrator command -v-guarded (global bin)', () => {
     expect(hook).toContain('command -v guard-deterministic');
   });
+
+  it('does NOT forward structure to the orchestrator (overlay is deliberately structure-free)', () => {
+    // The overlay is non-invasive and sets up no structure config, so buildOverlayHook calls
+    // standaloneDeterministicLines() with no command — passing structureCmd must not leak a
+    // --structure arg in. Lock the intentional omission so it is not re-added by accident.
+    const withStruct = buildOverlayHook(
+      { guards: [...GUARD_IDS], structureCmd: 'guard-structure gate' },
+      '.husky/pre-commit',
+    );
+    expect(withStruct).not.toContain('--structure');
+  });
 });

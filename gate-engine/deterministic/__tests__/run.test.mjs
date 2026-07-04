@@ -142,6 +142,23 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(mods).toContain('size-disable');
     expect(mods).toContain('folder-fanout');
   });
+
+  it('a typoed --only id fails CLOSED before running any gate (no silent drop)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    // `siz` is a typo for `size` — must NOT silently run zero built-ins.
+    expect(runDeterministic(repo(['size']), { exec, only: ['siz', 'fanout'] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('unknown gate id(s): siz');
+    expect(exec).not.toHaveBeenCalled(); // refused before the gate loop
+  });
+
+  it('an empty --only selection (e.g. `--only ,,` → []) fails CLOSED, never runs zero built-ins silently', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size']), { exec, only: [] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('empty selection');
+    expect(exec).not.toHaveBeenCalled();
+  });
 });
 
 describe('selectedIds', () => {

@@ -17,6 +17,7 @@ import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mjs';
 import { HEAL_ALIAS_NAME, isHealAlias } from '../lib/overlay.mjs';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mjs';
+import { structureCmdFor } from './init.mjs';
 import { cmpSemver } from './update.mjs';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
@@ -98,7 +99,7 @@ function checkStructureLint(cwd, stack) {
     return check('structure-lint', 'MISSING', 'no hook', 'run `devkit init`', true);
   }
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
-  const expectedCmd = stack === 'electron' ? 'bunx eslint src' : 'guard-structure gate';
+  const expectedCmd = structureCmdFor(stack);
   if (!block.includes(`--structure "${expectedCmd}"`)) {
     return check(
       'structure-lint',

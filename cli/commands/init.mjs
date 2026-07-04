@@ -87,6 +87,15 @@ const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 // uses eslint/domains.mjs, so it stays package-mode with consumer-side deps.
 const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
 
+// The structure-lint command a stack runs on the guard-deterministic `--structure` arg. Config-driven
+// stacks use devkit's own `guard-structure` bin (the orchestrator resolves it as a sibling module, so
+// no consumer eslint dep); every other structure stack (electron) keeps its consumer-side `bunx eslint
+// src`. Shared with doctor's checkStructureLint so the expected arg stays in lockstep with what init
+// emits when the stack rules change.
+export function structureCmdFor(stack) {
+  return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
+}
+
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
 const STRUCTURE_TEMPLATE_FILES = {
@@ -954,11 +963,7 @@ export async function applyInit(cwd, plan) {
   // Config-driven stacks run devkit's own `guard-structure` bin (no consumer eslint dep — the
   // orchestrator resolves it as a sibling module); electron keeps its consumer-side `bunx eslint
   // src`. Undefined when structure is off → no `--structure` arg emitted.
-  const structureCmd = isStructure
-    ? CONFIG_DRIVEN_STRUCTURE.has(stack)
-      ? 'guard-structure gate'
-      : 'bunx eslint src'
-    : undefined;
+  const structureCmd = isStructure ? structureCmdFor(stack) : undefined;
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
@@ -1000,8 +1005,9 @@ export async function applyInit(cwd, plan) {
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    // Pass the EFFECTIVE structure flag (isStructure, not the raw request) so the standalone block
-    // emits `__dk_gate guard-structure gate` only when structure actually applies to this stack/mode.
+    // Thread the resolved structureCmd into the selection so the block emits `--structure "<cmd>"`
+    // on the guard-deterministic line only when structure actually applies (structureCmd is
+    // undefined otherwise). Same path for package and standalone.
     if (standalone) installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
   }
