@@ -14,8 +14,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { buildFullHook } from '../lib/husky/husky-block.mjs';
 
 // Execute the ASSEMBLED hook under a real `sh -e` with a stub `bunx` that dispatches per tool
-// (exit codes via env knobs) and logs every invocation — proving the aggregation, prefix-skip,
-// and AI-gate ordering contracts end-to-end rather than by string inspection.
+// (exit codes via env knobs) and logs every invocation. The hook now delegates the whole
+// deterministic set (prefix cache → guards → structure → aggregation) to the single
+// `guard-deterministic` orchestrator, so its internal trichotomy/aggregation is proven in
+// gate-engine/deterministic/__tests__/run.test.mjs. THIS harness proves the SHELL contract the
+// hook still owns: the orchestrator gates the AI fragments (`|| exit 1`), the AI gates stay
+// fail-fast with their outage remedies, and it all survives dash + a hook path with spaces.
 
 const homes = [];
 afterEach(() => {
@@ -30,7 +34,7 @@ const hasDash = existsSync('/bin/dash');
 
 function runHook(
   env = {},
-  guards = ALL_GUARDS,
+  selection = { biome: false, guards: ALL_GUARDS },
   { shell = 'sh', dirPrefix = 'dk-hook-exec-' } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -43,20 +47,16 @@ function runHook(
 tool="$1"; shift
 echo "$tool $*" >> "$HOME/calls.log"
 case "$tool" in
-  guard-size) exit \${SIZE_RC:-0};;
-  guard-fanout) exit \${FANOUT_RC:-0};;
-  guard-dup) exit \${DUP_RC:-0};;
-  guard-clone) exit \${CLONE_RC:-0};;
+  guard-deterministic) exit \${DET_RC:-0};;
   guard-decisions) exit \${DEC_RC:-0};;
   guard-review) exit \${REVIEW_RC:-0};;
-  guard-prefix) case "$1" in check) exit \${PREFIX_CHECK_RC:-1};; *) exit 0;; esac;;
   *) exit 0;;
 esac
 `,
   );
   chmodSync(join(bin, 'bunx'), 0o755);
   const hookPath = join(home, 'pre-commit');
-  writeFileSync(hookPath, buildFullHook({ biome: false, guards }));
+  writeFileSync(hookPath, buildFullHook(selection));
   let status = 0;
   let stdout = '';
   try {
@@ -79,39 +79,35 @@ esac
 }
 
 describe('assembled hook execution (stubbed bunx, sh -e)', () => {
-  it('TWO deterministic failures are BOTH reported in one aggregated block (single exit 1)', () => {
-    const r = runHook({ SIZE_RC: '1', DUP_RC: '1' });
+  it('a deterministic failure blocks the hook (exit 1) and the AI gates never run', () => {
+    const r = runHook({ DET_RC: '1' });
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('deterministic gates failed: guard-size guard-dup');
-    // fanout/clone still ran (no fail-fast between deterministic gates)…
-    expect(r.calls).toContain('guard-fanout');
-    expect(r.calls).toContain('guard-clone');
-    // …but the AI gates never spend on a doomed commit, and nothing is recorded.
+    expect(r.calls).toContain('guard-deterministic');
+    // `guard-deterministic … || exit 1` — a doomed commit never pays for a judge.
     expect(r.calls).not.toContain('guard-decisions');
-    expect(r.calls).not.toContain('guard-prefix record');
+    expect(r.calls).not.toContain('guard-review');
   });
 
-  it('exit-2 gates fail open: hook exits 0 and records the prefix key', () => {
-    const r = runHook({ SIZE_RC: '2', DUP_RC: '2' });
+  it('a clean deterministic run lets the AI gates run', () => {
+    const r = runHook({ DET_RC: '0' });
     expect(r.status).toBe(0);
-    expect(r.calls).toContain('guard-prefix record');
-  });
-
-  it('a prefix-cache hit skips every deterministic gate but the AI gates still run', () => {
-    const r = runHook({ PREFIX_CHECK_RC: '0' });
-    expect(r.status).toBe(0);
-    expect(r.calls).not.toContain('guard-size');
-    expect(r.calls).not.toContain('guard-dup');
+    expect(r.calls).toContain('guard-deterministic');
     expect(r.calls).toContain('guard-decisions');
     expect(r.calls).toContain('guard-review');
-    // already cached — never re-recorded
-    expect(r.calls).not.toContain('guard-prefix record');
   });
 
-  it('an unexpected deterministic code is aggregated with its code named', () => {
-    const r = runHook({ FANOUT_RC: '127' });
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('guard-fanout(unexpected:127)');
+  it('passes the resolved structure command through to the orchestrator', () => {
+    const r = runHook(
+      { DET_RC: '0' },
+      {
+        biome: false,
+        guards: ALL_GUARDS,
+        structureCmd: 'guard-structure gate',
+      },
+    );
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-deterministic --hook');
+    expect(r.calls).toContain('--structure guard-structure gate');
   });
 
   it('guard-review exit 3 (strict fail-closed) blocks with the outage remedy, not a violation banner', () => {
@@ -134,25 +130,26 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
 });
 
 describe('assembled hook — shell/OS variants', () => {
-  it.runIf(hasDash)(
-    'dash (Debian/Ubuntu /bin/sh): aggregation, prefix skip and fail-open all hold',
-    () => {
-      const opts = { shell: '/bin/dash' };
-      const agg = runHook({ SIZE_RC: '1', DUP_RC: '1' }, ALL_GUARDS, opts);
-      expect(agg.status).toBe(1);
-      expect(agg.stdout).toContain('deterministic gates failed: guard-size guard-dup');
-      expect(runHook({ SIZE_RC: '2' }, ALL_GUARDS, opts).status).toBe(0); // exit-2 fail-open under dash -e
-      const skip = runHook({ PREFIX_CHECK_RC: '0' }, ALL_GUARDS, opts);
-      expect(skip.status).toBe(0);
-      expect(skip.calls).not.toContain('guard-size');
-      expect(skip.calls).toContain('guard-review');
-    },
-  );
+  it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): det-gate blocking + AI ordering hold', () => {
+    const opts = { shell: '/bin/dash' };
+    const fail = runHook({ DET_RC: '1' }, { biome: false, guards: ALL_GUARDS }, opts);
+    expect(fail.status).toBe(1);
+    expect(fail.calls).not.toContain('guard-decisions');
+    const clean = runHook({ DET_RC: '0' }, { biome: false, guards: ALL_GUARDS }, opts);
+    expect(clean.status).toBe(0);
+    expect(clean.calls).toContain('guard-review');
+  });
 
   it('a hook path containing SPACES survives every "$0"-derived quoting seam', () => {
     // devkit itself lives under "Personal and learning/" — the harness dir gets a space too.
-    const r = runHook({ PREFIX_CHECK_RC: '0' }, ALL_GUARDS, { dirPrefix: 'dk hook exec-' });
+    const r = runHook(
+      { DET_RC: '0' },
+      { biome: false, guards: ALL_GUARDS },
+      {
+        dirPrefix: 'dk hook exec-',
+      },
+    );
     expect(r.status).toBe(0);
-    expect(r.calls).toContain('guard-prefix check');
+    expect(r.calls).toContain('guard-deterministic --hook');
   });
 });

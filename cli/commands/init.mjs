@@ -87,6 +87,15 @@ const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 // uses eslint/domains.mjs, so it stays package-mode with consumer-side deps.
 const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
 
+// The structure-lint command a stack runs on the guard-deterministic `--structure` arg. Config-driven
+// stacks use devkit's own `guard-structure` bin (the orchestrator resolves it as a sibling module, so
+// no consumer eslint dep); every other structure stack (electron) keeps its consumer-side `bunx eslint
+// src`. Shared with doctor's checkStructureLint so the expected arg stays in lockstep with what init
+// emits when the stack rules change.
+export function structureCmdFor(stack) {
+  return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
+}
+
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
 const STRUCTURE_TEMPLATE_FILES = {
@@ -113,11 +122,6 @@ const STRUCTURE_TEMPLATE_FILES = {
 // devDeps/scripts owned by each component — used by both install (add) and remove (delete).
 const BIOME_DEV_DEPS = ['@biomejs/biome'];
 const BIOME_SCRIPTS = ['lint', 'format'];
-
-// The commented structure-lint placeholder line a structure stack flips live (and removal
-// re-comments). Hoisted to module scope (perf: avoid recompiling per call).
-const COMMENTED_LINT_RE = /\n# bunx eslint src.*\n/;
-const GUARD_STRUCTURE_RE = /\bguard-structure\b/;
 
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
@@ -225,7 +229,13 @@ function detectInstalled(cwd) {
   if (existsSync(hookPath)) {
     installed.add('husky');
     const hook = readFileSync(hookPath, 'utf8');
-    if (GUARD_IDS.some((g) => hasFragment(hook, `guard-${g}`))) installed.add('guards');
+    // Guards now surface as the single `deterministic` orchestrator fragment (size/fanout/dup/clone)
+    // plus per-id AI fragments (decisions/review) — any of them means guards are wired.
+    if (
+      hasFragment(hook, 'deterministic') ||
+      GUARD_IDS.some((g) => hasFragment(hook, `guard-${g}`))
+    )
+      installed.add('guards');
   }
   return installed;
 }
@@ -602,60 +612,6 @@ async function applyFallow(cwd, dryRun, interactive) {
   }
 }
 
-// Flip the commented structure-lint placeholder to the live `bunx eslint src` call, scoped to
-// THIS package's block (a monorepo hook may hold several). Inside a package block the gates run
-// cd'd into the package, so `bunx eslint src` resolves the package's own eslint.config + src.
-function enableStructureLint(hookRoot, pkgRel, dryRun, liveCmd = 'bunx eslint src') {
-  const hookPath = join(hookRoot, '.husky', 'pre-commit');
-  if (!existsSync(hookPath)) return;
-  const content = readFileSync(hookPath, 'utf8');
-  const block = extractGuardBlock(content, pkgRel);
-  if (!block) {
-    console.log('  ! no devkit-guards block to enable structure-lint in');
-    return;
-  }
-  // "Already enabled" = the NEW aggregation form is present. Match its exact marker, NOT a bare
-  // `${liveCmd}` substring — that also appears inside a legacy `${liveCmd} || exit 1` line, which is a
-  // DIFFERENT (fail-fast, un-aggregated) shape we must MIGRATE, not skip as already done.
-  const enabledMarker = GUARD_STRUCTURE_RE.test(liveCmd)
-    ? `${liveCmd} || rc=$?`
-    : `${liveCmd} || DK_DET_FAILS`;
-  if (block.includes(enabledMarker)) {
-    console.log('  • structure-lint already enabled in .husky/pre-commit');
-    return;
-  }
-  // What we replace: the commented placeholder (fresh init) OR a legacy fail-fast live line left by a
-  // PRE-CONVERGENCE hook (the upgrade edge). The legacy line sits OUTSIDE the DK_DET_FAILS aggregation
-  // and would exit on the first violation + ignore the prefix-cache skip — so it is MIGRATED, not left.
-  const legacy = ['\nbunx guard-structure || exit 1\n', '\nbunx eslint src || exit 1\n'].find((l) =>
-    block.includes(l),
-  );
-  const target = COMMENTED_LINT_RE.test(block) ? COMMENTED_LINT_RE : legacy;
-  if (!target) {
-    console.log('  ! no structure-lint placeholder or legacy line to enable in .husky/pre-commit');
-    return;
-  }
-  const migrating = typeof target === 'string'; // a legacy `|| exit 1` line, not the commented placeholder
-  if (dryRun) {
-    const verb = migrating ? 'migrate the legacy structure-lint line to' : 'uncomment';
-    console.log(`  [dry-run] ${verb} \`${liveCmd}\` in .husky/pre-commit`);
-    return;
-  }
-  // The live line joins the deterministic region: skipped on a prefix-cache hit, and a
-  // violation ACCUMULATES into DK_DET_FAILS (reported by devkit:det-verdict) instead of
-  // exiting fail-fast — same contract as the guard fragments around it. guard-structure keeps
-  // the guard rc trichotomy (exit 2 = could-not-run → fail-open); eslint has no fail-open code
-  // (its exit 2 is a fatal config error), so any non-zero accumulates.
-  const structureLive = GUARD_STRUCTURE_RE.test(liveCmd)
-    ? `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    rc=0\n    ${liveCmd} || rc=$?\n    if [ "$rc" -eq 1 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\n    elif [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then\n        DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint(unexpected:$rc)"\n    fi\nfi\n`
-    : `\nif [ -z "\${DK_PREFIX_SKIP:-}" ]; then\n    ${liveCmd} || DK_DET_FAILS="\${DK_DET_FAILS:-} structure-lint"\nfi\n`;
-  const newBlock = block.replace(target, structureLive);
-  writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
-  console.log(
-    `  ✓ ${migrating ? 'migrated' : 'enabled'} structure-lint (\`${liveCmd}\`) in .husky/pre-commit`,
-  );
-}
-
 // ── removal steps (SAFE: never delete a file devkit didn't create) ───────────
 
 // Reason: CRAP-flagged thin package.json mutator: two near-identical key-delete loops (devDeps, scripts) each gated on existence + dryRun; exercised end-to-end via every remove* caller, not unit-isolated
@@ -764,10 +720,12 @@ function removeHuskyPiece(hookRoot, pkgRel, id, dryRun) {
   return true;
 }
 
-// Remove ONLY devkit-created structure files (guarded by config marker), re-comment the line.
-// Reason: safe-removal sequence guarded per artifact: marker check → delete template files → delete baselines → strip pkg entries → re-comment the live eslint hook line; each existsSync/dryRun branch is a separate file devkit must verify it created before touching
+// Remove ONLY devkit-created structure files (guarded by config marker). The structure-lint
+// `--structure` arg is not a standalone hook line — installHusky (step 3) already rebuilt the
+// deterministic line without it — so nothing to strip from the hook here.
+// Reason: safe-removal sequence guarded per artifact: marker check → delete template files → delete baselines → strip pkg entries; each existsSync/dryRun branch is a separate file devkit must verify it created before touching
 // fallow-ignore-next-line complexity
-function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
+function removeStructure(cwd, prevConfig, dryRun) {
   if (!prevConfig?.components?.structure) {
     console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
     return;
@@ -794,24 +752,6 @@ function removeStructure(cwd, prevConfig, hookRoot, pkgRel, dryRun) {
   );
   if (pkgRemoved.length) {
     console.log(`  ${dryRun ? '[dry-run]' : '✓'} package.json: -${pkgRemoved.join(', -')}`);
-  }
-  // Re-comment the live structure-lint line inside THIS package's block at the git-root hook. The
-  // live line is stack-dependent: `bunx guard-structure` (config-driven) or `bunx eslint src` (electron).
-  const hookPath = join(hookRoot, '.husky', 'pre-commit');
-  if (existsSync(hookPath)) {
-    const content = readFileSync(hookPath, 'utf8');
-    const block = extractGuardBlock(content, pkgRel);
-    const placeholder = '\n# bunx eslint src  # uncomment after `devkit init --stack <x>`\n';
-    const live = ['\nbunx guard-structure || exit 1\n', '\nbunx eslint src || exit 1\n'].find((l) =>
-      block?.includes(l),
-    );
-    if (live) {
-      const newBlock = block.replace(live, placeholder);
-      if (!dryRun) writeFileSync(hookPath, replaceGuardBlock(content, newBlock, pkgRel));
-      console.log(
-        `  ${dryRun ? '[dry-run]' : '✓'} re-commented structure-lint line in .husky/pre-commit`,
-      );
-    }
   }
 }
 
@@ -841,7 +781,7 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
     if (survivors.length) installHookRegistrations(gitRoot, survivors, { dryRun });
     else removeHookRegistrations(gitRoot, { dryRun });
   }
-  if (remove.includes('structure')) removeStructure(cwd, prevConfig, gitRoot, pkgRel, dryRun);
+  if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
   if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
 
@@ -1018,6 +958,12 @@ export async function applyInit(cwd, plan) {
     selection.structure &&
     STRUCTURE_STACKS.has(stack) &&
     (!standalone || CONFIG_DRIVEN_STRUCTURE.has(stack));
+  // The stack-resolved structure-lint command, joined to the deterministic orchestrator via
+  // `--structure` (so a structure violation lands in the SAME aggregated report as the guards).
+  // Config-driven stacks run devkit's own `guard-structure` bin (no consumer eslint dep — the
+  // orchestrator resolves it as a sibling module); electron keeps its consumer-side `bunx eslint
+  // src`. Undefined when structure is off → no `--structure` arg emitted.
+  const structureCmd = isStructure ? structureCmdFor(stack) : undefined;
   const devkitPkg = readJson(join(packageDir(), 'package.json'));
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
@@ -1059,11 +1005,11 @@ export async function applyInit(cwd, plan) {
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    // Pass the EFFECTIVE structure flag (isStructure, not the raw request) so the standalone block
-    // emits `__dk_gate guard-structure gate` only when structure actually applies to this stack/mode.
-    if (standalone)
-      installStandaloneHook(gitRoot, pkgRel, { ...selection, structure: isStructure }, dryRun);
-    else installHusky(selection, gitRoot, pkgRel, dryRun);
+    // Thread the resolved structureCmd into the selection so the block emits `--structure "<cmd>"`
+    // on the guard-deterministic line only when structure actually applies (structureCmd is
+    // undefined otherwise). Same path for package and standalone.
+    if (standalone) installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
+    else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
   }
 
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
@@ -1074,17 +1020,9 @@ export async function applyInit(cwd, plan) {
   if (isStructure) {
     console.log('5. structure + import-wall baselines (grandfather current tree)');
     await runStructureBaselines(cwd, stack, dryRun, regenStructureBaselines);
-    // Package mode flips the commented placeholder to the live structure-lint line: config-driven
-    // stacks run the devkit `guard-structure` bin (no consumer eslint dep); electron keeps its
-    // consumer-side `bunx eslint src` preset. Standalone wires structure via buildStandaloneBlock
-    // (step 3), so it needs no placeholder flip here.
-    if (!standalone) {
-      console.log('6. enable structure-lint in pre-commit');
-      const liveCmd = CONFIG_DRIVEN_STRUCTURE.has(stack)
-        ? 'bunx guard-structure'
-        : 'bunx eslint src';
-      enableStructureLint(gitRoot, pkgRel, dryRun, liveCmd);
-    }
+    // Structure-lint is wired at block-build time (step 3) via `--structure <structureCmd>` on the
+    // deterministic orchestrator line — package and standalone alike. No separate enable step / hook
+    // placeholder to flip.
   }
 
   // Skills / agents / agent-hooks → the selected agent surface(s), with a prune of any now-dropped
@@ -1294,4 +1232,4 @@ export default async function run(args, cwd) {
   return 0;
 }
 
-export { detectInstalled, enableStructureLint, parseFlags, selectionFromFlags };
+export { detectInstalled, parseFlags, selectionFromFlags };
