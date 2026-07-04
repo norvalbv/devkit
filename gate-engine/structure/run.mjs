@@ -12,7 +12,8 @@
 // NOT done here: the baselines are frozen by `devkit init` (runStructureBaselines), same as the
 // ratchets. Config-driven only — buildStructureConfigs skips electron preset trees (no `grammar`).
 //
-// Exit contract (matches __dk_gate / the ratchet gates): 0 clean, 1 violations, 2 fail-open.
+// Exit contract (the shared gate trichotomy guard-deterministic applies): 0 clean, 1 violations,
+// 2 fail-open (could-not-run).
 
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,7 +65,7 @@ export async function runStructureGate(cwd = process.cwd()) {
     return { code: 1, errorCount, text };
   } catch (e) {
     // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
-    // that can't run must never wedge a commit. __dk_gate treats 2 as pass.
+    // that can't run must never wedge a commit. guard-deterministic treats 2 as fail-open (continue).
     return { code: 2, errorCount: 0, text: `guard-structure: ${e?.message ?? e}` };
   }
 }
