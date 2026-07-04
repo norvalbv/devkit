@@ -18,6 +18,7 @@
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
  * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default sonnet) ·
+ * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 2, floor 1) ·
  * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
  * allowlist — a gate judge can never write, stage, or commit.
@@ -46,12 +47,48 @@ import {
 // Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
 // diff investigation. Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this
 // gate alone: deterministic prefix ~240s (≈0 on a guard-prefix hit) + decisions ≤60s (≈0 on a
-// verdict-cache hit) + this cascade's worst case 2×300 (strict retry on a TRANSIENT/empty first pass
-// only — a TIMEOUT first pass is NOT re-run, capping it at 1×300) + 420 = 1020s. First-ship
-// worst ≈ 1800s = SHIP_COMMIT_TIMEOUT's default; a killed run converges on retry because PASSes
-// checkpoint per-completion and the caches skip everything already earned.
+// verdict-cache hit) + this cascade gate. PER-CASCADE worst ≈ 2×300 (strict retry on a TRANSIENT/
+// empty first pass only — a TIMEOUT first pass is NOT re-run, capping it at 1×300) + 420 = 1020s.
+// With the concurrency cap (GUARD_REVIEW_CONCURRENCY, default 2) the gate runs cascades in
+// ceil(N/K) WAVES, so its worst wall-clock ≈ ceil(N/K)×1020s — e.g. 5 reviewers at K=2 = 3×1020 =
+// 3060s, which CAN exceed SHIP_COMMIT_TIMEOUT (1800s default). That is by design: a killed ship
+// CONVERGES on re-run because PASSes checkpoint per-completion and the caches skip everything
+// already earned (docs/decisions/ship-gates-converge-not-restart.md). The cap trades a possible
+// extra ship attempt for each judge getting enough CPU + subscription slots to finish under its own
+// 300s timeout — the self-saturation this gate used to suffer when it fanned out ALL N judges at once.
 const FIRST_TIMEOUT_MS = 300000;
 const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block; never retried (see cascadeVerdict)
+
+// Bounded-concurrency map: at most `limit` fn calls in flight, input order preserved.
+// LOAD-BEARING: fn must never reject — the caller pre-wraps the cascade body in .catch. A worker
+// rejection here would reject Promise.all and abandon siblings' pending per-completion checkpoints.
+// ponytail: static pool. Load-adaptive sizing (os.loadavg / live concurrent-`claude` count) is the
+// upgrade path if one fixed cap ever proves too blunt across differently-loaded machines.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return results;
+}
+
+// Max judge cascades in flight (GUARD_REVIEW_CONCURRENCY / FRINK_ alias). Default 2 — enough to keep
+// wall-clock down while leaving each judge the CPU + subscription slots to finish under its 300s
+// timeout on a loaded box. Garbage / 0 / negative / float-below-1 → default; floor 1 (=1 serializes).
+const DEFAULT_REVIEW_CONCURRENCY = 2;
+function reviewConcurrency() {
+  const n = Number.parseInt(
+    process.env.GUARD_REVIEW_CONCURRENCY ?? process.env.FRINK_REVIEW_CONCURRENCY,
+    10,
+  );
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_REVIEW_CONCURRENCY;
+}
 
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
 // JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
@@ -203,8 +240,10 @@ async function cascadeVerdict(
 }
 
 /**
- * The gate → exit code (see module contract). All selected reviewers run CONCURRENTLY — each
- * cascade is independent, so wall-clock is the slowest single reviewer, not the sum.
+ * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
+ * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 2) — so under machine
+ * load each judge keeps enough CPU + subscription slots to finish under its timeout. Wall-clock is
+ * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade.
  */
 export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
   if (envFlag('NO_REVIEW')) return 0;
@@ -228,6 +267,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
 
   const cache = loadCache(cwd);
   const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'sonnet';
+  const concurrency = reviewConcurrency();
   const toRun = [];
   for (let i = 0; i < selected.length; i++) {
     const key = cacheKey(selected[i].reviewer.name, diffs[i]);
@@ -238,45 +278,46 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
   if (toRun.length === 0) return 0;
 
   console.error(
-    `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (parallel, ${firstModel} → opus on FAIL)…`,
+    `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`,
   );
-  // Each cascade CHECKPOINTS as it lands: its PASS is persisted per-completion (not after
-  // Promise.all), so a run killed by the ship timeout keeps every finished verdict and the retry
+  // Each cascade CHECKPOINTS as it lands: its PASS is persisted per-completion (not after the
+  // barrier), so a run killed by the ship timeout keeps every finished verdict and the retry
   // re-runs only the unfinished reviewers. On a ship (DEVKIT_REVIEW_PROGRESS set by the ship's
   // commit-with-gate-capture.sh) each completion is ALSO recorded to that progress JSON — the
   // STRUCTURED contract the timeout banner reads to name unfinished reviewers (`progress.mjs
   // unfinished`), replacing the old awk-parse of these stderr heartbeat lines. The lines below stay,
-  // but for humans only. The .catch keeps one cascade's throw from rejecting the whole Promise.all
-  // and discarding its siblings' still-pending completions.
+  // but for humans only. The .catch keeps one cascade's throw from rejecting the whole mapLimit run
+  // (a worker rejection would abandon its siblings' still-pending completions — see mapLimit).
   const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
+  // `running` = every reviewer to run, recorded up front. Under the concurrency cap some are QUEUED,
+  // not yet started, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names
+  // never-started reviewers. Correct for the banner's purpose — they're uncached and WILL be retried.
   const running = toRun.map((t) => t.sel.reviewer.name);
   const completed = [];
   if (progressFile) writeProgress(progressFile, { running, completed });
-  const results = await Promise.all(
-    toRun.map((t) => {
-      const t0 = Date.now();
-      return runCascade(t.sel, { cwd, cfg, exec, firstModel, retryFirst: strict })
-        .catch((e) => ({
-          name: t.sel.reviewer.name,
-          status: 'inconclusive',
-          reason: `engine error: ${e?.message ?? e}`,
-          escalated: false,
-        }))
-        .then((res) => {
-          if (res.status === 'pass')
-            savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
-          if (progressFile) {
-            completed.push(res.name);
-            writeProgress(progressFile, { running, completed });
-          }
-          const secs = Math.round((Date.now() - t0) / 1000);
-          console.error(
-            `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
-          );
-          return res;
-        });
-    }),
-  );
+  const results = await mapLimit(toRun, concurrency, (t) => {
+    const t0 = Date.now();
+    return runCascade(t.sel, { cwd, cfg, exec, firstModel, retryFirst: strict })
+      .catch((e) => ({
+        name: t.sel.reviewer.name,
+        status: 'inconclusive',
+        reason: `engine error: ${e?.message ?? e}`,
+        escalated: false,
+      }))
+      .then((res) => {
+        if (res.status === 'pass')
+          savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
+        if (progressFile) {
+          completed.push(res.name);
+          writeProgress(progressFile, { running, completed });
+        }
+        const secs = Math.round((Date.now() - t0) / 1000);
+        console.error(
+          `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
+        );
+        return res;
+      });
+  });
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
   const fails = results.filter((r) => r.status === 'fail');
