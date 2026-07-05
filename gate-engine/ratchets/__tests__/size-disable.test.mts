@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -27,6 +27,12 @@ const write = (root, rel, content) => {
 };
 const writeConfig = (root, cfg) =>
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
+const gitInit = (root) => {
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: root });
+};
+const gitAdd = (root, ...paths) => execFileSync('git', ['add', ...paths], { cwd: root });
 
 describe('countDisables', () => {
   it('returns zeros for an empty tree (boundary state)', () => {
@@ -222,12 +228,14 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(r.stderr).toContain('src/legacy.ts: 100 lines (max 80)');
   });
 
-  it('a grandfathered file that shrinks (still over cap) → gate auto-lowers the ceiling', () => {
+  it('a STAGED file that shrinks (still over cap) → gate auto-lowers its ceiling', () => {
     const root = makeRoot();
+    gitInit(root);
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', big(80));
-    run(root, 'freeze');
+    run(root, 'freeze'); // ceiling recorded at 80
     write(root, 'src/legacy.ts', big(60)); // shrank but still over the cap
+    gitAdd(root, 'src/legacy.ts'); // it is part of this commit
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
@@ -235,17 +243,65 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(baseline.files['src/legacy.ts']).toBe(60); // ceiling ratcheted down 80 → 60
   });
 
-  it('a grandfathered file dropped under the cap → gate auto-removes it from the baseline', () => {
+  it('a STAGED file dropped under the cap → gate auto-removes it from the baseline', () => {
     const root = makeRoot();
+    gitInit(root);
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', big(80));
     run(root, 'freeze');
     write(root, 'src/legacy.ts', big(10)); // healed under the cap
+    gitAdd(root, 'src/legacy.ts');
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files).not.toHaveProperty('src/legacy.ts');
+  });
+
+  it('lowers the ceiling for the STAGED file only; a parallel unstaged shrink stays untouched', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/x.ts', big(80));
+    write(root, 'src/y.ts', big(90));
+    run(root, 'freeze'); // x:80, y:90
+    write(root, 'src/x.ts', big(60)); // both shrink in the working tree...
+    write(root, 'src/y.ts', big(70));
+    gitAdd(root, 'src/x.ts'); // ...but only x is in THIS commit
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/x.ts']).toBe(60); // lowered
+    expect(baseline.files['src/y.ts']).toBe(90); // untouched — another agent's uncommitted work
+  });
+
+  it('an unstaged over-ceiling file does not block a commit that stages only a clean file', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/x.ts', big(80));
+    write(root, 'src/y.ts', big(90));
+    run(root, 'freeze'); // x:80, y:90
+    write(root, 'src/y.ts', big(200)); // a parallel agent grows y past its ceiling, UNSTAGED
+    write(root, 'src/x.ts', big(70)); // this agent's file is fine
+    gitAdd(root, 'src/x.ts');
+    expect(run(root, 'gate').status).toBe(0); // y's unstaged growth must not block x's commit
+  });
+
+  it('with nothing staged (CI / audit) the whole tree is enforced and the baseline is not mutated', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze'); // 80
+    write(root, 'src/legacy.ts', big(120)); // grew, but nothing is staged
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1); // whole-tree enforcement still catches a committed-state violation
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(80); // unchanged — no mutation without a commit
   });
 
   it('freeze is monotone-down: never raises a recorded ceiling (anti-laundering)', () => {

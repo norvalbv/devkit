@@ -140,6 +140,85 @@ function stageBaseline(root: string, rel: string): void {
   }
 }
 
+// The repo-root-relative paths in the pending commit (the git index). Returns null when git is
+// unavailable (the temp-dir tests, a non-git checkout) so the caller falls back to whole-tree.
+// An empty set means "nothing staged" — CI / a manual audit, not a commit in progress.
+function stagedSet(root: string): Set<string> | null {
+  try {
+    const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    return new Set(
+      out
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    return null;
+  }
+}
+
+// The maxLines gate as a per-file, per-commit shrink-only ratchet. When files are staged (a
+// commit in progress) it evaluates ONLY those files, so a parallel agent's unstaged edits can
+// neither block this commit nor tighten their files' ceilings. With nothing staged (CI, or a
+// manual `guard-size gate`) it enforces the whole committed tree and never mutates — there is
+// no commit to carry a baseline change. Exits 1 on a file over its ceiling.
+// Reason: sequential grow-check then per-file auto-lower, each a trivial guard at low nesting; splitting scatters one gate decision
+// fallow-ignore-next-line complexity
+function runLinesGate(
+  root: string,
+  cfg: ReturnType<typeof resolveGuardConfig>,
+  linesBaselineFile: string,
+): void {
+  const over = countOversized(root);
+  const grandfathered: Record<string, number> = existsSync(linesBaselineFile)
+    ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
+    : {};
+  const staged = stagedSet(root);
+  const inCommit = staged !== null && staged.size > 0;
+  // Scope to the committing files; with nothing staged, fall back to the whole tree (CI).
+  const scoped = inCommit ? over.filter((o) => staged?.has(o.file)) : over;
+
+  // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
+  const grew = scoped.filter((o) => o.lines > Math.max(cfg.maxLines, grandfathered[o.file] ?? 0));
+  if (grew.length) {
+    console.error(`🚫 ${grew.length} file(s) exceed their line limit — split them:`);
+    for (const o of grew) {
+      console.error(
+        `   ${o.file}: ${o.lines} lines (max ${Math.max(cfg.maxLines, grandfathered[o.file] ?? 0)})`,
+      );
+    }
+    process.exit(1);
+  }
+  if (!inCommit || !staged) return; // no commit in progress → never tighten/stage
+
+  // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
+  // so a concurrent agent's uncommitted shrink is never locked in.
+  const next = { ...grandfathered };
+  let tightened = false;
+  for (const f of staged) {
+    if (!(f in grandfathered)) continue;
+    const cur = over.find((o) => o.file === f)?.lines; // undefined = healed under the cap
+    if (cur === undefined) {
+      delete next[f];
+      tightened = true;
+    } else if (cur < grandfathered[f]) {
+      next[f] = cur;
+      tightened = true;
+    }
+  }
+  if (tightened) {
+    writeFileSync(
+      linesBaselineFile,
+      `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`,
+    );
+    stageBaseline(root, LINES_BASELINE);
+    console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
+  }
+}
+
 // Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
 // fallow-ignore-next-line complexity
 function runCli(cmd: string): void {
@@ -205,46 +284,8 @@ function runCli(cmd: string): void {
       );
     }
 
-    // Raw-line cap (the maxLines gate): a PER-FILE shrink-only ratchet. Each grandfathered
-    // file's recorded count is its ceiling; a new file's ceiling is the cap. On shrink the
-    // gate AUTO-LOWERS the record (and stages it) so the ceiling can only ever move down.
-    if (cfg.maxLines) {
-      const over = countOversized(root);
-      const grandfathered: Record<string, number> = existsSync(linesBaselineFile)
-        ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
-        : {};
-      // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new).
-      const grew = over.filter((o) => o.lines > Math.max(cfg.maxLines, grandfathered[o.file] ?? 0));
-      if (grew.length) {
-        console.error(`🚫 ${grew.length} file(s) exceed their line limit — split them:`);
-        for (const o of grew) {
-          const allowed = Math.max(cfg.maxLines, grandfathered[o.file] ?? 0);
-          console.error(`   ${o.file}: ${o.lines} lines (max ${allowed})`);
-        }
-        process.exit(1);
-      }
-      // Everything left is within its ceiling. Tighten the baseline DOWN to current reality:
-      // lower each recorded count that shrank, drop files that healed under the cap.
-      const next: Record<string, number> = {};
-      let tightened = false;
-      for (const [f, recorded] of Object.entries(grandfathered)) {
-        const cur = over.find((o) => o.file === f)?.lines; // undefined = healed under the cap
-        if (cur === undefined) {
-          tightened = true;
-          continue; // drop it entirely
-        }
-        next[f] = Math.min(recorded, cur);
-        if (next[f] < recorded) tightened = true;
-      }
-      if (tightened) {
-        writeFileSync(
-          linesBaselineFile,
-          `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`,
-        );
-        stageBaseline(root, LINES_BASELINE);
-        console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
-      }
-    }
+    // Raw-line cap (the maxLines gate): a per-file, per-COMMIT shrink-only ratchet.
+    if (cfg.maxLines) runLinesGate(root, cfg, linesBaselineFile);
     process.exit(0);
   }
 
