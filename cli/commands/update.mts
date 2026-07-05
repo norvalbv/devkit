@@ -12,7 +12,7 @@
  * Repo URL defaults to git+https — the repo is public, so https needs no auth and (unlike git+ssh,
  * which bun can't reliably clone) always resolves. Override with DEVKIT_REPO for a private fork or an
  * ssh host alias (e.g. DEVKIT_REPO=git+ssh://git@github-personal/norvalbv/devkit.git).
- * Plain .mjs, no build.
+ * TypeScript source, shipped as prebuilt .mjs.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';

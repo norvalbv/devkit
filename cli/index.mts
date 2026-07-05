@@ -11,7 +11,8 @@
  *   devkit --version
  *   devkit --help
  *
- * Plain .mjs, no build — `what you install is what runs` (devkit ships no dist/).
+ * TypeScript source (.mts), shipped as a prebuilt .mjs dist/ (compiled by `devkit release`).
+ * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
 import { assertGit } from './lib/guard/require-git.mts';

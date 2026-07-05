@@ -12,7 +12,7 @@
  * Never wholesale re-installs: the ONLY install is `bun install` of a genuinely newer PUBLISHED tag
  * (then re-run under the new code — the running process can't hot-swap to just-installed code). For
  * the common installed==latest case (symlink / local-checkout / steady state) it re-pins the stale
- * recorded refs and reconciles in a single pass. Plain .mjs, no build.
+ * recorded refs and reconciles in a single pass. TypeScript source, shipped as prebuilt .mjs.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

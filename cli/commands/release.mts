@@ -6,7 +6,11 @@
  *
  * Refuses outside the devkit repo (it would bump a consumer's package.json) and refuses on a
  * dirty tree (feature work must be committed first — release only bumps the version + tags).
- * Plain .mjs, no build.
+ *
+ * Source is real TypeScript (.mts); this command compiles it to the shipped .mjs `dist/` and commits
+ * that dist ON the release commit only (dist is gitignored on working branches). A node smoke gate
+ * verifies the built bin runs before the tag lands, so a git-installed consumer at the tag gets
+ * prebuilt .mjs with no consumer-side build.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -133,7 +137,33 @@ export default async function release(args: string[], cwd: string): Promise<numb
     filesToCommit.push('README.md');
   }
 
+  // Build the shipped dist (real .mts → .mjs + asset copy) and smoke-test it before it can be tagged.
+  console.log('Building dist…');
+  try {
+    execFileSync('bun', ['run', 'build'], { cwd, stdio: 'inherit' });
+  } catch {
+    console.error('devkit release: build failed — not releasing.');
+    return 1;
+  }
+  // Smoke gate (non-bypassable): the built bin must run under node and report the NEW version. This is
+  // the ONLY check that exercises the real dist resolution path — tsc + vitest resolve source, not dist.
+  try {
+    const built = execFileSync('node', [join(cwd, 'dist', 'cli', 'index.mjs'), '--version'], {
+      cwd,
+      encoding: 'utf8',
+    }).trim();
+    if (built !== target) throw new Error(`built bin reports ${built}, expected ${target}`);
+  } catch (e: unknown) {
+    console.error(
+      `devkit release: dist smoke check failed — ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return 1;
+  }
+
   git(['add', ...filesToCommit], cwd);
+  // dist/ is gitignored on working branches (diffs stay source-only); force-add it for THIS release
+  // commit so the tag carries prebuilt .mjs.
+  git(['add', '-f', 'dist'], cwd);
   git(['commit', '-m', `release: ${tag}`], cwd);
   git(['tag', '-a', tag, '-m', `devkit ${tag}`], cwd);
   git(['push', 'origin', branch], cwd);

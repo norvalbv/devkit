@@ -12,7 +12,7 @@
  *   - biome.jsonc / tsconfig.json need nothing — they `extends` the package, so they already track it.
  *   - the .husky/pre-commit devkit-guards region is refreshed by `devkit init` (noted, not done here).
  *
- * Nothing is written without --apply. You SEE every change first. Plain .mjs, no build.
+ * Nothing is written without --apply. You SEE every change first. TypeScript source, shipped as prebuilt .mjs.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
