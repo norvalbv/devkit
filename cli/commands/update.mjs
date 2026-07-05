@@ -9,8 +9,9 @@
  *   - global:  otherwise → `bun add -g` the new tag (updates the global CLI on PATH).
  * bun caches git deps, so we `bun pm cache rm` first.
  *
- * Repo URL defaults to the README form; override with DEVKIT_REPO if your ssh uses a host
- * alias (e.g. DEVKIT_REPO=git+ssh://git@github-personal/norvalbv/devkit.git).
+ * Repo URL defaults to git+https — the repo is public, so https needs no auth and (unlike git+ssh,
+ * which bun can't reliably clone) always resolves. Override with DEVKIT_REPO for a private fork or an
+ * ssh host alias (e.g. DEVKIT_REPO=git+ssh://git@github-personal/norvalbv/devkit.git).
  * Plain .mjs, no build.
  */
 import { execFileSync } from 'node:child_process';
@@ -18,9 +19,19 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const DEP = '@norvalbv/devkit';
-const BUN_REF = process.env.DEVKIT_REPO || 'git+ssh://git@github.com/norvalbv/devkit.git';
+
+/**
+ * The devkit git remote for `git ls-remote` + `bun add`. Defaults to git+https: the repo is public,
+ * so https needs no auth AND bun can clone it (bun's git+ssh clone fails on machines whose ssh auth
+ * doesn't reach bun's spawned git). DEVKIT_REPO overrides it — set a git+ssh URL for a private fork
+ * or an ssh host alias.
+ */
+export function repoUrl(env = process.env) {
+  return env.DEVKIT_REPO || 'git+https://github.com/norvalbv/devkit.git';
+}
+const BUN_REF = repoUrl();
 const TAG_RE = /refs\/tags\/v(\d+\.\d+\.\d+)\^?\{?\}?\s*$/;
-const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants ssh://, not git+ssh://
+const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants a bare URL (https:// / ssh://), not the git+ prefix
 
 /** -1 / 0 / 1 comparing two x.y.z strings numerically. */
 export function cmpSemver(a, b) {
@@ -58,7 +69,7 @@ export function fetchLatestTag() {
     ls = execFileSync('git', ['ls-remote', '--tags', lsUrl], { encoding: 'utf8' });
   } catch {
     return {
-      error: `could not reach the devkit remote (${lsUrl}). If your ssh uses a host alias, set DEVKIT_REPO.`,
+      error: `could not reach the devkit remote (${lsUrl}). Set DEVKIT_REPO to override it (private fork / ssh host alias).`,
     };
   }
   return { latest: latestTag(ls) };
@@ -81,7 +92,7 @@ Usage:
   devkit update [--dry-run]
 
 Re-pins package.json + \`bun install\` if devkit is a dep here, else \`bun add -g\` the new tag
-(updates the global CLI). Set DEVKIT_REPO if your ssh uses a host alias.`,
+(updates the global CLI). Defaults to git+https; set DEVKIT_REPO to override (private fork / ssh alias).`,
 };
 
 // Reason: flat update pipeline: sequential guard-and-return steps (remote unreachable, no tags, up-to-date, --dry-run) plus the package-vs-global mode fork; near-zero nesting, high branch COUNT where each branch is a trivial early-out
