@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS, normalizeSelection } from '../lib/components.mts';
+import { AGENT_TARGETS, normalizeSelection, type Selection } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
@@ -52,15 +52,28 @@ update / migrate / sync-skills / sync-agents / init — it does not replace them
 // scripted `devkit upgrade && …` doesn't treat a still-stale repo as finished.
 const NEEDS_RERUN = 10;
 
+// The .devkit/config.json fields upgrade reads (the recorded selection + repo mode).
+interface DevkitConfig {
+  overlay?: boolean;
+  stack?: string;
+  standalone?: boolean;
+  components?: Partial<Selection>;
+}
+
+// A package.json read only for its version.
+interface PackageManifest {
+  version?: string;
+}
+
 // Reason: flat top-level pipeline — sequential guarded steps (preflight → version/pin → migrate →
 // broad refresh → force-adopt → verify), each a single delegated call with near-zero nesting; the
 // real logic lives in the composed commands (applyInit / computeMigration / doctor / update).
 // fallow-ignore-next-line complexity
-export default async function upgrade(args, cwd) {
+export default async function upgrade(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const force = args.includes('--force');
 
-  const cfg = readJson(join(cwd, '.devkit', 'config.json'));
+  const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
   if (!cfg) {
     console.error('devkit upgrade: not initialized — run `devkit init` first.');
     return 2;
@@ -99,8 +112,11 @@ export default async function upgrade(args, cwd) {
   // ── 1. version / pin ───────────────────────────────────────────────────────
   // `current` = the version the REPO actually runs (its node_modules dep), not the CLI binary that
   // happens to be invoked — re-pinning to the CLI's version could diverge package.json from node_modules.
-  const runningVersion = readJson(join(packageDir(), 'package.json'))?.version;
-  const repoDepVersion = readJson(join(cwd, 'node_modules', DEP, 'package.json'))?.version;
+  const runningVersion = (readJson(join(packageDir(), 'package.json')) as PackageManifest | null)
+    ?.version;
+  const repoDepVersion = (
+    readJson(join(cwd, 'node_modules', DEP, 'package.json')) as PackageManifest | null
+  )?.version;
   const current = (!standalone && repoDepVersion) || runningVersion;
   if (!current) {
     console.error('devkit upgrade: could not resolve the installed devkit version.');
@@ -194,7 +210,7 @@ export default async function upgrade(args, cwd) {
 // short-circuit never re-pins, so an installed==latest repo can keep a stale #vX.Y.Z. Idempotent:
 // writes only when the ref actually changes; NO `bun install` — node_modules already matches the
 // installed version, so a dev symlink / local checkout survives.
-function repinStalePin(cwd, target, dryRun) {
+function repinStalePin(cwd: string, target: string, dryRun: boolean): void {
   const pkgPath = join(cwd, 'package.json');
   if (!existsSync(pkgPath)) {
     console.log('  • no package.json — skipping pin reconcile');

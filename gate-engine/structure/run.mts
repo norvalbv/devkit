@@ -22,23 +22,35 @@ import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), neve
 import { resolveGuardConfig } from '../config.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
 
+// The one field this gate reads off each structure.trees[] entry — its on-disk root.
+interface StructureTree {
+  root?: string;
+}
+
+// Outcome of the folder-structure gate: 0 clean / nothing to lint, 1 violations, 2 fail-open.
+interface StructureGateResult {
+  code: 0 | 1 | 2;
+  errorCount: number;
+  text?: string;
+}
+
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 
 /**
- * Run the folder-structure gate over a repo's declared structure roots.
- * @param {string} cwd consumer root (holds guard.config.json + eslint/baselines/)
- * @returns {Promise<{ code: 0|1|2, errorCount: number, text?: string }>}
- *   code 0 = clean / nothing to lint, 1 = violations, 2 = fail-open (internal error).
+ * Run the folder-structure gate over a repo's declared structure roots. `cwd` is the consumer root
+ * (holds guard.config.json + eslint/baselines/). Result code: 0 = clean / nothing to lint,
+ * 1 = violations, 2 = fail-open (internal error).
  */
-export async function runStructureGate(cwd = process.cwd()) {
+export async function runStructureGate(cwd = process.cwd()): Promise<StructureGateResult> {
   try {
     const cfg = resolveGuardConfig(cwd);
     // Lint only roots that EXIST on disk (an absent root has nothing to enforce yet).
-    const roots = (cfg.structure?.trees ?? [])
+    const trees: StructureTree[] = cfg.structure?.trees ?? [];
+    const roots = trees
       .map((t) => t.root)
-      .filter((r) => r && existsSync(join(cwd, r)));
+      .filter((r): r is string => (r ? existsSync(join(cwd, r)) : false));
     // Nothing declared / nothing present (generic guard.config, electron-only preset, empty tree).
     if (!roots.length) return { code: 0, errorCount: 0 };
     const baseConfig = await buildStructureConfigs(cwd);
@@ -53,9 +65,10 @@ export async function runStructureGate(cwd = process.cwd()) {
     for (const root of roots) {
       try {
         allResults.push(...(await eslint.lintFiles([root])));
-      } catch (e) {
+      } catch (e: unknown) {
         // Nothing-to-lint for THIS root → clean; any other throw is a real failure → fail-open below.
-        if (NOTHING_TO_LINT_RE.test(e?.message ?? '')) continue;
+        const message = e instanceof Error ? e.message : '';
+        if (NOTHING_TO_LINT_RE.test(message)) continue;
         throw e;
       }
     }
@@ -63,10 +76,11 @@ export async function runStructureGate(cwd = process.cwd()) {
     if (errorCount === 0) return { code: 0, errorCount: 0 };
     const text = await (await eslint.loadFormatter('stylish')).format(allResults);
     return { code: 1, errorCount, text };
-  } catch (e) {
+  } catch (e: unknown) {
     // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
     // that can't run must never wedge a commit. guard-deterministic treats 2 as fail-open (continue).
-    return { code: 2, errorCount: 0, text: `guard-structure: ${e?.message ?? e}` };
+    const message = e instanceof Error ? e.message : String(e);
+    return { code: 2, errorCount: 0, text: `guard-structure: ${message}` };
   }
 }
 

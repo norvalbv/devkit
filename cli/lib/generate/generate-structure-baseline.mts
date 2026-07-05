@@ -134,6 +134,14 @@ interface ResolveBaselineRootsOptions {
   roots?: Record<string, string>;
 }
 
+// Per-run context threaded into generateConfigTree (cwd/cfg/opts/log).
+interface ConfigTreeContext {
+  cwd: string;
+  cfg: ReturnType<typeof resolveGuardConfig>;
+  opts: GenerateStructureOptions;
+  log: (msg: string) => void;
+}
+
 // Skip folder-level entries — grandfather EXISTING files only. New files added
 // under the same legacy folder must still fail.
 function add(out: Set<string>, p: string) {
@@ -707,13 +715,13 @@ export function generateTreeBaseline(
 
 // Export name for a config-declared tree: 'cli' → 'cliStructureBaseline', 'gate-engine' → 'gateEngineStructureBaseline'.
 const NAME_SEP_RE = /[-_/](\w)/g;
-function exportNameFor(name) {
+function exportNameFor(name: string): string {
   const camel = name.replace(NAME_SEP_RE, (_, c) => c.toUpperCase());
   return `${camel}StructureBaseline`;
 }
 
 /** The .mjs body for a baseline file — same header/shape as frink's committed ones. */
-export function renderBaselineFile(tree, sorted) {
+export function renderBaselineFile(tree: string, sorted: string[]): string {
   const { label, exportName } = TREE_META[tree] ?? { label: tree, exportName: exportNameFor(tree) };
   return `// AUTO-GENERATED grandfather list of files violating the ${label}
 // folder-structure rule at the time it was introduced.
@@ -739,10 +747,10 @@ export const ${exportName} = ${JSON.stringify(sorted, null, 2)};
  * Returns {} when absent (a fresh repo has none yet — every lib folder is then
  * "unregistered" and grandfathered, which is the safe pre-baseline posture).
  */
-export async function loadDomains(cwd) {
+export async function loadDomains(cwd: string): Promise<StructureDomains> {
   const file = join(cwd, 'eslint', 'domains.mjs');
   if (!existsSync(file)) return {};
-  const mod = await import(pathToFileURL(file).href);
+  const mod = (await import(pathToFileURL(file).href)) as StructureDomains;
   return {
     RENDERER_LIB_DOMAINS: mod.RENDERER_LIB_DOMAINS,
     MAIN_ROOT_FOLDERS: mod.MAIN_ROOT_FOLDERS,
@@ -757,14 +765,17 @@ const TREES = ['renderer', 'main', 'shared', 'preload', 'socket', 'vercel'];
 // Baseline for ONE config-declared tree: grammar trees use the generic walker; preset trees pass
 // through to the frink-tree walker. Writes eslint/baselines/<name>.mjs unless dryRun. `ctx` carries
 // the per-run cwd/cfg/opts/log so the signature has no optional-then-required ambiguity.
-function generateConfigTree(t, ctx) {
+function generateConfigTree(t: StructureTree, ctx: ConfigTreeContext): TreeBaselineResult {
   const { cwd, cfg, opts, log } = ctx;
   const root = join(cwd, t.root);
   if (!existsSync(root)) return { tree: t.name, count: 0, written: false };
+  // Non-grammar (preset) trees always carry `preset`; String() mirrors the runtime string-coercion
+  // an object key / index already applies, so the value handed to generateTreeBaseline is unchanged.
+  const preset = String(t.preset);
   const sorted = t.grammar
     ? walkTree(t, root, resolveTreeExtensions(cfg, t))
-    : generateTreeBaseline(t.preset, cwd, {
-        roots: { [t.preset]: t.root },
+    : generateTreeBaseline(preset, cwd, {
+        roots: { [preset]: t.root },
         domains: t.domains ?? {},
       });
   if (!opts.dryRun) {
@@ -795,14 +806,16 @@ export async function generateStructureBaselines(
   // (the generic walker) or a named preset — governs ANY repo (devkit's own cli/gate-engine included).
   // Falls through to the LEGACY frink-6-tree path when no structure block is configured.
   const cfg = opts.cfg ?? resolveGuardConfig(cwd);
-  const trees = cfg.structure?.trees ?? [];
+  // GuardConfig types structure.trees loosely as object[]; StructureTree names the fields the
+  // generators read off each guard.config.json-declared entry (the config's JSON-parse boundary).
+  const trees = (cfg.structure?.trees ?? []) as StructureTree[];
   if (trees.length) {
     return trees.map((t) => generateConfigTree(t, { cwd, cfg, opts, log }));
   }
 
   const domains = await loadDomains(cwd);
-  const roots = { ...DEFAULT_ROOTS, ...(opts.roots ?? {}) };
-  const summary = [];
+  const roots: Record<string, string> = { ...DEFAULT_ROOTS, ...(opts.roots ?? {}) };
+  const summary: TreeBaselineResult[] = [];
   for (const tree of TREES) {
     const root = join(cwd, roots[tree]);
     if (!existsSync(root)) {
@@ -839,8 +852,8 @@ export function resolveBaselineRoots(
   opts: ResolveBaselineRootsOptions = {},
 ) {
   const cfg = opts.cfg ?? resolveGuardConfig(cwd);
-  const trees = cfg.structure?.trees ?? [];
-  if (trees.length) return trees.map((t: StructureTree) => [`${t.root}/`, `${t.name}.mjs`]);
+  const trees = (cfg.structure?.trees ?? []) as StructureTree[];
+  if (trees.length) return trees.map((t) => [`${t.root}/`, `${t.name}.mjs`]);
   const roots = { ...DEFAULT_ROOTS, ...(opts.roots ?? {}) };
   return Object.entries(roots).map(([tree, root]) => [`${root}/`, `${tree}.mjs`]);
 }

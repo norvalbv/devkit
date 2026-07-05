@@ -63,6 +63,9 @@ const ALL_IDS = DETERMINISTIC.map((g) => g.id);
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
 const WHITESPACE_RE = /\s+/;
+// Rewrites a sibling gate module's `.mjs` literal to the runtime extension. Hoisted (perf: no
+// per-gate regex compile).
+const MJS_EXT_RE = /\.mjs$/;
 
 // A single `--extra` gate spec. `cmd` is absent for a malformed spec (no `=`), which is
 // reported as unrunnable rather than silently dropped.
@@ -119,7 +122,7 @@ export function parseOpts(argv: string[]): ParsedOpts {
 // Which deterministic guards this repo selected. Source of truth = .devkit/config.json
 // components.guards (written by `devkit init`). A missing/unreadable config runs the WHOLE set —
 // never silently skip a gate the hook expected to run.
-export function selectedIds(cwd) {
+export function selectedIds(cwd: string): string[] {
   const cfgPath = path.join(cwd, '.devkit', 'config.json');
   if (!existsSync(cfgPath)) return ALL_IDS;
   try {
@@ -133,12 +136,16 @@ export function selectedIds(cwd) {
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
-function runArgv(cwd, argv, exec = execFileSync) {
+function runArgv(cwd: string, argv: string[], exec = execFileSync): number {
   try {
     exec(argv[0], argv.slice(1), { cwd, stdio: 'inherit' });
     return 0;
-  } catch (e) {
-    return typeof e?.status === 'number' ? e.status : 1; // spawn failure / kill → treat as a real fail
+  } catch (e: unknown) {
+    // spawn failure / kill → treat as a real fail
+    if (e && typeof e === 'object' && 'status' in e && typeof e.status === 'number') {
+      return e.status;
+    }
+    return 1;
   }
 }
 
@@ -189,7 +196,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     const ids = new Set(opts.only ?? selectedIds(cwd));
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
       label: `guard-${g.id}`,
-      argv: ['node', path.resolve(HERE, g.module.replace(/\.mjs$/, SELF_EXT)), ...g.args],
+      argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
       failOpen2: true,
     }));
     for (const x of opts.extra ?? []) gates.push(commandGate(x.label, x.cmd));

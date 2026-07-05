@@ -21,28 +21,29 @@
 
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { GrammarNode, TreeSpec } from './compile.mts';
 import { matchesFolderName, resolvePatterns } from './grammar.mts';
 
 /**
- * @param {object} treeSpec one entry of structure.trees: { root, grammar, libDomains?, frozenDirs?, ignoredDirs?, entryAllowlist? }
- * @param {string} absRoot absolute path to the tree root (cwd + treeSpec.root)
- * @param {string[]} exts the tree's resolved source extensions
- * @returns {string[]} sorted tree-relative violator paths
+ * Walk one structure.trees[] entry and return sorted tree-relative violator paths (the grandfather
+ * set). `treeSpec` is the tree entry ({ root, grammar, libDomains?, frozenDirs?, ignoredDirs?,
+ * entryAllowlist? }), `absRoot` the absolute path to the tree root (cwd + treeSpec.root), `exts` the
+ * tree's resolved source extensions.
  */
-export function walkTree(treeSpec, absRoot, exts) {
-  const out = new Set();
+export function walkTree(treeSpec: TreeSpec, absRoot: string, exts: string[]): string[] {
+  const out = new Set<string>();
   const ignored = new Set(treeSpec.ignoredDirs ?? []);
   const frozen = new Set(treeSpec.frozenDirs ?? []);
   const libDomains = treeSpec.libDomains ?? {};
   const rules = treeSpec.grammar?.rules ?? {};
 
   // Grandfather files only — never folder-level entries (new files under a legacy folder must fail).
-  const add = (p) => {
+  const add = (p: string) => {
     if (!p.endsWith('/')) out.add(p);
   };
 
   // Every file under a broken/frozen/unexpected dir is grandfathered debt.
-  const allFiles = (rel) => {
+  const allFiles = (rel: string) => {
     for (const e of readdirSync(join(absRoot, rel), { withFileTypes: true })) {
       const c = `${rel}/${e.name}`;
       if (e.isFile()) add(c);
@@ -56,7 +57,7 @@ export function walkTree(treeSpec, absRoot, exts) {
   // (file ok/violator, ignored/tests/frozen dir, named folder, domain-gated, recurse, unexpected);
   // each arm is trivial and nesting is shallow, but the COUNT is high. Splitting scatters one traversal.
   // fallow-ignore-next-line complexity
-  function walk(rel, node, broken) {
+  function walk(rel: string, node: GrammarNode | undefined, broken: boolean) {
     if (!node) {
       allFiles(rel); // no grammar for this dir → grandfather it all
       return;
@@ -64,10 +65,11 @@ export function walkTree(treeSpec, absRoot, exts) {
     const abs = rel ? join(absRoot, rel) : absRoot;
     const entries = readdirSync(abs, { withFileTypes: true });
     const fileOK = resolvePatterns(node.files, exts);
-    const nodeBroken =
+    const nodeBroken = Boolean(
       broken ||
-      (node.enforceExistence &&
-        !entries.some((e) => e.isFile() && e.name === node.enforceExistence));
+        (node.enforceExistence &&
+          !entries.some((e) => e.isFile() && e.name === node.enforceExistence)),
+    );
 
     for (const e of entries) {
       const childRel = rel ? `${rel}/${e.name}` : e.name;
@@ -91,7 +93,7 @@ export function walkTree(treeSpec, absRoot, exts) {
       } else if (node.domainGate) {
         const registered = (libDomains[node.domainGate] ?? []).includes(e.name);
         const id = Array.isArray(node.recurse) ? node.recurse[0] : node.recurse;
-        walk(childRel, rules[id], nodeBroken || !registered);
+        walk(childRel, id != null ? rules[id] : undefined, nodeBroken || !registered);
       } else if (node.recurse) {
         // `recurse` may be a list of rule ids (sibling families, e.g. react-app pages → pageFolder OR
         // componentFolder). Dispatch to the FIRST rule whose folderName matches; broken if none do.

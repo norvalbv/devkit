@@ -80,9 +80,9 @@ const SHARED = `export function computeWidgetTotals(items) {
 // The gate's exit-code contract is what a pre-commit hook depends on:
 //   1 = new clone → block · 0 = clean · 2 = could-not-run → fail-open.
 describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
-  let tmp;
-  let cloneFile; // a real reported clone path, for the --changed scoping test
-  let cloneHash; // the reported fragmentHash, for the allowlist-suppression test
+  let tmp: string;
+  let cloneFile: string | undefined; // a real reported clone path, for the --changed scoping test
+  let cloneHash: string | undefined; // the reported fragmentHash, for the allowlist-suppression test
 
   function run(args, env) {
     try {
@@ -264,7 +264,7 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate approve-command cap', () => {
 // --paths must resolve to THAT repo's scanRoots and surface its clone. If the engine reached
 // for __dirname it'd scan the package and miss this entirely.
 describe.skipIf(!HAS_JSCPD)('clone-detector from a temp consumer cwd (W-3)', () => {
-  let consumer;
+  let consumer: string;
   beforeAll(() => {
     consumer = mkdtempSync(join(tmpdir(), 'clone-consumer-'));
     mkdirSync(join(consumer, 'src'), { recursive: true });

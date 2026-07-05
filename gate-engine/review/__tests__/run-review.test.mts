@@ -280,7 +280,7 @@ describe('runReviewGate — cascade + exit contract', () => {
 
   it('the wrapped prompt reaches the judge with brief, checklist mandate + verdict pin; the diffstat rides stdin', async () => {
     const repo = consumerRepo({ backend: true });
-    let captured;
+    let captured: { label: string; args: string[]; input?: string; timeout?: number };
     const exec = mkExec(async (opts) => {
       if (opts.label === 'review:api-security-reviewer') captured = opts;
       writeArtifact(repo, opts.label);
@@ -318,7 +318,7 @@ describe('runReviewGate — adversarial staged filenames (argv-git regression)',
 describe('runReviewGate — per-completion checkpoints', () => {
   it('a finished PASS is on disk BEFORE slower cascades resolve (checkpoint, not batch)', async () => {
     const repo = consumerRepo({ backend: true });
-    let release;
+    let release: (value?: unknown) => void;
     const blocked = new Promise((r) => {
       release = r;
     });
@@ -444,7 +444,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     // Capture the FIRST-pass timeout the gate hands each judge. Fresh repo per run so the PASS cache
     // (keyed on reviewer + diff hash) can't skip the second run's exec calls.
     const capFor = async (repo) => {
-      let seen;
+      let seen: number | undefined;
       const probe = mkExec(async (opts) => {
         seen = opts.timeout;
         writeArtifact(repo, opts.label);
@@ -529,7 +529,7 @@ describe('review progress JSON — the ship banner contract (engine → file →
     process.env.DEVKIT_REVIEW_PROGRESS = progressFile;
     // Capture the `running` set the instant the engine wrote it (before any completion), by reading the
     // file inside the first judge invocation — proving the engine records the names the banner reads.
-    let runningAtStart;
+    let runningAtStart: string[] | undefined;
     const exec = mkExec(async (opts) => {
       if (!runningAtStart) runningAtStart = readProgress(progressFile)?.running;
       writeArtifact(repo, opts.label);
@@ -592,7 +592,7 @@ describe('runCompleteness — warn-by-default commit-msg gate', () => {
 
   it('PASS → exit 0; the prompt carries message, Targets block and brief', async () => {
     const repo = consumerRepo({ backend: true });
-    let captured;
+    let captured: { label: string; args: string[]; input?: string; timeout?: number };
     const exec = mkExec(async (opts) => {
       captured = opts;
       return 'VERDICT: PASS';

@@ -207,7 +207,9 @@ export function findBlockers(
   for (const g of audit?.duplication?.clone_groups ?? []) {
     if (g.introduced !== true) continue;
     const instances = g.instances ?? [];
-    if (instances.some((i) => overlaps(i.file, i.start_line, i.end_line))) {
+    // A clone instance with no `file` can't overlap a staged hunk (overlaps would look up an
+    // undefined key and return false); guard it so the file arg stays a definite string.
+    if (instances.some((i) => i.file != null && overlaps(i.file, i.start_line, i.end_line))) {
       blockers.push({
         kind: 'duplication',
         name: g.suggested_name,
@@ -242,7 +244,7 @@ export function findBlockers(
  * Pulled out of main() so the git invocation is a single, testable seam. Throws on a
  * git failure (main treats that as exit 2 / fail-open). Exported for completeness.
  */
-export function readStagedDiff(cwd = process.cwd()) {
+export function readStagedDiff(cwd = process.cwd()): StagedDiff {
   const opts: ExecSyncOptionsWithStringEncoding = {
     encoding: 'utf8',
     cwd,
@@ -257,14 +259,16 @@ export function readStagedDiff(cwd = process.cwd()) {
 }
 
 function main() {
-  let audit;
+  let audit: AuditPayload;
   try {
-    audit = JSON.parse(readStdin());
+    // Parse boundary: the stdin payload is `fallow audit --format json` — read it as AuditPayload
+    // (findBlockers treats every field defensively, so a shape mismatch degrades, never throws).
+    audit = JSON.parse(readStdin()) as AuditPayload;
   } catch {
     process.exit(2); // unreadable payload → let the caller fail-open
   }
 
-  let diff;
+  let diff: StagedDiff;
   try {
     diff = readStagedDiff();
   } catch {

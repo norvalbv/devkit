@@ -15,8 +15,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const MATCHER = resolve(here, '..', 'matcher.mts');
 const SIMILARITY_1_RE = /--similarity 1\b/;
 
-let tmp;
-let dbPath;
+let tmp: string;
+let dbPath: string;
 
 // 4-dim Float32 blob — any non-null value; the `exact` tier keys on code_hash, not
 // the embedding, so identical hashes flag regardless of the vectors.
@@ -312,7 +312,7 @@ describe('matcher destructive modes refuse a corrupt allowlist', () => {
 // `/` and the `/`-style staged set git emits. The matcher normalizes file_path at the read
 // boundary — pin it with a backslash-path fixture index.
 describe('matcher path normalization', () => {
-  let winDb;
+  let winDb: string;
   beforeAll(() => {
     winDb = join(tmp, 'win-index.db');
     const db = new DatabaseSync(winDb);

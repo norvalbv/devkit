@@ -16,7 +16,7 @@ import { cancel, confirm, isCancel } from '@clack/prompts';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 /** Compute the next version. `bump` is patch|minor|major, or an explicit x.y.z. */
-export function nextVersion(current, bump) {
+export function nextVersion(current: string, bump: string): string {
   if (SEMVER_RE.test(bump)) return bump;
   if (!SEMVER_RE.test(current)) throw new Error(`current version "${current}" is not x.y.z`);
   const [major, minor, patch] = current.split('.').map(Number);
@@ -27,11 +27,11 @@ export function nextVersion(current, bump) {
 }
 
 /** Rewrite every `devkit.git#vX.Y.Z` install pin in the README to the new version. */
-export function bumpReadmePins(readme, newVersion) {
+export function bumpReadmePins(readme: string, newVersion: string): string {
   return readme.replace(/devkit\.git#v\d+\.\d+\.\d+/g, `devkit.git#v${newVersion}`);
 }
 
-function git(args, cwd) {
+function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
@@ -51,7 +51,7 @@ Refuses outside the devkit repo, on a dirty tree, or if the target tag already e
 
 // Reason: flat release orchestration: a sequence of independent guard early-returns (no package.json / not devkit repo / dirty tree / bad bump / tag exists / non-TTY / tests fail) then trivial sequential steps (bump · commit · tag · push); high branch COUNT from stacked guards, each trivial with near-zero nesting
 // fallow-ignore-next-line complexity
-export default async function release(args, cwd) {
+export default async function release(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const yes = args.includes('--yes');
   const bump = args.find((a) => !a.startsWith('-')) || 'patch';
@@ -62,7 +62,7 @@ export default async function release(args, cwd) {
     return 1;
   }
   const pkgRaw = readFileSync(pkgPath, 'utf8');
-  const pkg = JSON.parse(pkgRaw);
+  const pkg = JSON.parse(pkgRaw) as { name: string; version: string };
 
   // Guard 1 — this is the devkit repo (not a consumer; release bumps + tags + pushes devkit itself).
   if (pkg.name !== '@norvalbv/devkit') {
@@ -76,11 +76,11 @@ export default async function release(args, cwd) {
   }
 
   const current = pkg.version;
-  let target;
+  let target: string;
   try {
     target = nextVersion(current, bump);
-  } catch (e) {
-    console.error(`devkit release: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`devkit release: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
   const tag = `v${target}`;

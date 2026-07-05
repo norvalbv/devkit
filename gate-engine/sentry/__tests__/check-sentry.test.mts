@@ -245,7 +245,7 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
     const origArgv = process.argv;
     process.argv = ['node', 'check-sentry.mts', ...(gate ? ['--gate'] : []), message];
     for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
-    let code;
+    let code: number | undefined;
     const exit = vi.spyOn(process, 'exit').mockImplementation((c) => {
       if (code === undefined) code = c ?? 0;
       throw new Error('__exit__');

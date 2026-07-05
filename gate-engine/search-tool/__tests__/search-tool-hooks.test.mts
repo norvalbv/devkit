@@ -37,8 +37,8 @@ function runGuard(command, env = {}) {
 }
 const guardFires = (cmd, env) => Boolean(runGuard(cmd, env)?.hookSpecificOutput?.additionalContext);
 
-let stateDir;
-let sessionId;
+let stateDir: string;
+let sessionId: string;
 function runCounterRaw(command, toolName = 'Bash') {
   return execFileSync('node', [COUNTER], {
     input: JSON.stringify({ tool_name: toolName, tool_input: { command }, session_id: sessionId }),

@@ -106,7 +106,7 @@ describe('gateExit', () => {
 });
 
 describe('loadScopedTargets', () => {
-  let dir;
+  let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'align-'));
   });
@@ -133,7 +133,7 @@ describe('loadScopedTargets', () => {
 });
 
 describe('--gate (integration, real git repo)', () => {
-  let repo;
+  let repo: string;
   const git = (a) => execSync(`git ${a}`, { cwd: repo, encoding: 'utf8' });
   // GUARD_DECISION_NO_LLM → judge returns null → fail-safe pass; exercises scope-match + git reads.
   // The gate resolves decisionsDir/noLog/noLlm from the repo cwd (W-3), so the gate runs with cwd=repo.
@@ -353,9 +353,9 @@ describe('--gate (integration, real git repo)', () => {
 // explicitly (3rd arg) and resolves config (noLlm) from it, so no DECISIONS_ROOT / import-time env
 // dance is needed — each test just points judge at its own temp repo with a PATH-stubbed claude.
 describe('judge cascade (in-process, stubbed claude on PATH)', () => {
-  let repo;
-  let savedPath;
-  let log;
+  let repo: string;
+  let savedPath: string | undefined;
+  let log: string;
   const target = { ruling: 'stay generic', vision: 'v' };
   const sh = (a) => execSync(a, { cwd: repo, encoding: 'utf8' });
   const useStub = (script) => {

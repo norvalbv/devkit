@@ -154,7 +154,7 @@ export const parseCasesText = (text) =>
 
 function loadCases(name) {
   const file = path.join(here, `cases-${name}.jsonl`);
-  let rows;
+  let rows: ReturnType<typeof parseCasesText>;
   try {
     rows = parseCasesText(readFileSync(file, 'utf8'));
   } catch (e) {
@@ -334,7 +334,7 @@ export function runDetectBench(rows, { model = MODEL, runs = RUNS } = {}) {
   let unstable = 0;
   for (const c of rows) {
     const smells = detectSmells(c.entries, c.boundaries ?? []);
-    let got;
+    let got: string;
     let freeSkip = false;
     let stable = true;
     if (smells.length === 0) {
@@ -418,7 +418,7 @@ export function runAlignmentBench(
   let outages = 0;
   let escalated = 0;
   for (const c of rows) {
-    let fx;
+    let fx: ReturnType<typeof materializeFixture>;
     try {
       fx = materializeFixture(c);
     } catch (e) {
@@ -429,8 +429,8 @@ export function runAlignmentBench(
         `decisions-eval: fixture build failed for ${c.id} — ${e?.message ?? e}`,
       );
     }
-    let first;
-    let final;
+    let first: string;
+    let final: string;
     let didEscalate = false;
     let outage = false;
     try {
@@ -474,7 +474,7 @@ export function runAlignmentBench(
       console.log(
         `  ${c.id.padEnd(30)} …disagrees with baseline (${retryAgainst[c.id].got}) — retrying once`,
       );
-      let fx2;
+      let fx2: ReturnType<typeof materializeFixture> | null;
       try {
         fx2 = materializeFixture(c);
       } catch {

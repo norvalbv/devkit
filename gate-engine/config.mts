@@ -30,6 +30,82 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
+// ── Shared config types ──────────────────────────────────────────────────────
+/** Matcher/clone tier + size thresholds (DEFAULTS.thresholds; a consumer tunes any subset). */
+export interface Thresholds {
+  nearCode: number;
+  driftCode: number;
+  driftDesc: number;
+  minLoc: number;
+  minTokens: number;
+}
+
+/** Review-agent topology block of a resolved config (the reviewer subagents read this). */
+export interface ReviewConfig {
+  backendRoots: string[];
+  frontendRoots: string[];
+  trustBoundaries: string;
+  shortcutTracking: boolean;
+  accessibility: { skipTouchTargets: boolean };
+  agentsDir: string;
+}
+
+/**
+ * The effective governance-gate config resolved by resolveGuardConfig. Consumers pull this
+ * shape (directly or via `ReturnType<typeof resolveGuardConfig>`); it must stay structurally
+ * in sync with the object resolveGuardConfig returns.
+ */
+export interface GuardConfig {
+  boundaries: string[];
+  scanRoots: string[];
+  sourceExtensions: string[];
+  structure: { trees: object[]; walls: object[] };
+  decisionsDir: string;
+  fanoutCap: number;
+  maxLines: number;
+  fanoutExempt: string[];
+  allowlistPath: string;
+  thresholds: Thresholds;
+  indexPath: string | null;
+  searchTool: string;
+  graphTool: string;
+  testCommand: string | null;
+  review: ReviewConfig;
+  noLog: boolean;
+  noLlm: boolean;
+  cwd: string;
+}
+
+// Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the
+// readFileSync/JSON.parse boundary). A malformed value is tolerated exactly as the runtime
+// tolerates it (the arr()/finite guards below), never trusted for correctness.
+interface RawGuardConfigFile {
+  boundaries?: string[];
+  scanRoots?: string[];
+  sourceExtensions?: string[];
+  structure?: { trees?: object[]; walls?: object[] };
+  decisionsDir?: string;
+  fanoutCap?: number;
+  maxLines?: number;
+  fanoutExempt?: string[];
+  allowlistPath?: string;
+  thresholds?: Partial<Thresholds>;
+  indexPath?: string | null;
+  searchTool?: string;
+  graphTool?: string;
+  testCommand?: string | null;
+  review?: {
+    backendRoots?: string[];
+    frontendRoots?: string[];
+    trustBoundaries?: string;
+    shortcutTracking?: boolean;
+    accessibility?: { skipTouchTargets?: boolean };
+    agentsDir?: string;
+  };
+  noLog?: boolean;
+  noLlm?: boolean;
+}
+
 export const CONFIG_FILENAME = 'guard.config.json';
 
 // Defaults are deliberately frink-agnostic: an empty/`src`-only repo gets a sane,
@@ -107,7 +183,7 @@ export const DEFAULTS = Object.freeze({
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
 // original frink gates. Returns undefined when neither is set.
-function envVar(name) {
+function envVar(name: string): string | undefined {
   const guard = process.env[`GUARD_${name}`];
   if (guard !== undefined) return guard;
   return process.env[`FRINK_${name}`];
@@ -115,7 +191,7 @@ function envVar(name) {
 
 // Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
 // as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-function envBool(name) {
+function envBool(name: string): boolean | undefined {
   const v = envVar(name);
   if (v === undefined) return undefined;
   const t = String(v).trim().toLowerCase();
@@ -126,59 +202,44 @@ function envBool(name) {
 // A GUARD_*/FRINK_* flag as a plain boolean — false when unset — for direct `if (envFlag(x))` use.
 // Distinct from envBool's undefined-when-unset (which lets config resolution fall through to
 // file/DEFAULT via ??). Exported so the review/decisions gates share one truthy-env predicate.
-export function envFlag(name) {
+export function envFlag(name: string): boolean {
   return envBool(name) ?? false;
 }
 
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
 // unparseable / not an object => throw: a typo'd config must fail loudly, never silently
 // degrade to defaults and quietly weaken a gate.
-function loadConfigFile(cwd) {
+function loadConfigFile(cwd: string): RawGuardConfigFile {
   const file = resolve(cwd, CONFIG_FILENAME);
   if (!existsSync(file)) return {};
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (e) {
-    throw new Error(`${CONFIG_FILENAME} at ${file} is not valid JSON: ${e.message}`);
+  } catch (e: unknown) {
+    throw new Error(
+      `${CONFIG_FILENAME} at ${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`${CONFIG_FILENAME} at ${file} must be a JSON object.`);
   }
-  return parsed;
+  // Parse boundary: assert the validated object to the raw-config shape (fields typed as
+  // expected; the resolver below re-guards every one before trusting it).
+  return parsed as RawGuardConfigFile;
 }
 
-const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
+const arr = <T,>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? v : fallback);
 
 /**
  * Resolve the effective governance-gate config for a consumer repo.
  *
- * @param {string} [cwd=process.cwd()] The CONSUMER repo root. All path fields are
+ * @param cwd The CONSUMER repo root (default process.cwd()). All path fields are
  *   interpreted relative to THIS, never the package dir (W-3).
- * @returns {{
- *   boundaries: string[],
- *   scanRoots: string[],
- *   sourceExtensions: string[],
- *   structure: {trees: object[], walls: object[]},
- *   decisionsDir: string,
- *   fanoutCap: number,
- *   maxLines: number,
- *   fanoutExempt: string[],
- *   allowlistPath: string,
- *   thresholds: object,
- *   indexPath: string|null,
- *   searchTool: string,
- *   graphTool: string,
- *   testCommand: string|null,
- *   review: {backendRoots:string[], frontendRoots:string[], trustBoundaries:string, shortcutTracking:boolean, accessibility:{skipTouchTargets:boolean}, agentsDir:string},
- *   noLog: boolean,
- *   noLlm: boolean,
- *   cwd: string,
- * }}
+ * @returns the resolved {@link GuardConfig}.
  */
 // Reason: flat config-precedence resolver: each field independently applies the same env ?? file ?? DEFAULT ladder (plus Number.isFinite/Boolean guards); the branch COUNT is high but every branch is a trivial fallback, and the ?? chains ARE the precedence policy — extracting them scatters one resolution table.
 // fallow-ignore-next-line complexity
-export function resolveGuardConfig(cwd = process.cwd()) {
+export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
   const file = loadConfigFile(cwd);
 
   const noLogEnv = envBool('NO_LOG');
@@ -199,8 +260,14 @@ export function resolveGuardConfig(cwd = process.cwd()) {
       ? { trees: arr(file.structure.trees, []), walls: arr(file.structure.walls, []) }
       : DEFAULTS.structure,
     decisionsDir: decisionsEnv ?? file.decisionsDir ?? DEFAULTS.decisionsDir,
-    fanoutCap: Number.isFinite(file.fanoutCap) ? file.fanoutCap : DEFAULTS.fanoutCap,
-    maxLines: Number.isFinite(file.maxLines) ? file.maxLines : DEFAULTS.maxLines,
+    fanoutCap:
+      typeof file.fanoutCap === 'number' && Number.isFinite(file.fanoutCap)
+        ? file.fanoutCap
+        : DEFAULTS.fanoutCap,
+    maxLines:
+      typeof file.maxLines === 'number' && Number.isFinite(file.maxLines)
+        ? file.maxLines
+        : DEFAULTS.maxLines,
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
     allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
     // Shallow-merge thresholds so a consumer can override one knob without restating all.
@@ -236,18 +303,17 @@ export function resolveGuardConfig(cwd = process.cwd()) {
  * already-absolute configured value is returned unchanged; a null field (e.g. indexPath
  * when the matcher is opted out) stays null so callers can detect the opt-out.
  *
- * @param {{cwd:string}} cfg A config from resolveGuardConfig.
- * @param {string} field One of: decisionsDir, allowlistPath, indexPath, or a scanRoot/
- *   fanoutExempt entry passed via `value`.
- * @param {string} [value] Explicit relative value (for array fields like scanRoots).
+ * @param cfg A config from resolveGuardConfig.
+ * @param field The string|null path field to absolutize: decisionsDir, allowlistPath, or indexPath.
+ * @param value Explicit relative value override (e.g. for an array field like a scanRoots entry).
  */
 export function resolveFromCwd(
-  cfg: { cwd: string; [field: string]: unknown },
-  field: string,
+  cfg: GuardConfig,
+  field: 'allowlistPath' | 'decisionsDir' | 'indexPath',
   value?: string | null,
 ): string | null {
-  // Config path fields are strings|null by contract (DEFAULTS + a validated guard.config.json).
-  const raw = (value ?? cfg[field]) as string | null;
+  // Config path fields are string|null by contract (DEFAULTS + a validated guard.config.json).
+  const raw = value ?? cfg[field];
   if (raw == null) return null;
   return isAbsolute(raw) ? raw : resolve(cfg.cwd, raw);
 }
@@ -263,26 +329,27 @@ const TEST_INFIX = /\.(test|spec)\./;
  * `isBarrel(name)` for an `index` barrel. The ratchets count files where `isSource && !isTest`
  * (fan-out also excludes `isBarrel`).
  *
- * @param {string[]} extensions bare extensions, no dot (e.g. `['ts','tsx']`)
- * @returns {{ isSource: (name:string)=>boolean, isTest: (name:string)=>boolean, isBarrel: (name:string)=>boolean }}
+ * @param extensions bare extensions, no dot (e.g. `['ts','tsx']`)
  */
-export function sourceMatchers(extensions) {
+export function sourceMatchers(extensions: string[]) {
   const exts = extensions.map((e) => `.${e.startsWith('.') ? e.slice(1) : e}`);
-  const isSource = (name) => exts.some((x) => name.endsWith(x));
+  const isSource = (name: string) => exts.some((x) => name.endsWith(x));
   return {
     isSource,
-    isTest: (name) => TEST_INFIX.test(name) && isSource(name),
-    isBarrel: (name) => exts.some((x) => name === `index${x}`),
+    isTest: (name: string) => TEST_INFIX.test(name) && isSource(name),
+    isBarrel: (name: string) => exts.some((x) => name === `index${x}`),
   };
 }
 
 /**
  * A structure tree's effective source extensions: its own `sourceExtensions` override, else the
  * repo-wide `cfg.sourceExtensions`. So a tree can speak `.tsx` in a `.mjs` repo (or vice-versa).
- * @param {{sourceExtensions:string[]}} cfg a resolved config
- * @param {{sourceExtensions?:string[]}} tree a structure.trees[] entry
- * @returns {string[]}
+ * @param cfg a resolved config
+ * @param tree a structure.trees[] entry
  */
-export function resolveTreeExtensions(cfg, tree) {
+export function resolveTreeExtensions(
+  cfg: { sourceExtensions: string[] },
+  tree: { sourceExtensions?: string[] } | null | undefined,
+): string[] {
   return arr(tree?.sourceExtensions, cfg.sourceExtensions);
 }

@@ -22,7 +22,7 @@ const gitRepo = () => {
   return d;
 };
 
-let savedShip;
+let savedShip: string | undefined;
 beforeEach(() => {
   savedShip = process.env.DEVKIT_SHIP;
   process.env.DEVKIT_SHIP = '1';

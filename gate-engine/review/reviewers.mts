@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { type resolveGuardConfig, sourceMatchers } from '../config.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
  * `sourceExtensions` and `searchTool` fields). Derived from the shared loader so it never drifts. */
@@ -207,7 +207,10 @@ export function wrapPrompt(agentBody: string, reviewer: Reviewer, files: string[
  * @param state parsed state-file JSON (null = missing/unreadable)
  * @param verdict the judge's parsed verdict
  */
-export function verifyChecklist(state: ChecklistState | null, verdict: 'PASS' | 'FAIL'): string | null {
+export function verifyChecklist(
+  state: ChecklistState | null,
+  verdict: 'PASS' | 'FAIL',
+): string | null {
   if (verdict === 'FAIL') return null;
   const items = state?.items ?? state?.files; // domain reviewers use items[]; commit-guard files[]
   if (!Array.isArray(items) || items.length === 0)

@@ -35,6 +35,7 @@ import {
   COMPONENTS,
   defaultSelection,
   GUARD_IDS,
+  type Selection,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
@@ -93,13 +94,13 @@ const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
 // no consumer eslint dep); every other structure stack (electron) keeps its consumer-side `bunx eslint
 // src`. Shared with doctor's checkStructureLint so the expected arg stays in lockstep with what init
 // emits when the stack rules change.
-export function structureCmdFor(stack) {
+export function structureCmdFor(stack: string): string {
   return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
 }
 
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
-const STRUCTURE_TEMPLATE_FILES = {
+const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {
   electron: [
     ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
@@ -127,6 +128,83 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
 const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
+
+// The recorded `.devkit/config.json` `components` block: per-component booleans + the guard/target
+// arrays. Every field optional — a pre-wizard config may omit any of them.
+interface RecordedComponents {
+  biome?: boolean;
+  tsconfig?: boolean;
+  skills?: boolean;
+  agents?: boolean;
+  searchSteering?: boolean;
+  agentHooks?: boolean;
+  husky?: boolean;
+  structure?: boolean;
+  fallow?: boolean;
+  searchCode?: boolean;
+  agentTargets?: string[];
+  guards?: string[];
+}
+
+// The `.devkit/config.json` shape init reads back (prevConfig / recorded selection). Only the fields
+// init consults are modelled; all optional (a partial/old config is valid).
+interface DevkitConfig {
+  stack?: string;
+  devkitRef?: string;
+  initVersion?: number;
+  pkgRel?: string;
+  standalone?: boolean;
+  overlay?: boolean;
+  minDevkit?: string;
+  configOverrides?: Record<string, unknown>;
+  components?: RecordedComponents;
+}
+
+// The consumer's package.json — only the maps init adds/removes entries in.
+interface PackageJson {
+  devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+// A consumer tsconfig.json for the safe devkit-extends strip (removeTsconfig).
+interface TsConfig {
+  extends?: string | string[];
+  [key: string]: unknown;
+}
+
+// The `eslint/baselines/exempt.mjs` overlay module (dynamic import) — the hand-maintained
+// import-wall exemptions.
+interface ExemptModule {
+  importWallExempt?: Array<{ pattern: string }>;
+}
+
+// The shape of a caught exec/Error the log helpers read (execFileSync throws carry stderr + status).
+interface ExecError {
+  stderr?: string | Buffer;
+  message?: string;
+  status?: number | null;
+}
+
+// The fully-resolved plan applyInit / applyOverlay consume (no prompting — callers pass this).
+interface InitPlan {
+  stack: string;
+  selection: Selection;
+  remove?: string[];
+  force?: boolean;
+  dryRun?: boolean;
+  interactive?: boolean;
+  scanRoots?: string[] | null;
+  standalone?: boolean;
+  overlay?: boolean;
+  globalCommitGate?: boolean;
+  devkitRef?: string;
+  regenStructureBaselines?: boolean;
+}
+
+// A component selection extended with the resolved structure-lint command — the shape the husky
+// block builders (buildFullHook / buildGuardBlock / installStandaloneHook) consume.
+type HookSelectionInput = Selection & { structureCmd?: string };
 
 interface InitFlags {
   yes: boolean;
@@ -196,9 +274,9 @@ function parseFlags(args: string[]): InitFlags {
 
 // Build a selection from flags (the --yes / non-TTY path): all recommended, minus --no-*,
 // guards narrowed by --guards / --no-guards.
-function selectionFromFlags(flags) {
+function selectionFromFlags(flags: InitFlags): Selection {
   const sel = defaultSelection();
-  for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure']) {
+  for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure'] as const) {
     if (flags.no.has(id)) sel[id] = false;
   }
   if (flags.no.has('guards')) sel.guards = [];
@@ -216,8 +294,8 @@ function selectionFromFlags(flags) {
 
 // Which components are currently wired? Read the recorded set first (authoritative), then
 // fall back to on-disk detection for a pre-wizard repo with no `components` block.
-function detectInstalled(cwd) {
-  const cfg = readJson(join(cwd, '.devkit', 'config.json'));
+function detectInstalled(cwd: string) {
+  const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
   const installed = new Set<string>();
   const recorded = cfg?.components;
   if (recorded) {
@@ -230,7 +308,7 @@ function detectInstalled(cwd) {
       'agentHooks',
       'husky',
       'structure',
-    ]) {
+    ] as const) {
       if (recorded[id]) installed.add(id);
     }
     if (recorded.guards?.length) installed.add('guards');
@@ -261,12 +339,16 @@ function detectInstalled(cwd) {
   return installed;
 }
 
-function readText(path) {
+function readText(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
-function logWrite(action, label) {
-  const map = { created: '✓ created', forced: '✓ overwrote', exists: '• already wired' };
+function logWrite(action: string, label: string) {
+  const map: Record<string, string> = {
+    created: '✓ created',
+    forced: '✓ overwrote',
+    exists: '• already wired',
+  };
   console.log(`  ${map[action] ?? action} ${label}`);
 }
 
@@ -274,9 +356,9 @@ function logWrite(action, label) {
 
 // Reason: flat orchestration: builds a [src,dest] item list from independent `if (sel.x)` toggles, then one write loop with a dry-run branch; high branch COUNT, each toggle trivial and non-nested
 // fallow-ignore-next-line complexity
-function installConfigs(cwd, sel, force, dryRun) {
+function installConfigs(cwd: string, sel: Selection, force: boolean, dryRun: boolean) {
   const tplDir = join(packageDir(), 'templates', 'generic');
-  const items = [];
+  const items: [string, string][] = [];
   if (sel.biome) items.push(['biome.jsonc', 'biome.jsonc']);
   if (sel.tsconfig) items.push(['tsconfig.json', 'tsconfig.json']);
   // guard.config.json is needed whenever ANY gate runs (guards or structure).
@@ -293,10 +375,10 @@ function installConfigs(cwd, sel, force, dryRun) {
   }
 }
 
-function installStructureFiles(cwd, stack, force, dryRun) {
+function installStructureFiles(cwd: string, stack: string, force: boolean, dryRun: boolean) {
   const tplDir = join(packageDir(), 'templates', stack);
   // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (stack rules).
-  const items = [
+  const items: [string, string][] = [
     ...STRUCTURE_TEMPLATE_FILES[stack],
     ['biome.jsonc', 'biome.jsonc'],
     ['tsconfig.json', 'tsconfig.json'],
@@ -324,7 +406,7 @@ function installStructureFiles(cwd, stack, force, dryRun) {
 // e.g. a non-`src` root like services/webapp/src. Patches the scanRoots array in place via
 // regex to PRESERVE the template's //-comment guidance keys; falls back to a JSON round-trip if
 // the key is absent. No-op when guard.config.json wasn't written (no guards/structure selected).
-function applyScanRoots(cwd, scanRoots, dryRun) {
+function applyScanRoots(cwd: string, scanRoots: string[] | null, dryRun: boolean) {
   if (!scanRoots?.length) return;
   const value = JSON.stringify(scanRoots);
   if (dryRun) {
@@ -336,7 +418,7 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
   const raw = readText(path);
   let next = raw.replace(SCANROOTS_RE, `$1${value}`);
   if (next === raw) {
-    const cfg = readJson(path) ?? {};
+    const cfg: Record<string, unknown> = (readJson(path) as Record<string, unknown> | null) ?? {};
     cfg.scanRoots = scanRoots;
     next = `${JSON.stringify(cfg, null, 2)}\n`;
   }
@@ -346,9 +428,16 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
 
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
-function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
+function patchPackageJson(
+  cwd: string,
+  devkitRef: string,
+  sel: Selection,
+  isStructure: boolean,
+  dryRun: boolean,
+  stack: string,
+) {
   const pkgPath = join(cwd, 'package.json');
-  const pkg = readJson(pkgPath);
+  const pkg = readJson(pkgPath) as PackageJson | null;
   if (!pkg) {
     console.log('  ! no package.json — skipping devDeps/scripts wiring');
     return;
@@ -381,7 +470,7 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
 
   pkg.devDependencies = pkg.devDependencies ?? {};
   pkg.scripts = pkg.scripts ?? {};
-  const added = [];
+  const added: string[] = [];
   for (const [k, v] of Object.entries(devDeps)) {
     if (!pkg.devDependencies[k]) {
       pkg.devDependencies[k] = v;
@@ -410,7 +499,7 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
 // which is `cwd` for a single-package repo, or the monorepo root when init runs in a package
 // subdir). `pkgRel` scopes the block + `cd`s the gates into the package. Fresh repo → full
 // hook; existing hook → replace/insert THIS package's devkit-guards block (others untouched).
-function installHusky(sel, hookRoot, pkgRel, dryRun) {
+function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string, dryRun: boolean) {
   const where = pkgRel ? ` (git root, scoped to ${pkgRel})` : '';
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) {
@@ -443,13 +532,13 @@ function installHusky(sel, hookRoot, pkgRel, dryRun) {
 // re-run (e.g. the documented post-`bun install` re-apply) must NOT re-snapshot the tree — that
 // would grandfather newly-added debt and silently move the ratchet up. guard-size writes a SECOND
 // baseline (size-lines.json) only under an active `maxLines` cap, so require that one too.
-function baselineFrozen(cwd, name) {
-  const has = (p) => existsSync(join(cwd, 'eslint', 'baselines', p));
+function baselineFrozen(cwd: string, name: string) {
+  const has = (p: string) => existsSync(join(cwd, 'eslint', 'baselines', p));
   if (name === 'guard-fanout') return has('fanout.json');
   return has('size.json') && (!resolveGuardConfig(cwd).maxLines || has('size-lines.json'));
 }
 
-function runFreezes(cwd, dryRun) {
+function runFreezes(cwd: string, dryRun: boolean) {
   if (dryRun) {
     console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
     return;
@@ -469,18 +558,18 @@ function runFreezes(cwd, dryRun) {
     try {
       execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
       console.log(`  ✓ ${name} freeze (baseline grandfathered)`);
-    } catch (e) {
+    } catch (e: unknown) {
       console.log(`  ! ${name} freeze failed: ${firstLine(e)}`);
     }
   }
 }
 
 /** The consumer's permanent import-wall exemptions (eslint/baselines/exempt.mjs `importWallExempt`), or empty. */
-export async function readImportWallExempt(cwd): Promise<Set<string>> {
+export async function readImportWallExempt(cwd: string): Promise<Set<string>> {
   const file = join(cwd, 'eslint', 'baselines', 'exempt.mjs');
   if (!existsSync(file)) return new Set();
   try {
-    const { importWallExempt = [] } = await import(pathToFileURL(file).href);
+    const { importWallExempt = [] } = (await import(pathToFileURL(file).href)) as ExemptModule;
     return new Set(importWallExempt.map((m) => m.pattern));
   } catch {
     return new Set();
@@ -493,13 +582,13 @@ export async function readImportWallExempt(cwd): Promise<Set<string>> {
 // grandfather violations added since init (silent debt laundering).
 // ponytail: coarse skip-if-any-exists (not per-tree); the alternative needs tree names before
 // generating. Prevents laundering fully; a rare some-present-some-missing tree just isn't re-created.
-function structureBaselinesExist(cwd) {
+function structureBaselinesExist(cwd: string) {
   const dir = join(cwd, 'eslint', 'baselines');
   if (!existsSync(dir)) return false;
   return readdirSync(dir).some((f) => f.endsWith('.mjs') && f !== 'exempt.mjs');
 }
 
-async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
+async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean, regen = true) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
     return;
@@ -515,10 +604,10 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
   // rules + EMPTY baselines (the eslint.config loadBaseline() returns [] when absent), and its
   // structureRoot is derived live from guard.config.json scanRoots — so for a src-rooted app
   // these calls are no-ops by design (the electron tree names never match).
-  const opts = { log: (m) => console.log(m) };
+  const opts = { log: (m: string) => console.log(m) };
   try {
     await generateStructureBaselines(cwd, opts);
-  } catch (e) {
+  } catch (e: unknown) {
     console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
   }
   try {
@@ -526,19 +615,23 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
     // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
     // during the scan — else it would be re-grandfathered every regen.
     generateImportWallBaseline(cwd, { ...opts, exemptPatterns: await readImportWallExempt(cwd) });
-  } catch (e) {
+  } catch (e: unknown) {
     console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
     console.log(`    (install deps — bun install — then re-run \`devkit init --stack ${stack}\`)`);
   }
 }
 
-function firstLine(e) {
-  return (e.stderr || e.message || '').toString().trim().split('\n')[0];
+function firstLine(e: unknown): string {
+  const err = e as ExecError;
+  return (err.stderr || err.message || '').toString().trim().split('\n')[0];
 }
 
 // A @clack confirm that's safe in any context: only prompts on a TTY-interactive run,
 // otherwise returns the non-interactive default. isCancel (Ctrl-C / Esc) → the default too.
-async function subConfirm(message, { interactive, fallback }) {
+async function subConfirm(
+  message: string,
+  { interactive, fallback }: { interactive: boolean; fallback: boolean },
+): Promise<boolean> {
   if (!interactive) return fallback;
   const v = await confirm({ message, initialValue: fallback });
   return isCancel(v) ? fallback : v;
@@ -552,12 +645,12 @@ async function subConfirm(message, { interactive, fallback }) {
 // Reason: flat policy resolver: the branches ARE the four resolution modes (none / force / non-interactive / interactive-pick), each a single guarded return; no nesting
 // fallow-ignore-next-line complexity
 async function resolveAssetConflicts(
-  gitRoot,
-  selection,
-  { interactive, force },
+  gitRoot: string,
+  selection: Selection,
+  { interactive, force }: { interactive: boolean; force: boolean },
 ): Promise<(kind: string, name: string) => boolean> {
   const targets = selection.agentTargets ?? AGENT_TARGETS;
-  const found = [];
+  const found: Array<{ kind: string; name: string }> = [];
   if (selection.skills)
     for (const name of detectSkillConflicts(gitRoot, targets)) found.push({ kind: 'skill', name });
   if (selection.agents)
@@ -595,12 +688,12 @@ async function resolveAssetConflicts(
 // Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
 // against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
 // (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
-function fallowHasDebt(cwd) {
+function fallowHasDebt(cwd: string) {
   try {
     execFileSync('fallow', ['audit'], { cwd, stdio: 'pipe' });
     return false; // exit 0 → clean → nothing to baseline
-  } catch (e) {
-    return e.status != null; // non-zero exit → debt; ENOENT (status null) → treat as none
+  } catch (e: unknown) {
+    return (e as ExecError).status != null; // non-zero exit → debt; ENOENT (status null) → treat as none
   }
 }
 
@@ -610,7 +703,7 @@ function fallowHasDebt(cwd) {
 // AND the repo has debt to grandfather. dryRun prints + writes nothing throughout.
 // Reason: flat fail-open orchestration: each fallow step (install → gitignore → optional init → wire gate → save baselines) is a sequential guarded call with its own dryRun/ok branch; the branch COUNT is the step count, no nesting
 // fallow-ignore-next-line complexity
-async function applyFallow(cwd, dryRun, interactive) {
+async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean) {
   const r = installFallow({ cwd, dryRun });
   console.log(`  ${r.ok ? '✓' : '!'} ${r.message}`);
   ensureFallowGitignore({ cwd, dryRun });
@@ -626,7 +719,7 @@ async function applyFallow(cwd, dryRun, interactive) {
       try {
         execFileSync('fallow', ['init'], { cwd, stdio: 'inherit' });
         console.log('  ✓ fallow init');
-      } catch (e) {
+      } catch (e: unknown) {
         console.log(`  ! fallow init skipped: ${firstLine(e)}`);
       }
     }
@@ -644,11 +737,16 @@ async function applyFallow(cwd, dryRun, interactive) {
 
 // Reason: CRAP-flagged thin package.json mutator: two near-identical key-delete loops (devDeps, scripts) each gated on existence + dryRun; exercised end-to-end via every remove* caller, not unit-isolated
 // fallow-ignore-next-line complexity
-function removeFromPkg(cwd, devDeps, scripts, dryRun) {
+function removeFromPkg(
+  cwd: string,
+  devDeps: string[],
+  scripts: string[],
+  dryRun: boolean,
+): string[] {
   const pkgPath = join(cwd, 'package.json');
-  const pkg = readJson(pkgPath);
+  const pkg = readJson(pkgPath) as PackageJson | null;
   if (!pkg) return [];
-  const removed = [];
+  const removed: string[] = [];
   for (const k of devDeps) {
     if (pkg.devDependencies?.[k]) {
       removed.push(`devDep ${k}`);
@@ -665,7 +763,7 @@ function removeFromPkg(cwd, devDeps, scripts, dryRun) {
   return removed;
 }
 
-function removeBiome(cwd, dryRun) {
+function removeBiome(cwd: string, dryRun: boolean) {
   const file = join(cwd, 'biome.jsonc');
   if (existsSync(file)) {
     console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} biome.jsonc`);
@@ -681,11 +779,11 @@ function removeBiome(cwd, dryRun) {
 // Remove ONLY the devkit `extends` from tsconfig — never delete a tsconfig with user content.
 // Reason: the branches ARE the safe-strip decision tiers: unparseable → bail, no-devkit-extends → bail, array-extends → filter, scalar-extends → delete; each guard exists to NEVER delete a tsconfig devkit didn't author
 // fallow-ignore-next-line complexity
-function removeTsconfig(cwd, dryRun) {
+function removeTsconfig(cwd: string, dryRun: boolean) {
   const file = join(cwd, 'tsconfig.json');
   if (!existsSync(file)) return;
   const raw = readFileSync(file, 'utf8');
-  let parsed;
+  let parsed: TsConfig;
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -693,7 +791,8 @@ function removeTsconfig(cwd, dryRun) {
     return;
   }
   const ext = parsed.extends;
-  const isDevkit = (e) => typeof e === 'string' && e.startsWith('@norvalbv/devkit/tsconfig');
+  const isDevkit = (e: unknown): boolean =>
+    typeof e === 'string' && e.startsWith('@norvalbv/devkit/tsconfig');
   const onlyExtends = Object.keys(parsed).length === 1 && 'extends' in parsed;
   if (!ext || (Array.isArray(ext) ? !ext.some(isDevkit) : !isDevkit(ext))) {
     console.log('  • tsconfig.json has no devkit extends — left untouched');
@@ -713,7 +812,7 @@ function removeTsconfig(cwd, dryRun) {
 
 // Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
 // other packages' blocks intact.
-function removeHusky(hookRoot, pkgRel, dryRun) {
+function removeHusky(hookRoot: string, pkgRel: string, dryRun: boolean) {
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
   const { content, removed } = removeGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
@@ -731,15 +830,24 @@ function removeHusky(hookRoot, pkgRel, dryRun) {
 
 // Remove a single fragment (one guard, or the biome step) from THIS package's block. Scoped via
 // extract→removeFragment→replace so a shared sentinel in another package's block is untouched.
-// `id` is intentionally left un-annotated: removeBiome calls this with only 3 args (dryRun lands in
-// the `id` slot), a pre-existing arg-order quirk this conversion preserves — hence dryRun is optional.
-function removeHuskyPiece(hookRoot: string, pkgRel: string, id, dryRun?: boolean) {
+// `id` is typed `string | boolean` because removeBiome calls this with only 3 args, so `dryRun`
+// (a boolean) lands in the `id` slot — a pre-existing arg-order quirk this conversion preserves
+// (that call passes pkgRel='biome-format', which matches no block, so extractGuardBlock returns null
+// and it no-ops before `id` is ever read). Hence the trailing dryRun is optional.
+function removeHuskyPiece(
+  hookRoot: string,
+  pkgRel: string,
+  id: string | boolean,
+  dryRun?: boolean,
+) {
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return false;
   const content = readFileSync(hookPath, 'utf8');
   const block = extractGuardBlock(content, pkgRel);
   if (!block) return false;
-  const { content: newBlock, removed } = removeFragment(block, id);
+  // Reached only via applyRemovals (id is always a string there); the boolean-in-id quirk above
+  // returns null at the block check, so this cast is erased over an already-string value.
+  const { content: newBlock, removed } = removeFragment(block, id as string);
   if (!removed) return false;
   if (dryRun) {
     console.log(`  [dry-run] remove ${id} from .husky/pre-commit`);
@@ -755,13 +863,14 @@ function removeHuskyPiece(hookRoot: string, pkgRel: string, id, dryRun?: boolean
 // deterministic line without it — so nothing to strip from the hook here.
 // Reason: safe-removal sequence guarded per artifact: marker check → delete template files → delete baselines → strip pkg entries; each existsSync/dryRun branch is a separate file devkit must verify it created before touching
 // fallow-ignore-next-line complexity
-function removeStructure(cwd, prevConfig, dryRun) {
+function removeStructure(cwd: string, prevConfig: DevkitConfig | null, dryRun: boolean) {
   if (!prevConfig?.components?.structure) {
     console.log('  ! structure not recorded as devkit-created — leaving eslint files untouched');
     return;
   }
   // Same structure file set across stacks today; key off the recorded stack to stay generic.
-  const files = STRUCTURE_TEMPLATE_FILES[prevConfig.stack] ?? STRUCTURE_TEMPLATE_FILES.electron;
+  const files =
+    STRUCTURE_TEMPLATE_FILES[prevConfig.stack ?? ''] ?? STRUCTURE_TEMPLATE_FILES.electron;
   for (const [, dest] of files) {
     const p = join(cwd, dest);
     if (existsSync(p)) {
@@ -787,7 +896,15 @@ function removeStructure(cwd, prevConfig, dryRun) {
 
 // Reason: flat removal dispatch: one `if (remove.includes(id)) removeX()` per component, ordered so guards (line-level) precede husky (block-level); high branch COUNT mirrors the component list, each branch a single delegated call
 // fallow-ignore-next-line complexity
-function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection) {
+function applyRemovals(
+  cwd: string,
+  remove: string[],
+  prevConfig: DevkitConfig | null,
+  gitRoot: string,
+  pkgRel: string,
+  dryRun: boolean,
+  selection: Selection,
+) {
   if (!remove.length) return;
   console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
   // Guards (individual lines) before husky (whole-block) so order is irrelevant.
@@ -807,7 +924,7 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
     const survivors = [
       selection.searchSteering && !remove.includes('searchSteering') && 'searchSteering',
       selection.agentHooks && !remove.includes('agentHooks') && 'agentHooks',
-    ].filter(Boolean);
+    ].filter((x): x is 'searchSteering' | 'agentHooks' => Boolean(x));
     if (survivors.length) installHookRegistrations(gitRoot, survivors, { dryRun });
     else removeHookRegistrations(gitRoot, { dryRun });
   }
@@ -820,7 +937,7 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
 // Overlay (local-only) install: invisible to git (.git/info/exclude), non-invasive (extends the
 // repo, edits nothing committed). Self-contained — writes its own git-ignored .devkit/config.json
 // and returns; applyInit's package/standalone path never runs for an overlay.
-function applyOverlay(cwd, plan, pkgRel, devkitRef) {
+function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: string) {
   const { stack, selection, force = false, dryRun = false } = plan;
   console.log(
     `devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`,
@@ -889,9 +1006,9 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
 // Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
 // fallow-ignore-next-line complexity
 function installAgentSurfaces(
-  gitRoot,
-  selection,
-  dryRun,
+  gitRoot: string,
+  selection: Selection,
+  dryRun: boolean,
   override: (kind: string, name: string) => boolean = () => false,
 ) {
   const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
@@ -916,7 +1033,7 @@ function installAgentSurfaces(
   const hookComponents = [
     selection.searchSteering && 'searchSteering',
     selection.agentHooks && 'agentHooks',
-  ].filter(Boolean);
+  ].filter((x): x is 'searchSteering' | 'agentHooks' => Boolean(x));
   if (hookComponents.length) {
     console.log('7c. agent hook registrations');
     installHookRegistrations(gitRoot, hookComponents, { dryRun, targets: agentTargets });
@@ -929,11 +1046,20 @@ function installAgentSurfaces(
 // files from it (manifests kept — the surviving surface still tracks them). Only for components
 // staying selected; a fully-deselected component is removed wholesale by applyRemovals. Skipped on a
 // fresh install where the dropped surface has no devkit dir (no work, no noise).
-function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun) {
+function pruneDeselectedSurfaces(
+  gitRoot: string,
+  selection: Selection,
+  agentTargets: string[],
+  hookComponents: string[],
+  dryRun: boolean,
+) {
   const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
   // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
   // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
-  const settingsFile = { claude: '.claude/settings.json', cursor: '.cursor/hooks.json' };
+  const settingsFile: Record<string, string> = {
+    claude: '.claude/settings.json',
+    cursor: '.cursor/hooks.json',
+  };
   const hasPrunableContent = prunedTargets.some(
     (t) =>
       ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
@@ -973,7 +1099,7 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponent
  */
 // Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
 // fallow-ignore-next-line complexity
-export async function applyInit(cwd, plan) {
+export async function applyInit(cwd: string, plan: InitPlan) {
   const {
     stack,
     selection,
@@ -999,9 +1125,9 @@ export async function applyInit(cwd, plan) {
   // orchestrator resolves it as a sibling module); electron keeps its consumer-side `bunx eslint
   // src`. Undefined when structure is off → no `--structure` arg emitted.
   const structureCmd = isStructure ? structureCmdFor(stack) : undefined;
-  const devkitPkg = readJson(join(packageDir(), 'package.json'));
+  const devkitPkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
   const devkitRef = plan.devkitRef ?? (devkitPkg ? `v${devkitPkg.version}` : 'main');
-  const prevConfig = readJson(join(cwd, '.devkit', 'config.json'));
+  const prevConfig = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
   // Monorepo: configs/baselines stay in cwd (the package), but the husky hook + repo-wide
   // skills target the git root, with gates scoped `cd <pkgRel>`. Single-package repo → gitRoot
   // === cwd, pkgRel '' → everything as before.
@@ -1022,7 +1148,7 @@ export async function applyInit(cwd, plan) {
   const on = COMPONENTS.filter((c) =>
     c.id === 'guards'
       ? selection.guards.length
-      : selection[c.id] && !(c.id === 'structure' && !isStructure),
+      : selection[c.id as keyof Selection] && !(c.id === 'structure' && !isStructure),
   ).map((c) => c.id);
   console.log(`  components: ${on.join(', ') || '(none)'}\n`);
 
@@ -1140,7 +1266,7 @@ function printReferencedSteps() {
   );
 }
 
-function structureAvailableFor(stack) {
+function structureAvailableFor(stack: string) {
   return STRUCTURE_STACKS.has(stack);
 }
 
@@ -1179,7 +1305,7 @@ See docs/glossary.md for package/standalone/overlay, gates, ratchets, baselines,
 
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
 // fallow-ignore-next-line complexity
-export default async function run(args, cwd) {
+export default async function run(args: string[], cwd: string) {
   const flags = parseFlags(args);
   const detectedStack = flags.stack ?? detectStack(cwd);
   // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
@@ -1187,8 +1313,8 @@ export default async function run(args, cwd) {
   const interactive = !flags.yes && process.stdout.isTTY && !flags.dryRun;
 
   let stack = detectedStack;
-  let selection;
-  let remove = [];
+  let selection: Selection;
+  let remove: string[] = [];
   let mode = detectedMode;
 
   // --baselines-only: re-derive the structure + import-wall baselines and NOTHING else (no config
@@ -1226,14 +1352,19 @@ export default async function run(args, cwd) {
       installed,
     });
     if (!result) return 0; // cancelled — nothing written
-    ({ mode, stack, selection, remove } = result);
+    ({ mode, stack, remove } = result);
+    // The wizard builds selection incrementally (Partial): package/standalone set every field;
+    // overlay leaves the package-only fields for applyOverlayConstraints (line below) to fill. It's
+    // a complete Selection at every point it's read here — no missing key is accessed before then.
+    selection = result.selection as Selection;
   } else {
     selection = selectionFromFlags(flags);
     // Non-interactive removal of deselected-present components only with --remove-deselected.
     if (flags.removeDeselected) {
       const installed = detectInstalled(cwd);
       for (const id of installed) {
-        const stillSelected = id === 'guards' ? selection.guards.length > 0 : selection[id];
+        const stillSelected =
+          id === 'guards' ? selection.guards.length > 0 : selection[id as keyof Selection];
         if (!stillSelected) remove.push(id);
       }
     }

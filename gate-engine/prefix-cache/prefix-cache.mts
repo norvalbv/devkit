@@ -35,9 +35,12 @@ const STORE_FILE = 'prefix-cache.json';
 
 // This package's own version — a behaviour salt, not consumer data, so the one sanctioned
 // exception to W-3's "no import.meta.url" rule (gate semantics change across versions).
-function devkitVersion() {
+function devkitVersion(): string | undefined {
   try {
-    return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+    const pkg = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+    ) as { version?: string };
+    return pkg.version;
   } catch {
     return 'unknown';
   }
@@ -67,7 +70,7 @@ export function computeKey(
   cwd: string,
   { hookPath, scope = 'devkit-guards', versionSalt }: KeyOpts = {},
 ): string | null {
-  let tree;
+  let tree: string;
   try {
     tree = execSync('git write-tree', { cwd, encoding: 'utf8' }).trim();
   } catch {
@@ -101,6 +104,6 @@ export function recordPrefix(cwd: string, opts: KeyOpts = {}) {
 }
 
 /** Drop every cached prefix key (the escape hatch for gitignored-input staleness). */
-export function clearPrefix(cwd) {
+export function clearPrefix(cwd: string) {
   clearEntries(devkitDataFile(cwd, STORE_FILE));
 }

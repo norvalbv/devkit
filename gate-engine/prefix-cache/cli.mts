@@ -54,7 +54,8 @@ function run(argv: string[]) {
 
 try {
   process.exit(run(process.argv.slice(2)));
-} catch (e) {
-  console.error(`guard-prefix: ${e?.message ?? e}`);
+} catch (e: unknown) {
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error(`guard-prefix: ${msg}`);
   process.exit(1); // any failure means "run the gates", never "skip"
 }

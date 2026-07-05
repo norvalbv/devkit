@@ -145,9 +145,9 @@ describe('materializeFixture', () => {
 // tests can assert exactly which judge calls were (not) made.
 
 describe('sub-benches (stubbed claude)', () => {
-  let dir;
-  let savedPath;
-  let log;
+  let dir: string;
+  let savedPath: string | undefined;
+  let log: string;
   const useStub = (script) => {
     const bin = join(dir, 'fakebin');
     mkdirSync(bin, { recursive: true });
@@ -158,7 +158,7 @@ describe('sub-benches (stubbed claude)', () => {
   };
   const calls = () => (existsSync(log) ? execSync(`cat "${log}"`, { encoding: 'utf8' }) : '');
 
-  let savedNoLlm;
+  let savedNoLlm: [string | undefined, string | undefined];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'eval-bench-'));

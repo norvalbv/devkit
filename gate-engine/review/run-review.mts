@@ -36,8 +36,8 @@ import { loadCache, savePasses } from './cache.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
   allowedToolsFor,
-  cacheKey,
   type ChecklistState,
+  cacheKey,
   escalatePrompt,
   type GuardConfig,
   parseReviewVerdict,
@@ -151,7 +151,9 @@ function agentBody(cwd: string, cfg: GuardConfig, name: string): string | null {
 /** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt → unverifiable). */
 function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistState | null {
   try {
-    return JSON.parse(readFileSync(path.resolve(cwd, reviewer.stateFile), 'utf8')) as ChecklistState;
+    return JSON.parse(
+      readFileSync(path.resolve(cwd, reviewer.stateFile), 'utf8'),
+    ) as ChecklistState;
   } catch {
     return null;
   }
@@ -171,7 +173,10 @@ function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
  * gate), a PASS is voided to inconclusive when the artifact is missing/incomplete/inconsistent
  * (verifyChecklist), and the artifact is removed afterwards either way.
  */
-export async function runCascade(sel: ReviewerSelection, opts: CascadeOpts): Promise<CascadeResult> {
+export async function runCascade(
+  sel: ReviewerSelection,
+  opts: CascadeOpts,
+): Promise<CascadeResult> {
   const { cwd } = opts;
   cleanupChecklistState(cwd, sel.reviewer);
   const res = await cascadeVerdict(sel, opts);

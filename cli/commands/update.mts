@@ -34,25 +34,25 @@ const TAG_RE = /refs\/tags\/v(\d+\.\d+\.\d+)\^?\{?\}?\s*$/;
 const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants a bare URL (https:// / ssh://), not the git+ prefix
 
 /** -1 / 0 / 1 comparing two x.y.z strings numerically. */
-export function cmpSemver(a, b) {
+export function cmpSemver(a: string, b: string): number {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
   return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
 }
 
 /** Highest vX.Y.Z tag from `git ls-remote --tags` output, or null. */
-export function latestTag(lsRemoteOutput) {
-  const versions = [];
+export function latestTag(lsRemoteOutput: string): string | null {
+  const versions: string[] = [];
   for (const line of lsRemoteOutput.split('\n')) {
     const m = line.match(TAG_RE);
     if (m) versions.push(m[1]);
   }
   if (!versions.length) return null;
-  return versions.sort(cmpSemver).at(-1);
+  return versions.sort(cmpSemver).at(-1) ?? null;
 }
 
 /** Rewrite the devkit dep's `#vX.Y.Z` ref in a package.json string to the new version. */
-export function repinPackageJson(pkgRaw, version) {
+export function repinPackageJson(pkgRaw: string, version: string): string {
   const re = new RegExp(`("${DEP.replace('/', '\\/')}"\\s*:\\s*"[^"]*#v)\\d+\\.\\d+\\.\\d+(")`);
   return pkgRaw.replace(re, `$1${version}$2`);
 }
@@ -62,9 +62,9 @@ export function repinPackageJson(pkgRaw, version) {
  * when the remote has no version tags) or `{ error }` when the remote is unreachable. Shared by
  * `update` and `upgrade` so both resolve the latest tag the same way (single source for the repo URL).
  */
-export function fetchLatestTag() {
+export function fetchLatestTag(): { latest?: string | null; error?: string } {
   const lsUrl = BUN_REF.replace(GIT_PREFIX_RE, '');
-  let ls;
+  let ls: string;
   try {
     ls = execFileSync('git', ['ls-remote', '--tags', lsUrl], { encoding: 'utf8' });
   } catch {
@@ -75,12 +75,15 @@ export function fetchLatestTag() {
   return { latest: latestTag(ls) };
 }
 
-function run(cmd, args, cwd) {
+function run(cmd: string, args: string[], cwd: string): void {
   execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 }
 
-function currentVersion() {
-  return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
+function currentVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  };
+  return pkg.version;
 }
 
 export const meta = {
@@ -97,7 +100,7 @@ Re-pins package.json + \`bun install\` if devkit is a dep here, else \`bun add -
 
 // Reason: flat update pipeline: sequential guard-and-return steps (remote unreachable, no tags, up-to-date, --dry-run) plus the package-vs-global mode fork; near-zero nesting, high branch COUNT where each branch is a trivial early-out
 // fallow-ignore-next-line complexity
-export default async function update(args, cwd) {
+export default async function update(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const current = currentVersion();
 
@@ -120,7 +123,10 @@ export default async function update(args, cwd) {
   let pkgRaw = null;
   if (existsSync(pkgPath)) {
     pkgRaw = readFileSync(pkgPath, 'utf8');
-    const pkg = JSON.parse(pkgRaw);
+    const pkg = JSON.parse(pkgRaw) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
     if (pkg.dependencies?.[DEP] || pkg.devDependencies?.[DEP]) mode = 'package';
   }
 
@@ -132,7 +138,9 @@ export default async function update(args, cwd) {
 
   run('bun', ['pm', 'cache', 'rm'], cwd);
   if (mode === 'package') {
-    const repinned = repinPackageJson(pkgRaw, latest);
+    // `mode === 'package'` is only ever set after pkgRaw was read from disk, so `?? ''` is a
+    // never-taken fallback that lets TS see a string without changing any reachable behavior.
+    const repinned = repinPackageJson(pkgRaw ?? '', latest);
     if (repinned === pkgRaw) {
       console.error(`devkit update: could not find a "${DEP}" git ref to re-pin in package.json.`);
       return 1;

@@ -40,6 +40,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileAtomic } from '../atomic-write.mts';
+import type { ReconcileManifest, ReconcilePath } from '../reconcile.mts';
 
 const LOCK_STALE_MS = 60_000; // a lock dir older than this is a dead writer/reader — reap it
 const LOCK_WAIT_MS = 5_000; // total time to retry a contended lock before throwing (never write unlocked)
@@ -47,7 +48,7 @@ const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/pat
 const PR_DIGITS = /^\d+$/; // a non-empty --pr is an integer; anything else → null
 
 /** Run git in <root>, return trimmed stdout, or null if the command fails (missing path, etc.). */
-function git(root, args) {
+function git(root: string, args: string[]): string | null {
   try {
     return execFileSync('git', ['-C', root, ...args], {
       encoding: 'utf8',
@@ -81,7 +82,7 @@ export function parseArgs(argv: string[]) {
 }
 
 /** git tree mode for a path that EXISTS in the working tree (symlink / executable / regular). */
-function worktreeMode(abs) {
+function worktreeMode(abs: string): string {
   const st = lstatSync(abs);
   if (st.isSymbolicLink()) return '120000';
   return st.mode & 0o111 ? '100755' : '100644';
@@ -93,7 +94,7 @@ function worktreeMode(abs) {
  * PRE-deletion committed blob so reconcile can prove still-deleted-as-shipped vs re-created).
  * Returns null only if a deleted path has no base blob either (never shipped anything real).
  */
-function classify(gitRoot, baseSha, p) {
+function classify(gitRoot: string, baseSha: string, p: string): ReconcilePath | null {
   if (p.startsWith('/') || p.split('/').includes('..')) return null; // repo-relative paths only (defense-in-depth)
   const abs = join(gitRoot, p);
   if (existsSync(abs)) {
@@ -118,7 +119,7 @@ function classify(gitRoot, baseSha, p) {
  * (an unlocked read-modify-write would lose a parallel ship's branch entry). A lock older than
  * 60s is a crashed holder — reap it.
  */
-function withLock(lockDir, fn) {
+function withLock<T>(lockDir: string, fn: () => T): T {
   const deadline = Date.now() + LOCK_WAIT_MS;
   let held = false;
   while (Date.now() <= deadline) {
@@ -126,8 +127,8 @@ function withLock(lockDir, fn) {
       mkdirSync(lockDir);
       held = true;
       break;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
+    } catch (e: unknown) {
+      if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e;
       try {
         if (Date.now() - lstatSync(lockDir).mtimeMs > LOCK_STALE_MS)
           rmSync(lockDir, { recursive: true, force: true });
@@ -145,11 +146,14 @@ function withLock(lockDir, fn) {
 }
 
 /** A well-formed v1 manifest: version 1 with a plain (non-array) branches object. */
-const isValidV1 = (m) =>
-  m &&
+const isValidV1 = (m: unknown): m is ReconcileManifest =>
+  typeof m === 'object' &&
+  m !== null &&
+  'version' in m &&
   m.version === 1 &&
-  m.branches &&
+  'branches' in m &&
   typeof m.branches === 'object' &&
+  m.branches !== null &&
   !Array.isArray(m.branches);
 
 /**
@@ -157,28 +161,43 @@ const isValidV1 = (m) =>
  * NEWER version THROWS rather than being clobbered (that would erase a newer schema's branches).
  * Exported so the version-gate is directly unit-testable.
  */
-export function readManifest(file) {
-  let raw;
+export function readManifest(file: string): ReconcileManifest {
+  let raw: string;
   try {
     raw = readFileSync(file, 'utf8');
-  } catch (e) {
-    if (e?.code === 'ENOENT') return { version: 1, branches: {} }; // absent → fresh
+  } catch (e: unknown) {
+    if (e instanceof Error && 'code' in e && e.code === 'ENOENT')
+      return { version: 1, branches: {} }; // absent → fresh
     throw e; // a real read error — surface it, never overwrite blindly
   }
-  let m;
+  let m: unknown;
   try {
     m = JSON.parse(raw);
   } catch {
     return { version: 1, branches: {} }; // torn / half-written → start fresh
   }
   if (isValidV1(m)) return m;
-  throw new Error(`refusing to overwrite an incompatible manifest (version ${m?.version})`);
+  const version: unknown =
+    typeof m === 'object' && m !== null && 'version' in m ? m.version : undefined;
+  throw new Error(`refusing to overwrite an incompatible manifest (version ${String(version)})`);
 }
 
 /** Print an error + return the failure code (consolidates the usage-validation exits). */
-function fail(msg) {
+function fail(msg: string): number {
   console.error(`reconcile-manifest-write: ${msg}`);
   return 1;
+}
+
+/** Options for {@link recordShip}. Fields are optional so the CLI boundary can pass unvalidated flags — recordShip validates and returns a failure code for a missing required one. */
+interface RecordShipOptions {
+  root?: string;
+  gitRoot?: string;
+  branch?: string;
+  repo?: string;
+  baseRef?: string;
+  baseSha?: string;
+  pr?: string | null;
+  merge?: boolean;
 }
 
 /**
@@ -190,9 +209,9 @@ function fail(msg) {
  * records what the PR actually committed, not a parallel agent's later edit to the shared tree.
  */
 export function recordShip(
-  { root, gitRoot = root, branch, repo, baseRef, baseSha, pr, merge = false },
-  paths,
-) {
+  { root, gitRoot, branch, repo, baseRef, baseSha, pr, merge = false }: RecordShipOptions,
+  paths: string[],
+): number {
   // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
   // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
   if (!root || !branch || !baseSha) return fail('missing one of --root/--branch/--base-sha');
@@ -200,7 +219,10 @@ export function recordShip(
     return fail('missing one of --root/--branch/--repo/--base-ref/--base-sha');
   }
   if (paths.length === 0) return fail('no paths given');
-  const entries = paths.map((p) => classify(gitRoot, baseSha, p)).filter(Boolean);
+  const hashRoot = gitRoot ?? root; // default to root; ship-branch passes the ephemeral commit worktree
+  const entries = paths
+    .map((p) => classify(hashRoot, baseSha, p))
+    .filter((e): e is ReconcilePath => e !== null);
   // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
   if (entries.length === 0) return fail('no recordable paths (all empty/unresolvable)');
 
@@ -216,14 +238,15 @@ export function recordShip(
         // re-shipped path with its branch-tip blob, add new paths, supersede a renamed-away path's stale
         // `modify` with its `delete`), keep the PR metadata, refresh shippedAt.
         if (!existing) throw new Error(`no manifest entry for ${branch} to merge into`);
-        const byPath = new Map(existing.paths.map((e) => [e.path, e]));
+        const byPath = new Map(existing.paths.map((e): [string, ReconcilePath] => [e.path, e]));
         for (const e of entries) byPath.set(e.path, e);
         manifest.branches[branch] = {
           ...existing,
           shippedAt: new Date().toISOString(),
           paths: [...byPath.values()],
         };
-      } else {
+      } else if (repo && baseRef) {
+        // repo/baseRef are guaranteed defined here (validated above when !merge); the guard also narrows the optionals to string.
         manifest.branches[branch] = {
           prNumber,
           repo,
@@ -235,23 +258,27 @@ export function recordShip(
       }
       writeFileAtomic(file, `${JSON.stringify(manifest, null, 2)}\n`); // temp+rename: a crash leaves the prior valid manifest intact
     });
-  } catch (e) {
-    return fail(e.message); // lock-timeout / incompatible-version / no-entry-to-merge → best-effort: record nothing, never corrupt
+  } catch (e: unknown) {
+    return fail(e instanceof Error ? e.message : String(e)); // lock-timeout / incompatible-version / no-entry-to-merge → best-effort: record nothing, never corrupt
   }
   return 0;
 }
 
-function main() {
+/** A string-valued flag: the parser only stores strings under named keys (`merge` is the lone boolean), so a non-string reads as absent. */
+const strFlag = (v: string | boolean | undefined): string | undefined =>
+  typeof v === 'string' ? v : undefined;
+
+function main(): number {
   const { flags, paths } = parseArgs(process.argv.slice(2));
   return recordShip(
     {
-      root: flags.root,
-      gitRoot: flags['git-root'], // optional — defaults to root; ship-branch passes the commit worktree
-      branch: flags.branch,
-      repo: flags.repo,
-      baseRef: flags['base-ref'],
-      baseSha: flags['base-sha'],
-      pr: flags.pr,
+      root: strFlag(flags.root),
+      gitRoot: strFlag(flags['git-root']), // optional — defaults to root; ship-branch passes the commit worktree
+      branch: strFlag(flags.branch),
+      repo: strFlag(flags.repo),
+      baseRef: strFlag(flags['base-ref']),
+      baseSha: strFlag(flags['base-sha']),
+      pr: strFlag(flags.pr),
       merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
     },
     paths,

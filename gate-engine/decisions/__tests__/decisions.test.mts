@@ -20,7 +20,7 @@ import {
 
 const SCRIPT = fileURLToPath(new URL('../decisions.mts', import.meta.url));
 
-let dir;
+let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'decisions-'));
 });

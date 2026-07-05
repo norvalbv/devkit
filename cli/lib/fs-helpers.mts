@@ -19,23 +19,23 @@ export function packageDir() {
 }
 
 /** Read + parse a JSON file. Returns null if absent; throws on malformed JSON (loud, not silent). */
-export function readJson(path) {
+export function readJson<T = unknown>(path: string): T | null {
   if (!existsSync(path)) return null;
   const raw = readFileSync(path, 'utf8');
   try {
     return JSON.parse(raw);
-  } catch (e) {
-    throw new Error(`${path} is not valid JSON: ${e.message}`);
+  } catch (e: unknown) {
+    throw new Error(`${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 /** sha256 hex digest of a file's bytes. */
-export function sha256(path) {
+export function sha256(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
 /** True iff `path` exists AND is a symlink (does NOT follow it). False if absent. */
-function isSymlink(path) {
+function isSymlink(path: string) {
   try {
     return lstatSync(path).isSymbolicLink();
   } catch {
@@ -50,7 +50,11 @@ function isSymlink(path) {
  *   'forced'    — file existed, overwritten (force)
  *   'exists'    — file existed, left untouched (no force)
  */
-export function writeIfAbsent(path, content, { force = false } = {}) {
+export function writeIfAbsent(
+  path: string,
+  content: string | NodeJS.ArrayBufferView,
+  { force = false }: { force?: boolean } = {},
+) {
   const present = existsSync(path);
   if (present && !force) return 'exists';
   // A sibling tool can leave the dest dir (or file) as a SYMLINK — e.g. .cursor/skills/<name> →

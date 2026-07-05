@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { writeFileAtomic } from '../atomic-write.mts';
 
-let tmp;
+let tmp: string;
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), 'atomic-write-'));
 });

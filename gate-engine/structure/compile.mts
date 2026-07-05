@@ -20,8 +20,10 @@ import { STRUCTURE_TOKENS, tokenRegex } from './grammar.mts';
 
 // One grammar node (also the shape of a rule body and the tree root). Every field is optional:
 // a node may declare literal files, named subfolders, a recurse dispatch, a domain gate, an
-// existence assertion, and (for rules) a folderName constraint.
-interface GrammarNode {
+// existence assertion, and (for rules) a folderName constraint. Exported (with Grammar/TreeSpec)
+// as the single grammar-shape source the sibling walker (walk.mts) + eslint layer (eslint-config.mts)
+// reuse — one declaration, no drift.
+export interface GrammarNode {
   files?: string[];
   folders?: Record<string, GrammarNode>;
   recurse?: string | string[];
@@ -31,17 +33,23 @@ interface GrammarNode {
 }
 
 // A tree's grammar root: a node that also carries the named `rules` map recurse ids resolve against.
-interface Grammar extends GrammarNode {
+export interface Grammar extends GrammarNode {
   rules?: Record<string, GrammarNode>;
 }
 
-// One structure.trees[] entry (grammar trees only — presets compile elsewhere).
-interface TreeSpec {
+// One structure.trees[] entry. compileToEslint reads root/grammar/entryAllowlist/ignoredDirs; the
+// remaining fields (libDomains/frozenDirs/sourceExtensions) are optional so the same interface serves
+// the walker + eslint layer, which need them. `name`/`root` are always present (the guard.config
+// tree contract) — the eslint layer keys per-tree baselines by `name`.
+export interface TreeSpec {
+  name: string;
   root: string;
   grammar?: Grammar;
   libDomains?: Record<string, string[]>;
   entryAllowlist?: string[];
   ignoredDirs?: string[];
+  frozenDirs?: string[];
+  sourceExtensions?: string[];
 }
 
 // A child entry in the plugin's Rule tree: a named folder/file, a {ruleId} dispatch, nested children,
@@ -68,15 +76,15 @@ interface CompileOpts {
 // The plugin matches a file's path RELATIVE to structureRoot, and the structure ROOT node's `name`
 // must be the structureRoot's last path segment (NOT the tree's logical name) — else nothing matches
 // and the rule silently passes everything. `src` → `src`; `src/renderer` → `renderer`.
-const rootName = (root) => root.split('/').filter(Boolean).pop() ?? root;
+const rootName = (root: string): string => root.split('/').filter(Boolean).pop() ?? root;
 
 const NON_ALNUM = /[^a-z0-9]/gi;
 // A libDomains key → a valid regexParameter token name: '@root' → 'root_domain', 'lib' → 'lib_domain'.
-const domainParam = (key) => `${key.replace(NON_ALNUM, '')}_domain`;
+const domainParam = (key: string): string => `${key.replace(NON_ALNUM, '')}_domain`;
 
 /** Base token table + one closed-registry alternation per libDomains key. */
-function buildRegexParameters(treeSpec: TreeSpec, exts: string[]) {
-  const params = {};
+function buildRegexParameters(treeSpec: TreeSpec, exts: string[]): Record<string, string> {
+  const params: Record<string, string> = {};
   for (const t of STRUCTURE_TOKENS) params[t] = tokenRegex(t, exts);
   for (const [key, names] of Object.entries(treeSpec.libDomains ?? {})) {
     // Empty registry → '^$' (matches nothing); existing folders are grandfathered via the baseline.
@@ -93,7 +101,7 @@ function buildRegexParameters(treeSpec: TreeSpec, exts: string[]) {
 function recurseChildren(node: GrammarNode, grammar: Grammar): CompiledChild[] {
   if (node.domainGate) {
     const id = Array.isArray(node.recurse) ? node.recurse[0] : node.recurse;
-    const rule = grammar.rules?.[id];
+    const rule = id != null ? grammar.rules?.[id] : undefined;
     const ruleChildren = rule ? compileNode(rule, grammar).children : [];
     return [{ name: `{${domainParam(node.domainGate)}}`, children: ruleChildren }];
   }
@@ -124,12 +132,9 @@ function compileRules(grammar: Grammar) {
 }
 
 /**
- * Build the `createFolderStructure(...)` config object for one tree.
- *
- * @param {object} treeSpec one structure.trees[] entry (grammar trees only — presets compile elsewhere)
- * @param {string[]} exts the tree's resolved source extensions
- * @param {{baseline?:string[], exempt?:string[]}} [opts] the generated grandfather list + permanent exempts
- * @returns {object} a createFolderStructure config
+ * Build the `createFolderStructure(...)` config object for one tree. `treeSpec` is one
+ * structure.trees[] entry (grammar trees only — presets compile elsewhere), `exts` the tree's
+ * resolved source extensions, `opts` the generated grandfather list + permanent exempts.
  */
 export function compileToEslint(treeSpec: TreeSpec, exts: string[], opts: CompileOpts = {}) {
   const grammar: Grammar = treeSpec.grammar ?? {};

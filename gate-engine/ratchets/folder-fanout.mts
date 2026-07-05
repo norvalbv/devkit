@@ -61,8 +61,8 @@ export function countFanout(
   const counts: FanoutCounts = {};
   // Reason: recursive directory walk: one branch per entry kind (subdir recurse vs impl/test/barrel file count) mirrors the filesystem tree; flattening scatters a single traversal
   // fallow-ignore-next-line complexity
-  const walk = (dir) => {
-    let entries;
+  const walk = (dir: string) => {
+    let entries: Dirent[];
     try {
       entries = readdirSync(join(root, dir), { withFileTypes: true });
     } catch {
@@ -86,7 +86,7 @@ export function overCap(counts: FanoutCounts, cap: number): FanoutCounts {
   return Object.fromEntries(Object.entries(counts).filter(([, n]) => n > cap));
 }
 
-function runCli(cmd) {
+function runCli(cmd: string) {
   const root = process.cwd();
   const cfg = resolveGuardConfig(root);
   const cap = cfg.fanoutCap;

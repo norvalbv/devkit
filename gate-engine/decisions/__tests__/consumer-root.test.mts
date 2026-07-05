@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 const CLI = fileURLToPath(new URL('../cli.mts', import.meta.url));
 const PACKAGE_DIR = dirname(fileURLToPath(new URL('../decisions.mts', import.meta.url)));
 
-let consumer;
+let consumer: string;
 beforeEach(() => {
   consumer = mkdtempSync(join(tmpdir(), 'consumer-repo-'));
 });

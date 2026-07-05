@@ -346,7 +346,7 @@ describe('parseVerdict', () => {
 // tests above can't reach — a real staged diff in a throwaway repo. The gate resolves its config
 // (decisionsDir, boundaries, noLog/noLlm) from the repo cwd, never the package dir (W-3).
 describe('--gate (integration, real git repo)', () => {
-  let repo;
+  let repo: string;
   const git = (args) => execSync(`git ${args}`, { cwd: repo, encoding: 'utf8' });
   // GUARD_DECISION_NO_LLM forces the deterministic regex floor so tests never make a real,
   // non-deterministic `claude -p` call. The LLM path can only DOWNGRADE a block, so the floor

@@ -18,6 +18,18 @@ import {
   type Selection,
 } from './components.mts';
 
+// The wizard builds its selection incrementally by component id — a mix of the known Selection
+// keys (booleans + guards/agentTargets arrays) written via dynamic id lookup. This captures that
+// dynamic-keyed shape without loosening the known Selection fields.
+type WizardSelection = Partial<Selection> & Record<string, boolean | string[] | undefined>;
+
+// The minimal shape componentOption reads off a component / opt-in row.
+interface PickerOption {
+  id: string;
+  label: string;
+  hint: string;
+}
+
 // The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
@@ -62,7 +74,7 @@ function bail(value: unknown): value is symbol {
 }
 
 // Render one component as a checkbox row: "Label — hint".
-function componentOption(c) {
+function componentOption(c: PickerOption) {
   return { value: c.id, label: c.label, hint: c.hint };
 }
 
@@ -106,6 +118,15 @@ interface RunWizardOpts {
   installed: Set<string>;
 }
 
+// The plan the wizard hands back to init (which normalises `selection` into a full Selection). The
+// wizard builds `selection` incrementally so it is a Partial — overlay mode never sets every field.
+interface WizardResult {
+  mode: string;
+  stack: string;
+  selection: Partial<Selection>;
+  remove: string[];
+}
+
 // Reason: flat clack wizard orchestration: sequential numbered steps (mode→stack→components→guards→removal→summary→apply) each guarded by `if (bail(x)) return null`; the branch COUNT is high but every branch is near-flat, and the untested-complexity is acceptable because this is an interactive TTY prompt flow exercised end-to-end, not unit-tested
 // fallow-ignore-next-line complexity
 export async function runWizard({
@@ -113,7 +134,7 @@ export async function runWizard({
   detectedMode = 'package',
   structureAvailable,
   installed,
-}: RunWizardOpts) {
+}: RunWizardOpts): Promise<WizardResult | null> {
   intro('◆ devkit setup');
 
   // 1. Mode — package / standalone / overlay. Drives every later step.
@@ -144,7 +165,7 @@ export async function runWizard({
   const structAvail = mode === 'package' && structureAvailable;
   // Built up incrementally (component flags + guards/agentTargets), so it's a Partial until the
   // apply layer normalises it — the wizard sets the fields the chosen mode touches.
-  const selection: Partial<Selection> = { guards: [] };
+  const selection: WizardSelection = { guards: [] };
   if (mode === 'overlay') {
     const choices = COMPONENT_OPTIONS.filter((c) => OVERLAY_PICKABLE.has(c.id));
     const picked = await multiselect({
@@ -215,7 +236,8 @@ export async function runWizard({
     mode === 'overlay'
       ? []
       : [...installed].filter((id) => {
-          const stillSelected = id === 'guards' ? selection.guards.length > 0 : selection[id];
+          const stillSelected =
+            id === 'guards' ? (selection.guards ?? []).length > 0 : selection[id];
           return !stillSelected;
         });
 
@@ -243,11 +265,17 @@ export async function runWizard({
 }
 
 // Concise plan summary for the note(): a ✓/· line per component + a remove line.
-function summarize(mode, selection, structureAvailable, deselected) {
+function summarize(
+  mode: string,
+  selection: WizardSelection,
+  structureAvailable: boolean,
+  deselected: string[],
+) {
+  const guards = selection.guards ?? [];
   if (mode === 'overlay') {
-    const g = selection.guards.length ? ` (${selection.guards.join(', ')})` : '';
+    const g = guards.length ? ` (${guards.join(', ')})` : '';
     const surfaces = (selection.agentTargets ?? AGENT_TARGETS).join(', ');
-    const on = (id) => (selection[id] ? '✓' : '·');
+    const on = (id: string) => (selection[id] ? '✓' : '·');
     return [
       'overlay — everything git-ignored, nothing committed:',
       `✓ guards${g}`,
@@ -260,8 +288,8 @@ function summarize(mode, selection, structureAvailable, deselected) {
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(
     (c) => {
-      const on = c.id === 'guards' ? selection.guards.length > 0 : selection[c.id];
-      const detail = c.id === 'guards' && on ? ` (${selection.guards.join(', ')})` : '';
+      const on = c.id === 'guards' ? guards.length > 0 : selection[c.id];
+      const detail = c.id === 'guards' && on ? ` (${guards.join(', ')})` : '';
       return `${on ? '✓' : '·'} ${c.label}${detail}`;
     },
   );

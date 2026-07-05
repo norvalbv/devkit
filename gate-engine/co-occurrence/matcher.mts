@@ -50,9 +50,16 @@ import { classifyPair } from './classify.mts';
 import { type DecayableEntry, isExpired } from './decay.mts';
 
 // ── Types (hoisted from JSDoc + inferred from usage / call sites) ─────────────
+// One sqlite output column. Mirrors node:sqlite's (non-exported) SQLOutputValue so a
+// `.all()` row (Record<string, SqlValue>) asserts to ChunkRow at the DB-read boundary.
+type SqlValue = null | number | bigint | string | NodeJS.NonSharedUint8Array;
 // A row of the search-code `chunks` table (external DB data — read via DatabaseSync
 // below and cast to this shape at that boundary). file_path is normalized in place.
 interface ChunkRow {
+  // Index signature mirrors the sqlite row type (Record<string, SqlValue>) so the .all()
+  // result asserts to ChunkRow[] at the DB-read boundary without laundering through
+  // `unknown`; the named columns below refine the specific fields this module reads.
+  [column: string]: SqlValue;
   file_path: string;
   symbol_name: string;
   start_line: number;
@@ -123,7 +130,8 @@ const cfg = resolveGuardConfig(process.cwd());
 // resolved to the consumer cwd. null => no index configured => matcher opt-out.
 const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
-const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
+const allowlistPathRaw =
+  process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
 // Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a
 // dup). Generic default = the engine's own bin; a consumer can point it at their own
 // wrapper via GUARD_ALLOWLIST_CLI. The printed command double-quotes args; assumes
@@ -159,10 +167,13 @@ const CHANGED = argv.includes('--changed');
 const APPLY = argv.includes('--apply');
 
 // "Couldn't run" is exit 2 in every mode; the gate treats it as fail-open.
-const cannotRun = (msg: string): never => {
+// Declared as a function (not a const arrow) so its `never` return participates in
+// control-flow narrowing — a guard `if (x == null) cannotRun(...)` then treats x as
+// non-null, and a try/catch whose catch calls it is definitely-assigned afterwards.
+function cannotRun(msg: string): never {
   console.error(msg);
   process.exit(2);
-};
+}
 
 // No index configured (config.indexPath null AND no SEARCH_CODE_DB) => matcher
 // opt-out: most repos have no search-code index, so this is the common path. Fail
@@ -180,9 +191,13 @@ if (!existsSync(dbPath)) {
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
 // the index) so every downstream read/write sees a definite string.
-if (allowlistPath == null) {
+if (allowlistPathRaw == null) {
   cannotRun('co-occurrence matcher: no allowlist path configured (fail-open).');
 }
+// Module-scope narrowing from the guard above does NOT cross into the nested mode
+// functions (loadAllowlist/runBaseline/…); alias to a string-typed const so they see a
+// definite path. cannotRun's `never` return makes allowlistPathRaw non-null here.
+const allowlistPath: string = allowlistPathRaw;
 
 const changedSet = CHANGED ? loadChangedSet(cfg.cwd) : null;
 

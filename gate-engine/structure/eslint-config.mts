@@ -9,25 +9,28 @@
  * (returns a plain config object); the plugin wrapping happens here.
  */
 
+import type { Linter } from 'eslint';
 import {
   createFolderStructure,
   projectStructureParser,
   projectStructurePlugin,
 } from 'eslint-plugin-project-structure';
 import { resolveGuardConfig, resolveTreeExtensions } from '../config.mts';
-import { compileToEslint } from './compile.mts';
+import { compileToEslint, type TreeSpec } from './compile.mts';
 import { makeBaselineLoaders } from './load-baseline.mts';
 
 /**
- * Build the eslint flat-config array governing a repo's declared structure trees.
- * @param {string} root repo root (holds guard.config.json + eslint/baselines/)
- * @returns {Promise<object[]>} flat-config entries (one folder-structure rule per grammar tree)
+ * Build the eslint flat-config array governing a repo's declared structure trees (one
+ * folder-structure rule per grammar tree). `root` is the repo root (holds guard.config.json +
+ * eslint/baselines/).
  */
-export async function buildStructureConfigs(root) {
+export async function buildStructureConfigs(root: string): Promise<Linter.Config[]> {
   const cfg = resolveGuardConfig(root);
   const { loadBaseline, loadExempt } = makeBaselineLoaders(root);
-  const configs = [];
-  for (const tree of cfg.structure?.trees ?? []) {
+  const configs: Linter.Config[] = [];
+  // cfg.structure.trees is object[] generically; at this config-read boundary they ARE tree specs.
+  const trees = (cfg.structure?.trees ?? []) as TreeSpec[];
+  for (const tree of trees) {
     if (!tree.grammar) continue; // a `preset` tree (if any) compiles via its own path, not here
     const exts = resolveTreeExtensions(cfg, tree);
     const rule = compileToEslint(tree, exts, {
@@ -35,7 +38,13 @@ export async function buildStructureConfigs(root) {
       exempt: await loadExempt(tree.name),
     });
     configs.push({
-      files: [`${tree.root}/**/*.{${exts.join(',')}}`],
+      // A single extension must NOT use a brace: minimatch does not expand a 1-element `{mts}`, so
+      // `*.{mts}` would match nothing (ESLint reports every file ignored). Brace only for 2+ exts.
+      files: [
+        exts.length === 1
+          ? `${tree.root}/**/*.${exts[0]}`
+          : `${tree.root}/**/*.{${exts.join(',')}}`,
+      ],
       languageOptions: { parser: projectStructureParser },
       plugins: { 'project-structure': projectStructurePlugin },
       // compile.mts stays plugin-free and returns a plain (runtime-valid) config object; cast it to

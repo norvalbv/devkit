@@ -45,7 +45,7 @@ const MSG_RE = /(?:^|\s)(?:-m|--message)\s+(?:"([^"]*)"|'([^']*)'|\\"([^"]*)\\"|
 const PR_RE = /(?:^|\s)--pr\s+(\S+)/;
 
 /** Run git in <dir>; trimmed stdout, or null on any failure (never throws). */
-function git(dir, args) {
+function git(dir: string, args: string[]): string | null {
   try {
     return execFileSync('git', ['-C', dir, ...args], {
       encoding: 'utf8',
@@ -62,7 +62,7 @@ function git(dir, args) {
  * (the reuse-message flag, AFTER commit) and a stray `-C` from a different git in a compound don't
  * hijack it.
  */
-function targetDir(command, cwd) {
+function targetDir(command: string, cwd: string): string {
   const pre = '(?:-[A-Za-z]\\S*\\s+|--\\S+\\s+)*';
   const post = `\\s+(?:${UNIT})*commit`;
   for (const quoted of [`"([^"]*)"`, `'([^']*)'`, `([^\\s"']+)`]) {
@@ -73,15 +73,15 @@ function targetDir(command, cwd) {
 }
 
 /** Short branch of HEAD in <dir>, or null for unborn / detached / not-a-repo / any error (→ allow). */
-function currentBranch(dir) {
+function currentBranch(dir: string): string | null {
   if (git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']) === null) return null; // unborn → allow
   return git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null; // detached → '' → null
 }
 
-const isProtected = (branch) => branch === 'main' || RELEASE_BRANCH.test(branch);
+const isProtected = (branch: string): boolean => branch === 'main' || RELEASE_BRANCH.test(branch);
 
 /** Isolate the `git commit …` portion: the command segment containing it, from `commit` onward. */
-function commitSegment(command) {
+function commitSegment(command: string): string {
   const seg = command.split(SEG_SPLIT).find((s) => GIT_COMMIT_RE.test(s)) ?? command;
   const i = seg.search(COMMIT_WORD_RE);
   return i === -1 ? seg : seg.slice(i + 'commit'.length);
@@ -95,13 +95,26 @@ const REJECT_FILE = 'commit-message-from-file (`-F`) is not supported here — u
 const REJECT_NO_MSG =
   'commit with `-m "<title>"` on a protected branch (a bare `git commit` would open an editor the agent can\'t drive).';
 
+/** The commit can't be safely translated → deny with this fix-it message instead of guessing. */
+interface RejectIntent {
+  reject: string;
+}
+/** A translatable commit: its title, joined body, and the `--pr <branch>` re-push target (if any). */
+interface ShipIntent {
+  reject?: undefined;
+  title: string;
+  body: string;
+  prBranch: string | null;
+}
+type CommitIntent = RejectIntent | ShipIntent;
+
 /**
  * Parse the commit flags into a ship intent: { title, body, prBranch } on success, or
  * { reject: <fix-it message> } when the commit can't be safely translated (so the guard denies with
  * guidance rather than guessing). Reject: -a/-am/--all (shared-tree sweep), --amend / -F (out of the
  * ship model), and no -m (would open an editor).
  */
-function parseCommit(seg) {
+function parseCommit(seg: string): CommitIntent {
   const tokens = seg.match(TOKENS_RE) ?? [];
   for (const t of tokens) {
     if (STAGE_ALL_RE.test(t) || t === '--all') return { reject: REJECT_STAGE_ALL };
@@ -115,15 +128,27 @@ function parseCommit(seg) {
 }
 
 /** Files in the index of <dir> (the explicit per-file ship scope), or [] on error. */
-function stagedPaths(dir) {
+function stagedPaths(dir: string): string[] {
   const out = git(dir, ['diff', '--cached', '--name-only']);
   return out ? out.split('\n').filter(Boolean) : [];
 }
 
+/** A repo's resolved ship command + extra args. */
+interface ShipCommandConfig {
+  command: string;
+  extraArgs: string[];
+}
+/** The relevant slice of `.devkit/config.json` (parsed at the JSON boundary; shape is trusted, not validated). */
+interface DevkitConfig {
+  ship?: { command?: string; extraArgs?: string[] };
+}
+
 /** A repo's ship command + extra args, from .devkit/config.json (default `devkit ship`, no extras). */
-function shipConfig(repoRoot) {
+function shipConfig(repoRoot: string): ShipCommandConfig {
   try {
-    const cfg = JSON.parse(readFileSync(join(repoRoot, '.devkit', 'config.json'), 'utf8'));
+    const cfg = JSON.parse(
+      readFileSync(join(repoRoot, '.devkit', 'config.json'), 'utf8'),
+    ) as DevkitConfig;
     const s = cfg?.ship;
     if (s && typeof s.command === 'string') {
       return { command: s.command, extraArgs: Array.isArray(s.extraArgs) ? s.extraArgs : [] };
@@ -135,15 +160,20 @@ function shipConfig(repoRoot) {
 }
 
 /** POSIX single-quote a token so it copy-pastes safely (literal, no expansion). */
-const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+const q = (s: string): string => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** kebab slug of the title for the auto branch name. */
-const slug = (title) =>
+const slug = (title: string): string =>
   title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, SLUG_MAX) || 'change';
+
+/** The PreToolUse Bash payload slice the guard reads (parsed from stdin JSON; may be null). */
+interface GuardHookInput {
+  tool_input?: { command?: string };
+}
 
 /**
  * Decide on a Bash tool input. Returns a deny-reason string (the copy-paste-ready ship command, or a
@@ -151,7 +181,11 @@ const slug = (title) =>
  * `rand` is injectable for deterministic tests; production uses a short random suffix to avoid branch
  * collisions across retries.
  */
-export function decide(input, cwd, rand) {
+export function decide(
+  input: GuardHookInput | null | undefined,
+  cwd: string,
+  rand?: string,
+): string | null {
   const command = input?.tool_input?.command;
   if (!command || !COMMIT_RE.test(command)) return null; // not a git commit → allow
   const dir = targetDir(command, cwd);
@@ -161,7 +195,7 @@ export function decide(input, cwd, rand) {
   const intent = parseCommit(commitSegment(command));
   const head = `Blocked: direct \`git commit\` on protected branch "${branch}".`;
   const cfg = shipConfig(dir);
-  if (intent.reject) {
+  if (intent.reject !== undefined) {
     return `${head}\n${intent.reject}\nThen re-run your commit — the guard will hand you a ready-to-run \`${cfg.command}\` command.`;
   }
   const paths = stagedPaths(dir);
@@ -175,8 +209,8 @@ export function decide(input, cwd, rand) {
   // (no stdin pipe, no temp file) and the body lands on the PR. q() single-quotes it so embedded
   // newlines / quotes / % / $ survive the paste; ship's --body takes precedence over stdin.
   const bodyArg = intent.body ? `--body ${q(intent.body)} ` : '';
-  let ship;
-  let note;
+  let ship: string;
+  let note: string;
   if (intent.prBranch) {
     ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${bodyArg}${extras}-- ${pathArgs}`;
     note = `Adds these changes to the existing PR on \`${intent.prBranch}\` (fast-forward, never --force).`;
