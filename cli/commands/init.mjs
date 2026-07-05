@@ -338,7 +338,7 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
   // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
   const electronPreset = isStructure && stack === 'electron';
   const devDeps = {
-    '@norvalbv/devkit': `git+ssh://git@github.com/norvalbv/devkit.git#${devkitRef}`,
+    '@norvalbv/devkit': `git+https://github.com/norvalbv/devkit.git#${devkitRef}`,
     ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
     ...(sel.husky ? { husky: '^9.1.7' } : {}),
     ...(electronPreset
