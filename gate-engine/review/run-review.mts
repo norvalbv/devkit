@@ -29,7 +29,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { envFlag, resolveGuardConfig } from '../config.mts';
+import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
@@ -39,7 +39,6 @@ import {
   type ChecklistState,
   cacheKey,
   escalatePrompt,
-  type GuardConfig,
   parseReviewVerdict,
   type Reviewer,
   type ReviewerSelection,

@@ -10,11 +10,10 @@
  */
 
 import { createHash } from 'node:crypto';
-import { type resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { type GuardConfig, sourceMatchers } from '../config.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
  * `sourceExtensions` and `searchTool` fields). Derived from the shared loader so it never drifts. */
-export type GuardConfig = ReturnType<typeof resolveGuardConfig>;
 
 /** One entry of the REVIEWERS table — a domain reviewer's identity + its checklist binding. */
 export interface Reviewer {
