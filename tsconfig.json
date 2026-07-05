@@ -1,17 +1,16 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "es2022",
     "skipLibCheck": true,
     "types": ["node"],
-    "strict": false,
-    "noImplicitAny": false
+    "strict": true
   },
-  "include": ["cli/**/*.mjs", "gate-engine/**/*.mjs"],
-  "//": "Typecheck shipped source only. Tests are validated by running them (vitest); templates import consumer-only peer deps (see their @ts-nocheck).",
-  "exclude": ["node_modules", "templates", "**/*.test.mjs", "**/__tests__/**"]
+  "include": ["cli/**/*.mts", "gate-engine/**/*.mts"],
+  "//": "Typecheck shipped source only. Tests are validated by running them (vitest); templates import consumer-only peer deps (see their @ts-nocheck). Phase A: strict OFF (rename pass); Phase B flips strict/noImplicitAny true. tsconfig.build.json handles emit.",
+  "exclude": ["node_modules", "templates", "dist", "**/*.test.mts", "**/__tests__/**", "**/eval/**"]
 }

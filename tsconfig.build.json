@@ -1,0 +1,23 @@
+{
+  // Emit config — ONLY used at release time (`devkit` build) to compile the .mts source into the
+  // shipped dist/ as .mjs. Dev never runs this: devkit runs its own .mts source directly under Node
+  // (type-stripping) / bun. tsconfig.json stays noEmit for the editor + `bun run typecheck`.
+  //
+  // .mts → .mjs (tsc maps the extension and preserves shebangs); rewriteRelativeImportExtensions
+  // turns the './x.mts' specifiers in source into './x.mjs' in the emitted output so the built tree
+  // resolves under bare node from a consumer's node_modules. Non-TS assets (.sh/.json/.jsonc,
+  // templates/skills/agents/agents-hooks, package.json) are copied into dist/ by the build's
+  // asset-copy step — tsc does not emit them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["cli/**/*.mts", "gate-engine/**/*.mts"],
+  "exclude": ["node_modules", "templates", "dist", "**/*.test.mts", "**/__tests__/**", "**/eval/**"]
+}

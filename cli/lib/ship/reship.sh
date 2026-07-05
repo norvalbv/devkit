@@ -121,7 +121,10 @@ git -C "$WT" push origin "HEAD:$BR" || {
 # --git-root "$WT": hash the just-committed (shipped) blobs. --base-sha "$BASE" (the PR-branch tip): classify
 # this commit's delta. --merge: keep the entry's PR metadata, overlay paths by path. (gh-free.)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-node "$SCRIPT_DIR/reconcile-manifest-write.mjs" \
+# devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
+# installed consumer (dist). Prefer whichever exists beside this script.
+RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
+node "$RMW" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --merge -- "${PATHS[@]}" \
   || echo "reship: reconcile manifest not updated (non-fatal)" >&2
 

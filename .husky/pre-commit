@@ -11,7 +11,7 @@
 #   --extra "lint=bun run lint"      Biome format+lint — hard gate (any non-zero blocks)
 #   --structure "bun run lint:structure"   folder-structure governance — hard gate
 # The AI gate (decisions) stays last and fail-fast, below.
-node gate-engine/deterministic/run.mjs --hook "${DK_HOOK_PATH:-$0}" \
+node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" \
     --only size,fanout \
     --extra "lint=bun run lint" \
     --structure "bun run lint:structure" || exit 1
@@ -20,7 +20,7 @@ node gate-engine/deterministic/run.mjs --hook "${DK_HOOK_PATH:-$0}" \
 # until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open
 # when `claude` is unavailable. The why-store lives under docs/decisions/. See the `decisions` skill.
 ddrc=0
-node gate-engine/decisions/cli.mjs detect --gate || ddrc=$?
+node gate-engine/decisions/cli.mts detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1

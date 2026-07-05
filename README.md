@@ -57,8 +57,11 @@ bun add -D git+https://github.com/norvalbv/devkit.git#<tag>
 - **Private fork / ssh host alias:** use the `git+ssh://` form instead — and for `devkit update`, set
   `DEVKIT_REPO=git+ssh://git@github.com/norvalbv/devkit.git`. Never bun's `github:` shorthand: it
   resolves through GitHub's API tarball endpoint, which 404s on a private repo.
-- **No build step, no `dist/`** — everything ships as runnable `.mjs` / `.json` / `.jsonc`. What you
-  install is what runs.
+- **TypeScript source, prebuilt `.mjs` — no build on your side.** devkit is authored in TypeScript
+  (`.mts`); `devkit release` compiles it to a `dist/` of runnable `.mjs` and commits that on the
+  release tag. A git-installed consumer at a tag gets the prebuilt `.mjs` — nothing compiles on your
+  machine, and Node runs it straight from `node_modules`. (Working on devkit itself runs the `.mts`
+  source directly under Node 23.6+ / bun via native type-stripping — no build in the dev loop.)
 
 ### Extend the BARE subpath, never a file path
 
