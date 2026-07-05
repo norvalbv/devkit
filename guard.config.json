@@ -1,6 +1,6 @@
 {
   "scanRoots": ["cli", "gate-engine"],
-  "sourceExtensions": ["mjs", "js"],
+  "sourceExtensions": ["mts"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",
   "review": {
@@ -13,11 +13,11 @@
       {
         "name": "cli",
         "root": "cli",
-        "sourceExtensions": ["mjs", "js"],
-        "entryAllowlist": ["index.mjs"],
+        "sourceExtensions": ["mts"],
+        "entryAllowlist": ["index.mts"],
         "libDomains": { "lib": ["generate", "guard", "help", "husky", "install", "ship"] },
         "grammar": {
-          "files": ["index.mjs"],
+          "files": ["index.mts"],
           "folders": {
             "commands": { "files": ["{kebab}", "{kebab_test}"], "recurse": "kebabModule" },
             "lib": {
@@ -38,8 +38,8 @@
       {
         "name": "gate-engine",
         "root": "gate-engine",
-        "sourceExtensions": ["mjs", "js"],
-        "entryAllowlist": ["config.mjs"],
+        "sourceExtensions": ["mts"],
+        "entryAllowlist": ["config.mts"],
         "ignoredDirs": ["eval"],
         "libDomains": {
           "@root": [
@@ -57,7 +57,7 @@
           ]
         },
         "grammar": {
-          "files": ["config.mjs"],
+          "files": ["config.mts"],
           "domainGate": "@root",
           "recurse": "engineModule",
           "rules": {

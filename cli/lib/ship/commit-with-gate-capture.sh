@@ -35,7 +35,8 @@ commit_with_gate_capture() {
   local progress="$root/.devkit/review-progress-${br//\//-}.json"
   # The progress READER lives beside gate-engine — resolve it relative to THIS script so it works in
   # every install mode (package node_modules, standalone, devkit's own repo) with no bunx/registry hit.
-  local progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mjs"
+  local progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mts"
+  [ -f "$progress_reader" ] || progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mjs"
   mkdir -p "$root/.devkit"
   rm -f "$progress"   # a stale file from a prior attempt must not mislead this run's timeout banner
 

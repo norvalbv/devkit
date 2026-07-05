@@ -47,7 +47,7 @@
     {
       // Tests legitimately use inline regex literals in expect(...).toMatch(/…/) —
       // the top-level-regex perf rule is noise there (not a hot path).
-      "includes": ["**/*.test.mjs"],
+      "includes": ["**/*.test.mts"],
       "linter": {
         "rules": {
           "performance": {

@@ -8,6 +8,6 @@
  * layout via the SAME `buildStructureConfigs` the shipped universal shim uses — one source, no drift.
  */
 
-import { buildStructureConfigs } from './gate-engine/structure/eslint-config.mjs';
+import { buildStructureConfigs } from './gate-engine/structure/eslint-config.mts';
 
 export default await buildStructureConfigs(process.cwd());

@@ -3,12 +3,12 @@
   // analysis reflects ACTUAL dead code, not false positives from this layout. (Entry points are
   // reachability roots, not ignores — every file is still fully analyzed for complexity + dupes.)
   "entry": [
-    "cli/index.mjs", // CLI root
-    "cli/commands/*.mjs", // each command's default export is invoked via DYNAMIC import() in index.mjs
+    "cli/index.mts", // CLI root
+    "cli/commands/*.mts", // each command's default export is invoked via DYNAMIC import() in index.mjs
     "agents-hooks/*.mjs", // synced agent-hook scripts — invoked by file PATH at runtime, never imported
     "skills/**/scripts/*.mjs", // skill scripts — invoked by the agent harness, never imported
-    "gate-engine/**/eval/*.mjs", // dev eval harnesses
-    "gate-engine/**/bench.mjs", // dev benchmarks
+    "gate-engine/**/eval/*.mts", // dev eval harnesses
+    "gate-engine/**/bench.mts", // dev benchmarks
     "eslint.config.mjs", // loaded by eslint; compiles the structure rule from guard.config.json
     "eslint/baselines/*.mjs" // generated grandfather lists — loaded by eslint.config.mjs via a computed dynamic import() fallow can't trace
   ],
