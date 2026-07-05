@@ -1,8 +1,9 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mjs';
-import { readConfig as config, tmpRepos } from './_helpers.mjs';
+import { CLI, readConfig as config, tmpRepos } from './_helpers.mjs';
 
 // --yes (passed by each test) forces the non-interactive path even when the runner has a TTY.
 const { tmpRepo, devkit, cleanup } = tmpRepos('init-');
@@ -118,13 +119,35 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     ]) {
       expect(pkg.devDependencies[dep], `${dep} should NOT be a consumer dep`).toBeUndefined();
     }
-    // devkit itself carries them; the gate runs devkit's bin.
-    expect(pkg.devDependencies['@norvalbv/devkit']).toBeDefined();
+    // devkit itself carries them; the gate runs devkit's bin, pinned via the public git+https remote.
+    expect(pkg.devDependencies['@norvalbv/devkit']).toMatch(
+      /^git\+https:\/\/github\.com\/norvalbv\/devkit\.git#/,
+    );
     expect(pkg.scripts['lint:structure']).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     // guard-structure runs as the orchestrator's structure gate (trichotomy: exit 2 stays fail-open).
     expect(hook).toContain('--structure "guard-structure gate"');
     expect(hook).not.toContain('bunx eslint src');
+  });
+
+  it('honours DEVKIT_REPO — the written devkit dep uses the override, not the https default', () => {
+    const root = tmpRepo({
+      name: 'fx',
+      version: '0',
+      type: 'module',
+      peerDependencies: { react: '^18' },
+      exports: {},
+    });
+    // The shared devkit() helper doesn't forward a custom env, so spawn directly with the override —
+    // a private fork / ssh host alias. init must pin the consumer dep at it (via the shared repoUrl()).
+    const override = 'git+ssh://git@github-personal/acme/devkit.git';
+    spawnSync(process.execPath, [CLI, 'init', '--stack', 'component-lib', '--yes'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REPO: override },
+    });
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@norvalbv/devkit'].startsWith(`${override}#`)).toBe(true);
   });
 
   it('electron package mode KEEPS eslint/parser/plugin + runs bunx eslint src', () => {

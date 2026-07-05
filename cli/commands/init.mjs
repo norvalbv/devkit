@@ -72,6 +72,7 @@ import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { detectAgentConflicts, syncAgents } from './sync/sync-agents.mjs';
 import { detectSkillConflicts, syncSkills } from './sync/sync-skills.mjs';
+import { repoUrl } from './update.mjs';
 
 const INIT_VERSION = 2;
 
@@ -338,7 +339,7 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
   // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
   const electronPreset = isStructure && stack === 'electron';
   const devDeps = {
-    '@norvalbv/devkit': `git+https://github.com/norvalbv/devkit.git#${devkitRef}`,
+    '@norvalbv/devkit': `${repoUrl()}#${devkitRef}`,
     ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
     ...(sel.husky ? { husky: '^9.1.7' } : {}),
     ...(electronPreset
