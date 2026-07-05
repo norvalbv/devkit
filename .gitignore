@@ -26,3 +26,8 @@ dist/
 
 # npm pack output (build artifact)
 *.tgz
+
+# completeness-eval working data (bench outputs; the corpus + baseline ARE committed)
+gate-engine/review/eval/runs.log
+gate-engine/review/eval/candidates.jsonl
+gate-engine/review/eval/transcripts/
