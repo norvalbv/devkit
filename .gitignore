@@ -20,3 +20,9 @@ gate-engine/decisions/eval/runs.log
 
 # eslint-plugin-project-structure cache
 projectStructure.cache.json
+
+# compiled output — built + committed ONLY on release commits/tags (see cli/commands/release). Ignored on main + feature branches so day-to-day diffs stay source-only.
+dist/
+
+# npm pack output (build artifact)
+*.tgz

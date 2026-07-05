@@ -190,7 +190,10 @@ fi
 # so a parallel agent's edit to a shipped file in this window can't be mis-recorded as the shipped blob.
 # The manifest itself still lands in $ROOT (the persistent shared tree); $WT is removed right after.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-node "$SCRIPT_DIR/reconcile-manifest-write.mjs" \
+# devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
+# installed consumer (dist). Prefer whichever exists beside this script.
+RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
+node "$RMW" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "$BASE" --pr "$PR_NUM" -- "${PATHS[@]}" \
   || echo "ship-branch: reconcile manifest not recorded (non-fatal)" >&2
 
