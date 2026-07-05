@@ -18,6 +18,7 @@
 // never the package dir. Per the "never hard-code a count" rule, freeze re-walks the
 // tree and writes whatever it finds — never a literal.
 
+import { execFileSync } from 'node:child_process';
 import {
   type Dirent,
   existsSync,
@@ -128,6 +129,17 @@ export function countOversized(
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
 
+// Best-effort `git add` for the auto-lowered baseline so the tightened count rides along in
+// the commit. Never throws: a shrink must not block the gate, and non-git contexts (the
+// temp-dir tests, a bare checkout) simply leave the file written for a later commit/freeze.
+function stageBaseline(root: string, rel: string): void {
+  try {
+    execFileSync('git', ['add', '--', rel], { cwd: root, stdio: 'pipe' });
+  } catch {
+    // not a git repo / git absent — the file is still written; picked up on the next commit
+  }
+}
+
 // Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
 // fallow-ignore-next-line complexity
 function runCli(cmd: string): void {
@@ -146,7 +158,14 @@ function runCli(cmd: string): void {
     );
     if (cfg.maxLines) {
       const over = countOversized(root);
-      const files = Object.fromEntries(over.map((o) => [o.file, o.lines]));
+      // Shrink-only: never RAISE a recorded ceiling. min(prev, current) means re-freezing
+      // after a `--no-verify` growth can't launder the larger count back into the baseline.
+      const prev: Record<string, number> = existsSync(linesBaselineFile)
+        ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
+        : {};
+      const files = Object.fromEntries(
+        over.map((o) => [o.file, o.file in prev ? Math.min(prev[o.file], o.lines) : o.lines]),
+      );
       writeFileSync(
         linesBaselineFile,
         `${JSON.stringify({ maxLines: cfg.maxLines, files }, null, 2)}\n`,
@@ -186,23 +205,44 @@ function runCli(cmd: string): void {
       );
     }
 
-    // Raw-line cap (the maxLines gate): a source file over the cap that ISN'T grandfathered fails.
+    // Raw-line cap (the maxLines gate): a PER-FILE shrink-only ratchet. Each grandfathered
+    // file's recorded count is its ceiling; a new file's ceiling is the cap. On shrink the
+    // gate AUTO-LOWERS the record (and stages it) so the ceiling can only ever move down.
     if (cfg.maxLines) {
       const over = countOversized(root);
       const grandfathered: Record<string, number> = existsSync(linesBaselineFile)
         ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
         : {};
-      const fresh = over.filter((o) => !(o.file in grandfathered));
-      if (fresh.length) {
-        console.error(`🚫 ${fresh.length} new file(s) exceed ${cfg.maxLines} lines — split them:`);
-        for (const o of fresh) console.error(`   ${o.file}: ${o.lines} lines`);
+      // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new).
+      const grew = over.filter((o) => o.lines > Math.max(cfg.maxLines, grandfathered[o.file] ?? 0));
+      if (grew.length) {
+        console.error(`🚫 ${grew.length} file(s) exceed their line limit — split them:`);
+        for (const o of grew) {
+          const allowed = Math.max(cfg.maxLines, grandfathered[o.file] ?? 0);
+          console.error(`   ${o.file}: ${o.lines} lines (max ${allowed})`);
+        }
         process.exit(1);
       }
-      const healed = Object.keys(grandfathered).filter((f) => !over.some((o) => o.file === f));
-      if (healed.length) {
-        console.log(
-          `✓ ${healed.length} file(s) dropped under ${cfg.maxLines} lines — run \`guard-size freeze\` to lock it in.`,
+      // Everything left is within its ceiling. Tighten the baseline DOWN to current reality:
+      // lower each recorded count that shrank, drop files that healed under the cap.
+      const next: Record<string, number> = {};
+      let tightened = false;
+      for (const [f, recorded] of Object.entries(grandfathered)) {
+        const cur = over.find((o) => o.file === f)?.lines; // undefined = healed under the cap
+        if (cur === undefined) {
+          tightened = true;
+          continue; // drop it entirely
+        }
+        next[f] = Math.min(recorded, cur);
+        if (next[f] < recorded) tightened = true;
+      }
+      if (tightened) {
+        writeFileSync(
+          linesBaselineFile,
+          `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`,
         );
+        stageBaseline(root, LINES_BASELINE);
+        console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
       }
     }
     process.exit(0);

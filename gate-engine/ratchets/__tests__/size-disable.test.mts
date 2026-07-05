@@ -207,17 +207,61 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/fresh.ts', big(70)); // NEW over-cap → blocked
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('exceed 50 lines');
+    expect(r.stderr).toContain('exceed their line limit');
+    expect(r.stderr).toContain('src/fresh.ts: 70 lines (max 50)');
   });
 
-  it('a grandfathered file dropped under the cap → gate exits 0 with a re-freeze reminder', () => {
+  it('a grandfathered file that GROWS past its recorded ceiling fails (the ratchet)', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze'); // ceiling recorded at 80
+    write(root, 'src/legacy.ts', big(100)); // grew past 80
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/legacy.ts: 100 lines (max 80)');
+  });
+
+  it('a grandfathered file that shrinks (still over cap) → gate auto-lowers the ceiling', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', big(80));
     run(root, 'freeze');
-    write(root, 'src/legacy.ts', big(10)); // shrank under the cap
-    const r = run(root, 'gate');
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain('dropped under 50 lines');
+    write(root, 'src/legacy.ts', big(60)); // shrank but still over the cap
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(60); // ceiling ratcheted down 80 → 60
+  });
+
+  it('a grandfathered file dropped under the cap → gate auto-removes it from the baseline', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze');
+    write(root, 'src/legacy.ts', big(10)); // healed under the cap
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files).not.toHaveProperty('src/legacy.ts');
+  });
+
+  it('freeze is monotone-down: never raises a recorded ceiling (anti-laundering)', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80)); // 80 lines on disk
+    // Pre-seed a lower ceiling as if a --no-verify growth is now being re-frozen.
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    );
+    expect(run(root, 'freeze').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(60); // stayed 60, NOT raised to 80
   });
 });
