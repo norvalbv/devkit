@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cmpSemver, latestTag, repinPackageJson } from '../commands/update.mjs';
+import { cmpSemver, latestTag, repinPackageJson, repoUrl } from '../commands/update.mjs';
 
 describe('cmpSemver', () => {
   it('orders numerically, not lexically', () => {
@@ -44,5 +44,16 @@ describe('repinPackageJson', () => {
   it('leaves a package.json without the devkit dep unchanged', () => {
     const raw = '{\n  "dependencies": { "react": "^19.0.0" }\n}';
     expect(repinPackageJson(raw, '0.10.0')).toBe(raw);
+  });
+});
+
+describe('repoUrl', () => {
+  it('defaults to git+https — public repo, bun can clone it (its git+ssh clone is unreliable)', () => {
+    expect(repoUrl({})).toBe('git+https://github.com/norvalbv/devkit.git');
+  });
+
+  it('honours a DEVKIT_REPO override (private fork / ssh host alias)', () => {
+    const ssh = 'git+ssh://git@github-personal/norvalbv/devkit.git';
+    expect(repoUrl({ DEVKIT_REPO: ssh })).toBe(ssh);
   });
 });

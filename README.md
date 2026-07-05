@@ -6,7 +6,7 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 | Half      | What                                                                       | How consumers get it |
 | --------- | -------------------------------------------------------------------------- | -------------------- |
 | **AGENT** | `skills/` + `agents/` — Claude/Cursor skills + reviewer/testing subagents  | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
-| **CODE**  | shared **configs** (Biome, tsconfig) + the portable **gate-engine**        | `bun add -D git+ssh://git@github.com/norvalbv/devkit.git#<tag>` |
+| **CODE**  | shared **configs** (Biome, tsconfig) + the portable **gate-engine**        | `bun add -D git+https://github.com/norvalbv/devkit.git#<tag>` |
 
 ## Reference
 
@@ -49,11 +49,14 @@ pinned global devkit (`bun add -g …#<devkitRef>`); without it the gates silent
 ## Install (package mode)
 
 ```bash
-bun add -D git+ssh://git@github.com/norvalbv/devkit.git#<tag>
+bun add -D git+https://github.com/norvalbv/devkit.git#<tag>
 ```
 
-- **Private repo:** use the `git+ssh://` form, not bun's `github:` shorthand — the latter resolves
-  through GitHub's API tarball endpoint, which 404s on a private repo.
+- **Public repo → `git+https://`** (above): no auth, and bun clones it reliably (bun's `git+ssh`
+  clone fails on machines whose ssh auth doesn't reach its spawned git).
+- **Private fork / ssh host alias:** use the `git+ssh://` form instead — and for `devkit update`, set
+  `DEVKIT_REPO=git+ssh://git@github.com/norvalbv/devkit.git`. Never bun's `github:` shorthand: it
+  resolves through GitHub's API tarball endpoint, which 404s on a private repo.
 - **No build step, no `dist/`** — everything ships as runnable `.mjs` / `.json` / `.jsonc`. What you
   install is what runs.
 
