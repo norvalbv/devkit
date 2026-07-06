@@ -2,7 +2,7 @@
 name: correctness-reviewer
 description: "Use this agent to review a finished diff for correctness bugs: concurrency/race conditions, state-machine dead states, writer/reader contract mismatches across modules, broadcast/dedup errors, discarded return values, and classifier/parsing edge cases.\\n\\n<example>\\nContext: User has implemented retry/recovery logic that writes task statuses.\\nuser: \"The task retry flow is done\"\\nassistant: \"Let me invoke the correctness-reviewer agent to trace every status write to its readers and walk the concurrent interleavings.\"\\n<commentary>\\nStatus writes need CAS guards and every consumer (pollers, filters, queries) must still select the written state.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User added an event that is broadcast to multiple listeners.\\nuser: \"chat-ready now fires on resume\"\\nassistant: \"I'll run the correctness-reviewer agent to enumerate the listeners and check for duplicate handling.\"\\n<commentary>\\nA broadcast consumed by N listeners without targeting/dedup executes its effect N times.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: opus
+model: haiku
 color: orange
 ---
 
