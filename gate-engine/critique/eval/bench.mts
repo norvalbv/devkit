@@ -760,8 +760,12 @@ export function compare(summary: Summary, base: Summary | undefined) {
         else lostUnstable = true;
       } else if (!p.ok && s.ok) gained.push(sid);
     }
+    // Mirror conditions on both sides (a stray composite-ok gate here undercounted improvements
+    // and skewed the McNemar b/c ratio toward false regressions). The b-side stability gate is
+    // the one deliberate asymmetry, as in verdict/false-alarm handling: a regression must be
+    // stable to count; an improvement counts as-is (conservative direction).
     if (lost.length && !gained.length) tables[1].b.push(id);
-    else if (gained.length && !lost.length && prev.ok !== cur.ok) tables[1].c.push(id);
+    else if (gained.length && !lost.length) tables[1].c.push(id);
     else if (lostUnstable) tables[1].unstable.push(id);
     if (cur.falseAlarm && prev.falseAlarm) {
       if (prev.falseAlarm.ok && !cur.falseAlarm.ok)

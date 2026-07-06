@@ -613,6 +613,31 @@ describe('compare', () => {
     expect(c.lines.join('\n')).toContain('verdict: REGRESSION');
   });
 
+  it('slot improvements count even when the composite row ok is unchanged (symmetric b/c)', () => {
+    const slotRow = (got: string) => ({
+      expected: 'RETHINK',
+      got: 'PROCEED', // verdict wrong in BOTH runs → composite ok identical and false
+      ok: false,
+      verdictOk: false,
+      verdictStable: true,
+      slots: { g1: { got, ok: got === 'hit', stable: true } },
+      falseAlarm: null,
+      outage: false,
+    });
+    const base = mkSummary({
+      rows: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`r${i}`, slotRow('miss')])),
+    });
+    const improved = mkSummary({
+      rows: Object.fromEntries(
+        Array.from({ length: 10 }, (_, i) => [`r${i}`, slotRow(i < 5 ? 'hit' : 'miss')]),
+      ),
+    });
+    const c = compare(improved, base);
+    expect(c.regressed).toBe(false);
+    const recallLine = c.lines.find((l) => l.startsWith('  recall: flips'));
+    expect(recallLine).toContain('improved [r0, r1, r2, r3, r4]');
+  });
+
   it('recall degradation = stable slots lost AND none gained; unstable losses are instability', () => {
     const slotRow = (got: string, stable = true) => ({
       expected: 'RETHINK',
