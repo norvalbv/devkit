@@ -111,8 +111,13 @@ function getStagedFiles() {
           // keeps the single opus pass inside its timeout (mirror of the gate's selection)
           !RE_TEST_INFIX.test(f),
       );
-  } catch {
-    return [];
+  } catch (e) {
+    // A git FAILURE (not-a-repo, corrupt index, bad plumbing) must never masquerade as "nothing
+    // staged" — that would send generate() down its clean skip/exit(0) path and wave the commit
+    // through unreviewed. `git diff --cached` with no matches exits 0 (empty stdout), so reaching
+    // this catch is a real failure: surface it loudly and non-zero.
+    console.error(`❌ correctness: \`git diff --cached\` failed — ${e.message ?? e}`);
+    process.exit(1);
   }
 }
 

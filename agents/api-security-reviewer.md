@@ -51,9 +51,12 @@ HARD EXCLUSIONS — never FAIL for these alone (they are the fix, not the bug):
 - **A route carrying the same auth as its siblings** — if the handler (or its router) applies the
   `requireSession`/auth middleware the sibling routes use, endpoint-auth is satisfied. Only FAIL
   when a state-changing or data-exposing route has NO auth its neighbours have.
-- **A path confined to a base dir** — a user segment resolved and then verified to stay under a
-  fixed root (`resolve(base,x)` followed by a `startsWith(base)`/containment check, or a basename)
-  is not traversal. Trace the containment check before flagging `../`.
+- **A path confined to a base dir** — a user segment is safe only when the containment check is
+  BOUNDARY-AWARE: `resolve(base, x)` then `startsWith(base + path.sep)` (a bare `startsWith(base)`
+  is NOT enough — `/srv/data_evil` matches the prefix `/srv/data`), or `path.relative(base, x)`
+  that does not start with `..`, or a `basename`. A resolved path guarded by a bare separator-less
+  prefix check IS a finding (partial path traversal); a separator-aware or `path.relative` check is
+  not — trace which one before flagging `../`.
 - **Theoretical / defense-in-depth** — missing rate limits on non-sensitive routes, headers on
   non-HTML JSON APIs, style, or logging of NON-sensitive data. Only FAIL if the diff REMOVES an
   existing protection or logs a real secret/credential/token.

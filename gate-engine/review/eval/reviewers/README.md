@@ -8,9 +8,10 @@ answer two questions with numbers instead of vibes:
 2. **Regression protection** — did a brief/checklist/catalog edit help or hurt?
 
 It drives the **real gate** (`runCascade` from `../../run-review.mts`) over disposable fixture
-repos, so bench and gate cannot drift. commit-guard is out of scope (its allowlist needs the
-consumer's semantic-search MCP tool, unresolvable in a bare fixture); a future correctness
-reviewer joins by adding `cases-correctness.jsonl` + its REVIEWERS entry.
+repos, so bench and gate cannot drift. The **correctness reviewer** (`cases-correctness.jsonl`,
+domain `all`, single-pass haiku) is in the cohort. commit-guard is out of scope (its allowlist
+needs the consumer's semantic-search MCP tool, unresolvable in a bare fixture); a further reviewer
+joins by adding its `cases-<skill>.jsonl` + REVIEWERS entry.
 
 **Bench-only, never shipped.** This directory is excluded from tsc and the build
 (`**/eval/**`), and the package publishes `dist/` only. `mine-bots.mts` calls the GitHub API on
