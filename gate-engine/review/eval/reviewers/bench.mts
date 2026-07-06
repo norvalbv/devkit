@@ -552,14 +552,29 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
   const progress = loadProgress(MODEL, CASCADE);
   const goldRows = plan.reduce((s, p) => s + p.rows.filter((r) => r.expected === 'FAIL').length, 0);
-  const estEscalations = CASCADE ? goldRows + Math.round((totalRows - goldRows) * 0.15) : 0;
+  // Only NON-pinned reviewers escalate (and only when the cascade is on) — a pinned reviewer
+  // (correctness) runs single-pass regardless of BENCH_CASCADE.
+  const estEscalations = CASCADE
+    ? plan.reduce(
+        (s, p) =>
+          s +
+          (p.reviewer.model
+            ? 0
+            : p.rows.filter((r) => r.expected === 'FAIL').length +
+              Math.round(p.rows.filter((r) => r.expected === 'PASS').length * 0.15)),
+        0,
+      )
+    : 0;
   const estMins = Math.round(
     (totalRows * (EST_FIRST_SECS[MODEL] ?? EST_FIRST_SECS.sonnet) + estEscalations * EST_ESCALATE_SECS) /
       60 /
       CONCURRENCY,
   );
+  const allPinned = plan.every((p) => p.reviewer.model);
+  const modelLabel = allPinned ? [...new Set(plan.map((p) => p.reviewer.model))].join('/') : MODEL;
+  const cascadeLabel = allPinned ? 'single-pass' : CASCADE ? 'on' : 'off';
   console.log(
-    `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${MODEL} · cascade ${CASCADE ? 'on' : 'off'} · ` +
+    `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${modelLabel} · cascade ${cascadeLabel} · ` +
       `concurrency ${CONCURRENCY} · est ≈ ${estMins} min wall-clock${dev ? ' · --dev (holdouts excluded)' : ''}` +
       `${progress.length ? ` · resuming (${progress.length} checkpointed row(s) on disk)` : ''}`,
   );

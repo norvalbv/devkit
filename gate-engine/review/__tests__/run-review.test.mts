@@ -185,6 +185,33 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(Object.keys(loadCache(repo)).length).toBe(4);
   });
 
+  it('single-pass FAIL blocks with an override affordance; an OVERRIDE_ env with a rationale waives it', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      if (label === 'review:correctness-reviewer') {
+        writeArtifact(repo, label, { failed: 1 }); // artifact carries a failed lens
+        return 'race\nVERDICT: FAIL — CAS clobber';
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    // 1. blocks, and the block names a fingerprint + the exact override line
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    const m = out.match(/OVERRIDE_([0-9a-f]{12})_RATIONALE/);
+    expect(m).toBeTruthy();
+    expect(out).toContain('un-overridden finding');
+    // 2. waive that exact finding via env → it passes (domain reviewers cached from run 1)
+    const key = `OVERRIDE_${(m as RegExpMatchArray)[1]}_RATIONALE`;
+    process.env[key] = 'writer holds the shard lock the fixture omits — not a real race';
+    try {
+      expect(await runReviewGate(repo, { exec })).toBe(0);
+    } finally {
+      delete process.env[key];
+    }
+  });
+
   it('a model-pinned reviewer (correctness) runs SINGLE-PASS — its first-pass FAIL blocks, never escalates', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
