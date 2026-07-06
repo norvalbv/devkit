@@ -27,7 +27,18 @@ BENCH_RUNS=3 node bench.mts --baseline  # baseline tier: majority-of-3 per row (
 BENCH_RUNS=3 node bench.mts --fail      # gate tier: exit 1 on floor breach / significant flips
 node bench.mts coverage                 # corpus coverage matrix — zero claude calls
 node bench.mts matcher-audit            # matcher agreement vs committed labels (% + Cohen's κ)
+BENCH_RUNS=3 node bench.mts --baseline --salvage <transcripts-dir>
+                                        # resume an interrupted run: rows with enough saved
+                                        # trials ingest from disk (matcher re-runs, critic does
+                                        # not) — only never-run rows spend critic tokens
 ```
+
+**Interruption/salvage:** every completed trial persists to `transcripts/` (summary + report +
+artifact + an `agent.hash` marker). If a run dies (quota, ^C, crash), copy `transcripts/` aside
+and pass it to `--salvage`: trials are exchangeable across runs of the same agent md (the marker
+is verified; a changed md refuses). Salvaged trials predating artifact persistence score
+`artifactValid: null` — unknown, excluded from that contract denominator, never assumed. The
+baseline records `salvagedRows` so a mixed-condition run is visible, not hidden.
 
 Exit `0` = ran (no regression under `--fail`) · `1` = regression (with `--fail`) · `2` = could not
 run. Sweeps: `BENCH_MODEL` (default = the agent md's frontmatter model, opus — the bench measures
@@ -156,3 +167,26 @@ everything was dark).
    runs its expensive reviewer K=1 + discordance-retry and gives the vote budget to the matcher.
    Shared-rule note: when both benches are on main, the matcher core (forced-choice slots, votes,
    κ) should be lifted into one shared module — tracked as the extraction trigger in matcher.mts.
+9. **Floors gate NEW breaches only.** The committed baseline itself breaches the clean-rate floor
+   (below), so an absolute floor would leave `--fail` permanently red and trained-ignored. A
+   breach the baseline already carries prints loudly (`KNOWN FLOOR BREACH … B2 target`) but does
+   not gate; the flip tables still catch that metric worsening row-by-row, and any breach that is
+   new vs the baseline fails immediately.
+
+## Committed baseline (2026-07-06, opus K=3 — the B1 result)
+
+- **valid-flaw recall 22/24 = 0.92** [0.74, 0.98] — floor met. Per-class: everything 1.00 except
+  ux 2/3 and missing-consideration 5/6.
+- **sound-proposal clean rate 1/5 = 0.20** [0.04, 0.62] — **KNOWN FLOOR BREACH, the B2 target**:
+  the agent fabricated ≥1 CRITICAL blocker on 4 of 5 sound proposals (hallucinated risk, the
+  ticket's predicted characteristic failure — now measured, not vibed). Decoy flag rate 4/20 =
+  0.20 sits just under its ceiling; finding precision is 22 matched of 104 emitted
+  (informational).
+- Verdict set-membership 31/33 = 0.94 · frame-meta 12/12 · severity calibration 14/22 = 0.64
+  (warn tier) · summary token budget honored 13/20 (real contract drift, as the session-history
+  sizes predicted).
+- `salvagedRows`: 30 of 33 rows' critic trials were salvaged from the usage-freeze-interrupted
+  first run (agentHash-verified); 3 decoy rows ran live. Matcher ran live for every row.
+
+B2 marching orders, measured: cut fabricated blockers on sound proposals (0.20 → ≥0.75 clean
+rate) without giving back valid-flaw recall (≥0.75 floor, currently 0.92).

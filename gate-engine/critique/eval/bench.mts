@@ -262,7 +262,47 @@ export interface RunDeps {
   execIntrinsic?: typeof runIntrinsic;
   execWorkflow?: typeof runWorkflow;
   match?: typeof runMatcher;
+  /** `--salvage <dir>`: returns saved trial transcripts for a row (an interrupted run's spend).
+   * A row with enough salvaged trials for a K-majority spawns NOTHING; the matcher (cheap haiku)
+   * still runs live on the parsed findings. Trials are exchangeable across runs of the same
+   * agentHash+corpus — the salvage run re-verifies both before accepting the directory. */
+  salvage?: (rowId: string) => SalvagedTrial[];
 }
+
+export interface SalvagedTrial {
+  raw: string;
+  report: string | null;
+  /** null = the interrupted run predates artifact persistence — validity is UNKNOWN for this
+   * trial (scored null, excluded from the contract denominator), never assumed pass/fail. */
+  artifact: string | null;
+}
+
+/** Read saved trials for one row from a transcripts dir (summary is the trial's existence). */
+export function loadSalvageDir(dir: string, rowId: string): SalvagedTrial[] {
+  const trials: SalvagedTrial[] = [];
+  const readOrNull = (p: string): string | null => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  for (let k = 1; k <= 3; k += 1) {
+    const raw = readOrNull(path.join(dir, `${rowId}.run${k}.summary.txt`));
+    if (raw === null) continue;
+    trials.push({
+      raw,
+      report: readOrNull(path.join(dir, `${rowId}.run${k}.report.md`)),
+      artifact: readOrNull(path.join(dir, `${rowId}.run${k}.artifact.json`)),
+    });
+  }
+  return trials;
+}
+
+/** Enough salvaged trials to stand in for a full row: the same bar as the outage rule (a K=3
+ * majority needs ≥2 trials; a K=1 dev row needs 1). */
+export const salvageUsable = (trials: SalvagedTrial[], runs: number): boolean =>
+  trials.length >= (runs >= 3 ? 2 : 1);
 
 /** Aggregate K parsed summaries into row-level verdict/frameMeta majorities. */
 export function aggregateSummaries(
@@ -284,15 +324,24 @@ export function aggregateSummaries(
 export async function runIntrinsicRow(row: Row, deps: RunDeps): Promise<RowResult> {
   const summaries: ParsedSummary[] = [];
   const textOks: boolean[] = [];
-  for (let k = 0; k < deps.runs; k += 1) {
-    const raw = await (deps.execIntrinsic ?? runIntrinsic)({
-      critic: deps.critic,
-      prompt: row.prompt,
-    });
-    // Cheap class: the first dark row aborts the run (sentry convention) — a polluted run is
-    // worth less than a rerun.
-    if (raw === null) throw new BenchAbort(2, `critique-eval: claude went dark on ${row.id}`);
-    deps.saveTranscript?.(`${row.id}.run${k + 1}.summary.txt`, raw);
+  const salvaged = deps.salvage?.(row.id) ?? [];
+  const trialRaws: string[] = [];
+  if (salvageUsable(salvaged, deps.runs)) {
+    for (const t of salvaged) trialRaws.push(t.raw);
+  } else {
+    for (let k = 0; k < deps.runs; k += 1) {
+      const raw = await (deps.execIntrinsic ?? runIntrinsic)({
+        critic: deps.critic,
+        prompt: row.prompt,
+      });
+      // Cheap class: the first dark row aborts the run (sentry convention) — a polluted run is
+      // worth less than a rerun.
+      if (raw === null) throw new BenchAbort(2, `critique-eval: claude went dark on ${row.id}`);
+      deps.saveTranscript?.(`${row.id}.run${k + 1}.summary.txt`, raw);
+      trialRaws.push(raw);
+    }
+  }
+  for (const raw of trialRaws) {
     summaries.push(parseSummary(raw));
     textOks.push(textCheck(raw, row));
   }
@@ -320,61 +369,86 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const gold = row.gold ?? [];
   const decoys = row.decoys ?? [];
   const summaries: ParsedSummary[] = [];
-  const contractPerRun: NonNullable<RowResult['contract']>[] = [];
+  const contractPerRun: {
+    summaryParsed: boolean;
+    withinTokenBudget: boolean;
+    reportWritten: boolean;
+    artifactValid: boolean | null;
+  }[] = [];
   const slotGotPerRun: Record<string, string>[] = [];
   const severityPerRun: { slotId: string; got: FindingSeverity }[][] = [];
   const fabricatedPerRun: number[] = [];
   let findingCount = 0;
   let completed = 0;
 
-  for (let k = 0; k < deps.runs; k += 1) {
-    const fx = materializeFixture(row); // fresh world per trial — no cross-run state bleed
-    deps.registerCleanup(fx.cleanup);
-    let out: Awaited<ReturnType<typeof runWorkflow>>;
-    try {
-      out = await (deps.execWorkflow ?? runWorkflow)({
-        critic: deps.critic,
-        prompt: row.prompt,
-        fixtureDir: fx.repo,
-        edgeCasesId: row.edgeCasesId,
-      });
-      if (out.raw === null) continue; // expensive class: score what completed, count the outage
-      completed += 1;
-      deps.saveTranscript?.(`${row.id}.run${k + 1}.summary.txt`, out.raw);
-      if (out.report) deps.saveTranscript?.(`${row.id}.run${k + 1}.report.md`, out.report);
-      const summary = parseSummary(out.raw);
-      summaries.push(summary);
-      const findings = out.report ? parseReportFindings(out.report) : [];
-      findingCount = Math.max(findingCount, findings.length);
-      let artifactValid = false;
-      if (out.artifact) {
-        try {
-          const a = JSON.parse(out.artifact) as { risks?: unknown[]; flowId?: string };
-          artifactValid =
-            Array.isArray(a.risks) &&
-            a.risks.length > 0 &&
-            (!row.edgeCasesId || a.flowId === row.edgeCasesId);
-        } catch {
-          artifactValid = false;
-        }
+  // One trial's scoring, shared by the live and salvaged paths. artifactKnowable=false means the
+  // trial predates artifact persistence: validity scores null (excluded from the denominator),
+  // never an assumed pass/fail.
+  const scoreTrial = async (
+    out: { raw: string; report: string | null; artifact: string | null },
+    artifactKnowable: boolean,
+  ) => {
+    const summary = parseSummary(out.raw);
+    summaries.push(summary);
+    const findings = out.report ? parseReportFindings(out.report) : [];
+    findingCount = Math.max(findingCount, findings.length);
+    let artifactValid: boolean | null = artifactKnowable ? false : null;
+    if (out.artifact) {
+      try {
+        const a = JSON.parse(out.artifact) as { risks?: unknown[]; flowId?: string };
+        artifactValid =
+          Array.isArray(a.risks) &&
+          a.risks.length > 0 &&
+          (!row.edgeCasesId || a.flowId === row.edgeCasesId);
+      } catch {
+        artifactValid = false;
       }
-      contractPerRun.push({
-        summaryParsed: summary.verdict !== null,
-        withinTokenBudget: summary.approxTokens <= SUMMARY_TOKEN_BUDGET,
-        reportWritten: out.report !== null,
-        artifactValid,
-      });
-      const outcomes = await (deps.match ?? runMatcher)(gold, decoys, findings, {
-        model: MATCH_MODEL,
-        runs: MATCH_RUNS,
-      });
-      const score = scoreCase(gold, decoys, findings, outcomes);
-      slotGotPerRun.push(Object.fromEntries(score.slots.map((s) => [s.slotId, s.got])));
-      severityPerRun.push(score.severity.map((p) => ({ slotId: p.slotId, got: p.got })));
-      fabricatedPerRun.push(score.fabricatedCriticals.length);
-    } finally {
-      fx.cleanup();
-      deps.registerCleanup(null);
+    }
+    contractPerRun.push({
+      summaryParsed: summary.verdict !== null,
+      withinTokenBudget: summary.approxTokens <= SUMMARY_TOKEN_BUDGET,
+      reportWritten: out.report !== null,
+      artifactValid,
+    });
+    const outcomes = await (deps.match ?? runMatcher)(gold, decoys, findings, {
+      model: MATCH_MODEL,
+      runs: MATCH_RUNS,
+    });
+    const score = scoreCase(gold, decoys, findings, outcomes);
+    slotGotPerRun.push(Object.fromEntries(score.slots.map((s) => [s.slotId, s.got])));
+    severityPerRun.push(score.severity.map((p) => ({ slotId: p.slotId, got: p.got })));
+    fabricatedPerRun.push(score.fabricatedCriticals.length);
+  };
+
+  const salvaged = deps.salvage?.(row.id) ?? [];
+  if (salvageUsable(salvaged, deps.runs)) {
+    // Already-paid trials from an interrupted run: no fixture, no spawn — matcher only.
+    for (const t of salvaged) {
+      completed += 1;
+      await scoreTrial(t, t.artifact !== null);
+    }
+  } else {
+    for (let k = 0; k < deps.runs; k += 1) {
+      const fx = materializeFixture(row); // fresh world per trial — no cross-run state bleed
+      deps.registerCleanup(fx.cleanup);
+      try {
+        const out = await (deps.execWorkflow ?? runWorkflow)({
+          critic: deps.critic,
+          prompt: row.prompt,
+          fixtureDir: fx.repo,
+          edgeCasesId: row.edgeCasesId,
+        });
+        if (out.raw === null) continue; // expensive class: score what completed, count the outage
+        completed += 1;
+        deps.saveTranscript?.(`${row.id}.run${k + 1}.summary.txt`, out.raw);
+        if (out.report) deps.saveTranscript?.(`${row.id}.run${k + 1}.report.md`, out.report);
+        if (out.artifact)
+          deps.saveTranscript?.(`${row.id}.run${k + 1}.artifact.json`, out.artifact);
+        await scoreTrial({ raw: out.raw, report: out.report, artifact: out.artifact }, true);
+      } finally {
+        fx.cleanup();
+        deps.registerCleanup(null);
+      }
     }
   }
 
@@ -431,11 +505,15 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const falseAlarm = isDecoyOnly(row)
     ? { got: fabricated.got, ok: !fabricated.got, stable: fabricated.stable }
     : null;
+  const artifactVals = contractPerRun
+    .map((c) => c.artifactValid)
+    .filter((v): v is boolean => v !== null);
   const contract: RowResult['contract'] = {
     summaryParsed: majorityBool(contractPerRun.map((c) => c.summaryParsed)).got,
     withinTokenBudget: majorityBool(contractPerRun.map((c) => c.withinTokenBudget)).got,
-    reportWritten: majorityBool(contractPerRun.map((c) => Boolean(c.reportWritten))).got,
-    artifactValid: majorityBool(contractPerRun.map((c) => Boolean(c.artifactValid))).got,
+    reportWritten: majorityBool(contractPerRun.map((c) => c.reportWritten)).got,
+    // All trials unknowable (pre-persistence salvage) → null: unknown, not pass/fail.
+    artifactValid: artifactVals.length ? majorityBool(artifactVals).got : null,
   };
   const goldOk = gold.every((g) => slots[g.id]?.ok);
   const decoysOk = decoys.every((d) => slots[d.id]?.ok);
@@ -472,6 +550,8 @@ export interface Summary {
   runnerHash?: string;
   corpusHash?: string;
   outages: number;
+  /** Rows whose trials were ingested from an interrupted run's transcripts (`--salvage`). */
+  salvagedRows?: string[];
   recall: { hits: number; total: number };
   cleanRate: { clean: number; total: number };
   decoyFlags: { flagged: number; mentioned: number; total: number };
@@ -533,7 +613,8 @@ export function summarize(results: RowResult[], critic: { model: string }): Summ
       key,
       {
         ok: workflowScored.filter((r) => r.contract?.[key] === true).length,
-        total: workflowScored.filter((r) => r.contract !== null).length,
+        // null = unknowable for that row (pre-persistence salvage) — out of the denominator.
+        total: workflowScored.filter((r) => r.contract !== null && r.contract[key] !== null).length,
       },
     ]),
   );
@@ -616,32 +697,40 @@ export function compare(summary: Summary, base: Summary | undefined) {
 
   const lines: string[] = [];
   let regressed = false;
-  const floors: [string, number, number, boolean][] = [
-    [
-      'valid-flaw recall',
-      summary.recall.hits / Math.max(1, summary.recall.total),
-      RECALL_FLOOR,
-      true,
-    ],
+  const floors: [string, (s: Summary) => number, number, boolean][] = [
+    ['valid-flaw recall', (s) => s.recall.hits / Math.max(1, s.recall.total), RECALL_FLOOR, true],
     [
       'sound-proposal clean rate',
-      summary.cleanRate.total ? summary.cleanRate.clean / summary.cleanRate.total : 1,
+      (s) => (s.cleanRate.total ? s.cleanRate.clean / s.cleanRate.total : 1),
       CLEAN_RATE_FLOOR,
       true,
     ],
     [
       'decoy flag rate',
-      summary.decoyFlags.total ? summary.decoyFlags.flagged / summary.decoyFlags.total : 0,
+      (s) => (s.decoyFlags.total ? s.decoyFlags.flagged / s.decoyFlags.total : 0),
       DECOY_FLAG_CEILING,
       false,
     ],
   ];
-  for (const [label, value, bound, isFloor] of floors) {
-    const breach = isFloor ? value < bound : value > bound;
-    if (breach) {
+  for (const [label, pick, bound, isFloor] of floors) {
+    const cur = pick(summary);
+    const breach = isFloor ? cur < bound : cur > bound;
+    if (!breach) continue;
+    const prev = pick(base);
+    const prevBreach = isFloor ? prev < bound : prev > bound;
+    // A floor is a tripwire for NEW catastrophic breakage. When the committed baseline itself
+    // breaches (the 2026-07-06 baseline: clean rate 0.20 — the agent's measured
+    // hallucinated-blocker rate, the declared B2 target), a permanent red gate would just get
+    // ignored; the known breach prints loudly instead, and the flip tables still catch that
+    // metric getting WORSE row-by-row.
+    if (prevBreach) {
+      lines.push(
+        `  KNOWN FLOOR BREACH (carried from baseline — the B2 target, not a regression): ${label} ${cur.toFixed(2)} ${isFloor ? '<' : '>'} ${bound}`,
+      );
+    } else {
       regressed = true;
       lines.push(
-        `  FLOOR BREACH — ${label} ${value.toFixed(2)} ${isFloor ? '<' : '>'} ${bound} (catastrophic; fails regardless of flips)`,
+        `  FLOOR BREACH — ${label} ${cur.toFixed(2)} ${isFloor ? '<' : '>'} ${bound} (new vs baseline; fails regardless of flips)`,
       );
     }
   }
@@ -843,6 +932,10 @@ async function main(argv: string[]) {
   const devOnly = args.has('--dev');
   const onlyIdx = argv.indexOf('--only');
   const only = onlyIdx !== -1 ? argv[onlyIdx + 1] : null;
+  const salvageIdx = argv.indexOf('--salvage');
+  const salvageDir = salvageIdx !== -1 ? argv[salvageIdx + 1] : null;
+  if (salvageDir && !existsSync(salvageDir))
+    throw new BenchAbort(2, `critique-eval: --salvage dir not found: ${salvageDir}`);
 
   // SIGINT: the current fixture must not linger in the tmpdir (decisions registers its own
   // cleanup in ITS main — an importer inherits none of it, so this bench keeps its own registry).
@@ -893,7 +986,33 @@ async function main(argv: string[]) {
   if (!rows.length) throw new BenchAbort(2, `critique-eval: no rows match --only ${only}`);
 
   const critic = loadCritic();
-  printEstimate(rows);
+  // --salvage: reuse an interrupted run's saved trials instead of re-buying them. Trials are only
+  // exchangeable across runs of the SAME agent prompt — a changed md means the saved transcripts
+  // measured a different critic, so refuse rather than mix experiments.
+  const salvagedIds: string[] = [];
+  if (salvageDir) {
+    const marker = path.join(salvageDir, 'agent.hash');
+    const savedHash = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
+    if (savedHash && savedHash !== sha12(critic.raw))
+      throw new BenchAbort(2, 'critique-eval: --salvage dir was produced by a different agent md');
+    for (const r of rows)
+      if (salvageUsable(loadSalvageDir(salvageDir, r.id), RUNS)) salvagedIds.push(r.id);
+    console.log(
+      `critique-eval: salvaging ${salvagedIds.length}/${rows.length} rows from ${salvageDir} ` +
+        `(${savedHash ? 'agentHash verified' : 'no agent.hash marker — verify the md is unchanged'}); ` +
+        `live rows: [${
+          rows
+            .filter((r) => !salvagedIds.includes(r.id))
+            .map((r) => r.id)
+            .join(', ') || '—'
+        }]`,
+    );
+  }
+  printEstimate(rows.filter((r) => !salvagedIds.includes(r.id)));
+  if (salvagedIds.length)
+    console.log(
+      `critique-eval: (budget above covers LIVE rows only — ${salvagedIds.length} salvaged rows cost matcher-haiku calls, not critic runs)`,
+    );
 
   mkdirSync(transcriptsDir, { recursive: true });
   const deps: RunDeps = {
@@ -910,7 +1029,14 @@ async function main(argv: string[]) {
       if (fn) activeCleanups.add(fn);
       else activeCleanups.clear();
     },
+    salvage: salvageDir ? (rowId) => loadSalvageDir(salvageDir, rowId) : undefined,
   };
+  // Stamp the transcripts dir with the agent hash so a FUTURE --salvage can verify exchangeability.
+  try {
+    writeFileSync(path.join(transcriptsDir, 'agent.hash'), sha12(critic.raw));
+  } catch {
+    // marker is best-effort
+  }
 
   const results = await mapPool(rows, ROW_CONCURRENCY, async (row) => {
     const r =
@@ -930,6 +1056,7 @@ async function main(argv: string[]) {
 
   const s = summarize(results, critic);
   s.agentHash = sha12(critic.raw);
+  if (salvagedIds.length) s.salvagedRows = salvagedIds;
   s.runnerHash = runnerHash();
   s.corpusHash = sha12(JSON.stringify(rows));
 

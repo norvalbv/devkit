@@ -424,6 +424,52 @@ describe('runWorkflowRow', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('salvaged trials replace spawning entirely; missing artifact scores null, not fail', async () => {
+    let spawns = 0;
+    const salvage = () => [
+      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
+      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
+      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
+    ];
+    const r = await runWorkflowRow(row, {
+      ...noDeps,
+      critic,
+      runs: 3,
+      salvage,
+      execWorkflow: (async () => {
+        spawns += 1;
+        return { raw: null, report: null, artifact: null, artifactPath: '' };
+      }) as never,
+      match: matchStub as never,
+    });
+    expect(spawns).toBe(0); // already-paid trials — nothing re-bought
+    expect(r.outage).toBe(false);
+    expect(r.verdict).toMatchObject({ got: 'RETHINK', ok: true, stable: true });
+    expect(r.contract).toMatchObject({ reportWritten: true, artifactValid: null });
+  });
+
+  it('too few salvaged trials for a K-majority falls back to live spawning', async () => {
+    let spawns = 0;
+    const r = await runWorkflowRow(row, {
+      ...noDeps,
+      critic,
+      runs: 3,
+      salvage: () => [{ raw: 'VERDICT: RETHINK', report: null, artifact: null }], // 1 < 2
+      execWorkflow: (async () => {
+        spawns += 1;
+        return {
+          raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID',
+          report: REPORT,
+          artifact: '{"risks":[{"id":"R1"}]}',
+          artifactPath: 'x',
+        };
+      }) as never,
+      match: matchStub as never,
+    });
+    expect(spawns).toBe(3);
+    expect(r.contract).toMatchObject({ artifactValid: true });
+  });
+
   it('scores NULL when completed trials fall below the K-majority minimum', async () => {
     const r = await runWorkflowRow(row, {
       ...noDeps,
@@ -519,7 +565,7 @@ describe('compare', () => {
       expect(c.regressed).toBe(false);
   });
 
-  it('floor breaches fail immediately', () => {
+  it('NEW floor breaches fail immediately', () => {
     const c = compare(mkSummary({ recall: { hits: 5, total: 10 } }), mkSummary());
     expect(c.regressed).toBe(true);
     expect(c.lines.join('\n')).toContain('valid-flaw recall');
@@ -528,6 +574,14 @@ describe('compare', () => {
       mkSummary(),
     );
     expect(ceil.regressed).toBe(true);
+  });
+
+  it('a breach the baseline already carries prints loudly but does not gate', () => {
+    const breached = { cleanRate: { clean: 1, total: 5 } };
+    const c = compare(mkSummary(breached), mkSummary(breached));
+    expect(c.regressed).toBe(false);
+    expect(c.lines.join('\n')).toContain('KNOWN FLOOR BREACH');
+    expect(c.lines.join('\n')).toContain('B2 target');
   });
 
   it('row-level verdict flips gate via mid-p; one stable flip is noise, not regression', () => {
