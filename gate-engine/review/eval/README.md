@@ -171,8 +171,22 @@ Relationship to `scripts/agent-benchmarks/`: complements, not supersedes — tha
 the *interactive* feature-critique surface with keyword checks; this bench measures the *gate* path
 with finding-level truth.
 
-## Matcher audit status
+## Matcher audit status (2026-07-06, baseline run over the v2 corpus)
 
-Populated by step 6 of sc-1058 (first full run → adversarial labelling → `matcher-audit`):
-agreement and κ are documented here once the committed labels land. Until then, treat headline
-numbers as provisional.
+All 53 matcher-judged slots (27 cases with ≥1 finding; zero-finding cases are deterministic and
+carry no matcher decision) were independently labelled blind — the labelers saw findings + slot
+descriptions, never the matcher's assignments — and adjudicated SAFE-style:
+
+- **agreement 51/53 = 0.96 [0.87, 0.99] · Cohen's κ 0.936** (`node bench.mts matcher-audit`)
+- Initial disagreements 3: one **matcher error** (a decoy leniency on a slot the K-vote had
+  already marked unstable — unstable slots never count as regression evidence); one **label
+  error** (auditor over-match, corrected in the committed labels with an `adjudicated:` note);
+  one immaterial same-gap facet pick (two findings describe one gap — hit either way).
+- Labels are model-authored (independent adversarial pass in fresh contexts re-deriving each
+  assignment from the matcher rubric) — the documented limitation of a claude-only harness;
+  spot-check `matcher-audit.labels.jsonl` (each line carries its `why`) in review.
+
+Baseline headline numbers (committed `results.baseline.json`): gap recall 25/34 = 0.74
+[0.57, 0.85] · false-flag 1/26 = 0.04 [0.01, 0.19] · recorded decisions re-litigated 1/14 ·
+severity calibration 0.68 exact, dominated by IMPORTANT→CRITICAL inflation (×7) — the reviewer
+over-escalates mid-tier gaps; that is the first prompt fix this bench should measure.
