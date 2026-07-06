@@ -77,13 +77,14 @@ const RETRYABLE = new Set(['outage', 'engine-error']);
  * allowlist appends the consumer's semantic-search MCP tool, which cannot resolve inside a bare
  * fixture repo. A future correctness reviewer joins by adding its cases file here. */
 export const BENCH_REVIEWERS = REVIEWERS.filter(
-  (r) => r.domain === 'backend' || r.domain === 'frontend',
+  (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
 );
 
-// Fixture layout every row lands in: backend rows stage under api/, frontend rows under web/.
-// selectReviewers then fires exactly the row's target domain.
+// Fixture layout every row lands in: backend rows stage under api/, frontend rows under web/, and
+// correctness (domain 'all') rows may live under any of api/, web/, or src/ (its roots = the
+// union). selectReviewers then fires exactly the row's target reviewer.
 const FIXTURE_CONFIG = {
-  scanRoots: ['api', 'web'],
+  scanRoots: ['api', 'web', 'src'],
   sourceExtensions: ['ts', 'tsx', 'js', 'mjs'],
   review: { backendRoots: ['api'], frontendRoots: ['web'] },
 };

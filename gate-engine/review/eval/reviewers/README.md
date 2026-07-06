@@ -38,14 +38,18 @@ itself — completed rows are safe, partial numbers are labelled PARTIAL and nev
 a baseline — switch accounts and re-run the same command. The checkpoint file is deleted when a
 run completes.
 
-The standard sweep sequence:
+The standard workflow — **iterate on haiku, spend on sonnet/opus only at the end** (any
+expensive-model numbers collected before an agent edit are invalidated by the gateHash change,
+so collecting them early is pure waste):
 
 ```bash
-node bench.mts validate                                  # free
+node bench.mts validate                                        # free
 BENCH_MODEL=haiku BENCH_CASCADE=off node bench.mts run --dev   # ~25–35 min shakeout
-node bench.mts run --baseline                            # sonnet cascade-on, ~1.5–2 h
-BENCH_MODEL=haiku node bench.mts run                     # ~1–1.5 h → decision rule below
-BENCH_MODEL=opus node bench.mts run                      # ~2.5–3 h ceiling reference (run once)
+BENCH_MODEL=haiku node bench.mts run --baseline                # haiku "before" number, ~1–1.5 h
+# … improvement loop: edit brief/checklist → cascade-off --dev re-run (~30 min) →
+#   confirm cascade-on → --baseline again. Repeat until the floors hold comfortably.
+node bench.mts run                                             # sonnet, IMPROVED agents, ~1.5–2 h
+BENCH_MODEL=opus node bench.mts run                            # opus ceiling, run once, ~2.5–3 h
 ```
 
 ## Corpus
@@ -103,18 +107,22 @@ a 5pp detector** — intervals print so nobody over-reads a point estimate.
 
 ## Pre-registered haiku decision rule
 
-Written BEFORE the first sweep; the sweep does not get to move the goalposts.
+Written BEFORE the first sweep; the sweep does not get to move the goalposts. Haiku is the
+DEFAULT candidate: agents are improved against haiku, and at the end the expensive models must
+justify their cost against the improved agents — not the other way round.
 
-Convert the production first pass to haiku (`GUARD_REVIEW_MODEL` default `'sonnet'` →
-`'haiku'`) **iff both**:
+Keep haiku as the production first pass (`GUARD_REVIEW_MODEL` default → `'haiku'`) **iff both**,
+measured on the final improved agents:
 
-1. Haiku **end-to-end block recall** shows no statistically significant one-directional
-   regression vs the sonnet baseline (per-reviewer flip tables, McNemar mid-p ≥ 0.05, holdouts
-   included), and
+1. Sonnet shows no statistically significant one-directional IMPROVEMENT over haiku on
+   **end-to-end block recall** (per-reviewer flip tables, McNemar mid-p ≥ 0.05, holdouts
+   included) — i.e. the bigger model does not buy blocks haiku misses, and
 2. Haiku **first-pass clean-pass ≥ 0.70** — below that, wasted opus escalations (≈ falseFailRate
    × ~4 min opus per commit) erase the latency/cost win.
 
-The opus sweep is a ceiling reference only — it does not gate the decision.
+If (1) fails but sonnet's edge is confined to one reviewer, a per-reviewer model pin is the
+fallback before giving up on haiku wholesale. The opus sweep is a ceiling reference only — it
+does not gate the decision.
 
 ## Departures from decisions-eval
 

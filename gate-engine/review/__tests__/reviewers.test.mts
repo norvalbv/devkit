@@ -7,6 +7,7 @@ import {
   escalatePrompt,
   parseReviewVerdict,
   REVIEWERS,
+  rootsFor,
   selectReviewers,
   stripFrontmatter,
   verifyChecklist,
@@ -61,21 +62,23 @@ describe('parseReviewVerdict', () => {
 });
 
 describe('selectReviewers', () => {
-  it('backend-only staged → backend pair + commit-guard', () => {
+  it('backend-only staged → backend pair + commit-guard + correctness', () => {
     expect(names(selectReviewers(['src/main/db.ts'], cfg))).toEqual([
       'api-security-reviewer',
       'backend-performance-reviewer',
       'commit-guard',
+      'correctness-reviewer',
     ]);
   });
-  it('frontend-only staged → frontend pair + commit-guard', () => {
+  it('frontend-only staged → frontend pair + commit-guard + correctness', () => {
     expect(names(selectReviewers(['src/renderer/App.tsx'], cfg))).toEqual([
       'frontend-security-reviewer',
       'frontend-performance-reviewer',
       'commit-guard',
+      'correctness-reviewer',
     ]);
   });
-  it('mixed staged → all five', () => {
+  it('mixed staged → all six', () => {
     expect(names(selectReviewers(['src/main/a.ts', 'src/preload/b.ts'], cfg))).toEqual(
       REVIEWERS.map((r) => r.name),
     );
@@ -89,6 +92,7 @@ describe('selectReviewers', () => {
       'api-security-reviewer',
       'backend-performance-reviewer',
       'commit-guard',
+      'correctness-reviewer', // domain 'all' still sees both files under scanRoot src
     ]);
   });
   it('commit-guard sees only SOURCE files under scanRoots (a staged JSON is not its business)', () => {
@@ -98,7 +102,33 @@ describe('selectReviewers', () => {
   });
   it('root matching is prefix-per-segment — src/mainframe is NOT under src/main', () => {
     const sel = selectReviewers(['src/mainframe/x.ts'], cfg);
-    expect(names(sel)).toEqual(['commit-guard']); // under scanRoot src, not backendRoot src/main
+    // under scanRoot src (→ commit-guard + correctness), not backendRoot src/main (→ no api/perf)
+    expect(names(sel)).toEqual(['commit-guard', 'correctness-reviewer']);
+  });
+});
+
+describe('correctness-reviewer (domain all)', () => {
+  const corr = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
+  it('sees SOURCE files across the UNION of every declared root, deduped', () => {
+    expect([...rootsFor(corr, cfg)].sort()).toEqual(
+      ['server', 'src', 'src/main', 'src/preload', 'src/renderer'].sort(),
+    );
+  });
+  it('is selected for a source file under any single root', () => {
+    expect(names(selectReviewers(['server/worker.ts'], cfg))).toContain('correctness-reviewer');
+  });
+  it('excludes test files — a runtime defect cannot come from a test hunk', () => {
+    const sel = selectReviewers(['src/main/a.ts', 'src/main/a.test.ts'], cfg);
+    const c = sel.find((s) => s.reviewer.name === 'correctness-reviewer');
+    expect(c.files).toEqual(['src/main/a.ts']);
+  });
+  it('excludes non-source (a staged JSON/doc is not a correctness concern)', () => {
+    const sel = selectReviewers(['src/main/data.json'], cfg);
+    expect(names(sel)).not.toContain('correctness-reviewer');
+  });
+  it('gets the semantic search tool ONLY when the consumer wired an index (indexPath set)', () => {
+    expect(allowedToolsFor(corr, { ...cfg, indexPath: null })).not.toContain(cfg.searchTool);
+    expect(allowedToolsFor(corr, { ...cfg, indexPath: '.idx/db' })).toContain(cfg.searchTool);
   });
 });
 

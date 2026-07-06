@@ -97,6 +97,18 @@ export const REVIEWERS = Object.freeze([
     stateFile: '.claude/.pre-commit-review.json',
     cmds: Object.freeze({ gen: 'init', check: 'check-file' }),
   }),
+  // Correctness is NOT domain-sliceable: a writer in a backend root and its reader in a frontend
+  // root are ONE finding, so this reviewer sees SOURCE files across the UNION of declared roots.
+  // Four ALWAYS-ON lenses — a correctness bug has no reliable lexical signature, so a regex gate
+  // would blind exactly the class this reviewer exists to catch. Runs the normal haiku→opus
+  // cascade like the others; the real-findings bench decides whether the first pass holds.
+  Object.freeze({
+    name: 'correctness-reviewer',
+    domain: 'all',
+    skill: 'correctness',
+    stateFile: '.claude/.correctness-review.json',
+    cmds: Object.freeze({ gen: 'generate', check: 'check-item' }),
+  }),
 ]);
 
 // Synced-skill layout is devkit's own convention (sync-skills targets .claude/skills), so the
@@ -122,6 +134,10 @@ const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
   if (reviewer.domain === 'backend') return cfg.review.backendRoots;
   if (reviewer.domain === 'frontend') return cfg.review.frontendRoots;
+  // `all` = the deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
+  // undeclared trees (vendored code, scripts) are outside the consumer's stated review surface.
+  if (reviewer.domain === 'all')
+    return [...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots])];
   return cfg.scanRoots;
 }
 
@@ -138,11 +154,18 @@ function underRoot(file: string, root: string): boolean {
  * configured frontend) simply never select that domain.
  */
 export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): ReviewerSelection[] {
-  const { isSource } = sourceMatchers(cfg.sourceExtensions);
+  const { isSource, isTest } = sourceMatchers(cfg.sourceExtensions);
   return REVIEWERS.map((reviewer) => {
     const roots = rootsFor(reviewer, cfg);
     let files = stagedFiles.filter((f) => roots.some((r) => underRoot(f, r)));
-    if (reviewer.domain === 'code') files = files.filter((f) => isSource(f.split('/').pop() ?? ''));
+    // code + all trigger only on SOURCE files: a staged JSON/doc is neither a duplication nor a
+    // correctness concern.
+    if (reviewer.domain === 'code' || reviewer.domain === 'all')
+      files = files.filter((f) => isSource(f.split('/').pop() ?? ''));
+    // The correctness charter is RUNTIME defects — a test-only hunk cannot introduce one, and
+    // test files are ~half a branch diff's bytes: excluding them keeps the judge inside its
+    // timeout on a ship-sized diff. Test adequacy is the testing reviewer's charter.
+    if (reviewer.domain === 'all') files = files.filter((f) => !isTest(f.split('/').pop() ?? ''));
     return { reviewer, files };
   }).filter((s) => s.files.length > 0);
 }
@@ -155,7 +178,12 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
  */
 export function allowedToolsFor(reviewer: Reviewer, cfg: GuardConfig): string {
   const tools = `${BASE_TOOLS},Bash(node ${checklistScript(reviewer)}:*)`;
-  return reviewer.domain === 'code' ? `${tools},${cfg.searchTool}` : tools;
+  if (reviewer.domain === 'code') return `${tools},${cfg.searchTool}`;
+  // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
+  // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
+  // a generic default naming an MCP tool the judge doesn't have, and Grep is the core mechanism.
+  if (reviewer.domain === 'all' && cfg.indexPath) return `${tools},${cfg.searchTool}`;
+  return tools;
 }
 
 /** Strip a leading YAML frontmatter block from an agent .md. */
