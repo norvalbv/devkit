@@ -229,11 +229,13 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedToolsFor(reviewer, cfg),
   ];
+  // A model-pinned reviewer (correctness) runs single-pass at its pinned model — no escalation.
+  const passModel = reviewer.model ?? firstModel;
   const stat = gitCached(cwd, ['--stat'], files);
   let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
-    args: args(prompt, firstModel),
+    args: args(prompt, passModel),
     input: stat,
     timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
@@ -272,6 +274,15 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'no VERDICT line',
       escalated: false,
+    };
+  // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
+  if (reviewer.model)
+    return {
+      name: reviewer.name,
+      status: 'fail',
+      reason: firstVerdict.reason,
+      escalated: false,
+      transcript: first,
     };
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,

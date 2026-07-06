@@ -109,6 +109,12 @@ describe('selectReviewers', () => {
 
 describe('correctness-reviewer (domain all)', () => {
   const corr = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
+  it('is pinned single-pass to haiku (the cascade subtracts recall here — see run-review.mts)', () => {
+    expect(corr.model).toBe('haiku');
+    // domain reviewers must stay unpinned so they keep the sonnet→opus cascade
+    for (const r of REVIEWERS.filter((r) => r.name !== 'correctness-reviewer'))
+      expect(r.model).toBeUndefined();
+  });
   it('sees SOURCE files across the UNION of every declared root, deduped', () => {
     expect([...rootsFor(corr, cfg)].sort()).toEqual(
       ['server', 'src', 'src/main', 'src/preload', 'src/renderer'].sort(),

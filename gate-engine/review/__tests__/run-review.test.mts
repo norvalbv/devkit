@@ -149,10 +149,12 @@ describe('runReviewGate — cascade + exit contract', () => {
     const repo = consumerRepo({ backend: true });
     const exec = passWithArtifact(repo);
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    // backend pair + commit-guard + correctness, one sonnet call each, no opus escalation
+    // backend pair + commit-guard + correctness, one call each, no opus escalation
     expect(exec).toHaveBeenCalledTimes(4);
     for (const call of exec.mock.calls) {
-      expect(call[0].args).toContain('sonnet');
+      const model = call[0].args[call[0].args.indexOf('--model') + 1];
+      // correctness is model-pinned single-pass (haiku); the domain reviewers first-pass at sonnet
+      expect(model).toBe(call[0].label === 'review:correctness-reviewer' ? 'haiku' : 'sonnet');
       expect(call[0].args.join(' ')).not.toContain('opus');
     }
     expect(Object.keys(loadCache(repo)).length).toBe(4);
@@ -169,12 +171,35 @@ describe('runReviewGate — cascade + exit contract', () => {
   it('sonnet FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {
+      // correctness is single-pass (no escalation to overturn) — hold it PASS so this test isolates
+      // the DOMAIN cascade-overturn path it's about.
+      if (label === 'review:correctness-reviewer') {
+        writeArtifact(repo, label);
+        return 'VERDICT: PASS';
+      }
       if (!label.endsWith(':escalate')) return 'sus\nVERDICT: FAIL — maybe';
       writeArtifact(repo, label);
       return 'overturned\nVERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(Object.keys(loadCache(repo)).length).toBe(4);
+  });
+
+  it('a model-pinned reviewer (correctness) runs SINGLE-PASS — its first-pass FAIL blocks, never escalates', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      if (label === 'review:correctness-reviewer') return 'race found\nVERDICT: FAIL — CAS clobber';
+      writeArtifact(repo, label); // domain reviewers pass
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    // exactly one call for correctness (no :escalate), and it ran on haiku
+    const corrCalls = exec.mock.calls.filter(([o]) => o.label.startsWith('review:correctness-reviewer'));
+    expect(corrCalls).toHaveLength(1);
+    expect(corrCalls[0][0].args[corrCalls[0][0].args.indexOf('--model') + 1]).toBe('haiku');
+    expect(exec.mock.calls.some(([o]) => o.label === 'review:correctness-reviewer:escalate')).toBe(false);
+    expect(err.mock.calls.flat().join('\n')).toContain('CAS clobber');
   });
 
   it('sonnet FAIL → opus confirm → exit 1 with the reviewer named; FAIL is never cached', async () => {

@@ -387,6 +387,12 @@ function printSummary(name, s, { cascade }) {
 const sectionKey = (reviewerName, model, cascade) =>
   `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}`;
 
+// A model-pinned reviewer (correctness) runs single-pass at its pinned model regardless of
+// BENCH_MODEL / BENCH_CASCADE — the gate ignores both for it. Report and key it by that reality so
+// its section, metrics, and baseline reflect what actually ran, not the swept knobs.
+const effModel = (reviewer) => reviewer.model ?? MODEL;
+const effCascade = (reviewer) => (reviewer.model ? false : CASCADE);
+
 function loadBaseline() {
   try {
     return JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
@@ -569,8 +575,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
   const perReviewer = [];
   for (const { reviewer, rows } of plan) {
     const meta = {
-      model: MODEL,
-      cascade: CASCADE,
+      model: effModel(reviewer),
+      cascade: effCascade(reviewer),
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
     };
@@ -645,7 +651,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
 
     // Stability pass: rows discordant with the baseline verdict re-run ONCE; a flip must confirm
     // 2-of-2 to count in the McNemar table (alignment-bench convention — K=1 rows are noisy).
-    const key = sectionKey(reviewer.name, MODEL, CASCADE);
+    const key = sectionKey(reviewer.name, meta.model, meta.cascade);
     const section = baseline?.sections?.[key];
     if (
       failMode &&
@@ -656,13 +662,13 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
       for (const res of results) {
         const baseRow = section.rows[res.id];
         if (!baseRow) continue;
-        const wasOk = CASCADE ? baseRow.okFinal : baseRow.okFirst;
-        const isOk = CASCADE ? res.okFinal : res.okFirst;
+        const wasOk = meta.cascade ? baseRow.okFinal : baseRow.okFirst;
+        const isOk = meta.cascade ? res.okFinal : res.okFirst;
         if (wasOk !== isOk) {
           console.log(`  ${res.id}: discordant with baseline — re-running once to confirm`);
           try {
             const rerun = await runRow(plan.find((p) => p.reviewer === reviewer).rows.find((r) => r.id === res.id));
-            const rerunOk = CASCADE ? rerun.okFinal : rerun.okFirst;
+            const rerunOk = meta.cascade ? rerun.okFinal : rerun.okFirst;
             res.stable = rerunOk === isOk;
             if (!res.stable) console.log(`  ${res.id}: flip did not reproduce — excluded from flip table`);
           } catch {
@@ -679,10 +685,15 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
   // ── Report ── (paused-skipped rows never ran — they are excluded, not counted as misses)
   const ran = (rows) => rows.filter((r) => r.finalStatus !== 'paused-skipped');
   const skippedCount = allResults.length - ran(allResults).length;
+  // A run's pooled cascade view is true only when EVERY ran reviewer cascaded (a mixed
+  // cascade + single-pass `all` run has no coherent end-to-end pool → treat as first-pass).
+  const pooledCascade = perReviewer.every(({ reviewer }) => effCascade(reviewer));
   for (const { reviewer, results } of perReviewer)
-    printSummary(reviewer.name, summarize(ran(results)), { cascade: CASCADE });
-  const pooled = summarize(ran(allResults));
-  printSummary(paused ? 'POOLED (PARTIAL — paused)' : 'POOLED', pooled, { cascade: CASCADE });
+    printSummary(reviewer.name, summarize(ran(results), { cascade: effCascade(reviewer) }), {
+      cascade: effCascade(reviewer),
+    });
+  const pooled = summarize(ran(allResults), { cascade: pooledCascade });
+  printSummary(paused ? 'POOLED (PARTIAL — paused)' : 'POOLED', pooled, { cascade: pooledCascade });
 
   if (paused) {
     // Ledger the partial run, then bail BEFORE floors/baseline — partial numbers must never
@@ -701,7 +712,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
   // ── Floors + flips (--fail) ──
   let failed = false;
   if (failMode) {
-    if (CASCADE) {
+    if (pooledCascade) {
       const br = pooled.blockRecall;
       const cp = pooled.cleanPass;
       if (br.n && br.k / br.n < FLOORS.blockRecall) {
@@ -738,14 +749,14 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
       throw new BenchAbort(2, `reviewer-eval: refusing --baseline with ${outages} outage/error row(s)`);
     const next = loadBaseline() ?? { sections: {} };
     for (const { reviewer, results, meta } of perReviewer) {
-      next.sections[sectionKey(reviewer.name, MODEL, CASCADE)] = {
+      next.sections[sectionKey(reviewer.name, meta.model, meta.cascade)] = {
         ...meta,
         when: new Date().toISOString(),
         dev,
         rows: Object.fromEntries(
           results.map((r) => [r.id, { expected: r.expected, okFirst: r.okFirst, okFinal: r.okFinal, finalStatus: r.finalStatus }]),
         ),
-        metrics: summarize(results),
+        metrics: summarize(results, { cascade: meta.cascade }),
       };
     }
     writeFileSync(BASELINE_FILE, `${JSON.stringify(next, null, 2)}\n`);

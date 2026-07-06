@@ -22,6 +22,14 @@ export interface Reviewer {
   skill: string;
   stateFile: string;
   cmds: { gen: string; check: string };
+  /** When set, the reviewer runs SINGLE-PASS at this model — no sonnet→opus cascade, its FAIL
+   * blocks directly. Used by the correctness reviewer: the reviewer-eval bench measured that the
+   * opus escalation OVERTURNS real correctness bugs (a "confirm or overturn" opus, handed a subtle
+   * race/contract bug, tends to overturn), dropping gold recall from 0.78 first-pass to 0.67
+   * end-to-end. A cascade also cannot fix a first-pass MISS. So this lens gets one strong-enough
+   * pass and no second-guessing. Domain reviewers leave it unset — the cascade HELPS them (opus
+   * overturns their false-FAILs on decoys). */
+  model?: string;
 }
 
 /** A selected reviewer paired with the staged files under its roots that triggered it. */
@@ -108,6 +116,9 @@ export const REVIEWERS = Object.freeze([
     skill: 'correctness',
     stateFile: '.claude/.correctness-review.json',
     cmds: Object.freeze({ gen: 'generate', check: 'check-item' }),
+    // Single-pass haiku (see Reviewer.model): bench-measured held-out recall 0.73 / precision 1.00
+    // with perfect domain-exclusivity — the cascade only subtracted here.
+    model: 'haiku',
   }),
 ]);
 
