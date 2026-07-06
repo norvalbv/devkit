@@ -17,6 +17,10 @@ node_modules
 gate-engine/decisions/eval/results.baseline.json
 # decisions-eval run ledger (local telemetry; the anti-Goodhart record of runs against the corpus)
 gate-engine/decisions/eval/runs.log
+# critique-eval: ledger + per-run transcripts are local telemetry. NOTE: its results.baseline.json
+# IS committed (sc-1059 requires a committed baseline) — do not add it here.
+gate-engine/critique/eval/runs.log
+gate-engine/critique/eval/transcripts/
 
 # eslint-plugin-project-structure cache
 projectStructure.cache.json

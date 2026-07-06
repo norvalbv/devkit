@@ -1,0 +1,733 @@
+{
+  "critique": {
+    "model": "opus",
+    "matchModel": "haiku",
+    "runs": 3,
+    "matchRuns": 3,
+    "outages": 0,
+    "recall": {
+      "hits": 22,
+      "total": 24
+    },
+    "cleanRate": {
+      "clean": 1,
+      "total": 5
+    },
+    "decoyFlags": {
+      "flagged": 4,
+      "mentioned": 0,
+      "total": 20
+    },
+    "perClass": {
+      "feasibility": {
+        "hits": 1,
+        "total": 1
+      },
+      "ux": {
+        "hits": 2,
+        "total": 3
+      },
+      "security": {
+        "hits": 2,
+        "total": 2
+      },
+      "codebase-conflict": {
+        "hits": 5,
+        "total": 5
+      },
+      "data-flow": {
+        "hits": 2,
+        "total": 2
+      },
+      "runtime-config": {
+        "hits": 5,
+        "total": 5
+      },
+      "missing-consideration": {
+        "hits": 5,
+        "total": 6
+      }
+    },
+    "verdictAccuracy": {
+      "correct": 31,
+      "total": 33
+    },
+    "confusion": {
+      "RETHINK": {
+        "RETHINK": 8,
+        "REJECT": 2,
+        "PROCEED WITH CHANGES": 1
+      },
+      "PROCEED": {
+        "PROCEED": 1,
+        "PROCEED WITH CHANGES": 7,
+        "RETHINK": 1
+      },
+      "REJECT": {
+        "REJECT": 5,
+        "RETHINK": 1
+      },
+      "PROCEED WITH CHANGES": {
+        "PROCEED WITH CHANGES": 6,
+        "REJECT": 1
+      }
+    },
+    "frameMetaAccuracy": {
+      "correct": 12,
+      "total": 12
+    },
+    "severityCalibration": {
+      "exact": 14,
+      "total": 22
+    },
+    "precisionInfo": {
+      "matched": 22,
+      "emitted": 104
+    },
+    "contract": {
+      "summaryParsed": {
+        "ok": 20,
+        "total": 20
+      },
+      "withinTokenBudget": {
+        "ok": 13,
+        "total": 20
+      },
+      "reportWritten": {
+        "ok": 20,
+        "total": 20
+      },
+      "artifactValid": {
+        "ok": 8,
+        "total": 8
+      }
+    },
+    "rows": {
+      "int-bandaid-skill-dedup": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-bandaid-skill-dedup-v1": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-fine-relative-time": {
+        "expected": "PROCEED",
+        "got": "PROCEED",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-contradict-env-denylist": {
+        "expected": "REJECT",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-notabug-cursor-advisory": {
+        "expected": "RETHINK",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-notabug-cursor-advisory-flip": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-realfix-null-parse": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": false,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "ses-overlay-selfheal": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "ses-reship-manifest": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "ses-sc1048-strict-cap": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "ses-integration-mcp": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "ses-desktop-novnc": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "int-verbose-decoy": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {},
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-symlink-skills": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-symlink-follow": {
+            "got": "hit",
+            "ok": true,
+            "stable": false
+          },
+          "F-dangling": {
+            "got": "hit",
+            "ok": true,
+            "stable": false
+          },
+          "F-git-platform": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-ssot-goal": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-hooks-import-devkit": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-no-node-modules": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-no-fallback": {
+            "got": "miss",
+            "ok": false,
+            "stable": false
+          },
+          "D-single-resolver": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-release-direct-push": {
+        "expected": "RETHINK",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-ruleset-blocks": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-tag-target": {
+            "got": "hit",
+            "ok": true,
+            "stable": false
+          },
+          "D-one-command": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-git-ssh-default": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-ssh-clone-fails": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-cryptic-error": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-env-override": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-bsd-grep-slash-s": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-bsd-portability": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-guard-idea": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-cursor-hardcode": {
+        "expected": "RETHINK",
+        "got": "PROCEED WITH CHANGES",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-surface-hygiene": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-fixed-path-ux": {
+            "got": "miss",
+            "ok": false,
+            "stable": false
+          },
+          "D-file-not-inline": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-eval-gate-on-deltas": {
+        "expected": "REJECT",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-contradicts-target": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-wilson-stays": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-eval-gate-on-deltas-v1": {
+        "expected": "REJECT",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-contradicts-target": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-wilson-stays": {
+            "got": "clean",
+            "ok": true,
+            "stable": false
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-contract-edgecases-id": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "PROCEED WITH CHANGES",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": false,
+        "slots": {
+          "F-json-contract": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-flag-approach": {
+            "got": "flagged",
+            "ok": false,
+            "stable": false
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-security-env-telemetry": {
+        "expected": "REJECT",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": false,
+        "slots": {
+          "F-env-exfiltration": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-no-consent": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-debuggability": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-security-config-cmd": {
+        "expected": "REJECT",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-repo-rce": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-cmd-portability": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-extension-need": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-conflict-second-matcher": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-duplicate-matcher": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-matcher-need": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-dataflow-index-order": {
+        "expected": "PROCEED WITH CHANGES",
+        "got": "REJECT",
+        "ok": false,
+        "verdictOk": false,
+        "verdictStable": true,
+        "slots": {
+          "F-keep-first-stale": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-dedupe-need": {
+            "got": "flagged",
+            "ok": false,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-ux-hard-block-warns": {
+        "expected": "RETHINK",
+        "got": "RETHINK",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-warn-tier-dx": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "F-no-escape": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          },
+          "D-thin-problem": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-decoy-wilson": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "D-wilson-choice": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          },
+          "D-flip-gate": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": {
+          "got": true,
+          "ok": false,
+          "stable": false
+        },
+        "outage": false
+      },
+      "wf-decoy-null-guard": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "D-early-return": {
+            "got": "clean",
+            "ok": true,
+            "stable": false
+          }
+        },
+        "falseAlarm": {
+          "got": true,
+          "ok": false,
+          "stable": false
+        },
+        "outage": false
+      },
+      "wf-decoy-posix-space": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "D-implements-target": {
+            "got": "clean",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": {
+          "got": false,
+          "ok": true,
+          "stable": true
+        },
+        "outage": false
+      },
+      "wf-posix-space-flip": {
+        "expected": "REJECT",
+        "got": "REJECT",
+        "ok": true,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "F-reverses-posix": {
+            "got": "hit",
+            "ok": true,
+            "stable": true
+          }
+        },
+        "falseAlarm": null,
+        "outage": false
+      },
+      "wf-decoy-manifest-checksum": {
+        "expected": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
+        "ok": false,
+        "verdictOk": true,
+        "verdictStable": true,
+        "slots": {
+          "D-manifest-mechanism": {
+            "got": "flagged",
+            "ok": false,
+            "stable": true
+          }
+        },
+        "falseAlarm": {
+          "got": true,
+          "ok": false,
+          "stable": true
+        },
+        "outage": false
+      },
+      "wf-decoy-verbose-scary": {
+        "expected": "PROCEED",
+        "got": "RETHINK",
+        "ok": false,
+        "verdictOk": false,
+        "verdictStable": true,
+        "slots": {
+          "D-memo-choice": {
+            "got": "flagged",
+            "ok": false,
+            "stable": true
+          }
+        },
+        "falseAlarm": {
+          "got": true,
+          "ok": false,
+          "stable": true
+        },
+        "outage": false
+      }
+    },
+    "agentHash": "e137c82bda25",
+    "salvagedRows": [
+      "int-bandaid-skill-dedup",
+      "int-bandaid-skill-dedup-v1",
+      "int-fine-relative-time",
+      "int-contradict-env-denylist",
+      "int-notabug-cursor-advisory",
+      "int-notabug-cursor-advisory-flip",
+      "int-realfix-null-parse",
+      "ses-overlay-selfheal",
+      "ses-reship-manifest",
+      "ses-sc1048-strict-cap",
+      "ses-integration-mcp",
+      "ses-desktop-novnc",
+      "int-verbose-decoy",
+      "wf-symlink-skills",
+      "wf-hooks-import-devkit",
+      "wf-release-direct-push",
+      "wf-git-ssh-default",
+      "wf-bsd-grep-slash-s",
+      "wf-cursor-hardcode",
+      "wf-eval-gate-on-deltas",
+      "wf-eval-gate-on-deltas-v1",
+      "wf-contract-edgecases-id",
+      "wf-security-env-telemetry",
+      "wf-security-config-cmd",
+      "wf-conflict-second-matcher",
+      "wf-dataflow-index-order",
+      "wf-ux-hard-block-warns",
+      "wf-decoy-wilson",
+      "wf-decoy-null-guard",
+      "wf-decoy-posix-space"
+    ],
+    "runnerHash": "77b1b13c29cd",
+    "corpusHash": "eed5fdcb950d"
+  }
+}

@@ -1,9 +1,0 @@
-{
-  "title": "Directly contradicts a recorded non-negotiable Target (flip-flop)",
-  "agent": "feature-critique",
-  "expectVerdict": ["REJECT", "RETHINK"],
-  "expectFrameMeta": ["SOUND", "NOTABUG", "BANDAID", "SKIP"],
-  "requireAny": ["deny list", "non-negotiable", "credential", "Target", "exfiltration"],
-  "forbid": [],
-  "note": "Contradicts a recorded Target → CRITICAL → REJECT, naming the deny-list Target. (Frame meta may read SOUND since it is a direct contradiction, not a band-aid — the Alignment lens catches it.)"
-}
