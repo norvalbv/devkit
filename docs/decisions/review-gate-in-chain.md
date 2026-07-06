@@ -15,3 +15,4 @@ created: 2026-07-02
 **Vision-fit:** n/a — devkit internal guardrail architecture, not a product surface.
 **Scope:** gate-engine/review/**,agents/**,skills/**,cli/lib/ship/**
 **Source:** manual
+- 2026-07-06 — Gate hardening shipped from the frink PR #60 investigation (judge additions deferred pending gate-eval benchmarks — archive/correctness-judge-full holds the prototype): completeness gate fails CLOSED (exit 3) under GUARD_AI_STRICT on judge outage/timeout (stderr warnings are invisible to headless shipping agents; exit code is the only reliable channel), timeout 360s->420s (it SIGTERM'd and silently skipped on PR #60's branch-sized commit), full --stat map rides stdin ahead of the capped diff; review gate: a missing agent brief is INCONCLUSIVE with a sync nudge (never judged as an empty brief -> fake PASS), a FAIL echoes the judge's full transcript, GUARD_REVIEW_SKIP disables one reviewer by name.

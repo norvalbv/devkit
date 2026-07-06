@@ -213,7 +213,10 @@ export function verifyChecklist(
   if (verdict === 'FAIL') return null;
   const items = state?.items ?? state?.files; // domain reviewers use items[]; commit-guard files[]
   if (!Array.isArray(items) || items.length === 0)
-    return 'checklist artifact missing — the judge skipped the checklist workflow';
+    return (
+      'checklist artifact missing — the judge skipped the checklist workflow (or its ' +
+      'checklist script was never synced: devkit sync-skills)'
+    );
   const pending = items.filter((i) => i.status === 'pending');
   if (pending.length > 0)
     return `checklist incomplete — ${pending.length} item(s) never resolved: ${pending

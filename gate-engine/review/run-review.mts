@@ -18,6 +18,7 @@
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
  * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default sonnet) ·
+ * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
  * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 2, floor 1) ·
  * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
@@ -47,12 +48,25 @@ import {
   wrapPrompt,
 } from './reviewers.mts';
 
-/** One reviewer's cascade outcome. */
+/** One reviewer's cascade outcome. `transcript` rides along on a FAIL so the gate can print the
+ * judge's full findings — a block whose evidence was discarded is undebuggable. */
 interface CascadeResult {
   name: string;
   status: 'pass' | 'fail' | 'inconclusive';
   reason: string;
   escalated: boolean;
+  transcript?: string;
+}
+
+// GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
+// per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
+function skippedReviewers(): Set<string> {
+  return new Set(
+    (process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 /** Orchestration inputs threaded through a cascade (config + the injectable judge runner). */
@@ -194,7 +208,18 @@ async function cascadeVerdict(
   { reviewer, files }: ReviewerSelection,
   { cwd, cfg, exec = execJudgeAsync, firstModel = 'sonnet', retryFirst = false }: CascadeOpts,
 ): Promise<CascadeResult> {
-  const prompt = wrapPrompt(agentBody(cwd, cfg, reviewer.name) ?? '', reviewer, files);
+  const body = agentBody(cwd, cfg, reviewer.name);
+  if (body === null)
+    // A missing brief must never be judged as an EMPTY brief (a wrapper-only prompt fake-passes):
+    // inconclusive → fail-open on a normal commit, fail-closed on a ship — exactly the loudness
+    // an updated-CLI-but-unsynced-agents consumer needs.
+    return {
+      name: reviewer.name,
+      status: 'inconclusive',
+      reason: `agent brief ${reviewer.name}.md missing under ${cfg.review.agentsDir} — run devkit sync-agents && devkit sync-skills`,
+      escalated: false,
+    };
+  const prompt = wrapPrompt(body, reviewer, files);
   const args = (p: string, model: string): string[] => [
     '-p',
     p,
@@ -264,7 +289,13 @@ async function cascadeVerdict(
     };
   const finalVerdict = parseReviewVerdict(second);
   if (finalVerdict.verdict === 'FAIL')
-    return { name: reviewer.name, status: 'fail', reason: finalVerdict.reason, escalated: true };
+    return {
+      name: reviewer.name,
+      status: 'fail',
+      reason: finalVerdict.reason,
+      escalated: true,
+      transcript: second,
+    };
   if (finalVerdict.verdict === 'PASS')
     return { name: reviewer.name, status: 'pass', reason: '', escalated: true };
   return {
@@ -294,6 +325,13 @@ export async function runReviewGate(
     cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return 0;
     selected = selectReviewers(stagedFiles(cwd), cfg);
+    const skip = skippedReviewers();
+    if (skip.size > 0) {
+      // never a silent cap: name what the knob dropped
+      for (const d of selected.filter((s) => skip.has(s.reviewer.name)))
+        console.error(`guard-review: ${d.reviewer.name} skipped (GUARD_REVIEW_SKIP)`);
+      selected = selected.filter((s) => !skip.has(s.reviewer.name));
+    }
     if (selected.length === 0) return 0;
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
     diffs = selected.map((s) => gitCached(cwd, [], s.files));
@@ -364,8 +402,9 @@ export async function runReviewGate(
   const fails = results.filter((r) => r.status === 'fail');
   for (const f of fails) {
     console.error(
-      `guard-review: ${f.name} FAILED (opus-confirmed) — ${f.reason || 'see transcript above'}`,
+      `guard-review: ${f.name} FAILED (opus-confirmed) — ${f.reason || 'see findings below'}`,
     );
+    if (f.transcript) console.error(f.transcript.trim());
   }
   if (fails.length > 0) return 1;
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
