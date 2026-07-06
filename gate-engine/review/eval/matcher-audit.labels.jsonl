@@ -1,0 +1,53 @@
+{"caseId":"adapted-anti-drift-helper-bypassed","slotId":"retry-branch-bypasses","match":"F1","why":"F1 flags retryTurn's raw .token check bypassing the new preflight gate — same gap, same remedy"}
+{"caseId":"adapted-anti-drift-helper-bypassed","slotId":"sequencing-decoy","match":"NONE","why":"no finding mentions listAccounts or credential-type visibility"}
+{"caseId":"adapted-cache-key-mismatch","slotId":"invalidation-key-mismatch","match":"NONE","why":"F1 is about poll/review not wired to backend, not the regenerate invalidation-key mismatch"}
+{"caseId":"adapted-cache-key-mismatch","slotId":"notify-never-sent","match":"F2","why":"F2 flags submitBatch dropping the collected notifyByEmail option — same wired-to-nothing gap"}
+{"caseId":"adapted-cache-key-mismatch","slotId":"failed-shows-success","match":"NONE","why":"no finding touches the banner/processing.tsx status lumping"}
+{"caseId":"adapted-cascade-delete-bypass","slotId":"project-delete-bypass","match":"F1","why":"F1 flags project-deletion cascade removing threads without cancelling runs — same orphaned-run bypass"}
+{"caseId":"adapted-cascade-delete-bypass","slotId":"followups-decoy","match":"NONE","why":"neither finding raises the confirm dialog or artifact cleanup follow-ups"}
+{"caseId":"adapted-clean-extraction","slotId":"stale-artifact-decoy","match":"NONE","why":"no finding mentions the .cursor/.edge-cases.json artifact"}
+{"caseId":"adapted-clean-extraction","slotId":"preexisting-refetch-decoy","match":"NONE","why":"F1 explicitly marks the double fetchState pre-existing/not a concern; its flagged gap is test coverage"}
+{"caseId":"adapted-cloud-path-loses-briefing","slotId":"cloud-briefing-lost","match":"F1","why":"F1 flags runConfig briefing unread by buildCloudPrompt so cloud agents run briefing-less — identical gap"}
+{"caseId":"adapted-cloud-path-loses-briefing","slotId":"docs-teach-retired-variable","match":"F2","why":"F2 flags agent-templates.md still teaching {{briefing}} that now renders empty — identical gap"}
+{"caseId":"adapted-cloud-path-loses-briefing","slotId":"local-param-decoy","match":"NONE","why":"F1 treats the local config channel as working by design; no finding flags the dropped execute argument"}
+{"caseId":"adapted-docs-third-flow-silent","slotId":"docs-silent-third-flow","match":"NONE","why":"no finding touches user-docs/permissions.md or the undocumented no-prompt flow"}
+{"caseId":"adapted-docs-third-flow-silent","slotId":"wiring-decoy","match":"F1","why":"F1 re-litigates gate wiring completeness (marker provenance, 'no caller exists to verify') that the decoy declares settled"}
+{"caseId":"adapted-gitignore-still-tracked","slotId":"still-tracked","match":"F1","why":"F1 flags gitignore as no-op for index-tracked mirror files needing untracking — the root gap; F2/F3 are facets"}
+{"caseId":"adapted-gitignore-still-tracked","slotId":"readme-still-instructs-commit","match":"NONE","why":"no finding mentions README's regenerate-and-commit instructions"}
+{"caseId":"adapted-indefensible-deferral","slotId":"deferral-premise-invalidated","match":"F1","why":"F1 names the crossed revisit trigger of archive-cancel-deferred and the orphaned runs — core gap; F3 covers only the stale-record facet"}
+{"caseId":"adapted-partial-fix-overflow","slotId":"overflow-loses-flag","match":"F1","why":"F1 flags fromBeginning dropped for overflow queue and stripped on drain re-dispatch — identical gap and fix"}
+{"caseId":"adapted-partial-fix-overflow","slotId":"preexisting-shift-decoy","match":"NONE","why":"no finding flags onRunTerminal dropping a pending run on dispatch throw"}
+{"caseId":"adapted-reduced-motion-hang","slotId":"reduced-motion-hang","match":"F1","why":"F1 names the exact chain: !important transform override → no transitionend → commit never runs → deck stuck"}
+{"caseId":"adapted-reduced-motion-hang","slotId":"pointercancel-commits","match":"NONE","why":"F4 (no move feedback) and F6 (no pointer capture) are different drag gaps; nobody flags pointercancel routing to onRelease"}
+{"caseId":"adapted-reduced-motion-hang","slotId":"multitouch-decoy","match":"NONE","why":"no finding raises multi-touch/second-pointer handling; F4/F6 flag other drag issues"}
+{"caseId":"adapted-strands-victim","slotId":"victim-stranded","match":"F1","why":"F1 shows canRerun blocks zombie-dispatched batches so the incident user stays locked out until restart, and proposes liveness-based recovery"}
+{"caseId":"adapted-strands-victim","slotId":"rerun-docs-stale","match":"F3","why":"F3 flags reruns.md still claiming both modes reuse the workspace, now false for from-beginning"}
+{"caseId":"adapted-strands-victim","slotId":"reuse-mechanism-decoy","match":"NONE","why":"no finding calls retry-failed's workspace reuse a defect; F2 targets from-beginning's fake freshWorkspace flag"}
+{"caseId":"adapted-strands-victim","slotId":"cancel-api-decoy","match":"NONE","why":"F1 only cites the deferred cancel API as context while flagging the valid zombie-recovery gap; no one demands the API be built"}
+{"caseId":"adapted-tool-config-drift","slotId":"sibling-regex-drift","match":"F2","why":"F2 flags guard/counter disagreeing on what counts as a search, breaking the keep-in-sync invariant"}
+{"caseId":"adapted-tool-config-drift","slotId":"readme-schema-drift","match":"F1","why":"F1 flags README case schema contradicting cases.json, producing malformed contributor entries"}
+{"caseId":"adapted-tool-config-drift","slotId":"local-wiring-decoy","match":"NONE","why":"F3 flags a vocabulary mismatch and explicitly accepts local-only wiring as deliberate; no finding re-litigates unregistered hooks"}
+{"caseId":"adapted-watcher-dedup-eviction","slotId":"dedup-never-evicted","match":"F1","why":"F1 identifies advancedTaskIds never evicted by resumeInPlace so the resumed done signal is swallowed"}
+{"caseId":"adapted-watcher-dedup-eviction","slotId":"imports-unstaged-module","match":"NONE","why":"no finding mentions the missing ../telemetry/client.ts import; F2 is about the commit message"}
+{"caseId":"adversarial-diffcap-burial","slotId":"exporter-never-registered","match":"F2","why":"F2 flags latencyExporter never registered, shipping the headline feature as a no-op"}
+{"caseId":"adversarial-diffcap-burial","slotId":"lockfile-churn-decoy","match":"NONE","why":"adjudicated: F1 flags the lockfile as a phantom-dep INJECTION (substantive content complaint), not the decoy's churn/size/unreviewability complaint — initial F1 label was an auditor over-match"}
+{"caseId":"adversarial-keyword-bait","slotId":"hack-comment-decoy","match":"NONE","why":"F2 defers to the recorded permanent-shim decision rather than flagging the shim as debt"}
+{"caseId":"adversarial-keyword-bait","slotId":"todo-backfill-decoy","match":"NONE","why":"neither finding mentions the TODO(backfill) or historical-data migration"}
+{"caseId":"adversarial-verbose-missing-backfill","slotId":"backfill-missing","match":"F1","why":"F1 directly names the missing backfill statement contradicting the commit claim; F2 is the downstream symptom, F1 is the root gap"}
+{"caseId":"adversarial-verbose-missing-backfill","slotId":"nullable-column-decoy","match":"NONE","why":"no finding objects to the column's nullability itself; all target the missing backfill, null rendering, or test gap"}
+{"caseId":"bandaid-config-dup-suppress-var","slotId":"bandaid-unbuilt-target","match":"F1","why":"F1 flags hand-syncing the duplicate instead of implementing the timeouts-single-source import/delete Target"}
+{"caseId":"bandaid-config-dup-suppress","slotId":"bandaid-unbuilt-target","match":"F1","why":"F1 flags re-syncing the copy instead of the recorded limits-single-source import-and-delete end-state"}
+{"caseId":"contradicts-target-payment-retry-dir","slotId":"retry-contradiction-decoy","match":"F1","why":"F1 flags the retry loop as directly contradicting the no-auto-retry Target"}
+{"caseId":"contradicts-target-payment-retry-var","slotId":"contradicts-no-retry-target","match":"F1","why":"F1 cites the billing-no-auto-retry Target and the no-key double-settlement risk verbatim"}
+{"caseId":"contradicts-target-payment-retry","slotId":"contradicts-no-retry-target","match":"F1","why":"F1 is the direct Target-contradiction finding with the idempotency-key-gated remedy; F2 only details the mechanism"}
+{"caseId":"incomplete-claim-signup-validation","slotId":"unvalidated-fields","match":"F1","why":"F1 states only email is validated while username/password ship unchecked, falsifying the all-fields claim"}
+{"caseId":"incomplete-claim-signup-validation","slotId":"strength-meter-decoy","match":"NONE","why":"F2 flags the missing min-length rule and explicitly excludes the meter/zxcvbn as out of scope"}
+{"caseId":"mined-devkit-overlay-force-dropped","slotId":"overlay-force-dropped","match":"NONE","why":"no finding raises the dropped force threading in overlay.mjs; F1 is a different gap (agent/hook types unhandled), F3 blames the findConflicts stub"}
+{"caseId":"mined-devkit-overlay-force-dropped","slotId":"doctor-preserved-decoy","match":"NONE","why":"no finding mentions doctor or preserved-asset drift reporting"}
+{"caseId":"mined-devkit-posix-class-sibling","slotId":"sibling-hook-unconverted","match":"F1","why":"F1 flags post-loop-guard.sh's remaining \\s and the broken must-stay-identical invariant"}
+{"caseId":"mined-devkit-posix-class-sibling","slotId":"grep-e-decoy","match":"NONE","why":"F1 mentions grep -qE only incidentally; nothing attacks shell-grep usage itself"}
+{"caseId":"missing-error-handling-webhook","slotId":"unhandled-failure","match":"F1","why":"F1's abort-on-webhook-failure stopping all remaining jobs is the same gap; F2 is only the timeout facet"}
+{"caseId":"missing-error-handling-webhook","slotId":"retry-queue-decoy","match":"NONE","why":"no finding demands a persistent retry queue or durable delivery"}
+{"caseId":"registration-gap-shortcut-help","slotId":"help-menu-entry","match":"F1","why":"F1 flags export-csv missing from HELP_ROWS making the shortcut invisible in the ? overlay"}
+{"caseId":"registration-gap-shortcut-help","slotId":"customization-decoy","match":"NONE","why":"no finding raises per-user rebinding/customization"}
+{"caseId":"stale-user-docs-export-format","slotId":"stale-docs","match":"F1","why":"F1 flags exporting.md's now-false CSV-default and ?format=json instructions"}

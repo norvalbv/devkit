@@ -1,0 +1,594 @@
+{
+  "completeness": {
+    "matchModel": "haiku",
+    "matchRuns": 3,
+    "cases": 30,
+    "caseOutages": 0,
+    "slotOutages": 0,
+    "outages": 0,
+    "gold": {
+      "total": 34,
+      "hit": 25
+    },
+    "decoys": {
+      "total": 26,
+      "flagged": 1,
+      "recorded": {
+        "total": 14,
+        "flagged": 1
+      }
+    },
+    "findings": {
+      "total": 71,
+      "matched": 26,
+      "spurious": 45
+    },
+    "severity": {
+      "total": 25,
+      "exact": 17,
+      "confusion": {
+        "IMPORTANT": {
+          "IMPORTANT": 3,
+          "CRITICAL": 7
+        },
+        "CRITICAL": {
+          "CRITICAL": 14,
+          "IMPORTANT": 1
+        }
+      }
+    },
+    "verdicts": {
+      "total": 30,
+      "correct": 24
+    },
+    "gapRecall": 0.7352941176470589,
+    "falseFlagRate": 0.038461538461538464,
+    "rows": {
+      "registration-gap-shortcut-help": {
+        "ok": true,
+        "stable": true
+      },
+      "stale-user-docs-export-format": {
+        "ok": true,
+        "stable": true
+      },
+      "missing-error-handling-webhook": {
+        "ok": true,
+        "stable": true
+      },
+      "bandaid-config-dup-suppress": {
+        "ok": true,
+        "stable": true
+      },
+      "contradicts-target-payment-retry": {
+        "ok": true,
+        "stable": true
+      },
+      "incomplete-claim-signup-validation": {
+        "ok": true,
+        "stable": true
+      },
+      "clean-complete-extract-helper": {
+        "ok": true,
+        "stable": true
+      },
+      "clean-complete-off-by-one-fix": {
+        "ok": true,
+        "stable": true
+      },
+      "mined-devkit-overlay-force-dropped": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-reauth-provider-enum": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-cascade-delete-bypass": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-watcher-dedup-eviction": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-gitignore-still-tracked": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-cloud-path-loses-briefing": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-docs-third-flow-silent": {
+        "ok": false,
+        "stable": false
+      },
+      "adapted-reduced-motion-hang": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-cache-key-mismatch": {
+        "ok": false,
+        "stable": true
+      },
+      "adapted-partial-fix-overflow": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-strands-victim": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-tool-config-drift": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-anti-drift-helper-bypassed": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-clean-extraction": {
+        "ok": true,
+        "stable": true
+      },
+      "adapted-indefensible-deferral": {
+        "ok": true,
+        "stable": true
+      },
+      "contradicts-target-payment-retry-var": {
+        "ok": true,
+        "stable": true
+      },
+      "contradicts-target-payment-retry-dir": {
+        "ok": false,
+        "stable": true
+      },
+      "bandaid-config-dup-suppress-var": {
+        "ok": true,
+        "stable": true
+      },
+      "adversarial-diffcap-burial": {
+        "ok": true,
+        "stable": true
+      },
+      "adversarial-keyword-bait": {
+        "ok": true,
+        "stable": true
+      },
+      "adversarial-verbose-missing-backfill": {
+        "ok": true,
+        "stable": true
+      },
+      "mined-devkit-posix-class-sibling": {
+        "ok": true,
+        "stable": true
+      }
+    },
+    "slots": {
+      "registration-gap-shortcut-help::help-menu-entry": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "registration-gap-shortcut-help::customization-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "stale-user-docs-export-format::stale-docs": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "missing-error-handling-webhook::unhandled-failure": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "missing-error-handling-webhook::retry-queue-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "bandaid-config-dup-suppress::bandaid-unbuilt-target": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "contradicts-target-payment-retry::contradicts-no-retry-target": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "incomplete-claim-signup-validation::unvalidated-fields": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "incomplete-claim-signup-validation::strength-meter-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-complete-extract-helper::date-lib-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-complete-extract-helper::timezone-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-complete-off-by-one-fix::cursor-pagination-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-complete-off-by-one-fix::page-size-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "mined-devkit-overlay-force-dropped::overlay-force-dropped": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "mined-devkit-overlay-force-dropped::doctor-preserved-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-reauth-provider-enum::reauth-drops-provider": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-reauth-provider-enum::test-locks-bug": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-reauth-provider-enum::docs-deferral-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-cascade-delete-bypass::project-delete-bypass": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cascade-delete-bypass::followups-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-watcher-dedup-eviction::dedup-never-evicted": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-watcher-dedup-eviction::imports-unstaged-module": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-gitignore-still-tracked::still-tracked": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-gitignore-still-tracked::readme-still-instructs-commit": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cloud-path-loses-briefing::cloud-briefing-lost": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cloud-path-loses-briefing::docs-teach-retired-variable": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cloud-path-loses-briefing::local-param-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-docs-third-flow-silent::docs-silent-third-flow": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-docs-third-flow-silent::wiring-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": false,
+        "expected": "clean"
+      },
+      "adapted-reduced-motion-hang::reduced-motion-hang": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-reduced-motion-hang::pointercancel-commits": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-reduced-motion-hang::multitouch-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-cache-key-mismatch::invalidation-key-mismatch": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cache-key-mismatch::notify-never-sent": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-cache-key-mismatch::failed-shows-success": {
+        "kind": "gold",
+        "got": "miss",
+        "ok": false,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-partial-fix-overflow::overflow-loses-flag": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-partial-fix-overflow::preexisting-shift-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-strands-victim::victim-stranded": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-strands-victim::rerun-docs-stale": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-strands-victim::reuse-mechanism-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-strands-victim::cancel-api-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-tool-config-drift::sibling-regex-drift": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-tool-config-drift::readme-schema-drift": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-tool-config-drift::local-wiring-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-anti-drift-helper-bypassed::retry-branch-bypasses": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adapted-anti-drift-helper-bypassed::sequencing-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-clean-extraction::stale-artifact-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-clean-extraction::preexisting-refetch-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adapted-indefensible-deferral::deferral-premise-invalidated": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "contradicts-target-payment-retry-var::contradicts-no-retry-target": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "contradicts-target-payment-retry-dir::retry-contradiction-decoy": {
+        "kind": "decoy",
+        "got": "flagged",
+        "ok": false,
+        "stable": true,
+        "expected": "clean"
+      },
+      "bandaid-config-dup-suppress-var::bandaid-unbuilt-target": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adversarial-diffcap-burial::exporter-never-registered": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adversarial-diffcap-burial::lockfile-churn-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adversarial-keyword-bait::hack-comment-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adversarial-keyword-bait::todo-backfill-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "adversarial-verbose-missing-backfill::backfill-missing": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adversarial-verbose-missing-backfill::nullable-column-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "mined-devkit-posix-class-sibling::sibling-hook-unconverted": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "mined-devkit-posix-class-sibling::grep-e-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      }
+    },
+    "gateHash": "917e1bdb6860",
+    "matcherHash": "1de322b63a47",
+    "corpusHash": "e990fc2525f3"
+  }
+}
