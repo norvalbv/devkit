@@ -6,16 +6,16 @@
     "matchRuns": 3,
     "outages": 0,
     "recall": {
-      "hits": 22,
+      "hits": 23,
       "total": 24
     },
     "cleanRate": {
-      "clean": 1,
+      "clean": 4,
       "total": 5
     },
     "decoyFlags": {
-      "flagged": 4,
-      "mentioned": 0,
+      "flagged": 2,
+      "mentioned": 2,
       "total": 20
     },
     "perClass": {
@@ -44,24 +44,22 @@
         "total": 5
       },
       "missing-consideration": {
-        "hits": 5,
+        "hits": 6,
         "total": 6
       }
     },
     "verdictAccuracy": {
-      "correct": 31,
+      "correct": 32,
       "total": 33
     },
     "confusion": {
       "RETHINK": {
-        "RETHINK": 8,
-        "REJECT": 2,
-        "PROCEED WITH CHANGES": 1
+        "RETHINK": 9,
+        "REJECT": 2
       },
       "PROCEED": {
-        "PROCEED": 1,
-        "PROCEED WITH CHANGES": 7,
-        "RETHINK": 1
+        "PROCEED": 3,
+        "PROCEED WITH CHANGES": 6
       },
       "REJECT": {
         "REJECT": 5,
@@ -77,12 +75,12 @@
       "total": 12
     },
     "severityCalibration": {
-      "exact": 14,
-      "total": 22
+      "exact": 18,
+      "total": 23
     },
     "precisionInfo": {
-      "matched": 22,
-      "emitted": 104
+      "matched": 23,
+      "emitted": 105
     },
     "contract": {
       "summaryParsed": {
@@ -90,7 +88,7 @@
         "total": 20
       },
       "withinTokenBudget": {
-        "ok": 13,
+        "ok": 19,
         "total": 20
       },
       "reportWritten": {
@@ -98,8 +96,8 @@
         "total": 20
       },
       "artifactValid": {
-        "ok": 8,
-        "total": 8
+        "ok": 20,
+        "total": 20
       }
     },
     "rows": {
@@ -165,10 +163,10 @@
       },
       "int-realfix-null-parse": {
         "expected": "PROCEED",
-        "got": "PROCEED WITH CHANGES",
+        "got": "PROCEED",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": false,
+        "verdictStable": true,
         "slots": {},
         "falseAlarm": null,
         "outage": false
@@ -243,12 +241,12 @@
           "F-symlink-follow": {
             "got": "hit",
             "ok": true,
-            "stable": false
+            "stable": true
           },
           "F-dangling": {
             "got": "hit",
             "ok": true,
-            "stable": false
+            "stable": true
           },
           "F-git-platform": {
             "got": "hit",
@@ -267,7 +265,7 @@
       "wf-hooks-import-devkit": {
         "expected": "RETHINK",
         "got": "RETHINK",
-        "ok": false,
+        "ok": true,
         "verdictOk": true,
         "verdictStable": true,
         "slots": {
@@ -277,14 +275,14 @@
             "stable": true
           },
           "F-no-fallback": {
-            "got": "miss",
-            "ok": false,
-            "stable": false
+            "got": "hit",
+            "ok": true,
+            "stable": true
           },
           "D-single-resolver": {
             "got": "clean",
             "ok": true,
-            "stable": true
+            "stable": false
           }
         },
         "falseAlarm": null,
@@ -365,7 +363,7 @@
       },
       "wf-cursor-hardcode": {
         "expected": "RETHINK",
-        "got": "PROCEED WITH CHANGES",
+        "got": "RETHINK",
         "ok": false,
         "verdictOk": true,
         "verdictStable": true,
@@ -425,7 +423,7 @@
           "D-wilson-stays": {
             "got": "clean",
             "ok": true,
-            "stable": false
+            "stable": true
           }
         },
         "falseAlarm": null,
@@ -434,9 +432,9 @@
       "wf-contract-edgecases-id": {
         "expected": "PROCEED WITH CHANGES",
         "got": "PROCEED WITH CHANGES",
-        "ok": false,
+        "ok": true,
         "verdictOk": true,
-        "verdictStable": false,
+        "verdictStable": true,
         "slots": {
           "F-json-contract": {
             "got": "hit",
@@ -444,8 +442,8 @@
             "stable": true
           },
           "D-flag-approach": {
-            "got": "flagged",
-            "ok": false,
+            "got": "mentioned",
+            "ok": true,
             "stable": false
           }
         },
@@ -540,7 +538,7 @@
           "D-dedupe-need": {
             "got": "flagged",
             "ok": false,
-            "stable": true
+            "stable": false
           }
         },
         "falseAlarm": null,
@@ -575,7 +573,7 @@
       "wf-decoy-wilson": {
         "expected": "PROCEED",
         "got": "PROCEED WITH CHANGES",
-        "ok": false,
+        "ok": true,
         "verdictOk": true,
         "verdictStable": true,
         "slots": {
@@ -591,35 +589,35 @@
           }
         },
         "falseAlarm": {
-          "got": true,
-          "ok": false,
-          "stable": false
+          "got": false,
+          "ok": true,
+          "stable": true
         },
         "outage": false
       },
       "wf-decoy-null-guard": {
         "expected": "PROCEED",
         "got": "PROCEED WITH CHANGES",
-        "ok": false,
+        "ok": true,
         "verdictOk": true,
         "verdictStable": true,
         "slots": {
           "D-early-return": {
             "got": "clean",
             "ok": true,
-            "stable": false
+            "stable": true
           }
         },
         "falseAlarm": {
-          "got": true,
-          "ok": false,
-          "stable": false
+          "got": false,
+          "ok": true,
+          "stable": true
         },
         "outage": false
       },
       "wf-decoy-posix-space": {
         "expected": "PROCEED",
-        "got": "PROCEED WITH CHANGES",
+        "got": "PROCEED",
         "ok": true,
         "verdictOk": true,
         "verdictStable": true,
@@ -675,26 +673,26 @@
       },
       "wf-decoy-verbose-scary": {
         "expected": "PROCEED",
-        "got": "RETHINK",
-        "ok": false,
-        "verdictOk": false,
+        "got": "PROCEED WITH CHANGES",
+        "ok": true,
+        "verdictOk": true,
         "verdictStable": true,
         "slots": {
           "D-memo-choice": {
-            "got": "flagged",
-            "ok": false,
+            "got": "mentioned",
+            "ok": true,
             "stable": true
           }
         },
         "falseAlarm": {
-          "got": true,
-          "ok": false,
-          "stable": true
+          "got": false,
+          "ok": true,
+          "stable": false
         },
         "outage": false
       }
     },
-    "agentHash": "e137c82bda25",
+    "agentHash": "c439b397feca",
     "salvagedRows": [
       "int-bandaid-skill-dedup",
       "int-bandaid-skill-dedup-v1",
@@ -724,8 +722,7 @@
       "wf-dataflow-index-order",
       "wf-ux-hard-block-warns",
       "wf-decoy-wilson",
-      "wf-decoy-null-guard",
-      "wf-decoy-posix-space"
+      "wf-decoy-null-guard"
     ],
     "runnerHash": "77b1b13c29cd",
     "corpusHash": "eed5fdcb950d"

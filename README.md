@@ -96,6 +96,23 @@ drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/con
 | `guard-prefix`        | deterministic-prefix pass cache for `devkit ship` retries (`check`/`record`/`clear` — an identical staged tree skips the deterministic gates) |
 | `guard-deterministic` | orchestrates the deterministic set in one gate (prefix check → size/fanout/dup/clone → aggregate → record) — one exit code, one report, replacing the per-guard hook protocol. `--structure "<cmd>"` folds structure-lint into the same report (config-driven `guard-structure gate` / electron `bunx eslint src`); `--extra "<label>=<cmd>"` (repeatable) adds a repo-specific gate; `--only "<id,id>"` restricts the built-in set |
 
+## Evals — every LLM judge is benchmarked
+
+Each LLM judge/agent devkit ships is scored against a labelled corpus, so a prompt edit lands as
+a measured delta, not a vibe. Shared method (Wilson CIs, flip-table gating under mid-p McNemar,
+hard floors, hashed baselines, anti-Goodhart run ledger): `gate-engine/decisions/eval/README.md`
+is the house standard. Current numbers and their history live in each eval's README — **a PR
+that regenerates a baseline must append a row to that README's results table**:
+
+| eval | subject | README (results + how to validate) |
+| --- | --- | --- |
+| decisions-eval | the 3 decisions-gate judges (detect / alignment / depth) | `gate-engine/decisions/eval/README.md` |
+| critique-eval | the feature-critique agent | `gate-engine/critique/eval/README.md` |
+
+Validate any published number: `BENCH_RUNS=3 node bench.mts --fail` in the eval dir at that
+commit — exit 0 and headlines within the printed MDE. Benches spend real tokens and never run in
+CI; cost prints before spend.
+
 ## Onboarding — `devkit init`
 
 ```bash
