@@ -59,6 +59,10 @@ STUCK, not one where it computes the right result insecurely or slowly. If the o
 can name is "this is insecure" or "this is slow", PASS every lens: another reviewer has it.
 A bug can be both (a discarded return that also leaks) — flag ONLY the correctness half, and only
 if you can state the concrete wrong-result interleaving/input.
+Concrete: a string-concatenated SQL query, an unescaped `innerHTML`, a `javascript:` URL — these
+are INJECTION (api/frontend-security). PASS them. They compute the intended result; they are not a
+race, a stuck state, a broken contract, or a misclassification. Do not rephrase a security or
+performance issue as "correctness" to justify a FAIL.
 </exclusions>
 
 <workflow>
@@ -96,6 +100,14 @@ For each item: Grep/Read the staged files and their counterparties, then mark it
   the operation succeeded when it resolved `false`.
 - Retry/resume paths: can they land in a state no recovery sweep re-drives? A "transient"
   condition marked permanently (e.g. near-expiry flagged as needs-reauth forever)?
+- ORDER before a guard: when a state write / resource open happens BEFORE a guarded operation
+  (a CAS, a validation, a send), walk the path where the guard FAILS or returns falsy. Is the
+  earlier write rolled back — or is it stranded (resource left open, flag left set) with nothing
+  to finalize it? An open-then-conditionally-abort with no rollback is a FAIL.
+- A latch/flag that only RESETS on a specific trigger (a prop/key change, a new id, an event):
+  trace whether that trigger can actually fire. A reset keyed on a value the caller holds
+  CONSTANT (a fixed `submitKey`, a stable id) never fires — the latch sticks forever if the
+  guarded action can early-return without clearing it. FAIL and name the stuck path.
 
 **Temporal & Concurrency** (`concurrency-races`):
 - For every read-then-write: walk the interleaving where ANOTHER actor (second process,
@@ -109,6 +121,13 @@ For each item: Grep/Read the staged files and their counterparties, then mark it
   targeting or dedup?
 - For every changed function signature or payload shape: grep the call sites — do all of them
   still hold the contract?
+- A parameter threaded for CONFIGURABILITY (a `root`, a `baseDir`, a `target`) but an internal
+  call still uses the HARD-CODED constant: the exported pair diverges — one half honours the
+  argument, the other reads/writes the old fixed location. Read the whole function body, not just
+  the signature; a configurable write paired with a hard-coded read copies from the wrong tree.
+- JSON-string vs object: a value serialized on the write side but consumed as a live object on the
+  read side (or `typeof x === 'object'` on a still-serialized string, or double-`stringify`) drops
+  fields silently. Trace the shape from producer to consumer.
 
 **Classifier & Parsing Edge Cases** (`error-and-edge-classification`):
 - For every regex/string classifier: CONSTRUCT one valid input that misclassifies (an anchor
