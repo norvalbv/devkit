@@ -2,17 +2,17 @@
   "completeness": {
     "matchModel": "haiku",
     "matchRuns": 3,
-    "cases": 30,
+    "cases": 31,
     "caseOutages": 0,
     "slotOutages": 0,
     "outages": 0,
     "gold": {
-      "total": 34,
+      "total": 35,
       "hit": 25
     },
     "decoys": {
-      "total": 26,
-      "flagged": 1,
+      "total": 27,
+      "flagged": 2,
       "recorded": {
         "total": 14,
         "flagged": 1
@@ -20,16 +20,16 @@
     },
     "findings": {
       "total": 71,
-      "matched": 26,
-      "spurious": 45
+      "matched": 27,
+      "spurious": 44
     },
     "severity": {
       "total": 25,
-      "exact": 17,
+      "exact": 19,
       "confusion": {
         "IMPORTANT": {
-          "IMPORTANT": 3,
-          "CRITICAL": 7
+          "IMPORTANT": 5,
+          "CRITICAL": 5
         },
         "CRITICAL": {
           "CRITICAL": 14,
@@ -38,11 +38,11 @@
       }
     },
     "verdicts": {
-      "total": 30,
+      "total": 31,
       "correct": 24
     },
-    "gapRecall": 0.7352941176470589,
-    "falseFlagRate": 0.038461538461538464,
+    "gapRecall": 0.7142857142857143,
+    "falseFlagRate": 0.07407407407407407,
     "rows": {
       "registration-gap-shortcut-help": {
         "ok": true,
@@ -78,14 +78,14 @@
       },
       "mined-devkit-overlay-force-dropped": {
         "ok": false,
-        "stable": true
+        "stable": false
       },
       "adapted-reauth-provider-enum": {
         "ok": false,
-        "stable": true
+        "stable": false
       },
       "adapted-cascade-delete-bypass": {
-        "ok": true,
+        "ok": false,
         "stable": true
       },
       "adapted-watcher-dedup-eviction": {
@@ -94,15 +94,15 @@
       },
       "adapted-gitignore-still-tracked": {
         "ok": false,
-        "stable": true
+        "stable": false
       },
       "adapted-cloud-path-loses-briefing": {
         "ok": true,
-        "stable": true
+        "stable": false
       },
       "adapted-docs-third-flow-silent": {
         "ok": false,
-        "stable": false
+        "stable": true
       },
       "adapted-reduced-motion-hang": {
         "ok": false,
@@ -117,7 +117,7 @@
         "stable": true
       },
       "adapted-strands-victim": {
-        "ok": true,
+        "ok": false,
         "stable": true
       },
       "adapted-tool-config-drift": {
@@ -142,7 +142,7 @@
       },
       "contradicts-target-payment-retry-dir": {
         "ok": false,
-        "stable": true
+        "stable": false
       },
       "bandaid-config-dup-suppress-var": {
         "ok": true,
@@ -161,6 +161,10 @@
         "stable": true
       },
       "mined-devkit-posix-class-sibling": {
+        "ok": true,
+        "stable": true
+      },
+      "adversarial-omitted-burial": {
         "ok": true,
         "stable": true
       }
@@ -261,7 +265,7 @@
         "kind": "gold",
         "got": "miss",
         "ok": false,
-        "stable": true,
+        "stable": false,
         "expected": "hit"
       },
       "mined-devkit-overlay-force-dropped::doctor-preserved-decoy": {
@@ -282,7 +286,7 @@
         "kind": "gold",
         "got": "miss",
         "ok": false,
-        "stable": true,
+        "stable": false,
         "expected": "hit"
       },
       "adapted-reauth-provider-enum::docs-deferral-decoy": {
@@ -294,8 +298,8 @@
       },
       "adapted-cascade-delete-bypass::project-delete-bypass": {
         "kind": "gold",
-        "got": "hit",
-        "ok": true,
+        "got": "miss",
+        "ok": false,
         "stable": true,
         "expected": "hit"
       },
@@ -324,7 +328,7 @@
         "kind": "gold",
         "got": "hit",
         "ok": true,
-        "stable": true,
+        "stable": false,
         "expected": "hit"
       },
       "adapted-gitignore-still-tracked::readme-still-instructs-commit": {
@@ -352,21 +356,21 @@
         "kind": "decoy",
         "got": "clean",
         "ok": true,
-        "stable": true,
+        "stable": false,
         "expected": "clean"
       },
       "adapted-docs-third-flow-silent::docs-silent-third-flow": {
         "kind": "gold",
-        "got": "miss",
-        "ok": false,
+        "got": "hit",
+        "ok": true,
         "stable": true,
         "expected": "hit"
       },
       "adapted-docs-third-flow-silent::wiring-decoy": {
         "kind": "decoy",
-        "got": "clean",
-        "ok": true,
-        "stable": false,
+        "got": "flagged",
+        "ok": false,
+        "stable": true,
         "expected": "clean"
       },
       "adapted-reduced-motion-hang::reduced-motion-hang": {
@@ -434,8 +438,8 @@
       },
       "adapted-strands-victim::rerun-docs-stale": {
         "kind": "gold",
-        "got": "hit",
-        "ok": true,
+        "got": "miss",
+        "ok": false,
         "stable": true,
         "expected": "hit"
       },
@@ -520,7 +524,7 @@
         "kind": "decoy",
         "got": "flagged",
         "ok": false,
-        "stable": true,
+        "stable": false,
         "expected": "clean"
       },
       "bandaid-config-dup-suppress-var::bandaid-unbuilt-target": {
@@ -585,10 +589,24 @@
         "ok": true,
         "stable": true,
         "expected": "clean"
+      },
+      "adversarial-omitted-burial::handler-never-registered": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "adversarial-omitted-burial::gen-churn-decoy": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
       }
     },
-    "gateHash": "917e1bdb6860",
+    "gateHash": "ec948790fabd",
     "matcherHash": "1de322b63a47",
-    "corpusHash": "e990fc2525f3"
+    "corpusHash": "69895c50370f"
   }
 }

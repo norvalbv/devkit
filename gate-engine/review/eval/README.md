@@ -7,7 +7,8 @@ reviewer brief is a measured delta instead of a vibe. Design record:
 
 The bench drives `runCompleteness()` **from the gate** through its injectable-exec seam, with a spy
 that delegates to the real judge runner: prompt construction, Target loading (`scopedTargets`), the
-60k stdin diff cap, argv, the opus model and the isolation flags all run inside the gate — bench and
+stdin evidence extraction (per-file caps + OMITTED accounting, sc-1060), argv, the opus model and
+the isolation flags all run inside the gate — bench and
 gate cannot drift. Each corpus row materialises as a disposable git repo (base committed, staged in
 the index, decoy Targets as real `docs/decisions/*.md` files) and the agentic judge investigates
 that world, never the host repo.
@@ -134,9 +135,11 @@ them, baseline/gate runs include them (the exam keeps questions you didn't pract
   (clean-complete × severity — `gold: []` by construction) are structural `n/a`, not debt.
 - Categories: registration-gap · stale-user-docs · missing-error-handling · missing-entry-point ·
   band-aid-over-target · contradicts-recorded-target · incomplete-claim · cross-surface-parity ·
-  interaction-regression · clean-complete (over-flag controls). Adversarial rows include a >60k
-  staged diff whose gap sits past the stdin `DIFF_CAP` (the judge must run `git diff --cached`
-  itself), keyword bait on a complete change, and a verbosity confound hiding one absent artifact.
+  interaction-regression · clean-complete (over-flag controls). Adversarial rows include two burial
+  cases against the sc-1060 stdin evidence contract — one pinning the `[TRUNCATED:` path (a huge
+  segment cannot eat the budget) and one pinning the `OMITTED:` path (the gap file arrives only as
+  a named pointer the judge must chase) — plus keyword bait on a complete change and a verbosity
+  confound hiding one absent artifact.
 
 ## Cost + outage policy
 
