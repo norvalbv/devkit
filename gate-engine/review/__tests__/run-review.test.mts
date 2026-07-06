@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadCache } from '../cache.mts';
-import { runCompleteness } from '../completeness.mts';
+import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
@@ -686,5 +686,54 @@ describe('runCompleteness — warn-by-default commit-msg gate', () => {
     expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(0);
     expect(exec).not.toHaveBeenCalled();
     expect(err.mock.calls.flat().join('\n')).toContain('completeness skipped');
+  });
+});
+
+describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-1060)', () => {
+  const seg = (p: string, bodyChars: number) =>
+    `diff --git a/${p} b/${p}\nindex 000..111 100644\n--- a/${p}\n+++ b/${p}\n${'+x'.repeat(Math.ceil(bodyChars / 2))}\n`;
+  const STAT = ' a.ts | 2 +-\n 1 file changed\n';
+
+  it('a diff under the total budget passes through whole — byte-identical to the old contract', () => {
+    const diff = seg('src/a.ts', 500) + seg('src/b.ts', 500);
+    expect(buildCompletenessEvidence(diff, STAT)).toBe(`${STAT}\n${diff}`);
+    expect(buildCompletenessEvidence(diff, STAT)).not.toContain('OMITTED');
+  });
+
+  it('one huge file cannot eat the budget: truncated at the segment cap, NAMED, later files still ride', () => {
+    const out = buildCompletenessEvidence(seg('big/first.gen.ts', 70000) + seg('src/late.ts', 400), STAT);
+    expect(out).toContain('[TRUNCATED: big/first.gen.ts — 8000 of ');
+    expect(out).toContain('git diff --cached -- big/first.gen.ts');
+    expect(out).toContain('diff --git a/src/late.ts'); // the late file survives — the sc-1060 point
+    expect(out).toContain('WARNING: 0 segment(s) OMITTED and 1 TRUNCATED');
+  });
+
+  it('budget exhaustion emits OMITTED pointer lines, never silence', () => {
+    // 7 full 8KB caps + 1 truncated 4KB = 60KB budget gone; segments 9-10 must be NAMED.
+    const parts = Array.from({ length: 10 }, (_, i) => seg(`src/f${i}.ts`, 9000));
+    const out = buildCompletenessEvidence(parts.join(''), STAT);
+    expect(out).toContain('OMITTED: src/f8.ts');
+    expect(out).toContain('OMITTED: src/f9.ts');
+    expect(out).toContain('git diff --cached -- src/f9.ts');
+    expect(out).toMatch(/WARNING: 2 segment\(s\) OMITTED and \d+ TRUNCATED[\s\S]*Investigate EVERY OMITTED/);
+  });
+
+  it('a long OMITTED list caps at 40 pointers and counts the rest (the --stat map is the full inventory)', () => {
+    const parts = Array.from({ length: 50 }, (_, i) => seg(`src/g${String(i).padStart(2, '0')}.ts`, 9000));
+    const out = buildCompletenessEvidence(parts.join(''), STAT);
+    const pointers = out.match(/^OMITTED: /gm) ?? [];
+    expect(pointers.length).toBe(40);
+    expect(out).toMatch(/…and 2 more OMITTED segment\(s\)/);
+  });
+
+  it('the --stat map always rides first', () => {
+    const out = buildCompletenessEvidence(seg('src/a.ts', 70000), STAT);
+    expect(out.startsWith(STAT)).toBe(true);
+  });
+
+  it('the wrapper prompt pins the OMITTED/TRUNCATED investigate mandate', () => {
+    const prompt = wrapCompleteness('brief', 'feat: x', ['a.ts'], 'targets');
+    expect(prompt).toContain('OMITTED');
+    expect(prompt).toContain('investigate EVERY OMITTED/TRUNCATED entry');
   });
 });

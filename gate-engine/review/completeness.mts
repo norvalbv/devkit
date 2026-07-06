@@ -33,8 +33,68 @@ const AGENT_NAME = 'feature-completeness-reviewer';
 // Aligned with the review gate's strict/escalate cap (sc-1048 rationale): the straight-opus
 // gap-finder on a big commit was SIGTERM'd at 360s and silently skipped — the PR #60 lesson.
 const TIMEOUT_MS = 420000;
-const DIFF_CAP = 60000; // stdin evidence cap; the judge reads full hunks itself via git diff
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
+
+// ─── stdin evidence extraction (detect-style, sc-1060) ─────────────────────────────
+// The old contract was `git diff --cached` blunt-capped at the first 60KB: positional — every
+// byte past the slice point silently vanished, and whether a gap buried there was ever seen
+// depended on the judge choosing to investigate the right file. The detect judge's lesson
+// (buildDetectJudgeInput) applied in full: per-file segments under per-segment + total caps, and
+// OMISSION ACCOUNTING — evidence dropped by a cap names itself, so the judge knows what it has
+// NOT seen and investigates (the tools are unchanged; extraction bounds stdin, not its reach).
+// Long positionally-sliced input also measurably degrades judgment (arXiv:2402.14848,
+// 2302.00093, 2409.01666). A diff already under the total budget passes through whole — the
+// common small-commit case sends byte-identical evidence to the old contract.
+const EVIDENCE_TOTAL_CAP = 60000; // same total budget as the old blunt cap — no cost claim
+const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff order, like detect)
+const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
+const SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
+
+function segmentPath(seg: string): string {
+  return seg.match(/^diff --git (?:a\/)?(\S+)/)?.[1] ?? '(unknown path)';
+}
+
+/** Per-file capped evidence + explicit omission accounting. Exported for tests (no git, no
+ * claude). `stat` (the full `--stat` map) always rides first — the complete inventory. */
+export function buildCompletenessEvidence(fullDiff: string, stat: string): string {
+  const diff = String(fullDiff);
+  if (diff.length <= EVIDENCE_TOTAL_CAP) return `${stat}\n${diff}`;
+  const segments = diff.split(SEGMENT_SPLIT_RE).filter((s) => s.trim());
+  const kept: string[] = [];
+  const omitted: string[] = [];
+  let used = 0;
+  let truncated = 0;
+  for (const seg of segments) {
+    const p = segmentPath(seg);
+    const room = EVIDENCE_TOTAL_CAP - used;
+    if (room <= 0) {
+      omitted.push(
+        `OMITTED: ${p} (${seg.length} chars over the evidence budget — run \`git diff --cached -- ${p}\`)`,
+      );
+      continue;
+    }
+    const cap = Math.min(SEGMENT_CAP, room);
+    if (seg.length <= cap) {
+      kept.push(seg);
+      used += seg.length;
+    } else {
+      truncated += 1;
+      kept.push(
+        `${seg.slice(0, cap)}\n[TRUNCATED: ${p} — ${cap} of ${seg.length} chars shown; run \`git diff --cached -- ${p}\` for the rest]\n`,
+      );
+      used += cap;
+    }
+  }
+  const omittedBlock =
+    omitted.length > OMITTED_LIST_MAX
+      ? `${omitted.slice(0, OMITTED_LIST_MAX).join('\n')}\n…and ${omitted.length - OMITTED_LIST_MAX} more OMITTED segment(s) — the --stat map above lists every file`
+      : omitted.join('\n');
+  const warning =
+    omitted.length || truncated
+      ? `\n[WARNING: ${omitted.length} segment(s) OMITTED and ${truncated} TRUNCATED — the stdin evidence is INCOMPLETE. Investigate EVERY OMITTED/TRUNCATED path before any PASS verdict.]`
+      : '';
+  return `${stat}\n${kept.join('')}${omitted.length ? `\n${omittedBlock}` : ''}${warning}`;
+}
 
 /** One governing Target (scope-match or semantic) as returned by `scopedTargets`. */
 export interface TargetBlock {
@@ -76,9 +136,11 @@ export function wrapCompleteness(
     'You are running as an automated HEADLESS COMMIT-MESSAGE GATE, not an interactive assistant.\n' +
     `The commit message (the change's stated intent):\n─────\n${message.trim()}\n─────\n` +
     `Staged files: ${files.join(', ')}\n` +
-    'The FULL file/churn map (--stat) followed by a truncated staged diff is on stdin. ' +
-    'INVESTIGATE before judging: run `git diff --cached -- <file>` for full hunks (the stdin diff ' +
-    'is capped — the stat map is the complete inventory); Read surrounding code where needed.\n' +
+    'The FULL file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
+    'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:) — ' +
+    'nothing is dropped silently. INVESTIGATE before judging: run `git diff --cached -- <file>` for ' +
+    'full hunks, Read surrounding code where needed, and investigate EVERY OMITTED/TRUNCATED entry ' +
+    'before any PASS verdict.\n' +
     'Step 0 is already done — the governing Targets are loaded below; do not run prep scripts. ' +
     'Subagents and meta-judges are unavailable in gate mode — apply their lenses yourself.\n' +
     `${targetsBlock}\n` +
@@ -130,19 +192,24 @@ export async function runCompleteness(
     const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(
       () => [],
     );
-    // The FULL --stat rides uncapped ahead of the capped diff: on a branch-sized commit the cap
-    // truncates whole files out of the evidence, but the judge must at least SEE the complete
-    // file/churn map of what it is being asked to gap-check (it reads full hunks itself).
+    // The FULL --stat rides uncapped ahead of the evidence: on a branch-sized commit the caps
+    // drop whole files, but the judge must at least SEE the complete file/churn map of what it
+    // is being asked to gap-check. Diff prefixes are forced ON-config so a consumer's
+    // diff.noprefix/mnemonicPrefix cannot change the segment-header format the extractor splits
+    // on (the detect gate's W-3 lesson).
     const stat = execSync('git diff --cached --stat', {
       cwd,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
-    diff = `${stat}\n${execSync('git diff --cached', {
-      cwd,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    }).slice(0, DIFF_CAP)}`;
+    diff = buildCompletenessEvidence(
+      execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+      stat,
+    );
     prompt = wrapCompleteness(body, message, files, renderTargets(targets));
   } catch (e: unknown) {
     console.error(
