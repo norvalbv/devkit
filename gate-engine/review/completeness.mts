@@ -13,7 +13,10 @@
  * package — no PATH round-trip) and render exactly like the consumer's prep-critique block.
  *
  * Contract: exit 1 = confident FAIL under GUARD_COMPLETENESS_HARD · exit 2 = could-not-run /
- * judge outage (fail-open) · exit 0 = everything else (pass / warn / skipped).
+ * judge outage (fail-open on normal commits) · exit 3 = the same outage under GUARD_AI_STRICT
+ * (ship): FAIL-CLOSED — a stderr warning is invisible to a headless shipping agent (exit code is
+ * the only channel that survives output filtering), so a ship must not proceed with its
+ * gap-finder silently dark · exit 0 = everything else (pass / warn / skipped).
  * Knobs: GUARD_NO_COMPLETENESS=1 skip · GUARD_COMPLETENESS_HARD=1 block · cfg.noLlm skip.
  */
 
@@ -27,7 +30,9 @@ import { execJudgeAsync } from '../judge/run-judge.mts';
 import { parseReviewVerdict, stripFrontmatter } from './reviewers.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
-const TIMEOUT_MS = 360000;
+// Aligned with the review gate's strict/escalate cap (sc-1048 rationale): the straight-opus
+// gap-finder on a big commit was SIGTERM'd at 360s and silently skipped — the PR #60 lesson.
+const TIMEOUT_MS = 420000;
 const DIFF_CAP = 60000; // stdin evidence cap; the judge reads full hunks itself via git diff
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
@@ -71,8 +76,9 @@ export function wrapCompleteness(
     'You are running as an automated HEADLESS COMMIT-MESSAGE GATE, not an interactive assistant.\n' +
     `The commit message (the change's stated intent):\n─────\n${message.trim()}\n─────\n` +
     `Staged files: ${files.join(', ')}\n` +
-    'A truncated staged diff is on stdin. INVESTIGATE before judging: run ' +
-    '`git diff --cached -- <file>` for full hunks; Read surrounding code where needed.\n' +
+    'The FULL file/churn map (--stat) followed by a truncated staged diff is on stdin. ' +
+    'INVESTIGATE before judging: run `git diff --cached -- <file>` for full hunks (the stdin diff ' +
+    'is capped — the stat map is the complete inventory); Read surrounding code where needed.\n' +
     'Step 0 is already done — the governing Targets are loaded below; do not run prep scripts. ' +
     'Subagents and meta-judges are unavailable in gate mode — apply their lenses yourself.\n' +
     `${targetsBlock}\n` +
@@ -124,17 +130,25 @@ export async function runCompleteness(
     const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(
       () => [],
     );
-    diff = execSync('git diff --cached', {
+    // The FULL --stat rides uncapped ahead of the capped diff: on a branch-sized commit the cap
+    // truncates whole files out of the evidence, but the judge must at least SEE the complete
+    // file/churn map of what it is being asked to gap-check (it reads full hunks itself).
+    const stat = execSync('git diff --cached --stat', {
       cwd,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
-    }).slice(0, DIFF_CAP);
+    });
+    diff = `${stat}\n${execSync('git diff --cached', {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    }).slice(0, DIFF_CAP)}`;
     prompt = wrapCompleteness(body, message, files, renderTargets(targets));
   } catch (e: unknown) {
     console.error(
-      `guard-review: completeness could not run — ${e instanceof Error ? e.message : String(e)}`,
+      `guard-review: completeness could not run — ${e instanceof Error ? e.message : String(e)}${envFlag('AI_STRICT') ? ' (strict ship mode: failing closed)' : ''}`,
     );
-    return 2; // fail-open
+    return envFlag('AI_STRICT') ? 3 : 2;
   }
 
   const raw = await exec({
@@ -144,7 +158,18 @@ export async function runCompleteness(
     timeout: TIMEOUT_MS,
     cwd,
   });
-  if (raw === null) return 2; // outage (execJudgeAsync already warned) — fail-open
+  if (raw === null) {
+    // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
+    // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
+    if (envFlag('AI_STRICT')) {
+      console.error(
+        'guard-review: completeness SKIPPED (judge outage/timeout) — strict ship mode fails closed.\n' +
+          '   Remedy: check `claude` CLI auth/quota, then re-run devkit ship.',
+      );
+      return 3;
+    }
+    return 2; // fail-open on a normal commit
+  }
   const { verdict, reason } = parseReviewVerdict(raw);
   if (verdict !== 'FAIL') return 0;
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);

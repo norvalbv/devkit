@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import {
@@ -179,6 +180,23 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
   });
   it('stripFrontmatter is a no-op without frontmatter', () => {
     expect(stripFrontmatter('no header here')).toBe('no header here');
+  });
+});
+
+describe('REVIEWERS table ↔ checklist script coupling', () => {
+  // verifyChecklist reads reviewer.stateFile while each skill script hardcodes its own
+  // CHECKLIST_PATH. A divergence voids every PASS silently (normal) / blocks every ship (strict),
+  // so the two constants are pinned to each other here.
+  it("every reviewer's stateFile equals its checklist script's CHECKLIST_PATH", () => {
+    for (const r of REVIEWERS) {
+      const script = readFileSync(
+        new URL(`../../../skills/${r.skill}/scripts/checklist.mjs`, import.meta.url),
+        'utf8',
+      );
+      const m = script.match(/const CHECKLIST_PATH = '([^']+)'/);
+      expect(m, `${r.skill}/scripts/checklist.mjs has no CHECKLIST_PATH`).not.toBeNull();
+      expect(m[1], `stateFile mismatch for ${r.name}`).toBe(r.stateFile);
+    }
   });
 });
 
