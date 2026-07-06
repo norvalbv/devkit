@@ -2,7 +2,7 @@
 name: frontend-performance-reviewer
 description: "Use this agent to review frontend code for performance issues. Checks bundle size, image optimization, CSS efficiency, and React rendering patterns.\\n\\n<example>\\nContext: User has added new React components or modified rendering logic.\\nuser: \"Added the new dashboard widgets\"\\nassistant: \"Let me invoke the frontend-performance-reviewer agent to check for unnecessary re-renders and bundle size impact.\"\\n<commentary>\\nNew components should be reviewed for React.memo usage, proper hook dependencies, and lazy loading opportunities.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has added images or modified CSS.\\nuser: \"Added the product images to the catalog page\"\\nassistant: \"I'll run the frontend-performance-reviewer agent to verify image optimization and lazy loading.\"\\n<commentary>\\nImages need review for proper formats, dimensions, and lazy loading implementation.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: opus
+model: sonnet
 color: yellow
 ---
 

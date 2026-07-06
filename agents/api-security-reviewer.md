@@ -2,7 +2,7 @@
 name: api-security-reviewer
 description: "Use this agent to review backend/API code for security vulnerabilities. Checks authentication, JWT handling, input validation, output security, and access control.\\n\\n<example>\\nContext: User has added new API endpoints or authentication logic.\\nuser: \"I've added the new user registration endpoint\"\\nassistant: \"Let me invoke the api-security-reviewer agent to check for security issues in your new endpoint.\"\\n<commentary>\\nNew API endpoints should be reviewed for authentication, input validation, and secure response handling.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has modified JWT or session handling.\\nuser: \"Updated the token refresh logic\"\\nassistant: \"I'll run the api-security-reviewer agent to verify the JWT implementation follows security best practices.\"\\n<commentary>\\nJWT changes require verification of algorithm, expiry, and secret handling.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: opus
+model: sonnet
 color: red
 ---
 
