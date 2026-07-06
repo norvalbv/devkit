@@ -1,0 +1,45 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  // component-lib preset. A primitives package is React top-to-bottom, so extend the biome/react
+  // preset directly (named exports, `type` over `interface`, no `export *` barrels), scoped to
+  // *.{tsx,jsx}. Filenames are kept consistent with the eslint flat-structure rule: PascalCase
+  // components + camelCase helpers (cn.ts), NO kebab-case (the structure rule rejects it).
+  "extends": ["@norvalbv/devkit/biome/react"],
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!dist", "!build", "!out", "!coverage", "!eslint/baselines"]
+  },
+  "overrides": [
+    {
+      // Source files: PascalCase component / camelCase helper filenames (matches the structure rule).
+      "includes": ["src/**/*.{ts,tsx}"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": {
+              "level": "error",
+              "options": {
+                "strictCase": false,
+                "requireAscii": true,
+                "filenameCases": ["PascalCase", "camelCase"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // Tests: relax filename + naming conventions.
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
+      "linter": {
+        "rules": {
+          "performance": { "useTopLevelRegex": "off" },
+          "style": {
+            "useFilenamingConvention": "off",
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    }
+  ]
+}
