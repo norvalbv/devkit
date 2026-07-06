@@ -34,6 +34,7 @@ import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
+import { blockingNote, reconcile } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
   allowedToolsFor,
@@ -200,6 +201,33 @@ export async function runCascade(
       res.reason = hole;
     }
   }
+  // Override valve — a single-pass (model-pinned) reviewer's FAIL blocks unless each failed lens is
+  // waived with a rationale (env OVERRIDE_<fp>_RATIONALE or .devkit/correctness-overrides.json). All
+  // waived → PASS; any un-waived → still FAIL, its reason names the fingerprints + how to waive them.
+  // Read the artifact BEFORE the cleanup below (the fingerprint needs the failed lens names).
+  if (res.status === 'fail' && sel.reviewer.model) {
+    const state = readChecklistState(cwd, sel.reviewer);
+    const failedLenses = (state?.items ?? [])
+      .filter((i) => i.status === 'fail')
+      .map((i) => i.name ?? '(finding)');
+    const lenses = failedLenses.length > 0 ? failedLenses : ['(finding)'];
+    const diffText = gitCached(cwd, [], sel.files);
+    const { suppressed, blocking } = reconcile(
+      cwd,
+      sel.reviewer.name,
+      lenses,
+      diffText,
+      new Date().toISOString(),
+    );
+    for (const s of suppressed)
+      console.error(`guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`);
+    if (blocking.length === 0) {
+      res.status = 'pass';
+      res.reason = `all ${suppressed.length} finding(s) overridden`;
+    } else {
+      res.reason = blockingNote(sel.reviewer.name, blocking);
+    }
+  }
   cleanupChecklistState(cwd, sel.reviewer);
   return res;
 }
@@ -229,11 +257,13 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedToolsFor(reviewer, cfg),
   ];
+  // A model-pinned reviewer (correctness) runs single-pass at its pinned model — no escalation.
+  const passModel = reviewer.model ?? firstModel;
   const stat = gitCached(cwd, ['--stat'], files);
   let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
-    args: args(prompt, firstModel),
+    args: args(prompt, passModel),
     input: stat,
     timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
@@ -272,6 +302,15 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'no VERDICT line',
       escalated: false,
+    };
+  // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
+  if (reviewer.model)
+    return {
+      name: reviewer.name,
+      status: 'fail',
+      reason: firstVerdict.reason,
+      escalated: false,
+      transcript: first,
     };
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,
@@ -402,7 +441,7 @@ export async function runReviewGate(
   const fails = results.filter((r) => r.status === 'fail');
   for (const f of fails) {
     console.error(
-      `guard-review: ${f.name} FAILED (opus-confirmed) — ${f.reason || 'see findings below'}`,
+      `guard-review: ${f.name} FAILED${f.escalated ? ' (opus-confirmed)' : ''} — ${f.reason || 'see findings below'}`,
     );
     if (f.transcript) console.error(f.transcript.trim());
   }
