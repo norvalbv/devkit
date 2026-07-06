@@ -17,6 +17,8 @@ const ENV_KEYS = [
   'FRINK_AI_STRICT',
   'GUARD_REVIEW_MODEL',
   'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_SKIP',
+  'FRINK_REVIEW_SKIP',
   'GUARD_REVIEW_CONCURRENCY',
   'FRINK_REVIEW_CONCURRENCY',
   'GUARD_NO_COMPLETENESS',
@@ -184,9 +186,43 @@ describe('runReviewGate — cascade + exit contract', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
-    expect(err.mock.calls.flat().join('\n')).toContain('api-security-reviewer FAILED');
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('api-security-reviewer FAILED');
+    // the judge's full findings are echoed — a block whose evidence was discarded is undebuggable
+    expect(out).toContain('raw SQL concat');
     // the two passers are cached; the failer is not
     expect(Object.keys(loadCache(repo)).length).toBe(2);
+  });
+
+  it('GUARD_REVIEW_SKIP surgically drops a named reviewer (and says so); the rest still run', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_REVIEW_SKIP = 'api-security-reviewer';
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([o]) => o.label)).not.toContain('review:api-security-reviewer');
+    expect(exec).toHaveBeenCalledTimes(2); // backend-performance + commit-guard still ran
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'api-security-reviewer skipped (GUARD_REVIEW_SKIP)',
+    );
+  });
+
+  it('missing agent brief → inconclusive with a sync nudge (exit 2), never judged on an empty brief', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(exec.mock.calls.map(([o]) => o.label)).not.toContain('review:api-security-reviewer');
+    expect(err.mock.calls.flat().join('\n')).toContain('devkit sync-agents');
+  });
+
+  it('missing agent brief under strict ship → fail-closed exit 3', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(3);
   });
 
   it('PASS verdict with NO checklist artifact → voided to inconclusive (exit 2), never cached', async () => {
@@ -617,6 +653,29 @@ describe('runCompleteness — warn-by-default commit-msg gate', () => {
     expect(
       await runCompleteness(msg(repo, 'feat: x'), repo, { exec: mkExec(async () => null) }),
     ).toBe(2);
+  });
+
+  it('judge outage under GUARD_AI_STRICT → exit 3 fail-closed (a silent skip is invisible to a headless ship)', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    expect(
+      await runCompleteness(msg(repo, 'feat: x'), repo, { exec: mkExec(async () => null) }),
+    ).toBe(3);
+    expect(err.mock.calls.flat().join('\n')).toContain('strict ship mode fails closed');
+  });
+
+  it('stdin carries the FULL --stat map ahead of the capped diff', async () => {
+    const repo = consumerRepo({ backend: true });
+    let captured: { input?: string };
+    const exec = mkExec(async (opts) => {
+      captured = opts;
+      return 'VERDICT: PASS';
+    });
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(0);
+    // --stat rows render as `<file> | <churn>`; the map precedes the diff body
+    expect(captured.input).toMatch(/db\.ts\s+\|/);
+    expect(captured.input.indexOf('|')).toBeLessThan(captured.input.indexOf('diff --git'));
   });
 
   it('missing agent brief → skip with a note, exit 0', async () => {
