@@ -29,6 +29,15 @@ Knobs: `BENCH_MODEL` (first-pass model, default `sonnet` = production) · `BENCH
 (short-circuit the opus escalation: first-pass metrics only, zero opus spend) ·
 `BENCH_CONCURRENCY` (default 2, the gate's own judge-contention default).
 
+**Checkpoint/resume (rate-limit safe).** Every completed row is appended to
+`progress-<model>-<cascade>.jsonl` the moment it lands. Re-running the **same command**
+auto-resumes: rows checkpointed under the same (model, cascade, gateHash, corpusHash) are
+salvaged instead of re-run; outage/engine-error rows always re-run; `--fresh` discards the
+checkpoint. After 3 consecutive judge outages (drained credit pool / rate limit) the run pauses
+itself — completed rows are safe, partial numbers are labelled PARTIAL and never gate or become
+a baseline — switch accounts and re-run the same command. The checkpoint file is deleted when a
+run completes.
+
 The standard sweep sequence:
 
 ```bash

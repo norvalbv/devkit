@@ -7,6 +7,7 @@ import {
   lintRows,
   makeSpyExec,
   runRow,
+  salvageMap,
   scoreRow,
   summarize,
   validateRow,
@@ -306,6 +307,53 @@ describe('validateRow (real checklist generate, no LLM)', () => {
     });
     const { problems } = validateRow(row);
     expect(problems.some((p) => p.includes('prompt-injection'))).toBe(true);
+  });
+});
+
+describe('salvageMap (checkpoint resume)', () => {
+  const meta = { gateHash: 'g1', corpusHash: 'c1' };
+  const entry = (id, over = {}) => ({
+    reviewer: 'api-security-reviewer',
+    gateHash: 'g1',
+    corpusHash: 'c1',
+    res: { id, subcause: null, okFinal: true },
+    ...over,
+  });
+
+  it('reuses matching non-retryable rows only', () => {
+    const map = salvageMap(
+      [
+        entry('r1'),
+        entry('r2', { res: { id: 'r2', subcause: 'outage', okFinal: false } }),
+        entry('r3', { res: { id: 'r3', subcause: 'engine-error', okFinal: false } }),
+        entry('r4', { res: { id: 'r4', subcause: 'checklist-void', okFinal: false } }),
+      ],
+      'api-security-reviewer',
+      meta,
+    );
+    // outage/engine-error re-run; a deterministic inconclusive (checklist-void) is a real result
+    expect([...map.keys()].sort()).toEqual(['r1', 'r4']);
+  });
+
+  it('ignores checkpoints from another reviewer, gate version, or corpus version', () => {
+    const stale = [
+      entry('r1', { reviewer: 'frontend-security-reviewer' }),
+      entry('r2', { gateHash: 'OTHER' }),
+      entry('r3', { corpusHash: 'OTHER' }),
+    ];
+    expect(salvageMap(stale, 'api-security-reviewer', meta).size).toBe(0);
+  });
+
+  it('last checkpoint wins for a re-run row', () => {
+    const map = salvageMap(
+      [
+        entry('r1', { res: { id: 'r1', subcause: null, okFinal: false } }),
+        entry('r1', { res: { id: 'r1', subcause: null, okFinal: true } }),
+      ],
+      'api-security-reviewer',
+      meta,
+    );
+    expect(map.get('r1').okFinal).toBe(true);
   });
 });
 

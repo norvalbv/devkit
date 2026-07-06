@@ -37,6 +37,7 @@ gate-engine/review/eval/candidates.jsonl
 gate-engine/review/eval/transcripts/
 
 # reviewer-eval working data (bench outputs; the corpus IS committed)
-gate-engine/review/eval/reviewers/runs.log
+gate-engine/review/eval/reviewers/*.log
 gate-engine/review/eval/reviewers/results.baseline.json
 gate-engine/review/eval/reviewers/candidates.jsonl
+gate-engine/review/eval/reviewers/progress-*.jsonl

@@ -36,7 +36,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -62,6 +62,16 @@ const CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENCY ??
 
 const BASELINE_FILE = path.join(here, 'results.baseline.json');
 const RUNS_LOG = path.join(here, 'runs.log');
+
+// Checkpoint/resume: every completed row is appended to a per-config progress file the moment it
+// lands, so a run killed by a rate limit / account switch loses NOTHING — re-running the same
+// command auto-resumes (rows with matching config+hashes and a non-outage result are reused;
+// --fresh discards). After OUTAGE_TRIP consecutive judge outages the run pauses itself early:
+// under a drained credit pool every further row would burn its attempt and score as an outage.
+const progressFile = (model, cascade) =>
+  path.join(here, `progress-${model}-${cascade ? 'on' : 'off'}.jsonl`);
+const OUTAGE_TRIP = 3;
+const RETRYABLE = new Set(['outage', 'engine-error']);
 
 /** The reviewers this bench covers — the 4 domain reviewers. commit-guard is deferred: its
  * allowlist appends the consumer's semantic-search MCP tool, which cannot resolve inside a bare
@@ -501,12 +511,39 @@ function coverage() {
 
 // ─── run ──────────────────────────────────────────────────────────────────────────
 
-async function runBench(targets, { dev, only, writeBaseline, failMode }) {
+function loadProgress(model, cascade) {
+  try {
+    return parseCasesText(readFileSync(progressFile(model, cascade), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+/** Checkpointed rows reusable for THIS reviewer + gate + corpus: retryable outcomes
+ * (outage/engine-error) re-run; a hash mismatch simply never matches — stale checkpoints are
+ * inert, not dangerous. */
+export function salvageMap(progress, reviewerName, meta) {
+  return new Map(
+    progress
+      .filter(
+        (p) =>
+          p.reviewer === reviewerName &&
+          p.gateHash === meta.gateHash &&
+          p.corpusHash === meta.corpusHash &&
+          !RETRYABLE.has(p.res.subcause),
+      )
+      .map((p) => [p.res.id, p.res]),
+  );
+}
+
+async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) {
   cleanBenchEnv();
   preflightClaude();
+  if (fresh) rmSync(progressFile(MODEL, CASCADE), { force: true });
   const plan = targets.map((reviewer) => ({ reviewer, rows: loadRows(reviewer, { dev, only }) }));
   const totalRows = plan.reduce((s, p) => s + p.rows.length, 0);
   if (totalRows === 0) throw new BenchAbort(2, 'reviewer-eval: no rows selected');
+  const progress = loadProgress(MODEL, CASCADE);
   const goldRows = plan.reduce((s, p) => s + p.rows.filter((r) => r.expected === 'FAIL').length, 0);
   const estEscalations = CASCADE ? goldRows + Math.round((totalRows - goldRows) * 0.15) : 0;
   const estMins = Math.round(
@@ -516,26 +553,63 @@ async function runBench(targets, { dev, only, writeBaseline, failMode }) {
   );
   console.log(
     `reviewer-eval: ${totalRows} rows (${goldRows} gold) · model ${MODEL} · cascade ${CASCADE ? 'on' : 'off'} · ` +
-      `concurrency ${CONCURRENCY} · est ≈ ${estMins} min wall-clock${dev ? ' · --dev (holdouts excluded)' : ''}`,
+      `concurrency ${CONCURRENCY} · est ≈ ${estMins} min wall-clock${dev ? ' · --dev (holdouts excluded)' : ''}` +
+      `${progress.length ? ` · resuming (${progress.length} checkpointed row(s) on disk)` : ''}`,
   );
+
+  // Pause-on-drained-pool: after OUTAGE_TRIP consecutive judge outages, stop STARTING rows —
+  // every completed row is already checkpointed, so the same command resumes after an account
+  // switch. In-flight rows are left to finish (their checkpoint still counts).
+  let consecutiveOutages = 0;
+  let paused = false;
 
   const baseline = loadBaseline();
   const allResults = [];
   const perReviewer = [];
   for (const { reviewer, rows } of plan) {
-    console.log(`\n── ${reviewer.name} (${rows.length} rows) ──`);
+    const meta = {
+      model: MODEL,
+      cascade: CASCADE,
+      gateHash: benchGateHash(reviewer),
+      corpusHash: corpusHash(reviewer),
+    };
+    const salvage = salvageMap(progress, reviewer.name, meta);
+    console.log(
+      `\n── ${reviewer.name} (${rows.length} rows${salvage.size ? `, ${salvage.size} salvaged` : ''}) ──`,
+    );
     const results = await mapLimit(rows, CONCURRENCY, async (row) => {
+      const saved = salvage.get(row.id);
+      if (saved) {
+        console.log(`  ${row.id.padEnd(36)} SALVAGED (checkpoint)`);
+        return saved;
+      }
+      if (paused)
+        return {
+          id: row.id,
+          reviewer: row.reviewer,
+          expected: row.expected,
+          holdout: !!row.holdout,
+          firstVerdict: null,
+          okFirst: false,
+          finalStatus: 'paused-skipped',
+          okFinal: false,
+          escalated: false,
+          escalateLive: false,
+          reasonClass: null,
+          subcause: 'paused',
+          ms: { first: 0, escalate: 0 },
+        };
+      let res;
       try {
-        const res = await runRow(row);
+        res = await runRow(row);
         const ok = CASCADE ? res.okFinal : res.okFirst;
         console.log(
           `  ${row.id.padEnd(36)} ${ok ? 'OK  ' : 'MISS'}  first=${res.firstVerdict ?? '∅'} final=${res.finalStatus}` +
             `${res.escalateLive ? ' (escalated)' : ''}${res.reasonClass ? ` [${res.reasonClass}]` : ''}`,
         );
-        return res;
       } catch (e) {
         console.error(`  ${row.id}: engine error — ${e?.message ?? e}`);
-        return {
+        res = {
           id: row.id,
           reviewer: row.reviewer,
           expected: row.expected,
@@ -551,16 +625,25 @@ async function runBench(targets, { dev, only, writeBaseline, failMode }) {
           ms: { first: 0, escalate: 0 },
         };
       }
+      appendFileSync(
+        progressFile(MODEL, CASCADE),
+        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, corpusHash: meta.corpusHash, res })}\n`,
+      );
+      if (RETRYABLE.has(res.subcause)) {
+        consecutiveOutages += 1;
+        if (consecutiveOutages >= OUTAGE_TRIP && !paused) {
+          paused = true;
+          console.error(
+            `reviewer-eval: ${OUTAGE_TRIP} consecutive judge outages — pausing (rate limit / drained pool?). ` +
+              'Completed rows are checkpointed; re-run the SAME command to resume.',
+          );
+        }
+      } else consecutiveOutages = 0;
+      return res;
     });
 
     // Stability pass: rows discordant with the baseline verdict re-run ONCE; a flip must confirm
     // 2-of-2 to count in the McNemar table (alignment-bench convention — K=1 rows are noisy).
-    const meta = {
-      model: MODEL,
-      cascade: CASCADE,
-      gateHash: benchGateHash(reviewer),
-      corpusHash: corpusHash(reviewer),
-    };
     const key = sectionKey(reviewer.name, MODEL, CASCADE);
     const section = baseline?.sections?.[key];
     if (
@@ -592,11 +675,27 @@ async function runBench(targets, { dev, only, writeBaseline, failMode }) {
     allResults.push(...results);
   }
 
-  // ── Report ──
+  // ── Report ── (paused-skipped rows never ran — they are excluded, not counted as misses)
+  const ran = (rows) => rows.filter((r) => r.finalStatus !== 'paused-skipped');
+  const skippedCount = allResults.length - ran(allResults).length;
   for (const { reviewer, results } of perReviewer)
-    printSummary(reviewer.name, summarize(results), { cascade: CASCADE });
-  const pooled = summarize(allResults);
-  printSummary('POOLED', pooled, { cascade: CASCADE });
+    printSummary(reviewer.name, summarize(ran(results)), { cascade: CASCADE });
+  const pooled = summarize(ran(allResults));
+  printSummary(paused ? 'POOLED (PARTIAL — paused)' : 'POOLED', pooled, { cascade: CASCADE });
+
+  if (paused) {
+    // Ledger the partial run, then bail BEFORE floors/baseline — partial numbers must never
+    // gate or become a baseline. The checkpoint file holds every completed row.
+    appendFileSync(
+      RUNS_LOG,
+      `${JSON.stringify({ ts: new Date().toISOString(), args: process.argv.slice(2), model: MODEL, cascade: CASCADE, paused: true, ran: ran(allResults).length, skipped: skippedCount })}\n`,
+    );
+    throw new BenchAbort(
+      2,
+      `reviewer-eval: PAUSED after ${ran(allResults).length}/${totalRows} rows (${skippedCount} not run). ` +
+        'Re-run the SAME command to resume from the checkpoint (switch accounts first if rate-limited).',
+    );
+  }
 
   // ── Floors + flips (--fail) ──
   let failed = false;
@@ -652,6 +751,10 @@ async function runBench(targets, { dev, only, writeBaseline, failMode }) {
     console.log(`\nbaseline written → ${path.basename(BASELINE_FILE)}`);
   }
 
+  // Run completed → the checkpoint file has served its purpose (keeping it would salvage stale
+  // results into a future run only until the next gate/corpus edit, but clean is clean).
+  rmSync(progressFile(MODEL, CASCADE), { force: true });
+
   // ── Ledger ──
   appendFileSync(
     RUNS_LOG,
@@ -702,6 +805,7 @@ if (invokedDirectly) {
         only,
         writeBaseline: flags.has('--baseline'),
         failMode: flags.has('--fail'),
+        fresh: flags.has('--fresh'),
       });
     }
   } catch (e) {
