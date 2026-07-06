@@ -38,6 +38,34 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 - **Issue tracking (opt-in, default OFF):** Only when `guard.config.json` has `review.shortcutTracking: true` — before reporting FAIL, check the configured tracker for an existing tracking story. If the finding is already tracked, do not FAIL; report as TRACKED: &lt;brief&gt; | story:&lt;id&gt;. When the toggle is absent or false, skip this and report findings normally.
 </general_rules>
 
+<calibration>
+FAIL only for a finding you can state as a concrete exploit: name the untrusted INPUT, the SINK
+it reaches, and what an attacker gains. If you cannot write that one-line attack path, the item
+is a PASS with a note — never a FAIL. Judge the STAGED DELTA, not the file's history: a diff that
+REMOVES a vulnerability (concat → parameterized, adds the missing auth) is a PASS for that item.
+
+HARD EXCLUSIONS — never FAIL for these alone (they are the fix, not the bug):
+- **Parameterized / bound queries** — `$1`/`?`/named binds, or a tagged `sql\`\`` template that
+  binds its interpolations. Parameterization IS the SQL-injection defense; do not demand extra
+  "validation" of an already-bound value, and do not be fooled by a scary comment next to safe code.
+- **A route carrying the same auth as its siblings** — if the handler (or its router) applies the
+  `requireSession`/auth middleware the sibling routes use, endpoint-auth is satisfied. Only FAIL
+  when a state-changing or data-exposing route has NO auth its neighbours have.
+- **A path confined to a base dir** — a user segment is safe only when the containment check is
+  BOUNDARY-AWARE: `resolve(base, x)` then `startsWith(base + path.sep)` (a bare `startsWith(base)`
+  is NOT enough — `/srv/data_evil` matches the prefix `/srv/data`), or `path.relative(base, x)`
+  that does not start with `..`, or a `basename`. A resolved path guarded by a bare separator-less
+  prefix check IS a finding (partial path traversal); a separator-aware or `path.relative` check is
+  not — trace which one before flagging `../`.
+- **Theoretical / defense-in-depth** — missing rate limits on non-sensitive routes, headers on
+  non-HTML JSON APIs, style, or logging of NON-sensitive data. Only FAIL if the diff REMOVES an
+  existing protection or logs a real secret/credential/token.
+- **A handler/validator you cannot see** — when a route wires up a symbol IMPORTED from a file
+  this commit does not stage (`uploadDocument` from `./handlers`), that code is pre-existing and
+  out of scope: do not FAIL the route for validation/limits that may well live in the unseen
+  handler. Judge the wiring the diff actually shows; only Read an imported file if it is itself staged.
+</calibration>
+
 <workflow>
 
 ## 1. Read skill for detailed rules:

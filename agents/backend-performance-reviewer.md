@@ -71,6 +71,12 @@ For each item the checklist enumerated:
 - Cache invalidation strategy clear
 - Appropriate TTL values
 - Cache-aside pattern correct
+- **Key never varies per-request:** trace what the cache KEY is built from. A key that folds in a
+  volatile value — `req.originalUrl`/full URL when the client appends a cache-buster (`_=<ts>`,
+  a nonce, `Date.now()`), a timestamp, a random id, or a request id — never collides across calls,
+  so the hit rate is ~0 and the "cached" expensive path (a wide scan, an aggregate) runs on EVERY
+  request. FAIL and name the stable key it should use (e.g. `orgId:window`). Same for a cache
+  whose write path and read path compute DIFFERENT keys.
 
 **Async:**
 - Heavy work offloaded to queues
