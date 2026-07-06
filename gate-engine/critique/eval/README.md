@@ -173,20 +173,30 @@ everything was dark).
    not gate; the flip tables still catch that metric worsening row-by-row, and any breach that is
    new vs the baseline fails immediately.
 
-## Committed baseline (2026-07-06, opus K=3 — the B1 result)
+## Results — baseline history
 
-- **valid-flaw recall 22/24 = 0.92** [0.74, 0.98] — floor met. Per-class: everything 1.00 except
-  ux 2/3 and missing-consideration 5/6.
-- **sound-proposal clean rate 1/5 = 0.20** [0.04, 0.62] — **KNOWN FLOOR BREACH, the B2 target**:
-  the agent fabricated ≥1 CRITICAL blocker on 4 of 5 sound proposals (hallucinated risk, the
-  ticket's predicted characteristic failure — now measured, not vibed). Decoy flag rate 4/20 =
-  0.20 sits just under its ceiling; finding precision is 22 matched of 104 emitted
-  (informational).
-- Verdict set-membership 31/33 = 0.94 · frame-meta 12/12 · severity calibration 14/22 = 0.64
-  (warn tier) · summary token budget honored 13/20 (real contract drift, as the session-history
-  sizes predicted).
-- `salvagedRows`: 30 of 33 rows' critic trials were salvaged from the usage-freeze-interrupted
-  first run (agentHash-verified); 3 decoy rows ran live. Matcher ran live for every row.
+The committed `results.baseline.json` is the machine-readable source of truth (per-row verdicts,
+slot outcomes, hashes, Wilson inputs); this table is the human-parseable summary. **Contract: any
+PR that regenerates the baseline appends a row here** with the run date, the prompt change that
+motivated it, and the headline numbers — so the agent's measured history stays greppable in one
+place. Validate any row by re-running `BENCH_RUNS=3 node bench.mts --fail` at that commit (or
+`--salvage <transcripts-dir>` against saved trials): the numbers must reproduce within the
+printed MDE.
 
-B2 marching orders, measured: cut fabricated blockers on sound proposals (0.20 → ≥0.75 clean
-rate) without giving back valid-flaw recall (≥0.75 floor, currently 0.92).
+| date · change | recall (floor .75) | clean rate (floor .75) | decoy flags (ceil .25) | verdict | frame-meta | severity cal | token contract |
+|---|---|---|---|---|---|---|---|
+| 2026-07-06 · **B1** initial prompt (PR #26) | 0.92 (22/24) | **0.20 (1/5) — breach** | 0.20 (4/20) | 0.94 (31/33) | 1.00 (12/12) | 0.64 (14/22) | 0.65 (13/20) |
+| 2026-07-06 · **B2** evidence-gated blockers + verdict coupling (PR #29) | **0.96 (23/24)** | **0.80 (4/5) — floor cleared** | 0.10 (2/20) | 0.97 (32/33) | 1.00 (12/12) | 0.78 (18/23) | 0.95 (19/20) |
+
+All numbers: opus, K=3 majority per row, 33 rows, zero outages; matcher haiku×3, κ 0.87
+(re-audit after any matcher change). Wilson 95% intervals ship in the bench output and the
+baseline JSON — at n=33 this corpus is a large-effect tripwire, not a percentage-point detector;
+read the intervals, not bare deltas.
+
+**B1 reading** (the problem statement): the agent fabricated ≥1 CRITICAL blocker on 4 of 5 sound
+proposals — hallucinated risk, the ticket's predicted characteristic failure, measured not vibed.
+**B2 reading** (the fix): four prompt rules — explicit permission to find nothing, positive-
+evidence burden for Critical Issues, verdict-blocker coupling, evidence-based severity tiers
+(prior art: pr-agent / sweep / code-review-gpt restraint prompts). Every headline moved the right
+way; `--fail` vs the B2 baseline exits 0. Remaining known weakness: ux-class recall 2/3 (one gold
+slot) — documented debt, not worth a baseline re-buy on its own.
