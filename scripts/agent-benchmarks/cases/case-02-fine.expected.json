@@ -1,9 +1,0 @@
-{
-  "title": "Genuinely sound, well-scoped fix — must NOT over-flag",
-  "agent": "feature-critique",
-  "expectVerdict": ["PROCEED", "PROCEED WITH CHANGES"],
-  "expectFrameMeta": ["SOUND", "SKIP"],
-  "requireAny": [],
-  "forbid": [],
-  "note": "Over-flagging a clean fix is as much a failure as missing a band-aid — the disagreement mandate must not become manufactured blockers. The over-flag guard IS expectVerdict=PROCEED + expectFrameMeta=SOUND (parsed verdict lines), NOT word-presence (the agent may say 'this is not a band-aid' in sound reasoning)."
-}
