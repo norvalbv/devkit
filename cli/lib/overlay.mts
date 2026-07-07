@@ -31,7 +31,7 @@ import {
 import { join } from 'node:path';
 import { syncAgents } from '../commands/sync/sync-agents.mts';
 import { syncSkills } from '../commands/sync/sync-skills.mts';
-import { AGENT_TARGETS, type Selection } from './components.mts';
+import { AGENT_TARGETS, normalizeSelection, type Selection } from './components.mts';
 import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
@@ -344,6 +344,52 @@ function installOverlayHook(
   } catch (e) {
     console.log(`  ! could not set core.hooksPath: ${firstLine(e)}`);
   }
+}
+
+/**
+ * Recompute the overlay pre-commit hook from the RECORDED config and report — or, unless `dryRun`,
+ * repair — drift against a freshly-built hook. `devkit update` re-pins the CLI but does NOT regenerate
+ * the git-ignored `.devkit/hooks/pre-commit`, so an updated repo can keep running an OLD hook shape
+ * (e.g. one predating a new ship gate) until re-init. This lets `devkit doctor --fix` refresh it
+ * without a manual `devkit init --overlay`. Pass-through wrappers are refreshed alongside (idempotent).
+ * `core.hooksPath` is left untouched — the `git ci` alias owns it and doctor reports it separately.
+ * Returns { missing, drift } observed BEFORE any write (missing counts as drift).
+ */
+export function syncOverlayHook(
+  gitRoot: string,
+  cwd: string,
+  cfg: { components?: Partial<Selection>; pkgRel?: string; origHooksPath?: string },
+  { dryRun }: { dryRun: boolean },
+): { missing: boolean; drift: boolean } {
+  const sel = normalizeSelection(cfg.components ?? {});
+  const pkgRel = cfg.pkgRel ?? '';
+  const fallow = Boolean(cfg.components?.fallow);
+  // Use the RECORDED origHooksPath — post-install core.hooksPath is `.devkit/hooks`, so reading it
+  // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
+  const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
+  const scriptDir = hookScriptDir(origHooksPath);
+  const existing = detectExistingHooks(gitRoot, scriptDir);
+  const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
+  const expected = buildOverlayHook(sel, preCommitChain, pkgRel, { fallow });
+
+  const pre = join(gitRoot, LOCAL_HOOKS, 'pre-commit');
+  const current = existsSync(pre) ? readFileSync(pre, 'utf8') : null;
+  const missing = current === null;
+  const drift = current !== expected; // a missing hook (null) is drift too
+
+  if (!dryRun && drift) {
+    const dir = join(gitRoot, LOCAL_HOOKS);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(pre, expected);
+    chmodSync(pre, 0o755);
+    // refresh the pass-through wrappers for the repo's OTHER hooks (idempotent).
+    for (const h of existing.filter((n) => n !== 'pre-commit')) {
+      const p = join(dir, h);
+      writeFileSync(p, buildPassthroughHook(`${scriptDir}/${h}`));
+      chmodSync(p, 0o755);
+    }
+  }
+  return { missing, drift };
 }
 
 // Resolve fallow for an overlay install: detect → (warn + global install if missing) → save

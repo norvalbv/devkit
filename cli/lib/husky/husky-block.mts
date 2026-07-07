@@ -288,6 +288,10 @@ export function buildOverlayHook(
   return `${HOOK_PREAMBLE}
 # devkit OVERLAY (LOCAL, git-ignored). Runs devkit's gates + lint overlay on this commit, then
 # the repo's OWN committed hook UNCHANGED. Invisible to the team — nothing here is committed.
+# Sentinel: proves the chain actually started, so \`devkit ship\` can tell a real run from a silent
+# no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
+# \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
+[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
 ${scoped}
 
 # Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):

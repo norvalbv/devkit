@@ -157,5 +157,21 @@ export default async function update(args: string[], cwd: string): Promise<numbe
       '  Next: `devkit migrate` — reconcile your emitted config files (eslint.config.mjs, guard.config.json) with the new version. Dry-run by default; shows every change before --apply.',
     );
   }
+  // Overlay repos keep their gate chain in a git-ignored .devkit/hooks/pre-commit that this update does
+  // NOT regenerate — so a new hook shape (e.g. an added ship gate) won't apply until it's refreshed.
+  try {
+    if (
+      (
+        JSON.parse(readFileSync(join(cwd, '.devkit', 'config.json'), 'utf8')) as {
+          overlay?: boolean;
+        }
+      )?.overlay
+    )
+      console.log(
+        '  Overlay repo: run `devkit doctor --fix` to refresh the local gate hook to this version.',
+      );
+  } catch {
+    /* no readable overlay config — nothing to hint */
+  }
   return 0;
 }

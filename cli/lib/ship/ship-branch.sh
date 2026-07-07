@@ -134,6 +134,20 @@ git worktree add -q -b "$BR" "$WT" "$BASE" >&2
 # silently shipping ungated code. Run dependency setup (`prepare` / `husky`) before shipping.
 # ponytail: husky-assumed (.husky/_) — a lefthook / non-husky repo would need a hook-runner knob;
 # every devkit-onboarded repo wires husky, so the realistic consumer set always has it.
+#
+# Overlay mode keeps the gate chain in .devkit/hooks/pre-commit — git-excluded, so it never
+# materializes in a fresh worktree and the husky shim silently no-ops (shipping UNGATED code).
+# Link it so the chain runs; fail CLOSED if the config declares overlay but the hook is missing
+# (mirrors the .husky/_ contract — gates must not fail open). The commit itself forces
+# core.hooksPath=.devkit/hooks so the overlay hook fires regardless of husky-reclaim state.
+# ponytail: naive JSON grep for the flag; swap for a real parser if the config schema drifts.
+if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$ROOT/.devkit/config.json" 2>/dev/null; then
+  [ -x "$ROOT/.devkit/hooks/pre-commit" ] || {
+    echo "overlay mode but $ROOT/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
+    exit 1
+  }
+  LINK_DIRS+=(.devkit)
+fi
 if [ ! -e "$ROOT/.husky/_" ]; then
   echo "missing $ROOT/.husky/_ — run dependency setup before shipping (gates must not fail open)" >&2
   exit 1

@@ -72,6 +72,16 @@ trap cleanup EXIT
 git worktree add -q --detach "$WT" "$BASE" >&2
 
 # Same gate-dep symlinks + fail-closed husky guard as new-ship (the gates must actually run).
+# Overlay mode keeps the gate chain in .devkit/hooks/pre-commit (git-excluded → absent from the
+# worktree → husky shim no-ops). Link it + fail CLOSED if declared-overlay but the hook is missing;
+# the commit forces core.hooksPath=.devkit/hooks so it fires. (See ship-branch.sh for the full why.)
+if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$ROOT/.devkit/config.json" 2>/dev/null; then
+  [ -x "$ROOT/.devkit/hooks/pre-commit" ] || {
+    echo "overlay mode but $ROOT/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
+    exit 1
+  }
+  LINK_DIRS+=(.devkit)
+fi
 if [ ! -e "$ROOT/.husky/_" ]; then
   echo "missing $ROOT/.husky/_ — run dependency setup before shipping (gates must not fail open)" >&2
   exit 1

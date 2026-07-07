@@ -22,6 +22,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 vi.setConfig({ testTimeout: 30_000 }); // bash + many git subprocesses; generous under parallel load
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
+const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const REPO_RE = /REPO=(.*)/;
 const BASE_REF_RE = /BASE_REF=(.*)/;
@@ -145,6 +146,37 @@ function seedShipRepoLocalRemote() {
   mkdirSync(join(ghRoot, 'github.com', 'acme'), { recursive: true });
   execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
   return { ...seedShipRepo({ origin: bare }), bare };
+}
+
+/**
+ * Turn a seeded ship repo `dir` into an OVERLAY install: a git-ignored `.devkit/config.json`
+ * (`overlay:true`) + an executable `.devkit/hooks/pre-commit`. `overlayHook === null` writes NO hook
+ * (models a broken/absent overlay hook → ship must fail closed). The overlay hook is git-ignored in a
+ * real repo; here it just stays untracked. The seed keeps `.husky/_` (the fail-closed husky guard),
+ * but ship forces core.hooksPath=.devkit/hooks so the OVERLAY hook is the one that runs.
+ */
+function addOverlay(dir, overlayHook) {
+  mkdirSync(join(dir, '.devkit/hooks'), { recursive: true });
+  writeFileSync(
+    join(dir, '.devkit/config.json'),
+    `${JSON.stringify({ overlay: true }, null, 2)}\n`,
+  );
+  if (overlayHook !== null) {
+    const pre = join(dir, '.devkit/hooks/pre-commit');
+    writeFileSync(pre, `#!/bin/sh\n${overlayHook}\n`);
+    chmodSync(pre, 0o755);
+  }
+}
+
+/** A ship repo whose `origin` is a local bare remote that ALREADY has the PR branch `pr-open` (the
+ *  existing-branch precondition `ship --pr` requires). Returns {dir, env, git, bare}. */
+function seedReshipRepo() {
+  const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+  dirs.push(bare);
+  execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
+  const seeded = seedShipRepo({ origin: bare });
+  seeded.git(['push', '-q', 'origin', 'work:pr-open'], { stdio: 'ignore' }); // the open PR's head branch
+  return { ...seeded, bare };
 }
 
 /** A `gh` stub on a fresh PATH dir: runs `prBody` for `gh pr …`, exits 0 for anything else (clears the
@@ -543,5 +575,141 @@ describe('ship-branch.sh — worktree integration', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     expect(git(['show', '-s', '--format=%b', 'feat/body'])).toMatch(/BODY_INLINE_XYZ/);
+  });
+});
+
+// Overlay mode keeps the entire gate chain in a git-ignored .devkit/hooks/pre-commit that never
+// materializes in a fresh worktree — so ship must (1) link .devkit in AND force
+// core.hooksPath=.devkit/hooks so the chain actually runs, (2) fail CLOSED if the config declares
+// overlay but the hook is missing, and (3) never report "gates ran" when the chain produced no
+// output (honest banner), while staying version-skew-safe for old pre-sentinel hooks.
+describe('ship-branch.sh — overlay-mode gate chain', () => {
+  it('runs the overlay hook (via forced core.hooksPath) and captures its output', () => {
+    const { dir, env, git } = seedShipRepo(); // .husky/_ hook is a bare `exit 0` (no marker)
+    // Overlay hook emits the sentinel + a UNIQUE marker. Its presence in the log proves the OVERLAY
+    // hook ran — NOT .husky/_/pre-commit (which has no marker); without the core.hooksPath force git
+    // would run .husky/_ and the marker would be absent (the bug this guards).
+    addOverlay(dir, `echo 'devkit-gates: chain start' >&2\necho 'GATE_MARKER_OVERLAY'\nexit 0`);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ov-run', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-ov-run.log'), 'utf8');
+    expect(log).toMatch(/GATE_MARKER_OVERLAY/); // the overlay chain ran in the worktree
+    expect(log).toMatch(/devkit-gates: chain start/); // sentinel captured
+    expect(r.stderr).toMatch(/pre-commit gates ran/); // honest success banner
+  });
+
+  it('a blocking overlay gate aborts the ship', () => {
+    const { dir, env, git } = seedShipRepo();
+    addOverlay(dir, `echo 'devkit-gates: chain start' >&2\necho 'OVERLAY_BLOCK_XYZ'\nexit 1`);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ov-block', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status).not.toBe(0); // the overlay gate blocked
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-ov-block.log'), 'utf8')).toMatch(
+      /OVERLAY_BLOCK_XYZ/,
+    );
+  });
+
+  it('fails CLOSED when the config declares overlay but the hook is absent', () => {
+    const { dir, env, git } = seedShipRepo();
+    addOverlay(dir, null); // overlay:true in config, but NO .devkit/hooks/pre-commit
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ov-broken', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status).not.toBe(0); // refuses to ship ungated
+    expect(r.stderr).toMatch(/gates must not fail open/);
+  });
+
+  it('aborts + reclaims the branch when a sentinel-emitting overlay hook produces NO output', () => {
+    // NON-dry: the honest-banner reset+abort only reclaims the branch on the real cleanup path.
+    // The hook FILE contains the sentinel line (so the file-grep gate arms) but never emits it at
+    // runtime (guarded off) → the chain silently no-op'd → ship must abort, not report success.
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    addOverlay(dir, `[ -n "\${DK_NEVER:-}" ] && echo 'devkit-gates: chain start' >&2\nexit 0`);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const stubBin = ghStub('exit 0'); // clears the `command -v gh` preflight; no PR is reached
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ov-noop', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${process.env.PATH}` },
+    });
+    expect(r.status).not.toBe(0); // silence is NOT reportable as success
+    expect(r.stderr).toMatch(/NO gate output captured/);
+    expect(r.stderr).not.toMatch(/pre-commit gates ran/); // the false success banner must not print
+    expect(localBranchExists(git, 'feat/ov-noop')).toBe(false); // reset+cleanup reclaimed it (retry unblocked)
+    expect(remoteBranchExists(bare, 'feat/ov-noop')).toBe(false); // aborted before push
+  });
+
+  it('does NOT abort an old (pre-sentinel) overlay hook that runs its gates — version skew', () => {
+    // devkit update ships the new ship.sh but does NOT regenerate the on-disk hook. An old hook runs
+    // every gate correctly yet emits no sentinel; holding it to a sentinel it can't emit would falsely
+    // abort a fully-gated ship. The file-grep gate exempts hooks whose FILE lacks the sentinel line.
+    const { dir, env, git } = seedShipRepo();
+    addOverlay(dir, `echo 'OLD_HOOK_MARKER'\nexit 0`); // runs a gate, no sentinel anywhere
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ov-skew', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0); // ships green — enforcement skipped for a sentinel-less hook
+    expect(r.stderr).toMatch(/pre-commit gates ran/);
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-ov-skew.log'), 'utf8')).toMatch(
+      /OLD_HOOK_MARKER/,
+    );
+  });
+});
+
+describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
+  it('links + forces the overlay hook so it runs in the detached re-ship worktree', () => {
+    const { dir, env, git } = seedReshipRepo();
+    addOverlay(dir, `echo 'devkit-gates: chain start' >&2\necho 'RESHIP_OVERLAY_MARKER'\nexit 0`);
+    writeFileSync(join(dir, 'note.txt'), 'delta\n'); // a delta vs origin/pr-open so the commit isn't empty
+    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
+      /RESHIP_OVERLAY_MARKER/,
+    );
+  });
+
+  it('fails CLOSED when the config declares overlay but the hook is absent', () => {
+    const { dir, env, git } = seedReshipRepo();
+    addOverlay(dir, null);
+    writeFileSync(join(dir, 'note.txt'), 'delta\n');
+    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/gates must not fail open/);
   });
 });
