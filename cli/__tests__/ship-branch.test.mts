@@ -928,4 +928,93 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     // Copied into $WT first → the helper sees it present and skips → a real 100644 blob, not a 120000 symlink.
     expect(git(['ls-tree', 'feat/ship-cfg', 'guard.config.json']).trim()).toMatch(/^100644/);
   });
+
+  // Edge: the real install path has spaces ("…/Personal and learning/devkit") but every test tmpdir is
+  // space-free. Exercise link-gate-configs.sh + the emitter with a $ROOT that contains spaces — a single
+  // unquoted expansion (ln/mkdir/git -C/node) would break linking. Seeded inline (seedShipRepo can't
+  // take a spaced dir).
+  it('links a config when $ROOT contains spaces (real-world install path)', () => {
+    const base = mkdtempSync(join(tmpdir(), 'ship gap-')); // NB: the space in the prefix → a spaced $ROOT
+    dirs.push(base);
+    const dir = join(base, 'a b'); // a second space, in a nested segment
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    const env = { ...process.env, ...GIT_ENV };
+    const git = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', 'git@github.com:acme/app.git'],
+    ])
+      git(a, { stdio: 'ignore' });
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\n[ -e guard.config.json ] && echo CONFIG_SEEN\nexit 0\n',
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/spaced', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/guard\.config\.json .*commit it/); // linked + noticed despite the spaces
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-spaced.log'), 'utf8')).toMatch(
+      /CONFIG_SEEN/,
+    );
+  });
+
+  // Edge/error path: an unparseable guard.config.json makes resolveGuardConfig throw → the emitter exits
+  // non-zero → the shell must WARN and fall back to the fixed artifact list (still linking the bad config
+  // in, so the worktree gate fails loud on it) rather than crashing the ship.
+  it('warns and falls back to fixed artifacts when guard.config.json is unparseable', () => {
+    const { dir, env, git } = seedShipRepo({
+      hookBody: '[ -e guard.config.json ] && echo CONFIG_SEEN\nexit 0',
+    });
+    writeFileSync(join(dir, 'guard.config.json'), '{ this is not: valid json'); // untracked + unparseable
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/badcfg', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0); // the linker degrades gracefully; the real gate fails loud, not this
+    expect(r.stderr).toMatch(/could not resolve config gate paths/); // the resolver-failure warning
+    // Fixed-artifact fallback still links guard.config.json itself → the worktree gate sees the bad config.
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-badcfg.log'), 'utf8')).toMatch(
+      /CONFIG_SEEN/,
+    );
+  });
+
+  // Boundary: every other test links exactly one config. With N present, the notice must report the plural
+  // count and list each linked path.
+  it('links multiple untracked configs and lists each in the notice (plural count)', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked fixed artifact
+    writeFileSync(join(dir, '.fallowrc.jsonc'), '{}\n'); // a second untracked fixed artifact
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/multi', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/2 gate config\(s\) present/); // plural count
+    expect(r.stderr).toMatch(/guard\.config\.json .*commit it/);
+    expect(r.stderr).toMatch(/\.fallowrc\.jsonc .*commit it/); // both listed
+  });
 });
