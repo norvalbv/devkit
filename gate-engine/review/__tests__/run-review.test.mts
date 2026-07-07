@@ -153,8 +153,9 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).toHaveBeenCalledTimes(4);
     for (const call of exec.mock.calls) {
       const model = call[0].args[call[0].args.indexOf('--model') + 1];
-      // correctness is model-pinned single-pass (haiku); the domain reviewers first-pass at sonnet
-      expect(model).toBe(call[0].label === 'review:correctness-reviewer' ? 'haiku' : 'sonnet');
+      // every first pass is haiku now — domain default flipped sonnet→haiku (bench 6/6), and
+      // correctness is model-pinned haiku. opus appears only on a FAIL escalation (none here).
+      expect(model).toBe('haiku');
       expect(call[0].args.join(' ')).not.toContain('opus');
     }
     expect(Object.keys(loadCache(repo)).length).toBe(4);
@@ -168,7 +169,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('sonnet FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
+  it('first-pass FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {
       // correctness is single-pass (no escalation to overturn) — hold it PASS so this test isolates
@@ -229,7 +230,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('CAS clobber');
   });
 
-  it('sonnet FAIL → opus confirm → exit 1 with the reviewer named; FAIL is never cached', async () => {
+  it('first-pass FAIL → opus confirm → exit 1 with the reviewer named; FAIL is never cached', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async ({ label }) => {
