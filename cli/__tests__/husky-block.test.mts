@@ -284,6 +284,13 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(hook).toContain('&& exit 0');
   });
 
+  it('emits the ship sentinel (DEVKIT_SHIP-gated) BEFORE the gates so ship can detect a no-op chain', () => {
+    const sentIdx = hook.indexOf('devkit-gates: chain start');
+    expect(sentIdx).toBeGreaterThan(-1);
+    expect(hook).toContain(`[ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2`);
+    expect(sentIdx).toBeLessThan(guardIdx); // before the gates → a first-gate block still records it
+  });
+
   it('places the guard BEFORE the chain exec (the chain runs only when the env is unset)', () => {
     expect(chainIdx).toBeGreaterThan(guardIdx);
   });

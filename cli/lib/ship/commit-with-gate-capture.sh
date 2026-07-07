@@ -65,11 +65,20 @@ commit_with_gate_capture() {
     echo "ship: no timeout/gtimeout on PATH — gate-hang protection disabled (brew install coreutils to enable)" >&2
   fi
 
+  # Overlay mode: force core.hooksPath at the .devkit overlay hook so the FULL gate chain runs in the
+  # ship worktree in EVERY state. A plain `git commit` otherwise honours the husky-reclaimed
+  # core.hooksPath=.husky/_ and runs only the team's committed hook — the overlay chain (devkit's
+  # gates) silently no-ops (the bug this fixes). ship-branch/reship linked .devkit in, so the relative
+  # path resolves to $wt/.devkit/hooks via the symlink; the overlay hook then execs the repo's own
+  # committed hook too. Non-overlay repos have no such file → empty array → unchanged behaviour.
+  local hookcfg=()
+  [ -x "$root/.devkit/hooks/pre-commit" ] && hookcfg=(-c core.hooksPath=.devkit/hooks)
+
   set +e
   # ${to[@]+"${to[@]}"}: set -u-safe empty-array expansion (a bare "${to[@]}" aborts under stock-macOS
   # bash 3.2). Empty → bare git (degrade); non-empty → `timeout -k 10 <secs> git …`. PIPESTATUS[0] is the
-  # timeout/git exit (124 on timeout) through both forms — never tee's.
-  ${to[@]+"${to[@]}"} git -C "$wt" commit -m "$title" -m "$body" 2>&1 | tee "$log" >&2
+  # timeout/git exit (124 on timeout) through both forms — never tee's. hookcfg expands the same way.
+  ${to[@]+"${to[@]}"} git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" 2>&1 | tee "$log" >&2
   local rc=${PIPESTATUS[0]}
   set -e
 
@@ -95,6 +104,26 @@ commit_with_gate_capture() {
       echo "   env prefixes can be stripped by command-rewriting shell hooks). Full log: $log"
     } >&2
   elif [ "$rc" -eq 0 ]; then
+    # Honest banner: a zero-exit commit is NOT proof the gates ran. In overlay mode the chain can
+    # silently no-op (see the core.hooksPath forcing above); if that ever happens the log holds no
+    # gate output and reporting "✓ gates ran" would be a lie. Gate enforcement on the overlay hook
+    # FILE emitting the sentinel — `devkit update` re-pins the package but does NOT regenerate the
+    # git-ignored on-disk hook, so a consumer on a new ship.sh + an old sentinel-less hook still
+    # runs its gates correctly; holding it to a sentinel it can't emit would falsely abort a fully
+    # gated ship. Only sentinel-emitting hooks are held to fail-closed enforcement.
+    if [ -x "$root/.devkit/hooks/pre-commit" ] \
+       && grep -q 'devkit-gates: chain start' "$root/.devkit/hooks/pre-commit" \
+       && ! grep -q 'devkit-gates: chain start' "$log"; then
+      # The commit already succeeded (rc=0) but the chain produced no sentinel → undo it so the
+      # caller's cleanup reclaims the branch (else tip≠BASE keeps it, blocking a retry). HEAD~1==BASE
+      # (branch created at BASE, exactly one commit); the worktree is discarded next, so --soft suffices.
+      git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
+      {
+        echo "⚠️  ship: NO gate output captured — overlay hook chain appears to have no-op'd"
+        echo "    (expected .devkit/hooks/pre-commit to run). Ship aborted; nothing pushed. Log: $log"
+      } >&2
+      return 1
+    fi
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
