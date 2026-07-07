@@ -128,6 +128,27 @@ commit_with_gate_capture() {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
     } >&2
+  else
+    # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log
+    # above. Surface ONE otherwise-cryptic failure: a repo path with a SPACE + a git hook (usually a
+    # consumer commit-msg like `commitlint --edit $1`) that forwards the message-file path UNQUOTED.
+    # git hands a LINKED-worktree hook the ABSOLUTE $GIT_DIR/COMMIT_EDITMSG path, so the space
+    # word-splits inside that hook and its arg parser dumps "Unknown argument: <fragment>". Gate on BOTH
+    # the space AND COMMIT_EDITMSG appearing in the captured log so a NORMAL gate rejection under a
+    # spaced path (this repo self-dogfoods at one) does NOT misfire. The split is in that hook, not
+    # devkit (every ship path is quoted) — we can only point at it.
+    case "$root" in
+      *" "*)
+        if grep -q 'COMMIT_EDITMSG' "$log" 2>/dev/null; then
+          {
+            echo "ℹ️  ship: a git hook mishandled the commit-message file path, and your repo path has a space:"
+            echo "   \"$root\"."
+            echo "   git gives a worktree commit the ABSOLUTE COMMIT_EDITMSG path, so a hook that forwards it"
+            echo "   UNQUOTED (e.g. commitlint --edit \$1) word-splits on the space and its parser rejects the"
+            echo "   fragment. Fix: quote \"\$1\" in that commit-msg hook, or use a space-free repo path."
+          } >&2
+        fi ;;
+    esac
   fi
   return "$rc"
 }
