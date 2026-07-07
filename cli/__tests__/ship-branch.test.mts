@@ -303,6 +303,25 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(git(['ls-tree', 'feat/wt-test', 'tool.sh']).trim()).toMatch(EXEC_MODE_RE);
   });
 
+  // Regression: a FAILED dry-run must not leak its ephemeral worktree/branch. Before the fix cleanup
+  // keyed on SHIP_DRY_RUN and only PRINTED "worktree kept" — so a gate failure under dry-run left a
+  // devkit-ship-* worktree + empty branch registered, blocking later deletion. Now cleanup keys on
+  // "did a commit land beyond BASE": nothing landed ⇒ reclaim both, even under dry-run.
+  it('a failed gate under dry-run leaves no worktree or branch behind', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'exit 1' }); // gate fails → commit fails → nonzero exit
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/leak-test', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).not.toBe(0); // the gate failed the ship
+    expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/); // no ephemeral worktree left registered
+    expect(localBranchExists(git, 'feat/leak-test')).toBe(false); // no leftover branch
+  });
+
   it('ships a dash-leading filename passed after -- (treated as a path, not a flag)', () => {
     const { dir, env, git } = seedShipRepo();
     const weird = '--looks-like-flag.txt';
