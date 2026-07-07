@@ -17,7 +17,9 @@
  *            hook never renders an outage as "opus-confirmed FAIL"
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
- * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default sonnet) ·
+ * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default haiku — the
+ *   reviewer-eval bench validated the domain reviewers at haiku, 6/6 block/6/6 clean; a FAIL still
+ *   escalates to opus, so opus stays the block authority) ·
  * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
  * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 2, floor 1) ·
  * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
@@ -234,7 +236,7 @@ export async function runCascade(
 
 async function cascadeVerdict(
   { reviewer, files }: ReviewerSelection,
-  { cwd, cfg, exec = execJudgeAsync, firstModel = 'sonnet', retryFirst = false }: CascadeOpts,
+  { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false }: CascadeOpts,
 ): Promise<CascadeResult> {
   const body = agentBody(cwd, cfg, reviewer.name);
   if (body === null)
@@ -382,7 +384,7 @@ export async function runReviewGate(
   }
 
   const cache = loadCache(cwd);
-  const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'sonnet';
+  const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
   const concurrency = reviewConcurrency();
   const toRun: { sel: ReviewerSelection; key: string; diffText: string }[] = [];
   for (let i = 0; i < selected.length; i++) {
