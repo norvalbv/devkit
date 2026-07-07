@@ -11,10 +11,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
-import { HEAL_ALIAS_CMD } from '../lib/overlay.mts';
+import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
 import { rootRegistry } from './_helpers.mts';
 
@@ -728,5 +729,62 @@ describe('overlay (local-only) install', () => {
     expect(sel.agents).toBe(false);
     expect(sel.agentHooks).toBe(true);
     expect(sel.fallow).toBe(true);
+  });
+});
+
+// `devkit update` re-pins the CLI but never regenerates the git-ignored .devkit/hooks/pre-commit, so an
+// updated overlay repo can keep an OLD hook shape (a version-skew gap). syncOverlayHook + `doctor --fix`
+// let the hook be refreshed without a manual `devkit init --overlay`.
+describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
+  const initOverlay = (root) =>
+    applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+  // Simulate a post-update skew: overwrite the fresh hook with an OLD shape (no ship sentinel).
+  const staleHook = (root) =>
+    writeFileSync(
+      join(root, '.devkit', 'hooks', 'pre-commit'),
+      '#!/bin/sh\n# old devkit overlay hook\nexit 0\n',
+    );
+  const readHook = (root) => readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+  const readCfg = (root) => JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
+
+  it('syncOverlayHook detects a stale hook, regenerates it, then reports clean (idempotent)', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    staleHook(root);
+    const cfg = readCfg(root);
+
+    // dry-run: drift detected, nothing written
+    expect(syncOverlayHook(root, root, cfg, { dryRun: true })).toEqual({
+      missing: false,
+      drift: true,
+    });
+    expect(readHook(root)).not.toContain('devkit-gates: chain start');
+
+    // heal: reports the pre-write drift AND rewrites the hook to the current shape
+    expect(syncOverlayHook(root, root, cfg, { dryRun: false }).drift).toBe(true);
+    expect(readHook(root)).toContain('devkit-gates: chain start'); // the current ship sentinel is back
+    expect(readHook(root)).toContain('.husky/pre-commit'); // still chains to the team's hook
+
+    // idempotent: a freshly-healed hook shows no drift
+    expect(syncOverlayHook(root, root, cfg, { dryRun: true }).drift).toBe(false);
+  });
+
+  it('doctor flags a stale overlay hook (exit 1); doctor --fix regenerates it (exit 0)', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    staleHook(root);
+
+    // read-only doctor: STALE → drift → exit 1, hook untouched
+    expect(await doctorRun([], root)).toBe(1);
+    expect(readHook(root)).not.toContain('devkit-gates: chain start');
+
+    // doctor --fix: regenerates → exit 0, sentinel restored
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(readHook(root)).toContain('devkit-gates: chain start');
   });
 });

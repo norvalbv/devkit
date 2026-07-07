@@ -16,7 +16,7 @@ import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
 import { markEnd, markStart } from '../lib/husky/husky.mts';
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
-import { HEAL_ALIAS_NAME, isHealAlias } from '../lib/overlay.mts';
+import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
 import { structureCmdFor } from './init.mts';
 import { cmpSemver } from './update.mts';
@@ -569,7 +569,7 @@ const DEFAULT_DOCTOR_SEL: Partial<Selection> = {
 // a linear ✓/⚠/· print per signal + advisory agent-half/fallow checks; high branch COUNT, near-zero
 // nesting, and the exit code stays gated on hook+path only (everything else is advisory)
 // fallow-ignore-next-line complexity
-async function runOverlayDoctor(cwd: string, cfg: DevkitConfig): Promise<number> {
+async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): Promise<number> {
   // hooksPath + the alias are repo-wide (set at the git ROOT) — a monorepo package is a subdir, so
   // read/check at the root, not cwd.
   const { gitRoot } = detectGitRoot(cwd);
@@ -585,10 +585,27 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig): Promise<number>
   };
   const hooksPath = gitGet('core.hooksPath');
   const aliasOurs = isHealAlias(gitGet(`alias.${HEAL_ALIAS_NAME}`));
-  const hookOk = existsSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit'));
+  // Detect — and with --fix, repair — a STALE/MISSING overlay hook. `devkit update` re-pins the CLI
+  // but never regenerates the git-ignored .devkit/hooks/pre-commit, so an updated repo can keep an
+  // OLD hook shape (e.g. one predating a new ship gate) until re-init. Compare against a freshly-built
+  // hook; --fix rewrites it (mirrors how the package/standalone doctor heals by re-running the installer).
+  const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: !fix });
+  const hookOk = existsSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit')); // post-fix presence
   const pathOk = hooksPath === '.devkit/hooks';
   console.log('devkit doctor — overlay (local-only)\n');
-  console.log(`  ${hookOk ? '✓' : '✗'} .devkit/hooks/pre-commit ${hookOk ? 'present' : 'MISSING'}`);
+  if (!hookOk)
+    console.log(
+      '  ✗ .devkit/hooks/pre-commit MISSING — run `devkit doctor --fix` (or `devkit init --overlay`)',
+    );
+  else if (fix && (sync.missing || sync.drift))
+    console.log(
+      '  ✓ .devkit/hooks/pre-commit regenerated (was stale/missing — refreshed to the current devkit)',
+    );
+  else if (sync.drift)
+    console.log(
+      '  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh',
+    );
+  else console.log('  ✓ .devkit/hooks/pre-commit present');
   console.log(
     `  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it) or re-run \`devkit init --overlay\``}`,
   );
@@ -648,7 +665,8 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig): Promise<number>
       `  ${wired ? '✓' : '·'} fallow gate: ${wired ? 'wired in the local hook' : 'not wired'}`,
     );
   }
-  return hookOk && pathOk ? 0 : 1;
+  // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
+  return hookOk && pathOk && (fix || !sync.drift) ? 0 : 1;
 }
 
 /**
@@ -726,7 +744,8 @@ Usage:
   devkit doctor [--fix]
 
   --fix    Re-run init for the recorded selection (recreates MISSING pieces; never re-freezes a
-           baseline). Exit 0 all-ok, 1 drift, 2 not-initialized.
+           baseline). In an overlay repo, regenerates a stale/missing local gate hook (e.g. after
+           \`devkit update\` shipped a new hook shape). Exit 0 all-ok, 1 drift, 2 not-initialized.
 
 Also warns if the RUNNING devkit is older than this repo's init stamp or a hand-declared
 "minDevkit":"x.y.z" floor in .devkit/config.json.`,
@@ -747,7 +766,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   }
 
   const cfg = (readJson(join(cwd, '.devkit', 'config.json')) ?? {}) as DevkitConfig;
-  if (cfg.overlay) return runOverlayDoctor(cwd, cfg);
+  if (cfg.overlay) return runOverlayDoctor(cwd, cfg, fix);
 
   const { results, sel } = await collectResults(cwd, cfg, configResult);
 
