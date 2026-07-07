@@ -83,7 +83,10 @@ function botComments(repo, pr) {
 const repoArgs = [];
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 1) {
-  if (argv[i] === '--repo' && argv[i + 1]) repoArgs.push(argv[(i += 1)]);
+  if (argv[i] === '--repo' && argv[i + 1]) {
+    i += 1;
+    repoArgs.push(argv[i]);
+  }
 }
 const repos = repoArgs.length > 0 ? repoArgs : DEFAULT_REPOS;
 
@@ -92,7 +95,7 @@ for (const repo of repos) {
   const prs = listPrs(repo);
   console.error(`mine-bots: ${repo} — ${prs.length} PRs`);
   for (const { number, title } of prs) {
-    let comments;
+    let comments: ReturnType<typeof botComments>;
     try {
       comments = botComments(repo, number);
     } catch (e) {
