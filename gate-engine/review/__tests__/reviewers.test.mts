@@ -111,7 +111,7 @@ describe('correctness-reviewer (domain all)', () => {
   const corr = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
   it('is pinned single-pass to haiku (the cascade subtracts recall here — see run-review.mts)', () => {
     expect(corr.model).toBe('haiku');
-    // domain reviewers must stay unpinned so they keep the sonnet→opus cascade
+    // domain reviewers must stay unpinned so they keep the haiku→opus cascade
     for (const r of REVIEWERS.filter((r) => r.name !== 'correctness-reviewer'))
       expect(r.model).toBeUndefined();
   });
