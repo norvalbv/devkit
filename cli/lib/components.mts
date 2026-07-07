@@ -16,7 +16,7 @@ export const RECOMMENDED_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'decisio
  * headless reviewer judges) is selectable but OFF by default — it spends real model budget on
  * every commit, so a consumer opts in with `--guards …,review` or the wizard.
  */
-export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'qavis-advisory'];
 
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
@@ -82,6 +82,11 @@ export const GUARD_OPTIONS = [
   { id: 'clone', label: 'clone', hint: 'verbatim copy-paste (jscpd)' },
   { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
   { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
+  {
+    id: 'qavis-advisory',
+    label: 'qavis-advisory',
+    hint: 'nudge to run qavis QA on UI diffs (needs qavis on PATH + .qavis/recipe.json)',
+  },
 ];
 
 /**

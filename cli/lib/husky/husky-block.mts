@@ -81,6 +81,24 @@ fi
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
 const AI_GUARD_IDS = ['decisions', 'review'] as const;
 
+// The qavis-advisory gate runs LAST — it's advisory, not a blocker, and cheapest to skip past. It is
+// NOT an AI_GUARD (different exit contract: 0 = continue, 3 = strict-ship block, never exit 1), so it
+// gets its own fragment + its own remedy line rather than the shared "judge unavailable" copy. All
+// the "deserves QA?" logic + the pass-receipt live in qavis; this just shells `qavis route` and maps
+// its verdict to an exit code (fail-open when qavis/the bin is absent — the fallow precedent).
+const QAVIS_ADVISORY_ID = 'qavis-advisory';
+const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
+qarc=0
+bunx guard-qavis-advisory --gate || qarc=$?
+[ "$qarc" -eq 3 ] && exit 1
+# qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
+# (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
+# /devkit:guard-qavis-advisory`;
+const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1; then
+    qarc=0; guard-qavis-advisory --gate || qarc=$?
+    [ "$qarc" -eq 3 ] && exit 1
+fi`;
+
 // The biome format-staged-files step (only when the `biome` component is selected).
 const BIOME_FRAGMENT = `# devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
@@ -164,6 +182,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id)) pieces.push(GUARD_FRAGMENTS[id]);
   }
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) pieces.push(QAVIS_FRAGMENT);
   const body = pieces.join('\n\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
@@ -220,6 +239,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
     if (selection.guards?.includes(id))
       pieces.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
   }
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) pieces.push(standaloneQavisLines);
   const body = pieces.join('\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
@@ -281,6 +301,7 @@ export function buildOverlayHook(
     if (selection.guards?.includes(id))
       gates.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
   }
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) gates.push(standaloneQavisLines);
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
   const scoped = pkgRel
     ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
