@@ -239,11 +239,14 @@ describe('reship — untracked gate configs are linked into the re-ship worktree
 
     const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
     const wt = WT_RE.exec(r.stderr)?.[1];
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(/guard\.config\.json .*commit it/);
-    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toMatch(
-      /CONFIG_SEEN/,
-    );
-    if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toMatch(/guard\.config\.json .*commit it/);
+      expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toMatch(
+        /CONFIG_SEEN/,
+      );
+    } finally {
+      if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+    }
   });
 });

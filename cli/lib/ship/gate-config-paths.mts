@@ -5,9 +5,10 @@
  * A `devkit ship` commits inside an ephemeral worktree checked out clean at $BASE, so it holds only
  * TRACKED files. link-gate-configs.sh symlinks gate inputs that live in the repo but aren't in that
  * checkout (an untracked config, a gitignored index) so the worktree gates match a plain commit. The
- * gate inputs whose LOCATION is configurable — `indexPath` (default null, no universal default) and
- * `allowlistPath` — must be READ from guard.config.json, not hardcoded: decision synced-assets-
- * layout-agnostic mandates resolving roots from the consumer's config, never a fixed layout. The rest
+ * gate inputs whose LOCATION is configurable — `indexPath` (default null, no universal default),
+ * `allowlistPath`, and `decisionsDir` — must be READ from guard.config.json, not hardcoded: decision
+ * synced-assets-layout-agnostic mandates resolving roots from the consumer's config, never a fixed
+ * layout (a custom decisionsDir that isn't committed would otherwise never reach the worktree). The rest
  * (guard.config.json itself, the fallow files, the caches) are devkit's own fixed artifact names and
  * stay hardcoded in the shell.
  *
@@ -22,7 +23,7 @@ import { resolveFromCwd, resolveGuardConfig } from '../../../gate-engine/config.
 const root = process.argv[2] ?? process.cwd();
 const cfg = resolveGuardConfig(root);
 
-for (const field of ['indexPath', 'allowlistPath'] as const) {
+for (const field of ['indexPath', 'allowlistPath', 'decisionsDir'] as const) {
   const abs = resolveFromCwd(cfg, field);
   if (!abs) continue; // opted-out (indexPath null) → nothing to link
   const rel = relative(root, abs);
