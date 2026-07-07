@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck — BENCH-ONLY (excluded from tsc, see tsconfig.json exclude); loose types deliberate.
 
 /**
  * reviewer-eval — benchmark the domain pre-commit reviewers (api-security, backend-performance,

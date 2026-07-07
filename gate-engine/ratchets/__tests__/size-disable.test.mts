@@ -131,8 +131,9 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
 
   it('gate exits 1 when a NEW file-level disable appears', () => {
     const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] }); // governed repo → enforce even with no debt baseline
     write(root, 'src/a.ts', 'export {};\n');
-    run(root, 'freeze');
+    run(root, 'freeze'); // 0 disables → no baseline written
     write(root, 'src/b.ts', '/* eslint-disable max-lines */\nexport {};\n');
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
@@ -141,10 +142,58 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
 
   it('gate exits 1 when only the per-function count grows', () => {
     const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', 'export {};\n');
     run(root, 'freeze');
     write(root, 'src/b.ts', '// eslint-disable-next-line max-lines-per-function\nexport {};\n');
     expect(run(root, 'gate').status).toBe(1);
+  });
+
+  it('freeze writes NO baseline when there are zero disables (no empty file left on disk)', () => {
+    const root = makeRoot();
+    write(root, 'src/a.ts', 'export {};\n');
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+  });
+
+  it('freeze deletes a stale empty baseline once the last disable heals', () => {
+    const root = makeRoot();
+    write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
+    run(root, 'freeze'); // size.json = {1,0}
+    write(root, 'src/a.ts', 'export {};\n'); // healed
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+  });
+
+  it('gate ENFORCES from config (not fail-open) when governed but no baseline exists', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] }); // governed, never frozen
+    write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1); // a disable with no grandfathering is blocked
+    expect(r.stderr).toContain('may only SHRINK');
+  });
+
+  it('gate heal-deletes + stages size.json when the last disable heals in a real commit', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
+    run(root, 'freeze'); // size.json = {1,0}
+    gitAdd(root, 'src/a.ts', 'eslint/baselines/size.json'); // baseline is committed → tracked
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    write(root, 'src/a.ts', 'export {};\n'); // healed
+    gitAdd(root, 'src/a.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('removed & staged');
+    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+    // the deletion rides this commit
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=D'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(staged).toContain('eslint/baselines/size.json');
   });
 
   it('gate exits 0 (with a re-freeze reminder) when counts shrink', () => {
@@ -157,9 +206,9 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     expect(r.stdout).toContain('shrank');
   });
 
-  it('gate fails OPEN (exit 2) when the baseline file is missing', () => {
-    const root = makeRoot();
-    write(root, 'src/a.ts', 'export {};\n');
+  it('gate fails OPEN (exit 2) in an UNGOVERNED repo (no guard.config.json) with no baseline', () => {
+    const root = makeRoot(); // no guard.config.json → not governed → never wedge
+    write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
     expect(run(root, 'gate').status).toBe(2);
   });
 
@@ -243,11 +292,12 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(baseline.files['src/legacy.ts']).toBe(60); // ceiling ratcheted down 80 → 60
   });
 
-  it('a STAGED file dropped under the cap → gate auto-removes it from the baseline', () => {
+  it('a STAGED file dropped under the cap → gate auto-removes it from the baseline (file kept while others remain)', () => {
     const root = makeRoot();
     gitInit(root);
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', big(80));
+    write(root, 'src/other.ts', big(90)); // a second giant keeps the baseline non-empty
     run(root, 'freeze');
     write(root, 'src/legacy.ts', big(10)); // healed under the cap
     gitAdd(root, 'src/legacy.ts');
@@ -256,6 +306,21 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files).not.toHaveProperty('src/legacy.ts');
+    expect(baseline.files['src/other.ts']).toBe(90); // untouched
+  });
+
+  it('the LAST grandfathered file healing → gate deletes + stages size-lines.json (no empty file left)', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    run(root, 'freeze'); // size-lines.json = { legacy: 80 }
+    write(root, 'src/legacy.ts', big(10)); // last giant healed under the cap
+    gitAdd(root, 'src/legacy.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('removed & staged');
+    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).toThrow();
   });
 
   it('lowers the ceiling for the STAGED file only; a parallel unstaged shrink stays untouched', () => {

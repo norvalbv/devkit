@@ -128,5 +128,8 @@ No single command covers everything — the walls split across two mechanisms:
 
 The ratchet gates fire via husky (and a **CI mirror** — `--no-verify` is bypassable, so a load-bearing
 gate must run on the server too). A `gate` that finds *growth* exits 1 and blocks the commit (split,
-don't disable); one that finds *shrinkage* reminds you to re-freeze. Both fail open if their baseline
-is missing, so a fresh checkout never wedges.
+don't disable); one whose last grandfathered entry *heals* in the commit self-deletes the baseline.
+A missing baseline means "no grandfathered debt": a **governed** repo (one with `guard.config.json` —
+every adopted repo, CI included) still **enforces the cap from config**, and only an ungoverned repo
+fails open, so an unadopted checkout never wedges. Baselines are cut once at adoption and never
+re-snapshotted (an absent one is healthy, not drift).

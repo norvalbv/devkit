@@ -1,61 +1,217 @@
 {
-  "changeId": "overlay-global-commit-gate-shim",
+  "changeId": "qavis-advisory-gate",
   "flowId": null,
   "scope": { "frontend": false, "backend": true, "shared": true },
   "risks": [
     {
       "id": "R1",
-      "layer": "shared",
-      "category": "Contract & Boundary Handling",
-      "triggers": ["cwd != repo root when git runs hooks"],
+      "layer": "backend",
+      "category": "State & Data Integrity",
+      "triggers": [
+        "devkit ship of a UI-affecting diff in a repo with .qavis/recipe.json",
+        "PR does not exist yet at commit time so existingBody has no qavis marker"
+      ],
       "edgeCases": [
-        {"id":"EC1","scenario":"plain git commit in a linked worktree of an overlaid repo","expected":"gates run once against this worktree's .devkit/hooks","testType":"integration","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: resolves the repo root — fires from a subdir"],"notes":"shim uses git rev-parse --show-toplevel, not cwd-relative"},
-        {"id":"EC2","scenario":"git -C <overlaid-repo> commit from an unrelated cwd / a package subdir","expected":"gates run once","testType":"integration","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: resolves the repo root — fires from a subdir"],"notes":""},
-        {"id":"EC3","scenario":"cwd has its own .devkit/hooks but the repo root does not","expected":"no mis-fire against the wrong dir","testType":"integration","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: does NOT mis-fire on a stray .devkit/hooks in cwd"],"notes":""}
+        {
+          "id": "EC1",
+          "scenario": "devkit ship a branch with one .tsx under components/ and a .qavis/recipe.json present; qavis has NOT been run",
+          "expected": "ship should be satisfiable by ACTUALLY running qavis (a pass-receipt clears the block), not only by an override",
+          "testType": "e2e",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "As specced, hasQavisMarker(existingBody)=false on every new ship -> ADVISE -> exit 3 ALWAYS. v1 defers the pass-receipt, so running qavis cannot clear it; only an override can. Pure-friction always-block on the flagship use case."
+        },
+        {
+          "id": "EC2",
+          "scenario": "same UI ship, second attempt after running `qavis qa --diff` locally",
+          "expected": "block clears because qavis ran and passed on this staged tree",
+          "testType": "e2e",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "No staged-diff-SHA pass-receipt in v1 -> the second attempt STILL blocks. Trains reflexive override -> dead gate (the exact anti-pattern check-sentry.mts lines 14-16 warn against)."
+        }
       ]
     },
     {
       "id": "R2",
-      "layer": "shared",
-      "category": "Recovery & Failure Modes",
-      "triggers": ["overlaid husky repo with no committed .husky/pre-commit"],
+      "layer": "backend",
+      "category": "Contract & Boundary Handling",
+      "triggers": ["commit trailer `qavis: skip` used to override a PRE-COMMIT gate"],
       "edgeCases": [
-        {"id":"EC4","scenario":"husky repo, pre-push committed but NO committed pre-commit, plain git commit","expected":"gates do not run (husky _/h:6 exits before sourcing init.sh) — documented hole","testType":"integration","coverageStatus":"documented","coveredBy":["doctor.mjs overlay warn: no committed .husky/pre-commit","docs/decisions/overlay-self-heal.md Negative"],"notes":"closing it needs a git-ignored .husky/pre-commit stub — out of overlay's invisibility budget"}
+        {
+          "id": "EC3",
+          "scenario": "author adds trailer `qavis: skip` to the commit message to bypass the advisory at pre-commit",
+          "expected": "override honored",
+          "testType": "integration",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "A pre-commit hook has NO access to the commit message (git passes it only to commit-msg). Sentry & completeness live at commit-msg specifically for this. The trailer override is DEAD at pre-commit; only env overrides work."
+        }
       ]
     },
     {
       "id": "R3",
-      "layer": "shared",
-      "category": "State & Data Integrity",
-      "triggers": ["gates-only env guard before chain exec"],
+      "layer": "backend",
+      "category": "Contract & Boundary Handling",
+      "triggers": ["bench `diff` field vs gate `git diff --cached` feeding the shared classifier"],
       "edgeCases": [
-        {"id":"EC5","scenario":"post-reclaim plain commit, shim installed, gate passes","expected":"gates run once with DEVKIT_VIA_HUSKY_INIT=1; committed hook runs once; no double-run","testType":"e2e","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: runs the overlay gates with DEVKIT_VIA_HUSKY_INIT=1","husky-block.test.mjs: guard BEFORE chain exec"],"notes":""},
-        {"id":"EC6","scenario":"post-reclaim plain commit, a gate fails (overlay hook exit 1)","expected":"commit aborts; exit 1 propagates through the sourced init.sh","testType":"e2e","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: propagates a failing gate to abort the commit"],"notes":""},
-        {"id":"EC7","scenario":"git ci alias active AND shim installed","expected":"gates run exactly once (alias re-points → husky bypassed → shim not sourced)","testType":"integration","coverageStatus":"documented","coveredBy":["doctor.mjs: shim + alias don't double-run note"],"notes":"alias path bypasses husky's _/h entirely, so init.sh is never sourced"}
+        {
+          "id": "EC4",
+          "scenario": "consumer has diff.noprefix=true or mnemonicPrefix set; gate calls plain `git diff --cached`",
+          "expected": "judge sees identical header shape to authored bench diffs (no drift)",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "completeness/detect force `-c diff.noprefix=false -c diff.mnemonicPrefix=false`. Plan omits this -> consumer git config can change the bytes the shared buildContext sees, drifting gate from bench."
+        }
       ]
     },
     {
       "id": "R4",
       "layer": "backend",
-      "category": "Recovery & Failure Modes",
-      "triggers": ["install/remove of machine-global init.sh"],
+      "category": "Permission & Security Boundaries",
+      "triggers": ["override env var propagation through the ship subprocess chain"],
       "edgeCases": [
-        {"id":"EC8","scenario":"install onto a pre-existing user init.sh (with/without trailing newline)","expected":"user content preserved, one devkit block","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: appends onto a pre-existing user init.sh"],"notes":""},
-        {"id":"EC9","scenario":"re-install (idempotency)","expected":"exactly one devkit block, byte-stable","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: is idempotent — re-install is byte-stable"],"notes":"strip-then-reinsert, never blind append"},
-        {"id":"EC10","scenario":"clean --global with user content before and after the block","expected":"only the devkit block removed, file kept","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: remove strips only the devkit block, keeping user content before AND after"],"notes":""},
-        {"id":"EC11","scenario":"clean --global on a devkit-only init.sh","expected":"file unlinked","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: remove unlinks a devkit-only init.sh"],"notes":""},
-        {"id":"EC12","scenario":"per-repo devkit clean with the shim installed","expected":"global shim untouched (inert); only clean --global removes it","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: removes the machine-global shim; plain clean leaves it"],"notes":""}
+        {
+          "id": "EC5",
+          "scenario": "user runs `GUARD_QAVIS_OK=1 devkit ship` (inline prefix) under an rtk command-rewriting shell hook",
+          "expected": "override reaches the git-commit subprocess inside commit-with-gate-capture.sh",
+          "testType": "integration",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "Memory + the ship script warn inline env prefixes can be stripped by command-rewriting hooks; must be EXPORTED. Document `export GUARD_QAVIS_OK=1` (same footgun as SHIP_COMMIT_TIMEOUT)."
+        }
       ]
     },
     {
       "id": "R5",
-      "layer": "shared",
-      "category": "Permission & Security Boundaries",
-      "triggers": ["HUSKY env, PATH ordering, sourced-global-runs-repo-local, $0 across shells"],
+      "layer": "backend",
+      "category": "Recovery & Failure Modes",
+      "triggers": ["LLM/hybrid judge outage during a strict ship"],
       "edgeCases": [
-        {"id":"EC13","scenario":"HUSKY=0 git commit in overlaid repo","expected":"shim skips (honors husky's escape hatch)","testType":"integration","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: honors HUSKY=0 — skips the gates"],"notes":"shim self-checks HUSKY=0 because _/h's own HUSKY=0 exit is after it sources init.sh"},
-        {"id":"EC14","scenario":"shim runs overlay hook before _/h exports node_modules/.bin","expected":"overlay hook resolves its own tools by explicit path / own PATH_SETUP","testType":"integration","coverageStatus":"documented","coveredBy":["overlay.mjs docstring PATH-ordering note","husky-block.mjs OVERLAY_LINT_STEPS uses node_modules/.bin/... explicit paths"],"notes":"true today; guard against a future bare-bin gate"},
-        {"id":"EC15","scenario":"$0 basename across dash/bash/zsh-as-sh","expected":"${0##*/} == pre-commit (stub sources h, h sources init.sh; $0 inherited)","testType":"unit","coverageStatus":"covered","coveredBy":["overlay-global-hook.test.mjs: dispatch runs under sh with $0 basename = hook name"],"notes":""}
+        {
+          "id": "EC6",
+          "scenario": "claude CLI unauth/quota-exhausted while gate runs in llm mode under GUARD_AI_STRICT",
+          "expected": "exit 2 fail-open (advisor infra failure must not block a ship)",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "Intended departure from completeness (which exit-3 fail-closes on outage). Fine IF the husky fragment does NOT render the standard exit-3 'judge unavailable' remedy for this gate. Regex mode never hits this."
+        }
+      ]
+    },
+    {
+      "id": "R6",
+      "layer": "backend",
+      "category": "UX Behavioral Correctness",
+      "triggers": ["the actionable command the gate prints", "no-recipe repo", "exit-3 husky fragment messaging"],
+      "edgeCases": [
+        {
+          "id": "EC7",
+          "scenario": "gate prints `qavis qa --diff <base> --repo . --annotate description` (no --pr) as the remedy",
+          "expected": "the printed command actually records something the author can act on",
+          "testType": "e2e",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "qavis --annotate only writes on a PASS and requires --pr (cli.ts printAnnotation returns early when pr undefined). At commit time there is no PR, so `--annotate description` is a silent no-op. The remedy command is broken for the primary case."
+        },
+        {
+          "id": "EC8",
+          "scenario": "UI change in a repo with NO .qavis/recipe.json",
+          "expected": "SILENT (correct: can't QA without a recipe; don't nag every commit)",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "Plan's SILENT is right for the gate. Surface 'add a recipe' ONCE in devkit doctor/init, not per-commit."
+        },
+        {
+          "id": "EC16",
+          "scenario": "positive ADVISE returns exit 3 under strict; husky GUARD_FRAGMENTS.qavisAdvisory reuses decisions/review rc handling",
+          "expected": "the message tells the author to run qavis, NOT 'judge unavailable — check claude auth/quota'",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "husky-block.mts decisions/review fragments render exit 3 as 'judge unavailable — strict ship mode failed closed'. Repurposing exit 3 for a positive finding collides with that copy; the fragment CANNOT be 'same as decisions/review'."
+        }
+      ]
+    },
+    {
+      "id": "R7",
+      "layer": "backend",
+      "category": "Contract & Boundary Handling",
+      "triggers": ["bench `--fail` regression gate", "recorded Target bench-gates-on-flips-not-deltas"],
+      "edgeCases": [
+        {
+          "id": "EC9",
+          "scenario": "mirror sentry bench `--fail` (aggregate F1/accuracy delta with 1e-9 epsilon)",
+          "expected": "gate on per-row FLIP TABLE (McNemar) + hard floors + config/corpus/gate hashes, per the recorded Target",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "sentry/eval/bench.mts line 135 IS the aggregate-delta anti-pattern docs/decisions/bench-gates-on-flips-not-deltas.md was written to replace. Use gate-engine/review/eval/bench.mts as the --fail template."
+        },
+        {
+          "id": "EC10",
+          "scenario": "mine devkit/qavis PR history for ADVISE-labelled rows",
+          "expected": "labels reflect 'should this have been QA'd', independently judged",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "Label circularity if ADVISE == 'qavis was historically run'. Also devkit has frontendRoots:[] (a CLI, zero UI diffs) -> almost nothing UI to mine from devkit; corpus is really authored + qavis-only."
+        }
+      ]
+    },
+    {
+      "id": "R8",
+      "layer": "backend",
+      "category": "State & Data Integrity",
+      "triggers": ["non-trivial git diff shapes"],
+      "edgeCases": [
+        {
+          "id": "EC11",
+          "scenario": "staged change is a pure DELETE of components/Foo.tsx",
+          "expected": "decide explicitly (likely SILENT — nothing to drive on a removed view)",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "isUiAffecting matches the deleted .tsx path -> regex ADVISE. False-advise on deletions unless name-status filters D."
+        },
+        {
+          "id": "EC12",
+          "scenario": "staged change is a binary asset under public/ or assets/",
+          "expected": "ADVISE (visual change), and the diff-reading judge must not flip to SILENT on an empty/binary hunk",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "regex ADVISE is right; the LLM diff path gets no usable text for a binary hunk -> ensure it does not downgrade."
+        },
+        {
+          "id": "EC13",
+          "scenario": "empty staged diff (no files)",
+          "expected": "SILENT / exit 0",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "completeness returns 0 on files.length===0; qavis-advisory must too."
+        },
+        {
+          "id": "EC14",
+          "scenario": "monorepo: UI change in package A which HAS a recipe; hook runs cd'd into A",
+          "expected": "recipe resolves per-package (.qavis/recipe.json relative to the package cwd)",
+          "testType": "integration",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "husky-block cd's into pkgRel; recipe presence must resolve at that cwd, not the git root. Per synced-assets-layout-agnostic, resolve roots from config, never hardcode."
+        },
+        {
+          "id": "EC15",
+          "scenario": "rename components/Foo.tsx -> components/Foo.view.tsx, or .tsx -> .ts",
+          "expected": "classifier handles rename entries and extension changes deterministically",
+          "testType": "unit",
+          "coverageStatus": "not-covered",
+          "coveredBy": [],
+          "notes": "git diff --cached --name-only lists the new path; a .tsx->.ts rename could drop below UI_EXT. Define the intended verdict."
+        }
       ]
     }
   ]

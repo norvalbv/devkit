@@ -358,7 +358,7 @@ describe('overlay (local-only) install', () => {
     }
   });
 
-  it('freeze-if-absent: re-running overlay keeps the baseline (does NOT re-grandfather new debt)', async () => {
+  it('adopted repo never re-grandfathers new debt (baselining is init-only; baseline stays absent)', async () => {
     const root = workRepo();
     const opts = {
       stack: 'react-app',
@@ -367,8 +367,11 @@ describe('overlay (local-only) install', () => {
       devkitRef: 'v0.9.0',
     };
     await applyInit(root, opts);
-    const sizeBefore = readFileSync(join(root, 'eslint', 'baselines', 'size.json'), 'utf8');
-    expect(JSON.parse(sizeBefore).fileDisables).toBe(0);
+    // A clean repo has zero disables → NO empty size.json is written (an empty baseline is not kept
+    // as a sentinel any more). The durable "already adopted" marker is .devkit/config.json.
+    const sizeBaseline = join(root, 'eslint', 'baselines', 'size.json');
+    expect(existsSync(sizeBaseline)).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'config.json'))).toBe(true);
 
     // add NEW size debt (an inline max-lines disable) — a re-freeze WOULD grandfather it
     mkdirSync(join(root, 'src'), { recursive: true });
@@ -378,11 +381,13 @@ describe('overlay (local-only) install', () => {
     );
     await applyInit(root, opts);
 
-    // baseline unchanged → the ratchet still catches the new disable on the next commit
-    expect(readFileSync(join(root, 'eslint', 'baselines', 'size.json'), 'utf8')).toBe(sizeBefore);
+    // Adopted (marker present) → freeze is skipped, so the new debt is NEVER grandfathered; the
+    // baseline stays absent and the size gate still catches the disable via enforce-from-config
+    // (proven in gate-engine/ratchets/__tests__/size-disable.test.mts).
+    expect(existsSync(sizeBaseline)).toBe(false);
   });
 
-  it('freeze-if-absent still creates a MISSING size-lines baseline when maxLines is later turned on', async () => {
+  it('init-only: re-apply does NOT auto-create size-lines when maxLines is enabled later (explicit freeze does)', async () => {
     const root = workRepo();
     const opts = {
       stack: 'react-app',
@@ -390,18 +395,28 @@ describe('overlay (local-only) install', () => {
       overlay: true,
       devkitRef: 'v0.9.0',
     };
-    await applyInit(root, opts); // no maxLines yet → only size.json
+    await applyInit(root, opts); // no maxLines yet
     const linesBaseline = join(root, 'eslint', 'baselines', 'size-lines.json');
     expect(existsSync(linesBaseline)).toBe(false);
 
-    // turn on the raw-line cap, then re-apply — size.json exists but size-lines.json is still missing
+    // turn on the raw-line cap AND add a legacy giant that would need grandfathering
     const cfgPath = join(root, 'guard.config.json');
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
     cfg.maxLines = 50;
+    cfg.scanRoots = ['src'];
+    cfg.sourceExtensions = ['ts'];
     writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
-    await applyInit(root, opts);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'legacy.ts'), `${Array(80).fill('const x = 1;').join('\n')}\n`);
 
-    expect(existsSync(linesBaseline)).toBe(true); // first-freeze of the lines baseline was NOT skipped
+    await applyInit(root, opts);
+    // Adopted repo → baselining is init-only; the implicit re-apply does NOT snapshot the giant.
+    expect(existsSync(linesBaseline)).toBe(false);
+
+    // The EXPLICIT re-cut path (`guard-size freeze`) is how a later cap is grandfathered.
+    const script = join(process.cwd(), 'gate-engine', 'ratchets', 'size-disable.mts');
+    execFileSync(process.execPath, [script, 'freeze'], { cwd: root });
+    expect(existsSync(linesBaseline)).toBe(true);
   });
 
   // ── agent-half + fallow (the components overlay grew to install) ────────────────
