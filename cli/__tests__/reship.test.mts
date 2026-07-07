@@ -250,3 +250,110 @@ describe('reship — untracked gate configs are linked into the re-ship worktree
     }
   });
 });
+
+describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carries the space)', () => {
+  // A linked-worktree commit hands the commit-msg hook the ABSOLUTE $GIT_DIR/COMMIT_EDITMSG path; under
+  // a spaced repo root that path contains the space. Devkit forwards it as one intact arg (every ship
+  // path is quoted) — the crash that motivated this was a CONSUMER commit-msg hook re-forwarding $1
+  // UNQUOTED. (A) proves reship survives a spaced root; (B) proves the failure hint fires on the split.
+  function mkRepo(spaced = true) {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    // spaced → the repo root's parent component contains a space (the crash trigger); else space-free.
+    const parent = mkdtempSync(join(tmpdir(), spaced ? 'reship space ' : 'reship-nospace-'));
+    dirs.push(parent);
+    const dir = join(parent, 'repo');
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) => execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+    ])
+      g(a, { stdio: 'ignore' });
+    writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    // First ship: a.ts=v1 on origin/feat/pr, then edit v2 for the re-ship.
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    return { dir, g };
+  }
+
+  // Install the commit-msg hook AFTER first-ship setup so it fires only on the re-ship commit.
+  const commitMsg = (dir, body) => {
+    writeFileSync(join(dir, '.husky/_/commit-msg'), body);
+    chmodSync(join(dir, '.husky/_/commit-msg'), 0o755);
+  };
+
+  it('A: re-ships through a correctly-quoted commit-msg hook (path arrives intact, with its space)', () => {
+    const { dir, g } = mkRepo();
+    const recDir = mkdtempSync(join(tmpdir(), 'reship-rec-')); // space-FREE record path (no redirect-quoting subtlety)
+    dirs.push(recDir);
+    const rec = join(recDir, 'arg');
+    commitMsg(dir, `#!/bin/sh\nprintf '%s\\n' "$1" > ${JSON.stringify(rec)}\n`);
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    expect(r.status, r.stderr).toBe(0); // reship completes despite the spaced $ROOT
+    const arg1 = readFileSync(rec, 'utf8').trimEnd();
+    expect(arg1).toMatch(/COMMIT_EDITMSG$/); // git handed the hook the message-file path...
+    expect(arg1).toContain(' '); // ...as ONE arg still carrying the space (no split before the hook)
+    if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+  });
+
+  it('B: names the space cause when a commit-msg hook forwards $1 unquoted (reproduces the crash)', () => {
+    const { dir } = mkRepo();
+    // The consumer bug, reproduced: `set -- --edit $1` with an UNQUOTED $1 splits a spaced path into
+    // >2 args; echo "$*" keeps the COMMIT_EDITMSG tail in the output (the signature the hint gates on),
+    // then exit non-zero fails the commit. Robust to any number of spaces in the temp path.
+    commitMsg(dir, '#!/bin/sh\nset -- --edit $1\n[ "$#" -eq 2 ] && exit 0\necho "Unknown argument: $*"\nexit 9\n');
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    expect(r.status).not.toBe(0); // the split failed the commit
+    expect(r.stderr).toMatch(/repo path has a space/); // the diagnostic fired (space + COMMIT_EDITMSG in log)
+    // reship's cleanup trap already reclaimed the ephemeral worktree on the failed commit.
+  });
+
+  it('C: stays silent on a spaced-path commit failure WITHOUT the COMMIT_EDITMSG signature', () => {
+    // Locks the LOG half of the AND-gate. A normal gate rejection under a spaced path (this repo
+    // self-dogfoods at one) must not be mis-blamed on an unquoted commit-msg hook. Regressing the gate
+    // to space-only would keep test B green but silently reintroduce this false positive.
+    const { dir } = mkRepo(true);
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\necho "gate: blocked (no signature here)"\nexit 1\n', // fails BEFORE git writes COMMIT_EDITMSG
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    expect(r.status).not.toBe(0); // the gate failed the commit
+    expect(r.stderr).not.toMatch(/repo path has a space/); // …but the split diagnostic stays silent
+  });
+
+  it('D: stays silent on a space-FREE path even when COMMIT_EDITMSG is in the log', () => {
+    // Locks the SPACE half of the AND-gate. A hook surfacing COMMIT_EDITMSG at a normal (space-free)
+    // path is not the spaced-path split, so the space-specific advice must not fire.
+    const { dir } = mkRepo(false);
+    expect(dir).not.toContain(' '); // premise: the OS temp dir is space-free (as every other test assumes)
+    writeFileSync(
+      join(dir, '.husky/_/commit-msg'),
+      '#!/bin/sh\necho "hook read $PWD/.git/COMMIT_EDITMSG"\nexit 1\n', // COMMIT_EDITMSG in log, but no split
+    );
+    chmodSync(join(dir, '.husky/_/commit-msg'), 0o755);
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    expect(r.status).not.toBe(0); // the hook failed the commit
+    expect(r.stderr).not.toMatch(/repo path has a space/); // no space → no hint, despite COMMIT_EDITMSG in log
+  });
+});
