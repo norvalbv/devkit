@@ -1,0 +1,84 @@
+{
+  "name": "@norvalbv/devkit",
+  "version": "0.30.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Single source-of-truth devkit: shared Biome/TS configs + portable governance gate-engine + setup-wizard CLI. Consumed via `bun add git+ssh://git@github.com/norvalbv/devkit.git#<tag>`.",
+  "exports": {
+    "./biome/base": "./dist/biome/base.jsonc",
+    "./biome/react": "./dist/biome/react.jsonc",
+    "./tsconfig/base": "./dist/tsconfig/base.json",
+    "./tsconfig/next": "./dist/tsconfig/next.json",
+    "./tsconfig/node": "./dist/tsconfig/node.json",
+    "./gate-engine/config": "./dist/gate-engine/config.mjs",
+    "./gate-engine/structure/compile": "./dist/gate-engine/structure/compile.mjs",
+    "./gate-engine/structure/grammar": "./dist/gate-engine/structure/grammar.mjs",
+    "./gate-engine/structure/walk": "./dist/gate-engine/structure/walk.mjs",
+    "./gate-engine/structure/load-baseline": "./dist/gate-engine/structure/load-baseline.mjs",
+    "./gate-engine/structure/eslint-config": "./dist/gate-engine/structure/eslint-config.mjs",
+    "./gate-engine/decisions/decisions": "./dist/gate-engine/decisions/decisions.mjs",
+    "./gate-engine/decisions/check-alignment": "./dist/gate-engine/decisions/check-alignment.mjs",
+    "./gate-engine/decisions/verdict-cache": "./dist/gate-engine/decisions/verdict-cache.mjs",
+    "./gate-engine/judge/factory": "./dist/gate-engine/judge/factory.mjs",
+    "./gate-engine/judge/run-judge": "./dist/gate-engine/judge/run-judge.mjs",
+    "./gate-engine/judge/judge-isolation": "./dist/gate-engine/judge/judge-isolation.mjs",
+    "./gate-engine/judge/verdict-store": "./dist/gate-engine/judge/verdict-store.mjs",
+    "./gate-engine/review/reviewers": "./dist/gate-engine/review/reviewers.mjs",
+    "./gate-engine/review/run-review": "./dist/gate-engine/review/run-review.mjs",
+    "./gate-engine/review/cache": "./dist/gate-engine/review/cache.mjs",
+    "./gate-engine/review/completeness": "./dist/gate-engine/review/completeness.mjs",
+    "./gate-engine/prefix-cache/prefix-cache": "./dist/gate-engine/prefix-cache/prefix-cache.mjs",
+    "./gate-engine/fallow/staged-filter": "./dist/gate-engine/fallow/staged-filter.mjs",
+    "./gate-engine/search-tool/guard": "./dist/gate-engine/search-tool/search-tool-guard.mjs",
+    "./gate-engine/search-tool/counter": "./dist/gate-engine/search-tool/search-tool-counter.mjs",
+    "./gate-engine/sentry/check-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
+  },
+  "bin": {
+    "devkit": "./dist/cli/index.mjs",
+    "guard-decisions": "./dist/gate-engine/decisions/cli.mjs",
+    "guard-review": "./dist/gate-engine/review/cli.mjs",
+    "guard-prefix": "./dist/gate-engine/prefix-cache/cli.mjs",
+    "guard-deterministic": "./dist/gate-engine/deterministic/run.mjs",
+    "guard-dup": "./dist/gate-engine/co-occurrence/matcher.mjs",
+    "guard-clone": "./dist/gate-engine/co-occurrence/clone-detector.mjs",
+    "guard-fanout": "./dist/gate-engine/ratchets/folder-fanout.mjs",
+    "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
+    "guard-structure": "./dist/gate-engine/structure/run.mjs",
+    "guard-fallow-staged": "./dist/gate-engine/fallow/staged-filter.mjs",
+    "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "biome check .",
+    "lint:structure": "eslint cli gate-engine",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.json",
+    "prepare": "husky",
+    "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@types/node": "^25.9.3",
+    "husky": "^9.1.7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "optionalDependencies": {
+    "jscpd": "^4.2.4"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.5.1",
+    "eslint": "^10.5.0",
+    "eslint-plugin-project-structure": "^3.14.3",
+    "ts-morph": "^28.0.0"
+  },
+  "engines": {
+    "node": ">=23.6"
+  }
+}
