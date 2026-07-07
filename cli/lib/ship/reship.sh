@@ -90,6 +90,21 @@ for d in "${LINK_DIRS[@]}"; do
   [ -e "$ROOT/$d" ] && ln -s "$ROOT/$d" "$WT/$d"
 done
 
+# Link the devkit-synced reviewer briefs + judge checklists so guard-review runs in the worktree.
+# .claude/{agents,skills} are git-ignored in an overlay consumer → absent from a fresh worktree →
+# every reviewer INCONCLUSIVEs → strict ship fails CLOSED. Link the two SUBDIRS (not the whole .claude:
+# the checklist writes per-run state to .claude/.<skill>-review.json in cwd, which must stay in the
+# ephemeral worktree). Skip a subdir already checked out (repos that TRACK .claude — no bogus nesting).
+# (See ship-branch.sh for the full why.)
+if [ -d "$ROOT/.claude/agents" ] || [ -d "$ROOT/.claude/skills" ]; then
+  mkdir -p "$WT/.claude"
+  for sub in agents skills; do
+    if [ -e "$ROOT/.claude/$sub" ] && [ ! -e "$WT/.claude/$sub" ]; then
+      ln -s "$ROOT/.claude/$sub" "$WT/.claude/$sub"
+    fi
+  done
+fi
+
 # Copy the CURRENT content of each path over the fetched tip (add/modify), or delete it. The commit
 # diff is therefore (origin/<branch> tip → your current files) = exactly the new delta, with no
 # HEAD-relative patch that could clash with the first ship's content.

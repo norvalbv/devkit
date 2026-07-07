@@ -61,6 +61,11 @@ interface CascadeResult {
   transcript?: string;
 }
 
+// A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
+// remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
+// (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
+const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
+
 // GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
 // per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
 function skippedReviewers(): Set<string> {
@@ -452,10 +457,19 @@ export async function runReviewGate(
   if (fails.length > 0) return 1;
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
   for (const r of inconclusive) {
+    // The remedy must match the CAUSE: a missing brief (cascadeVerdict) or missing checklist artifact
+    // (verifyChecklist) is a SYNC gap — the auth/quota remedy is actively wrong and contradicts the
+    // reason. In a `devkit ship` worktree the briefs/skills must also be LINKED in (ship-branch.sh
+    // does this); an un-synced main checkout is the other cause. Runtime outages (judge outage, no
+    // VERDICT, engine error) keep the auth/quota remedy.
+    const syncCause = SYNC_INCONCLUSIVE_RE.test(r.reason);
+    const remedy = syncCause
+      ? 'run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are present, then re-run devkit ship'
+      : 'check `claude` CLI auth/quota, then re-run devkit ship';
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
-            '   Remedy: check `claude` CLI auth/quota, then re-run devkit ship (completed verdicts are cached).'
+            `   Remedy: ${remedy} (completed verdicts are cached).`
         : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
     );
   }
