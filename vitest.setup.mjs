@@ -18,3 +18,13 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+// JSCPD_BIN: a dev's globally-installed jscpd (e.g. ~/.bun/bin/jscpd) exported into the shell leaks
+// into the clone-detector subprocesses the tests spawn, so the suite validates THAT binary instead of
+// the jscpd devkit vendors + ships (node_modules/.bin/jscpd). Across a jscpd major bump the reported
+// clone-path base changed — 5.x reports bare basenames (`a.ts`), 4.x reports src/-prefixed
+// (`src/a.ts`) — which flips the relPath/normalisation assertions red purely on the ambient env.
+// Strip it so the module-level `JSCPD_BIN` const falls back to the vendored binary; tests that need a
+// specific bin still pass it per-spawn (execFileSync env), and resolveJscpdBin's unit tests inject env
+// directly, so both are unaffected.
+delete process.env.JSCPD_BIN;
