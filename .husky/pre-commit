@@ -34,6 +34,14 @@ elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
 fi
 # ddrc 0 = clean/staged/routine/bypassed, ddrc 2 = fail-open → continue; any other code blocks.
 
+# qavis-advisory gate (advisory) — nudge to run qavis QA on a UI-affecting staged change. All the
+# "deserves QA?" logic + the pass-receipt live in qavis; this shells `qavis route`. Fail-open when
+# qavis or a .qavis/recipe.json is absent — devkit has no recipe, so this is a clean no-op here
+# (dogfooded for wiring parity). 3 = ADVISE under a strict ship (block); anything else continues.
+qarc=0
+node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
+[ "$qarc" -eq 3 ] && exit 1
+
 # fallow audit (dead-code + complexity + duplication on the changed set) — advisory (fail-open):
 # surfaces findings, never blocks; no-ops when the fallow CLI is not installed.
 command -v fallow >/dev/null 2>&1 && fallow audit || true
