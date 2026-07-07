@@ -108,16 +108,29 @@ else BODY=$(cat); fi
 
 cleanup() {
   rm -f "$PATCH"
+  # Reclaim the ephemeral worktree + branch whenever no commit landed beyond BASE — the commit
+  # failed, never ran, or was reset by the honest-banner abort in commit-with-gate-capture.sh,
+  # leaving an empty branch + throwaway worktree with nothing to inspect or recover. This fires on
+  # EVERY exit, incl. DRY and the fail-closed preflight exits — otherwise a failed dry-run leaks a
+  # devkit-ship-* worktree + branch (they then show as "checked out in a linked worktree" and block
+  # deletion). An absent branch (worktree add failed) is treated the same. Keying on the commit —
+  # not on SHIP_DRY_RUN — is what the sibling reship.sh already does. Worktree first: a branch
+  # checked out in a worktree can't be deleted.
+  local tip; tip=$(git rev-parse -q --verify "$BR" 2>/dev/null || true)
+  if [ -z "$tip" ] || [ "$tip" = "$BASE" ]; then
+    git worktree remove --force "$WT" 2>/dev/null || true
+    [ -n "$tip" ] && git branch -D "$BR" 2>/dev/null || true
+    return
+  fi
+  # A commit DID land beyond BASE.
   if [ -n "${SHIP_DRY_RUN:-}" ]; then
+    # Dry-run success: keep the worktree so the operator can inspect the local commit.
     echo "DRY: worktree kept at $WT (branch $BR). Inspect, then:" >&2
     echo "  git worktree remove --force '$WT' && git branch -D '$BR'" >&2
   else
+    # Non-dry: remove the worktree; KEEP the branch (commit succeeded but push/PR may have failed)
+    # so the work stays recoverable — it is deleted explicitly after push + PR succeed (below).
     git worktree remove --force "$WT" 2>/dev/null || true
-    # Drop the branch ONLY if it has no commit beyond BASE — i.e. the commit failed or
-    # never ran, leaving an empty branch that would just block a retry at the preflight.
-    # A branch that DID get the commit (e.g. the commit succeeded but the push failed) is
-    # KEPT so the work stays recoverable; it is deleted explicitly after push + PR succeed.
-    [ "$(git rev-parse -q --verify "$BR" 2>/dev/null)" = "$BASE" ] && git branch -D "$BR" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
@@ -155,6 +168,25 @@ fi
 for d in "${LINK_DIRS[@]}"; do
   [ -e "$ROOT/$d" ] && ln -s "$ROOT/$d" "$WT/$d"
 done
+
+# .claude/{agents,skills} are devkit sync artifacts (devkit sync-agents / sync-skills). In an overlay
+# consumer they're git-ignored, so a fresh worktree lacks them and guard-review can't load reviewer
+# briefs (.claude/agents/<name>.md) or run the judge checklist (.claude/skills/<skill>/scripts/
+# checklist.mjs) — every reviewer INCONCLUSIVEs, which under ship strict (GUARD_AI_STRICT) fails CLOSED,
+# aborting every overlay ship. Link the two SUBDIRS — not the whole .claude: the checklist writes
+# per-run state to .claude/.<skill>-review.json in cwd, which must stay in the ephemeral worktree, not
+# leak into the shared main tree. Skip a subdir already checked out (repos that TRACK .claude, e.g.
+# devkit itself, get it via git checkout — a symlink onto it nests a bogus .../agents/agents).
+# ponytail: .claude/agents is sync-agents' hardcoded write target AND guard-review's agentsDir default;
+# a custom RELATIVE review.agentsDir isn't covered (still fails CLOSED, not open).
+if [ -d "$ROOT/.claude/agents" ] || [ -d "$ROOT/.claude/skills" ]; then
+  mkdir -p "$WT/.claude"
+  for sub in agents skills; do
+    if [ -e "$ROOT/.claude/$sub" ] && [ ! -e "$WT/.claude/$sub" ]; then
+      ln -s "$ROOT/.claude/$sub" "$WT/.claude/$sub"
+    fi
+  done
+fi
 
 # Tracked edits (modify + delete, binary-safe) -> worktree index.
 git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
