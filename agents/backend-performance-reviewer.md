@@ -2,7 +2,7 @@
 name: backend-performance-reviewer
 description: "Use this agent to review backend code for performance issues. Checks database queries, caching strategies, async patterns, and API response optimization.\\n\\n<example>\\nContext: User has added database queries or data fetching logic.\\nuser: \"Added the query to fetch all user tasks\"\\nassistant: \"Let me invoke the backend-performance-reviewer agent to check for N+1 queries and pagination issues.\"\\n<commentary>\\nDatabase queries should be reviewed for efficiency, proper indexing, and avoiding N+1 patterns.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has implemented caching or heavy data processing.\\nuser: \"Implemented caching for the dashboard data\"\\nassistant: \"I'll run the backend-performance-reviewer agent to verify cache invalidation and TTL strategies.\"\\n<commentary>\\nCaching implementations need review for proper invalidation and memory considerations.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: haiku
 color: orange
 ---
 

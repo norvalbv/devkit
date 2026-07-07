@@ -2,7 +2,7 @@
 name: frontend-security-reviewer
 description: "Use this agent to review frontend code for security vulnerabilities. Checks XSS prevention, CSRF protection, token storage, and input validation.\\n\\n<example>\\nContext: User has added form handling or user input processing.\\nuser: \"Added the comment submission form\"\\nassistant: \"Let me invoke the frontend-security-reviewer agent to check for XSS vulnerabilities and input sanitization.\"\\n<commentary>\\nUser input handling should be reviewed for proper sanitization and XSS prevention.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has modified authentication or token handling.\\nuser: \"Updated the login flow to store the session\"\\nassistant: \"I'll run the frontend-security-reviewer agent to verify tokens aren't stored in localStorage and are properly secured.\"\\n<commentary>\\nAuthentication changes need review for secure token storage and CSRF protection.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: sonnet
+model: haiku
 color: red
 ---
 
