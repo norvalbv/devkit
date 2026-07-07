@@ -1,0 +1,117 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  // Generic core (vcs, formatter, assist, json/css formatters, generic linter
+  // rules) is inherited from the shared devkit BASE preset. The React
+  // architecture rules are applied here in a RENDERER-SCOPED override — NOT via
+  // the broad biome/react preset — so they never fire on the Electron MAIN
+  // process or other Node/config .ts files (which legitimately use default
+  // exports, interfaces, etc.).
+  "extends": ["@norvalbv/devkit/biome/base"],
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!out", "!dist", "!release", "!resources", "!eslint/baselines"]
+  },
+  "overrides": [
+    {
+      // Renderer .tsx: PascalCase | kebab-case filenames (components + modules).
+      "includes": ["src/renderer/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": {
+              "level": "error",
+              "options": {
+                "strictCase": false,
+                "requireAscii": true,
+                "filenameCases": ["PascalCase", "kebab-case"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // React architecture rules — RENDERER ONLY. Named exports only, `type` over
+      // `interface`, ban React.FC / JSX.Element in favour of ReactElement, no
+      // `export *` barrels.
+      "includes": ["src/renderer/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "error",
+            "useConsistentTypeDefinitions": {
+              "level": "error",
+              "options": { "style": "type" }
+            },
+            "noRestrictedTypes": {
+              "level": "error",
+              "options": {
+                "types": {
+                  "React.FC": {
+                    "message": "React.FC is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "FC": {
+                    "message": "FC is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "React.FunctionComponent": {
+                    "message": "React.FunctionComponent is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "FunctionComponent": {
+                    "message": "FunctionComponent is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "JSX.Element": {
+                    "message": "JSX.Element widens props to any. Use ReactElement from 'react' instead.",
+                    "use": "ReactElement"
+                  },
+                  "React.JSX.Element": {
+                    "message": "React.JSX.Element widens props to any. Use ReactElement from 'react' instead.",
+                    "use": "ReactElement"
+                  }
+                }
+              }
+            }
+          },
+          "performance": {
+            "noReExportAll": "error"
+          }
+        }
+      }
+    },
+    {
+      // src/main/ — Electron main process. kebab-only filenames + no default exports.
+      "includes": ["src/main/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDefaultExport": "error",
+            "useFilenamingConvention": {
+              "level": "error",
+              "options": {
+                "strictCase": false,
+                "requireAscii": true,
+                "filenameCases": ["kebab-case"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // Tests: relax filename + naming conventions.
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
+      "linter": {
+        "rules": {
+          "performance": { "useTopLevelRegex": "off" },
+          "style": {
+            "useFilenamingConvention": "off",
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    }
+  ]
+}
