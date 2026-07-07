@@ -25,11 +25,13 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { hasStagedFiles, stageBaseline } from './git-index.mts';
 
 // { '<dir>': <impl-file count> } — the per-directory fan-out tally the walk produces.
 type FanoutCounts = Record<string, number>;
@@ -94,23 +96,36 @@ function runCli(cmd: string) {
   const offenders = overCap(countFanout(root), cap);
 
   if (cmd === 'freeze') {
-    const out = { cap, dirs: offenders };
-    mkdirSync(dirname(baselineFile), { recursive: true });
-    writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
-    console.log(
-      `✓ ${BASELINE}: cap ${cap}, ${Object.keys(offenders).length} over-cap folder(s) grandfathered (shrink-only)`,
-    );
+    if (Object.keys(offenders).length > 0) {
+      const out = { cap, dirs: offenders };
+      mkdirSync(dirname(baselineFile), { recursive: true });
+      writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
+      console.log(
+        `✓ ${BASELINE}: cap ${cap}, ${Object.keys(offenders).length} over-cap folder(s) grandfathered (shrink-only)`,
+      );
+    } else {
+      // No folder over cap → no debt to grandfather. Don't write an empty baseline; delete a stale one.
+      // The cap is enforced from guard.config.json, so an absent baseline still gates new fan-out.
+      rmSync(baselineFile, { force: true });
+      console.log(`✓ ${BASELINE}: no folder over cap ${cap} — no baseline written`);
+    }
     process.exit(0);
   }
 
   // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
   // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
-    if (!existsSync(baselineFile)) {
-      console.error(`fanout-ratchet: ${BASELINE} missing — run \`guard-fanout freeze\` first.`);
-      process.exit(2); // fail-open before the baseline exists
+    const hasBaseline = existsSync(baselineFile);
+    // Missing baseline = no grandfathered over-cap folders. Enforce the config cap whenever the repo
+    // is governed (guard.config.json present — devkit's own repo, CI, any adopted consumer); only an
+    // UNgoverned + un-frozen repo fails open, so an unadopted repo is never wedged. Never key this on
+    // .devkit/config.json — absent in devkit's sync-dogfooded repo and in CI (would disable the gate).
+    if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
+      process.exit(2); // ungoverned + un-frozen → fail open
     }
-    const frozen = JSON.parse(readFileSync(baselineFile, 'utf8')) as FanoutBaseline;
+    const frozen: FanoutBaseline = hasBaseline
+      ? (JSON.parse(readFileSync(baselineFile, 'utf8')) as FanoutBaseline)
+      : { cap, dirs: {} };
     const grew = Object.entries(offenders).filter(
       ([dir, n]) => n > Math.max(frozen.cap, frozen.dirs[dir] ?? 0),
     );
@@ -124,6 +139,19 @@ function runCli(cmd: string) {
         '   Split into cohesive kebab subfolders (group by concern — graphify/co-occurrence can suggest clusters).',
       );
       process.exit(1);
+    }
+    // Every grandfathered folder healed (baseline had over-cap dirs, none remain) → self-delete the
+    // stale baseline in a real commit so it doesn't linger.
+    if (
+      hasBaseline &&
+      Object.keys(frozen.dirs).length > 0 &&
+      Object.keys(offenders).length === 0 &&
+      hasStagedFiles(root)
+    ) {
+      rmSync(baselineFile, { force: true });
+      stageBaseline(root, BASELINE);
+      console.log(`✓ fan-out debt cleared — ${BASELINE} removed & staged.`);
+      process.exit(0);
     }
     const shrank = Object.entries(frozen.dirs).filter(([dir, n]) => (offenders[dir] ?? 0) < n);
     if (shrank.length > 0) {

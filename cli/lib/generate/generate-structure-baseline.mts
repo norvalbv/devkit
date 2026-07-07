@@ -22,7 +22,7 @@
  * Output: one `eslint/baselines/<tree>.mjs` per existing tree (overwritten).
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mts';
@@ -780,8 +780,14 @@ function generateConfigTree(t: StructureTree, ctx: ConfigTreeContext): TreeBasel
       });
   if (!opts.dryRun) {
     const outFile = join(cwd, 'eslint', 'baselines', `${t.name}.mjs`);
-    mkdirSync(dirname(outFile), { recursive: true });
-    writeFileSync(outFile, renderBaselineFile(t.name, sorted));
+    if (sorted.length > 0) {
+      mkdirSync(dirname(outFile), { recursive: true });
+      writeFileSync(outFile, renderBaselineFile(t.name, sorted));
+    } else {
+      // No violators → no debt to grandfather. Don't write an empty baseline; delete a stale one
+      // (the eslint loader returns [] on absence, so enforcement is unchanged).
+      rmSync(outFile, { force: true });
+    }
   }
   log(
     `  ${opts.dryRun ? '[dry-run] ' : '✓ '}eslint/baselines/${t.name}.mjs: ${sorted.length} grandfathered file(s)`,
@@ -825,8 +831,12 @@ export async function generateStructureBaselines(
     const sorted = generateTreeBaseline(tree, cwd, { roots, domains });
     const out = join(cwd, 'eslint', 'baselines', `${tree}.mjs`);
     if (!opts.dryRun) {
-      mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, renderBaselineFile(tree, sorted));
+      if (sorted.length > 0) {
+        mkdirSync(dirname(out), { recursive: true });
+        writeFileSync(out, renderBaselineFile(tree, sorted));
+      } else {
+        rmSync(out, { force: true }); // no violators → no empty baseline (loader returns [] on absence)
+      }
     }
     log(
       `  ${opts.dryRun ? '[dry-run] ' : '✓ '}eslint/baselines/${tree}.mjs: ${sorted.length} grandfathered file(s)`,

@@ -31,19 +31,30 @@ One generated baseline per declared `structure.trees[]` entry, plus the shared r
 If a generated entry is really a permanent exception (a vendored file, a generated giant), **move it to
 `exempt.mjs`** rather than chasing it to zero.
 
-## Regenerating (only after a deliberate audit — never to silence a new offender)
+## Regenerating (baselines are cut ONCE, at adoption — never re-snapshotted)
+
+Baselines are frozen exactly once, when `devkit init` first adopts the repo (recorded by
+`.devkit/config.json`). An adopted repo is **never** re-baselined — not by `devkit upgrade`, not by
+the overlay re-apply on `bun install`, not by a code change. That is what stops a `--no-verify` /
+GUI-committed violation from being silently grandfathered on the next re-apply. To deliberately
+re-cut a baseline after a genuine audit, run the explicit freeze:
 
 ```bash
-devkit init       # re-runs the structure + import-wall baseline generators from guard.config.json
-                  # (the size + fan-out ratchets re-freeze via gate-engine/ratchets/* at commit time)
+guard-fanout freeze   # re-count the fan-out baseline
+guard-size freeze     # re-count the size baselines
+devkit init --baselines-only   # re-run the structure + import-wall generators
 ```
 
-You **cannot** game these by hand-deleting an entry: regen re-adds anything still violating, and the
-two `.json` ratchets have monotonic gates (the count can only go down). The honest way to remove an
-entry is to *fix the file*.
+You **cannot** game these by hand-deleting an entry: an explicit re-cut re-adds anything still
+violating, and the two `.json` ratchets have monotonic gates (the count can only go down). The honest
+way to remove an entry is to *fix the file*.
 
 ## The end state
 
 Drive each debt file's contents to `[]` / `0`, reclassifying genuine exceptions into `exempt.mjs` as
-you go. **Keep the empty files** — an empty baseline is the standing proof that its wall has zero
-grandfathered exceptions.
+you go. When a debt file reaches empty it is **deleted, not kept** — an absent baseline means "zero
+grandfathered exceptions, wall enforced straight from `guard.config.json`". The gates self-clean:
+`guard-fanout` / `guard-size` delete a baseline the moment its last entry heals in a commit, and the
+structure/import generators write nothing when a tree has no violators. So the standing proof of a
+clean wall is the **absence** of its baseline, and a governed repo (one with `guard.config.json`)
+still enforces every cap with no baseline present.

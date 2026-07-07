@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   generateStructureBaselines,
@@ -102,6 +104,16 @@ describe('generateStructureBaselines — multi-tree', () => {
     const summary = await generateStructureBaselines(root, {});
     // 'charts' is registered → bar.ts is valid → renderer baseline empty.
     expect(summary.find((s) => s.tree === 'renderer').count).toBe(0);
+  });
+
+  it('writes NO baseline for a clean tree, and deletes a stale one (no empty .mjs left)', async () => {
+    const root = tmpRepo();
+    write(root, 'src/renderer/components/Button/index.tsx'); // valid → 0 violators
+    // Pre-seed a stale (empty) baseline as an older devkit would have written.
+    write(root, 'eslint/baselines/renderer.mjs', 'export const rendererStructureBaseline = [];\n');
+    const rendererBaseline = join(root, 'eslint', 'baselines', 'renderer.mjs');
+    await generateStructureBaselines(root, {});
+    expect(existsSync(rendererBaseline)).toBe(false); // stale empty baseline deleted, none re-written
   });
 });
 

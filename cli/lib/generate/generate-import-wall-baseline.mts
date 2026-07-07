@@ -27,7 +27,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mts';
@@ -255,8 +255,14 @@ export function generateImportWallBaseline(
   const exportName = opts.walls?.exportName ?? DEFAULT_WALLS.exportName;
   const out = join(cwd, OUT);
   if (!opts.dryRun) {
-    mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, renderImportWallFile(entries, exportName));
+    if (entries.length > 0) {
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(out, renderImportWallFile(entries, exportName));
+    } else {
+      // No violators → no debt to grandfather. Don't write an empty baseline; delete a stale one
+      // (the eslint loader returns [] on absence, so enforcement is unchanged).
+      rmSync(out, { force: true });
+    }
   }
   log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${OUT}: ${entries.length} grandfathered file(s)`);
   for (const [w, n] of Object.entries(classCounts).sort()) log(`     ${w}: ${n} file(s)`);

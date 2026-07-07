@@ -18,7 +18,6 @@
 // never the package dir. Per the "never hard-code a count" rule, freeze re-walks the
 // tree and writes whatever it finds — never a literal.
 
-import { execFileSync } from 'node:child_process';
 import {
   type Dirent,
   existsSync,
@@ -26,11 +25,13 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
+import { hasStagedFiles, stageBaseline, stagedSet } from './git-index.mts';
 
 // The impl-file predicate bundle sourceMatchers() returns (isSource/isTest/isBarrel).
 type SourceMatchers = ReturnType<typeof sourceMatchers>;
@@ -129,37 +130,6 @@ export function countOversized(
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
 
-// Best-effort `git add` for the auto-lowered baseline so the tightened count rides along in
-// the commit. Never throws: a shrink must not block the gate, and non-git contexts (the
-// temp-dir tests, a bare checkout) simply leave the file written for a later commit/freeze.
-function stageBaseline(root: string, rel: string): void {
-  try {
-    execFileSync('git', ['add', '--', rel], { cwd: root, stdio: 'pipe' });
-  } catch {
-    // not a git repo / git absent — the file is still written; picked up on the next commit
-  }
-}
-
-// The repo-root-relative paths in the pending commit (the git index). Returns null when git is
-// unavailable (the temp-dir tests, a non-git checkout) so the caller falls back to whole-tree.
-// An empty set means "nothing staged" — CI / a manual audit, not a commit in progress.
-function stagedSet(root: string): Set<string> | null {
-  try {
-    const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    return new Set(
-      out
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
-  } catch {
-    return null;
-  }
-}
-
 // The maxLines gate as a per-file, per-commit shrink-only ratchet. When files are staged (a
 // commit in progress) it evaluates ONLY those files, so a parallel agent's unstaged edits can
 // neither block this commit nor tighten their files' ceilings. With nothing staged (CI, or a
@@ -210,12 +180,20 @@ function runLinesGate(
     }
   }
   if (tightened) {
-    writeFileSync(
-      linesBaselineFile,
-      `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`,
-    );
-    stageBaseline(root, LINES_BASELINE);
-    console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
+    if (Object.keys(next).length === 0) {
+      // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
+      // not kept as a sentinel) and stage the removal so it rides this commit.
+      rmSync(linesBaselineFile, { force: true });
+      stageBaseline(root, LINES_BASELINE);
+      console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
+    } else {
+      writeFileSync(
+        linesBaselineFile,
+        `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`,
+      );
+      stageBaseline(root, LINES_BASELINE);
+      console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
+    }
   }
 }
 
@@ -230,11 +208,19 @@ function runCli(cmd: string): void {
 
   if (cmd === 'freeze') {
     const out = { fileDisables: current.fileDisables, fnDisables: current.fnDisables };
-    mkdirSync(dirname(baselineFile), { recursive: true });
-    writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
-    console.log(
-      `✓ ${BASELINE}: frozen max-lines disables = ${out.fileDisables} file-level, ${out.fnDisables} per-function (from ${current.scannedFiles} source files)`,
-    );
+    if (out.fileDisables || out.fnDisables) {
+      mkdirSync(dirname(baselineFile), { recursive: true });
+      writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
+      console.log(
+        `✓ ${BASELINE}: frozen max-lines disables = ${out.fileDisables} file-level, ${out.fnDisables} per-function (from ${current.scannedFiles} source files)`,
+      );
+    } else {
+      // No disables anywhere → no debt to grandfather. Don't write an empty baseline; delete a stale one.
+      rmSync(baselineFile, { force: true });
+      console.log(
+        `✓ ${BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`,
+      );
+    }
     if (cfg.maxLines) {
       const over = countOversized(root);
       // Shrink-only: never RAISE a recorded ceiling. min(prev, current) means re-freezing
@@ -245,13 +231,21 @@ function runCli(cmd: string): void {
       const files = Object.fromEntries(
         over.map((o) => [o.file, o.file in prev ? Math.min(prev[o.file], o.lines) : o.lines]),
       );
-      writeFileSync(
-        linesBaselineFile,
-        `${JSON.stringify({ maxLines: cfg.maxLines, files }, null, 2)}\n`,
-      );
-      console.log(
-        `✓ ${LINES_BASELINE}: ${over.length} file(s) over ${cfg.maxLines} lines grandfathered (shrink-only)`,
-      );
+      if (Object.keys(files).length > 0) {
+        mkdirSync(dirname(linesBaselineFile), { recursive: true });
+        writeFileSync(
+          linesBaselineFile,
+          `${JSON.stringify({ maxLines: cfg.maxLines, files }, null, 2)}\n`,
+        );
+        console.log(
+          `✓ ${LINES_BASELINE}: ${over.length} file(s) over ${cfg.maxLines} lines grandfathered (shrink-only)`,
+        );
+      } else {
+        rmSync(linesBaselineFile, { force: true });
+        console.log(
+          `✓ ${LINES_BASELINE}: no file over ${cfg.maxLines} lines — no baseline written`,
+        );
+      }
     }
     process.exit(0);
   }
@@ -259,11 +253,18 @@ function runCli(cmd: string): void {
   // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
   // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
-    if (!existsSync(baselineFile)) {
-      console.error(`size-ratchet: ${BASELINE} missing — run \`guard-size freeze\` first.`);
-      process.exit(2); // fail-open: don't block commits before the baseline exists
+    const hasBaseline = existsSync(baselineFile);
+    // A missing baseline means "no grandfathered debt". Enforce from config (empty baseline = 0/0)
+    // whenever the repo is governed (guard.config.json present — true in devkit's own repo, CI, and
+    // any adopted consumer). Only an UNgoverned repo with no baseline fails open, so a repo that
+    // never adopted the ratchet is never wedged. Never key this on .devkit/config.json — it is
+    // absent in devkit's sync-dogfooded repo and in CI, which would silently disable the gate.
+    if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
+      process.exit(2); // ungoverned + un-frozen → fail open
     }
-    const frozen = JSON.parse(readFileSync(baselineFile, 'utf8')) as SizeBaseline;
+    const frozen: SizeBaseline = hasBaseline
+      ? (JSON.parse(readFileSync(baselineFile, 'utf8')) as SizeBaseline)
+      : { fileDisables: 0, fnDisables: 0 };
     const grewFile = current.fileDisables > frozen.fileDisables;
     const grewFn = current.fnDisables > frozen.fnDisables;
     if (grewFile || grewFn) {
@@ -277,8 +278,26 @@ function runCli(cmd: string): void {
       console.error('   Split the file below the cap instead of disabling.');
       process.exit(1);
     }
-    // Counts dropped → remind to re-freeze so the ratchet tightens.
-    if (current.fileDisables < frozen.fileDisables || current.fnDisables < frozen.fnDisables) {
+    // Debt fully healed (frozen had disables, now none): self-delete the stale baseline in a real
+    // commit so it doesn't linger. A partial shrink just reminds to re-freeze.
+    const healed =
+      (frozen.fileDisables > 0 || frozen.fnDisables > 0) &&
+      current.fileDisables === 0 &&
+      current.fnDisables === 0;
+    if (healed && hasBaseline) {
+      if (hasStagedFiles(root)) {
+        rmSync(baselineFile, { force: true });
+        stageBaseline(root, BASELINE);
+        console.log(`✓ size debt cleared — ${BASELINE} removed & staged.`);
+      } else {
+        console.log(
+          `✓ size debt shrank to zero — run \`guard-size freeze\` to remove ${BASELINE}.`,
+        );
+      }
+    } else if (
+      current.fileDisables < frozen.fileDisables ||
+      current.fnDisables < frozen.fnDisables
+    ) {
       console.log(
         `✓ size debt shrank (${current.fileDisables}/${current.fnDisables} vs frozen ${frozen.fileDisables}/${frozen.fnDisables}) — run \`guard-size freeze\` to lock it in.`,
       );
