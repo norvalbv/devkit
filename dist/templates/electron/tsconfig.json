@@ -1,0 +1,4 @@
+{
+  "extends": "@norvalbv/devkit/tsconfig/base",
+  "include": ["src", "socket-server/src", "vercel-serverless"]
+}
