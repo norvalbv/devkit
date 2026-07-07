@@ -223,10 +223,14 @@ describe('runReviewGate — cascade + exit contract', () => {
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
     // exactly one call for correctness (no :escalate), and it ran on haiku
-    const corrCalls = exec.mock.calls.filter(([o]) => o.label.startsWith('review:correctness-reviewer'));
+    const corrCalls = exec.mock.calls.filter(([o]) =>
+      o.label.startsWith('review:correctness-reviewer'),
+    );
     expect(corrCalls).toHaveLength(1);
     expect(corrCalls[0][0].args[corrCalls[0][0].args.indexOf('--model') + 1]).toBe('haiku');
-    expect(exec.mock.calls.some(([o]) => o.label === 'review:correctness-reviewer:escalate')).toBe(false);
+    expect(exec.mock.calls.some(([o]) => o.label === 'review:correctness-reviewer:escalate')).toBe(
+      false,
+    );
     expect(err.mock.calls.flat().join('\n')).toContain('CAS clobber');
   });
 
@@ -757,7 +761,10 @@ describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-
   });
 
   it('one huge file cannot eat the budget: truncated at the segment cap, NAMED, later files still ride', () => {
-    const out = buildCompletenessEvidence(seg('big/first.gen.ts', 70000) + seg('src/late.ts', 400), STAT);
+    const out = buildCompletenessEvidence(
+      seg('big/first.gen.ts', 70000) + seg('src/late.ts', 400),
+      STAT,
+    );
     expect(out).toContain('[TRUNCATED: big/first.gen.ts — 8000 of ');
     expect(out).toContain('git diff --cached -- big/first.gen.ts');
     expect(out).toContain('diff --git a/src/late.ts'); // the late file survives — the sc-1060 point
@@ -771,11 +778,15 @@ describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-
     expect(out).toContain('OMITTED: src/f8.ts');
     expect(out).toContain('OMITTED: src/f9.ts');
     expect(out).toContain('git diff --cached -- src/f9.ts');
-    expect(out).toMatch(/WARNING: 2 segment\(s\) OMITTED and \d+ TRUNCATED[\s\S]*Investigate EVERY OMITTED/);
+    expect(out).toMatch(
+      /WARNING: 2 segment\(s\) OMITTED and \d+ TRUNCATED[\s\S]*Investigate EVERY OMITTED/,
+    );
   });
 
   it('a long OMITTED list caps at 40 pointers and counts the rest (the --stat map is the full inventory)', () => {
-    const parts = Array.from({ length: 50 }, (_, i) => seg(`src/g${String(i).padStart(2, '0')}.ts`, 9000));
+    const parts = Array.from({ length: 50 }, (_, i) =>
+      seg(`src/g${String(i).padStart(2, '0')}.ts`, 9000),
+    );
     const out = buildCompletenessEvidence(parts.join(''), STAT);
     const pointers = out.match(/^OMITTED: /gm) ?? [];
     expect(pointers.length).toBe(40);

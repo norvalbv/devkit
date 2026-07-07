@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -30,6 +30,12 @@ const fill = (root, dir, n, prefix = 'file') => {
 
 const writeConfig = (root, cfg) =>
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
+const gitInit = (root) => {
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: root });
+};
+const gitAdd = (root, ...paths) => execFileSync('git', ['add', ...paths], { cwd: root });
 
 describe('countFanout', () => {
   it('counts impl files per directory at every depth, recursively', () => {
@@ -131,12 +137,61 @@ describe('CLI freeze/gate contract', () => {
 
   it('gate blocks a NEW folder exceeding the cap', () => {
     const root = makeRoot();
+    writeConfig(root, {}); // governed repo → enforce even with no debt baseline
     fill(root, 'src/ok', 3);
-    run(root, 'freeze');
+    run(root, 'freeze'); // no offender → no baseline written
     fill(root, 'src/new-pile', FANOUT_CAP + 1);
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('src/new-pile');
+  });
+
+  it('freeze writes NO baseline when no folder is over cap (no empty file left on disk)', () => {
+    const root = makeRoot();
+    fill(root, 'src/ok', 3);
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+  });
+
+  it('freeze deletes a stale empty baseline once the last over-cap pile heals', () => {
+    const root = makeRoot();
+    fill(root, 'src/pile', 20);
+    run(root, 'freeze'); // fanout.json written
+    rmSync(join(root, 'src/pile'), { recursive: true });
+    fill(root, 'src/pile', 5); // under cap now
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+  });
+
+  it('gate ENFORCES from config (not fail-open) when governed but no baseline exists', () => {
+    const root = makeRoot();
+    writeConfig(root, {}); // governed, never frozen
+    fill(root, 'src/new-pile', FANOUT_CAP + 1);
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/new-pile');
+  });
+
+  it('gate heal-deletes + stages fanout.json when the last pile heals in a real commit', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {});
+    fill(root, 'src/pile', 20);
+    run(root, 'freeze'); // fanout.json = { dirs: { 'src/pile': 20 } }
+    gitAdd(root, 'guard.config.json', 'src/pile', 'eslint/baselines/fanout.json');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    rmSync(join(root, 'src/pile'), { recursive: true });
+    fill(root, 'src/pile', 5); // healed under cap
+    gitAdd(root, 'src/pile');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('removed & staged');
+    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=D'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(staged).toContain('eslint/baselines/fanout.json');
   });
 
   it('gate blocks a grandfathered folder growing past its frozen count (shrink-only)', () => {

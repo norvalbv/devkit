@@ -16,19 +16,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
-import { resolveGuardConfig } from '../../gate-engine/config.mts';
 import {
   AGENT_TARGETS,
   applyOverlayConstraints,
@@ -528,19 +519,25 @@ function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string,
   console.log(`  ✓ refreshed devkit-guards block${where} in .husky/pre-commit`);
 }
 
-// True when a bin's baseline output(s) ALREADY exist → freeze-if-absent skips re-freezing. A
-// re-run (e.g. the documented post-`bun install` re-apply) must NOT re-snapshot the tree — that
-// would grandfather newly-added debt and silently move the ratchet up. guard-size writes a SECOND
-// baseline (size-lines.json) only under an active `maxLines` cap, so require that one too.
-function baselineFrozen(cwd: string, name: string) {
-  const has = (p: string) => existsSync(join(cwd, 'eslint', 'baselines', p));
-  if (name === 'guard-fanout') return has('fanout.json');
-  return has('size.json') && (!resolveGuardConfig(cwd).maxLines || has('size-lines.json'));
+// True once the repo has been adopted — devkit init wrote .devkit/config.json. Baselines are cut
+// exactly ONCE, at first init; an adopted repo NEVER re-snapshots (a re-run — e.g. the post-`bun
+// install` overlay re-apply, or `devkit upgrade` — would grandfather debt added via the ungated
+// channel and silently move the ratchet up; see docs/decisions/overlay-self-heal.md). Explicit
+// re-cuts go through `guard-* freeze`, never an implicit re-apply. The marker is durable and survives
+// deleting empty baseline files, so it — not a debt file's existence — is the "already frozen" bit.
+// Ordering holds: runFreezes/runStructureBaselines run BEFORE the config write on first init, so the
+// very first adoption still freezes.
+function repoAdopted(cwd: string) {
+  return existsSync(join(cwd, '.devkit', 'config.json'));
 }
 
 function runFreezes(cwd: string, dryRun: boolean) {
   if (dryRun) {
     console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
+    return;
+  }
+  if (repoAdopted(cwd)) {
+    console.log('  • repo already adopted — keeping baselines (run `guard-* freeze` to re-cut)');
     return;
   }
   // devkit's own ratchet bins are .mts in this repo (dev/tests, Node strips types) but compiled .mjs
@@ -551,10 +548,6 @@ function runFreezes(cwd: string, dryRun: boolean) {
     ['guard-size', join(packageDir(), 'gate-engine', 'ratchets', `size-disable${ext}`)],
   ];
   for (const [name, bin] of bins) {
-    if (baselineFrozen(cwd, name)) {
-      console.log(`  • ${name} baseline exists — keeping (run \`${name} freeze\` to re-snapshot)`);
-      continue;
-    }
     try {
       execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
       console.log(`  ✓ ${name} freeze (baseline grandfathered)`);
@@ -576,26 +569,18 @@ export async function readImportWallExempt(cwd: string): Promise<Set<string>> {
   }
 }
 
-// True when a generated structure / import-wall baseline already exists (any `eslint/baselines/*.mjs`
-// except the hand-maintained `exempt.mjs` template). `devkit upgrade` passes regen=false so it
-// RECREATES a missing baseline but never RE-SNAPSHOTS an existing one — re-snapshotting would
-// grandfather violations added since init (silent debt laundering).
-// ponytail: coarse skip-if-any-exists (not per-tree); the alternative needs tree names before
-// generating. Prevents laundering fully; a rare some-present-some-missing tree just isn't re-created.
-function structureBaselinesExist(cwd: string) {
-  const dir = join(cwd, 'eslint', 'baselines');
-  if (!existsSync(dir)) return false;
-  return readdirSync(dir).some((f) => f.endsWith('.mjs') && f !== 'exempt.mjs');
-}
-
 async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean, regen = true) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
     return;
   }
-  if (!regen && structureBaselinesExist(cwd)) {
+  // Structure/import baselines are cut ONCE at first init. An adopted repo (.devkit/config.json
+  // present) never re-snapshots — `devkit upgrade` passes regen=false so it skips here rather than
+  // re-grandfathering violations added since init (silent debt laundering). Keyed off the durable
+  // marker, not `eslint/baselines/*.mjs` existence, so deleting an empty baseline doesn't re-arm regen.
+  if (!regen && repoAdopted(cwd)) {
     console.log(
-      '  • structure + import-wall baselines exist — keeping (run `devkit init` to re-snapshot)',
+      '  • repo already adopted — keeping structure + import-wall baselines (run `devkit init` to re-snapshot)',
     );
     return;
   }

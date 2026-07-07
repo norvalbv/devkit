@@ -148,7 +148,9 @@ export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
   // `all` = the deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
   // undeclared trees (vendored code, scripts) are outside the consumer's stated review surface.
   if (reviewer.domain === 'all')
-    return [...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots])];
+    return [
+      ...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots]),
+    ];
   return cfg.scanRoots;
 }
 

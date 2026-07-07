@@ -1,8 +1,9 @@
 /**
  * `devkit doctor` — diagnose drift between a consumer repo and what `devkit init` wires.
  *
- * Read-only by default; `--fix` re-runs the idempotent init steps (but NEVER auto-refreezes
- * baselines — it only recreates a MISSING one). Exit: 0 all-ok, 1 drift, 2 not-initialized.
+ * Read-only by default; `--fix` re-runs the idempotent init steps (but NEVER touches baselines —
+ * those are cut once at init; an absent one is healthy, enforced from config). Exit: 0 all-ok, 1
+ * drift, 2 not-initialized.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -383,16 +384,17 @@ function checkSearchToolBins(): CheckResult {
 }
 
 function checkBaselines(cwd: string): CheckResult {
-  const fanout = existsSync(join(cwd, 'eslint', 'baselines', 'fanout.json'));
-  const size = existsSync(join(cwd, 'eslint', 'baselines', 'size.json'));
-  if (fanout && size) return check('baselines', 'OK', 'fanout + size present');
-  const missing = [!fanout && 'fanout', !size && 'size'].filter(Boolean);
+  const has = (p: string) => existsSync(join(cwd, 'eslint', 'baselines', p));
+  const present = (['fanout', 'size'] as const).filter((n) => has(`${n}.json`));
+  // A ratchet baseline holds ONLY grandfathered debt and is cut once at init. An absent one means
+  // "no debt — cap enforced from guard.config.json", which is healthy, not drift. So this is purely
+  // informational: never MISSING, never a --fix target.
   return check(
     'baselines',
-    'MISSING',
-    `${missing.join(' + ')} baseline absent`,
-    'run `guard-fanout freeze` / `guard-size freeze`',
-    true,
+    'OK',
+    present.length
+      ? `grandfathered debt: ${present.join(' + ')}`
+      : 'no grandfathered debt (enforced from config)',
   );
 }
 
@@ -545,20 +547,9 @@ function applyFix(
       stdio: 'inherit',
     });
   }
-  const baselines = results.find((r) => r.name === 'baselines');
-  if (baselines && baselines.status === 'MISSING') {
-    // ONLY recreate a missing baseline — never refreeze an existing one (that would launder debt).
-    console.log('  recreating MISSING baseline(s) via freeze (existing baselines left untouched):');
-    for (const [name, bin] of [
-      ['fanout', join(packageDir(), 'gate-engine', 'ratchets', `folder-fanout${SELF_EXT}`)],
-      ['size', join(packageDir(), 'gate-engine', 'ratchets', `size-disable${SELF_EXT}`)],
-    ]) {
-      if (!existsSync(join(cwd, 'eslint', 'baselines', `${name}.json`))) {
-        execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
-        console.log(`    ✓ created ${name} baseline`);
-      }
-    }
-  }
+  // No baseline recreation here: baselines are cut once at init and an absent one is healthy (no
+  // grandfathered debt — the cap is enforced from guard.config.json). An explicit re-cut is `guard-*
+  // freeze`, never doctor --fix.
 }
 
 // The default component selection (pre-`components`-block configs, and the all-on fallback).

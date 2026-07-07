@@ -65,7 +65,7 @@ node scripts/folder-fanout-ratchet.mjs  freeze   # fanout.json
 
 **Why you can't game it:**
 1. **Self-healing / shrink-only:** regen re-walks and re-emits, so hand-deleting a debt entry does nothing — it returns if the file still violates. The only honest removal is to *fix the file* ("a to-do list that empties itself").
-2. **Monotonic count gate:** `size.json`/`fanout.json` have a `gate` subcommand (pre-commit) that exits 1 if the count **grew** (split, don't disable), reminds to re-freeze if it **shrank**, and **fails open (exit 2)** if the baseline is missing so a fresh checkout never wedges.
+2. **Monotonic count gate:** `size.json`/`fanout.json` have a `gate` subcommand (pre-commit) that exits 1 if the count **grew** (split, don't disable) and self-deletes the baseline when its last entry **heals** in a commit. A missing baseline means "no grandfathered debt": in a **governed** repo (one with `guard.config.json`) the gate still **enforces the cap straight from config**; only an ungoverned repo **fails open (exit 2)**, so an unadopted checkout never wedges.
 
 The size wall additionally has a **shrink-on-touch** rule: a staged file in `size.json` that's touched and still over cap fails — turning "self-heal on touch" from convention into enforcement (`directory-structure.md` §5).
 
