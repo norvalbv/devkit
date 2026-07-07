@@ -275,12 +275,16 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('devkit sync-agents');
   });
 
-  it('missing agent brief under strict ship → fail-closed exit 3', async () => {
+  it('missing agent brief under strict ship → fail-closed exit 3 with the SYNC remedy (not auth/quota)', async () => {
     const repo = consumerRepo({ backend: true });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
     rmSync(join(repo, '.claude', 'agents', 'api-security-reviewer.md'));
     expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('strict ship mode fails closed');
+    expect(out).toContain('devkit sync-agents'); // the cause-correct remedy…
+    expect(out).not.toContain('auth/quota'); // …NOT the misleading generic one
   });
 
   it('PASS verdict with NO checklist artifact → voided to inconclusive (exit 2), never cached', async () => {

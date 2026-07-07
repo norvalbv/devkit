@@ -2,9 +2,11 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -29,7 +31,9 @@ const BASE_REF_RE = /BASE_REF=(.*)/;
 const DETACHED_RE = /detached HEAD/;
 const DIR_RE = /directory path not allowed/;
 const FLAG_RE = /unknown flag/;
-const WT_RE = /worktree kept at (.+) \(branch/;
+// Matches the dry-run "worktree kept" line of BOTH scripts: ship-branch prints "… (branch <br>)",
+// reship prints "… . Remove with:" — so dropWorktree cleans either (reship worktrees leaked before).
+const WT_RE = /worktree kept at (.+?)(?: \(branch|\. Remove)/;
 const NOTE_RE = /note\.txt/;
 const EXEC_MODE_RE = /^100755/; // git mode for an executable blob
 const dirs = [];
@@ -730,5 +734,97 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
     dropWorktree(git, r.stderr);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/gates must not fail open/);
+  });
+});
+
+// .claude/{agents,skills} are devkit sync artifacts — git-ignored in an overlay consumer, so a fresh
+// worktree lacks them and guard-review can't load reviewer briefs / run the judge checklist (every
+// reviewer INCONCLUSIVEs → strict ship fails closed). ship must symlink the two SUBDIRS in, leave
+// .claude itself a real worktree dir (per-run checklist state stays local, not leaked to the shared
+// tree), and NOT clobber a .claude a repo TRACKS (already checked out → a symlink onto it nests
+// .../agents/agents).
+describe('ship — links .claude/{agents,skills} into the worktree', () => {
+  /** Seed git-ignored (untracked) devkit-synced .claude artifacts in `dir`. */
+  function seedClaudeArtifacts(dir, git) {
+    writeFileSync(join(dir, '.gitignore'), '.claude/\n');
+    git(['add', '.gitignore'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'ignore .claude'], { stdio: 'ignore' });
+    mkdirSync(join(dir, '.claude/agents'), { recursive: true });
+    writeFileSync(join(dir, '.claude/agents/api-security-reviewer.md'), '# brief\n');
+    mkdirSync(join(dir, '.claude/skills/api-security/scripts'), { recursive: true });
+    writeFileSync(join(dir, '.claude/skills/api-security/scripts/checklist.mjs'), '// noop\n');
+  }
+
+  it('symlinks the two subdirs (agents + skills), keeps .claude itself a real dir', () => {
+    const { dir, env, git } = seedShipRepo();
+    seedClaudeArtifacts(dir, git);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/claude-link', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      expect(wt, r.stderr).toBeTruthy();
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(wt, '.claude')).isSymbolicLink()).toBe(false); // real dir → per-run state stays local
+      // resolves back into ROOT, so the brief is actually readable from the worktree cwd
+      expect(readFileSync(join(wt, '.claude/agents/api-security-reviewer.md'), 'utf8')).toMatch(
+        /# brief/,
+      );
+      expect(realpathSync(join(wt, '.claude/agents'))).toBe(
+        realpathSync(join(dir, '.claude/agents')),
+      );
+    } finally {
+      dropWorktree(git, r.stderr);
+    }
+  });
+
+  it('does NOT clobber a TRACKED .claude already checked out (no nested .claude/agents/agents)', () => {
+    const { dir, env, git } = seedShipRepo();
+    mkdirSync(join(dir, '.claude/agents'), { recursive: true });
+    writeFileSync(join(dir, '.claude/agents/api-security-reviewer.md'), '# tracked\n');
+    git(['add', '.claude/agents/api-security-reviewer.md'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'track .claude'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/claude-tracked', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(false); // real git checkout
+      expect(existsSync(join(wt, '.claude/agents/agents'))).toBe(false); // no bogus nested symlink
+    } finally {
+      dropWorktree(git, r.stderr);
+    }
+  });
+
+  it('reship.sh links the subdirs into the detached re-ship worktree too', () => {
+    const { dir, env, git } = seedReshipRepo();
+    seedClaudeArtifacts(dir, git);
+    writeFileSync(join(dir, 'note.txt'), 'delta\n'); // a delta vs origin/pr-open so the commit isn't empty
+    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      expect(wt, r.stderr).toBeTruthy();
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(true);
+    } finally {
+      dropWorktree(git, r.stderr);
+    }
   });
 });
