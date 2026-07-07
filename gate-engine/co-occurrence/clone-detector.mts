@@ -32,11 +32,12 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
+import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mts';
 
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
@@ -60,46 +61,15 @@ const DEFAULTS = {
 // jscpd auto-detects formats by extension; we keep only source code clones.
 const CODE_EXT = /\.(tsx?|jsx?)$/;
 
-// jscpd bin resolution — HOIST-AGNOSTIC. Prefer devkit's OWN bundled jscpd (shipped as an
-// optionalDependency) so a standalone/global consumer needs NO jscpd dep of their own. We probe
-// candidate `.bin` paths rather than `require.resolve('jscpd/package.json')` — jscpd's `exports`
-// blocks that subpath.
-const OWN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'); // gate-engine/co-occurrence → devkit root
-
-/**
- * Resolve the jscpd binary. Order:
- *   JSCPD_BIN env (verbatim — used even if it doesn't exist, so a test can force the fail-open path)
- *   → devkit-own / hoist / consumer `.bin/jscpd`
- *   → bare `'jscpd'` (execFileSync PATH-resolves a GLOBAL install via execvp — house idiom, cf. the
- *     git/gh/qavis/claude spawns; a truly-missing binary throws ENOENT → the caller fails OPEN).
- * `'jscpd'` is the `??` terminal, never a `.find` candidate — `exists('jscpd')` is cwd-relative and
- * would misfire on a stray file. `exists` is injectable so the order can be unit-tested without fs.
- */
-export function resolveJscpdBin({
-  env,
-  exists = existsSync,
-  ownRoot,
+// jscpd bin resolution lives in the side-effect-free ./jscpd-bin.mts (shared with the prefix-cache
+// config-fingerprint, which folds the SAME resolution into the cache key). Read JSCPD_BIN here (not as
+// a default inside the resolver) so the resolver stays pure — a caller can express "no env override"
+// as `env: undefined` without it silently re-reading process.env.
+const JSCPD_BIN = resolveJscpdBin({
+  env: process.env.JSCPD_BIN,
+  ownRoot: JSCPD_OWN_ROOT,
   repoRoot,
-}: {
-  env?: string;
-  exists?: (p: string) => boolean;
-  ownRoot: string;
-  repoRoot: string;
-}): string {
-  return (
-    env ??
-    [
-      resolve(ownRoot, 'node_modules', '.bin', 'jscpd'), // devkit dogfood tree
-      resolve(ownRoot, '..', '..', '.bin', 'jscpd'), // consumed/global: hoist root beside @norvalbv/devkit
-      resolve(repoRoot, 'node_modules', '.bin', 'jscpd'), // consumer's own (package mode)
-    ].find((p) => exists(p)) ??
-    'jscpd'
-  );
-}
-
-// Read JSCPD_BIN here (not as a default inside the resolver) so the resolver stays pure — a caller
-// can express "no env override" as `env: undefined` without it silently re-reading process.env.
-const JSCPD_BIN = resolveJscpdBin({ env: process.env.JSCPD_BIN, ownRoot: OWN_ROOT, repoRoot });
+});
 
 /** A line locator in a jscpd clone: either a bare line number or a `{ line }` object. */
 type CloneLineLoc = number | { line: number };
