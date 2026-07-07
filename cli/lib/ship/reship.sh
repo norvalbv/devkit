@@ -121,6 +121,11 @@ done
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothing to re-push" >&2; exit 1; }
 
+# Link gate configs present in the repo but absent from this fresh checkout (an untracked config, a
+# gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
+. "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
+link_untracked_gate_configs "$WT" "$ROOT"
+
 # Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
 # the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
