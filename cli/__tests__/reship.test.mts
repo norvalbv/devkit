@@ -199,3 +199,51 @@ describe('reship — merges the re-pushed paths into the branch reconcile entry'
     expect(e.baseRef).toBe('work');
   });
 });
+
+describe('reship — untracked gate configs are linked into the re-ship worktree', () => {
+  it('links an untracked guard.config.json so the gate sees it (not defaults), with a notice', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+    ])
+      g(a, { stdio: 'ignore' });
+    // Hook cwd = the worktree, so it proves the untracked config was linked in.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\n[ -e guard.config.json ] && echo CONFIG_SEEN || echo CONFIG_MISSING\nexit 0\n',
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    // Seed the open PR branch, then edit + re-push with an untracked guard.config.json present.
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/guard\.config\.json .*commit it/);
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toMatch(
+      /CONFIG_SEEN/,
+    );
+    if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+  });
+});

@@ -828,3 +828,104 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     }
   });
 });
+
+// The silent-defaults gap: the ship worktree is a clean checkout at $BASE (tracked files only), so an
+// untracked config / gitignored index never reaches it and the worktree gates run on DEFAULTS while the
+// ship LOOKS fully gated. link-gate-configs.sh symlinks such inputs in (restoring plain-commit parity)
+// and prints a loud notice. The hook body runs with cwd = the worktree, so it can assert a config arrived.
+describe('ship-branch.sh — untracked/gitignored gate configs are linked into the worktree', () => {
+  const cfgHook = '[ -e guard.config.json ] && echo CONFIG_SEEN || echo CONFIG_MISSING\nexit 0';
+
+  it('links an untracked guard.config.json in + nudges to commit it (gate sees it, not defaults)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: cfgHook });
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/gate-cfg', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/absent from the committed tree/); // the loud notice printed
+    expect(r.stderr).toMatch(/guard\.config\.json .*commit it/); // untracked → hygiene nudge
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-gate-cfg.log'), 'utf8');
+    expect(log).toMatch(/CONFIG_SEEN/); // reached the worktree = parity restored
+    expect(log).not.toMatch(/CONFIG_MISSING/);
+  });
+
+  it('is a silent no-op for a TRACKED config (it already rides the checkout)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: cfgHook });
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n');
+    git(['add', 'guard.config.json'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'track config'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/cfg-tracked', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/absent from the committed tree/); // nothing to link → no notice
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-cfg-tracked.log'), 'utf8')).toMatch(
+      /CONFIG_SEEN/,
+    );
+  });
+
+  it('labels a config-resolved, gitignored index path as a cache — not a "commit it" nudge', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, '.gitignore'), '.search-code/\n');
+    writeFileSync(join(dir, 'guard.config.json'), '{"indexPath":".search-code/index.db"}\n');
+    mkdirSync(join(dir, '.search-code'), { recursive: true });
+    writeFileSync(join(dir, '.search-code/index.db'), 'idx');
+    git(['add', '.gitignore', 'guard.config.json'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'config + ignore'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/idx', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    // gate-config-paths.mts resolved the config's indexPath; check-ignore labels it a cache, not a nudge.
+    expect(r.stderr).toMatch(/\.search-code\/index\.db .*gitignored cache/);
+    expect(r.stderr).not.toMatch(/\.search-code\/index\.db .*commit it/);
+  });
+
+  it('does not double-link a config already passed via --link (no ln clobber under set -e)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: cfgHook });
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/dbl', 't', '--link', 'guard.config.json', 'note.txt'],
+      { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0); // no "File exists" abort
+    expect(r.stderr).not.toMatch(/guard\.config\.json .*commit it/); // already present → not re-listed
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-dbl.log'), 'utf8')).toMatch(
+      /CONFIG_SEEN/,
+    );
+  });
+
+  it('ships a gate config passed as a PATH as a real blob, not a symlink (helper runs after copy)', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked AND shipped
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ship-cfg', 't', 'guard.config.json'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    // Copied into $WT first → the helper sees it present and skips → a real 100644 blob, not a 120000 symlink.
+    expect(git(['ls-tree', 'feat/ship-cfg', 'guard.config.json']).trim()).toMatch(/^100644/);
+  });
+});
