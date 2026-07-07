@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hashFragment, relPath, resolveJscpdBin } from '../clone-detector.mts';
+import { hashFragment, relPath } from '../clone-detector.mts';
+import { resolveJscpdBin } from '../jscpd-bin.mts';
 
 const HEX16 = /^[0-9a-f]{16}$/;
 const LINES_RE = /--lines \d+\b/;
