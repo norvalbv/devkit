@@ -49,9 +49,10 @@ const EVIDENCE_TOTAL_CAP = 60000; // same total budget as the old blunt cap — 
 const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff order, like detect)
 const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
 const SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
+const SEGMENT_PATH_RE = /^diff --git (?:a\/)?(\S+)/;
 
 function segmentPath(seg: string): string {
-  return seg.match(/^diff --git (?:a\/)?(\S+)/)?.[1] ?? '(unknown path)';
+  return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
 }
 
 /** Per-file capped evidence + explicit omission accounting. Exported for tests (no git, no

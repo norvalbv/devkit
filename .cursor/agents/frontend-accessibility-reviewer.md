@@ -49,19 +49,19 @@ Skip if only files outside those roots (e.g. `review.backendRoots`) are modified
 
 SCRIPT=".claude/skills/frontend-accessibility/scripts/checklist.mjs"
 
-## 2. Setup
+## 2. Generate the checklist
 ```bash
 node $SCRIPT generate
 node $SCRIPT status
 ```
+`generate` enumerates the review items from the staged files under `review.frontendRoots`
+(`guard.config.json`). If it prints "No staged frontend files", exit early — nothing to review.
 
-If "No staged frontend files" → exit early, nothing to review.
-
-## 3. Check each item
-For each item in the checklist:
-- Use Grep tool to search staged files for issues
-- Reference the SKILL.md for what to look for
-- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
+## 3. Check each item, one at a time
+For each item the checklist enumerated:
+- Use Grep to inspect the staged files for that concern; Read surrounding code where a hunk is ambiguous.
+- Reference the SKILL.md rule categories below for what to look for.
+- Mark it: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`.
 
 ### Accessibility checks by category:
 
@@ -112,7 +112,7 @@ For each item in the checklist:
 - Large text contrast >= 3:1 (WCAG AA)
 - Non-text elements (icons, borders) contrast >= 3:1
 - Color is not the sole means of conveying information
-- Use `node $SCRIPT contrast "#fg" "#bg"` to verify ratios
+- Use `node $SCRIPT contrast "#fg" "#bg"` to verify contrast ratios
 
 **Motion & Media:**
 - Animations respect `prefers-reduced-motion`
@@ -133,14 +133,7 @@ For each item in the checklist:
 node $SCRIPT finalize
 node $SCRIPT cleanup
 ```
+`finalize` verifies every enumerated item was resolved — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work.
 
-## 5. Return to root
-Return ONLY the script's finalize output. If there are failures, list them as:
-```
-FAIL: [item-name] | [file path] | [1-line reason]
-FAIL: ...
-PASS: [N items passed]
-```
-If all pass: `PASS: all [N] items passed`
-No prose, no summaries, no recommendations. Your output goes directly into root agent context.
+Then report: list each finding as `FAIL: [issue] | [file:line] | [1-line reason]`; if none, report `PASS: no accessibility issues`. No prose, no summaries, no recommendations. Your output goes directly into root agent context.
 </workflow>

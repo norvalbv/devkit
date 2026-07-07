@@ -39,6 +39,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveGuardConfig } from '../../../config.mts';
 import {
   BenchAbort,
   cleanBenchEnv,
@@ -47,9 +48,13 @@ import {
   parseCasesText,
   wilson,
 } from '../../../decisions/eval/bench.mts';
-import { resolveGuardConfig } from '../../../config.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
-import { REVIEWERS, checklistScript, parseReviewVerdict, selectReviewers } from '../../reviewers.mts';
+import {
+  checklistScript,
+  parseReviewVerdict,
+  REVIEWERS,
+  selectReviewers,
+} from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -144,16 +149,21 @@ export function lintRows(rows, reviewerName) {
     const where = `${reviewerName}/${row.id ?? '<no id>'}`;
     if (!row.id || seen.has(row.id)) throw new BenchAbort(2, `duplicate/missing id: ${where}`);
     seen.add(row.id);
-    if (!row.note) throw new BenchAbort(2, `${where}: every row needs a note (why the label is right)`);
+    if (!row.note)
+      throw new BenchAbort(2, `${where}: every row needs a note (why the label is right)`);
     for (const [field, allowed] of Object.entries(ROW_ENUMS))
       if (row[field] !== undefined && !allowed.includes(row[field]))
         throw new BenchAbort(2, `${where}: ${field}=${row[field]} not in ${allowed.join('|')}`);
     if (!row.expected) throw new BenchAbort(2, `${where}: missing expected`);
     if (row.expected === 'FAIL' && !(Array.isArray(row.expectItems) && row.expectItems.length > 0))
       throw new BenchAbort(2, `${where}: expected FAIL needs expectItems`);
-    if (!row.repo?.base || !row.repo?.staged) throw new BenchAbort(2, `${where}: missing repo.base/staged`);
+    if (!row.repo?.base || !row.repo?.staged)
+      throw new BenchAbort(2, `${where}: missing repo.base/staged`);
     if (row.reviewer !== reviewerName)
-      throw new BenchAbort(2, `${where}: reviewer=${row.reviewer} but lives in ${reviewerName}'s file`);
+      throw new BenchAbort(
+        2,
+        `${where}: reviewer=${row.reviewer} but lives in ${reviewerName}'s file`,
+      );
   }
   return rows;
 }
@@ -197,7 +207,10 @@ export function benchGateHash(reviewer) {
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'agents', `${reviewer.name}.md`), 'utf8'),
-      readFileSync(path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'), 'utf8'),
+      readFileSync(
+        path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
+        'utf8',
+      ),
     ].join('\n \n'),
   );
 }
@@ -217,7 +230,13 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
   return async (opts) => {
     const isEscalate = opts.label.endsWith(':escalate');
     if (isEscalate && !cascade) {
-      capture.push({ label: opts.label, out: 'VERDICT: FAIL — cascade disabled (bench)', ms: 0, snapshot: null, synthetic: true });
+      capture.push({
+        label: opts.label,
+        out: 'VERDICT: FAIL — cascade disabled (bench)',
+        ms: 0,
+        snapshot: null,
+        synthetic: true,
+      });
       return 'VERDICT: FAIL — cascade disabled (bench)';
     }
     const t0 = Date.now();
@@ -235,10 +254,15 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
 
 // ─── Row scoring ──────────────────────────────────────────────────────────────────
 
+const OUTAGE_RE = /outage/i;
+const NO_VERDICT_RE = /no VERDICT/i;
+const CHECKLIST_RE = /checklist/i;
+const VERDICT_INJECTION_RE = /VERDICT:/i;
+
 function subcause(reason) {
-  if (/outage/i.test(reason)) return 'outage';
-  if (/no VERDICT/i.test(reason)) return 'no-verdict';
-  if (/checklist/i.test(reason)) return 'checklist-void';
+  if (OUTAGE_RE.test(reason)) return 'outage';
+  if (NO_VERDICT_RE.test(reason)) return 'no-verdict';
+  if (CHECKLIST_RE.test(reason)) return 'checklist-void';
   return 'other';
 }
 
@@ -267,7 +291,8 @@ export function scoreRow(row, capture, cas) {
         esc?.out ?? '',
         first?.out ?? '',
       ].join('\n');
-      if (row.reasonPattern && new RegExp(row.reasonPattern, 'i').test(text)) reasonClass = 'pattern-only';
+      if (row.reasonPattern && new RegExp(row.reasonPattern, 'i').test(text))
+        reasonClass = 'pattern-only';
       else reasonClass = failedItems.length === 0 ? 'fail-unattributed' : 'unattributed';
     }
   }
@@ -301,7 +326,9 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
   for (const key of Object.keys(assets))
     if (row.repo.base[key] !== undefined || row.repo.staged[key] !== undefined)
       throw new BenchAbort(2, `${row.id}: row must not define gate asset path ${key}`);
-  const fx = materializeFixture({ repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged } });
+  const fx = materializeFixture({
+    repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged },
+  });
   try {
     const cfg = resolveGuardConfig(fx.repo);
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
@@ -341,7 +368,8 @@ export function summarize(results, { cascade = CASCADE } = {}) {
   const decoys = results.filter((r) => r.expected === 'PASS');
   const blocked = gold.filter((r) => r.okFinal);
   const reasons = {};
-  for (const r of blocked) if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
+  for (const r of blocked)
+    if (r.reasonClass) reasons[r.reasonClass] = (reasons[r.reasonClass] ?? 0) + 1;
   const inconclusive = {};
   for (const r of results)
     if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
@@ -360,7 +388,9 @@ export function summarize(results, { cascade = CASCADE } = {}) {
       : {}),
     escalations: liveEscalations.length,
     escalateMeanSecs: liveEscalations.length
-      ? Math.round(liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000)
+      ? Math.round(
+          liveEscalations.reduce((s, r) => s + r.ms.escalate, 0) / liveEscalations.length / 1000,
+        )
       : 0,
     reasons,
     inconclusive,
@@ -375,10 +405,17 @@ function printSummary(name, s, { cascade }) {
     console.log(`  end-to-end block recall  ${fmtCi(s.blockRecall.k, s.blockRecall.n)}`);
     console.log(`  end-to-end clean-pass    ${fmtCi(s.cleanPass.k, s.cleanPass.n)}`);
   }
-  const reasons = Object.entries(s.reasons).map(([k, v]) => `${k}:${v}`).join(' ') || '—';
+  const reasons =
+    Object.entries(s.reasons)
+      .map(([k, v]) => `${k}:${v}`)
+      .join(' ') || '—';
   console.log(`  right-reason split       ${reasons}`);
-  console.log(`  live escalations         ${s.escalations}${s.escalations ? ` (mean ${s.escalateMeanSecs}s)` : ''}`);
-  const inc = Object.entries(s.inconclusive).map(([k, v]) => `${k}:${v}`).join(' ');
+  console.log(
+    `  live escalations         ${s.escalations}${s.escalations ? ` (mean ${s.escalateMeanSecs}s)` : ''}`,
+  );
+  const inc = Object.entries(s.inconclusive)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(' ');
   if (inc) console.log(`  inconclusive             ${inc}`);
 }
 
@@ -417,7 +454,9 @@ export function compareReviewer(name, nowRows, nowMeta, base) {
   const section = base?.sections?.[key];
   if (!section) return { skipped: `no baseline section ${key}` };
   if (section.gateHash !== nowMeta.gateHash)
-    return { skipped: `gate code / brief / checklist changed (${key}) — regenerate with --baseline` };
+    return {
+      skipped: `gate code / brief / checklist changed (${key}) — regenerate with --baseline`,
+    };
   if (section.corpusHash !== nowMeta.corpusHash)
     return { skipped: `corpus changed (${key}) — regenerate with --baseline` };
   let b = 0;
@@ -454,15 +493,21 @@ export function validateRow(row) {
   const reviewer = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
   if (!reviewer) return { problems: [`unknown reviewer ${row.reviewer}`], itemCount: 0 };
   for (const content of Object.values(row.repo.staged))
-    if (content && /VERDICT:/i.test(content)) problems.push('staged content contains "VERDICT:" (prompt-injection hazard)');
+    if (content && VERDICT_INJECTION_RE.test(content))
+      problems.push('staged content contains "VERDICT:" (prompt-injection hazard)');
   const assets = buildAssets(reviewer);
-  const fx = materializeFixture({ repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged } });
+  const fx = materializeFixture({
+    repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged },
+  });
   let itemCount = 0;
   try {
     const cfg = resolveGuardConfig(fx.repo);
     const sel = selectReviewers(fx.staged, cfg).find((s) => s.reviewer.name === row.reviewer);
     if (!sel) problems.push('selectReviewers does not fire the target reviewer');
-    execFileSync('node', [checklistScript(reviewer), 'generate'], { cwd: fx.repo, encoding: 'utf8' });
+    execFileSync('node', [checklistScript(reviewer), 'generate'], {
+      cwd: fx.repo,
+      encoding: 'utf8',
+    });
     let names = [];
     try {
       const state = JSON.parse(readFileSync(path.join(fx.repo, reviewer.stateFile), 'utf8'));
@@ -472,7 +517,8 @@ export function validateRow(row) {
       problems.push('checklist generate left no readable artifact');
     }
     for (const want of row.expectItems ?? [])
-      if (!names.includes(want)) problems.push(`expectItems: ${want} not in generated [${names.join(', ')}]`);
+      if (!names.includes(want))
+        problems.push(`expectItems: ${want} not in generated [${names.join(', ')}]`);
   } finally {
     fx.cleanup();
   }
@@ -488,7 +534,8 @@ function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
     for (const row of rows) {
       const { problems, itemCount } = validateRow(row);
       const fat = itemCount > 6 ? '  ⚠ fat row (cost)' : '';
-      if (problems.length === 0) console.log(`  ${row.id.padEnd(36)} OK    ${itemCount} items${fat}`);
+      if (problems.length === 0)
+        console.log(`  ${row.id.padEnd(36)} OK    ${itemCount} items${fat}`);
       else {
         bad += 1;
         console.log(`  ${row.id.padEnd(36)} BAD   ${problems.join(' | ')}`);
@@ -503,14 +550,19 @@ function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
  * coverage stays honest against catalog drift. */
 function coverage() {
   for (const reviewer of BENCH_REVIEWERS) {
-    const script = readFileSync(path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'), 'utf8');
+    const script = readFileSync(
+      path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
+      'utf8',
+    );
     const catalog = [...script.matchAll(/name:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]);
     const rows = loadRows(reviewer);
     const hit = new Set(rows.flatMap((r) => r.expectItems ?? []));
     const gold = rows.filter((r) => r.expected === 'FAIL').length;
     const byProv = {};
     for (const r of rows) byProv[r.provenance ?? '?'] = (byProv[r.provenance ?? '?'] ?? 0) + 1;
-    console.log(`\n${reviewer.name}: ${rows.length} rows (${gold} gold), provenance ${JSON.stringify(byProv)}`);
+    console.log(
+      `\n${reviewer.name}: ${rows.length} rows (${gold} gold), provenance ${JSON.stringify(byProv)}`,
+    );
     console.log(`  covered items   ${catalog.filter((c) => hit.has(c)).join(', ') || '—'}`);
     console.log(`  uncovered items ${catalog.filter((c) => !hit.has(c)).join(', ') || '—'}`);
   }
@@ -566,7 +618,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
       )
     : 0;
   const estMins = Math.round(
-    (totalRows * (EST_FIRST_SECS[MODEL] ?? EST_FIRST_SECS.sonnet) + estEscalations * EST_ESCALATE_SECS) /
+    (totalRows * (EST_FIRST_SECS[MODEL] ?? EST_FIRST_SECS.sonnet) +
+      estEscalations * EST_ESCALATE_SECS) /
       60 /
       CONCURRENCY,
   );
@@ -621,7 +674,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
           subcause: 'paused',
           ms: { first: 0, escalate: 0 },
         };
-      let res;
+      let res: Awaited<ReturnType<typeof runRow>>;
       try {
         res = await runRow(row);
         const ok = CASCADE ? res.okFinal : res.okFirst;
@@ -682,10 +735,13 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
         if (wasOk !== isOk) {
           console.log(`  ${res.id}: discordant with baseline — re-running once to confirm`);
           try {
-            const rerun = await runRow(plan.find((p) => p.reviewer === reviewer).rows.find((r) => r.id === res.id));
+            const rerun = await runRow(
+              plan.find((p) => p.reviewer === reviewer).rows.find((r) => r.id === res.id),
+            );
             const rerunOk = meta.cascade ? rerun.okFinal : rerun.okFirst;
             res.stable = rerunOk === isOk;
-            if (!res.stable) console.log(`  ${res.id}: flip did not reproduce — excluded from flip table`);
+            if (!res.stable)
+              console.log(`  ${res.id}: flip did not reproduce — excluded from flip table`);
           } catch {
             res.stable = false;
           }
@@ -742,7 +798,9 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
     if (MODEL === 'sonnet') {
       const fr = pooled.firstFailRecall;
       if (fr.n && fr.k / fr.n < FLOORS.firstFailRecallSonnetOnly) {
-        console.error(`FLOOR: pooled first-pass FAIL-recall ${fmtCi(fr.k, fr.n)} < ${FLOORS.firstFailRecallSonnetOnly}`);
+        console.error(
+          `FLOOR: pooled first-pass FAIL-recall ${fmtCi(fr.k, fr.n)} < ${FLOORS.firstFailRecallSonnetOnly}`,
+        );
         failed = true;
       }
     }
@@ -750,7 +808,9 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
       const cmp = compareReviewer(reviewer.name, results, meta, baseline);
       if (cmp.skipped) console.log(`compare ${reviewer.name}: SKIPPED — ${cmp.skipped}`);
       else {
-        console.log(`compare ${reviewer.name}: ${cmp.regressed ? 'REGRESSED' : 'ok'} — ${cmp.detail}`);
+        console.log(
+          `compare ${reviewer.name}: ${cmp.regressed ? 'REGRESSED' : 'ok'} — ${cmp.detail}`,
+        );
         if (cmp.regressed) failed = true;
       }
     }
@@ -758,10 +818,16 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
 
   // ── Baseline write ──
   if (writeBaseline) {
-    if (only) throw new BenchAbort(2, 'reviewer-eval: refusing --baseline with --only (partial corpus)');
-    const outages = allResults.filter((r) => r.subcause === 'outage' || r.subcause === 'engine-error').length;
+    if (only)
+      throw new BenchAbort(2, 'reviewer-eval: refusing --baseline with --only (partial corpus)');
+    const outages = allResults.filter(
+      (r) => r.subcause === 'outage' || r.subcause === 'engine-error',
+    ).length;
     if (outages > 0)
-      throw new BenchAbort(2, `reviewer-eval: refusing --baseline with ${outages} outage/error row(s)`);
+      throw new BenchAbort(
+        2,
+        `reviewer-eval: refusing --baseline with ${outages} outage/error row(s)`,
+      );
     const next = loadBaseline() ?? { sections: {} };
     for (const { reviewer, results, meta } of perReviewer) {
       next.sections[sectionKey(reviewer.name, meta.model, meta.cascade)] = {
@@ -769,7 +835,15 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
         when: new Date().toISOString(),
         dev,
         rows: Object.fromEntries(
-          results.map((r) => [r.id, { expected: r.expected, okFirst: r.okFirst, okFinal: r.okFinal, finalStatus: r.finalStatus }]),
+          results.map((r) => [
+            r.id,
+            {
+              expected: r.expected,
+              okFirst: r.okFirst,
+              okFinal: r.okFinal,
+              finalStatus: r.finalStatus,
+            },
+          ]),
         ),
         metrics: summarize(results, { cascade: meta.cascade }),
       };

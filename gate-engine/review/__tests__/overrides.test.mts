@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -59,7 +59,9 @@ describe('reconcile', () => {
     const cwd = repo();
     const r = reconcile(cwd, 'correctness-reviewer', ['concurrency-races'], 'D', NOW);
     expect(r.suppressed).toEqual([]);
-    expect(r.blocking).toEqual([{ lens: 'concurrency-races', fp: fpFor('concurrency-races', 'D') }]);
+    expect(r.blocking).toEqual([
+      { lens: 'concurrency-races', fp: fpFor('concurrency-races', 'D') },
+    ]);
     expect(loadOverrides(cwd)).toEqual({}); // nothing persisted on a plain block
   });
 
@@ -79,18 +81,38 @@ describe('reconcile', () => {
   it('an env override suppresses AND is persisted through to the file (survives next commit)', () => {
     const cwd = repo();
     const fp = fpFor('error-and-edge-classification', 'D');
-    const env = { [`OVERRIDE_${fp}_RATIONALE`]: 'anchor is tight — false positive' } as NodeJS.ProcessEnv;
-    const r = reconcile(cwd, 'correctness-reviewer', ['error-and-edge-classification'], 'D', NOW, env);
+    const env = {
+      [`OVERRIDE_${fp}_RATIONALE`]: 'anchor is tight — false positive',
+    } as NodeJS.ProcessEnv;
+    const r = reconcile(
+      cwd,
+      'correctness-reviewer',
+      ['error-and-edge-classification'],
+      'D',
+      NOW,
+      env,
+    );
     expect(r.blocking).toEqual([]);
     const stored = loadOverrides(cwd)[fp];
-    expect(stored).toMatchObject({ rationale: 'anchor is tight — false positive', by: 'env', at: NOW });
+    expect(stored).toMatchObject({
+      rationale: 'anchor is tight — false positive',
+      by: 'env',
+      at: NOW,
+    });
   });
 
   it('mixed: one waived, one still blocking', () => {
     const cwd = repo();
     const fp = fpFor('concurrency-races', 'D');
     const env = { [`OVERRIDE_${fp}_RATIONALE`]: 'ok' } as NodeJS.ProcessEnv;
-    const r = reconcile(cwd, 'correctness-reviewer', ['concurrency-races', 'json-shape'], 'D', NOW, env);
+    const r = reconcile(
+      cwd,
+      'correctness-reviewer',
+      ['concurrency-races', 'json-shape'],
+      'D',
+      NOW,
+      env,
+    );
     expect(r.suppressed.map((s) => s.lens)).toEqual(['concurrency-races']);
     expect(r.blocking.map((b) => b.lens)).toEqual(['json-shape']);
   });

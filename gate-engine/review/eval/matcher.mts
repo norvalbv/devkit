@@ -63,7 +63,8 @@ export interface DecoySlot {
 // (`**CRITICAL**:`, `- IMPORTANT:`, `### LOW:`). The colon is required — bare severity words in
 // prose ("this is a CRITICAL gap") must not start a finding.
 const FINDING_LINE_RE = /^[\s>*#-]*\**(CRITICAL|IMPORTANT|LOW)\**\s*:\s*(.+)$/;
-const ISSUES_LINE_RE = /^[\s>*#-]*\**ISSUES\**\s*:\s*(\d+)\s*critical\D+(\d+)\s*important\D+(\d+)\s*low/i;
+const ISSUES_LINE_RE =
+  /^[\s>*#-]*\**ISSUES\**\s*:\s*(\d+)\s*critical\D+(\d+)\s*important\D+(\d+)\s*low/i;
 const VERDICT_LINE_RE = /^[\s>*#-]*\**VERDICT\**\s*:/i;
 const MAX_CONTEXT_LINES = 5; // the brief allows 2–5 context lines per finding
 
@@ -106,7 +107,8 @@ export function parseFindings(raw: string): ParsedTranscript {
     }
     // Context lines attach to the finding above (the brief allows 2–5 explanatory lines).
     const last = findings[findings.length - 1];
-    if (last && line.trim() && last.context.length < MAX_CONTEXT_LINES) last.context.push(line.trim());
+    if (last && line.trim() && last.context.length < MAX_CONTEXT_LINES)
+      last.context.push(line.trim());
   }
   if (issues === null) warnings.push('no ISSUES tally line in transcript');
   else {
@@ -129,7 +131,10 @@ export function parseFindings(raw: string): ParsedTranscript {
 
 function numberedFindings(findings: Finding[]): string {
   return findings
-    .map((f, i) => `F${i + 1} (${f.severity}): ${f.desc}${f.paths ? ` | ${f.paths}` : ''}${f.impact ? ` | ${f.impact}` : ''}`)
+    .map(
+      (f, i) =>
+        `F${i + 1} (${f.severity}): ${f.desc}${f.paths ? ` | ${f.paths}` : ''}${f.impact ? ` | ${f.impact}` : ''}`,
+    )
     .join('\n');
 }
 
@@ -173,7 +178,9 @@ export function buildDecoyPrompt(slot: DecoySlot, findings: Finding[]): string {
  * null is a matcher outage for that trial, never a silent NONE.
  */
 export function parseSlotReply(raw: string, findingCount: number): number | null {
-  const lines = [...String(raw).matchAll(/^[\s>*#-]*\**SLOT\**\s*:\s*(NONE|F?\s*(\d+))\s*\**\s*$/gim)];
+  const lines = [
+    ...String(raw).matchAll(/^[\s>*#-]*\**SLOT\**\s*:\s*(NONE|F?\s*(\d+))\s*\**\s*$/gim),
+  ];
   if (lines.length === 0) return null;
   const last = lines[lines.length - 1];
   if (last[1].toUpperCase() === 'NONE') return 0;
@@ -225,7 +232,11 @@ export async function mapPool<T, R>(
 
 /** Majority vote over per-trial matches; a full tie or an all-null slot fails safe. Exported for
  * tests. Votes are stringified finding numbers ('0' = NONE); null trials vote 'NULL'. */
-export function voteSlot(trials: (number | null)[]): { match: number; stable: boolean; outage: boolean } {
+export function voteSlot(trials: (number | null)[]): {
+  match: number;
+  stable: boolean;
+  outage: boolean;
+} {
   const counts = new Map<string, number>();
   for (const t of trials) {
     const key = t === null ? 'NULL' : String(t);
@@ -254,15 +265,31 @@ export async function runMatcher(
   { model = 'haiku', runs = 3, concurrency = 4, exec = execJudgeAsync, cwd }: MatcherOptions = {},
 ): Promise<SlotOutcome[]> {
   const slots: { slotId: string; kind: 'gold' | 'decoy'; prompt: string }[] = [
-    ...gold.map((s) => ({ slotId: s.id, kind: 'gold' as const, prompt: buildGoldPrompt(s, findings) })),
-    ...decoys.map((s) => ({ slotId: s.id, kind: 'decoy' as const, prompt: buildDecoyPrompt(s, findings) })),
+    ...gold.map((s) => ({
+      slotId: s.id,
+      kind: 'gold' as const,
+      prompt: buildGoldPrompt(s, findings),
+    })),
+    ...decoys.map((s) => ({
+      slotId: s.id,
+      kind: 'decoy' as const,
+      prompt: buildDecoyPrompt(s, findings),
+    })),
   ];
   if (findings.length === 0)
-    return slots.map(({ slotId, kind }) => ({ slotId, kind, match: 0, stable: true, outage: false }));
+    return slots.map(({ slotId, kind }) => ({
+      slotId,
+      kind,
+      match: 0,
+      stable: true,
+      outage: false,
+    }));
 
   // One work item per (slot, trial) so the pool bounds TOTAL concurrent claude calls, not slots.
   const trials: (number | null)[][] = slots.map(() => []);
-  const work: { si: number }[] = slots.flatMap((_, si) => Array.from({ length: runs }, () => ({ si })));
+  const work: { si: number }[] = slots.flatMap((_, si) =>
+    Array.from({ length: runs }, () => ({ si })),
+  );
   await mapPool(work, concurrency, async ({ si }) => {
     const ask = () =>
       exec({
@@ -304,7 +331,7 @@ export interface CaseScore {
 
 export function scoreCase(
   gold: GoldSlot[],
-  decoys: DecoySlot[],
+  _decoys: DecoySlot[],
   findings: Finding[],
   outcomes: SlotOutcome[],
 ): CaseScore {

@@ -479,6 +479,11 @@ describe('--gate (integration, real git repo)', () => {
           // before the stub ever runs — these tests exist to exercise the stubbed claude path.
           GUARD_DECISION_NO_LLM: '',
           FRINK_DECISION_NO_LLM: '',
+          // The ship path exports GUARD_AI_STRICT=1 (commit-with-gate-capture.sh), which the
+          // pre-push vitest inherits — that would flip these non-strict outage cases to exit 3.
+          // Clear it by default; the strict cases opt back in via extraEnv.
+          GUARD_AI_STRICT: '',
+          FRINK_AI_STRICT: '',
           PATH: `${stubClaude(script)}:${process.env.PATH}`,
           ...extraEnv,
         },

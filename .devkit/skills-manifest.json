@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.26.0",
-  "generatedAt": "2026-07-03T16:16:07.981Z",
+  "devkitRef": "v0.29.0",
+  "generatedAt": "2026-07-07T12:48:29.585Z",
   "targets": [
     "claude",
     "cursor"
@@ -13,6 +13,8 @@
     "brainstorming/SKILL.md": "faa2fd9ea4ac99b0e92934c931701c25a85767935526810baa9c462b632855e0",
     "commit-guard/SKILL.md": "69fe86ef83dd22006fec3b1b7990747c69455b6368699c86a579977603e4bdbb",
     "commit-guard/scripts/checklist.mjs": "82283ead00bf8fe1db5b9a9443e9c0dbe395b06fcb71fd9cfd81c51cab6c487e",
+    "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
+    "correctness/scripts/checklist.mjs": "a63e2425befd186c7fe3b5db1e0ee3190dfb506f29021cafa5bfb74ad8ed1d9b",
     "decisions/SKILL.md": "c85736e2b4ff81af0b299c2a7455e7ef6d5c8e81b47200c7f1d65833d5ecef4a",
     "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
     "feature-critique/SKILL.md": "f40fae2d934d851c3ba9847a924c0d43bf4661d640d0a83e9bf3f9121b42429f",

@@ -70,7 +70,6 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadScopedTargets } from '../../decisions/check-alignment.mts';
 import {
   BenchAbort,
   cleanBenchEnv,
@@ -420,8 +419,7 @@ export function summarize(
       s.severity.total += 1;
       if (p.expected === p.got) s.severity.exact += 1;
       s.severity.confusion[p.expected] ??= {};
-      s.severity.confusion[p.expected][p.got] =
-        (s.severity.confusion[p.expected][p.got] ?? 0) + 1;
+      s.severity.confusion[p.expected][p.got] = (s.severity.confusion[p.expected][p.got] ?? 0) + 1;
     }
     if (row.expectedVerdict) {
       s.verdicts.total += 1;
@@ -528,7 +526,9 @@ export function compareCompleteness(summary: BenchSummary, base: BenchSummary | 
     );
   }
   if (unstable.length)
-    lines.push(`  unstable cases (unconfirmed flips — instability, not regression): [${unstable.join(', ')}]`);
+    lines.push(
+      `  unstable cases (unconfirmed flips — instability, not regression): [${unstable.join(', ')}]`,
+    );
   // Slot-level flips print informationally — finer-grained diagnosis, never the gate.
   const slotB = Object.entries(summary.slots)
     .filter(([k, cur]) => base.slots?.[k]?.ok && !cur.ok && cur.stable)
@@ -542,7 +542,9 @@ export function compareCompleteness(summary: BenchSummary, base: BenchSummary | 
     );
   if (midP < 0.05 && b.length > c.length) {
     regressed = true;
-    lines.push(`  REGRESSION — one-directional case flips are significant (mid-p ${midP.toFixed(3)} < 0.05)`);
+    lines.push(
+      `  REGRESSION — one-directional case flips are significant (mid-p ${midP.toFixed(3)} < 0.05)`,
+    );
   }
   return { regressed, lines };
 }
@@ -593,14 +595,21 @@ function printEstimate(rows: CompletenessCase[], matchRuns: number) {
 function printCoverage(rows: CompletenessCase[]) {
   console.log(`── completeness (${rows.length} rows) ──`);
   const cells: Record<string, number> = {};
-  const tag: { provenance: Record<string, number>; holdout: number; variants: number; decoyKinds: Record<string, number> } = {
+  const tag: {
+    provenance: Record<string, number>;
+    holdout: number;
+    variants: number;
+    decoyKinds: Record<string, number>;
+  } = {
     provenance: {},
     holdout: 0,
     variants: 0,
     decoyKinds: {},
   };
   for (const r of rows) {
-    const sevs = r.gold.length ? [...new Set(r.gold.map((g) => g.severity))] : ['(no gold — control)'];
+    const sevs = r.gold.length
+      ? [...new Set(r.gold.map((g) => g.severity))]
+      : ['(no gold — control)'];
     for (const sev of sevs) {
       const key = `${r.category.padEnd(26)} ${sev.padEnd(22)} ${r.difficulty ?? 'unset'}`;
       cells[key] = (cells[key] ?? 0) + 1;
@@ -616,7 +625,9 @@ function printCoverage(rows: CompletenessCase[]) {
   console.log(
     `  provenance: ${Object.entries(tag.provenance)
       .map(([k, v]) => `${k}=${v}`)
-      .join(' ')} · holdout=${tag.holdout} · variant rows=${tag.variants} · decoys: ${Object.entries(
+      .join(
+        ' ',
+      )} · holdout=${tag.holdout} · variant rows=${tag.variants} · decoys: ${Object.entries(
       tag.decoyKinds,
     )
       .map(([k, v]) => `${k}=${v}`)
@@ -634,7 +645,10 @@ function printCoverage(rows: CompletenessCase[]) {
  * most slots are NONE, and a matcher that always says NONE "agrees" often by chance. Policy:
  * κ < 0.7 → the matcher is not trusted; fix matcher.mts before reading headline metrics.
  */
-export function matcherAudit(labelsText: string, readTranscript: (caseId: string) => { outcomes: { slotId: string; match: number }[] } | null) {
+export function matcherAudit(
+  labelsText: string,
+  readTranscript: (caseId: string) => { outcomes: { slotId: string; match: number }[] } | null,
+) {
   const labels = parseCasesText(labelsText) as { caseId: string; slotId: string; match: string }[];
   if (!labels.length) throw new BenchAbort(2, 'completeness-eval: no audit labels');
   const a: string[] = [];
@@ -688,14 +702,21 @@ async function main(argv: string[]) {
   }
   if (args.has('matcher-audit')) {
     if (!existsSync(auditLabelsPath))
-      throw new BenchAbort(2, `completeness-eval: no ${path.basename(auditLabelsPath)} — label a held sample first`);
+      throw new BenchAbort(
+        2,
+        `completeness-eval: no ${path.basename(auditLabelsPath)} — label a held sample first`,
+      );
     const res = matcherAudit(readFileSync(auditLabelsPath, 'utf8'), (caseId) => {
       const f = path.join(transcriptsDir, `${caseId}.json`);
       return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null;
     });
-    console.log(`matcher-audit: agreement ${fmtCi(res.agree, res.n)} · Cohen's κ ${res.kappa.toFixed(3)}`);
+    console.log(
+      `matcher-audit: agreement ${fmtCi(res.agree, res.n)} · Cohen's κ ${res.kappa.toFixed(3)}`,
+    );
     if (res.missing.length)
-      console.log(`  ${res.missing.length} labelled slot(s) missing a transcript (stale labels or no run yet): [${res.missing.join(', ')}]`);
+      console.log(
+        `  ${res.missing.length} labelled slot(s) missing a transcript (stale labels or no run yet): [${res.missing.join(', ')}]`,
+      );
     console.log(
       res.kappa >= 0.7
         ? '  κ ≥ 0.7 — matcher trusted'
@@ -705,9 +726,15 @@ async function main(argv: string[]) {
   }
 
   if (devOnly && (writeBaseline || failOnRegression))
-    throw new BenchAbort(2, 'completeness-eval: --dev excludes holdout rows — not valid with --baseline/--fail');
+    throw new BenchAbort(
+      2,
+      'completeness-eval: --dev excludes holdout rows — not valid with --baseline/--fail',
+    );
   if (only && (writeBaseline || failOnRegression))
-    throw new BenchAbort(2, 'completeness-eval: --only is an iteration subset — not valid with --baseline/--fail');
+    throw new BenchAbort(
+      2,
+      'completeness-eval: --only is an iteration subset — not valid with --baseline/--fail',
+    );
   if (devOnly) rows = rows.filter((r) => !r.holdout);
   if (only) rows = rows.filter((r) => r.id.startsWith(only));
   if (!rows.length) throw new BenchAbort(2, 'completeness-eval: no rows after filtering');
@@ -726,7 +753,7 @@ async function main(argv: string[]) {
 
   const results: CaseResult[] = [];
   for (const row of rows) {
-    let res = await runCase(row);
+    const res = await runCase(row);
     // Alignment convention: a case whose outcome disagrees with the baseline re-runs ONCE.
     // 1-of-2 disagreement = instability (never a counted flip); 2-of-2 = a real flip.
     if (!res.outage && res.score && retryAgainst?.rows?.[row.id]) {
@@ -745,8 +772,8 @@ async function main(argv: string[]) {
     }
     results.push(res);
     if (res.outage) console.log(`  ${row.id.padEnd(34)} OUTAGE (reviewer dark — row excluded)`);
-    else {
-      const sc = res.score!;
+    else if (res.score) {
+      const sc = res.score;
       const hits = sc.slots.filter((x) => x.kind === 'gold' && x.ok).length;
       const goldN = sc.slots.filter((x) => x.kind === 'gold').length;
       const flagged = sc.slots.filter((x) => x.kind === 'decoy' && !x.ok).length;
@@ -766,13 +793,25 @@ async function main(argv: string[]) {
   s.matcherHash = mh;
   s.corpusHash = sha12(JSON.stringify(rows));
 
-  console.log(`\ncompleteness: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=opus K=1]`);
-  console.log(`  headline: gap recall ${fmtCi(s.gold.hit, s.gold.total)}  (floor ${FLOOR_GAP_RECALL})`);
-  console.log(`  headline: false-flag rate ${fmtCi(s.decoys.flagged, s.decoys.total)}  (ceiling ${CEILING_FALSE_FLAG})`);
-  console.log(`    recorded decisions re-litigated: ${fmtCi(s.decoys.recorded.flagged, s.decoys.recorded.total)}`);
-  console.log(`  finding precision (informational): ${fmtCi(s.findings.matched, s.findings.total)} · spurious/case ${(s.findings.spurious / Math.max(1, s.cases - s.caseOutages)).toFixed(1)}`);
+  console.log(
+    `\ncompleteness: ${results.length} case(s)  [matcher=${s.matchModel} K=${s.matchRuns} · reviewer=opus K=1]`,
+  );
+  console.log(
+    `  headline: gap recall ${fmtCi(s.gold.hit, s.gold.total)}  (floor ${FLOOR_GAP_RECALL})`,
+  );
+  console.log(
+    `  headline: false-flag rate ${fmtCi(s.decoys.flagged, s.decoys.total)}  (ceiling ${CEILING_FALSE_FLAG})`,
+  );
+  console.log(
+    `    recorded decisions re-litigated: ${fmtCi(s.decoys.recorded.flagged, s.decoys.recorded.total)}`,
+  );
+  console.log(
+    `  finding precision (informational): ${fmtCi(s.findings.matched, s.findings.total)} · spurious/case ${(s.findings.spurious / Math.max(1, s.cases - s.caseOutages)).toFixed(1)}`,
+  );
   if (s.severity.total) {
-    console.log(`  severity calibration (warn tier): exact ${fmtCi(s.severity.exact, s.severity.total)}`);
+    console.log(
+      `  severity calibration (warn tier): exact ${fmtCi(s.severity.exact, s.severity.total)}`,
+    );
     for (const want of SEVERITIES)
       if (s.severity.confusion[want])
         console.log(
@@ -781,11 +820,17 @@ async function main(argv: string[]) {
             .join(' ')}`,
         );
   }
-  if (s.verdicts.total) console.log(`  verdict line (informational): ${fmtCi(s.verdicts.correct, s.verdicts.total)}`);
-  if (s.outages) console.log(`  outages: ${s.caseOutages} case(s) + ${s.slotOutages} slot(s) — score is suspect, rerun before trusting`);
+  if (s.verdicts.total)
+    console.log(`  verdict line (informational): ${fmtCi(s.verdicts.correct, s.verdicts.total)}`);
+  if (s.outages)
+    console.log(
+      `  outages: ${s.caseOutages} case(s) + ${s.slotOutages} slot(s) — score is suspect, rerun before trusting`,
+    );
   const vc = variantConsistency(rows, s);
   if (vc)
-    console.log(`  variant consistency: ${vc.consistent}/${vc.total} groups${vc.broken.length ? ` — broken: [${vc.broken.join(', ')}]` : ''}`);
+    console.log(
+      `  variant consistency: ${vc.consistent}/${vc.total} groups${vc.broken.length ? ` — broken: [${vc.broken.join(', ')}]` : ''}`,
+    );
 
   const { regressed, lines } = compareCompleteness(s, baseline.completeness);
   if (existsSync(baselinePath)) for (const l of lines) console.log(l);
@@ -811,7 +856,9 @@ async function main(argv: string[]) {
     console.log(`\nwrote baseline → ${path.relative(process.cwd(), baselinePath)}`);
   }
   if (failOnRegression && regressed) {
-    console.error('\nFAIL: floor breach or statistically significant one-directional case flips vs baseline.');
+    console.error(
+      '\nFAIL: floor breach or statistically significant one-directional case flips vs baseline.',
+    );
     process.exit(1);
   }
   process.exit(0);

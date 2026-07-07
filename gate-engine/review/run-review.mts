@@ -222,7 +222,9 @@ export async function runCascade(
       new Date().toISOString(),
     );
     for (const s of suppressed)
-      console.error(`guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`);
+      console.error(
+        `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`,
+      );
     if (blocking.length === 0) {
       res.status = 'pass';
       res.reason = `all ${suppressed.length} finding(s) overridden`;

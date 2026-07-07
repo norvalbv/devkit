@@ -156,6 +156,10 @@ describe('--gate (integration, real git repo)', () => {
       env: {
         ...process.env,
         GUARD_DECISIONS_DIR: join(repo, 'docs', 'decisions'),
+        // The ship exports GUARD_AI_STRICT=1, which the pre-push vitest inherits and would flip
+        // these fail-open cases to exit 3. Clear it by default; strict cases opt in via extraEnv.
+        GUARD_AI_STRICT: '',
+        FRINK_AI_STRICT: '',
         PATH: `${bin}:${process.env.PATH}`, // our stub wins; git still resolves from the tail
         ...extraEnv,
       },
