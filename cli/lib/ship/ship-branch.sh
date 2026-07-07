@@ -199,6 +199,11 @@ git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read
   git -C "$WT" add -- "$f"
 done
 
+# Link gate configs that live in the repo but aren't in this fresh checkout (an untracked config, a
+# gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
+. "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
+link_untracked_gate_configs "$WT" "$ROOT"
+
 # Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
 # agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
