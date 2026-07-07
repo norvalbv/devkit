@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { hashFragment, relPath } from '../clone-detector.mts';
+import { hashFragment, relPath, resolveJscpdBin } from '../clone-detector.mts';
 
 const HEX16 = /^[0-9a-f]{16}$/;
 const LINES_RE = /--lines \d+\b/;
@@ -50,6 +50,28 @@ describe('relPath', () => {
   });
   it('leaves a forward-slash src path collapsed the same way', () => {
     expect(relPath('/abs/proj/src/main/b.ts')).toBe('src/main/b.ts');
+  });
+});
+
+// jscpd bin resolution order. The bare-'jscpd' terminal is what lets a GLOBAL install work with no
+// JSCPD_BIN and no vendored jscpd — unreachable via a real spawn in-repo (devkit bundles jscpd, so a
+// candidate always exists first), so we cover the order here with an injected existence check.
+describe('resolveJscpdBin', () => {
+  const roots = { ownRoot: '/own', repoRoot: '/repo' };
+  it('JSCPD_BIN env wins verbatim, even if it does not exist', () => {
+    expect(resolveJscpdBin({ ...roots, env: '/nonexistent/jscpd', exists: () => false })).toBe(
+      '/nonexistent/jscpd',
+    );
+  });
+  it('with no env, returns the first candidate that exists (order precedence)', () => {
+    // Only the consumer candidate exists → it wins over devkit-own/hoist (which do not).
+    const consumer = resolve('/repo', 'node_modules', '.bin', 'jscpd');
+    expect(resolveJscpdBin({ ...roots, env: undefined, exists: (p) => p === consumer })).toBe(
+      consumer,
+    );
+  });
+  it('no env and no candidate on disk → bare "jscpd" (PATH global / fail-open)', () => {
+    expect(resolveJscpdBin({ ...roots, env: undefined, exists: () => false })).toBe('jscpd');
   });
 });
 
