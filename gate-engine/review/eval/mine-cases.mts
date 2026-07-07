@@ -169,11 +169,16 @@ function main(argv: string[]) {
   for (const p of projects) candidates.push(...mineProject(path.join(projectsRoot, p), p));
   candidates.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
   const outPath = path.join(here, 'candidates.jsonl');
-  writeFileSync(outPath, candidates.map((c) => JSON.stringify(c)).join('\n') + (candidates.length ? '\n' : ''));
+  writeFileSync(
+    outPath,
+    candidates.map((c) => JSON.stringify(c)).join('\n') + (candidates.length ? '\n' : ''),
+  );
 
   const byProject: Record<string, number> = {};
   for (const c of candidates) byProject[c.project] = (byProject[c.project] ?? 0) + 1;
-  console.log(`mine-cases: ${candidates.length} candidate(s) → ${path.relative(process.cwd(), outPath)} (gitignored)`);
+  console.log(
+    `mine-cases: ${candidates.length} candidate(s) → ${path.relative(process.cwd(), outPath)} (gitignored)`,
+  );
   for (const [p, n] of Object.entries(byProject).sort((a, b) => b[1] - a[1]))
     console.log(`  ${String(n).padStart(4)}  ${p}`);
   console.log(
@@ -182,6 +187,5 @@ function main(argv: string[]) {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) main(process.argv.slice(2));

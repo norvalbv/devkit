@@ -27,6 +27,7 @@ const goldRow = (over = {}) => ({
     base: { 'api/users.ts': 'export function listUsers() {\n  return [];\n}\n' },
     staged: {
       'api/users.ts':
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${id} is the fixture's vulnerable-SQL text, not a template
         "import { db } from './db';\nexport function getUser(id: string) {\n  return db.query(`SELECT * FROM users WHERE id = ${id}`);\n}\n",
     },
   },
@@ -121,7 +122,9 @@ describe('scoreRow buckets', () => {
   });
 
   it('pattern-only: wrong item failed but the finding text matches reasonPattern', () => {
-    const wrongItem = { items: [{ name: 'input-validation', status: 'fail', issues: ['raw concat into query'] }] };
+    const wrongItem = {
+      items: [{ name: 'input-validation', status: 'fail', issues: ['raw concat into query'] }],
+    };
     const res = scoreRow(
       goldRow(),
       cap('VERDICT: FAIL — x', { out: 'VERDICT: FAIL — x', snapshot: wrongItem }),
@@ -152,7 +155,11 @@ describe('scoreRow buckets', () => {
   it('uses the FIRST pass snapshot when the escalation was synthetic (cascade off)', () => {
     const res = scoreRow(
       goldRow(),
-      cap('VERDICT: FAIL — sqli', { out: 'VERDICT: FAIL — cascade disabled (bench)', snapshot: null, synthetic: true }, { first: failArtifact }),
+      cap(
+        'VERDICT: FAIL — sqli',
+        { out: 'VERDICT: FAIL — cascade disabled (bench)', snapshot: null, synthetic: true },
+        { first: failArtifact },
+      ),
       { status: 'fail', reason: 'sqli', escalated: true },
     );
     expect(res.reasonClass).toBe('right-item');
@@ -175,11 +182,15 @@ describe('scoreRow buckets', () => {
   });
 
   it('decoy scored on PASS both layers', () => {
-    const res = scoreRow(decoyRow(), cap('all good\nVERDICT: PASS', null, { first: passArtifact }), {
-      status: 'pass',
-      reason: '',
-      escalated: false,
-    });
+    const res = scoreRow(
+      decoyRow(),
+      cap('all good\nVERDICT: PASS', null, { first: passArtifact }),
+      {
+        status: 'pass',
+        reason: '',
+        escalated: false,
+      },
+    );
     expect(res.okFirst).toBe(true);
     expect(res.okFinal).toBe(true);
     expect(res.reasonClass).toBeNull();
@@ -190,12 +201,19 @@ describe('compareReviewer', () => {
   const meta = { model: 'sonnet', cascade: true, gateHash: 'g1', corpusHash: 'c1' };
   const baseWith = (rows, over = {}) => ({
     sections: {
-      'api-security-reviewer@sonnet@cascade-on': { gateHash: 'g1', corpusHash: 'c1', rows, ...over },
+      'api-security-reviewer@sonnet@cascade-on': {
+        gateHash: 'g1',
+        corpusHash: 'c1',
+        rows,
+        ...over,
+      },
     },
   });
 
   it('skips without a matching section', () => {
-    expect(compareReviewer('api-security-reviewer', [], meta, { sections: {} }).skipped).toMatch(/no baseline/);
+    expect(compareReviewer('api-security-reviewer', [], meta, { sections: {} }).skipped).toMatch(
+      /no baseline/,
+    );
   });
 
   it('skips on gateHash mismatch', () => {
@@ -207,13 +225,19 @@ describe('compareReviewer', () => {
     const rows = Object.fromEntries(
       Array.from({ length: 8 }, (_, i) => [`r${i}`, { okFinal: true, okFirst: true }]),
     );
-    const now = Array.from({ length: 8 }, (_, i) => ({ id: `r${i}`, okFinal: i >= 6, okFirst: true }));
+    const now = Array.from({ length: 8 }, (_, i) => ({
+      id: `r${i}`,
+      okFinal: i >= 6,
+      okFirst: true,
+    }));
     // 6 stable downward flips → regression
     const cmp = compareReviewer('api-security-reviewer', now, meta, baseWith(rows));
     expect(cmp.regressed).toBe(true);
     // same flips marked unstable → excluded, no regression
     const shaky = now.map((r) => ({ ...r, stable: r.okFinal ? undefined : false }));
-    expect(compareReviewer('api-security-reviewer', shaky, meta, baseWith(rows)).regressed).toBe(false);
+    expect(compareReviewer('api-security-reviewer', shaky, meta, baseWith(rows)).regressed).toBe(
+      false,
+    );
   });
 });
 
@@ -221,7 +245,10 @@ describe('runRow end-to-end (fake judge, real fixture + gate)', () => {
   it('gold row blocks via escalation with right-item attribution', async () => {
     const exec = fakeJudge({
       first: { out: 'found it\nVERDICT: FAIL — sqli', artifact: failArtifact },
-      escalate: { out: 'confirmed\nVERDICT: FAIL — string-concatenated sql', artifact: failArtifact },
+      escalate: {
+        out: 'confirmed\nVERDICT: FAIL — string-concatenated sql',
+        artifact: failArtifact,
+      },
     });
     const res = await runRow(goldRow(), { model: 'sonnet', cascade: true, exec });
     expect(res.finalStatus).toBe('fail');
@@ -360,10 +387,46 @@ describe('salvageMap (checkpoint resume)', () => {
 describe('summarize', () => {
   it('splits gold/decoy metrics and counts live escalations only', () => {
     const rows = [
-      { expected: 'FAIL', firstVerdict: 'FAIL', okFirst: true, okFinal: true, escalateLive: true, reasonClass: 'right-item', subcause: null, ms: { first: 1, escalate: 240000 } },
-      { expected: 'FAIL', firstVerdict: 'PASS', okFirst: false, okFinal: false, escalateLive: false, reasonClass: null, subcause: null, ms: { first: 1, escalate: 0 } },
-      { expected: 'PASS', firstVerdict: 'PASS', okFirst: true, okFinal: true, escalateLive: false, reasonClass: null, subcause: null, ms: { first: 1, escalate: 0 } },
-      { expected: 'PASS', firstVerdict: null, okFirst: false, okFinal: false, escalateLive: false, reasonClass: null, subcause: 'outage', ms: { first: 0, escalate: 0 } },
+      {
+        expected: 'FAIL',
+        firstVerdict: 'FAIL',
+        okFirst: true,
+        okFinal: true,
+        escalateLive: true,
+        reasonClass: 'right-item',
+        subcause: null,
+        ms: { first: 1, escalate: 240000 },
+      },
+      {
+        expected: 'FAIL',
+        firstVerdict: 'PASS',
+        okFirst: false,
+        okFinal: false,
+        escalateLive: false,
+        reasonClass: null,
+        subcause: null,
+        ms: { first: 1, escalate: 0 },
+      },
+      {
+        expected: 'PASS',
+        firstVerdict: 'PASS',
+        okFirst: true,
+        okFinal: true,
+        escalateLive: false,
+        reasonClass: null,
+        subcause: null,
+        ms: { first: 1, escalate: 0 },
+      },
+      {
+        expected: 'PASS',
+        firstVerdict: null,
+        okFirst: false,
+        okFinal: false,
+        escalateLive: false,
+        reasonClass: null,
+        subcause: 'outage',
+        ms: { first: 0, escalate: 0 },
+      },
     ];
     const s = summarize(rows, { cascade: true });
     expect(s.firstFailRecall).toEqual({ k: 1, n: 2 });

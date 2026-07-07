@@ -71,7 +71,12 @@ function makeRow(overrides: Partial<CompletenessCase> = {}): CompletenessCase {
       staged: { 'src/registry.ts': 'export const ACTIONS = ["copy", "export-csv"];\n' },
     },
     gold: [
-      { id: 'g1', severity: 'IMPORTANT', desc: 'export-csv missing from help menu', paths: ['src/help-menu.ts'] },
+      {
+        id: 'g1',
+        severity: 'IMPORTANT',
+        desc: 'export-csv missing from help menu',
+        paths: ['src/help-menu.ts'],
+      },
     ],
     decoys: [
       {
@@ -114,8 +119,14 @@ describe('parseFindings', () => {
       paths: 'src/help-menu.ts',
       impact: 'users cannot discover it',
     });
-    expect(findings[0].context).toEqual(['The registry gained the action but the sibling list did not.']);
-    expect(findings[1]).toMatchObject({ severity: 'LOW', desc: 'consider a changelog entry', impact: '' });
+    expect(findings[0].context).toEqual([
+      'The registry gained the action but the sibling list did not.',
+    ]);
+    expect(findings[1]).toMatchObject({
+      severity: 'LOW',
+      desc: 'consider a changelog entry',
+      impact: '',
+    });
     expect(issues).toEqual({ critical: 0, important: 1, low: 1 });
     expect(warnings).toEqual([]);
   });
@@ -130,14 +141,16 @@ describe('parseFindings', () => {
   });
 
   it('warns on ISSUES tally mismatch and on a missing tally', () => {
-    expect(parseFindings('CRITICAL: x | a.ts | y\nISSUES: 2 critical, 0 important, 0 low').warnings[0]).toMatch(
-      /disagrees/,
-    );
+    expect(
+      parseFindings('CRITICAL: x | a.ts | y\nISSUES: 2 critical, 0 important, 0 low').warnings[0],
+    ).toMatch(/disagrees/);
     expect(parseFindings('CRITICAL: x | a.ts | y').warnings[0]).toMatch(/no ISSUES tally/);
   });
 
   it('returns zero findings for a clean report and never treats VERDICT as a finding', () => {
-    const { findings } = parseFindings('ISSUES: 0 critical, 0 important, 0 low\nVERDICT: PASS — complete');
+    const { findings } = parseFindings(
+      'ISSUES: 0 critical, 0 important, 0 low\nVERDICT: PASS — complete',
+    );
     expect(findings).toEqual([]);
   });
 });
@@ -193,12 +206,21 @@ describe('mapPool', () => {
 describe('runMatcher', () => {
   const gold = [{ id: 'g1', severity: 'IMPORTANT' as const, desc: 'gap' }];
   const decoys = [{ id: 'd1', kind: 'out-of-scope' as const, desc: 'decoy' }];
-  const finding = { severity: 'IMPORTANT' as const, desc: 'gap', paths: '', impact: '', context: [] };
+  const finding = {
+    severity: 'IMPORTANT' as const,
+    desc: 'gap',
+    paths: '',
+    impact: '',
+    context: [],
+  };
 
   it('short-circuits with zero findings — no exec call, gold missed, decoys clean', async () => {
     let calls = 0;
     const outcomes = await runMatcher(gold, decoys, [], {
-      exec: async () => ((calls += 1), 'SLOT: F1'),
+      exec: async () => {
+        calls += 1;
+        return 'SLOT: F1';
+      },
     });
     expect(calls).toBe(0);
     expect(outcomes).toEqual([
@@ -208,7 +230,15 @@ describe('runMatcher', () => {
   });
 
   it('votes K trials per slot and retries a dark reply once', async () => {
-    const replies: (string | null)[] = [null, 'SLOT: F1', 'SLOT: F1', 'SLOT: F1', 'SLOT: NONE', 'SLOT: NONE', 'SLOT: NONE'];
+    const replies: (string | null)[] = [
+      null,
+      'SLOT: F1',
+      'SLOT: F1',
+      'SLOT: F1',
+      'SLOT: NONE',
+      'SLOT: NONE',
+      'SLOT: NONE',
+    ];
     let i = 0;
     const outcomes = await runMatcher(gold, decoys, [finding], {
       runs: 3,
@@ -216,7 +246,7 @@ describe('runMatcher', () => {
       // No ?? here — a deliberate null (dark judge) must reach the matcher as null.
       exec: async () => (i < replies.length ? replies[i++] : 'SLOT: NONE'),
     });
-    const g = outcomes.find((o) => o.slotId === 'g1')!;
+    const g = outcomes.find((o) => o.slotId === 'g1');
     expect(g).toMatchObject({ match: 1, stable: true, outage: false }); // retry rescued the flake
     expect(outcomes.find((o) => o.slotId === 'd1')).toMatchObject({ match: 0, stable: true });
   });
@@ -357,12 +387,12 @@ describe('runCase', () => {
     });
     expect(res.outage).toBe(false);
     expect(res.verdict).toBe('FAIL');
-    expect(res.score!.slots).toEqual([
+    expect(res.score?.slots).toEqual([
       { slotId: 'g1', kind: 'gold', ok: true, got: 'hit', stable: true, outage: false },
       { slotId: 'd1', kind: 'decoy', ok: true, got: 'clean', stable: true, outage: false },
     ]);
-    expect(res.score!.severity).toEqual([{ expected: 'IMPORTANT', got: 'IMPORTANT' }]);
-    expect(res.score!.spurious).toEqual([2]); // the LOW changelog finding matched nothing
+    expect(res.score?.severity).toEqual([{ expected: 'IMPORTANT', got: 'IMPORTANT' }]);
+    expect(res.score?.spurious).toEqual([2]); // the LOW changelog finding matched nothing
   });
 
   it('a dark reviewer is an outage, not a crash and not a pass', async () => {
@@ -378,7 +408,11 @@ describe('runCase', () => {
   it('a gate free-skip (env kill-switch) aborts as a fixture bug — never a pass', async () => {
     process.env.GUARD_NO_COMPLETENESS = '1';
     await expect(
-      runCase(makeRow(), { reviewerExec: async () => REVIEWER_TRANSCRIPT, matcherExec: matcherStub, saveTranscript: false }),
+      runCase(makeRow(), {
+        reviewerExec: async () => REVIEWER_TRANSCRIPT,
+        matcherExec: matcherStub,
+        saveTranscript: false,
+      }),
     ).rejects.toThrow(/free-skipped/);
   });
 
@@ -411,14 +445,20 @@ describe('runCase', () => {
       gold: [],
     });
     await expect(
-      runCase(row, { reviewerExec: async () => REVIEWER_TRANSCRIPT, matcherExec: matcherStub, saveTranscript: false }),
+      runCase(row, {
+        reviewerExec: async () => REVIEWER_TRANSCRIPT,
+        matcherExec: matcherStub,
+        saveTranscript: false,
+      }),
     ).rejects.toThrow(/not in the gate prompt/);
   });
 });
 
 // ─── summarize + variantConsistency ───────────────────────────────────────────────
 
-function summaryFrom(slotSpecs: Record<string, { kind: 'gold' | 'decoy'; ok: boolean; stable?: boolean }>): BenchSummary {
+function summaryFrom(
+  slotSpecs: Record<string, { kind: 'gold' | 'decoy'; ok: boolean; stable?: boolean }>,
+): BenchSummary {
   // Build a summary via the real aggregation path with one synthetic case per slot map.
   const rows: CompletenessCase[] = [];
   const results = [];
@@ -472,8 +512,22 @@ describe('summarize', () => {
         warnings: [],
         score: {
           slots: [
-            { slotId: 'g1', kind: 'gold' as const, ok: true, got: 'hit' as const, stable: true, outage: false },
-            { slotId: 'd1', kind: 'decoy' as const, ok: false, got: 'flagged' as const, stable: true, outage: false },
+            {
+              slotId: 'g1',
+              kind: 'gold' as const,
+              ok: true,
+              got: 'hit' as const,
+              stable: true,
+              outage: false,
+            },
+            {
+              slotId: 'd1',
+              kind: 'decoy' as const,
+              ok: false,
+              got: 'flagged' as const,
+              stable: true,
+              outage: false,
+            },
           ],
           severity: [{ expected: 'IMPORTANT' as const, got: 'CRITICAL' as const }],
           spurious: [3],
@@ -495,28 +549,25 @@ describe('summarize', () => {
 
   it('counts case outages and slot outages separately; outage slots join no metric', () => {
     const row = makeRow();
-    const s = summarize(
-      [row, makeRow({ id: 'other' })],
-      [
-        { id: row.id, outage: true, exit: 0, verdict: null, warnings: [], score: null },
-        {
-          id: 'other',
-          outage: false,
-          exit: 0,
-          verdict: null,
-          warnings: [],
-          score: {
-            slots: [
-              { slotId: 'g1', kind: 'gold', ok: false, got: 'miss', stable: true, outage: true },
-              { slotId: 'd1', kind: 'decoy', ok: true, got: 'clean', stable: true, outage: false },
-            ],
-            severity: [],
-            spurious: [],
-            findingCount: 0,
-          },
+    const s = summarize([row, makeRow({ id: 'other' })], [
+      { id: row.id, outage: true, exit: 0, verdict: null, warnings: [], score: null },
+      {
+        id: 'other',
+        outage: false,
+        exit: 0,
+        verdict: null,
+        warnings: [],
+        score: {
+          slots: [
+            { slotId: 'g1', kind: 'gold', ok: false, got: 'miss', stable: true, outage: true },
+            { slotId: 'd1', kind: 'decoy', ok: true, got: 'clean', stable: true, outage: false },
+          ],
+          severity: [],
+          spurious: [],
+          findingCount: 0,
         },
-      ] as never,
-    );
+      },
+    ] as never);
     expect(s.caseOutages).toBe(1);
     expect(s.slotOutages).toBe(1);
     expect(s.outages).toBe(2);
@@ -527,10 +578,16 @@ describe('summarize', () => {
   it('a null verdict scores as PASS (the gate fail-open reading)', () => {
     const row = makeRow({ expectedVerdict: 'PASS', decoys: [], gold: [] });
     // Bypass lint concerns — direct summarize with an empty-slot score.
-    const s = summarize(
-      [row],
-      [{ id: row.id, outage: false, exit: 0, verdict: null, warnings: [], score: { slots: [], severity: [], spurious: [], findingCount: 0 } }] as never,
-    );
+    const s = summarize([row], [
+      {
+        id: row.id,
+        outage: false,
+        exit: 0,
+        verdict: null,
+        warnings: [],
+        score: { slots: [], severity: [], spurious: [], findingCount: 0 },
+      },
+    ] as never);
     expect(s.verdicts).toEqual({ total: 1, correct: 1 });
   });
 });
@@ -552,7 +609,9 @@ describe('variantConsistency', () => {
     expect(variantConsistency(rows, s)).toEqual({ consistent: 1, total: 2, broken: ['b'] });
   });
   it('returns null with no variant groups', () => {
-    expect(variantConsistency([makeRow()], summaryFrom({ 'x::g1': { kind: 'gold', ok: true } }))).toBeNull();
+    expect(
+      variantConsistency([makeRow()], summaryFrom({ 'x::g1': { kind: 'gold', ok: true } })),
+    ).toBeNull();
   });
 });
 
@@ -573,7 +632,12 @@ function baseSummary(overrides: Partial<BenchSummary> = {}): BenchSummary {
     verdicts: { total: 0, correct: 0 },
     gapRecall: 1,
     falseFlagRate: 0,
-    rows: { a: { ok: true, stable: true }, b: { ok: true, stable: true }, c: { ok: true, stable: true }, d: { ok: true, stable: true } },
+    rows: {
+      a: { ok: true, stable: true },
+      b: { ok: true, stable: true },
+      c: { ok: true, stable: true },
+      d: { ok: true, stable: true },
+    },
     slots: {},
     gateHash: 'gh',
     matcherHash: 'mh',
@@ -585,10 +649,18 @@ function baseSummary(overrides: Partial<BenchSummary> = {}): BenchSummary {
 describe('compareCompleteness', () => {
   it('skips without lying on config / hash / outage mismatches', () => {
     const base = baseSummary();
-    expect(compareCompleteness(baseSummary({ matchModel: 'sonnet' }), base).lines[0]).toMatch(/config differs/);
-    expect(compareCompleteness(baseSummary({ gateHash: 'x' }), base).lines[0]).toMatch(/gate code \/ agent brief changed/);
-    expect(compareCompleteness(baseSummary({ matcherHash: 'x' }), base).lines[0]).toMatch(/matcher changed/);
-    expect(compareCompleteness(baseSummary({ corpusHash: 'x' }), base).lines[0]).toMatch(/corpus changed/);
+    expect(compareCompleteness(baseSummary({ matchModel: 'sonnet' }), base).lines[0]).toMatch(
+      /config differs/,
+    );
+    expect(compareCompleteness(baseSummary({ gateHash: 'x' }), base).lines[0]).toMatch(
+      /gate code \/ agent brief changed/,
+    );
+    expect(compareCompleteness(baseSummary({ matcherHash: 'x' }), base).lines[0]).toMatch(
+      /matcher changed/,
+    );
+    expect(compareCompleteness(baseSummary({ corpusHash: 'x' }), base).lines[0]).toMatch(
+      /corpus changed/,
+    );
     expect(compareCompleteness(baseSummary({ outages: 1 }), base).lines[0]).toMatch(/outage/);
     expect(compareCompleteness(baseSummary(), undefined).lines[0]).toMatch(/no baseline/);
   });
@@ -601,7 +673,10 @@ describe('compareCompleteness', () => {
     );
     expect(lowRecall.regressed).toBe(true);
     expect(lowRecall.lines.join('\n')).toMatch(/FLOOR BREACH/);
-    const noisy = compareCompleteness(baseSummary({ falseFlagRate: CEILING_FALSE_FLAG + 0.01 }), base);
+    const noisy = compareCompleteness(
+      baseSummary({ falseFlagRate: CEILING_FALSE_FLAG + 0.01 }),
+      base,
+    );
     expect(noisy.regressed).toBe(true);
     expect(noisy.lines.join('\n')).toMatch(/CEILING BREACH/);
   });
@@ -609,7 +684,10 @@ describe('compareCompleteness', () => {
   it('a single stable case flip warns but does not regress; ~6 one-directional flips regress', () => {
     const mkRows = (bad: string[]) =>
       Object.fromEntries(
-        Array.from({ length: 12 }, (_, i) => [`c${i}`, { ok: !bad.includes(`c${i}`), stable: true }]),
+        Array.from({ length: 12 }, (_, i) => [
+          `c${i}`,
+          { ok: !bad.includes(`c${i}`), stable: true },
+        ]),
       );
     const base = baseSummary({ rows: mkRows([]) });
     const oneFlip = compareCompleteness(baseSummary({ rows: mkRows(['c0']) }), base);
@@ -625,10 +703,20 @@ describe('compareCompleteness', () => {
 
   it('symmetric churn does not regress; unstable flips never count', () => {
     const base = baseSummary({
-      rows: { a: { ok: true, stable: true }, b: { ok: false, stable: true }, c: { ok: true, stable: true } },
+      rows: {
+        a: { ok: true, stable: true },
+        b: { ok: false, stable: true },
+        c: { ok: true, stable: true },
+      },
     });
     const churn = compareCompleteness(
-      baseSummary({ rows: { a: { ok: false, stable: true }, b: { ok: true, stable: true }, c: { ok: true, stable: true } } }),
+      baseSummary({
+        rows: {
+          a: { ok: false, stable: true },
+          b: { ok: true, stable: true },
+          c: { ok: true, stable: true },
+        },
+      }),
       base,
     );
     expect(churn.regressed).toBe(false);
@@ -668,9 +756,12 @@ describe('cases-completeness.jsonl (the committed corpus)', () => {
         const targets = loadScopedTargets(join(fx.repo, 'docs/decisions'));
         for (const d of rdDecoys) {
           const t = targets.find((x) => x.slug === d.targetSlug);
-          expect(t, `${row.id}: decoy Target ${d.targetSlug} must parse (needs a **Scope:** field)`).toBeDefined();
           expect(
-            matchScope(fx.staged, t!.scopeGlobs),
+            t,
+            `${row.id}: decoy Target ${d.targetSlug} must parse (needs a **Scope:** field)`,
+          ).toBeDefined();
+          expect(
+            matchScope(fx.staged, t?.scopeGlobs),
             `${row.id}: decoy Target ${d.targetSlug} scope must match ≥1 staged file or the gate never loads it`,
           ).toBe(true);
         }
@@ -682,7 +773,8 @@ describe('cases-completeness.jsonl (the committed corpus)', () => {
 
   it('variant rows point at existing canonical rows', () => {
     const ids = new Set(corpus.map((r) => r.id));
-    for (const r of corpus) if (r.variantOf) expect(ids.has(r.variantOf), `${r.id} → ${r.variantOf}`).toBe(true);
+    for (const r of corpus)
+      if (r.variantOf) expect(ids.has(r.variantOf), `${r.id} → ${r.variantOf}`).toBe(true);
   });
 });
 
@@ -690,7 +782,12 @@ describe('cases-completeness.jsonl (the committed corpus)', () => {
 
 describe('matcherAudit', () => {
   const transcripts: Record<string, { outcomes: { slotId: string; match: number }[] }> = {
-    'case-a': { outcomes: [{ slotId: 'g1', match: 1 }, { slotId: 'd1', match: 0 }] },
+    'case-a': {
+      outcomes: [
+        { slotId: 'g1', match: 1 },
+        { slotId: 'd1', match: 0 },
+      ],
+    },
     'case-b': { outcomes: [{ slotId: 'g1', match: 0 }] },
   };
   const read = (id: string) => transcripts[id] ?? null;

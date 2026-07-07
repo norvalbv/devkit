@@ -2,7 +2,7 @@
 name: backend-performance-reviewer
 description: "Use this agent to review backend code for performance issues. Checks database queries, caching strategies, async patterns, and API response optimization.\\n\\n<example>\\nContext: User has added database queries or data fetching logic.\\nuser: \"Added the query to fetch all user tasks\"\\nassistant: \"Let me invoke the backend-performance-reviewer agent to check for N+1 queries and pagination issues.\"\\n<commentary>\\nDatabase queries should be reviewed for efficiency, proper indexing, and avoiding N+1 patterns.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has implemented caching or heavy data processing.\\nuser: \"Implemented caching for the dashboard data\"\\nassistant: \"I'll run the backend-performance-reviewer agent to verify cache invalidation and TTL strategies.\"\\n<commentary>\\nCaching implementations need review for proper invalidation and memory considerations.\\n</commentary>\\n</example>"
 tools: Read, Grep, Glob, Bash
-model: opus
+model: haiku
 color: orange
 ---
 
@@ -44,19 +44,19 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 
 SCRIPT=".claude/skills/backend-performance/scripts/checklist.mjs"
 
-## 2. Setup
+## 2. Generate the checklist
 ```bash
 node $SCRIPT generate
 node $SCRIPT status
 ```
+`generate` enumerates the review items from the staged files under `review.backendRoots`
+(`guard.config.json`). If it prints "No staged backend files", exit early — nothing to review.
 
-If "No staged backend files" → exit early, nothing to review.
-
-## 3. Check each item
-For each item in the checklist:
-- Use Grep tool to search staged files for issues
-- Reference the SKILL.md for what to look for
-- Run: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`
+## 3. Check each item, one at a time
+For each item the checklist enumerated:
+- Use Grep to inspect the staged files for that concern; Read surrounding code where a hunk is ambiguous.
+- Reference the SKILL.md rule categories below for what to look for.
+- Mark it: `node $SCRIPT check-item <name> --pass` or `--fail "reason"`.
 
 ### Performance checks by category:
 
@@ -71,6 +71,12 @@ For each item in the checklist:
 - Cache invalidation strategy clear
 - Appropriate TTL values
 - Cache-aside pattern correct
+- **Key never varies per-request:** trace what the cache KEY is built from. A key that folds in a
+  volatile value — `req.originalUrl`/full URL when the client appends a cache-buster (`_=<ts>`,
+  a nonce, `Date.now()`), a timestamp, a random id, or a request id — never collides across calls,
+  so the hit rate is ~0 and the "cached" expensive path (a wide scan, an aggregate) runs on EVERY
+  request. FAIL and name the stable key it should use (e.g. `orgId:window`). Same for a cache
+  whose write path and read path compute DIFFERENT keys.
 
 **Async:**
 - Heavy work offloaded to queues
@@ -92,6 +98,5 @@ For each item in the checklist:
 node $SCRIPT finalize
 node $SCRIPT cleanup
 ```
-
-Done. No verbose summary needed.
+`finalize` verifies every enumerated item was resolved — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. No verbose summary needed.
 </workflow>
