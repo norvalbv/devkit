@@ -42,6 +42,7 @@
     "guard-prefix": "./dist/gate-engine/prefix-cache/cli.mjs",
     "guard-deterministic": "./dist/gate-engine/deterministic/run.mjs",
     "guard-dup": "./dist/gate-engine/co-occurrence/matcher.mjs",
+    "guard-dup-allowlist": "./dist/gate-engine/co-occurrence/allowlist-cli.mjs",
     "guard-clone": "./dist/gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./dist/gate-engine/ratchets/folder-fanout.mjs",
     "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
