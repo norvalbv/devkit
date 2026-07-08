@@ -35,6 +35,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
+import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
 import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mts';
@@ -44,10 +45,11 @@ const cfg = resolveGuardConfig(process.cwd());
 const repoRoot = cfg.cwd;
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPath = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
-// Approval-hint CLI on a gate block — generic default = the engine's own bin; a consumer
-// can point it at their own wrapper via GUARD_ALLOWLIST_CLI. The printed command
-// double-quotes args; assumes paths/hashes are shell-safe (git-tracked paths + hex hashes).
-const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || 'bunx guard-dup-allowlist';
+// Approval-hint CLI on a gate block — default = the engine's own guard-dup-allowlist bin,
+// bare (no `bunx`): on a global devkit install it's a PATH sibling of this gate, where
+// `bunx <name>` would 404. A consumer can override via GUARD_ALLOWLIST_CLI. The printed
+// command double-quotes args; assumes paths/hashes are shell-safe (git-tracked paths + hex).
+const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 
 const DEFAULTS = {
   // Token-clone floor + scan roots seed from the resolved config (consumer-tunable);
@@ -198,39 +200,14 @@ export function hashFragment(fragment: string): string {
   return createHash('sha256').update(normalised).digest('hex').slice(0, 16);
 }
 
-interface CloneAllowlistEntry {
-  fragmentHash: string;
-  date: string;
-  decayDays?: number;
-}
-interface AllowlistFile {
-  clones?: CloneAllowlistEntry[];
-}
-
 /** Fragment hashes of clones already approved AND still live (non-expired) in the
- * allowlist — the gate surfaces only clones not in this set. */
+ * allowlist — the gate surfaces only clones not in this set. The CloneAllowlistEntry shape,
+ * the corruption-refusing loader (fail-open exit 2 on a corrupt-but-present file, so an
+ * approved clone never re-surfaces as novel and false-blocks), and the atomic writer all
+ * live in ./allowlist-io.mts, shared with the matcher + the guard-dup-allowlist CLI. */
 function liveAllowlistedHashes(): Set<string> {
-  // Missing → no approvals yet (empty). But a corrupt-but-PRESENT file must NOT silently
-  // become "empty" — that makes every approved clone re-surface as novel → the gate
-  // false-blocks (the inverse of the matcher's wipe). Fail OPEN instead (exit 2), matching
-  // the matcher's contract: an infra/corrupt failure never bricks a commit.
-  if (allowlistPath == null || !existsSync(allowlistPath)) return new Set<string>();
-  let parsed: AllowlistFile | undefined;
-  try {
-    parsed = JSON.parse(readFileSync(allowlistPath, 'utf8')) as AllowlistFile;
-  } catch {
-    console.error(
-      `clone-detector: ${allowlistPath} exists but is not valid JSON — refusing (fail-open).`,
-    );
-    process.exit(2);
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    console.error(
-      `clone-detector: ${allowlistPath} is not a valid allowlist object — refusing (fail-open).`,
-    );
-    process.exit(2);
-  }
-  const clones = Array.isArray(parsed.clones) ? parsed.clones : [];
+  if (allowlistPath == null) return new Set<string>();
+  const { clones } = loadAllowlist(allowlistPath, 'clone-detector');
   return new Set(clones.filter((c) => !isExpired(c)).map((c) => c.fragmentHash));
 }
 

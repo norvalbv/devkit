@@ -44,10 +44,16 @@ import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
-import { writeFileAtomic } from './atomic-write.mts';
+import {
+  ALLOWLIST_CLI,
+  type AllowlistPair,
+  loadAllowlist as loadAllowlistFile,
+  saveAllowlist,
+  symFileKey,
+} from './allowlist-io.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { classifyPair } from './classify.mts';
-import { type DecayableEntry, isExpired } from './decay.mts';
+import { isExpired } from './decay.mts';
 
 // ── Types (hoisted from JSDoc + inferred from usage / call sites) ─────────────
 // One sqlite output column. Mirrors node:sqlite's (non-exported) SQLOutputValue so a
@@ -90,24 +96,9 @@ interface Pair {
   desc: number;
   tier: Tier;
 }
-// An allowlist entry (from .co-occurrence-allowlist.json — external data). The four
-// symbol/file fields are always present; the rest are findability metadata. Extends
-// the shared DecayableEntry (date + decayDays) so isExpired() accepts it directly.
-interface AllowlistPair extends DecayableEntry {
-  symbolA: string;
-  fileA: string;
-  symbolB: string;
-  fileB: string;
-  rangeA?: string;
-  rangeB?: string;
-  similarity?: number;
-  description?: string;
-}
-// Raw parsed shape of the allowlist file (before the defensive Array.isArray checks).
-interface RawAllowlist {
-  pairs?: AllowlistPair[];
-  clones?: unknown[];
-}
+// The allowlist entry shape (AllowlistPair), its order-insensitive key (symFileKey), and
+// the corruption-refusing loader/atomic writer now live in ./allowlist-io.mts — shared with
+// the clone detector and the guard-dup-allowlist CRUD CLI (imported above).
 // A labels.json bench entry (engine-shipped fixture — external data).
 interface Label {
   a: string;
@@ -132,11 +123,12 @@ const dbPath = process.env.SEARCH_CODE_DB ?? resolveFromCwd(cfg, 'indexPath');
 // Allowlist: CO_OCCURRENCE_ALLOWLIST env (fixtures/tests) wins; else config.allowlistPath.
 const allowlistPathRaw =
   process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(cfg, 'allowlistPath');
-// Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a
-// dup). Generic default = the engine's own bin; a consumer can point it at their own
-// wrapper via GUARD_ALLOWLIST_CLI. The printed command double-quotes args; assumes
-// paths/symbols are shell-safe (git-tracked code paths + JS identifiers).
-const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || 'bunx guard-dup-allowlist';
+// Approval-hint CLI shown on a gate block (a human/agent pastes it to allowlist a dup).
+// Default = the engine's own guard-dup-allowlist bin, bare (no `bunx`): on a global devkit
+// install it's a PATH sibling of this gate; `bunx <name>` would 404 against the registry.
+// A consumer can point it at their own wrapper via GUARD_ALLOWLIST_CLI. The printed command
+// double-quotes args; assumes paths/symbols are shell-safe (git-tracked paths + JS identifiers).
+const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
@@ -198,6 +190,11 @@ if (allowlistPathRaw == null) {
 // functions (loadAllowlist/runBaseline/…); alias to a string-typed const so they see a
 // definite path. cannotRun's `never` return makes allowlistPathRaw non-null here.
 const allowlistPath: string = allowlistPathRaw;
+
+// The shared loader takes (path, label); every mode below reads no-arg. This wrapper binds
+// the module-scope path + this gate's label so the refusal message reads "co-occurrence
+// matcher: …" exactly as before.
+const loadAllowlist = () => loadAllowlistFile(allowlistPath, 'co-occurrence matcher');
 
 const changedSet = CHANGED ? loadChangedSet(cfg.cwd) : null;
 
@@ -312,7 +309,7 @@ function runScan() {
     // mutates the allowlist (cf. prune), so it's safe in a pre-push/commit hook.
     const known = new Set(
       loadAllowlist()
-        .pairs.filter((p) => !isExpired(p))
+        .pairs.filter((p: AllowlistPair) => !isExpired(p))
         .map(symFileKey),
     );
     pairs = pairs.filter((p) => !known.has(symFileKey(p)));
@@ -431,10 +428,7 @@ function runBaseline() {
     added++;
   }
   // Preserve the clones[] array (token-clone entries) — must not be wiped by a pair re-baseline.
-  writeFileAtomic(
-    allowlistPath,
-    `${JSON.stringify({ pairs: kept, clones: existing.clones ?? [] }, null, 2)}\n`,
-  );
+  saveAllowlist(allowlistPath, { pairs: kept, clones: existing.clones });
 
   // Reset + re-mark DB allowlisted flags from the frozen set only.
   db.prepare('UPDATE chunks SET allowlisted = 0 WHERE allowlisted = 1').run();
@@ -493,10 +487,7 @@ function runReconcile() {
     db.close();
     return;
   }
-  writeFileAtomic(
-    allowlistPath,
-    `${JSON.stringify({ pairs: kept, clones: clones ?? [] }, null, 2)}\n`,
-  );
+  saveAllowlist(allowlistPath, { pairs: kept, clones });
   console.log(`Wrote ${kept.length} pair(s) → ${allowlistPath}`);
   db.close();
 }
@@ -524,11 +515,6 @@ function orderKey(i: number, j: number): [number, number] {
 function symKey(a: string, b: string) {
   return a < b ? `${a} ${b}` : `${b} ${a}`;
 }
-function symFileKey(p: { symbolA: string; fileA: string; symbolB: string; fileB: string }) {
-  const a = `${p.symbolA} ${p.fileA}`;
-  const b = `${p.symbolB} ${p.fileB}`;
-  return a < b ? `${a} ${b}` : `${b} ${a}`;
-}
 // Retrofit rangeA/rangeB onto existing symbol pairs by looking up each symbol's
 // chunk line range in the index. Rough (one chunk per symbol); findability metadata.
 // Reason: thin one-off maintenance script: build a symbol→range lookup, then per-allowlist-pair fill rangeA/rangeB and tally filled/missed; CRAP-flagged as a dev-only retrofit run end-to-end not unit-tested
@@ -548,43 +534,9 @@ function runBackfillRanges() {
     if (ra && rb) filled++;
     else missed++;
   }
-  writeFileAtomic(
-    allowlistPath,
-    `${JSON.stringify({ pairs: allowlist.pairs, clones: allowlist.clones ?? [] }, null, 2)}\n`,
-  );
+  saveAllowlist(allowlistPath, { pairs: allowlist.pairs, clones: allowlist.clones });
   console.log(
     `Backfilled ranges on ${filled}/${allowlist.pairs.length} pairs (${missed} unresolved — symbol moved/renamed).`,
   );
   db.close();
-}
-
-// Reason: defensive corruption-guard parser: the distinct branches (missing→empty, unparseable JSON→refuse, parseable-but-not-object→refuse, per-array Array.isArray normalize) each guard a real destructive-overwrite hazard where a wrong fallback silently wipes the baselined allowlist; CRAP-flagged as a thin file-load helper exercised via the modes that call it, not unit-tested
-// fallow-ignore-next-line complexity
-function loadAllowlist(): { pairs: AllowlistPair[]; clones: unknown[] } {
-  // Missing file → empty (fine). But a corrupt-but-PRESENT file must NOT be treated as empty:
-  // a destructive caller (baseline/reconcile/backfill) would then overwrite it with {pairs:[]},
-  // silently wiping every baselined pair. Refuse instead (exit 2 = could-not-run; scan/gate
-  // fail open, destructive modes abort without writing).
-  if (!existsSync(allowlistPath)) return { pairs: [], clones: [] };
-  let v: RawAllowlist;
-  try {
-    v = JSON.parse(readFileSync(allowlistPath, 'utf8')) as RawAllowlist;
-  } catch {
-    cannotRun(
-      `co-occurrence matcher: ${allowlistPath} exists but is not valid JSON — refusing (restore it first).`,
-    );
-  }
-  // Parseable-but-not-an-object (null / number / string — a garbage write landing on valid JSON)
-  // is corruption too: refuse, else `v.pairs` throws → exit 1 (false-block) not exit-2 fail-open.
-  // Normalize each array independently so an odd-but-valid shape (e.g. clones-only) never
-  // discards the other array.
-  if (!v || typeof v !== 'object') {
-    cannotRun(
-      `co-occurrence matcher: ${allowlistPath} is not a valid allowlist object — refusing (restore it first).`,
-    );
-  }
-  return {
-    pairs: Array.isArray(v.pairs) ? v.pairs : [],
-    clones: Array.isArray(v.clones) ? v.clones : [],
-  };
 }
