@@ -22,8 +22,9 @@ production path, and its output (`candidates.jsonl`) is gitignored.
 
 ```bash
 node bench.mts validate [reviewer]      # 0 LLM calls — corpus linter (run before any spend)
-node bench.mts coverage                 # 0 LLM calls — catalog/type coverage
+node bench.mts coverage                 # 0 LLM calls — catalog + per-lens gold counts + difficulty
 node bench.mts run [reviewer|all] [--dev] [--only <idPrefix>] [--baseline] [--fail]
+node bench.mts run <reviewer> --against <before.json>   # A/B a prompt edit (directional; §A/B below)
 ```
 
 Knobs: `BENCH_MODEL` (first-pass model, default `sonnet` = production) · `BENCH_CASCADE=off`
@@ -55,13 +56,25 @@ BENCH_MODEL=opus node bench.mts run                            # opus ceiling, r
 
 ## Corpus
 
-One JSONL file per reviewer (`cases-<skill>.jsonl`), 12 rows each: 6 gold seeded-bugs (distinct
-catalog items; 3 clear / 2 borderline / 1 adversarial), 3 clean decoys (trigger ≥2 checklist
-items, genuinely fine), 2 near-miss decoys (look vulnerable, provably safe), 1 minimal pair
-(`variantOf`: the fixed twin of a gold row, expected PASS). 2 rows per file are `holdout: true`
-(excluded by `--dev`, included in baselines). Dataset-card fields per row: `note` (mandatory
-why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are anonymized
-adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
+One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 12 rows
+each: 6 gold seeded-bugs (distinct catalog items; 3 clear / 2 borderline / 1 adversarial), 3 clean
+decoys (trigger ≥2 checklist items, genuinely fine), 2 near-miss decoys (look vulnerable, provably
+safe), 1 minimal pair (`variantOf`: the fixed twin of a gold row, expected PASS). 2 rows per file
+are `holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
+`note` (mandatory why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are
+anonymized adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
+
+**`correctness` is the exception — a larger, growing cohort (66 rows, 38 gold / 28 decoy).** Its
+four always-on lenses have no per-item catalog to spread across, so it is built for bug-CLASS
+coverage instead: gold by lens `state-transitions:14 · concurrency-races:7 · writer-reader-contracts:7
+· error-and-edge-classification:10`. It includes a regression set for the classes that leaked PAST
+the shipped reviewer to CodeRabbit — stale-state/missing-reset, documented-early-exit-bypassed,
+exit-code contract, and cleanup-after-throwable/no-`try`/`finally` — each gold paired with a
+**true minimal-pair decoy** (`variantOf`, same fixture differing ONLY in the bug construct) so a
+precision regression from an over-broad prompt edit shows as a decoy false-block. ~40% holdout;
+each leaked class carries ≥1 dev gold to tune on + ≥2 holdout golds to validate generalization.
+Note `variantOf` is documentation/traceability only — no metric reads it; the decoy's protection is
+its contribution to the `cleanPass` denominator.
 
 Fixture shape: gate assets (guard.config.json with `backendRoots:["api"]` /
 `frontendRoots:["web"]`, the agent brief, the checklist script) are injected into `repo.base` at
@@ -103,8 +116,34 @@ with net-negative flips). Rows discordant with the baseline are re-run once; a f
 when 2-of-2 confirmed. Baselines are keyed `<reviewer>@<model>@<cascade>` and embed
 `gateHash` (run-review.mts + reviewers.mts + brief + checklist — the brief IS gate code) +
 `corpusHash`; any mismatch **skips** comparison loudly instead of lying. Regenerate with
-`--baseline` after deliberate changes. At 48 rows this bench is a **large-effect tripwire, not
-a 5pp detector** — intervals print so nobody over-reads a point estimate.
+`--baseline` after deliberate changes. Even at this size (48 domain rows; 66 correctness) each
+cohort is a **large-effect tripwire, not a 5pp detector** — intervals print so nobody over-reads a
+point estimate.
+
+## A/B a deliberate prompt edit — `--against <before.json>`
+
+`--fail`'s flip table **skips** across a `gateHash` change — but a deliberate brief/checklist edit
+is exactly a `gateHash` change, so it can never measure the edit it was made for. `--against` is
+the opt-in paired A/B for that case:
+
+```bash
+BENCH_MODEL=haiku node bench.mts run correctness-reviewer --baseline   # baseline the CURRENT brief
+cp results.baseline.json before-hunt.json                              # snapshot the "before"
+# … edit agents/correctness-reviewer.md (+ skills/correctness/SKILL.md) …
+BENCH_MODEL=haiku node bench.mts run correctness-reviewer --against before-hunt.json
+```
+
+It reruns the (edited) brief and prints a **directional** per-row flip table vs the snapshot,
+pairing purely by `row.id`. It **bypasses the `gateHash` guard** (the edit is expected to change it)
+but **keeps `corpusHash` a HARD skip** — the paired rows must be the identical fixtures, so freeze
+the corpus and re-baseline the "before" before an A/B. It writes **no baseline** and always **exits
+0** (informational — the accept/revert call is yours). The `before.json` is a plain `cp` of a
+baseline and is never clobbered (`--baseline` only writes `results.baseline.json`).
+
+Because a small targeted cluster can't reach McNemar significance (≤4 one-directional flips ≈
+mid-p 0.06), don't gate acceptance on the pooled p-value: accept an edit when its **targeted golds
+flip miss→hit and no decoy flips into a block**, confirm on a K≥3 rerun of the touched golds, then
+re-`--baseline` and run `--fail` for the pooled no-regression check.
 
 ## Pre-registered haiku decision rule
 
@@ -125,6 +164,23 @@ If (1) fails but sonnet's edge is confined to one reviewer, a per-reviewer model
 fallback before giving up on haiku wholesale. The opus sweep is a ceiling reference only — it
 does not gate the decision.
 
+## Measured results — correctness (66-row corpus, K=1, single-pass)
+
+Point estimates on the 66-row corpus (38 gold / 28 decoys). K=1 + 66 rows = tripwire, not a
+5pp detector; CIs are wide.
+
+| Model | Block recall | Clean-pass (precision proxy) | Right-item |
+|---|---|---|---|
+| haiku | 29/38 = **0.76** [.61,.87] | 24/28 = **0.86** [.69,.94] | 19/29 |
+| sonnet | 35/38 = **0.92** [.79,.97] | 24/28 = **0.86** [.69,.94] | 31/35 |
+
+- **Recall scales with model** (0.76→0.92); **precision is model-invariant at 0.86.**
+- The four false-blocks are cross-domain leaks (`xdomain-sqli`, `xdomain-render` — flagged despite
+  the explicit `<exclusions>`) and surface-cue blocks (`decoy-*-broadcast`, `decoy-*-classifier`).
+  Both classes have *existing* brief guidance that the single-pass judge ignores → the prose is
+  tapped out; precision to ≥0.95 needs a **verify pass** (generate→refute), not more rules.
+- Path to 0.95/0.95: sonnet finder (recall) + a domain-and-refutation verify stage (precision).
+
 ## Departures from decisions-eval
 
 - Baseline sections are keyed by `(reviewer, model, cascade)` — a sweep can never clobber or
@@ -137,13 +193,17 @@ does not gate the decision.
 - `results.baseline.json` and `runs.log` are gitignored (decisions convention), as is
   `candidates.jsonl`.
 
-## Cost (48 rows, concurrency 2)
+## Cost (concurrency 2)
+
+The domain pool is 48 rows; the `correctness` cohort is 66 (single-pass haiku, no escalation). Run
+one reviewer at a time during a hunt — the numbers below are the 48-row domain pool; a full `all`
+run is ~114 rows. A budget line prints before any token is spent; every run appends one to `runs.log`.
 
 | run | config | wall-clock |
 |---|---|---|
-| shakeout | haiku, cascade-off, `--dev` | ~25–35 min |
-| production baseline | sonnet, cascade-on | ~1.5–2 h |
-| haiku sweep | haiku, cascade-on | ~1–1.5 h |
-| opus sweep | opus, cascade-on | ~2.5–3 h |
-
-A budget line prints before any token is spent; every run appends one line to `runs.log`.
+| correctness A/B (dev) | haiku, single-pass, `--dev` | ~25 min |
+| correctness full | haiku, single-pass | ~40 min |
+| domain shakeout | haiku, cascade-off, `--dev` | ~25–35 min |
+| domain production baseline | sonnet, cascade-on | ~1.5–2 h |
+| domain haiku sweep | haiku, cascade-on | ~1–1.5 h |
+| domain opus sweep | opus, cascade-on | ~2.5–3 h |
