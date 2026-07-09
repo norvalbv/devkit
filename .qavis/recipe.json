@@ -1,0 +1,5 @@
+{
+  "//": "qavis cheap-tier recipe. devkit is a headless CLI — no UI for the vision tier to drive, so qavis runs its test command in an ephemeral checkout and verdicts on the exit code. `test:e2e` packs + installs the shipped dist bins and drives the real devkit/guard-* bins (the point: prove the INSTALLED CLI, not the source). Needs the cheap tier from benord-labs/qavis#33; until that lands, qavis strips the unknown `test` key and skips (harmless).",
+  "install": "bun install",
+  "test": "bun run test:e2e"
+}
