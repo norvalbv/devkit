@@ -366,7 +366,7 @@ describe('ship-branch.sh — worktree integration', () => {
   // push OK but `gh pr create` fails (the wrong-gh-account bug, frink#28): the branch is live on the
   // remote, so the manifest MUST be recorded the instant the push succeeds — recording on PR-create
   // instead would orphan the pushed branch from `devkit reconcile` forever. pr:null is fine: reconcile
-  // self-heals it by resolving merge state via `gh pr view --head <branch>` once a PR exists + merges.
+  // self-heals it by resolving merge state via `gh pr view <branch>` once a PR exists + merges.
   it('records the branch (pr:null) the instant push succeeds, even when gh pr create fails', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote(); // REPO resolves to acme/app, offline push
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
@@ -424,7 +424,7 @@ describe('ship-branch.sh — worktree integration', () => {
 
   // A 0-exit `gh pr create` that prints no parseable URL (e.g. it writes the URL to stderr) must NOT be
   // mistaken for the create-failure path: the ship still succeeds and cleans up, recording pr:null —
-  // which reconcile self-heals via its `gh pr view --head <branch>` lookup. Guards the exit-code vs
+  // which reconcile self-heals via its `gh pr view <branch>` lookup. Guards the exit-code vs
   // empty-PR_NUM distinction the reorder introduced.
   it('treats a 0-exit gh with no parseable URL as success: records pr:null and still cleans up', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();

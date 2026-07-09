@@ -235,7 +235,7 @@ fi
 # Record what shipped the instant the PUSH succeeded — independent of `gh pr create` — so `devkit
 # reconcile` can later replace these now-stale local copies in the shared tree with the merged-upstream
 # version (no stash/pull). On a PR-create failure we record pr:null; reconcile self-heals it once a PR
-# exists + merges (it resolves merge state by `gh pr view --head <branch>`, not by the stored number).
+# exists + merges (it resolves merge state by `gh pr view <branch>`, not by the stored number).
 # Best-effort: a manifest miss only costs a manual reconcile later — it must never unwind the push.
 # --git-root "$WT" hashes the just-COMMITTED blobs (what the PR shipped), not $ROOT's working tree —
 # so a parallel agent's edit to a shipped file in this window can't be mis-recorded as the shipped blob.
