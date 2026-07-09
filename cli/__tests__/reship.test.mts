@@ -266,7 +266,8 @@ describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carr
     const dir = join(parent, 'repo');
     mkdirSync(join(dir, '.husky/_'), { recursive: true });
     const env = { ...process.env, ...GENV };
-    const g = (a, o = {}) => execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
     writeFileSync(join(dir, '.husky/.keep'), '');
     for (const a of [
       ['init', '-q', '-b', 'work'],
@@ -317,7 +318,10 @@ describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carr
     // The consumer bug, reproduced: `set -- --edit $1` with an UNQUOTED $1 splits a spaced path into
     // >2 args; echo "$*" keeps the COMMIT_EDITMSG tail in the output (the signature the hint gates on),
     // then exit non-zero fails the commit. Robust to any number of spaces in the temp path.
-    commitMsg(dir, '#!/bin/sh\nset -- --edit $1\n[ "$#" -eq 2 ] && exit 0\necho "Unknown argument: $*"\nexit 9\n');
+    commitMsg(
+      dir,
+      '#!/bin/sh\nset -- --edit $1\n[ "$#" -eq 2 ] && exit 0\necho "Unknown argument: $*"\nexit 9\n',
+    );
 
     const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
     expect(r.status).not.toBe(0); // the split failed the commit

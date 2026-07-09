@@ -3,8 +3,9 @@
  *
  *   devkit update [--dry-run]        (also: devkit --update / -u)
  *
- * Resolves the highest semver tag from the devkit remote, compares it to the running
- * version, and re-installs if newer. Two modes, auto-detected from the cwd:
+ * Resolves the highest semver tag from the devkit remote and re-installs if newer. "Newer" is judged
+ * against what the REPO resolves in package mode (its node_modules dep, else the pinned #v tag) and
+ * against the running CLI in global mode. Two modes, auto-detected from the cwd:
  *   - package: `@norvalbv/devkit` is a dep here → re-pin package.json + `bun install`.
  *   - global:  otherwise → `bun add -g` the new tag (updates the global CLI on PATH).
  * bun caches git deps, so we `bun pm cache rm` first.
@@ -17,6 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readJson } from '../lib/fs-helpers.mts';
 
 export const DEP = '@norvalbv/devkit';
 
@@ -32,12 +34,38 @@ export function repoUrl(env = process.env) {
 const BUN_REF = repoUrl();
 const TAG_RE = /refs\/tags\/v(\d+\.\d+\.\d+)\^?\{?\}?\s*$/;
 const GIT_PREFIX_RE = /^git\+/; // git ls-remote wants a bare URL (https:// / ssh://), not the git+ prefix
+const PIN_RE = /#v(\d+\.\d+\.\d+)/; // the #vX.Y.Z tag pinned on the devkit dep in package.json
 
 /** -1 / 0 / 1 comparing two x.y.z strings numerically. */
 export function cmpSemver(a: string, b: string): number {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
   return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+}
+
+/**
+ * The version `update` compares against the latest published tag. Package mode measures what the REPO
+ * resolves (its node_modules dep, else the #v tag pinned in package.json) — NOT the running CLI, so a
+ * global CLI ahead of the repo's pin still reconciles the repo. Global mode measures the running CLI
+ * (self-update of the binary on PATH).
+ */
+export function installedVersion(o: {
+  mode: 'package' | 'global';
+  repoDep?: string | null;
+  pinned?: string | null;
+  running: string;
+}): string {
+  return o.mode === 'package' ? (o.repoDep ?? o.pinned ?? o.running) : o.running;
+}
+
+/**
+ * After installing a newer published tag, a re-run is needed only when the RUNNING CLI is itself
+ * behind that tag — it can't hot-swap to code it just installed. A running CLI already ≥ latest (e.g.
+ * the global CLI on PATH) has latest templates, so the caller can reconcile in the same pass. An
+ * unknown running version is treated conservatively as needing a re-run.
+ */
+export function needsRerun(latest: string, running?: string): boolean {
+  return !running || cmpSemver(latest, running) > 0;
 }
 
 /** Highest vX.Y.Z tag from `git ls-remote --tags` output, or null. */
@@ -102,7 +130,6 @@ Re-pins package.json + \`bun install\` if devkit is a dep here, else \`bun add -
 // fallow-ignore-next-line complexity
 export default async function update(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
-  const current = currentVersion();
 
   const { latest, error } = fetchLatestTag();
   if (error) {
@@ -113,21 +140,36 @@ export default async function update(args: string[], cwd: string): Promise<numbe
     console.error('devkit update: no version tags found on the remote.');
     return 1;
   }
-  if (cmpSemver(latest, current) <= 0) {
-    console.log(`devkit is up to date (v${current}).`);
-    return 0;
-  }
 
+  // Detect mode + read the pinned #vX.Y.Z BEFORE the up-to-date check: in package mode "installed"
+  // means what the REPO resolves (its node_modules dep, else the pinned tag), NOT the running CLI —
+  // a global CLI ahead of the repo's pin must still reconcile the repo.
   const pkgPath = join(cwd, 'package.json');
-  let mode = 'global';
+  let mode: 'package' | 'global' = 'global';
   let pkgRaw = null;
+  let pinned: string | null = null;
   if (existsSync(pkgPath)) {
     pkgRaw = readFileSync(pkgPath, 'utf8');
     const pkg = JSON.parse(pkgRaw) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
-    if (pkg.dependencies?.[DEP] || pkg.devDependencies?.[DEP]) mode = 'package';
+    const ref = pkg.dependencies?.[DEP] ?? pkg.devDependencies?.[DEP];
+    if (ref) {
+      mode = 'package';
+      pinned = ref.match(PIN_RE)?.[1] ?? null;
+    }
+  }
+  const repoDep =
+    mode === 'package'
+      ? ((readJson(join(cwd, 'node_modules', DEP, 'package.json')) as { version?: string } | null)
+          ?.version ?? null)
+      : null;
+  const current = installedVersion({ mode, repoDep, pinned, running: currentVersion() });
+
+  if (cmpSemver(latest, current) <= 0) {
+    console.log(`devkit is up to date (v${current}).`);
+    return 0;
   }
 
   console.log(`devkit update: v${current} → v${latest} (${mode} mode)`);

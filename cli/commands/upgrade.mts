@@ -9,10 +9,12 @@
  * --dry-run  print every action; write nothing.
  * --force    adopt consumer-authored skill/agent/hook collisions (tuned configs are NEVER overwritten).
  *
- * Never wholesale re-installs: the ONLY install is `bun install` of a genuinely newer PUBLISHED tag
- * (then re-run under the new code — the running process can't hot-swap to just-installed code). For
- * the common installed==latest case (symlink / local-checkout / steady state) it re-pins the stale
- * recorded refs and reconciles in a single pass. TypeScript source, shipped as prebuilt .mjs.
+ * Never wholesale re-installs: the ONLY install is `bun install` of a genuinely newer PUBLISHED tag.
+ * A re-run is then required only when the RUNNING CLI is itself behind that tag (it can't hot-swap to
+ * just-installed code); when the running CLI is already >= latest it installs AND reconciles in the
+ * same pass. For the common installed==latest case (symlink / local-checkout / steady state) it
+ * re-pins the stale recorded refs and reconciles in a single pass. TypeScript source, shipped as
+ * prebuilt .mjs.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,7 +28,7 @@ import { applyInit } from './init.mts';
 import { computeMigration } from './migrate.mts';
 import { syncAgents } from './sync/sync-agents.mts';
 import { syncSkills } from './sync/sync-skills.mts';
-import update, { cmpSemver, DEP, fetchLatestTag, repinPackageJson } from './update.mts';
+import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
 
 export const meta = {
   name: 'upgrade',
@@ -43,9 +45,10 @@ RECORDED selection (honours agentTargets — never re-adds a deselected surface)
   --dry-run  print every action; write nothing.
   --force    adopt consumer-authored skill/agent/hook collisions (tuned configs are NEVER overwritten).
 
-If a NEWER devkit tag is published, upgrade installs it and asks you to re-run (the running process
-can't hot-swap to just-installed code). Otherwise it reconciles in a single pass. Composes
-update / migrate / sync-skills / sync-agents / init — it does not replace them.`,
+If a NEWER devkit tag is published, upgrade installs it; it then asks you to re-run ONLY if the
+running CLI is itself behind that tag (it can't hot-swap to just-installed code) — a running CLI
+already >= latest installs and reconciles in the same pass. Otherwise it reconciles in a single pass.
+Composes update / migrate / sync-skills / sync-agents / init — it does not replace them.`,
 };
 
 // Exit for "installed a newer tag; re-run to reconcile" — distinct from 0 (done) / 1 (drift) so a
@@ -122,6 +125,9 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     console.error('devkit upgrade: could not resolve the installed devkit version.');
     return 1;
   }
+  // The version to reconcile the pin / devkitRef / emitted files to. Bumped to `latest` below only if
+  // we install a newer tag AND continue in this pass (running CLI already current — see needsRerun).
+  let target = current;
 
   console.log('1. version / pin');
   if (!standalone && repoDepVersion && runningVersion && repoDepVersion !== runningVersion) {
@@ -136,18 +142,29 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     } else if (latest && cmpSemver(latest, current) > 0) {
       console.log(`  newer devkit published: v${latest} (installed v${current})`);
       if (dryRun) {
-        console.log(`  [dry-run] would install v${latest}, then re-run to reconcile.`);
+        console.log(
+          `  [dry-run] would install v${latest}${needsRerun(latest, runningVersion) ? ', then re-run to reconcile' : ' and reconcile in this pass'}.`,
+        );
         return 0;
       }
       const code = await update([], cwd);
       if (code !== 0) return code;
+      // A re-run is needed only when the RUNNING CLI is itself behind latest — it can't hot-swap to
+      // the code it just installed. When it is already ≥ latest (e.g. the global CLI on PATH) its
+      // templates ARE latest and update reconciled node_modules in place, so continue this pass and
+      // reconcile the repo to v${latest}.
+      if (needsRerun(latest, runningVersion)) {
+        console.log(
+          '\nInstalled a newer devkit. Re-run `devkit upgrade` to reconcile emitted files under the new version.',
+        );
+        return NEEDS_RERUN;
+      }
+      target = latest;
       console.log(
-        '\nInstalled a newer devkit. Re-run `devkit upgrade` to reconcile emitted files under the new version.',
+        `  ✓ installed v${latest} — running CLI already current, reconciling in this pass.`,
       );
-      return NEEDS_RERUN;
     }
   }
-  const target = current;
   if (standalone) console.log('  • standalone — no devkit pin to reconcile');
   else repinStalePin(cwd, target, dryRun);
 

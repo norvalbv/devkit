@@ -135,9 +135,10 @@ bunx devkit upgrade            # --dry-run to preview; --force to adopt consumer
 ```
 
 `upgrade` composes the individual slices idempotently and ends by running `doctor`. If a newer tag
-has been *published*, it installs it and asks you to re-run (a running CLI can't hot-swap to
-just-installed code); for a local checkout / already-current install it reconciles in one pass and
-never re-adds a deselected agent surface. Consumer-tuned configs are never overwritten — record an
+has been *published*, it installs it, then asks you to re-run only when the running CLI is itself
+behind that tag (it can't hot-swap to just-installed code) — a running CLI already at/above latest
+installs and reconciles in the same pass. For a local checkout / already-current install it
+reconciles in one pass and never re-adds a deselected agent surface. Consumer-tuned configs are never overwritten — record an
 intentional override in `.devkit/config.json` `configOverrides: ["tsconfig.json"]` so `doctor`
 treats it as OK, not drift.
 

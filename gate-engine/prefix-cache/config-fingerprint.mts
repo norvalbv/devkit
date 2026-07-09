@@ -18,7 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   JSCPD_OWN_ROOT,
@@ -97,7 +97,11 @@ export function gateConfigFingerprint(cwd: string): string {
   // (4) jscpd availability + version. Resolve the SAME bin the clone gate uses. The bare-PATH terminal
   // (global install) is a stable token — statSync('jscpd') is cwd-relative and would throw. An absolute
   // path is stat-proxied so "newly present" and "upgraded in place" both flip the hash.
-  const bin = resolveJscpdBin({ env: process.env.JSCPD_BIN, ownRoot: JSCPD_OWN_ROOT, repoRoot: cwd });
+  const bin = resolveJscpdBin({
+    env: process.env.JSCPD_BIN,
+    ownRoot: JSCPD_OWN_ROOT,
+    repoRoot: cwd,
+  });
   const jscpd = bin === JSCPD_PATH_TERMINAL ? 'jscpd:path' : `jscpd:${statProxy(bin, 'missing')}`;
 
   return sha256([canonicalJSON(behavioral), baselines, allowlist, index, jscpd].join('\0'));
