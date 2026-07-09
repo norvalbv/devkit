@@ -56,6 +56,8 @@
   "scripts": {
     "test": "vitest",
     "test:run": "vitest run",
+    "test:e2e": "vitest run -c vitest.e2e.config.mjs",
+    "playground": "bun scripts/playground.mts",
     "lint": "biome check .",
     "lint:structure": "eslint cli gate-engine",
     "format": "biome check --write .",
