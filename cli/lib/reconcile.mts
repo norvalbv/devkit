@@ -177,19 +177,30 @@ export function detectMerged({
 }): string {
   const override = process.env.DEVKIT_RECONCILE_MERGED_OVERRIDE;
   if (override && process.env.VITEST) return override; // test-only seam — inert in production (never bypasses the real gh MERGED gate)
-  const sel = prNumber != null ? [String(prNumber)] : ['--head', branch];
+  // gh pr view takes the branch POSITIONALLY (`gh pr view [<number>|<url>|<branch>]`); --head is a
+  // `gh pr list` flag and makes `gh pr view` exit non-zero, silently degrading every pr:null lookup to UNKNOWN.
+  const sel = prNumber != null ? [String(prNumber)] : [branch];
+  const debug = process.env.DEVKIT_RECONCILE_DEBUG; // surface gh's stderr instead of collapsing all failures to UNKNOWN
   try {
     const state = execFileSync(
       'gh',
       ['pr', 'view', ...sel, '--repo', repo, '--json', 'state', '-q', '.state'],
       {
         encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
+        stdio: ['ignore', 'pipe', debug ? 'pipe' : 'ignore'],
       },
     ).trim();
     return state === 'MERGED' ? 'MERGED' : 'OPEN';
-  } catch {
-    return 'UNKNOWN'; // gh absent / offline / no PR — clears no debt, never crashes
+  } catch (e) {
+    // gh absent / offline / no PR — clears no debt, never crashes.
+    if (debug) {
+      const stderr =
+        e instanceof Error && 'stderr' in e ? String((e as { stderr?: unknown }).stderr ?? '') : '';
+      console.error(
+        `detectMerged ${repo} ${branch}: gh failed — ${stderr.trim() || (e instanceof Error ? e.message : String(e))}`,
+      );
+    }
+    return 'UNKNOWN';
   }
 }
 
