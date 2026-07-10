@@ -213,7 +213,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     } else if (dryRun) {
       console.log(`  [dry-run] would add recommended gate(s): ${recommended.join(', ')}`);
       for (const id of optIn) console.log(`  [dry-run] opt-in gate also available: ${id}`);
-    } else if (process.stdout.isTTY) {
+    } else if (process.stdout.isTTY && process.stdin.isTTY) {
       const picked = await multiselect({
         message: 'New gates available since your last install — select any to add',
         options: [...recommended, ...optIn].map((id) => ({
