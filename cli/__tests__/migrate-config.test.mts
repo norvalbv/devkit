@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { computeMigration } from '../commands/migrate.mts';
+import { computeMigration } from '../commands/migrate-config.mts';
 import { packageDir } from '../lib/fs-helpers.mts';
 import { structFixtures } from './_helpers.mts';
 

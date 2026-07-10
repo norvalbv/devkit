@@ -142,6 +142,6 @@ reconciles in one pass and never re-adds a deselected agent surface. Consumer-tu
 intentional override in `.devkit/config.json` `configOverrides: ["tsconfig.json"]` so `doctor`
 treats it as OK, not drift.
 
-The slices are still available if you want to run them by hand: `devkit update` (self-update the
-package), `devkit migrate --apply` (reconcile emitted configs), `devkit sync-skills` /
-`devkit sync-agents`, and `devkit doctor --fix` (re-run init for the recorded selection).
+The lower-level slices stay callable for scripts: `devkit update` (self-update the package),
+`devkit sync-skills` / `devkit sync-agents`, and `devkit doctor --fix` (re-run init for the recorded
+selection). The emitted-config reconcile is no longer a standalone command — `devkit upgrade` folds it in.
