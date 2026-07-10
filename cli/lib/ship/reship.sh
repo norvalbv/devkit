@@ -129,6 +129,7 @@ link_untracked_gate_configs "$WT" "$ROOT"
 # Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
 # the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
