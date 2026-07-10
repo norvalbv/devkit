@@ -170,7 +170,7 @@ export default async function update(args, cwd) {
     }
     console.log(`✓ devkit updated to v${latest}.`);
     if (mode === 'package') {
-        console.log('  Next: `devkit migrate` — reconcile your emitted config files (eslint.config.mjs, guard.config.json) with the new version. Dry-run by default; shows every change before --apply.');
+        console.log('  Next: run `devkit upgrade` — one command reconciles your emitted configs (eslint.config.mjs, guard.config.json), refreshes the husky gates, and syncs skills/agents. `--dry-run` to preview first.');
     }
     // Overlay repos keep their gate chain in a git-ignored .devkit/hooks/pre-commit that this update does
     // NOT regenerate — so a new hook shape (e.g. an added ship gate) won't apply until it's refreshed.
