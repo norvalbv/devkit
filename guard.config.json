@@ -49,6 +49,7 @@
             "fallow",
             "judge",
             "prefix-cache",
+            "qavis-advisory",
             "ratchets",
             "review",
             "search-tool",
