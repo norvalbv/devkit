@@ -22,9 +22,6 @@
   "//sourceExtensions": "Impl-file extensions the ratchets + structure rule count. A React app is ['ts','tsx'].",
   "sourceExtensions": ["ts", "tsx"],
 
-  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). Replaces the old eslint max-lines rule so eslint stays structure-only. Per-FUNCTION caps need a parser — not yet.",
-  "maxLines": 500,
-
   "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
   "review": {
     "backendRoots": [],

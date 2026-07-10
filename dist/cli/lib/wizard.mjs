@@ -37,6 +37,9 @@ const SEARCHCODE_OPTION = {
     label: 'search-code',
     hint: 'opt this repo in to the semantic search index (optional, off by default)',
 };
+// The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
+// selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
+const LINE_GROWTH_ID = 'line-growth';
 // Abort the wizard the moment clack reports a cancel (Ctrl-C / Esc). A TS type guard, so a
 // non-cancelled value narrows to its real type after `if (bail(x)) return null`.
 function bail(value) {
@@ -158,17 +161,27 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
             return null;
         selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
     }
-    // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook).
+    // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook). The
+    // line-growth block rides this list as a checkbox (recommended-on) but is a CONFIG KNOB, not a guard
+    // id: it's split back out into selection.lineGrowth so selection.guards stays pure guard ids.
     if (selection.husky) {
         const guards = await multiselect({
             message: 'Select gate guards',
-            options: GUARD_OPTIONS.map((g) => ({ value: g.id, label: g.label, hint: g.hint })),
-            initialValues: [...RECOMMENDED_GUARD_IDS],
+            options: [
+                ...GUARD_OPTIONS.map((g) => ({ value: g.id, label: g.label, hint: g.hint })),
+                {
+                    value: LINE_GROWTH_ID,
+                    label: 'line-growth block',
+                    hint: 'cap files at 500 lines — current giants grandfathered, new growth blocked (needs size)',
+                },
+            ],
+            initialValues: [...RECOMMENDED_GUARD_IDS, LINE_GROWTH_ID],
             required: false,
         });
         if (bail(guards))
             return null;
-        selection.guards = guards;
+        selection.lineGrowth = guards.includes(LINE_GROWTH_ID);
+        selection.guards = guards.filter((g) => g !== LINE_GROWTH_ID);
     }
     // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).
     const remove = [];
@@ -223,6 +236,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
     });
     lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
     lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
+    lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
     }
