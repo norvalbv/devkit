@@ -1,0 +1,56 @@
+{
+  "//": "component-lib preset for the devkit governance gate-engine. A flat primitives/components package (PascalCase files + cn.ts + index.ts barrel in src/). Copy to your repo ROOT. JSON has no real comments, so guidance lives in //-prefixed sibling keys — the loader ignores unknown keys. Every path resolves relative to the consumer repo, never the devkit package.",
+
+  "//scanRoots": "Where the ratchets + scans (incl. the eslint structureRoot, via scanRoots[0]) look. Default ['src']. A monorepo lib at packages/ui/src OVERRIDES this — set scanRoots to that path; eslint.config.mjs derives SRC from it, no edits there.",
+  "scanRoots": ["src"],
+
+  "//sourceExtensions": "Impl-file extensions the size/fanout ratchets count. A TS component lib is ['ts','tsx'].",
+  "sourceExtensions": ["ts", "tsx"],
+
+  "//boundaries": "Cross-trust-boundary prefixes for the decisions smell gate. A component lib has no trust boundary, so EMPTY.",
+  "boundaries": [],
+
+  "//fanoutCap": "Max non-test impl files per folder (any depth) before guard-fanout trips. A flat primitives lib legitimately holds many files at src/ root — RAISE this (or add src to fanoutExempt) if your component count exceeds it.",
+  "fanoutCap": 40,
+
+  "//fanoutExempt": "Flat-by-design folders exempt from the fanout cap. For a flat primitives lib, the src root IS flat by design — listed here so a 40-primitive lib doesn't trip the cap.",
+  "fanoutExempt": ["src"],
+
+  "//allowlistPath": "Co-occurrence intentional-dup approvals (guard-dup + guard-clone).",
+  "allowlistPath": ".co-occurrence-allowlist.json",
+
+  "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
+  "decisionsDir": "docs/decisions",
+
+  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "review": {
+    "backendRoots": [],
+    "frontendRoots": ["src"],
+    "trustBoundaries": "",
+    "shortcutTracking": false,
+    "accessibility": { "skipTouchTargets": false }
+  },
+
+  "//structure": "THE topology (data). The shared eslint.config.mjs shim compiles this via devkit's compileToEslint — no per-stack eslint rule. A flat primitives lib: PascalCase component files (.ts/.tsx) + the index.ts barrel + cn.ts helper, directly in src/; optional PascalCase subfolders nest recursively. Add helper literals (e.g. 'theme.ts') to grammar.files as your lib grows; a misnamed file (kebab, or camelCase .tsx) is rejected. Walls empty (a lib has no import boundary).",
+  "structure": {
+    "trees": [
+      {
+        "name": "lib",
+        "root": "src",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.ts", "cn.ts", "{pascal}", "{test}", "{css}"],
+          "recurse": "componentFolder",
+          "rules": {
+            "componentFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.ts", "index.tsx", "{pascal}", "{test}", "{css}"],
+              "recurse": "componentFolder"
+            }
+          }
+        }
+      }
+    ],
+    "walls": []
+  }
+}
