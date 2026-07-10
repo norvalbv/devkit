@@ -8,7 +8,7 @@
  * at a bogus URL so the version step's `git ls-remote` fails fast (no network).
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CLI, readConfig as config, tmpRepos } from './_helpers.mts';
@@ -81,5 +81,53 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(up.stdout).toMatch(/no new recommended gates/i);
     expect(up.stdout).not.toMatch(/\breview\b/i); // opt-in gate not re-surfaced
     expect(guards(root)).toEqual(before); // selection unchanged
+  });
+});
+
+describe('devkit upgrade — line-growth block back-fill', () => {
+  const giant = (root: string) => {
+    mkdirSync(join(root, 'src'), { recursive: true });
+    // 600 lines (no trailing newline) → over the 500-line cap; must be grandfathered, not hard-error.
+    writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
+  };
+  const gc = (root: string) => JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+
+  it('non-TTY: enables the cap + grandfathers giants for a repo that predates the block', () => {
+    const root = tmpRepo(CLIB_PKG);
+    // Legacy shape: size guard on, line-growth block never enabled (no cap).
+    expect(
+      run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor', '--no-line-growth')
+        .status,
+    ).toBe(0);
+    // Simulate a PRE-feature install: drop the recorded lineGrowth key so upgrade treats it as
+    // "never offered" (a real legacy config has no such key → normalizeSelection defaults it true).
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    delete cfg.components.lineGrowth;
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    expect(gc(root).maxLines).toBeUndefined();
+    giant(root);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+
+    expect(gc(root).maxLines).toBe(500); // cap written
+    const lines = JSON.parse(
+      readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
+    );
+    expect(lines.files['src/giant.ts']).toBe(600); // giant grandfathered, not hard-erroring
+    expect(config(root).components.lineGrowth).toBe(true); // recorded on
+    expect(up.stdout).toMatch(/line-growth block enabled/i);
+  });
+
+  it('does NOT re-offer once the cap is already set (no re-nag)', () => {
+    const root = tmpRepo(CLIB_PKG);
+    // A default init already enables the block → the cap is present.
+    expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
+    expect(gc(root).maxLines).toBe(500);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(up.stdout).not.toMatch(/3b\. line-growth|line-growth block enabled/i);
   });
 });
