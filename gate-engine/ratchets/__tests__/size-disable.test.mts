@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { countDisables, countOversized } from '../size-disable.mts';
+import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
 
@@ -384,5 +384,29 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(60); // stayed 60, NOT raised to 80
+  });
+
+  it('freezeLines grandfathers over-cap files into size-lines.json and NEVER touches size.json', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    // A pre-existing disable-count baseline (as if adopted long ago). enabling the line cap on an
+    // adopted repo must NOT re-snapshot this — that would launder any --no-verify disable growth.
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 5, fnDisables: 3 }));
+    const sizeBefore = readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8');
+
+    expect(freezeLines(root)).toBe(1);
+    const lines = JSON.parse(readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'));
+    expect(lines).toEqual({ maxLines: 50, files: { 'src/legacy.ts': 80 } });
+    // The disable-count baseline is byte-identical — freezeLines writes ONLY the line baseline.
+    expect(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toBe(sizeBefore);
+  });
+
+  it('freezeLines is a no-op (returns 0, writes nothing) when the cap is off', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] }); // no maxLines
+    write(root, 'src/huge.ts', big(900));
+    expect(freezeLines(root)).toBe(0);
+    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).toThrow();
   });
 });

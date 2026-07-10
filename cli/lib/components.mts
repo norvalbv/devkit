@@ -111,6 +111,12 @@ export interface Selection {
   structure: boolean;
   fallow: boolean;
   searchCode: boolean;
+  /**
+   * The per-file line-growth block: when on, `maxLines` is written into guard.config.json so the
+   * guard-size ratchet caps source files (existing giants grandfathered shrink-only). A config KNOB on
+   * the `size` guard, not a husky fragment — the apply layer writes the cap iff `size` is also selected.
+   */
+  lineGrowth: boolean;
   agentTargets: string[];
   guards: string[];
 }
@@ -135,6 +141,9 @@ export function defaultSelection(): Selection {
     structure: true,
     fallow: false,
     searchCode: false,
+    // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
+    // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
+    lineGrowth: true,
     agentTargets: [...AGENT_TARGETS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
