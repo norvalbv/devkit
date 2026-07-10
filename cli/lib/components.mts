@@ -9,14 +9,21 @@
  */
 
 /** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
-export const RECOMMENDED_GUARD_IDS = ['size', 'fanout', 'dup', 'clone', 'decisions'];
+export const RECOMMENDED_GUARD_IDS = [
+  'size',
+  'fanout',
+  'dup',
+  'clone',
+  'decisions',
+  'qavis-advisory',
+];
 
 /**
  * Every selectable sub-gate inside the husky `# devkit-guards` block. `review` (the in-chain
- * headless reviewer judges) is selectable but OFF by default — it spends real model budget on
- * every commit, so a consumer opts in with `--guards …,review` or the wizard.
+ * headless reviewer judges) is the one selectable-but-OFF-by-default gate — it spends real model
+ * budget on every commit, so a consumer opts in with `--guards …,review` or the wizard.
  */
-export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'qavis-advisory'];
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
 
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
@@ -165,5 +172,20 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
       ? partial.agentTargets.filter((t) => AGENT_TARGETS.includes(t))
       : base.agentTargets,
     guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
+  };
+}
+
+/**
+ * Bundled gates absent from a RECORDED selection, split by recommend-status. `normalizeSelection`
+ * replays the recorded `guards` array verbatim, so a gate shipped after a repo's last install is
+ * never in it; `upgrade` and `doctor` call this to reconcile the recorded set against the current
+ * bundle (`GUARD_IDS`). `recommended` gates heal automatically (non-TTY) / pre-check (wizard);
+ * `optIn` gates are surfaced as a notice but never auto-added.
+ */
+export function newBundledGates(recorded: string[]): { recommended: string[]; optIn: string[] } {
+  const missing = GUARD_IDS.filter((g) => !recorded.includes(g));
+  return {
+    recommended: missing.filter((g) => RECOMMENDED_GUARD_IDS.includes(g)),
+    optIn: missing.filter((g) => !RECOMMENDED_GUARD_IDS.includes(g)),
   };
 }

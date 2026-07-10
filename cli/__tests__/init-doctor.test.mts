@@ -27,7 +27,14 @@ describe('init --yes (all recommended)', () => {
     const cfg = config(root);
     expect(cfg.stack).toBe('generic');
     expect(cfg.components.biome).toBe(true);
-    expect(cfg.components.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions']);
+    expect(cfg.components.guards).toEqual([
+      'size',
+      'fanout',
+      'dup',
+      'clone',
+      'decisions',
+      'qavis-advisory',
+    ]);
     expect(cfg.components.structure).toBe(false);
   });
 
