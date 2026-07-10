@@ -125,17 +125,26 @@ export const REVIEWERS = Object.freeze([
   // Correctness is NOT domain-sliceable: a writer in a backend root and its reader in a frontend
   // root are ONE finding, so this reviewer sees SOURCE files across the UNION of declared roots.
   // Four ALWAYS-ON lenses — a correctness bug has no reliable lexical signature, so a regex gate
-  // would blind exactly the class this reviewer exists to catch. Runs the normal haiku→opus
-  // cascade like the others; the real-findings bench decides whether the first pass holds.
+  // would blind exactly the class this reviewer exists to catch. Runs SINGLE-PASS at a pinned
+  // model (see `model` below and the Reviewer.model docstring) — no haiku→opus cascade: the
+  // escalation was bench-measured to OVERTURN real correctness bugs, so its FAIL blocks directly.
   Object.freeze({
     name: 'correctness-reviewer',
     domain: 'all',
     skill: 'correctness',
     stateFile: '.claude/.correctness-review.json',
     cmds: Object.freeze({ gen: 'generate', check: 'check-item' }),
-    // Single-pass haiku (see Reviewer.model): bench-measured held-out recall 0.73 / precision 1.00
-    // with perfect domain-exclusivity — the cascade only subtracted here.
-    model: 'haiku',
+    // Single-pass at the pinned model (see Reviewer.model). Measured on the 66-row corpus
+    // (K=1, tripwire — wide CIs): haiku recall 0.76 / clean-pass 0.86 · sonnet recall 0.92 /
+    // clean-pass 0.86. The earlier "precision 1.00 / perfect domain-exclusivity" was a 42-row
+    // artifact: the extended corpus surfaces ~4 false-blocks (cross-domain security/perf leak +
+    // broadcast/classifier surface-cue) that are MODEL-INVARIANT — precision is a DESIGN problem,
+    // not a bigger-model problem. Recall DOES scale with model (0.76→0.92), so the finder runs sonnet
+    // (K=1 evidence; a confirming flip-table run is still owed). Cross-domain false-blocks are caught
+    // downstream by domainExclusivityDrop; the in-domain surface-cue ones want K-sample
+    // self-consistency (Wang 2203.11171), NOT a same-family refute pass (it overturned real FAILs
+    // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
+    model: 'sonnet',
   }),
   // Checks a diff against the CONSUMER repo's own written CLAUDE.md rules — never devkit's own.
   // SKILL-LESS (no skill/stateFile/cmds — see Reviewer.skill docstring): its AC forbids Bash

@@ -12,6 +12,7 @@ import {
   summarize,
   validateRow,
 } from '../eval/reviewers/bench.mts';
+import { domainExclusivityDrop } from '../run-review.mts';
 
 const APISEC = BENCH_REVIEWERS.find((r) => r.name === 'api-security-reviewer');
 
@@ -221,6 +222,31 @@ describe('compareReviewer', () => {
     expect(compareReviewer('api-security-reviewer', [], meta, base).skipped).toMatch(/regenerate/);
   });
 
+  it('crossGate bypasses the gateHash guard and produces the directional flip table', () => {
+    // A prompt A/B: gateHash intentionally differs; the same corpus. 5 upward flips = improvement.
+    const rows = Object.fromEntries(
+      Array.from({ length: 8 }, (_, i) => [`r${i}`, { okFinal: false, okFirst: false }]),
+    );
+    const now = Array.from({ length: 8 }, (_, i) => ({
+      id: `r${i}`,
+      okFinal: i < 5,
+      okFirst: i < 5,
+    }));
+    const base = baseWith(rows, { gateHash: 'BEFORE' });
+    const cmp = compareReviewer('api-security-reviewer', now, meta, base, { crossGate: true });
+    expect(cmp.skipped).toBeNull();
+    expect(cmp.improved).toBe(true);
+    expect(cmp.regressed).toBe(false);
+    expect(cmp.detail).toMatch(/A\/B/);
+  });
+
+  it('crossGate still HARD-skips on corpusHash mismatch', () => {
+    const base = baseWith({}, { gateHash: 'BEFORE', corpusHash: 'OTHER' });
+    expect(
+      compareReviewer('api-security-reviewer', [], meta, base, { crossGate: true }).skipped,
+    ).toMatch(/corpus changed/);
+  });
+
   it('flags a significant one-directional regression, ignores unstable flips', () => {
     const rows = Object.fromEntries(
       Array.from({ length: 8 }, (_, i) => [`r${i}`, { okFinal: true, okFirst: true }]),
@@ -238,6 +264,55 @@ describe('compareReviewer', () => {
     expect(compareReviewer('api-security-reviewer', shaky, meta, baseWith(rows)).regressed).toBe(
       false,
     );
+  });
+});
+
+describe('domainExclusivityDrop', () => {
+  const fail = (name: string, issues: string[]) => ({ name, status: 'fail', issues });
+
+  it('drops a lens whose reason is purely out-of-charter (the xdomain-sqli / xdomain-render leaks)', () => {
+    const { kept, dropped } = domainExclusivityDrop([
+      fail('writer-reader-contracts', ['String-concatenated SQL from request input — injection.']),
+      fail('state-transitions', ['Unmemoized value forces a full re-render on every keystroke.']),
+    ]);
+    expect(kept).toEqual([]);
+    expect(dropped.map((d) => d.lens)).toEqual(['writer-reader-contracts', 'state-transitions']);
+  });
+
+  it('keeps a real correctness FAIL when the reason carries a correctness signal (best-effort, not a guarantee)', () => {
+    // One-sided safety: an out-of-charter keyword + a correctness signal → KEEP. Best-effort, bounded
+    // by CORRECTNESS_SIGNAL coverage — hence that list is kept broad (see run-review.mts).
+    const { kept, dropped } = domainExclusivityDrop([
+      fail('concurrency-races', [
+        'Two requests both pass the auth check, then a race clobbers the token write.',
+      ]),
+      fail('state-transitions', [
+        'The SQL retry path leaves lastError stale — a recovered task reads it forever.',
+      ]),
+      // Would have been wrongly dropped by the narrow keyword list ("overwrites"/"lost update"/
+      // "cancel" absent) — the broadened CORRECTNESS_SIGNAL must catch these.
+      fail('concurrency-races', [
+        'The second request overwrites the cached token — a lost update.',
+      ]),
+      fail('state-transitions', ['A cancelled task is revived on retry and left unclaimable.']),
+    ]);
+    expect(dropped).toEqual([]);
+    expect(kept).toHaveLength(4);
+  });
+
+  it('keeps a fail-unattributed lens (no issue text) so it still blocks', () => {
+    const { kept, dropped } = domainExclusivityDrop([fail('state-transitions', [])]);
+    expect(dropped).toEqual([]);
+    expect(kept).toEqual(['state-transitions']);
+  });
+
+  it('ignores passing lenses', () => {
+    const { kept, dropped } = domainExclusivityDrop([
+      { name: 'state-transitions', status: 'pass', issues: [] },
+      fail('error-and-edge-classification', ['XSS via unescaped innerHTML.']),
+    ]);
+    expect(kept).toEqual([]);
+    expect(dropped.map((d) => d.lens)).toEqual(['error-and-edge-classification']);
   });
 });
 

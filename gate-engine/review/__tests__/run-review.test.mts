@@ -156,10 +156,10 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).toHaveBeenCalledTimes(5);
     for (const call of exec.mock.calls) {
       const model = call[0].args[call[0].args.indexOf('--model') + 1];
-      // every first pass is haiku now — domain default flipped sonnet→haiku (bench 6/6), and
-      // correctness/conventions are model-pinned haiku. opus appears only on a FAIL escalation
-      // (none here).
-      expect(model).toBe('haiku');
+      // Domain + conventions reviewers' first pass is haiku (default flipped sonnet→haiku, bench 6/6);
+      // correctness is model-pinned to sonnet (bench recall 0.76→0.92). opus appears only on escalation.
+      const pinnedSonnet = call[0].label?.includes('correctness-reviewer');
+      expect(model).toBe(pinnedSonnet ? 'sonnet' : 'haiku');
       expect(call[0].args.join(' ')).not.toContain('opus');
     }
     expect(Object.keys(loadCache(repo)).length).toBe(5);
@@ -226,12 +226,12 @@ describe('runReviewGate — cascade + exit contract', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(1);
-    // exactly one call for correctness (no :escalate), and it ran on haiku
+    // exactly one call for correctness (no :escalate), and it ran on its pinned sonnet
     const corrCalls = exec.mock.calls.filter(([o]) =>
       o.label.startsWith('review:correctness-reviewer'),
     );
     expect(corrCalls).toHaveLength(1);
-    expect(corrCalls[0][0].args[corrCalls[0][0].args.indexOf('--model') + 1]).toBe('haiku');
+    expect(corrCalls[0][0].args[corrCalls[0][0].args.indexOf('--model') + 1]).toBe('sonnet');
     expect(exec.mock.calls.some(([o]) => o.label === 'review:correctness-reviewer:escalate')).toBe(
       false,
     );

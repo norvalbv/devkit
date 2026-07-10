@@ -8,6 +8,7 @@
  * numbers: (a) can the first pass drop to haiku, (b) did a checklist/brief edit help or hurt.
  *
  *   node bench.mts run [reviewer|all] [--dev] [--only <idPrefix>] [--baseline] [--fail]
+ *   node bench.mts run <reviewer> --against <before.json>   # A/B a prompt edit (directional, no gate)
  *   node bench.mts validate          # 0 LLM calls: corpus linter (selection + expectItems + injection)
  *   node bench.mts coverage          # 0 LLM calls: catalog/type coverage of the corpus
  *
@@ -439,6 +440,16 @@ function loadBaseline() {
   }
 }
 
+// --against: the explicit "before" snapshot for a prompt A/B. Unlike loadBaseline (a missing
+// baseline is fine → null), a bad --against path is a hard error — the user asked for a comparison.
+function loadAgainstFile(p) {
+  try {
+    return JSON.parse(readFileSync(p, 'utf8'));
+  } catch (e) {
+    throw new BenchAbort(2, `reviewer-eval: --against file unreadable (${p}): ${e?.message ?? e}`);
+  }
+}
+
 // Floors are POOLED (48 rows is a tripwire, not a per-reviewer detector). firstFailRecall floors
 // only on the production model — for haiku/opus sweeps it is the decision INPUT, not a gate.
 const FLOORS = { blockRecall: 0.75, cleanPass: 0.85, firstFailRecallSonnetOnly: 0.6 };
@@ -450,16 +461,22 @@ const FLOORS = { blockRecall: 0.75, cleanPass: 0.85, firstFailRecallSonnetOnly: 
  * detail}. Stability: rows the caller re-ran and that flipped BACK are not counted (caller
  * filters via `stable`).
  */
-export function compareReviewer(name, nowRows, nowMeta, base) {
+export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = false } = {}) {
   const key = sectionKey(name, nowMeta.model, nowMeta.cascade);
   const section = base?.sections?.[key];
   if (!section) return { skipped: `no baseline section ${key}` };
-  if (section.gateHash !== nowMeta.gateHash)
+  // crossGate (--against A/B): a deliberate brief/checklist edit is EXPECTED to change gateHash,
+  // so bypass that guard — the flip table pairs purely by row.id and is meaningful across the edit.
+  // corpusHash stays a HARD skip in EVERY mode: paired rows must be the identical fixtures, so an
+  // A/B must re-baseline the "before" on the frozen corpus first.
+  if (!crossGate && section.gateHash !== nowMeta.gateHash)
     return {
       skipped: `gate code / brief / checklist changed (${key}) — regenerate with --baseline`,
     };
   if (section.corpusHash !== nowMeta.corpusHash)
-    return { skipped: `corpus changed (${key}) — regenerate with --baseline` };
+    return {
+      skipped: `corpus changed (${key}) — re-baseline the "before" on the frozen corpus first`,
+    };
   let b = 0;
   let c = 0;
   const flips = [];
@@ -478,10 +495,12 @@ export function compareReviewer(name, nowRows, nowMeta, base) {
   }
   const p = mcnemarMidP(b, c);
   const regressed = b > c && p < 0.05;
+  const improved = c > b && p < 0.05;
   return {
     skipped: null,
     regressed,
-    detail: `flips ↓${b} ↑${c} (mid-p ${p.toFixed(3)})${flips.length ? ` — ${flips.join(', ')}` : ''}`,
+    improved,
+    detail: `${crossGate ? 'A/B (directional, not a regression gate) ' : ''}flips ↓${b} ↑${c} (mid-p ${p.toFixed(3)})${flips.length ? ` — ${flips.join(', ')}` : ''}`,
   };
 }
 
@@ -561,11 +580,21 @@ function coverage() {
     const gold = rows.filter((r) => r.expected === 'FAIL').length;
     const byProv = {};
     for (const r of rows) byProv[r.provenance ?? '?'] = (byProv[r.provenance ?? '?'] ?? 0) + 1;
+    // Per-lens GOLD counts + difficulty histogram: catalog "covered/uncovered" is binary and hides
+    // thin lenses (a lens with 1 gold reads as "covered"). These counts are what balancing targets.
+    const goldByItem = {};
+    const byDiff = {};
+    for (const r of rows.filter((x) => x.expected === 'FAIL')) {
+      for (const it of r.expectItems ?? []) goldByItem[it] = (goldByItem[it] ?? 0) + 1;
+      byDiff[r.difficulty ?? '?'] = (byDiff[r.difficulty ?? '?'] ?? 0) + 1;
+    }
     console.log(
       `\n${reviewer.name}: ${rows.length} rows (${gold} gold), provenance ${JSON.stringify(byProv)}`,
     );
     console.log(`  covered items   ${catalog.filter((c) => hit.has(c)).join(', ') || '—'}`);
     console.log(`  uncovered items ${catalog.filter((c) => !hit.has(c)).join(', ') || '—'}`);
+    console.log(`  gold by item    ${catalog.map((c) => `${c}:${goldByItem[c] ?? 0}`).join('  ')}`);
+    console.log(`  gold difficulty ${JSON.stringify(byDiff)}`);
   }
 }
 
@@ -596,8 +625,11 @@ export function salvageMap(progress, reviewerName, meta) {
   );
 }
 
-async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) {
+async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, against }) {
   cleanBenchEnv();
+  const abMode = !!against;
+  if (abMode && writeBaseline)
+    throw new BenchAbort(2, 'reviewer-eval: --against is a read-only A/B; drop --baseline');
   preflightClaude();
   if (fresh) rmSync(progressFile(MODEL, CASCADE), { force: true });
   const plan = targets.map((reviewer) => ({ reviewer, rows: loadRows(reviewer, { dev, only }) }));
@@ -639,7 +671,15 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
   let consecutiveOutages = 0;
   let paused = false;
 
-  const baseline = loadBaseline();
+  // A/B (--against): compare the just-run (edited) prompt against an explicit "before" snapshot,
+  // pairing per row.id across the deliberate gateHash change. Loaded ONCE and used for BOTH the
+  // stability rerun AND compareReviewer — never falling back to results.baseline.json, which a
+  // later --baseline would overwrite and desync from the "before" the flips are measured against.
+  const baseline = abMode ? loadAgainstFile(against) : loadBaseline();
+  if (abMode)
+    console.log(
+      `reviewer-eval: A/B vs ${path.basename(against)} — directional only (writes no baseline, exits 0)`,
+    );
   const allResults = [];
   const perReviewer = [];
   for (const { reviewer, rows } of plan) {
@@ -722,11 +762,13 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
     // 2-of-2 to count in the McNemar table (alignment-bench convention — K=1 rows are noisy).
     const key = sectionKey(reviewer.name, meta.model, meta.cascade);
     const section = baseline?.sections?.[key];
+    // Stability rerun fires for --fail (same-gate regression check) AND for A/B (--against,
+    // cross-gate). corpusHash must match in both; gateHash must match ONLY outside A/B mode.
     if (
-      failMode &&
+      (failMode || abMode) &&
       section &&
-      section.gateHash === meta.gateHash &&
-      section.corpusHash === meta.corpusHash
+      section.corpusHash === meta.corpusHash &&
+      (abMode || section.gateHash === meta.gateHash)
     ) {
       for (const res of results) {
         const baseRow = section.rows[res.id];
@@ -781,19 +823,21 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
     );
   }
 
-  // ── Floors + flips (--fail) ──
+  // ── Floors + flips (--fail) / A/B directional compare (--against) ──
+  // In A/B mode floors + the flip table PRINT for context but never set the exit — an A/B is
+  // informational, the accept/revert decision is the caller's.
   let failed = false;
-  if (failMode) {
+  if (failMode || abMode) {
     if (pooledCascade) {
       const br = pooled.blockRecall;
       const cp = pooled.cleanPass;
       if (br.n && br.k / br.n < FLOORS.blockRecall) {
         console.error(`FLOOR: pooled block recall ${fmtCi(br.k, br.n)} < ${FLOORS.blockRecall}`);
-        failed = true;
+        if (!abMode) failed = true;
       }
       if (cp.n && cp.k / cp.n < FLOORS.cleanPass) {
         console.error(`FLOOR: pooled clean-pass ${fmtCi(cp.k, cp.n)} < ${FLOORS.cleanPass}`);
-        failed = true;
+        if (!abMode) failed = true;
       }
     }
     if (MODEL === 'sonnet') {
@@ -802,17 +846,24 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh }) 
         console.error(
           `FLOOR: pooled first-pass FAIL-recall ${fmtCi(fr.k, fr.n)} < ${FLOORS.firstFailRecallSonnetOnly}`,
         );
-        failed = true;
+        if (!abMode) failed = true;
       }
     }
     for (const { reviewer, results, meta } of perReviewer) {
-      const cmp = compareReviewer(reviewer.name, results, meta, baseline);
+      const cmp = compareReviewer(reviewer.name, results, meta, baseline, { crossGate: abMode });
       if (cmp.skipped) console.log(`compare ${reviewer.name}: SKIPPED — ${cmp.skipped}`);
       else {
-        console.log(
-          `compare ${reviewer.name}: ${cmp.regressed ? 'REGRESSED' : 'ok'} — ${cmp.detail}`,
-        );
-        if (cmp.regressed) failed = true;
+        const label = abMode
+          ? cmp.improved
+            ? 'IMPROVED'
+            : cmp.regressed
+              ? 'REGRESSED'
+              : 'no-change'
+          : cmp.regressed
+            ? 'REGRESSED'
+            : 'ok';
+        console.log(`compare ${reviewer.name}: ${label} — ${cmp.detail}`);
+        if (!abMode && cmp.regressed) failed = true;
       }
     }
   }
@@ -887,7 +938,11 @@ if (invokedDirectly) {
   const flags = new Set(argv.filter((a) => a.startsWith('--')));
   const onlyIdx = argv.indexOf('--only');
   const only = onlyIdx !== -1 ? argv[onlyIdx + 1] : null;
-  const positional = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--only');
+  const againstIdx = argv.indexOf('--against');
+  const against = againstIdx !== -1 ? argv[againstIdx + 1] : null;
+  const positional = argv.filter(
+    (a, i) => !a.startsWith('--') && argv[i - 1] !== '--only' && argv[i - 1] !== '--against',
+  );
   const cmd = ['run', 'validate', 'coverage'].includes(positional[0]) ? positional[0] : 'run';
   const target = positional.find((p) => p !== cmd);
   const targets =
@@ -905,6 +960,7 @@ if (invokedDirectly) {
       await runBench(targets, {
         dev: flags.has('--dev'),
         only,
+        against,
         writeBaseline: flags.has('--baseline'),
         failMode: flags.has('--fail'),
         fresh: flags.has('--fresh'),

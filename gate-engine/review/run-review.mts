@@ -203,6 +203,42 @@ function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
  * gate), a PASS is voided to inconclusive when the artifact is missing/incomplete/inconsistent
  * (verifyChecklist), and the artifact is removed afterwards either way.
  */
+// Deterministic domain-exclusivity guard for the bench-measured cross-domain false-blocks
+// (xdomain-sqli / xdomain-render: correctness FAILs a lens for a defect the security/performance
+// reviewers own — see agents/correctness-reviewer.md <exclusions>). ONE-SIDED and best-effort:
+// drops a failing lens ONLY when its reason matches an out-of-charter keyword AND matches NO
+// correctness-signal keyword — biased to UNDER-fire (keep the FAIL when in doubt) so it carries no
+// recall cost. It is NOT a semantic arbiter and NOT a guarantee: its safety is proportional to the
+// CORRECTNESS_SIGNAL coverage below, so that list is kept deliberately broad. Covers cross-domain
+// leaks ONLY (2 of the bench's 4 false-blocks). The in-domain surface-cue false-blocks want K-sample
+// self-consistency with an asymmetric block rule (Wang 2203.11171), NOT a same-family verify/refute
+// pass — such a pass overturns real FAILs (measured 0.78→0.67 here; Huang 2310.01798, Stechly
+// 2402.08115) and only pays off cross-family (Lu 2512.02304). Precision to ~0.95 is also unmeasurable
+// until the decoy corpus grows (n=28 → clean-pass CI [.69,.94]).
+const OUT_OF_CHARTER =
+  /\b(sql|injection|xss|csrf|sanitiz|escap|secrets?|credentials?|deserializ|n\+1|select\s+\*|pagination|unbounded|re-?render|bundle\s?size|memoiz|throughput|latenc|perf(ormance)?)\b/i;
+// Deliberately broad — every miss here risks dropping a real FAIL, so err toward inclusion.
+const CORRECTNESS_SIGNAL =
+  /\b(race|interleav|concurren|clobber|overwrit|overwrote|lost\s?update|stale|reset|invalidat|discard|dropped|unhandled|unchecked|ignored\s+(return|result|error)|missing|contract|signature|call\s?site|broadcast|dedup|classif|pars(e|ing)|off-by|wrong\s+(result|state|value)|incorrect|stuck|deadlock|leak|finally|rollback|revert|strand|CAS|atomic|toctou|check[\s-]?then[\s-]?act|order(ing)?|sequenc|idempoten|mutat|await|promise|callback|null|undefined|double[\s-]?(fire|write)|early\s+(return|exit)|exit\s?code|fall[\s-]?through|latch|unclaim|revive|cancel|retry|resum|recover)\b/i;
+
+/** Partition a checklist's failing lenses into ones that still block (`kept`) and ones dropped as
+ * out-of-charter (`dropped`). A lens drops only when its issues are unambiguously security/perf. */
+export function domainExclusivityDrop(
+  items: { name?: string; status?: string; issues?: string[] }[] = [],
+): { kept: string[]; dropped: { lens: string; reason: string }[] } {
+  const kept: string[] = [];
+  const dropped: { lens: string; reason: string }[] = [];
+  for (const it of items) {
+    if (it.status !== 'fail') continue;
+    const lens = it.name ?? '(finding)';
+    const text = (it.issues ?? []).join(' \n ');
+    if (text && OUT_OF_CHARTER.test(text) && !CORRECTNESS_SIGNAL.test(text))
+      dropped.push({ lens, reason: text });
+    else kept.push(lens);
+  }
+  return { kept, dropped };
+}
+
 export async function runCascade(
   sel: ReviewerSelection,
   opts: CascadeOpts,
@@ -233,31 +269,46 @@ export async function runCascade(
     // paraphrase of the SAME violation can vary run-to-run on byte-identical input, which would
     // silently un-match a dev's already-committed waiver and re-block them.
     const state = readChecklistState(cwd, sel.reviewer);
-    const checklistLenses = (state?.items ?? [])
-      .filter((i) => i.status === 'fail')
-      .map((i) => i.name ?? '(finding)');
+    const items = state?.items ?? [];
+    const failedCount = items.filter((i) => i.status === 'fail').length;
+    // Domain-exclusivity guard (checklist reviewers only): drop failing lenses flagging a
+    // security/performance defect this reviewer must stay silent on. One-sided/best-effort (see
+    // domainExclusivityDrop); conventions has no checklist, so this is a no-op there.
+    const { kept, dropped } = domainExclusivityDrop(items);
+    for (const d of dropped)
+      console.error(
+        `guard-review: ${sel.reviewer.name} — ${d.lens} dropped as out-of-charter (security/performance is another reviewer's finding)`,
+      );
+    // A skill-less reviewer (conventions) has no checklist — its lens is the OFFENDING path:line each
+    // violation names (parseConventionFindings), never the free-text VERDICT reason.
     const conventionLenses = parseConventionFindings(res.transcript ?? '').map(
       (f) => `${f.offendingPath}:${f.offendingLine}`,
     );
-    const failedLenses = sel.reviewer.stateFile ? checklistLenses : conventionLenses;
-    const lenses = failedLenses.length > 0 ? failedLenses : ['(finding)'];
-    const diffText = gitCached(cwd, [], sel.files);
-    const { suppressed, blocking } = reconcile(
-      cwd,
-      sel.reviewer.name,
-      lenses,
-      diffText,
-      new Date().toISOString(),
-    );
-    for (const s of suppressed)
-      console.error(
-        `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`,
-      );
-    if (blocking.length === 0) {
+    const failedLenses = sel.reviewer.stateFile ? kept : conventionLenses;
+    // All checklist lenses dropped as out-of-charter → not a correctness block (checklist reviewers only).
+    if (sel.reviewer.stateFile && failedCount > 0 && kept.length === 0) {
       res.status = 'pass';
-      res.reason = `all ${suppressed.length} finding(s) overridden`;
+      res.reason = `${dropped.length} out-of-charter finding(s) dropped (owned by security/performance reviewer)`;
     } else {
-      res.reason = blockingNote(sel.reviewer.name, blocking);
+      const lenses = failedLenses.length > 0 ? failedLenses : ['(finding)'];
+      const diffText = gitCached(cwd, [], sel.files);
+      const { suppressed, blocking } = reconcile(
+        cwd,
+        sel.reviewer.name,
+        lenses,
+        diffText,
+        new Date().toISOString(),
+      );
+      for (const s of suppressed)
+        console.error(
+          `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`,
+        );
+      if (blocking.length === 0) {
+        res.status = 'pass';
+        res.reason = `all ${suppressed.length} finding(s) overridden`;
+      } else {
+        res.reason = blockingNote(sel.reviewer.name, blocking);
+      }
     }
   }
   cleanupChecklistState(cwd, sel.reviewer);
