@@ -3,8 +3,10 @@
  * shape. `devkit update` bumps the dep, but the files devkit emitted at init time are SNAPSHOTS that
  * don't move with the package; this reconciles them:
  *   - devkit-OWNED files (eslint.config.mjs — the generated shim / preset) are REPLACED when they drift.
- *   - YOUR data (guard.config.json) is MERGED: missing keys (e.g. the `structure` block, `maxLines`)
- *     are added; your existing values are NEVER clobbered.
+ *   - YOUR data (guard.config.json) is MERGED: missing keys (e.g. the `structure` block) are added;
+ *     your existing values are NEVER clobbered. NOTE: the `maxLines` line-growth cap is deliberately
+ *     NOT template-merged — enabling it must grandfather current giants (a freeze), so it's offered by
+ *     `devkit upgrade` (which freezes in the same step), never silently added here.
  *   - biome.jsonc / tsconfig.json need nothing — they `extends` the package, so they already track it.
  *
  * This was the `devkit migrate` command; the standalone verb was removed (a half-command that never

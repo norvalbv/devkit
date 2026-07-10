@@ -27,6 +27,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
+import { LINE_CAP, setMaxLines } from "../../gate-engine/ratchets/size-disable.mjs";
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, defaultSelection, GUARD_IDS, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
@@ -165,6 +166,9 @@ function selectionFromFlags(flags) {
         sel.guards = [];
     else if (flags.guards)
         sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
+    // Line-growth block is recommended-on; --no-line-growth opts out under --yes / non-TTY.
+    if (flags.no.has('line-growth'))
+        sel.lineGrowth = false;
     // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
     sel.fallow = flags.fallow && !flags.no.has('fallow');
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
@@ -309,6 +313,22 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
     }
     writeFileSync(path, next);
     console.log(`  ✓ guard.config.json scanRoots = ${value}`);
+}
+// Enable the per-file line-growth block on FIRST adoption: write `maxLines` into guard.config.json so
+// the guard-size ratchet caps source files. Called BEFORE the step-4 freeze so that same first-init
+// `guard-size freeze` grandfathers the current giants into size-lines.json. Callers gate this on
+// !repoAdopted — enabling the cap on an already-adopted repo without a fresh freeze would hard-error
+// its giants, so that path goes through `devkit upgrade`'s offer (which freezes in the same step).
+function applyMaxLines(cwd, on, dryRun) {
+    if (!on)
+        return;
+    if (dryRun) {
+        console.log(`  [dry-run] set guard.config.json maxLines = ${LINE_CAP} (line-growth block)`);
+        return;
+    }
+    if (setMaxLines(cwd)) {
+        console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
+    }
 }
 // Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
 // fallow-ignore-next-line complexity
@@ -958,6 +978,10 @@ export async function applyInit(cwd, plan) {
     else
         installConfigs(cwd, selection, force, dryRun);
     applyScanRoots(cwd, scanRoots, dryRun);
+    // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)
+    // and only when the size guard runs it. An adopted repo enables it via `devkit upgrade` (freeze +
+    // cap in one step), never here — this apply pass would set the cap with no matching freeze.
+    applyMaxLines(cwd, !repoAdopted(cwd) && Boolean(selection.lineGrowth) && selection.guards.includes('size'), dryRun);
     // Standalone touches NO package.json (the whole point — no private dep in a shared repo).
     if (!standalone) {
         console.log('2. package.json');
@@ -1013,6 +1037,7 @@ export async function applyInit(cwd, plan) {
         structure: isStructure,
         fallow: Boolean(selection.fallow),
         searchCode: Boolean(selection.searchCode),
+        lineGrowth: Boolean(selection.lineGrowth),
         agentTargets: [...agentTargets],
         guards: selection.husky ? [...selection.guards] : [],
     };

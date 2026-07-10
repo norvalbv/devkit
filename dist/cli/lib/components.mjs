@@ -110,6 +110,9 @@ export function defaultSelection() {
         structure: true,
         fallow: false,
         searchCode: false,
+        // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
+        // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
+        lineGrowth: true,
         agentTargets: [...AGENT_TARGETS],
         guards: [...RECOMMENDED_GUARD_IDS],
     };
