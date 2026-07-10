@@ -33,7 +33,6 @@ const COMMANDS = {
     release: () => import("./commands/release.mjs"),
     update: () => import("./commands/update.mjs"),
     upgrade: () => import("./commands/upgrade.mjs"),
-    migrate: () => import("./commands/migrate.mjs"),
     move: () => import("./commands/move.mjs"),
     reconcile: () => import("./commands/reconcile.mjs"),
     ship: () => import("./commands/ship.mjs"),
