@@ -18,6 +18,7 @@ import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
+import { bundledNames } from '../lib/sync-manifest.mts';
 import { structureCmdFor } from './init.mts';
 import { cmpSemver } from './update.mts';
 
@@ -285,10 +286,24 @@ async function checkSkills(cwd: string, surface = 'claude'): Promise<CheckResult
     const consumerPath = join(gitRoot, `.${surface}`, 'skills', rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
-  if (sourceDrift.length || consumerDrift.length) {
+  // Bundle-completeness: a NEW bundled skill the (stale) manifest doesn't list — and that was never
+  // synced under .<surface>/skills — is drift the per-file loop above can't see (it iterates manifest
+  // keys only, so a just-added skill is invisible). A consumer-authored same-named skill (present on
+  // disk, deliberately off-manifest) is NOT drift, so require absent-on-disk too — see the
+  // non-devkit-asset-collision-preserve decision.
+  const manifestSkillDirs = new Set(Object.keys(manifest.files).map((k) => k.split('/')[0]));
+  const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter(
+    (dir) =>
+      !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)),
+  );
+  if (sourceDrift.length || consumerDrift.length || unsynced.length) {
     const parts: string[] = [];
     if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
     if (consumerDrift.length) parts.push(`consumer copy drifted (${consumerDrift.length})`);
+    if (unsynced.length)
+      parts.push(
+        `bundle has ${unsynced.length} skill(s) the manifest lacks (${unsynced.join(', ')})`,
+      );
     return check('skills', 'DRIFT', parts.join('; '), 'run `devkit sync-skills`', true);
   }
   return check('skills', 'OK', `${Object.keys(manifest.files).length} file(s) in sync`);
@@ -312,10 +327,22 @@ async function checkAgents(cwd: string, surface = 'claude'): Promise<CheckResult
     const consumerPath = join(gitRoot, `.${surface}`, 'agents', rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
-  if (sourceDrift.length || consumerDrift.length) {
+  // Bundle-completeness: a NEW bundled agent the (stale) manifest doesn't list — and that was never
+  // synced under .<surface>/agents — is drift the per-file loop above can't see (it iterates manifest
+  // keys only). A consumer-authored same-named agent (present on disk, deliberately off-manifest) is
+  // NOT drift, so require absent-on-disk too — see the non-devkit-asset-collision-preserve decision.
+  const unsynced = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md')).filter(
+    (name) =>
+      !(name in manifest.files) && !existsSync(join(gitRoot, `.${surface}`, 'agents', name)),
+  );
+  if (sourceDrift.length || consumerDrift.length || unsynced.length) {
     const parts: string[] = [];
     if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
     if (consumerDrift.length) parts.push(`consumer copy drifted (${consumerDrift.length})`);
+    if (unsynced.length)
+      parts.push(
+        `bundle has ${unsynced.length} agent(s) the manifest lacks (${unsynced.join(', ')})`,
+      );
     return check('agents', 'DRIFT', parts.join('; '), 'run `devkit sync-agents`', true);
   }
   return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
@@ -523,7 +550,12 @@ function applyFix(
 
   // MISSING template files / husky drift → init for the recorded selection (idempotent).
   const needsInit = results.some(
-    (r) => r.fixable && r.status === 'MISSING' && r.name !== 'baselines' && r.name !== 'skills',
+    (r) =>
+      r.fixable &&
+      r.status === 'MISSING' &&
+      r.name !== 'baselines' &&
+      r.name !== 'skills' &&
+      r.name !== 'agents',
   );
   // The guard block AND its structure-lint `--structure` arg both live in the .husky/pre-commit
   // deterministic line, which init rebuilds from the recorded selection — so a drifted structure-lint
@@ -543,6 +575,13 @@ function applyFix(
   const skills = results.find((r) => r.name === 'skills');
   if (skills && skills.status !== 'OK') {
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
+      cwd,
+      stdio: 'inherit',
+    });
+  }
+  const agents = results.find((r) => r.name === 'agents');
+  if (agents && agents.status !== 'OK') {
+    execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-agents'], {
       cwd,
       stdio: 'inherit',
     });
