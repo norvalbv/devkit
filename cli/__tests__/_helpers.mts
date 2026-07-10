@@ -65,6 +65,37 @@ export function rootRegistry() {
 }
 
 /**
+ * Seed a per-session edits ledger for the agents-hooks suites (session-edits-lib.sh). Creates a
+ * fixture-LOCAL tmpdir (pass it as TMPDIR to the hook so real machine state never leaks in) and
+ * writes `devkit-session-edits/<REPO_KEY>-<sid>` with the given repo-relative paths. REPO_KEY is
+ * computed exactly the way the lib does (`pwd -P | cksum`) so the hook resolves the same file.
+ * Pass `paths: null` to create the isolated tmpdir WITHOUT a ledger (the no-edits session shape).
+ *
+ * @param {string} root fixture repo root
+ * @param {string} sid session_id the hook payload will carry
+ * @param {string[]|null} paths repo-relative edited paths (null → no ledger)
+ * @returns {string} the tmpdir to pass as the hook's TMPDIR env
+ */
+export function seedSessionLedger(root, sid, paths) {
+  const tmp = join(root, '.test-tmpdir');
+  mkdirSync(join(tmp, 'devkit-session-edits'), { recursive: true });
+  if (paths !== null) {
+    writeFileSync(
+      join(tmp, 'devkit-session-edits', `${repoKey(root)}-${sid}`),
+      `${paths.join('\n')}\n`,
+    );
+  }
+  return tmp;
+}
+
+/** REPO_KEY exactly as session-edits-lib.sh computes it (`pwd -P | cksum`, first field). */
+export const repoKey = (root) =>
+  spawnSync('bash', ['-c', 'pwd -P | cksum | cut -d" " -f1'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).stdout.trim();
+
+/**
  * Fixtures for the structure-baseline suites: a self-cleaning tmp repo + a `write(root, rel, content)`
  * helper that mkdir-ps the parent. `const { tmpRepo, write, cleanup } = structFixtures('struct-')`.
  *

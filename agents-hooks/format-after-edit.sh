@@ -27,7 +27,24 @@ if [ -n "$CLAUDE_PROJECT_DIR" ] && [[ "$file_path" != "$CLAUDE_PROJECT_DIR"/* ]]
   exit 0
 fi
 
-cd "${CLAUDE_PROJECT_DIR:-$(pwd)}" 2>/dev/null || { echo '{}'; exit 0; }
+# Absolute hook dir BEFORE cd — a relative $0 would dangle after the chdir.
+HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || { echo '{}'; exit 0; }
+
+# Record this edit in the per-session ledger (repo-relative path) so the Stop hooks
+# (lint-check/knip-check/decision-stop-check) can scope their reports to files THIS session
+# touched. Best-effort: a missing lib (sync-hooks --only) or unwritable $TMPDIR never blocks.
+# Strip the prefix from the same UNRESOLVED root the guard above compared against — `pwd -P`
+# would resolve symlinks (/tmp → /private/tmp) and the strip would silently miss.
+source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
+if type session_edits_file &>/dev/null; then
+  rel_path="${file_path#"${CLAUDE_PROJECT_DIR:-$(pwd)}"/}"
+  if [ -n "$rel_path" ] && [ "$rel_path" != "$file_path" ]; then
+    ledger=$(session_edits_file "$input")
+    mkdir -p "$(dirname "$ledger")" 2>/dev/null &&
+      printf '%s\n' "$rel_path" >> "$ledger" 2>/dev/null || true
+  fi
+fi
 
 # Biome format/lint auto-fix on the edited file (silent, best-effort).
 if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]]; then
