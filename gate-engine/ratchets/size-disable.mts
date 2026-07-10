@@ -193,7 +193,14 @@ export function hasLineCap(cwd: string): boolean {
 export function setMaxLines(cwd: string, cap = LINE_CAP): boolean {
   const cfgPath = join(cwd, 'guard.config.json');
   if (!existsSync(cfgPath)) return false;
-  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+  let cfg: Record<string, unknown>;
+  try {
+    cfg = JSON.parse(readFileSync(cfgPath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    // Unparseable guard.config.json → skip (mirror hasLineCap). A corrupt user-edited file must not
+    // crash init/upgrade; the gates surface the JSON error separately when they run.
+    return false;
+  }
   if (typeof cfg.maxLines === 'number' && cfg.maxLines > 0) return false;
   cfg['//maxLines'] = MAXLINES_DOC;
   cfg.maxLines = cap;
@@ -204,11 +211,15 @@ export function setMaxLines(cwd: string, cap = LINE_CAP): boolean {
 /**
  * Enable the block on an already-adopted repo (the upgrade back-fill): set the cap, then grandfather
  * the current over-cap files via a lines-only freeze that NEVER touches the disable-count baseline
- * (size.json) — so no unrelated size debt is laundered in. Returns how many files were grandfathered.
+ * (size.json) — so no unrelated size debt is laundered in. Returns whether the cap is now in effect
+ * and how many files were grandfathered. Skips gracefully (enabled:false) when guard.config.json is
+ * absent or unparseable — freezeLines would otherwise re-resolve that same corrupt file and throw.
  */
-export function enableLineGrowth(cwd: string): { grandfathered: number } {
-  setMaxLines(cwd);
-  return { grandfathered: freezeLines(cwd) };
+export function enableLineGrowth(cwd: string): { enabled: boolean; grandfathered: number } {
+  // setMaxLines is false when it wrote nothing: cap already present (fine — grandfather it) OR the
+  // file is unreadable (bail — don't freeze against a config we can't parse).
+  if (!setMaxLines(cwd) && !hasLineCap(cwd)) return { enabled: false, grandfathered: 0 };
+  return { enabled: true, grandfathered: freezeLines(cwd) };
 }
 
 /** How many source files WOULD be grandfathered at the default cap — for `--dry-run`; writes nothing. */

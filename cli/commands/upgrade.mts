@@ -279,17 +279,11 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
         sel.lineGrowth = false; // record the decline so upgrade never re-nags
         console.log('  • line-growth block not enabled');
       } else {
-        const { grandfathered } = enableLineGrowth(cwd);
-        console.log(
-          `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`,
-        );
+        reportLineGrowth(enableLineGrowth(cwd));
       }
     } else {
       // Non-TTY: auto-enable + freeze (heal like a recommended gate).
-      const { grandfathered } = enableLineGrowth(cwd);
-      console.log(
-        `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`,
-      );
+      reportLineGrowth(enableLineGrowth(cwd));
     }
   }
 
@@ -354,4 +348,20 @@ function repinStalePin(cwd: string, target: string, dryRun: boolean): void {
   }
   writeFileSync(pkgPath, repinned);
   console.log(`  ✓ re-pinned devkit → #v${target}`);
+}
+
+// Print the outcome of a line-growth enable — honest when an unreadable guard.config.json meant the
+// cap was NOT written (enableLineGrowth skips rather than crashing on a corrupt file).
+function reportLineGrowth({
+  enabled,
+  grandfathered,
+}: {
+  enabled: boolean;
+  grandfathered: number;
+}): void {
+  console.log(
+    enabled
+      ? `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`
+      : '  • could not enable line-growth block — guard.config.json unreadable; skipped',
+  );
 }

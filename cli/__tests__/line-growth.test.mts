@@ -107,4 +107,19 @@ describe('line-growth block enabler', () => {
     expect(previewGrandfather(root)).toBe(1);
     expect(hasLineCap(root)).toBe(false); // preview wrote nothing
   });
+
+  it('setMaxLines returns false (no throw) on a malformed guard.config.json', () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'guard.config.json'), '{ not: valid json,,,');
+    expect(setMaxLines(root)).toBe(false);
+  });
+
+  it('enableLineGrowth skips gracefully on a malformed guard.config.json (no crash, not enabled)', () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'guard.config.json'), '{ broken');
+    writeSrc(root, 'giant.ts', big(600));
+    // Must NOT throw — freezeLines would otherwise re-resolve the corrupt file and crash.
+    expect(enableLineGrowth(root)).toEqual({ enabled: false, grandfathered: 0 });
+    expect(existsSync(join(root, 'eslint', 'baselines', 'size-lines.json'))).toBe(false);
+  });
 });
