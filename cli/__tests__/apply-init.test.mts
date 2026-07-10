@@ -3,7 +3,7 @@
  * the wizard funnels into. Calling applyInit with a chosen component map is preferable to
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -88,6 +88,11 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes'])).fallow).toBe(false);
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow'])).fallow).toBe(true);
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow', '--no-fallow'])).fallow).toBe(false);
+  });
+
+  it('lineGrowth is recommended-ON: default true, off with --no-line-growth', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).lineGrowth).toBe(true);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-line-growth'])).lineGrowth).toBe(false);
   });
 
   it('parseFlags reads --scan-root / --scan-roots as a comma list', () => {
@@ -362,5 +367,37 @@ describe('applyInit — config field preservation (2c)', () => {
     const after = JSON.parse(readFileSync(cfgPath, 'utf8'));
     expect(after.minDevkit).toBe('0.20.0');
     expect(after.configOverrides).toEqual(['tsconfig.json']);
+  });
+});
+
+describe('applyInit — per-file line-growth block (recommended-on)', () => {
+  const giant = (root: string) => {
+    mkdirSync(join(root, 'src'), { recursive: true });
+    // 600 lines (no trailing newline) → over the 500-line cap.
+    writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
+  };
+  const linesBaseline = (root: string) => join(root, 'eslint', 'baselines', 'size-lines.json');
+
+  it('default init writes maxLines and grandfathers a current giant into size-lines.json', async () => {
+    const root = tmpRepo();
+    giant(root); // pre-existing giant must be grandfathered by init's freeze, not left to hard-error
+    await applyInit(root, { stack: 'generic', selection: defaultSelection() });
+
+    expect(JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines).toBe(500);
+    expect(JSON.parse(readFileSync(linesBaseline(root), 'utf8')).files['src/giant.ts']).toBe(600);
+    expect(config(root).components.lineGrowth).toBe(true);
+  });
+
+  it('--no-line-growth: no cap written, no size-lines baseline', async () => {
+    const root = tmpRepo();
+    giant(root);
+    const sel = selectionFromFlags(parseFlags(['--no-line-growth']));
+    await applyInit(root, { stack: 'generic', selection: sel });
+
+    expect(
+      JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines,
+    ).toBeUndefined();
+    expect(existsSync(linesBaseline(root))).toBe(false);
+    expect(config(root).components.lineGrowth).toBe(false);
   });
 });

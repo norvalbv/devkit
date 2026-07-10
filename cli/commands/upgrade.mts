@@ -19,7 +19,13 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isCancel, multiselect } from '@clack/prompts';
+import { confirm, isCancel, multiselect } from '@clack/prompts';
+import {
+  enableLineGrowth,
+  hasLineCap,
+  LINE_CAP,
+  previewGrandfather,
+} from '../../gate-engine/ratchets/size-disable.mts';
 import {
   AGENT_TARGETS,
   GUARD_OPTIONS,
@@ -243,6 +249,47 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
           `  • devkit also bundles ${id} (opt-in) — enable with 'devkit init --guards …,${id}'`,
         );
       }
+    }
+  }
+
+  // ── 3b. line-growth block: back-fill the per-file maxLines cap for repos that predate it ───
+  // It's a CONFIG KNOB on the already-selected `size` guard (not a guard id), so newBundledGates never
+  // surfaces it. Offer it when size runs but guard.config.json has no cap. `sel.lineGrowth` defaults
+  // true (a legacy repo never recorded it) → the offer fires once; declining records false (no re-nag),
+  // enabling writes the cap. Enabling here ALSO grandfathers current giants (lines-only freeze), since
+  // upgrade's init pass never re-freezes an adopted repo — without it their over-cap files hard-error.
+  if (
+    sel.husky &&
+    sel.guards.includes('size') &&
+    sel.lineGrowth &&
+    existsSync(join(cwd, 'guard.config.json')) &&
+    !hasLineCap(cwd)
+  ) {
+    console.log('\n3b. line-growth block');
+    if (dryRun) {
+      console.log(
+        `  [dry-run] would enable per-file line-growth block (maxLines ${LINE_CAP}; grandfathers ${previewGrandfather(cwd)} file(s))`,
+      );
+    } else if (process.stdout.isTTY && process.stdin.isTTY) {
+      const yes = await confirm({
+        message: `Enable the per-file line-growth block? Caps source files at ${LINE_CAP} lines; current giants are grandfathered (shrink-only), new growth is blocked.`,
+        initialValue: true,
+      });
+      if (isCancel(yes) || !yes) {
+        sel.lineGrowth = false; // record the decline so upgrade never re-nags
+        console.log('  • line-growth block not enabled');
+      } else {
+        const { grandfathered } = enableLineGrowth(cwd);
+        console.log(
+          `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`,
+        );
+      }
+    } else {
+      // Non-TTY: auto-enable + freeze (heal like a recommended gate).
+      const { grandfathered } = enableLineGrowth(cwd);
+      console.log(
+        `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`,
+      );
     }
   }
 
