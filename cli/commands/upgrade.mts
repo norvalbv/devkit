@@ -1,7 +1,7 @@
 /**
  * `devkit upgrade` — one idempotent command that fully reconciles a consumer repo to the installed
  * devkit, reading everything from .devkit/config.json. It COMPOSES the existing slices (it does not
- * replace them): version/pin reconcile → migrate (emitted configs) → the init broad refresh
+ * replace them): version/pin reconcile → emitted-config reconcile (computeMigration) → the init broad refresh
  * (skills/agents/agent-hooks + husky/guards, honouring the RECORDED agentTargets) → doctor verify.
  *
  *   devkit upgrade [--dry-run] [--force]
@@ -33,7 +33,7 @@ import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { syncHookScripts } from '../lib/install/install-hooks.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
-import { computeMigration } from './migrate.mts';
+import { computeMigration } from './migrate-config.mts';
 import { syncAgents } from './sync/sync-agents.mts';
 import { syncSkills } from './sync/sync-skills.mts';
 import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
@@ -46,9 +46,10 @@ export const meta = {
 Usage:
   devkit upgrade [--dry-run] [--force]
 
-Reads .devkit/config.json and composes the slices: reconcile the devkit pin + devkitRef, run
-migrate (emitted configs), refresh skills/agents/agent-hooks + the husky guard block for the
-RECORDED selection (honours agentTargets — never re-adds a deselected surface), then run doctor.
+Reads .devkit/config.json and composes the slices: reconcile the devkit pin + devkitRef, reconcile
+emitted configs (eslint.config.mjs / guard.config.json), refresh skills/agents/agent-hooks + the
+husky guard block for the RECORDED selection (honours agentTargets — never re-adds a deselected
+surface), then run doctor.
 
   --dry-run  print every action; write nothing.
   --force    adopt consumer-authored skill/agent/hook collisions (tuned configs are NEVER overwritten).
@@ -56,7 +57,8 @@ RECORDED selection (honours agentTargets — never re-adds a deselected surface)
 If a NEWER devkit tag is published, upgrade installs it; it then asks you to re-run ONLY if the
 running CLI is itself behind that tag (it can't hot-swap to just-installed code) — a running CLI
 already >= latest installs and reconciles in the same pass. Otherwise it reconciles in a single pass.
-Composes update / migrate / sync-skills / sync-agents / init — it does not replace them.`,
+This is the SINGLE upgrade entry point — run it, not the pieces (update / sync-skills / sync-agents /
+init stay callable for scripts, but upgrade composes them + the emitted-config reconcile).`,
 };
 
 // Exit for "installed a newer tag; re-run to reconcile" — distinct from 0 (done) / 1 (drift) so a
@@ -76,7 +78,7 @@ interface PackageManifest {
   version?: string;
 }
 
-// Reason: flat top-level pipeline — sequential guarded steps (preflight → version/pin → migrate →
+// Reason: flat top-level pipeline — sequential guarded steps (preflight → version/pin → config reconcile →
 // broad refresh → force-adopt → verify), each a single delegated call with near-zero nesting; the
 // real logic lives in the composed commands (applyInit / computeMigration / doctor / update).
 // fallow-ignore-next-line complexity

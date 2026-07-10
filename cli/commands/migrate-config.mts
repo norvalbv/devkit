@@ -1,38 +1,26 @@
 /**
- * devkit migrate — bring a consumer's EMITTED files up to the INSTALLED devkit's shape.
- *
- *   devkit migrate            # DRY-RUN: show exactly what differs + what each change is (default)
- *   devkit migrate --apply    # write the changes
- *
- * `devkit --update` bumps the dep, but the files devkit emitted at init time are SNAPSHOTS — they
- * don't move with the package. This reconciles them, transparently:
+ * Emitted-config reconcile logic — bring a consumer's EMITTED files up to the INSTALLED devkit's
+ * shape. `devkit update` bumps the dep, but the files devkit emitted at init time are SNAPSHOTS that
+ * don't move with the package; this reconciles them:
  *   - devkit-OWNED files (eslint.config.mjs — the generated shim / preset) are REPLACED when they drift.
  *   - YOUR data (guard.config.json) is MERGED: missing keys (e.g. the `structure` block, `maxLines`)
  *     are added; your existing values are NEVER clobbered.
  *   - biome.jsonc / tsconfig.json need nothing — they `extends` the package, so they already track it.
- *   - the .husky/pre-commit devkit-guards region is refreshed by `devkit init` (noted, not done here).
  *
- * Nothing is written without --apply. You SEE every change first. TypeScript source, shipped as prebuilt .mjs.
+ * This was the `devkit migrate` command; the standalone verb was removed (a half-command that never
+ * refreshed husky). `devkit upgrade` is the single entry point and calls computeMigration here.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 
-const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
-
 // One entry in a migration plan: a devkit file to reconcile, plus the write() that applies it.
-interface MigrationChange {
+export interface MigrationChange {
   file: string;
   kind: string;
   why: string;
   write: () => void;
-}
-
-// The relevant slice of `.devkit/config.json` this command reads.
-interface DevkitConfig {
-  stack?: string;
 }
 
 // The current eslint.config source for a stack (mirrors init's STRUCTURE_TEMPLATE_FILES): every
@@ -95,54 +83,4 @@ export function computeMigration(cwd: string, stack: string): MigrationChange[] 
   return [eslintChange(cwd, stack), guardConfigChange(cwd, stack)].filter(
     (c): c is MigrationChange => c !== null,
   );
-}
-
-export const meta = {
-  name: 'migrate',
-  summary: 'Reconcile your emitted files with the installed devkit.',
-  help: `devkit migrate — after an update, reconcile your EMITTED files with the installed devkit.
-
-Usage:
-  devkit migrate [--apply]
-
-DRY-RUN by default — shows every change (devkit-owned files like eslint.config.mjs replaced; your
-guard.config.json values merged, never clobbered). --apply to write.`,
-};
-
-// Reason: flat CLI shell — stack guard, empty-plan early-out, the per-change report/apply loop, two
-// trailing notes; near-zero nesting. The real logic (computeMigration + each *Change builder) is
-// extracted and unit-tested (migrate.test.mjs); CRAP is the static estimate for this thin printer.
-// fallow-ignore-next-line complexity
-export default async function migrate(args: string[], cwd: string): Promise<number> {
-  const apply = args.includes('--apply');
-  const cfg: DevkitConfig | null = readJson(join(cwd, '.devkit', 'config.json'));
-  const stack = cfg?.stack ?? detectStack(cwd);
-  if (!STRUCTURE_STACKS.has(stack)) {
-    console.log(`devkit migrate: stack "${stack}" has no structure preset — nothing to migrate.`);
-    return 0;
-  }
-
-  const changes = computeMigration(cwd, stack);
-  if (!changes.length) {
-    console.log(
-      '✓ devkit migrate: emitted files already match the installed devkit. Nothing to do.',
-    );
-    console.log(
-      '  (biome.jsonc / tsconfig.json track the package via `extends` — never migrated.)',
-    );
-    return 0;
-  }
-
-  console.log(
-    `devkit migrate — ${changes.length} change(s) for stack "${stack}"${apply ? ':' : ' (DRY-RUN; pass --apply to write):'}\n`,
-  );
-  for (const c of changes) {
-    console.log(`  ${apply ? '✓' : '•'} ${c.file}  [${c.kind}]  — ${c.why}`);
-    if (apply) c.write();
-  }
-  console.log(
-    `\n  .husky/pre-commit: re-run \`devkit init --stack ${stack}\` to refresh the devkit-guards region (e.g. the structure-lint line).`,
-  );
-  if (!apply) console.log('\n  Review above, then run: devkit migrate --apply');
-  return 0;
 }

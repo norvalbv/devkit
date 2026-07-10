@@ -2,7 +2,7 @@
  * `devkit upgrade` — version/pin step wiring (Option B): install a genuinely newer PUBLISHED tag, then
  * decide via `needsRerun` whether to re-run (running CLI itself behind ⇒ can't hot-swap) or continue
  * reconciling in the SAME pass (running CLI already >= latest). The composed slices are mocked at
- * their module boundaries — only `upgrade.mts` imports doctor/init/migrate, so wholesale-mocking them
+ * their module boundaries — only `upgrade.mts` imports doctor/init/migrate-config, so wholesale-mocking them
  * is safe — so this exercises upgrade's OWN control flow without a network install or a real reconcile.
  *
  * Pure decisions (cmpSemver / needsRerun) are unit-tested in update.test.mts; this locks the WIRING:
@@ -27,7 +27,7 @@ vi.mock('../commands/update.mts', async (importOriginal) => ({
   default: vi.fn(async () => 0),
   fetchLatestTag: vi.fn(),
 }));
-vi.mock('../commands/migrate.mts', () => ({ computeMigration: vi.fn(() => []) }));
+vi.mock('../commands/migrate-config.mts', () => ({ computeMigration: vi.fn(() => []) }));
 vi.mock('../commands/init.mts', () => ({ applyInit: vi.fn(async () => {}) }));
 vi.mock('../commands/doctor.mts', () => ({ default: vi.fn(async () => 0) }));
 
