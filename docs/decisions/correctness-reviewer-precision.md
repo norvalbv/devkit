@@ -1,0 +1,21 @@
+---
+slug: correctness-reviewer-precision
+created: 2026-07-10
+---
+
+# correctness-reviewer-precision
+
+## Target · 2026-07-10 — Correctness-reviewer precision: model for recall, sampling for precision — never a same-family self-verify pass
+
+**Context:** The single-pass correctness reviewer false-blocks ~14% of clean diffs (clean-pass 0.86 on the 66-row bench) while catching 0.92 of real bugs on sonnet — 2 cross-domain blocks (it flags security/perf its <exclusions> tell it to skip) + 2 in-domain surface-cue blocks (blocks the correct broadcast/classifier fix). The obvious fix — a second LLM pass that re-judges/refutes each FAIL — was ALREADY built as the haiku->opus cascade and REMOVED because it OVERTURNED real bugs, dropping recall 0.78->0.67. Every false block erodes trust in a blocking gate and trains devs to bypass it; precision cannot be bought by a bigger model (model-invariant: haiku 0.86 = sonnet 0.86).
+**Ruling:** Correctness precision is a DESIGN problem, not a model problem. RECALL comes from the model (single-pass sonnet finder, the model-pinned exception to the domain-reviewer cascade). PRECISION comes from SAMPLING, not self-critique: K-sample self-consistency with an asymmetric 'unanimous-to-block, lenient-to-pass' rule, routed by sample AGREEMENT (never the model's stated confidence), which never asks the model to second-guess its own finding. Cross-domain leaks are trimmed by a one-sided deterministic keyword drop (domainExclusivityDrop) that can only REMOVE a block, biased to under-fire — the ONLY acceptable matcher use. Explicitly forbidden: a same-family generate->verify/refute pass.
+**Consequences:**
+- Positive: The gate keeps blocking real bugs (recall protected — no verifier eats it) without accumulating unmeasurable-away false blocks; and it will not flip-flop — this record stops a future engineer (or agent) from re-adding the verify/refute pass that already failed twice (prod 0.78->0.67, and again mid-design this session).
+- Negative: Precision stays an honest ~0.86 until self-consistency + a larger decoy corpus land (both need live bench spend, currently paused). K-sampling, once built, multiplies per-commit gate latency/cost K x. The deterministic cross-domain guard is a keyword list that needs ongoing maintenance and only trims the 2 cross-domain rows (not the 2 in-domain ones).
+**Vision-fit:** n/a — internal devkit gate reliability (a commit gate devs trust because it rarely false-blocks).
+**Researched:** Red-team over arXiv (load-bearing papers verified from PDF): self-correction degrades/overturns correct answers (Huang 2310.01798; Stechly 2402.08115; Kamoi 2406.01297); verification pays only CROSS-family (Lu 2512.02304); shared generator+evaluator reward-hacks (Pan 2407.04549); self-consistency (Wang 2203.11171); constrained decoding degrades reasoning (Tam 2408.02442); LLM confidence poorly calibrated (Jiang 2012.00955). Local bench: haiku 0.76/0.86, sonnet 0.92/0.86, opus-cascade 0.78->0.67; clean-pass CI [.69,.94] at n=28 → 0.95 is UNMEASURABLE until the corpus grows.
+**Rejected:** (a) same-family generate->verify/refute pass — REJECTED: IS the removed cascade; overturns real FAILs (0.78->0.67; Huang/Stechly/Kamoi); verification pays only cross-family (Lu 2512.02304), unavailable in a Claude-only stack. (b) bigger finder model for precision — REJECTED: precision model-invariant (haiku 0.86 = sonnet 0.86); a bigger model buys recall only. (c) structured enum + deterministic domain-equality — REJECTED: relocates the same failed self-classification into a typed field, and constrained decoding degrades the recall-bearing reasoning (Tam 2408.02442). (d) regex/LLM as the semantic block/pass ARBITER — REJECTED: brittle / inherits surface-cue sensitivity + correlated blind spots; only a one-sided DROP survives, bounded to cross-domain.
+**Anchored-bet:** [BET]
+**Revisit-when:** K-sample self-consistency is built AND bench-measured to beat clean-pass 0.86 without recall loss; OR the decoy corpus grows enough that clean-pass CI resolves 0.95 (~n>=120 decoys); OR a cross-family (non-Claude) verifier becomes available in the gate.
+**Scope:** gate-engine/review/**,agents/correctness-reviewer.md,skills/correctness/**
+**Source:** collab · https://github.com/norvalbv/devkit/pull/57
