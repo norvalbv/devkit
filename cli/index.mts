@@ -50,7 +50,6 @@ const COMMANDS: Record<string, CommandLoader> = {
   release: () => import('./commands/release.mts'),
   update: () => import('./commands/update.mts'),
   upgrade: () => import('./commands/upgrade.mts'),
-  migrate: () => import('./commands/migrate.mts'),
   move: () => import('./commands/move.mts'),
   reconcile: () => import('./commands/reconcile.mts'),
   ship: () => import('./commands/ship.mts'),
