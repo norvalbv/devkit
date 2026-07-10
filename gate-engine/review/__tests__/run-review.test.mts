@@ -71,6 +71,7 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
     'frontend-performance-reviewer',
     'commit-guard',
     'correctness-reviewer',
+    'conventions-reviewer',
     'feature-completeness-reviewer',
   ]) {
     writeFileSync(join(agents, `${name}.md`), `---\nname: ${name}\n---\nBrief for ${name}.`);
@@ -96,7 +97,9 @@ const reviewerFromLabel = (label) =>
   REVIEWERS.find((r) => label === `review:${r.name}` || label === `review:${r.name}:escalate`);
 function writeArtifact(repo, label, { pending = 0, failed = 0 } = {}) {
   const reviewer = reviewerFromLabel(label);
-  if (!reviewer) return;
+  // A skill-less reviewer (conventions-reviewer) has no checklist stateFile — nothing to write;
+  // its PASS is trusted directly (see run-review.mts's `hasChecklist` branch).
+  if (!reviewer?.stateFile) return;
   const key = reviewer.name === 'commit-guard' ? 'files' : 'items';
   const mk = (status, i) =>
     reviewer.name === 'commit-guard'
@@ -149,17 +152,17 @@ describe('runReviewGate — cascade + exit contract', () => {
     const repo = consumerRepo({ backend: true });
     const exec = passWithArtifact(repo);
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    // backend pair + commit-guard + correctness, one call each, no opus escalation
-    expect(exec).toHaveBeenCalledTimes(4);
+    // backend pair + commit-guard + correctness + conventions, one call each, no opus escalation
+    expect(exec).toHaveBeenCalledTimes(5);
     for (const call of exec.mock.calls) {
       const model = call[0].args[call[0].args.indexOf('--model') + 1];
-      // Domain reviewers' first pass is haiku (default flipped sonnet→haiku, bench 6/6); correctness
-      // is model-pinned to sonnet (bench recall 0.76→0.92). opus appears only on a FAIL escalation.
+      // Domain + conventions reviewers' first pass is haiku (default flipped sonnet→haiku, bench 6/6);
+      // correctness is model-pinned to sonnet (bench recall 0.76→0.92). opus appears only on escalation.
       const pinnedSonnet = call[0].label?.includes('correctness-reviewer');
       expect(model).toBe(pinnedSonnet ? 'sonnet' : 'haiku');
       expect(call[0].args.join(' ')).not.toContain('opus');
     }
-    expect(Object.keys(loadCache(repo)).length).toBe(4);
+    expect(Object.keys(loadCache(repo)).length).toBe(5);
   });
 
   it('identical diff re-run hits the cache — zero judge spawns', async () => {
@@ -173,9 +176,9 @@ describe('runReviewGate — cascade + exit contract', () => {
   it('first-pass FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {
-      // correctness is single-pass (no escalation to overturn) — hold it PASS so this test isolates
-      // the DOMAIN cascade-overturn path it's about.
-      if (label === 'review:correctness-reviewer') {
+      // correctness AND conventions are single-pass (no escalation to overturn) — hold both PASS
+      // so this test isolates the DOMAIN cascade-overturn path it's about.
+      if (label === 'review:correctness-reviewer' || label === 'review:conventions-reviewer') {
         writeArtifact(repo, label);
         return 'VERDICT: PASS';
       }
@@ -184,7 +187,7 @@ describe('runReviewGate — cascade + exit contract', () => {
       return 'overturned\nVERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    expect(Object.keys(loadCache(repo)).length).toBe(4);
+    expect(Object.keys(loadCache(repo)).length).toBe(5);
   });
 
   it('single-pass FAIL blocks with an override affordance; an OVERRIDE_ env with a rationale waives it', async () => {
@@ -249,8 +252,8 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(out).toContain('api-security-reviewer FAILED');
     // the judge's full findings are echoed — a block whose evidence was discarded is undebuggable
     expect(out).toContain('raw SQL concat');
-    // the three passers are cached; the failer is not
-    expect(Object.keys(loadCache(repo)).length).toBe(3);
+    // the four passers are cached; the failer is not
+    expect(Object.keys(loadCache(repo)).length).toBe(4);
   });
 
   it('GUARD_REVIEW_SKIP surgically drops a named reviewer (and says so); the rest still run', async () => {
@@ -260,7 +263,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     const exec = passWithArtifact(repo);
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(exec.mock.calls.map(([o]) => o.label)).not.toContain('review:api-security-reviewer');
-    expect(exec).toHaveBeenCalledTimes(3); // backend-performance + commit-guard + correctness still ran
+    expect(exec).toHaveBeenCalledTimes(4); // backend-performance + commit-guard + correctness + conventions still ran
     expect(err.mock.calls.flat().join('\n')).toContain(
       'api-security-reviewer skipped (GUARD_REVIEW_SKIP)',
     );
@@ -293,7 +296,9 @@ describe('runReviewGate — cascade + exit contract', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async () => 'all good I promise\nVERDICT: PASS'); // skipped the workflow
     expect(await runReviewGate(repo, { exec })).toBe(2);
-    expect(Object.keys(loadCache(repo)).length).toBe(0);
+    // the 4 checklist-driven reviewers void to inconclusive; conventions-reviewer has no checklist
+    // to skip in the first place — its PASS is trusted directly and DOES cache (the one entry).
+    expect(Object.keys(loadCache(repo)).length).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain('skipped the checklist workflow');
   });
 
@@ -316,7 +321,9 @@ describe('runReviewGate — cascade + exit contract', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(2);
-    expect(Object.keys(loadCache(repo)).length).toBe(0);
+    // conventions-reviewer has no checklist artifact to mismatch against — its PASS caches (1);
+    // the 4 checklist-driven reviewers void to inconclusive on the FAILED-item mismatch.
+    expect(Object.keys(loadCache(repo)).length).toBe(1);
   });
 
   it('a STALE artifact from a previous session never satisfies the gate (pre-cleaned)', async () => {
@@ -330,7 +337,8 @@ describe('runReviewGate — cascade + exit contract', () => {
   it('checklist artifacts are cleaned up after the run', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passWithArtifact(repo) });
-    for (const r of REVIEWERS) expect(existsSync(join(repo, r.stateFile))).toBe(false);
+    for (const r of REVIEWERS.filter((r) => r.stateFile))
+      expect(existsSync(join(repo, r.stateFile))).toBe(false);
   });
 
   it('judge outage (null) → exit 2 fail-open', async () => {
@@ -372,6 +380,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(seen.sort()).toEqual([
       'review:commit-guard',
+      'review:conventions-reviewer',
       'review:correctness-reviewer',
       'review:frontend-performance-reviewer',
       'review:frontend-security-reviewer',
@@ -415,6 +424,39 @@ describe('runReviewGate — adversarial staged filenames (argv-git regression)',
   });
 });
 
+describe('runReviewGate — conventions-reviewer selected ALONE (non-source file, no other reviewer fires)', () => {
+  // A file under a scanRoot but OUTSIDE any backendRoot/frontendRoot, with a NON-source
+  // extension: backend/frontend reviewers never match (wrong root), commit-guard and correctness
+  // both filter to source-only ('code'/'all' domains — see selectReviewers), and conventions
+  // (no such filter, since a CLAUDE.md rule can govern any file type) is the ONLY one left. This
+  // is the real differentiator the AC exists for, exercised standalone through the ACTUAL gate —
+  // not alongside a source reviewer that happens to also be selected.
+  it('a staged JSON config file selects conventions-reviewer and nothing else', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'config.json'), '{ "flag": false }\n');
+    execSync('git add .', { cwd: repo });
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([o]) => o.label)).toEqual(['review:conventions-reviewer']);
+  });
+
+  it('the same standalone selection FAILS and blocks cleanly when the rule is violated — the full skill-less path, no other reviewer active to interfere', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'Every config file must set "flag": true.\n');
+    writeFileSync(join(repo, 'src', 'config.json'), '{ "flag": false }\n');
+    execSync('git add .', { cwd: repo });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(
+      async () =>
+        'VIOLATION: Every config file must set "flag": true. — CLAUDE.md:1\nOFFENDING: { "flag": false } — src/config.json:1\nVERDICT: FAIL — flag is false\n',
+    );
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
+  });
+});
+
 describe('runReviewGate — per-completion checkpoints', () => {
   it('a finished PASS is on disk BEFORE slower cascades resolve (checkpoint, not batch)', async () => {
     const repo = consumerRepo({ backend: true });
@@ -434,7 +476,7 @@ describe('runReviewGate — per-completion checkpoints', () => {
     });
     release();
     expect(await done).toBe(0);
-    expect(Object.keys(loadCache(repo)).length).toBe(4);
+    expect(Object.keys(loadCache(repo)).length).toBe(5);
   });
 
   it('one cascade throwing neither rejects the gate nor discards sibling checkpoints', async () => {
@@ -446,7 +488,7 @@ describe('runReviewGate — per-completion checkpoints', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(2); // inconclusive, never a crash
-    expect(Object.keys(loadCache(repo)).length).toBe(3); // the three passers still checkpointed
+    expect(Object.keys(loadCache(repo)).length).toBe(4); // the four passers still checkpointed
     expect(err.mock.calls.flat().join('\n')).toContain('engine error: boom');
   });
 
@@ -461,15 +503,15 @@ describe('runReviewGate — per-completion checkpoints', () => {
 });
 
 describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
-  // consumerRepo({backend, frontend}) stages one file per domain → all 6 reviewers selected
-  // (backend pair, frontend pair, commit-guard, correctness).
+  // consumerRepo({backend, frontend}) stages one file per domain → all 7 reviewers selected
+  // (backend pair, frontend pair, commit-guard, correctness, conventions).
   it('default cap 2: at most 2 judge cascades run at once, all still complete + cache', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-    expect(probe.exec).toHaveBeenCalledTimes(6);
+    expect(probe.exec).toHaveBeenCalledTimes(7);
     expect(probe.maxInflight()).toBe(2);
-    expect(Object.keys(loadCache(repo)).length).toBe(6);
+    expect(Object.keys(loadCache(repo)).length).toBe(7);
   });
 
   it('GUARD_REVIEW_CONCURRENCY=1 fully serializes — never more than 1 in flight', async () => {
@@ -480,12 +522,12 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     expect(probe.maxInflight()).toBe(1);
   });
 
-  it('a cap ≥ reviewer count only BOUNDS, never pads — all 6 run at once', async () => {
+  it('a cap ≥ reviewer count only BOUNDS, never pads — all 7 run at once', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     process.env.GUARD_REVIEW_CONCURRENCY = '9';
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-    expect(probe.maxInflight()).toBe(6);
+    expect(probe.maxInflight()).toBe(7);
   });
 
   it('strict ship: the cap holds even when each cascade runs first + retry (the production path)', async () => {
@@ -494,7 +536,7 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     process.env.GUARD_AI_STRICT = '1';
     const probe = concurrencyProbe(repo, { failFirst: true }); // first attempt null → one strict retry
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-    expect(probe.exec).toHaveBeenCalledTimes(12); // 6 reviewers × (attempt + retry), sequential in-slot
+    expect(probe.exec).toHaveBeenCalledTimes(14); // 7 reviewers × (attempt + retry), sequential in-slot
     expect(probe.maxInflight()).toBeLessThanOrEqual(2);
   });
 
@@ -516,8 +558,8 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     process.env.GUARD_AI_STRICT = '1';
     const exec = mkExec(async () => null);
     expect(await runReviewGate(repo, { exec })).toBe(3);
-    // 4 reviewers × (1 attempt + 1 retry), no escalation possible
-    expect(exec).toHaveBeenCalledTimes(8);
+    // 5 reviewers × (1 attempt + 1 retry), no escalation possible
+    expect(exec).toHaveBeenCalledTimes(10);
     const out = err.mock.calls.flat().join('\n');
     expect(out).toContain('retrying once');
     expect(out).toContain('strict ship mode fails closed');
@@ -535,7 +577,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
       return null;
     });
     expect(await runReviewGate(repo, { exec })).toBe(3);
-    expect(exec).toHaveBeenCalledTimes(4); // one attempt per reviewer — NO retry on a timeout
+    expect(exec).toHaveBeenCalledTimes(5); // one attempt per reviewer — NO retry on a timeout
     const out = err.mock.calls.flat().join('\n');
     expect(out).not.toContain('retrying once');
   });
@@ -576,7 +618,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(0);
-    expect(Object.keys(loadCache(repo)).length).toBe(4);
+    expect(Object.keys(loadCache(repo)).length).toBe(5);
   });
 
   it('a dead first pass cannot poison the retry: stale checklist rows are cleared pre-retry', async () => {
@@ -596,7 +638,9 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     // state (mixed old/new). With pre-retry cleanup the PASS is voided for the RIGHT reason:
     // the retry itself skipped the checklist workflow → inconclusive → strict exit 3.
     expect(await runReviewGate(repo, { exec })).toBe(3);
-    expect(Object.keys(loadCache(repo)).length).toBe(0); // nothing cached from mixed state
+    // the 4 checklist-driven reviewers cache nothing from the mixed state; conventions-reviewer
+    // has no checklist to poison in the first place, so its retry PASS is trusted and DOES cache.
+    expect(Object.keys(loadCache(repo)).length).toBe(1);
   });
 
   it('a hard opus-confirmed FAIL still exits 1 (never conflated with the fail-closed 3)', async () => {
@@ -616,7 +660,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async () => null);
     expect(await runReviewGate(repo, { exec })).toBe(2);
-    expect(exec).toHaveBeenCalledTimes(4); // one attempt each, no retry
+    expect(exec).toHaveBeenCalledTimes(5); // one attempt each, no retry
   });
 });
 

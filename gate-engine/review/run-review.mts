@@ -36,6 +36,8 @@ import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
+import { renderGoverningClaudeMd } from './claude-md.mts';
+import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { blockingNote, reconcile } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
@@ -43,11 +45,14 @@ import {
   type ChecklistState,
   cacheKey,
   escalatePrompt,
+  hasChecklist,
+  parseConventionFindings,
   parseReviewVerdict,
   type Reviewer,
   type ReviewerSelection,
   selectReviewers,
   verifyChecklist,
+  wrapConventionsPrompt,
   wrapPrompt,
 } from './reviewers.mts';
 
@@ -169,8 +174,10 @@ function agentBody(cwd: string, cfg: GuardConfig, name: string): string | null {
   }
 }
 
-/** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt → unverifiable). */
+/** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
+ * all — a skill-less reviewer has no stateFile to read → unverifiable). */
 function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistState | null {
+  if (!reviewer.stateFile) return null;
   try {
     return JSON.parse(
       readFileSync(path.resolve(cwd, reviewer.stateFile), 'utf8'),
@@ -180,8 +187,10 @@ function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistState | n
   }
 }
 
-/** Remove a reviewer's checklist artifact so a stale one can never satisfy the NEXT run. */
+/** Remove a reviewer's checklist artifact so a stale one can never satisfy the NEXT run. A
+ * skill-less reviewer has no stateFile — nothing to clean up. */
 function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
+  if (!reviewer.stateFile) return;
   rmSync(path.resolve(cwd, reviewer.stateFile), { force: true });
 }
 
@@ -237,7 +246,11 @@ export async function runCascade(
   const { cwd } = opts;
   cleanupChecklistState(cwd, sel.reviewer);
   const res = await cascadeVerdict(sel, opts);
-  if (res.status === 'pass') {
+  if (res.status === 'pass' && sel.reviewer.stateFile) {
+    // A skill-less reviewer (no stateFile) has no artifact to verify — its PASS is trusted
+    // directly, the same trust level completeness.mts already uses for its own straight verdict;
+    // its substitute anti-hallucination mechanism is the AC's own quote-both-or-stay-silent
+    // contract, enforced by the brief, not an artifact this gate can independently check.
     const hole = verifyChecklist(readChecklistState(cwd, sel.reviewer), 'PASS');
     if (hole) {
       res.status = 'inconclusive';
@@ -249,21 +262,35 @@ export async function runCascade(
   // waived → PASS; any un-waived → still FAIL, its reason names the fingerprints + how to waive them.
   // Read the artifact BEFORE the cleanup below (the fingerprint needs the failed lens names).
   if (res.status === 'fail' && sel.reviewer.model) {
+    // A checklist reviewer's lens is the checklist item name (stable: fixed per diff, deterministic
+    // parsing). A skill-less reviewer has no checklist — its lens is the OFFENDING path:line each
+    // violation names (parseConventionFindings), deterministic for a fixed diff exactly like a
+    // checklist item name. Neither ever uses the free-text VERDICT reason: a haiku judge's one-line
+    // paraphrase of the SAME violation can vary run-to-run on byte-identical input, which would
+    // silently un-match a dev's already-committed waiver and re-block them.
     const state = readChecklistState(cwd, sel.reviewer);
     const items = state?.items ?? [];
     const failedCount = items.filter((i) => i.status === 'fail').length;
-    // Domain-exclusivity guard first: drop lenses that flag a security/performance defect this
-    // reviewer must stay silent on. All failing lenses out-of-charter → not a correctness block.
+    // Domain-exclusivity guard (checklist reviewers only): drop failing lenses flagging a
+    // security/performance defect this reviewer must stay silent on. One-sided/best-effort (see
+    // domainExclusivityDrop); conventions has no checklist, so this is a no-op there.
     const { kept, dropped } = domainExclusivityDrop(items);
     for (const d of dropped)
       console.error(
         `guard-review: ${sel.reviewer.name} — ${d.lens} dropped as out-of-charter (security/performance is another reviewer's finding)`,
       );
-    if (failedCount > 0 && kept.length === 0) {
+    // A skill-less reviewer (conventions) has no checklist — its lens is the OFFENDING path:line each
+    // violation names (parseConventionFindings), never the free-text VERDICT reason.
+    const conventionLenses = parseConventionFindings(res.transcript ?? '').map(
+      (f) => `${f.offendingPath}:${f.offendingLine}`,
+    );
+    const failedLenses = sel.reviewer.stateFile ? kept : conventionLenses;
+    // All checklist lenses dropped as out-of-charter → not a correctness block (checklist reviewers only).
+    if (sel.reviewer.stateFile && failedCount > 0 && kept.length === 0) {
       res.status = 'pass';
       res.reason = `${dropped.length} out-of-charter finding(s) dropped (owned by security/performance reviewer)`;
     } else {
-      const lenses = kept.length > 0 ? kept : ['(finding)'];
+      const lenses = failedLenses.length > 0 ? failedLenses : ['(finding)'];
       const diffText = gitCached(cwd, [], sel.files);
       const { suppressed, blocking } = reconcile(
         cwd,
@@ -303,7 +330,17 @@ async function cascadeVerdict(
       reason: `agent brief ${reviewer.name}.md missing under ${cfg.review.agentsDir} — run devkit sync-agents && devkit sync-skills`,
       escalated: false,
     };
-  const prompt = wrapPrompt(body, reviewer, files);
+  // A skill-less reviewer (no checklist, no Bash) gets its evidence PRE-RENDERED instead of a
+  // "fetch it yourself" instruction: the capped diff (diff-evidence.mts) rides on stdin exactly
+  // like completeness.mts's judge, and the governing CLAUDE.md rules (claude-md.mts) are baked
+  // into the prompt itself.
+  const stat = gitCached(cwd, ['--stat'], files);
+  const prompt = hasChecklist(reviewer)
+    ? wrapPrompt(body, reviewer, files)
+    : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files));
+  const input = hasChecklist(reviewer)
+    ? stat
+    : buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
   const args = (p: string, model: string): string[] => [
     '-p',
     p,
@@ -313,14 +350,13 @@ async function cascadeVerdict(
     '--allowedTools',
     allowedToolsFor(reviewer, cfg),
   ];
-  // A model-pinned reviewer (correctness) runs single-pass at its pinned model — no escalation.
+  // A model-pinned reviewer (correctness, conventions) runs single-pass at its pinned model — no escalation.
   const passModel = reviewer.model ?? firstModel;
-  const stat = gitCached(cwd, ['--stat'], files);
   let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
     args: args(prompt, passModel),
-    input: stat,
+    input,
     timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {

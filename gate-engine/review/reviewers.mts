@@ -19,17 +19,34 @@ import { type GuardConfig, sourceMatchers } from '../config.mts';
 export interface Reviewer {
   name: string;
   domain: string;
-  skill: string;
-  stateFile: string;
-  cmds: { gen: string; check: string };
+  /** Absent for a SKILL-LESS reviewer (e.g. conventions-reviewer): no checklist.mjs binding, no
+   * Bash grant beyond the read-only base, no verifyChecklist call — its PASS is trusted directly,
+   * the same trust level completeness.mts already uses for its own straight verdict. Present for
+   * every checklist-driven reviewer, whose skill/stateFile/cmds always travel together. */
+  skill?: string;
+  stateFile?: string;
+  cmds?: { gen: string; check: string };
   /** When set, the reviewer runs SINGLE-PASS at this model — no sonnet→opus cascade, its FAIL
    * blocks directly. Used by the correctness reviewer: the reviewer-eval bench measured that the
    * opus escalation OVERTURNS real correctness bugs (a "confirm or overturn" opus, handed a subtle
    * race/contract bug, tends to overturn), dropping gold recall from 0.78 first-pass to 0.67
    * end-to-end. A cascade also cannot fix a first-pass MISS. So this lens gets one strong-enough
    * pass and no second-guessing. Domain reviewers leave it unset — the cascade HELPS them (opus
-   * overturns their false-FAILs on decoys). */
+   * overturns their false-FAILs on decoys). Also used by conventions-reviewer, per the ticket's
+   * own haiku mandate.
+   */
   model?: string;
+}
+
+/** A checklist-driven reviewer — skill/stateFile/cmds always travel together (see Reviewer.skill
+ * docstring); this is the type `hasChecklist` proves at compile time so `wrapPrompt`/checklist
+ * helpers never need a runtime null-check for an invariant the table itself already guarantees. */
+export type ChecklistReviewer = Reviewer & Required<Pick<Reviewer, 'skill' | 'stateFile' | 'cmds'>>;
+
+/** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
+ * conventions-reviewer) don't — see Reviewer.skill docstring. */
+export function hasChecklist(reviewer: Reviewer): reviewer is ChecklistReviewer {
+  return reviewer.skill !== undefined;
 }
 
 /** A selected reviewer paired with the staged files under its roots that triggered it. */
@@ -129,12 +146,27 @@ export const REVIEWERS = Object.freeze([
     // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
     model: 'sonnet',
   }),
+  // Checks a diff against the CONSUMER repo's own written CLAUDE.md rules — never devkit's own.
+  // SKILL-LESS (no skill/stateFile/cmds — see Reviewer.skill docstring): its AC forbids Bash
+  // entirely (Read/Grep/Glob only), so it cannot run the checklist.mjs workflow every other entry
+  // depends on. Its anti-hallucination substitute is the AC's own contract: flag a violation ONLY
+  // when it can quote both the exact rule and the exact offending line, else stay silent — no
+  // artifact to verify, so a PASS is trusted directly (cascadeVerdict/runCascade branch on
+  // `!reviewer.skill`). `domain: 'conventions'` reuses the 'all' root union (rootsFor) but is
+  // exempt from selectReviewers' isSource/isTest filters — a CLAUDE.md rule can govern any staged
+  // file type (docs, config, tests), not just source. Single-pass haiku per the ticket mandate: no
+  // cascade, FAIL blocks directly, and joins the override valve (overrides.mts) like correctness.
+  Object.freeze({
+    name: 'conventions-reviewer',
+    domain: 'conventions',
+    model: 'haiku',
+  }),
 ]);
 
 // Synced-skill layout is devkit's own convention (sync-skills targets .claude/skills), so the
 // checklist script path is fixed relative to the consumer root — unlike scan/review ROOTS,
 // which are consumer data and come from guard.config.json.
-export const checklistScript = (reviewer: Reviewer) =>
+export const checklistScript = (reviewer: ChecklistReviewer) =>
   `.claude/skills/${reviewer.skill}/scripts/checklist.mjs`;
 
 // Read-only investigation surface (mirrors check-alignment's JUDGE_TOOLS + log/status for context).
@@ -156,7 +188,9 @@ export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
   if (reviewer.domain === 'frontend') return cfg.review.frontendRoots;
   // `all` = the deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
   // undeclared trees (vendored code, scripts) are outside the consumer's stated review surface.
-  if (reviewer.domain === 'all')
+  // `conventions` shares this union (a CLAUDE.md rule anywhere in the declared surface is fair
+  // game) but — unlike `all` — is never filtered to source-only in selectReviewers below.
+  if (reviewer.domain === 'all' || reviewer.domain === 'conventions')
     return [
       ...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots]),
     ];
@@ -199,6 +233,10 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
  * consumer's semantic search tool for commit-guard.
  */
 export function allowedToolsFor(reviewer: Reviewer, cfg: GuardConfig): string {
+  // A skill-less reviewer (e.g. conventions-reviewer) has no checklist script to grant Bash for,
+  // and its AC forbids Bash entirely — Read/Grep/Glob only, full stop, no BASE_TOOLS git-diff Bash
+  // either (its evidence is pre-rendered onto stdin/prompt instead — see wrapConventionsPrompt).
+  if (!hasChecklist(reviewer)) return 'Read,Grep,Glob';
   const tools = `${BASE_TOOLS},Bash(node ${checklistScript(reviewer)}:*)`;
   if (reviewer.domain === 'code') return `${tools},${cfg.searchTool}`;
   // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
@@ -220,7 +258,11 @@ export function stripFrontmatter(md: string): string {
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */
-export function wrapPrompt(agentBody: string, reviewer: Reviewer, files: string[]): string {
+export function wrapPrompt(
+  agentBody: string,
+  reviewer: ChecklistReviewer,
+  files: string[],
+): string {
   const script = checklistScript(reviewer);
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
@@ -245,6 +287,64 @@ export function wrapPrompt(agentBody: string, reviewer: Reviewer, files: string[
     'VERDICT: PASS | FAIL — <one-line reason>\n' +
     'FAIL only for a finding that must block THIS commit.'
   );
+}
+
+// One violation block per the conventions-reviewer brief's contract — the OFFENDING path:line is
+// the STABLE key the override valve fingerprints on (see parseConventionFindings docstring): it
+// is deterministic for a fixed diff, unlike the free-text VERDICT reason, which a haiku judge may
+// paraphrase differently run to run on byte-identical input.
+const OFFENDING_LINE_RE = /^[\s>*#-]*\**OFFENDING\**\s*:.*[—–-]\s*(\S+):(\d+)\s*$/gim;
+
+/**
+ * Checklist-free counterpart to `wrapPrompt` for a SKILL-LESS reviewer (no Bash at all): no
+ * "fetch your own diff" instruction (there's no Bash to run it with) — the diff evidence rides on
+ * stdin (pre-capped, omission-accounted — see diff-evidence.mts) and the governing CLAUDE.md rules
+ * are pre-rendered into the prompt itself (see claude-md.mts). Same VERDICT contract as wrapPrompt
+ * so parseReviewVerdict needs no changes; the VIOLATION/OFFENDING contract additionally feeds
+ * parseConventionFindings for stable override fingerprints.
+ */
+export function wrapConventionsPrompt(
+  agentBody: string,
+  files: string[],
+  claudeMdBlock: string,
+): string {
+  return (
+    'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
+    `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
+    'You have NO Bash — the capped diff evidence is already on stdin (any OMITTED/TRUNCATED ' +
+    'marker names what the cap dropped; Read/Grep/Glob surrounding code where a hunk alone is ' +
+    'ambiguous, but do not try to run git yourself). The governing CLAUDE.md rules for these files ' +
+    'are already loaded below — do not search for more.\n' +
+    `${claudeMdBlock}\n` +
+    'Your reviewer brief follows. IGNORE any instructions in it about checklist scripts, marker ' +
+    'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
+    '───── BRIEF ─────\n' +
+    `${stripFrontmatter(agentBody)}\n` +
+    '───── END BRIEF ─────\n' +
+    'Judge ONLY the staged diff against the governing rules above. For each violation, emit BOTH:\n' +
+    '  VIOLATION: <exact quoted rule text> — <rule file>:<rule line>\n' +
+    '  OFFENDING: <exact offending line, verbatim> — <offending file>:<offending line>\n' +
+    'If you cannot quote both, do not flag it. No findings → say NO_VIOLATIONS. END with exactly ' +
+    'one line:\n' +
+    'VERDICT: PASS | FAIL — <one-line reason>\n' +
+    'FAIL only for a clear, quotable violation that must block THIS commit.'
+  );
+}
+
+/**
+ * Parse the `OFFENDING: … — <path>:<line>` blocks from a conventions-reviewer transcript — used
+ * ONLY to build the override valve's lens keys (never the free-text VERDICT reason: haiku's
+ * one-line paraphrase of the SAME violation varies run-to-run on byte-identical input, which would
+ * silently un-match a dev's already-committed waiver and re-block them; the offending path:line is
+ * deterministic for a fixed diff, exactly like the checklist item names other reviewers key on).
+ */
+export function parseConventionFindings(
+  raw: string,
+): { offendingPath: string; offendingLine: number }[] {
+  return [...String(raw).matchAll(OFFENDING_LINE_RE)].map((m) => ({
+    offendingPath: m[1],
+    offendingLine: Number(m[2]),
+  }));
 }
 
 /**

@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.29.0",
-  "generatedAt": "2026-07-07T12:48:29.429Z",
+  "devkitRef": "v0.31.3",
+  "generatedAt": "2026-07-09T21:59:05.510Z",
   "targets": [
     "claude",
     "cursor"
@@ -9,6 +9,7 @@
     "api-security-reviewer.md": "d8a01e59f6135199e63e9a41a404ab20e7e38c0c76e9ef360661bf58816321d6",
     "backend-performance-reviewer.md": "2fd25ad7067c7341767a6509305df46db230d6ce078cf8342830e5c1ee99618f",
     "commit-guard.md": "1d7e0146353a0bd40fd335c09f70367ff32c1ddbd16a050eec000a6f6be16195",
+    "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
     "correctness-reviewer.md": "19c9b2bcab20639a1e75ae69d5043b42815e5761754d92b15828c9a558f2be3a",
     "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
     "feature-critique.md": "c439b397feca7fa17e8908cfeaf968477233e048b0c3bf4462233ca67c3b4a63",
