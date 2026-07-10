@@ -1,3 +1,6 @@
+import os from 'node:os';
+import path from 'node:path';
+
 // Git exports control vars (GIT_DIR, GIT_WORK_TREE, …) into every hook's environment. devkit's
 // git-integration tests spawn `git init` / commits in throwaway temp repos via the INHERITED env;
 // an inherited GIT_DIR makes those gits operate on devkit's OWN .git instead of the temp repo —
@@ -28,3 +31,14 @@ for (const k of [
 // specific bin still pass it per-spawn (execFileSync env), and resolveJscpdBin's unit tests inject env
 // directly, so both are unaffected.
 delete process.env.JSCPD_BIN;
+
+// The ship-path tests (ship-branch / reship / reconcile / …) spawn a REAL commit-with-gate-capture.sh
+// whose gate-events emitter defaults its sink to ~/.devkit/telemetry/gate-events.jsonl — the
+// developer's real ship telemetry. Redirect it to a throwaway per-worker temp file so test ships
+// (fixture branches, forced SHIP_COMMIT_TIMEOUT expiries) can never pollute real data. The emitter
+// no-ops only when the var is UNSET, so a value here is safe; emitter tests override it per-test.
+process.env.DEVKIT_GATE_EVENTS = path.join(
+  os.tmpdir(),
+  `devkit-test-gate-events-${process.pid}.jsonl`,
+);
+delete process.env.DEVKIT_SHIP_ID;

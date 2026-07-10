@@ -29,6 +29,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mts';
@@ -463,10 +464,22 @@ function runGate() {
         // Strict ship contract: an outage is exit 3 (judge-unavailable, failed closed), never
         // exit 1 — the hook must not render a dark judge as a confirmed decision smell.
         console.error(`decision smells (unverified): ${smells.join(', ')}`);
+        emitGateEvent({
+          type: 'gate_result',
+          gate: 'decisions',
+          status: 'fail',
+          detail: smells.join(', '),
+        });
         process.exit(3);
       }
     }
     console.error(`decision smells: ${smells.join(', ')}`);
+    emitGateEvent({
+      type: 'gate_result',
+      gate: 'decisions',
+      status: 'fail',
+      detail: smells.join(', '),
+    });
     process.exit(1);
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);

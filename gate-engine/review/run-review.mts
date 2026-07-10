@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
@@ -522,6 +523,17 @@ export async function runReviewGate(
           writeProgress(progressFile, { running, completed });
         }
         const secs = Math.round((Date.now() - t0) / 1000);
+        // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
+        // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
+        emitGateEvent({
+          type: 'review_result',
+          reviewer: res.name,
+          status: res.status,
+          escalated: res.escalated,
+          model: firstModel,
+          reason: res.reason,
+          secs,
+        });
         console.error(
           `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
         );
