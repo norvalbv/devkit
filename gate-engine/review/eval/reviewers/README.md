@@ -177,9 +177,22 @@ Point estimates on the 66-row corpus (38 gold / 28 decoys). K=1 + 66 rows = trip
 - **Recall scales with model** (0.76→0.92); **precision is model-invariant at 0.86.**
 - The four false-blocks are cross-domain leaks (`xdomain-sqli`, `xdomain-render` — flagged despite
   the explicit `<exclusions>`) and surface-cue blocks (`decoy-*-broadcast`, `decoy-*-classifier`).
-  Both classes have *existing* brief guidance that the single-pass judge ignores → the prose is
-  tapped out; precision to ≥0.95 needs a **verify pass** (generate→refute), not more rules.
-- Path to 0.95/0.95: sonnet finder (recall) + a domain-and-refutation verify stage (precision).
+  Both classes have *existing* brief guidance the single-pass judge ignores → the prose is tapped out.
+
+### Path to higher precision (research-grounded — a red-team pass)
+- **First grow the decoy corpus.** At n=28, clean-pass CI is [.69,.94]; **0.95 is above the upper
+  bound — literally unmeasurable** until more cross-domain + surface-cue minimal-pairs land. Chasing
+  the 4 rows before that is optimizing against noise.
+- **Do NOT add a same-family generate→verify/refute pass.** That *is* the haiku→opus cascade we
+  removed (recall 0.78→0.67), and the literature predicts the overturn: Huang 2310.01798, Stechly
+  2402.08115, Kamoi 2406.01297. Verification only pays **cross-family** (Lu 2512.02304) — unavailable
+  in a Claude-only stack.
+- **Split the two classes, one tool each:** cross-domain → the deterministic one-sided
+  `domainExclusivityDrop` guard (`run-review.mts`, zero recall cost); in-domain surface-cue →
+  **K-sample self-consistency with an asymmetric "≥⅔-to-block, lenient-to-pass" rule** (Wang
+  2203.11171), generalizing the existing 2-of-2 discordant-rerun. It never asks the model to
+  second-guess its own finding, so it can't eat recall. Route by **sample agreement, not the model's
+  stated confidence** (poorly calibrated: 2012.00955).
 
 ## Departures from decisions-eval
 

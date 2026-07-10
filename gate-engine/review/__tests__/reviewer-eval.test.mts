@@ -279,8 +279,9 @@ describe('domainExclusivityDrop', () => {
     expect(dropped.map((d) => d.lens)).toEqual(['writer-reader-contracts', 'state-transitions']);
   });
 
-  it('NEVER drops a real correctness FAIL, even when the reason mentions security/perf words', () => {
-    // The load-bearing safety property: an out-of-charter keyword + a correctness signal → KEEP.
+  it('keeps a real correctness FAIL when the reason carries a correctness signal (best-effort, not a guarantee)', () => {
+    // One-sided safety: an out-of-charter keyword + a correctness signal → KEEP. Best-effort, bounded
+    // by CORRECTNESS_SIGNAL coverage — hence that list is kept broad (see run-review.mts).
     const { kept, dropped } = domainExclusivityDrop([
       fail('concurrency-races', [
         'Two requests both pass the auth check, then a race clobbers the token write.',
@@ -288,9 +289,15 @@ describe('domainExclusivityDrop', () => {
       fail('state-transitions', [
         'The SQL retry path leaves lastError stale — a recovered task reads it forever.',
       ]),
+      // Would have been wrongly dropped by the narrow keyword list ("overwrites"/"lost update"/
+      // "cancel" absent) — the broadened CORRECTNESS_SIGNAL must catch these.
+      fail('concurrency-races', [
+        'The second request overwrites the cached token — a lost update.',
+      ]),
+      fail('state-transitions', ['A cancelled task is revived on retry and left unclaimable.']),
     ]);
     expect(dropped).toEqual([]);
-    expect(kept).toEqual(['concurrency-races', 'state-transitions']);
+    expect(kept).toHaveLength(4);
   });
 
   it('keeps a fail-unattributed lens (no issue text) so it still blocks', () => {

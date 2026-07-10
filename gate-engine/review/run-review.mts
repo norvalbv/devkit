@@ -194,17 +194,23 @@ function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
  * gate), a PASS is voided to inconclusive when the artifact is missing/incomplete/inconsistent
  * (verifyChecklist), and the artifact is removed afterwards either way.
  */
-// Deterministic domain-exclusivity guard (stopgap for the bench-measured cross-domain false-blocks
-// xdomain-sqli / xdomain-render, where correctness FAILs a lens for a defect the security/performance
-// reviewers own — see agents/correctness-reviewer.md <exclusions>). Drops a failing lens ONLY when
-// its cited reason matches an out-of-charter keyword AND matches NO correctness-signal keyword, so a
-// real race/state/contract/classifier FAIL is never suppressed even if its reason mentions "sql" or
-// "slow". Logic-tested (reviewer-eval.test.mts), NOT metric-validated; fixes cross-domain leaks only,
-// not in-domain surface-cue false-blocks — a generate→verify pass is the real precision fix.
+// Deterministic domain-exclusivity guard for the bench-measured cross-domain false-blocks
+// (xdomain-sqli / xdomain-render: correctness FAILs a lens for a defect the security/performance
+// reviewers own — see agents/correctness-reviewer.md <exclusions>). ONE-SIDED and best-effort:
+// drops a failing lens ONLY when its reason matches an out-of-charter keyword AND matches NO
+// correctness-signal keyword — biased to UNDER-fire (keep the FAIL when in doubt) so it carries no
+// recall cost. It is NOT a semantic arbiter and NOT a guarantee: its safety is proportional to the
+// CORRECTNESS_SIGNAL coverage below, so that list is kept deliberately broad. Covers cross-domain
+// leaks ONLY (2 of the bench's 4 false-blocks). The in-domain surface-cue false-blocks want K-sample
+// self-consistency with an asymmetric block rule (Wang 2203.11171), NOT a same-family verify/refute
+// pass — such a pass overturns real FAILs (measured 0.78→0.67 here; Huang 2310.01798, Stechly
+// 2402.08115) and only pays off cross-family (Lu 2512.02304). Precision to ~0.95 is also unmeasurable
+// until the decoy corpus grows (n=28 → clean-pass CI [.69,.94]).
 const OUT_OF_CHARTER =
   /\b(sql|injection|xss|csrf|sanitiz|escap|secrets?|credentials?|deserializ|n\+1|select\s+\*|pagination|unbounded|re-?render|bundle\s?size|memoiz|throughput|latenc|perf(ormance)?)\b/i;
+// Deliberately broad — every miss here risks dropping a real FAIL, so err toward inclusion.
 const CORRECTNESS_SIGNAL =
-  /\b(race|interleav|concurren|clobber|stale|reset|discard|ignored\s+(return|result)|contract|signature|call\s?site|broadcast|dedup|classif|pars(e|ing)|off-by|wrong\s+(result|state|value)|stuck|deadlock|leak|finally|rollback|strand|CAS|idempoten|double[\s-]?(fire|write)|early\s+(return|exit)|exit\s?code)\b/i;
+  /\b(race|interleav|concurren|clobber|overwrit|overwrote|lost\s?update|stale|reset|invalidat|discard|dropped|unhandled|unchecked|ignored\s+(return|result|error)|missing|contract|signature|call\s?site|broadcast|dedup|classif|pars(e|ing)|off-by|wrong\s+(result|state|value)|incorrect|stuck|deadlock|leak|finally|rollback|revert|strand|CAS|atomic|toctou|check[\s-]?then[\s-]?act|order(ing)?|sequenc|idempoten|mutat|await|promise|callback|null|undefined|double[\s-]?(fire|write)|early\s+(return|exit)|exit\s?code|fall[\s-]?through|latch|unclaim|revive|cancel|retry|resum|recover)\b/i;
 
 /** Partition a checklist's failing lenses into ones that still block (`kept`) and ones dropped as
  * out-of-charter (`dropped`). A lens drops only when its issues are unambiguously security/perf. */

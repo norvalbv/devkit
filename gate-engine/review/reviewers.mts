@@ -121,10 +121,12 @@ export const REVIEWERS = Object.freeze([
     // (K=1, tripwire — wide CIs): haiku recall 0.76 / clean-pass 0.86 · sonnet recall 0.92 /
     // clean-pass 0.86. The earlier "precision 1.00 / perfect domain-exclusivity" was a 42-row
     // artifact: the extended corpus surfaces ~4 false-blocks (cross-domain security/perf leak +
-    // broadcast/classifier surface-cue) that are MODEL-INVARIANT — precision needs a verify pass,
-    // not a bigger model. Recall DOES scale with model (0.76→0.92), so the finder runs sonnet
-    // (K=1 evidence; a confirming flip-table run is still owed). The cross-domain false-blocks are
-    // caught deterministically downstream by domainExclusivityDrop (a verify stage is the real fix).
+    // broadcast/classifier surface-cue) that are MODEL-INVARIANT — precision is a DESIGN problem,
+    // not a bigger-model problem. Recall DOES scale with model (0.76→0.92), so the finder runs sonnet
+    // (K=1 evidence; a confirming flip-table run is still owed). Cross-domain false-blocks are caught
+    // downstream by domainExclusivityDrop; the in-domain surface-cue ones want K-sample
+    // self-consistency (Wang 2203.11171), NOT a same-family refute pass (it overturned real FAILs
+    // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
     model: 'sonnet',
   }),
 ]);
