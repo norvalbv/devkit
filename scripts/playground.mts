@@ -29,7 +29,9 @@ writeFileSync(join(fx.repoDir, 'src', 'index.ts'), 'export {};\n');
 fx.git('add', 'README.md', 'src/index.ts');
 fx.git('commit', '-q', '-m', 'base');
 
-const init = fx.run('devkit', ['init', '--stack', stack, '--guards', guards, '--yes']);
+// --agent-hooks: opt-in surface, but the playground exists to poke at everything — install the
+// in-flight session hooks too so the banner's simulate-a-session recipe works out of the box.
+const init = fx.run('devkit', ['init', '--stack', stack, '--guards', guards, '--yes', '--agent-hooks']);
 if (init.status !== 0) {
   process.stderr.write(`devkit init failed:\n${init.stdout ?? ''}${init.stderr ?? ''}\n`);
   fx.cleanup();
@@ -50,13 +52,23 @@ process.stdout.write(
     '        the repo-local user is preset, aliases/config are not.',
     '  Try:  devkit doctor',
     '        echo x > src/loose.ts && git add src/loose.ts && git commit -m x   # blocked',
+    '  Agent hooks are installed (.claude/hooks/, CLAUDE_PROJECT_DIR is set) — simulate a session:',
+    `        echo '{"session_id":"s1","tool_input":{"file_path":"'$PWD'/src/index.ts"}}' \\`,
+    '          | bash .claude/hooks/format-after-edit.sh    # records the edit in the s1 ledger',
+    `        echo '{"session_id":"s1"}' | bash .claude/hooks/lint-check.sh   # scoped to s1's edits`,
     `  Exit the shell to ${keep ? 'keep' : 'nuke'} the fixture.`,
     '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '',
   ].join('\n'),
 );
 
-spawnSync(shell, [], { cwd: fx.repoDir, stdio: 'inherit', env: fx.env });
+// CLAUDE_PROJECT_DIR so the installed .claude/hooks/* scripts are drivable from this shell
+// exactly as the agent harness invokes them (they cd/scope on it).
+spawnSync(shell, [], {
+  cwd: fx.repoDir,
+  stdio: 'inherit',
+  env: { ...fx.env, CLAUDE_PROJECT_DIR: fx.repoDir },
+});
 
 if (keep) {
   process.stdout.write(`\nfixture kept at ${fx.repoDir}\n`);

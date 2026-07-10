@@ -18,11 +18,23 @@ input=$(cat)
 # Loop guard: never block a stop that we ourselves re-invoked.
 echo "$input" | grep -q '"stop_hook_active":[[:space:]]*true' && exit 0
 
-cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" 2>/dev/null || exit 0
+# Absolute hook dir BEFORE cd — a relative $0 would dangle after the chdir.
+HOOK_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd)
+cd "${CLAUDE_PROJECT_DIR:-$HOOK_DIR/../..}" 2>/dev/null || exit 0
 
 # GUARD_NO_LOG (FRINK_NO_LOG back-compat alias) bypasses the decision gate entirely.
 [ -n "$GUARD_NO_LOG" ] && exit 0
 [ -n "$FRINK_NO_LOG" ] && exit 0
+
+# Session scoping — only nudge about smells in files THIS session edited (ledger written by
+# format-after-edit.sh; see session-edits-lib.sh). Missing lib (sync-hooks --only) or no
+# session edits → FAIL-OPEN: a session that edited nothing made no decision to record.
+# The commit gate (guard-decisions detect --gate) stays working-tree-wide.
+source "$HOOK_DIR/session-edits-lib.sh" 2>/dev/null || true
+type session_edits_file &>/dev/null || exit 0
+LEDGER=$(clean_session_ledger "$(session_edits_file "$input")")
+[ -n "$LEDGER" ] || exit 0
+trap 'rm -f "$LEDGER"' EXIT
 
 # Per-session SEEN-SET: a file listing the `<smell-label>\t<contributing-file>` pairs already
 # nudged this session. The hook re-arms only on a pair NOT yet in the set — so the SAME pending
@@ -57,6 +69,11 @@ fi
 # Cheap regex scan of the WHOLE working tree (staged + unstaged), emitting (label, contributing-file)
 # pairs. No LLM here — the gate's claude -p judgment is for commit time; this turn-end check stays fast.
 PAIRS=$($DECISIONS detect scan --working --files 2>/dev/null)
+[ -z "$PAIRS" ] && exit 0
+
+# Keep only pairs whose contributing file is in this session's edits ledger — a smell in a
+# file a PARALLEL session is working on is that session's nudge, not this one's.
+PAIRS=$(printf '%s\n' "$PAIRS" | awk -F'\t' 'NR==FNR { if ($0 != "") e[$0] = 1; next } $2 in e' "$LEDGER" -)
 [ -z "$PAIRS" ] && exit 0
 
 # A decision file is already being touched this session → it's being handled, don't nag. Resolve the
