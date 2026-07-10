@@ -27,6 +27,7 @@ import { envFlag, resolveGuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
+import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { parseReviewVerdict, stripFrontmatter } from './reviewers.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
@@ -35,67 +36,11 @@ const AGENT_NAME = 'feature-completeness-reviewer';
 const TIMEOUT_MS = 420000;
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
-// ─── stdin evidence extraction (detect-style, sc-1060) ─────────────────────────────
-// The old contract was `git diff --cached` blunt-capped at the first 60KB: positional — every
-// byte past the slice point silently vanished, and whether a gap buried there was ever seen
-// depended on the judge choosing to investigate the right file. The detect judge's lesson
-// (buildDetectJudgeInput) applied in full: per-file segments under per-segment + total caps, and
-// OMISSION ACCOUNTING — evidence dropped by a cap names itself, so the judge knows what it has
-// NOT seen and investigates (the tools are unchanged; extraction bounds stdin, not its reach).
-// Long positionally-sliced input also measurably degrades judgment (arXiv:2402.14848,
-// 2302.00093, 2409.01666). A diff already under the total budget passes through whole — the
-// common small-commit case sends byte-identical evidence to the old contract.
-const EVIDENCE_TOTAL_CAP = 60000; // same total budget as the old blunt cap — no cost claim
-const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff order, like detect)
-const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
-const SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
-const SEGMENT_PATH_RE = /^diff --git (?:a\/)?(\S+)/;
-
-function segmentPath(seg: string): string {
-  return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
-}
-
-/** Per-file capped evidence + explicit omission accounting. Exported for tests (no git, no
- * claude). `stat` (the full `--stat` map) always rides first — the complete inventory. */
-export function buildCompletenessEvidence(fullDiff: string, stat: string): string {
-  const diff = String(fullDiff);
-  if (diff.length <= EVIDENCE_TOTAL_CAP) return `${stat}\n${diff}`;
-  const segments = diff.split(SEGMENT_SPLIT_RE).filter((s) => s.trim());
-  const kept: string[] = [];
-  const omitted: string[] = [];
-  let used = 0;
-  let truncated = 0;
-  for (const seg of segments) {
-    const p = segmentPath(seg);
-    const room = EVIDENCE_TOTAL_CAP - used;
-    if (room <= 0) {
-      omitted.push(
-        `OMITTED: ${p} (${seg.length} chars over the evidence budget — run \`git diff --cached -- ${p}\`)`,
-      );
-      continue;
-    }
-    const cap = Math.min(SEGMENT_CAP, room);
-    if (seg.length <= cap) {
-      kept.push(seg);
-      used += seg.length;
-    } else {
-      truncated += 1;
-      kept.push(
-        `${seg.slice(0, cap)}\n[TRUNCATED: ${p} — ${cap} of ${seg.length} chars shown; run \`git diff --cached -- ${p}\` for the rest]\n`,
-      );
-      used += cap;
-    }
-  }
-  const omittedBlock =
-    omitted.length > OMITTED_LIST_MAX
-      ? `${omitted.slice(0, OMITTED_LIST_MAX).join('\n')}\n…and ${omitted.length - OMITTED_LIST_MAX} more OMITTED segment(s) — the --stat map above lists every file`
-      : omitted.join('\n');
-  const warning =
-    omitted.length || truncated
-      ? `\n[WARNING: ${omitted.length} segment(s) OMITTED and ${truncated} TRUNCATED — the stdin evidence is INCOMPLETE. Investigate EVERY OMITTED/TRUNCATED path before any PASS verdict.]`
-      : '';
-  return `${stat}\n${kept.join('')}${omitted.length ? `\n${omittedBlock}` : ''}${warning}`;
-}
+// The capped, omission-accounted stdin-evidence builder (sc-1060) now lives in diff-evidence.mts
+// so gate-engine/review/claude-md.mts's CLAUDE.md renderer can reuse the same capping shape for
+// conventions-reviewer (which, having no Bash, needs the identical pre-rendered-evidence pattern
+// this gate pioneered). Re-exported under the original name — zero behavior change here.
+export { buildCappedDiffEvidence as buildCompletenessEvidence };
 
 /** One governing Target (scope-match or semantic) as returned by `scopedTargets`. */
 export interface TargetBlock {
@@ -203,7 +148,7 @@ export async function runCompleteness(
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });
-    diff = buildCompletenessEvidence(
+    diff = buildCappedDiffEvidence(
       execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
         cwd,
         encoding: 'utf8',

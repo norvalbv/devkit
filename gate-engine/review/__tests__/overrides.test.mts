@@ -124,6 +124,33 @@ describe('reconcile', () => {
     const r = reconcile(cwd, 'correctness-reviewer', ['json-shape'], 'D', NOW);
     expect(r.blocking).toHaveLength(1);
   });
+
+  // conventions-reviewer shares this exact store/mechanism with correctness-reviewer (both are
+  // single-pass, model-pinned REVIEWERS entries — see reviewers.mts). Two DIFFERENT reviewers
+  // waiving findings on the SAME diff bytes must coexist in one persisted file, not clobber each
+  // other — `persist()` does a full read-modify-write of the WHOLE store, so a naive
+  // implementation that dropped unrelated keys on write would silently un-waive the other
+  // reviewer's already-recorded override.
+  it("two DIFFERENT reviewers' env overrides on the SAME diff both persist — neither clobbers the other", () => {
+    const cwd = repo();
+    const fpConventions = fingerprint('conventions-reviewer', 'app/handler.ts:4', 'DIFF-SHARED');
+    const fpCorrectness = fingerprint('correctness-reviewer', 'concurrency-races', 'DIFF-SHARED');
+    reconcile(cwd, 'conventions-reviewer', ['app/handler.ts:4'], 'DIFF-SHARED', NOW, {
+      [`OVERRIDE_${fpConventions}_RATIONALE`]: 'conventions waiver',
+    } as NodeJS.ProcessEnv);
+    reconcile(cwd, 'correctness-reviewer', ['concurrency-races'], 'DIFF-SHARED', NOW, {
+      [`OVERRIDE_${fpCorrectness}_RATIONALE`]: 'correctness waiver',
+    } as NodeJS.ProcessEnv);
+    const store = loadOverrides(cwd);
+    expect(store[fpConventions]?.rationale).toBe('conventions waiver');
+    expect(store[fpCorrectness]?.rationale).toBe('correctness waiver');
+    // Re-reconciling EITHER reviewer alone still sees BOTH entries intact — a read for one
+    // reviewer must never observe the other's waiver as lost.
+    const rConv = reconcile(cwd, 'conventions-reviewer', ['app/handler.ts:4'], 'DIFF-SHARED', NOW);
+    expect(rConv.suppressed.map((s) => s.fp)).toEqual([fpConventions]);
+    const rCorr = reconcile(cwd, 'correctness-reviewer', ['concurrency-races'], 'DIFF-SHARED', NOW);
+    expect(rCorr.suppressed.map((s) => s.fp)).toEqual([fpCorrectness]);
+  });
 });
 
 describe('blockingNote', () => {

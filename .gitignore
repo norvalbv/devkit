@@ -41,3 +41,10 @@ gate-engine/review/eval/reviewers/*.log
 gate-engine/review/eval/reviewers/results.baseline.json
 gate-engine/review/eval/reviewers/candidates.jsonl
 gate-engine/review/eval/reviewers/progress-*.jsonl
+
+# conventions-eval: ledger + per-run transcripts are local telemetry (mirrors critique-eval).
+# NOTE: results.baseline.json is NOT committed YET (no live run has been performed — see
+# README's "Results — baseline history" section); once a first --baseline run lands it SHOULD be
+# committed like completeness/critique's, so do not add it here.
+gate-engine/review/eval/conventions/runs.log
+gate-engine/review/eval/conventions/transcripts/

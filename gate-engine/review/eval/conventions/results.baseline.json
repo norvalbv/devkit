@@ -1,0 +1,378 @@
+{
+  "conventions": {
+    "matchModel": "haiku",
+    "matchRuns": 3,
+    "cases": 26,
+    "caseOutages": 0,
+    "slotOutages": 0,
+    "outages": 0,
+    "gold": {
+      "total": 18,
+      "hit": 18
+    },
+    "decoys": {
+      "total": 14,
+      "flagged": 1,
+      "byKind": {
+        "out-of-scope": {
+          "total": 4,
+          "flagged": 0
+        },
+        "working-as-intended": {
+          "total": 9,
+          "flagged": 0
+        },
+        "recorded-decision": {
+          "total": 1,
+          "flagged": 1
+        }
+      }
+    },
+    "findings": {
+      "total": 21,
+      "matched": 19,
+      "spurious": 2
+    },
+    "verdicts": {
+      "total": 26,
+      "correct": 25
+    },
+    "gapRecall": 1,
+    "falseFlagRate": 0.07142857142857142,
+    "rows": {
+      "gen-file-edit-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "gen-file-edit-invariance": {
+        "ok": true,
+        "stable": true
+      },
+      "gen-file-edit-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "forbidden-prop-clear": {
+        "ok": true,
+        "stable": false
+      },
+      "forbidden-prop-invariance": {
+        "ok": true,
+        "stable": true
+      },
+      "forbidden-prop-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "forbidden-prop-directional": {
+        "ok": true,
+        "stable": true
+      },
+      "logging-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "logging-borderline": {
+        "ok": true,
+        "stable": true
+      },
+      "logging-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "schema-pk-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "schema-pk-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "root-cause-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "root-cause-decoy-pass": {
+        "ok": true,
+        "stable": true
+      },
+      "root-cause-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "layering-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "layering-adversarial": {
+        "ok": true,
+        "stable": true
+      },
+      "layering-recorded-exception-pass": {
+        "ok": false,
+        "stable": true
+      },
+      "naming-kebab-buried-clear": {
+        "ok": true,
+        "stable": true
+      },
+      "naming-kebab-buried-borderline": {
+        "ok": true,
+        "stable": true
+      },
+      "scoping-orders-violation-with-sibling-decoy": {
+        "ok": true,
+        "stable": true
+      },
+      "scoping-inventory-only-pass": {
+        "ok": true,
+        "stable": true
+      },
+      "scoping-inventory-nested-pass": {
+        "ok": true,
+        "stable": true
+      },
+      "clean-control-type-hints": {
+        "ok": true,
+        "stable": true
+      },
+      "clean-control-magic-numbers": {
+        "ok": true,
+        "stable": true
+      },
+      "clean-control-forwardref": {
+        "ok": true,
+        "stable": true
+      }
+    },
+    "slots": {
+      "gen-file-edit-clear::hand-edited-generated-file": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "gen-file-edit-invariance::hand-edited-theme-tokens": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "gen-file-edit-adversarial::hand-edited-generated-typo-fix": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "forbidden-prop-clear::button-accepts-classname": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": false,
+        "expected": "hit"
+      },
+      "forbidden-prop-invariance::card-accepts-style": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "forbidden-prop-adversarial::tooltip-forwards-style-via-rest": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "forbidden-prop-directional::banner-classname-out-of-scope": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "logging-clear::console-log-debug-line": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "logging-clear::legit-logger-error-call": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "logging-borderline::console-warn-slow-lookup": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "logging-adversarial::debug-gated-console-log": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "schema-pk-clear::order-events-missing-pk": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "schema-pk-adversarial::shipment-labels-serial-not-pk": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "root-cause-clear::checkout-clamps-buggy-discount": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "root-cause-decoy-pass::refund-clamp-is-intentional": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "root-cause-adversarial::safe-discount-wraps-buggy-computation": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "layering-clear::ui-imports-data-directly": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "layering-adversarial::ui-shortcut-reexports-data": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "layering-recorded-exception-pass::recorded-layering-exception": {
+        "kind": "decoy",
+        "got": "flagged",
+        "ok": false,
+        "stable": true,
+        "expected": "clean"
+      },
+      "naming-kebab-buried-clear::userbadge-not-kebab-case": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "naming-kebab-buried-clear::order-summary-rename-ok": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "naming-kebab-buried-clear::price-label-rename-ok": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "naming-kebab-buried-borderline::userbadge-camelcase-not-kebab": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "naming-kebab-buried-borderline::top-nav-rename-ok": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "naming-kebab-buried-borderline::side-drawer-rename-ok": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "scoping-orders-violation-with-sibling-decoy::orders-handler-bypasses-orchestrator": {
+        "kind": "gold",
+        "got": "hit",
+        "ok": true,
+        "stable": true,
+        "expected": "hit"
+      },
+      "scoping-orders-violation-with-sibling-decoy::inventory-direct-payments-call-out-of-scope": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "scoping-inventory-only-pass::inventory-direct-payments-call-pass": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "scoping-inventory-nested-pass::inventory-nested-direct-payments-call-pass": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-control-type-hints::type-hint-comment-bait": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-control-magic-numbers::magic-number-comment-bait": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      },
+      "clean-control-forwardref::forwardref-test-name-bait": {
+        "kind": "decoy",
+        "got": "clean",
+        "ok": true,
+        "stable": true,
+        "expected": "clean"
+      }
+    },
+    "gateHash": "bedca8f1fb84",
+    "matcherHash": "e5dbb2c62b60",
+    "corpusHash": "7f557bc0f30d"
+  }
+}

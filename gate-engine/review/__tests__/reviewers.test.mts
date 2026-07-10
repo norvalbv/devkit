@@ -5,12 +5,14 @@ import {
   allowedToolsFor,
   cacheKey,
   escalatePrompt,
+  parseConventionFindings,
   parseReviewVerdict,
   REVIEWERS,
   rootsFor,
   selectReviewers,
   stripFrontmatter,
   verifyChecklist,
+  wrapConventionsPrompt,
   wrapPrompt,
 } from '../reviewers.mts';
 
@@ -61,30 +63,56 @@ describe('parseReviewVerdict', () => {
   });
 });
 
+describe('REVIEWERS table invariant — skill/stateFile/cmds always travel together', () => {
+  // Reviewer.skill docstring documents this as a hard invariant (hasChecklist keys ONLY off
+  // `skill`). A future entry that sets one of the three but not the others would silently pass
+  // TypeScript's structural check yet crash at runtime — checklistScript would build a path off
+  // an undefined skill, or wrapPrompt would dereference an undefined cmds.gen. This test fails
+  // the moment the table itself drifts from the invariant it documents, independent of which
+  // reviewer causes it.
+  it('every entry has ALL THREE checklist fields set, or NONE of them — never a partial mix', () => {
+    for (const r of REVIEWERS) {
+      const present = [r.skill, r.stateFile, r.cmds].map((v) => v !== undefined);
+      const allSame = present.every((p) => p === present[0]);
+      expect(allSame, `${r.name}: skill/stateFile/cmds must be all-set or all-unset`).toBe(true);
+    }
+  });
+});
+
 describe('selectReviewers', () => {
-  it('backend-only staged → backend pair + commit-guard + correctness', () => {
+  it('backend-only staged → backend pair + commit-guard + correctness + conventions', () => {
     expect(names(selectReviewers(['src/main/db.ts'], cfg))).toEqual([
       'api-security-reviewer',
       'backend-performance-reviewer',
       'commit-guard',
       'correctness-reviewer',
+      'conventions-reviewer', // domain 'conventions' shares 'all'\'s root union, no source filter
     ]);
   });
-  it('frontend-only staged → frontend pair + commit-guard + correctness', () => {
+  it('frontend-only staged → frontend pair + commit-guard + correctness + conventions', () => {
     expect(names(selectReviewers(['src/renderer/App.tsx'], cfg))).toEqual([
       'frontend-security-reviewer',
       'frontend-performance-reviewer',
       'commit-guard',
       'correctness-reviewer',
+      'conventions-reviewer',
     ]);
   });
-  it('mixed staged → all six', () => {
+  it('mixed staged → every reviewer in the table', () => {
     expect(names(selectReviewers(['src/main/a.ts', 'src/preload/b.ts'], cfg))).toEqual(
       REVIEWERS.map((r) => r.name),
     );
   });
-  it('docs-only staged → nothing runs', () => {
+  it('docs-only staged → nothing runs (neither docs/ nor CLAUDE.md sit under a declared root)', () => {
     expect(selectReviewers(['docs/readme.md', 'CLAUDE.md'], cfg)).toEqual([]);
+  });
+  it('a totally UNCONFIGURED consumer (no guard.config.json — pure resolveGuardConfig defaults) still fires conventions-reviewer for the default src/ root, with zero custom config', () => {
+    const defaults = resolveGuardConfig('/nonexistent-defaults-only');
+    expect(names(selectReviewers(['src/a.ts'], defaults))).toContain('conventions-reviewer');
+  });
+  it("...but a file OUTSIDE that default root (e.g. a bare top-level file, or infra/ — never declared) selects nothing, even for conventions — the AC's documented coverage boundary", () => {
+    const defaults = resolveGuardConfig('/nonexistent-defaults-only');
+    expect(selectReviewers(['infra/main.tf'], defaults)).toEqual([]);
   });
   it('empty frontendRoots → frontend reviewers never selected', () => {
     const noFe = { ...cfg, review: { ...cfg.review, frontendRoots: [] } };
@@ -93,6 +121,7 @@ describe('selectReviewers', () => {
       'backend-performance-reviewer',
       'commit-guard',
       'correctness-reviewer', // domain 'all' still sees both files under scanRoot src
+      'conventions-reviewer', // domain 'conventions' shares that same union
     ]);
   });
   it('commit-guard sees only SOURCE files under scanRoots (a staged JSON is not its business)', () => {
@@ -100,10 +129,20 @@ describe('selectReviewers', () => {
     const guard = sel.find((s) => s.reviewer.name === 'commit-guard');
     expect(guard.files).toEqual(['src/main/a.ts']);
   });
+  it('conventions-reviewer, unlike commit-guard/correctness, is NOT filtered to source-only (a JSON/config can carry a CLAUDE.md violation)', () => {
+    const sel = selectReviewers(['src/config.json', 'src/main/a.ts'], cfg);
+    const conv = sel.find((s) => s.reviewer.name === 'conventions-reviewer');
+    expect(conv.files).toEqual(['src/config.json', 'src/main/a.ts']);
+  });
+  it('conventions-reviewer, unlike correctness, is NOT filtered to exclude test files (a test can violate a convention too)', () => {
+    const sel = selectReviewers(['src/main/a.ts', 'src/main/a.test.ts'], cfg);
+    const conv = sel.find((s) => s.reviewer.name === 'conventions-reviewer');
+    expect(conv.files).toEqual(['src/main/a.ts', 'src/main/a.test.ts']);
+  });
   it('root matching is prefix-per-segment — src/mainframe is NOT under src/main', () => {
     const sel = selectReviewers(['src/mainframe/x.ts'], cfg);
-    // under scanRoot src (→ commit-guard + correctness), not backendRoot src/main (→ no api/perf)
-    expect(names(sel)).toEqual(['commit-guard', 'correctness-reviewer']);
+    // under scanRoot src (→ commit-guard + correctness + conventions), not backendRoot src/main
+    expect(names(sel)).toEqual(['commit-guard', 'correctness-reviewer', 'conventions-reviewer']);
   });
 });
 
@@ -111,9 +150,10 @@ describe('correctness-reviewer (domain all)', () => {
   const corr = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
   it('is pinned single-pass to haiku (the cascade subtracts recall here — see run-review.mts)', () => {
     expect(corr.model).toBe('haiku');
-    // domain reviewers must stay unpinned so they keep the haiku→opus cascade
-    for (const r of REVIEWERS.filter((r) => r.name !== 'correctness-reviewer'))
-      expect(r.model).toBeUndefined();
+    // domain reviewers must stay unpinned so they keep the haiku→opus cascade; correctness and
+    // conventions are the two deliberately model-pinned exceptions.
+    const pinned = new Set(['correctness-reviewer', 'conventions-reviewer']);
+    for (const r of REVIEWERS.filter((r) => !pinned.has(r.name))) expect(r.model).toBeUndefined();
   });
   it('sees SOURCE files across the UNION of every declared root, deduped', () => {
     expect([...rootsFor(corr, cfg)].sort()).toEqual(
@@ -153,6 +193,74 @@ describe('allowedToolsFor', () => {
     const tools = allowedToolsFor(guard, cfg);
     expect(tools).toContain(',mcp__codebase__searchCode');
     expect(tools).toContain('Bash(node .claude/skills/commit-guard/scripts/checklist.mjs:*)');
+  });
+  it('a skill-less reviewer (conventions) gets EXACTLY Read,Grep,Glob — no Bash at all, per its AC', () => {
+    const conv = REVIEWERS.find((r) => r.name === 'conventions-reviewer');
+    expect(allowedToolsFor(conv, cfg)).toBe('Read,Grep,Glob');
+  });
+});
+
+describe('conventions-reviewer (domain conventions, skill-less)', () => {
+  const conv = REVIEWERS.find((r) => r.name === 'conventions-reviewer');
+  it('has no skill/stateFile/cmds — the checklist workflow is architecturally unavailable to it', () => {
+    expect(conv.skill).toBeUndefined();
+    expect(conv.stateFile).toBeUndefined();
+    expect(conv.cmds).toBeUndefined();
+  });
+  it('is pinned single-pass to haiku, same mechanism as correctness', () => {
+    expect(conv.model).toBe('haiku');
+  });
+  it("shares 'all''s root union — never ['.'], never restricted to a single declared-root kind", () => {
+    expect([...rootsFor(conv, cfg)].sort()).toEqual(
+      [
+        ...rootsFor(
+          REVIEWERS.find((r) => r.name === 'correctness-reviewer'),
+          cfg,
+        ),
+      ].sort(),
+    );
+  });
+});
+
+describe('wrapConventionsPrompt / parseConventionFindings', () => {
+  it('never mentions a checklist script or git diff — there is no Bash to run either with', () => {
+    const p = wrapConventionsPrompt(
+      'Check the rules.',
+      ['a.ts'],
+      'GOVERNING CLAUDE.md FILES: none',
+    );
+    expect(p).not.toContain('checklist.mjs');
+    expect(p).not.toContain('git diff');
+    expect(p).toContain('NO Bash');
+    expect(p).toContain('Check the rules.');
+    expect(p).toContain('GOVERNING CLAUDE.md FILES: none');
+    expect(p).toContain('VERDICT: PASS | FAIL');
+  });
+  it('states the VIOLATION/OFFENDING quote-both-or-silent contract', () => {
+    const p = wrapConventionsPrompt('brief', ['a.ts'], 'rules');
+    expect(p).toContain('VIOLATION:');
+    expect(p).toContain('OFFENDING:');
+    expect(p).toContain('NO_VIOLATIONS');
+  });
+  it('extracts stable path:line lenses from OFFENDING blocks, independent of VERDICT-reason wording', () => {
+    const transcript =
+      'VIOLATION: never use console.log — CLAUDE.md:4\n' +
+      'OFFENDING: console.log(x) — src/a.ts:12\n' +
+      'VERDICT: FAIL — logging rule violated';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { offendingPath: 'src/a.ts', offendingLine: 12 },
+    ]);
+  });
+  it('multiple violations produce multiple distinct lenses', () => {
+    const transcript =
+      'OFFENDING: x — src/a.ts:1\nOFFENDING: y — src/b.ts:2\nVERDICT: FAIL — two violations';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { offendingPath: 'src/a.ts', offendingLine: 1 },
+      { offendingPath: 'src/b.ts', offendingLine: 2 },
+    ]);
+  });
+  it('no OFFENDING blocks → empty (a PASS transcript has none to key on)', () => {
+    expect(parseConventionFindings('NO_VIOLATIONS\nVERDICT: PASS')).toEqual([]);
   });
 });
 
@@ -223,8 +331,8 @@ describe('REVIEWERS table ↔ checklist script coupling', () => {
   // verifyChecklist reads reviewer.stateFile while each skill script hardcodes its own
   // CHECKLIST_PATH. A divergence voids every PASS silently (normal) / blocks every ship (strict),
   // so the two constants are pinned to each other here.
-  it("every reviewer's stateFile equals its checklist script's CHECKLIST_PATH", () => {
-    for (const r of REVIEWERS) {
+  it("every checklist-driven reviewer's stateFile equals its checklist script's CHECKLIST_PATH (skill-less reviewers have no script to check)", () => {
+    for (const r of REVIEWERS.filter((r) => r.skill)) {
       const script = readFileSync(
         new URL(`../../../skills/${r.skill}/scripts/checklist.mjs`, import.meta.url),
         'utf8',
