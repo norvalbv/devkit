@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { checkPrefix, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -40,6 +41,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
 // module so the same literals resolve in both — string-literal paths are NOT rewritten by tsc emit.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
+
+// Telemetry: strip the `guard-` bin prefix and any `(unexpected:rc)` suffix off a gate label to
+// get the bare gate name (module-level per biome's useTopLevelRegex).
+const GUARD_PREFIX_RE = /^guard-/;
+const GATE_SUFFIX_RE = /\(.*\)$/;
 
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
@@ -213,6 +219,16 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     }
   }
   if (fails.length > 0) {
+    // Ship telemetry (best-effort, no-op off-ship): one gate_result per failing gate so the usage
+    // tracker can attribute a blocked ship to the exact gate(s). `(unexpected:rc)` = could-not-run.
+    for (const label of fails) {
+      emitGateEvent({
+        type: 'gate_result',
+        gate: label.replace(GUARD_PREFIX_RE, '').replace(GATE_SUFFIX_RE, ''),
+        status: label.includes('(unexpected:') ? 'could_not_run' : 'fail',
+        detail: label,
+      });
+    }
     console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f}`).join('')}`);
     console.error(
       '   Every deterministic failure is listed above — fix them together, then commit once.',
