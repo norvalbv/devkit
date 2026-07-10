@@ -1,0 +1,75 @@
+{
+  "//": "react-app preset for the devkit governance gate-engine. Copy to your repo ROOT. JSON has no real comments, so guidance lives in //-prefixed sibling keys — strip them or leave them (the loader ignores unknown keys). Every path resolves relative to the consumer repo, never the devkit package.",
+
+  "//scanRoots": "Where the ratchets + scans look for impl files. Default ['src'] suits a standard Vite/CRA app. If your app lives under a non-standard root (e.g. a monorepo package at services/webapp/src), OVERRIDE this — set scanRoots to that path.",
+  "scanRoots": ["src"],
+
+  "//boundaries": "Cross-trust-boundary prefixes for the decisions smell gate. A plain React app has no trust boundary, so this is EMPTY (the smell never fires on a single-process frontend). Add prefixes only if you grow a backend in-repo.",
+  "boundaries": [],
+
+  "//fanoutCap": "Max non-test impl files per folder (any depth) before guard-fanout trips. This — NOT eslint — governs fan-out for the react-app preset.",
+  "fanoutCap": 12,
+
+  "//fanoutExempt": "Flat-by-design folders exempt from the fanout cap. EMPTY by default; add a folder only when its flatness is intentional (e.g. an icon set).",
+  "fanoutExempt": [],
+
+  "//allowlistPath": "Co-occurrence intentional-dup approvals (guard-dup + guard-clone).",
+  "allowlistPath": ".co-occurrence-allowlist.json",
+
+  "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
+  "decisionsDir": "docs/decisions",
+
+  "//sourceExtensions": "Impl-file extensions the ratchets + structure rule count. A React app is ['ts','tsx'].",
+  "sourceExtensions": ["ts", "tsx"],
+
+  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). Replaces the old eslint max-lines rule so eslint stays structure-only. Per-FUNCTION caps need a parser — not yet.",
+  "maxLines": 500,
+
+  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "review": {
+    "backendRoots": [],
+    "frontendRoots": ["src"],
+    "trustBoundaries": "",
+    "shortcutTracking": false,
+    "accessibility": { "skipTouchTargets": false }
+  },
+
+  "//structure": "THE topology (data). The shared eslint.config.mjs shim compiles this via devkit's engine — no per-stack eslint rule. Governs src/components + src/pages as trees of PascalCase folders (index.tsx + colocated subcomponents/hooks/helpers/tests/css/md); every OTHER src/ folder (services/, store/, hooks/, …) is ungoverned/open (no tree = not visited). To govern another folder, add a tree here. Walls empty (a plain app has no trust boundary).",
+  "structure": {
+    "trees": [
+      {
+        "name": "components",
+        "root": "src/components",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+          "recurse": "componentFolder",
+          "rules": {
+            "componentFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+              "recurse": "componentFolder"
+            }
+          }
+        }
+      },
+      {
+        "name": "pages",
+        "root": "src/pages",
+        "sourceExtensions": ["ts", "tsx"],
+        "grammar": {
+          "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+          "recurse": "pageFolder",
+          "rules": {
+            "pageFolder": {
+              "folderName": "{pascal_dir}",
+              "files": ["index.tsx", "index.ts", "constants.ts", "types.ts", "{pascal_tsx}", "{use_hook_camel}", "{camel_ts}", "{test}", "{css}", "{any_md}"],
+              "recurse": "pageFolder"
+            }
+          }
+        }
+      }
+    ],
+    "walls": []
+  }
+}

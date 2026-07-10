@@ -1,0 +1,20 @@
+{
+  "scanRoots": ["src", "socket-server/src", "vercel-serverless"],
+  "boundaries": ["src/main/", "socket-server/", "vercel-serverless/"],
+  "fanoutCap": 12,
+  "fanoutExempt": ["src/main/lib/trpc/routers", "src/renderer/components/ui"],
+  "allowlistPath": ".co-occurrence-allowlist.json",
+  "decisionsDir": "docs/decisions",
+
+  "//backends": "Which backend processes this electron app runs structure-lint for. Read by eslint.config.mjs at load; devkit migrate merge-preserves your values. Flip one off if you don't ship it.",
+  "backends": { "socketServer": true, "vercel": true },
+
+  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "review": {
+    "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
+    "frontendRoots": ["src/renderer", "src/preload"],
+    "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
+    "shortcutTracking": false,
+    "accessibility": { "skipTouchTargets": true }
+  }
+}
