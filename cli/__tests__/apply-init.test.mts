@@ -41,7 +41,7 @@ describe('selection helpers', () => {
       husky: true,
       structure: true,
     });
-    expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions']);
+    expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {

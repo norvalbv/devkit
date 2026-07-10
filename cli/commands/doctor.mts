@@ -113,18 +113,18 @@ function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   }
   const block = extractGuardBlock(content, pkgRel) ?? '';
   // The deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
-  // orchestrator (which re-reads the selection from .devkit/config.json at commit time); the AI
-  // guards (decisions/review) keep their own per-id fragment. So verify one `guard-deterministic`
-  // call when any deterministic guard is selected, plus each selected AI guard's sentinel. A block
-  // that predates this collapse (per-guard `bunx guard-X` lines, no `guard-deterministic`) fails
-  // the first check and is flagged for regeneration.
-  const AI = new Set(['decisions', 'review']);
+  // orchestrator (which re-reads the selection from .devkit/config.json at commit time); the rest
+  // (decisions/review/qavis-advisory) keep their own per-id `guard-<id>` fragment. So verify one
+  // `guard-deterministic` call when any deterministic guard is selected, plus each selected
+  // own-fragment guard's sentinel. A block that predates this collapse (per-guard `bunx guard-X`
+  // lines, no `guard-deterministic`) fails the first check and is flagged for regeneration.
+  const OWN_FRAGMENT = new Set(['decisions', 'review', 'qavis-advisory']);
   const missing: string[] = [];
-  if (selectedGuards.some((g) => !AI.has(g)) && !block.includes('guard-deterministic')) {
+  if (selectedGuards.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
     missing.push('deterministic gates');
   }
   for (const g of selectedGuards) {
-    if (AI.has(g) && !block.includes(`guard-${g}`)) missing.push(g);
+    if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`)) missing.push(g);
   }
   if (missing.length) {
     return check(

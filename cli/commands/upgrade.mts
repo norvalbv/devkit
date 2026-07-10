@@ -16,9 +16,17 @@
  * re-pins the stale recorded refs and reconciles in a single pass. TypeScript source, shipped as
  * prebuilt .mjs.
  */
+
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS, normalizeSelection, type Selection } from '../lib/components.mts';
+import { isCancel, multiselect } from '@clack/prompts';
+import {
+  AGENT_TARGETS,
+  GUARD_OPTIONS,
+  newBundledGates,
+  normalizeSelection,
+  type Selection,
+} from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
@@ -184,14 +192,66 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     console.log('  • no structure preset recorded — nothing to migrate');
   }
 
-  // ── 3+4. broad refresh (idempotent; never clobbers consumer configs) ───────
+  // ── 3. gates: reconcile newly-bundled gates against the recorded selection ─
+  // applyInit rebuilds the husky block from sel.guards (the RECORDED set), so a gate shipped after
+  // this repo's last install is silently dropped. Reconcile against the current bundle: offer the
+  // new gates interactively (TTY), else heal the recommended ones + notice the opt-in ones (never
+  // auto-added). Mutating sel.guards here feeds applyInit below, which persists it to .devkit/config.json.
+  console.log('\n3. gates');
+  if (!sel.husky) {
+    console.log('  • husky not selected — no gates to reconcile');
+  } else {
+    const { recommended, optIn } = newBundledGates(sel.guards);
+    const opt = (id: string) => GUARD_OPTIONS.find((g) => g.id === id);
+    // Trigger ONLY on a missing RECOMMENDED gate (the genuine "you're behind" case — e.g. a
+    // newly-promoted gate). An opt-in gate the user simply never enabled must NOT re-nag on every
+    // upgrade; it rides along in the offer/notice below whenever a recommended reconcile fires.
+    // ponytail: gate on recommended-missing (no per-repo "gates known at install" state); a purely-new
+    // opt-in gate with no recommended change won't surface until one does.
+    if (!recommended.length) {
+      console.log('  • no new recommended gates — gate selection unchanged');
+    } else if (dryRun) {
+      console.log(`  [dry-run] would add recommended gate(s): ${recommended.join(', ')}`);
+      for (const id of optIn) console.log(`  [dry-run] opt-in gate also available: ${id}`);
+    } else if (process.stdout.isTTY && process.stdin.isTTY) {
+      const picked = await multiselect({
+        message: 'New gates available since your last install — select any to add',
+        options: [...recommended, ...optIn].map((id) => ({
+          value: id,
+          label: opt(id)?.label ?? id,
+          hint: opt(id)?.hint,
+        })),
+        initialValues: recommended,
+        required: false,
+      });
+      if (isCancel(picked)) {
+        console.log('  • skipped gate selection — existing gates unchanged');
+      } else if ((picked as string[]).length) {
+        sel.guards = [...sel.guards, ...(picked as string[])];
+        console.log(`  ✓ added gate(s): ${(picked as string[]).join(', ')}`);
+      } else {
+        console.log('  • no gates selected');
+      }
+    } else {
+      // Non-TTY: heal recommended, notice opt-in (never auto-add opt-in).
+      sel.guards = [...sel.guards, ...recommended];
+      console.log(`  ✓ added recommended gate(s): ${recommended.join(', ')}`);
+      for (const id of optIn) {
+        console.log(
+          `  • devkit also bundles ${id} (opt-in) — enable with 'devkit init --guards …,${id}'`,
+        );
+      }
+    }
+  }
+
+  // ── 4. broad refresh (idempotent; never clobbers consumer configs) ─────────
   // applyInit(force:false): configs via writeIfAbsent (existing preserved), package.json devDeps,
   // husky guard block refreshed only if changed, ratchet baselines frozen only if missing,
   // skills/agents/agent-hooks synced (collisions preserved), deselected surfaces pruned, and
   // .devkit/config.json rewritten with devkitRef=v<target> (minDevkit/configOverrides carried
   // forward). regenStructureBaselines:false → an existing structure baseline is kept, never
   // re-snapshotted (no debt laundering).
-  console.log('\n3. broad refresh (skills / agents / agent-hooks / husky / guards)');
+  console.log('\n4. broad refresh (skills / agents / agent-hooks / husky / guards)');
   await applyInit(cwd, {
     stack,
     selection: sel,
@@ -206,7 +266,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected
   // surfaces adopting consumer-authored same-named collisions; tuned biome/tsconfig are untouched.
   if (force) {
-    console.log('\n4. --force: adopt consumer-authored asset collisions');
+    console.log('\n5. --force: adopt consumer-authored asset collisions');
     const syncArgs = dryRun ? ['--dry-run'] : [];
     const override = () => true;
     if (sel.skills) syncSkills(syncArgs, gitRoot, sel.agentTargets, { override });
@@ -219,7 +279,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     console.log('\nDry-run complete — nothing written. Re-run without --dry-run to apply.');
     return 0;
   }
-  console.log('\n5. verify\n');
+  console.log('\n6. verify\n');
   return doctor([], cwd);
 }
 
