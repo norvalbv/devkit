@@ -1,0 +1,50 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  // react-app preset. Unlike the electron template (which extends biome/base and
+  // re-applies React rules in a RENDERER-scoped override to keep them off the
+  // Node main process), a plain React app is React top-to-bottom — so we extend
+  // the biome/react preset directly. It already layers the React architecture
+  // rules (named exports, `type` over `interface`, ReactElement over JSX.Element,
+  // no `export *` barrels) onto base, scoped to `*.{tsx,jsx}`.
+  //
+  // The react preset ships NO `files.includes` on purpose — we add ours here.
+  "extends": ["@norvalbv/devkit/biome/react"],
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!dist", "!build", "!out", "!coverage", "!eslint/baselines"]
+  },
+  "overrides": [
+    {
+      // React component/page files: PascalCase | kebab-case filenames. AMEND the
+      // allowed cases here if your repo uses a different convention.
+      "includes": ["src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": {
+              "level": "error",
+              "options": {
+                "strictCase": false,
+                "requireAscii": true,
+                "filenameCases": ["PascalCase", "kebab-case", "camelCase"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      // Tests: relax filename + naming conventions.
+      "includes": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx"],
+      "linter": {
+        "rules": {
+          "performance": { "useTopLevelRegex": "off" },
+          "style": {
+            "useFilenamingConvention": "off",
+            "useNamingConvention": "off"
+          }
+        }
+      }
+    }
+  ]
+}
