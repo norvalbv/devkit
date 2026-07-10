@@ -50,6 +50,17 @@ commit_with_gate_capture() {
   #                           timeout can name the ones left unfinished (structured, not stderr prose).
   export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
 
+  # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
+  # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the
+  # deterministic/decisions/review events (emitted from the node gates via gate-events.mts) and the
+  # ship_attempt/ship_result lines below all carry the same ship_id and correlate. Off-ship the env
+  # is unset and nothing is emitted. A downstream reader (the usage tracker's collector) tail-ingests
+  # it; every write is `>> … || true` so telemetry can never fail the ship.
+  export DEVKIT_GATE_EVENTS="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
+  export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${br//\//-}-$$-$(date +%s)")}"
+  mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
+  local repo_name; repo_name="$(basename "$root")"
+
   # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
   # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
   # cascade 2×300 (strict retry — transient/empty first pass only; a TIMEOUT isn't re-run) + 420 =
@@ -74,6 +85,13 @@ commit_with_gate_capture() {
   local hookcfg=()
   [ -x "$root/.devkit/hooks/pre-commit" ] && hookcfg=(-c core.hooksPath=.devkit/hooks)
 
+  # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
+  # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
+  local dur_start; dur_start=$(date +%s)
+  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","ts":"%s"}\n' \
+    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "${DEVKIT_SHIP_MODE:-ship}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+
   set +e
   # ${to[@]+"${to[@]}"}: set -u-safe empty-array expansion (a bare "${to[@]}" aborts under stock-macOS
   # bash 3.2). Empty → bare git (degrade); non-empty → `timeout -k 10 <secs> git …`. PIPESTATUS[0] is the
@@ -81,6 +99,23 @@ commit_with_gate_capture() {
   ${to[@]+"${to[@]}"} git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" 2>&1 | tee "$log" >&2
   local rc=${PIPESTATUS[0]}
   set -e
+
+  # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
+  # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
+  # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
+  # order attributes it. qavis is advisory (never blocks a ship) so it is not a blocked_gate value.
+  local blocked_json timed_out
+  if [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
+  elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
+  elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
+  elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
+  elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
+  else blocked_json='"unknown"'; timed_out=false
+  fi
+  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"ts":"%s"}\n' \
+    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "$rc" "$timed_out" "$blocked_json" \
+    "$(( $(date +%s) - dur_start ))" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     # Attribute the kill: the last stage banner in the log names the phase that was mid-flight; if the
