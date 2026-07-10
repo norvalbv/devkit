@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rootRegistry } from './_helpers.mts';
+import { rootRegistry, seedSessionLedger } from './_helpers.mts';
 
 const AGENTS_HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks');
 const KNIP_HOOK = join(AGENTS_HOOKS, 'knip-check.sh');
@@ -23,8 +23,10 @@ const HAS_BUN = spawnSync('bash', ['-c', 'command -v bun'], { encoding: 'utf8' }
 
 // A `knip` script that announces itself then fails: exit 2 + this marker in the hook's stderr proves
 // the degrade-skip gates OPENED and knip actually ran; the marker's ABSENCE proves the hook skipped.
-// Cleanly separable even though "ran-and-passed" and "skipped" would both exit 0.
-const KNIP_SCRIPT = 'echo KNIP_RAN; exit 1';
+// Cleanly separable even though "ran-and-passed" and "skipped" would both exit 0. The marker is a
+// PATH (and the fixture creates that file + seeds it into the session-edits ledger) because the hook
+// now filters knip output to files the session edited — a non-path marker would be filtered out.
+const KNIP_SCRIPT = 'echo KNIP_RAN.ts; exit 1';
 const pkg = (extra = {}) => JSON.stringify({ name: 'fx', version: '0.0.0', ...extra });
 const withKnipScript = (extra = {}) => pkg({ scripts: { knip: KNIP_SCRIPT }, ...extra });
 
@@ -33,16 +35,21 @@ afterEach(cleanup);
 
 const fixture = (files) => {
   const dir = mkTmp('knip-hook-');
+  writeFileSync(join(dir, 'KNIP_RAN.ts'), 'export {};\n');
   for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
   return dir;
 };
 
-const run = (dir, { stopHookActive = false } = {}) =>
-  spawnSync('bash', [KNIP_HOOK], {
-    input: JSON.stringify({ stop_hook_active: stopHookActive }),
-    env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+// By default the payload session "edited" the marker file, so the session-scoping gate is open
+// and the legacy degrade-skip behaviours stay observable. `edits: null` = a session with no edits.
+const run = (dir, { stopHookActive = false, edits = ['KNIP_RAN.ts'] } = {}) => {
+  const tmp = seedSessionLedger(dir, 'test-sid', edits);
+  return spawnSync('bash', [KNIP_HOOK], {
+    input: JSON.stringify({ stop_hook_active: stopHookActive, session_id: 'test-sid' }),
+    env: { ...process.env, CLAUDE_PROJECT_DIR: dir, TMPDIR: tmp },
     encoding: 'utf8',
   });
+};
 
 describe.skipIf(!HAS_BUN)('knip-check.sh gate behaviour', () => {
   // Forms the ORIGINAL hook missed (it checked only knip.json/.jsonc/.ts/.config.ts). Parametrised
@@ -85,6 +92,22 @@ describe.skipIf(!HAS_BUN)('knip-check.sh gate behaviour', () => {
     expect(r.status).toBe(0);
     expect(r.stderr).not.toContain('KNIP_RAN');
   });
+
+  it('session scoping: a session with NO recorded edits is never blocked (fail-open)', () => {
+    const r = run(fixture({ '.knip.json': '{}', 'package.json': withKnipScript() }), {
+      edits: null,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+
+  it("session scoping: findings only in ANOTHER session's files are filtered out", () => {
+    const dir = fixture({ '.knip.json': '{}', 'package.json': withKnipScript() });
+    writeFileSync(join(dir, 'theirs.ts'), 'export {};\n');
+    const r = run(dir, { edits: ['theirs.ts'] }); // knip flags KNIP_RAN.ts, which this session never touched
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('KNIP_RAN');
+  });
 });
 
 // Static guard — no bun/node needed. Locks Defect D permanently: neither bun-only hook may probe
@@ -94,6 +117,7 @@ describe('Defect D static guard: bun-only hooks never shell node', () => {
   it.each([
     ['knip-check.sh', KNIP_HOOK],
     ['lint-check.sh', LINT_HOOK],
+    ['session-edits-lib.sh', join(AGENTS_HOOKS, 'session-edits-lib.sh')],
   ])('%s contains no `node -<flag>` probe', (_name, path) => {
     expect(readFileSync(path, 'utf8')).not.toMatch(/\bnode\s+-/);
   });

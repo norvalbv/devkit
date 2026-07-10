@@ -63,7 +63,7 @@ const BUN_BIN_DIR = dirname(BUN);
 
 /** Source roots whose bytes determine whether a rebuild is needed. Covers everything the tarball
  *  ships (copy-dist-assets mirrors templates/skills/agents into dist/) plus the build inputs. */
-const SOURCE_ROOTS = ['cli', 'gate-engine', 'scripts', 'templates', 'skills', 'agents'];
+const SOURCE_ROOTS = ['cli', 'gate-engine', 'scripts', 'templates', 'skills', 'agents', 'agents-hooks'];
 const SOURCE_FILES = ['package.json', 'tsconfig.json', 'tsconfig.build.json'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '__tests__', 'coverage']);
 
