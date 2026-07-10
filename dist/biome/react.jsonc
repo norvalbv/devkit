@@ -1,0 +1,88 @@
+{
+  // @norvalbv/devkit — Biome REACT preset (base core + React architecture rules).
+  //
+  // CONSUME via the BARE exports subpath, never the .jsonc file path (BL-1):
+  //   { "extends": ["@norvalbv/devkit/biome/react"] }   // ✅
+  //   { "extends": ["@norvalbv/devkit/biome/react.jsonc"] }   // ❌ exports map owns the extension
+  //
+  // This preset pulls in everything from base (formatter, json formatter, generic
+  // linter rules) and layers the React architecture rules on top: named exports
+  // only, `type` over `interface`, ban React.FC / JSX.Element in favour of
+  // ReactElement, and no `export *` barrels.
+  //
+  // It carries NO `files.includes` — add your own locally to scope which files the
+  // React rules apply to:
+  //   {
+  //     "extends": ["@norvalbv/devkit/biome/react"],
+  //     "files": { "includes": ["**", "!dist"] }
+  //   }
+  //
+  // The relative `./base.jsonc` extends below resolves WITHIN this package; that is
+  // intentional and supported (a preset extending a sibling preset). Consumers still
+  // extend the bare subpath above, not these files.
+  //
+  // The React architecture rules live in an `overrides` block scoped to `*.{tsx,jsx}`
+  // — they are component-level rules (named exports, ReactElement over JSX.Element, no
+  // `export *`) and MUST NOT fire on Node/config `.ts`/`.mjs` files. A consumer extends
+  // this preset at the repo root; the override keeps the React rules off the backend.
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "extends": ["./base.jsonc"],
+  "overrides": [
+    {
+      "includes": ["**/*.{tsx,jsx}"],
+      "linter": {
+        "rules": {
+          "style": {
+            // component-exports: named exports only
+            "noDefaultExport": "error",
+            // typing-types-over-interfaces: type over interface
+            "useConsistentTypeDefinitions": {
+              "level": "error",
+              "options": {
+                "style": "type"
+              }
+            },
+            // typing-no-fc + typing-returns: ban React.FC and JSX.Element in favour of ReactElement
+            "noRestrictedTypes": {
+              "level": "error",
+              "options": {
+                "types": {
+                  "React.FC": {
+                    "message": "React.FC is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "FC": {
+                    "message": "FC is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "React.FunctionComponent": {
+                    "message": "React.FunctionComponent is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "FunctionComponent": {
+                    "message": "FunctionComponent is discouraged. Type props explicitly and return ReactElement.",
+                    "use": "ReactElement"
+                  },
+                  "JSX.Element": {
+                    "message": "JSX.Element widens props to any. Use ReactElement from 'react' instead.",
+                    "use": "ReactElement"
+                  },
+                  "React.JSX.Element": {
+                    "message": "React.JSX.Element widens props to any. Use ReactElement from 'react' instead.",
+                    "use": "ReactElement"
+                  }
+                }
+              }
+            }
+          },
+          // barrel-files: ban `export *` (aimless re-exports break tree-shaking and
+          // invite cycles). A named public-API barrel (`export { X } from './X'`) is
+          // fine and is how cross-feature imports work; export default is banned above.
+          "performance": {
+            "noReExportAll": "error"
+          }
+        }
+      }
+    }
+  ]
+}
