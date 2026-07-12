@@ -50,8 +50,5 @@
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": true }
-  },
-
-  "//completenessHard": "The completeness gate (commit-msg, feature-completeness-reviewer as a headless judge) blocks on a confident FAIL. Default: true — a warn printed to a headless agent scrolls past unread, so the flagged gap ships anyway. Set false to soften to advisory for this repo. Env override: GUARD_COMPLETENESS_HARD / FRINK_COMPLETENESS_HARD (=0 softens / =1 hardens as a one-off).",
-  "completenessHard": true
+  }
 }

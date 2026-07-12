@@ -73,7 +73,6 @@ export interface GuardConfig {
   review: ReviewConfig;
   noLog: boolean;
   noLlm: boolean;
-  completenessHard: boolean;
   cwd: string;
 }
 
@@ -105,7 +104,6 @@ interface RawGuardConfigFile {
   };
   noLog?: boolean;
   noLlm?: boolean;
-  completenessHard?: boolean;
 }
 
 export const CONFIG_FILENAME = 'guard.config.json';
@@ -181,12 +179,6 @@ export const DEFAULTS = Object.freeze({
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
   noLlm: false,
-  // The completeness gate (commit-msg) blocks on a confident FAIL. HARD by default: a warn
-  // printed to a headless agent is a no-op channel — the finding scrolls past and the gap
-  // ships (the same lesson that hardened the sentry gate). Set false (or
-  // GUARD_COMPLETENESS_HARD=0 / FRINK_COMPLETENESS_HARD=0 as a one-off) to soften to
-  // advisory; GUARD_NO_COMPLETENESS=1 skips entirely.
-  completenessHard: true,
 });
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
@@ -199,7 +191,9 @@ function envVar(name: string): string | undefined {
 
 // Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
 // as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-function envBool(name: string): boolean | undefined {
+// Exported for hard-by-default gates that must distinguish unset (→ default) from an
+// explicit `=0` soften (envFlag can't — it folds unset and `=0` both to false).
+export function envBool(name: string): boolean | undefined {
   const v = envVar(name);
   if (v === undefined) return undefined;
   const t = String(v).trim().toLowerCase();
@@ -252,7 +246,6 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
 
   const noLogEnv = envBool('NO_LOG');
   const noLlmEnv = envBool('DECISION_NO_LLM');
-  const completenessHardEnv = envBool('COMPLETENESS_HARD');
   const indexEnv = envVar('INDEX_PATH');
   const allowlistEnv = envVar('ALLOWLIST_PATH');
   const decisionsEnv = envVar('DECISIONS_DIR');
@@ -300,8 +293,6 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     },
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
-    completenessHard:
-      completenessHardEnv ?? Boolean(file.completenessHard ?? DEFAULTS.completenessHard),
     // Echo the resolution base so engines never have to re-derive it (and never reach
     // for __dirname): they resolve every path field against THIS cwd.
     cwd,

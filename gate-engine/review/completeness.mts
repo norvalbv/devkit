@@ -6,27 +6,28 @@
  *
  * HARD-BY-DEFAULT: a confident FAIL blocks the commit. Warn-only proved a no-op channel for
  * headless agents — findings scrolled past unread and the flagged gap shipped anyway (the same
- * evidence that hardened the sentry gate). A repo softens to advisory via `guard.config.json`
- * `"completenessHard": false` (or GUARD_COMPLETENESS_HARD=0 as a one-off). Straight opus, no
- * cascade (user ruling: the gap-finder gets the strongest model or it isn't worth running).
+ * evidence that hardened the sentry gate). GUARD_COMPLETENESS_HARD=0 softens a one-off commit
+ * back to advisory — env only, deliberately NO guard.config.json key: a standing config soften
+ * would be a per-repo policy no consumer wants and an agent-stageable file could self-serve.
+ * Straight opus, no cascade (user ruling: the gap-finder gets the strongest model or it isn't
+ * worth running).
  *
  * Step 0 is done FOR the agent: the governing Targets load in-process via scopedTargets() (same
  * package — no PATH round-trip) and render exactly like the consumer's prep-critique block.
  *
- * Contract: exit 1 = confident FAIL under completenessHard (the default; env or config can
- * soften) · exit 2 = could-not-run / judge outage (fail-open on normal commits) · exit 3 = the
- * same outage under GUARD_AI_STRICT (ship): FAIL-CLOSED — a stderr warning is invisible to a
- * headless shipping agent (exit code is the only channel that survives output filtering), so a
- * ship must not proceed with its gap-finder silently dark · exit 0 = everything else (pass /
- * softened warn / skipped).
- * Knobs: GUARD_NO_COMPLETENESS=1 skip · cfg.completenessHard=false / GUARD_COMPLETENESS_HARD=0
- * soften · cfg.noLlm skip.
+ * Contract: exit 1 = confident FAIL (the default; GUARD_COMPLETENESS_HARD=0 softens) · exit 2 =
+ * could-not-run / judge outage (fail-open on normal commits) · exit 3 = the same outage under
+ * GUARD_AI_STRICT (ship): FAIL-CLOSED — a stderr warning is invisible to a headless shipping
+ * agent (exit code is the only channel that survives output filtering), so a ship must not
+ * proceed with its gap-finder silently dark · exit 0 = everything else (pass / softened warn /
+ * skipped).
+ * Knobs: GUARD_NO_COMPLETENESS=1 skip · GUARD_COMPLETENESS_HARD=0 soften · cfg.noLlm skip.
  */
 
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { envFlag, resolveGuardConfig } from '../config.mts';
+import { envBool, envFlag, resolveGuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
@@ -115,11 +116,9 @@ export async function runCompleteness(
   if (envFlag('NO_COMPLETENESS')) return 0;
   let prompt: string;
   let diff: string;
-  let completenessHard = false;
   try {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return 0;
-    completenessHard = cfg.completenessHard;
     const message = readFileSync(
       path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile),
       'utf8',
@@ -192,11 +191,11 @@ export async function runCompleteness(
   if (verdict !== 'FAIL') return 0;
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());
-  if (completenessHard) return 1;
+  // Hard unless explicitly softened for this one commit (GUARD_COMPLETENESS_HARD=0); unset → block.
+  if (envBool('COMPLETENESS_HARD') ?? true) return 1;
   console.error(
-    'guard-review: WARN-only (commit proceeds; completenessHard is softened for this repo). ' +
-      'Re-harden by removing `"completenessHard": false` from guard.config.json; skip with ' +
-      'GUARD_NO_COMPLETENESS=1.',
+    'guard-review: WARN-only (commit proceeds; GUARD_COMPLETENESS_HARD=0 softened this run). ' +
+      'Skip entirely with GUARD_NO_COMPLETENESS=1.',
   );
   return 0;
 }
