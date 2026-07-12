@@ -13,6 +13,7 @@ import {
   buildPrompt,
   cleanMessage,
   extractEvidence,
+  focusDiff,
   judge,
   majority,
   parseSentryVerdict,
@@ -140,11 +141,11 @@ describe('buildContext (names tier appends files; diff tier appends the staged d
   });
 
   it('diff tier appends the staged diff + the self-clear directive', () => {
-    const diff = '--- a/src/a.ts\n+++ b/src/a.ts\n@@\n+  captureException(e);';
+    const diff = '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n+  captureException(e);';
     const out = buildContext('fix: swallow', 'M\tsrc/a.ts', diff, 'diff');
     expect(out).toContain('STAGED DIFF');
     expect(out).toContain('reply SKIP');
-    expect(out).toContain('captureException(e);');
+    expect(out).toContain('captureException(e);'); // the error hunk survives focusDiff
   });
 
   it('diff tier with no diff degrades to message-only', () => {
@@ -152,10 +153,49 @@ describe('buildContext (names tier appends files; diff tier appends the staged d
   });
 
   it('caps the staged diff evidence (a huge diff does not blow the payload)', () => {
-    const diff = `--- a/x\n+++ b/x\n${'+ line\n'.repeat(4000)}`;
+    const diff = `--- a/x\n+++ b/x\n${`@@ -1 +1 @@\n+ log.warn(e)\n`.repeat(4000)}`;
     const out = buildContext('fix: x', '', diff, 'diff');
-    // message (≤2000) + directive header + capped diff (≤6000) stays bounded well under the raw diff.
+    // message (≤2000) + directive header + capped evidence (≤6000) stays bounded well under the raw diff.
     expect(out.length).toBeLessThan(2000 + 1000 + 6000 + 100);
+  });
+});
+
+describe('focusDiff (decisions-style evidence selection — error hunks only)', () => {
+  const fileDiff = (path: string, hunkBody: string) =>
+    `--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,3 @@\n${hunkBody}`;
+
+  it('keeps a hunk that adds a capture', () => {
+    expect(focusDiff(fileDiff('src/a.ts', '+  captureException(e);'))).toContain(
+      'captureException',
+    );
+  });
+
+  it('keeps a swallow hunk (catch / log.warn)', () => {
+    const out = focusDiff(fileDiff('src/a.ts', '+  catch (e) { log.warn(e); }'));
+    expect(out).toContain('log.warn');
+  });
+
+  it('drops a non-error hunk to header + omission note', () => {
+    const out = focusDiff(
+      fileDiff(
+        'src/ui.tsx',
+        '-  <span className="truncate" />\n+  <span className="break-words" />',
+      ),
+    );
+    expect(out).not.toContain('className');
+    expect(out).toContain('CHANGED FILES: src/ui.tsx');
+    expect(out).toContain('omitted');
+  });
+
+  it('multi-file: keeps the capture file AND the swallow file', () => {
+    const diff = `${fileDiff('src/cap.ts', '+  captureException(e);')}\n${fileDiff('src/swallow.ts', '+  catch (e) { log.warn(e); }')}`;
+    const out = focusDiff(diff);
+    expect(out).toContain('captureException');
+    expect(out).toContain('log.warn');
+  });
+
+  it('empty diff → empty', () => {
+    expect(focusDiff('')).toBe('');
   });
 });
 

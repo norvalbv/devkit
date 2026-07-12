@@ -9,9 +9,9 @@
  * It imports the judge pieces FROM THE GATE (buildPrompt / shouldJudge / buildContext / judge), so the
  * benchmark exercises the exact path the gate runs — prompt and logic never drift.
  *
- * SEED corpus: cases.jsonl ships a small, GENERIC starter set (no repo-specific subjects). It is a
- * seed, not data the engine reads at runtime — copy it and add your own real commit subjects for a
- * meaningful score on your codebase. No baseline ships: generate yours with --baseline once tuned.
+ * SEED corpus: cases.jsonl ships a 103-case starter set derived from real commits (paths/subjects are
+ * illustrative, not generic). It is a dev-only seed, not data the gate reads at runtime — copy it and
+ * add your own real commit subjects to score your codebase. No baseline ships: generate with --baseline.
  *
  * Each row in cases.jsonl: { id, message, nameStatus?, diff?, expected:"MONITOR"|"SKIP", category, note }.
  * `diff` (the staged diff) is only read by the `diff` context tier; the self-clear rows (a MONITOR-worthy
@@ -42,7 +42,9 @@ const casesPath = path.join(here, 'cases.jsonl');
 const baselinePath = path.join(here, 'results.baseline.json');
 
 const MODEL = process.env.BENCH_MODEL ?? 'haiku';
-const CONTEXT = process.env.BENCH_CONTEXT ?? 'message';
+// Default matches the gate default (diff) so a bare `--fail` compares against the shipped config's
+// baseline, not a message run vs a diff baseline (CodeRabbit #92).
+const CONTEXT = process.env.BENCH_CONTEXT ?? 'diff';
 const SHOTS = Number(process.env.BENCH_SHOTS ?? '4');
 const SAMPLES = Number(process.env.BENCH_SAMPLES ?? '1') || 1;
 const args = new Set(process.argv.slice(2));

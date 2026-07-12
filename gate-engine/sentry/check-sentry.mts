@@ -19,13 +19,15 @@
  * the message-file path); pre-commit can't see it on interactive commits.
  *
  * Research basis (the context tier + prompt shape are tuned, not guessed):
- *   - message-alone underfits; message + file-level change features (paths + A/M/D, NOT hunks) lifts
- *     cross-project commit classification ~+20pp (arXiv 1711.05340). Full diff can confuse a cheap
- *     model via distractors (arXiv 2412.10079) — so message stays the default. But a message-only
- *     judge cannot see that a swallowed error is ALREADY instrumented in the same commit (sc-1116): it
- *     re-flags a surface the diff already fixed. The `diff` tier feeds the (capped) staged diff so the
- *     judge SELF-CLEARS when the capture is present — the same "evaluate the live diff" contract the
- *     decisions/reviewer judges use. It is a swept dimension (below); ship the cell the eval picks.
+ *   - message-alone underfits (arXiv 1711.05340) AND is structurally blind to sc-1116: it cannot see
+ *     that a swallowed error is ALREADY instrumented in the same commit, so it re-flags a surface the
+ *     diff already fixed (measured: message precision 0.46 regardless of model). A FULL diff can
+ *     confuse a cheap model via distractors (arXiv 2412.10079) — but FOCUSING it to error-handling
+ *     hunks (focusDiff, the decisions-detect pattern) removes them. So the default feeds the FOCUSED
+ *     diff, the same "evaluate the live diff" contract the decisions/reviewer judges use. On the eval
+ *     (103 real-derived cases) haiku+focused-diff = F1 0.93 (precision 0.93, recall 0.93) vs message
+ *     F1 0.56, and it beats sonnet on the full diff (0.88) AND edges sonnet-focused (0.92) — context
+ *     + focus dominate model, and cheap wins outright.
  *   - few-shot >> zero-shot, chain-of-thought does not help commit classification (arXiv 2605.02033).
  *   - self-consistency (sample N, majority-vote) reliably lifts a model; reasoning tiers give no
  *     advantage and are slow (arXiv 2510.22389) — so prefer *_SENTRY_SAMPLES over a reasoning tier.
@@ -40,14 +42,21 @@
  * Knobs (read GUARD_* first, then FRINK_* as a back-compat alias):
  *   NO_SENTRY_JUDGE=1 (skip) · SENTRY_NO_LLM=1 (skip — can't judge without the LLM) ·
  *   SENTRY_HARD=1 (MONITOR→block) · SENTRY_MODEL (default haiku) ·
- *   SENTRY_CONTEXT=message|names|diff (default message) · SENTRY_SAMPLES=N (default 1) ·
- *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd).
+ *   SENTRY_CONTEXT=message|names|diff (default diff, focused) · SENTRY_SAMPLES=N (default 1) ·
+ *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd) ·
+ *   SENTRY_DIFF_FULL=1 (feed the whole diff, not just error-handling hunks — A/B).
+ *
+ * DATA BOUNDARY: the `diff` tier sends the FOCUSED staged source (error-handling hunks, capped 6000c)
+ * to the configured Claude judge — more than the message tier's metadata. focusDiff limits it to
+ * error-relevant hunks, never whole files. Set SENTRY_CONTEXT=message to send only the commit message,
+ * or NO_SENTRY_JUDGE=1 to disable the judge entirely.
  * No `claude` binary / offline / quota-exhausted → fail-open, but execJudge prints one stderr warning
  * so the dark judge is VISIBLE (no longer a silent no-op). See ../judge/run-judge.mjs.
  *
- * GOVERNING RULE (devkit "ship the generator, never the data"): every path resolves against the
- * CONSUMER cwd, never __dirname. The watchlist + the eval corpus + the baseline are the consumer's
- * data, born in their repo — none ships here.
+ * GOVERNING RULE (devkit "ship the generator, never the data"): every runtime path resolves against
+ * the CONSUMER cwd, never __dirname. The WATCHLIST + the BASELINE stay the consumer's data (born in
+ * their repo, never shipped). The eval `cases.jsonl` DOES ship — 103 real-derived cases — but it is a
+ * dev-only SEED the gate never reads at runtime; a consumer copies + grows it with their own commits.
  */
 
 import { execSync } from 'node:child_process';
@@ -88,11 +97,13 @@ const CWD = process.cwd();
 
 const MODEL = envVar('SENTRY_MODEL') ?? 'haiku';
 const SAMPLES = Number(envVar('SENTRY_SAMPLES') ?? '1') || 1;
-// Default = diff: the eval (gate-engine/sentry/eval) picked it. On the seed corpus, haiku+diff scores
-// MONITOR precision 1.00 / recall 0.83 (F1 0.91) vs message's 0.83/0.83 (F1 0.83) — the diff tier
-// erases the sc-1116 false-positive (a swallow the same commit already instruments → SKIP) at no
-// recall cost, and still MONITORs a surface a capture ELSEWHERE in the diff leaves un-instrumented.
-// `message`/`names` stay available via *_SENTRY_CONTEXT; re-run the sweep on your corpus to re-decide.
+// Default = diff, FOCUSED (see buildContext/focusDiff). The eval (gate-engine/sentry/eval, 103 cases)
+// picked it: haiku+focused-diff = MONITOR precision 0.93 / recall 0.93 (F1 0.93) vs message 0.46/0.71
+// (F1 0.56 — message flags every already-instrumented swallow). Focusing to error-handling hunks beats
+// the full diff (0.83), beats sonnet-full (0.88), AND edges sonnet-focused (0.92) — context + focus
+// dominate model, cheap wins. The
+// diff tier erases the sc-1116 false-positive at no recall cost and still MONITORs a surface a capture
+// ELSEWHERE leaves un-instrumented. `message`/`names` stay available via *_SENTRY_CONTEXT.
 const CONTEXT_TIER = envVar('SENTRY_CONTEXT') ?? 'diff';
 const DEFAULT_WATCHLIST = 'docs/sentry-watchlist.md';
 
@@ -160,18 +171,58 @@ export function shouldJudge(message: string): boolean {
   return SENTRY_JUDGE_TYPE_RE.test(subjectOf(message));
 }
 
-// Cap the staged-diff evidence fed to the `diff` tier. Sentry commits are small; a cap keeps a large
-// refactor from burying the signal (focused > full context — same rationale as the decisions detect
-// judge's 12000 slice). The bench sweeps whether the diff tier is worth the extra tokens over message.
+// Cap the staged-diff evidence fed to the `diff` tier.
 const DIFF_EVIDENCE_CAP = 6000;
+
+// A hunk is error-handling-relevant if it touches a catch/throw/reject/.catch, a log.warn|error, or a
+// Sentry capture — the swallow-vs-capture signal the judge needs. Everything else is a distractor.
+const ERROR_HUNK_RE =
+  /\b(?:try|catch|throw|reject|captureException|captureMessage|captureMainMessage)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
+// Per-file block boundary, post-image path, hunk boundary — hoisted (a literal in a hot fn recompiles).
+const DIFF_FILE_SPLIT_RE = /\n(?=--- )/;
+const DIFF_POST_PATH_RE = /^\+\+\+ (?:b\/)?(\S+)/m;
+const DIFF_HUNK_SPLIT_RE = /\n(?=@@ )/;
+
+/**
+ * FOCUS the staged diff to just its error-handling hunks — the decisions-detect pattern (send the
+ * judge the signal, not the whole commit): a header listing every changed file, then ONLY the
+ * error-relevant hunks per file, then an omission count. Dropping distractors is a MEASURED win on the
+ * 103-case eval (haiku 0.83→0.93) — it kills borderline over-fires and stops the cap from truncating
+ * the signal out of a big commit. Deterministic EVIDENCE selection only; the LLM still decides.
+ */
+export function focusDiff(diffText: string): string {
+  const text = String(diffText);
+  if (!text.trim()) return '';
+  const files: string[] = [];
+  const kept: string[] = [];
+  let omitted = 0;
+  for (const block of text.split(DIFF_FILE_SPLIT_RE)) {
+    const m = block.match(DIFF_POST_PATH_RE);
+    const file = m?.[1];
+    if (file && file !== '/dev/null') files.push(file);
+    const hunks = block.split(DIFF_HUNK_SPLIT_RE);
+    const head = hunks[0].startsWith('@@') ? '' : (hunks.shift() ?? ''); // the ---/+++ header
+    const relevant: string[] = [];
+    for (const h of hunks) {
+      if (!h.startsWith('@@')) continue;
+      if (ERROR_HUNK_RE.test(h)) relevant.push(h);
+      else omitted += 1;
+    }
+    if (relevant.length) kept.push(`${head.trim()}\n${relevant.join('\n')}`.trim());
+  }
+  const header = files.length ? `CHANGED FILES: ${files.join(', ')}\n` : '';
+  const note = omitted ? `[${omitted} non-error hunk(s) omitted]\n` : '';
+  return `${header}${note}${kept.join('\n')}`.trim();
+}
 
 /** Build the stdin payload for the judge.
  *   message : commit subject/body only (the tuned default).
  *   names   : + the changed-file list (status + path), never hunks.
- *   diff    : + the staged diff, capped — lets the judge SEE whether the change already instruments
- *             the error it handles (so a MONITOR self-clears when the capture is present), instead of
- *             re-flagging a surface the diff already fixed. The directive is inlined so the MODEL makes
- *             the call from the diff — no regex / string matching. */
+ *   diff    : + the staged diff, FOCUSED to its error-handling hunks (focusDiff — the decisions
+ *             pattern), then capped — lets the judge SEE whether the change already instruments the
+ *             error it handles (so a MONITOR self-clears when the capture is present). The directive is
+ *             inlined so the MODEL decides from the diff — no regex verdict. GUARD_SENTRY_DIFF_FULL=1
+ *             feeds the whole diff instead (A/B escape hatch). */
 export function buildContext(
   message: string,
   nameStatus: string,
@@ -181,13 +232,23 @@ export function buildContext(
   const msg = String(message).trim().slice(0, 2000);
   const base = `COMMIT MESSAGE:\n${msg}`;
   if (tier === 'diff' && diff && String(diff).trim()) {
+    const focused = envVar('SENTRY_DIFF_FULL') ? '' : focusDiff(diff);
+    // Truncation fail-safe: if the (focused) evidence overflows the cap, a later swallow can be cut
+    // while an early capture survives — the judge must NOT read that absence as instrumented. Mark it
+    // incomplete (mirrors the decisions detect judge's INCOMPLETE fail-safe). focusDiff makes overflow
+    // rare (error hunks only), but a genuinely large multisurface commit can still hit it.
+    const full = focused || String(diff).trim();
+    const evidence =
+      full.length > DIFF_EVIDENCE_CAP
+        ? `${full.slice(0, DIFF_EVIDENCE_CAP)}\n[EVIDENCE TRUNCATED — later hunks omitted; a swallow whose capture is not shown here may still be UN-instrumented. Do NOT infer SKIP from an absent capture.]`
+        : full;
     return (
       `${base}\n\n` +
-      'STAGED DIFF (ground truth over the message). If this diff ALREADY adds a Sentry capture — ' +
-      '`Sentry.captureException`/`captureMessage` or a project wrapper such as `captureMainMessage` — ' +
-      'for the error the change handles, the surface is instrumented: reply SKIP. Reply MONITOR only ' +
-      'when a swallowed error-class is introduced or touched and the diff adds NO capture for it:\n' +
-      `${String(diff).trim().slice(0, DIFF_EVIDENCE_CAP)}`
+      'STAGED DIFF (error-handling hunks; ground truth over the message). If this diff ALREADY adds a ' +
+      'Sentry capture — `Sentry.captureException`/`captureMessage` or a project wrapper such as ' +
+      '`captureMainMessage` — for the error the change handles, the surface is instrumented: reply ' +
+      'SKIP. Reply MONITOR only when a swallowed error-class is introduced or touched and the diff ' +
+      `adds NO capture for it:\n${evidence}`
     );
   }
   if (tier !== 'names' || !nameStatus || !String(nameStatus).trim()) return base;
