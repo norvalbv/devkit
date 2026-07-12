@@ -58,7 +58,7 @@ const excerptDiff = (diff) => {
     let j = i + 1;
     while (j < lines.length && !UNIT_START_RE.test(lines[j])) j++;
     const unit = lines.slice(i, j);
-    const unitBytes = unit.join('\n').length + 1;
+    const unitBytes = Buffer.byteLength(unit.join('\n'), 'utf8') + 1;
     if (out.length + unit.length > MAX_EXCERPT_LINES || bytes + unitBytes > MAX_EXCERPT_BYTES) {
       truncated = true;
       break;
@@ -128,7 +128,20 @@ for (const p of proposals) {
   const { excerpt, truncated } = p.diffFull
     ? excerptDiff(p.diffFull)
     : { excerpt: null, truncated: false };
-  const degenerate = !!p.degenerate;
+  // strict: only true/"true" is degenerate — a malformed value (e.g. the string "false") must
+  // fail loudly, never coerce into a degenerate row that silently drops its findings
+  const rawDegenerate = scalar(p.degenerate);
+  const degenerate = rawDegenerate === true || rawDegenerate === 'true';
+  if (![true, false, 'true', 'false', null, undefined].includes(rawDegenerate))
+    errors.push(`${p.id}: malformed degenerate flag ${JSON.stringify(rawDegenerate)}`);
+  // malformed judge output (findings not an array / null entries) must surface as a row error,
+  // never crash the whole finalize pass before validateCase can name the offender
+  if (p.findings != null && !Array.isArray(p.findings))
+    errors.push(`${p.id}: findings is not an array`);
+  const rawFindings = Array.isArray(p.findings) ? p.findings : [];
+  const findingObjects = rawFindings.filter((f) => f && typeof f === 'object');
+  if (findingObjects.length !== rawFindings.length)
+    errors.push(`${p.id}: findings contains non-object entries`);
   const c = scrubDeep({
     id: p.id,
     source: p.source,
@@ -153,7 +166,7 @@ for (const p of proposals) {
       truncated,
       summary: p.summary ?? '',
     },
-    findings: degenerate ? [] : (p.findings ?? []).map(normalizeFinding),
+    findings: degenerate ? [] : findingObjects.map(normalizeFinding),
     degenerate,
     degenerateReason: degenerate ? (scalar(p.degenerateReason) ?? 'empty-diff') : null,
     note: p.note ?? '',
@@ -170,6 +183,14 @@ for (const p of proposals) {
   const leaks = findLeaks(JSON.stringify(c));
   if (leaks.length) errors.push(`${c.id}: scrub leaks — ${leaks.join(', ')}`);
   cases.push(c);
+}
+
+// --append must not launder an invalid or leaked OLD row through a successful exit — the copied
+// rows get the same validation as the new ones before the merged corpus is written.
+for (const c of existing) {
+  errors.push(...validateCase(c));
+  const leaks = findLeaks(JSON.stringify(c));
+  if (leaks.length) errors.push(`${c.id}: scrub leaks (existing row) — ${leaks.join(', ')}`);
 }
 
 if (errors.length) {

@@ -19,12 +19,11 @@ import { describe, expect, it } from 'vitest';
 import { EXCERPT_ALLOWLIST, validateCase } from '../eval/lib/schema.mts';
 import { findLeaks } from '../eval/lib/scrub.mts';
 
-const casesPath = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'eval',
-  'cases.jsonl',
-);
+// EDGE_CASES_CORPUS lets CI (or a checkout holding the canonical private copy) point the gate at
+// the real corpus; the local gitignored working copy is the fallback.
+const casesPath =
+  process.env.EDGE_CASES_CORPUS ??
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'eval', 'cases.jsonl');
 
 const present = existsSync(casesPath);
 
@@ -43,7 +42,11 @@ describe.skipIf(!present)('edge-cases corpus (cases.jsonl)', () => {
   });
 
   it('carries no secret-pattern leaks and no machine paths', () => {
-    const leaks = lines.flatMap((l, i) => findLeaks(l).map((k) => `line ${i + 1}: ${k}`));
+    // scan DECODED values (re-serialized), not raw lines — /-style JSON escapes must not
+    // hide a machine path or token from the patterns
+    const leaks = cases.flatMap((c, i) =>
+      findLeaks(JSON.stringify(c)).map((k) => `line ${i + 1}: ${k}`),
+    );
     expect(leaks).toEqual([]);
   });
 

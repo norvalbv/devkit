@@ -53,7 +53,10 @@ export const classifyPromptVariant = (text) => {
   if (t.includes("given everything we've discussed") && t.includes('golden standard'))
     return 'frink-cmd-v1';
   // earlier revision of the frink command — same body, no golden-standard coverage line
-  if (t.includes("given everything we've discussed") && t.includes('carried out in the same branch'))
+  if (
+    t.includes("given everything we've discussed") &&
+    t.includes('carried out in the same branch')
+  )
     return 'frink-cmd-v0';
   if (t.includes('based on our diff, debugging, and chat history')) return 'legacy-diff-debug-chat';
   return `custom-${sha8(t)}`;
@@ -82,8 +85,8 @@ export const validateCase = (c) => {
   const a = c?.anchor;
   if (!a || !isOneOf(a.kind, ANCHOR_KINDS)) err(`bad anchor.kind ${a?.kind}`);
   if (typeof a?.summary !== 'string' || !a.summary) err('anchor.summary required');
-  if (a?.kind === 'diff' && typeof a?.nameStatus !== 'string')
-    err('diff anchor requires nameStatus');
+  if (a?.kind === 'diff' && (typeof a?.nameStatus !== 'string' || !a.nameStatus.trim()))
+    err('diff anchor requires a non-empty nameStatus');
   const allowlisted = EXCERPT_ALLOWLIST.includes(c?.repo);
   if (a?.diffExcerpt && !allowlisted)
     err(`diffExcerpt present but repo ${c?.repo} not in excerpt allowlist`);

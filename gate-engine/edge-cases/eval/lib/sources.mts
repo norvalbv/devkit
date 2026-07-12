@@ -444,10 +444,17 @@ const buildCursorWorkspaceMap = () => {
 };
 
 const PATH_RE = /\/Users\/[\w.%/ -]+/g;
+const safeDecode = (s) => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s; // stray % in a real filename ("100%off.txt") — vote on the raw path
+  }
+};
 const repoPathVote = (json) => {
   const votes = {};
   for (const m of json.matchAll(PATH_RE)) {
-    const repo = detectRepo(decodeURIComponent(m[0]));
+    const repo = detectRepo(safeDecode(m[0]));
     if (repo !== 'other:unknown') votes[repo] = (votes[repo] ?? 0) + 1;
   }
   const [winner] = Object.entries(votes).sort((a, b) => b[1] - a[1])[0] ?? [];

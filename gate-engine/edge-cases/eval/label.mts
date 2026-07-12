@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { CATEGORIES, DEGENERATE_REASONS, EVIDENCE_TIERS, SEVERITIES } from './lib/schema.mts';
+import { scrub } from './lib/scrub.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rawDir = path.join(here, 'raw');
@@ -87,6 +88,10 @@ const gatherEvidence = (c) => {
     if (c.editedFiles?.length) {
       const until = new Date(Date.parse(c.date) + 14 * 24 * 3600 * 1000).toISOString();
       const suffixes = c.editedFiles.map((f) => f.split('/').slice(-2).join('/'));
+      // laterCommits feeds the "independent-fix" tier, so the SESSION'S OWN commits must never
+      // land here — path overlap alone would let same-session compliance masquerade as an
+      // independent later fix. Exclude every sha the session printed (pre + post).
+      const ownShas = [...(c.preCommits ?? []), ...(c.postCommits ?? [])];
       const log = git(repoPath, [
         'log',
         '--all',
@@ -99,6 +104,8 @@ const gatherEvidence = (c) => {
       ]);
       for (const block of log.split('\x01').filter(Boolean)) {
         const [head, ...files] = block.trim().split('\n');
+        const sha = head.split(' ')[0];
+        if (ownShas.some((own) => sha.startsWith(own) || own.startsWith(sha))) continue;
         if (suffixes.some((suf) => files.some((f) => f.includes(suf))))
           bundle.laterCommits.push(head);
       }
@@ -202,7 +209,9 @@ console.log(`label: ${todo.length} to propose (${done.size} already done, model 
 
 const labelOne = async (c) => {
   const bundle = gatherEvidence(c);
-  const input = buildInput(c, bundle);
+  // defense in depth: modeled secrets/paths never reach the judge at all — redaction is
+  // semantics-neutral for labeling, and finalize's scrub stays the committed-output gate
+  const input = scrub(buildInput(c, bundle));
   for (let attempt = 0; attempt < 2; attempt++) {
     const raw = await execJudgeAsync({
       label: `edge-cases-label:${c.id}`,
@@ -219,7 +228,17 @@ const labelOne = async (c) => {
         ...f,
         evidence: { ...(f.evidence ?? {}), reviewed: false },
       }));
-      return { ...c, ...proposal, findings, labelModel: MODEL };
+      // whitelist the judge's contribution — a reply must never overwrite harvested provenance
+      // (repo/source/diffFull/…), or a transcript-influenced answer could e.g. forge an
+      // allowlisted repo and publish a non-allowlisted excerpt downstream
+      return {
+        ...c,
+        summary: proposal.summary,
+        degenerate: proposal.degenerate,
+        degenerateReason: proposal.degenerateReason ?? null,
+        findings,
+        labelModel: MODEL,
+      };
     } catch {
       // malformed JSON — one retry, then give up on this case
     }
