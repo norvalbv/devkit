@@ -13,6 +13,7 @@ import {
   buildPrompt,
   cleanMessage,
   extractEvidence,
+  focusDiff,
   judge,
   majority,
   parseSentryVerdict,
@@ -108,24 +109,24 @@ describe('sentryExit (block bounded to hard-mode + confident MONITOR)', () => {
   });
 });
 
-describe('buildContext (names tier appends changed files, never hunks)', () => {
+describe('buildContext (names tier appends files; diff tier appends the staged diff)', () => {
   it('message tier is message-only', () => {
-    expect(buildContext('fix: x', 'M\tsrc/a.ts', 'message')).toBe('COMMIT MESSAGE:\nfix: x');
+    expect(buildContext('fix: x', 'M\tsrc/a.ts', '', 'message')).toBe('COMMIT MESSAGE:\nfix: x');
   });
 
   it('names tier appends the changed-file list when present', () => {
-    const out = buildContext('fix: x', 'M\tsrc/a.ts\nA\tsrc/b.ts', 'names');
+    const out = buildContext('fix: x', 'M\tsrc/a.ts\nA\tsrc/b.ts', '', 'names');
     expect(out).toContain('CHANGED FILES');
     expect(out).toContain('M\tsrc/a.ts');
   });
 
   it('names tier with no file list degrades to message-only', () => {
-    expect(buildContext('fix: x', '', 'names')).toBe('COMMIT MESSAGE:\nfix: x');
+    expect(buildContext('fix: x', '', '', 'names')).toBe('COMMIT MESSAGE:\nfix: x');
   });
 
   it('caps a huge changed-file list at 30 lines (a big refactor commit)', () => {
     const nameStatus = Array.from({ length: 50 }, (_, i) => `M\tsrc/f${i}.ts`).join('\n');
-    const fileLines = buildContext('fix: x', nameStatus, 'names')
+    const fileLines = buildContext('fix: x', nameStatus, '', 'names')
       .split('CHANGED FILES (status\\tpath):\n')[1]
       .split('\n')
       .filter(Boolean);
@@ -134,9 +135,103 @@ describe('buildContext (names tier appends changed files, never hunks)', () => {
 
   it('caps an oversized commit message at 2000 chars', () => {
     const msg = `fix: ${'a'.repeat(5000)}`;
-    expect(buildContext(msg, '', 'message').length).toBeLessThanOrEqual(
+    expect(buildContext(msg, '', '', 'message').length).toBeLessThanOrEqual(
       'COMMIT MESSAGE:\n'.length + 2000,
     );
+  });
+
+  it('diff tier appends the staged diff + the self-clear directive', () => {
+    const diff = '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n+  captureException(e);';
+    const out = buildContext('fix: swallow', 'M\tsrc/a.ts', diff, 'diff');
+    expect(out).toContain('STAGED DIFF');
+    expect(out).toContain('reply SKIP');
+    expect(out).toContain('captureException(e);'); // the error hunk survives focusDiff
+  });
+
+  it('diff tier with no diff degrades to message-only', () => {
+    expect(buildContext('fix: x', 'M\tsrc/a.ts', '', 'diff')).toBe('COMMIT MESSAGE:\nfix: x');
+  });
+
+  it('caps the staged diff evidence (a huge diff does not blow the payload)', () => {
+    const diff = `--- a/x\n+++ b/x\n${`@@ -1 +1 @@\n+ log.warn(e)\n`.repeat(4000)}`;
+    const out = buildContext('fix: x', '', diff, 'diff');
+    // message (≤2000) + directive header + capped evidence (≤6000) stays bounded well under the raw diff.
+    expect(out.length).toBeLessThan(2000 + 1000 + 6000 + 100);
+  });
+});
+
+describe('focusDiff (decisions-style evidence selection — error hunks only)', () => {
+  const fileDiff = (path: string, hunkBody: string) =>
+    `--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,3 @@\n${hunkBody}`;
+
+  it('keeps a hunk that adds a capture', () => {
+    expect(focusDiff(fileDiff('src/a.ts', '+  captureException(e);'))).toContain(
+      'captureException',
+    );
+  });
+
+  it('keeps a swallow hunk (catch / log.warn)', () => {
+    const out = focusDiff(fileDiff('src/a.ts', '+  catch (e) { log.warn(e); }'));
+    expect(out).toContain('log.warn');
+  });
+
+  it('drops a non-error hunk to header + omission note', () => {
+    const out = focusDiff(
+      fileDiff(
+        'src/ui.tsx',
+        '-  <span className="truncate" />\n+  <span className="break-words" />',
+      ),
+    );
+    expect(out).not.toContain('className');
+    expect(out).toContain('CHANGED FILES: src/ui.tsx');
+    expect(out).toContain('omitted');
+  });
+
+  it('multi-file: keeps the capture file AND the swallow file', () => {
+    const diff = `${fileDiff('src/cap.ts', '+  captureException(e);')}\n${fileDiff('src/swallow.ts', '+  catch (e) { log.warn(e); }')}`;
+    const out = focusDiff(diff);
+    expect(out).toContain('captureException');
+    expect(out).toContain('log.warn');
+  });
+
+  it('splits on `diff --git` so a next file preamble never leaks into a prior hunk', () => {
+    // A REAL `git diff --cached`: a plain UI file, then a `catch-utils.ts` file. The 2nd file's
+    // `diff --git a/…/catch-utils.ts` preamble must NOT attach to the 1st file's hunk and trip
+    // ERROR_HUNK_RE (the word "catch" in the path). The UI file must still drop to header-only.
+    const diff = [
+      'diff --git a/src/ui.tsx b/src/ui.tsx',
+      'index 111..222 100644',
+      '--- a/src/ui.tsx',
+      '+++ b/src/ui.tsx',
+      '@@ -5 +5 @@',
+      '-  <span className="truncate" />',
+      '+  <span className="break-words" />',
+      'diff --git a/src/lib/catch-utils.ts b/src/lib/catch-utils.ts',
+      'index 333..444 100644',
+      '--- a/src/lib/catch-utils.ts',
+      '+++ b/src/lib/catch-utils.ts',
+      '@@ -1 +1,2 @@',
+      '+  const x = 1;',
+    ].join('\n');
+    const out = focusDiff(diff);
+    expect(out).not.toContain('className'); // UI hunk dropped, not kept via the leaked "catch" path
+    expect(out).not.toContain('const x = 1'); // catch-utils hunk is not error-relevant either
+    expect(out).toContain('src/ui.tsx');
+    expect(out).toContain('src/lib/catch-utils.ts'); // both files still listed in the header
+  });
+
+  it('KEEPS a comment/string capture hunk (evidence selection) — the LLM, not the regex, judges it', () => {
+    // focusDiff shows the hunk to the judge; it does NOT decide. A commented capture is kept as
+    // evidence; the prompt tells the judge a comment/string capture does not count (see mon-decoy-*).
+    const out = focusDiff(
+      fileDiff('src/a.ts', '+  // captureException(e) later\n+  catch (e) { log.warn(e); }'),
+    );
+    expect(out).toContain('captureException'); // shown, not silently dropped
+    expect(out).toContain('log.warn');
+  });
+
+  it('empty diff → empty', () => {
+    expect(focusDiff('')).toBe('');
   });
 });
 

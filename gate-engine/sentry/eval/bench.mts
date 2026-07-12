@@ -9,17 +9,19 @@
  * It imports the judge pieces FROM THE GATE (buildPrompt / shouldJudge / buildContext / judge), so the
  * benchmark exercises the exact path the gate runs — prompt and logic never drift.
  *
- * SEED corpus: cases.jsonl ships a small, GENERIC starter set (no repo-specific subjects). It is a
- * seed, not data the engine reads at runtime — copy it and add your own real commit subjects for a
- * meaningful score on your codebase. No baseline ships: generate yours with --baseline once tuned.
+ * SEED corpus: cases.jsonl ships a 103-case starter set derived from real commits (paths/subjects are
+ * illustrative, not generic). It is a dev-only seed, not data the gate reads at runtime — copy it and
+ * add your own real commit subjects to score your codebase. No baseline ships: generate with --baseline.
  *
- * Each row in cases.jsonl: { id, message, nameStatus?, expected:"MONITOR"|"SKIP", category, note }.
+ * Each row in cases.jsonl: { id, message, nameStatus?, diff?, expected:"MONITOR"|"SKIP", category, note }.
+ * `diff` (the staged diff) is only read by the `diff` context tier; the self-clear rows (a MONITOR-worthy
+ * message whose diff ALREADY adds the capture → expected SKIP) exist to score exactly that tier.
  * A row whose type free-skips (shouldJudge=false) is scored deterministically as SKIP with NO claude
  * call — so the bench only spends tokens on the judged set, exactly like the gate.
  *
  * Sweeps (the token-economy validation — pick the cheapest cell that clears the F1 target):
- *   BENCH_MODEL=haiku|sonnet     model (default haiku)
- *   BENCH_CONTEXT=message|names  message-only vs message + changed-file list (default message)
+ *   BENCH_MODEL=haiku|sonnet         model (default haiku)
+ *   BENCH_CONTEXT=message|names|diff message-only · + changed-file list · + the staged diff (default message)
  *   BENCH_SHOTS=0|4              zero- vs few-shot (default 4)
  *   BENCH_SAMPLES=1|3            self-consistency majority-vote (default 1)
  *
@@ -40,7 +42,9 @@ const casesPath = path.join(here, 'cases.jsonl');
 const baselinePath = path.join(here, 'results.baseline.json');
 
 const MODEL = process.env.BENCH_MODEL ?? 'haiku';
-const CONTEXT = process.env.BENCH_CONTEXT ?? 'message';
+// Default matches the gate default (diff) so a bare `--fail` compares against the shipped config's
+// baseline, not a message run vs a diff baseline (CodeRabbit #92).
+const CONTEXT = process.env.BENCH_CONTEXT ?? 'diff';
 const SHOTS = Number(process.env.BENCH_SHOTS ?? '4');
 const SAMPLES = Number(process.env.BENCH_SAMPLES ?? '1') || 1;
 const args = new Set(process.argv.slice(2));
@@ -68,7 +72,7 @@ function loadCasesOrExit() {
 /** Classify one case → its verdict. Free-skips score deterministically (no claude, no tokens). */
 function classify(c) {
   if (!shouldJudge(c.message)) return { got: 'SKIP', judged: false };
-  const input = buildContext(c.message, c.nameStatus, CONTEXT);
+  const input = buildContext(c.message, c.nameStatus, c.diff, CONTEXT);
   const result = judge(input, { model: MODEL, samples: SAMPLES, prompt: buildPrompt(SHOTS) });
   if (!result) return process.exit(2); // claude unavailable → can't benchmark
   return { got: result.verdict ?? 'NULL', judged: true };
