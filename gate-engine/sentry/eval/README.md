@@ -10,10 +10,10 @@ It imports the judge pieces **from the gate** (`buildPrompt`, `shouldJudge`, `bu
 
 ## SEED corpus (`cases.jsonl`) — replace it with your own
 
-`cases.jsonl` ships a small, **generic** starter set (no repo-specific subjects). It is a **seed,
-not data the engine reads at runtime** — the gate never touches it. Copy it into your repo and add
-your own **real commit subjects** for a meaningful score on your codebase, then regenerate a baseline
-(`--baseline`). **No `results.baseline.json` ships** — it is yours to generate once tuned.
+`cases.jsonl` ships a **103-case** starter set derived from real commits (paths/subjects are
+illustrative). It is a **dev-only seed, not data the gate reads at runtime** — the gate never touches
+it. Copy it into your repo and add your own **real commit subjects** for a meaningful score, then
+regenerate a baseline (`--baseline`). **No `results.baseline.json` ships** — it is yours to generate.
 
 ## Run
 
