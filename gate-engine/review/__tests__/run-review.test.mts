@@ -712,22 +712,30 @@ describe('review progress JSON — the ship banner contract (engine → file →
   });
 });
 
-describe('runCompleteness — warn-by-default commit-msg gate', () => {
+describe('runCompleteness — hard-by-default commit-msg gate', () => {
   const msg = (repo, text) => {
     const f = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
     writeFileSync(f, text);
     return f;
   };
 
-  it('FAIL without HARD → warn, exit 0', async () => {
+  it('FAIL → exit 1 (hard by default, no env, no config key)', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'gap: no error handling\nVERDICT: FAIL — misleading scope');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+  });
+
+  it('FAIL + GUARD_COMPLETENESS_HARD=0 → softened to warn for this run, exit 0', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exec = mkExec(async () => 'gap: no error handling\nVERDICT: FAIL — misleading scope');
+    process.env.GUARD_COMPLETENESS_HARD = '0';
+    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
     expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
     expect(err.mock.calls.flat().join('\n')).toContain('WARN-only');
   });
 
-  it('FAIL + GUARD_COMPLETENESS_HARD=1 → exit 1', async () => {
+  it('FAIL + GUARD_COMPLETENESS_HARD=1 → still blocks (explicit harden is a no-op on the default)', async () => {
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_COMPLETENESS_HARD = '1';
