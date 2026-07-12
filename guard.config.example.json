@@ -50,5 +50,10 @@
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": true }
+  },
+
+  "//vision": "Product-vision judge gate (guard-vision, pre-commit; opt-in via --guards …,vision). You own the CONTENT: statement = prose defining your product's vision and the lines a diff must not cross (what OUT/DRIFT mean for YOUR product). devkit owns the mechanism: FIT/DRIFT/OUT scaffold, opus judge, hard-by-default block on a confident OUT (DRIFT only warns; GUARD_VISION_HARD=0 softens a one-off; GUARD_NO_VISION=1 skips). Omit or null => the gate self-skips.",
+  "vision": {
+    "statement": "A friendly AI development TOOL, not a platform: the product must never host the user's shipped-product backend (their database, payments, auth, hosting/deploy). The product's OWN infra is always fine. OUT = a diff that makes us host the user's product backend. DRIFT = a diff serving an audience off the developer-task spine."
   }
 }

@@ -20,7 +20,7 @@ describe('newBundledGates', () => {
     const recorded = ['size', 'fanout', 'dup', 'clone', 'decisions']; // a pre-qavis selection
     const { recommended, optIn } = newBundledGates(recorded);
     expect(recommended).toEqual(['qavis-advisory']); // newly recommended, absent
-    expect(optIn).toEqual(['review']); // bundled but never selected
+    expect(optIn).toEqual(['review', 'vision']); // bundled but never selected
   });
 
   it('returns empty buckets when the recorded set already has every bundled gate', () => {
@@ -29,9 +29,9 @@ describe('newBundledGates', () => {
     expect(optIn).toEqual([]);
   });
 
-  it('a fully-recommended selection leaves only opt-in review outstanding', () => {
+  it('a fully-recommended selection leaves only the opt-in gates outstanding', () => {
     const { recommended, optIn } = newBundledGates([...RECOMMENDED_GUARD_IDS]);
     expect(recommended).toEqual([]);
-    expect(optIn).toEqual(['review']);
+    expect(optIn).toEqual(['review', 'vision']);
   });
 });

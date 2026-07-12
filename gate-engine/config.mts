@@ -40,6 +40,15 @@ export interface Thresholds {
   minTokens: number;
 }
 
+/**
+ * Vision-gate content block: the consumer's product-vision statement — prose defining the vision
+ * and the lines a diff must not cross (what OUT/DRIFT mean for THAT product). devkit owns only
+ * the mechanism (guard-vision); null/empty statement → the gate self-skips.
+ */
+export interface VisionConfig {
+  statement: string | null;
+}
+
 /** Review-agent topology block of a resolved config (the reviewer subagents read this). */
 export interface ReviewConfig {
   backendRoots: string[];
@@ -71,6 +80,7 @@ export interface GuardConfig {
   graphTool: string;
   testCommand: string | null;
   review: ReviewConfig;
+  vision: VisionConfig;
   noLog: boolean;
   noLlm: boolean;
   cwd: string;
@@ -102,6 +112,7 @@ interface RawGuardConfigFile {
     accessibility?: { skipTouchTargets?: boolean };
     agentsDir?: string;
   };
+  vision?: { statement?: string | null };
   noLog?: boolean;
   noLlm?: boolean;
 }
@@ -176,6 +187,9 @@ export const DEFAULTS = Object.freeze({
     // headless judges (the SAME files the root agent dispatches interactively).
     agentsDir: '.claude/agents',
   }),
+  // Vision gate content (guard-vision). null statement => the gate self-skips; a consumer
+  // activates it by writing its product-vision prose here (see guard.config.example.json).
+  vision: Object.freeze({ statement: null }),
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
   noLlm: false,
@@ -291,6 +305,8 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
         ...(file.review?.accessibility ?? {}),
       },
     },
+    // Vision-gate content: file only (no env — a multi-line statement doesn't belong in env).
+    vision: { statement: file.vision?.statement ?? DEFAULTS.vision.statement },
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
     // Echo the resolution base so engines never have to re-derive it (and never reach

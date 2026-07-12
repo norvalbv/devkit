@@ -1,0 +1,17 @@
+---
+slug: vision-gate-hosted
+created: 2026-07-12
+---
+
+# vision-gate-hosted
+
+## Target · 2026-07-12 — guard-vision joins the gate-engine with the qavis-advisory-gate ownership split: devkit owns the MEC
+
+**Context:** The product-vision commit gate lived as a consumer-local script (frink scripts/positioning/check-vision.mjs): an opus judge of the staged diff vs the product's vision, warn-by-default. Two rulings forced a rehome: gate fixes belong in devkit, the source of truth for the gate engine (user ruling — a frink PR flipping the local script hard was closed in favour of a devkit delivery), and no LLM judge gate is warn-by-default (review-gate-in-chain, 2026-07-12). Devkit already hosts the sibling judge gates (sentry at commit-msg, completeness, decisions), so a consumer-local vision judge was the odd one out.
+**Ruling:** guard-vision joins the gate-engine with the qavis-advisory-gate ownership split: devkit owns the MECHANISM (FIT/DRIFT/OUT verdict scaffold wrapped around the consumer's text, confident-single-word parse, opus judge via execJudge + JUDGE_READ_ONLY/JUDGE_ISOLATION, 12k paths-first diff sample, exit contract 0/1/2) and the consumer owns the CONTENT (guard.config.json vision.statement — prose defining its vision and what OUT/DRIFT mean; null => the gate self-skips like frontend reviewers with no frontendRoots). HARD-BY-DEFAULT bounded block: only a confident single-word OUT exits 1; DRIFT warns; ambiguous parses null (never blocks); GUARD_VISION_HARD=0 softens a one-off; GUARD_NO_VISION=1 skips; fail-open on judge outage and on git/config failure (exit 2). Wired as an opt-in AI guard fragment (decisions -> vision -> review order: cheaper judge before the reviewer panel) across all three hook builders; no env slot for the statement (multi-line prose does not belong in env).
+**Consequences:**
+- Positive: Positive: every consumer gets the vision gate from one source with one hard-by-default policy; frink deletes its local script (full migration, no legacy fork); the statement lives next to the other consumer topology (review roots, boundaries) in guard.config.json. Negative: opus spend per code commit for consumers that opt in; a 12k diff cap means an off-vision module in a huge diff's tail can read FIT (accepted, ported as-is); the statement is agent-editable config — but weakening prose only degrades verdict quality, it cannot flip the exit contract.
+- Negative: Statement-in-config over hardcoded prompt (sentry's approach): sentry's judgement is product-agnostic so its prompt ships in devkit; a vision judgement IS the product content, so devkit ships only the scaffold. Opt-in (not recommended-default) because an unconfigured gate is a dead hook line.
+**Vision-fit:** n/a — devkit gate-engine internals; the gate exists to guard each CONSUMER's product vision.
+**Scope:** gate-engine/vision/**,gate-engine/config.mts,cli/lib/husky/husky-block.mts,cli/lib/components.mts,guard.config.example.json
+**Source:** manual

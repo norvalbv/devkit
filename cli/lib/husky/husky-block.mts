@@ -57,6 +57,20 @@ elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
 fi
 # ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
 # /devkit:guard-decisions`,
+  vision: `# devkit:guard-vision
+echo "🔭 Vision gate (staged diff vs product vision)..."
+vrc=0
+bunx guard-vision --gate || vrc=$?
+if [ "$vrc" -eq 1 ]; then
+    echo "   Diff conflicts with the recorded product vision (confident OUT)."
+    echo "   Rethink it, or bypass a false positive: GUARD_NO_VISION=1 git commit ..."
+    exit 1
+elif [ "$vrc" -ne 0 ] && [ "$vrc" -ne 2 ]; then
+    echo "   guard-vision: unexpected exit $vrc — blocking the commit."
+    exit 1
+fi
+# vrc 0 = fit / drift-warn / softened / skipped, vrc 2 = fail-open → continue.
+# /devkit:guard-vision`,
   review: `# devkit:guard-review
 echo "🔍 Reviewer gate (headless domain judges)..."
 rrc=0
@@ -79,7 +93,9 @@ fi
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
-const AI_GUARD_IDS = ['decisions', 'review'] as const;
+// vision sits between: cheaper than the reviewer panel, so a doomed off-vision commit never pays
+// for the domain judges.
+const AI_GUARD_IDS = ['decisions', 'vision', 'review'] as const;
 
 // The qavis-advisory gate runs LAST — it's advisory, not a blocker, and cheapest to skip past. It is
 // NOT an AI_GUARD (different exit contract: 0 = continue, 3 = strict-ship block, never exit 1), so it
@@ -202,6 +218,7 @@ export function buildFullHook(selection: HookSelection, pkgRel = ''): string {
 // never blocked — exactly fallow's `command -v fallow || exit 0`.
 const STANDALONE_GATES = {
   decisions: ['guard-decisions', 'detect', '--gate'],
+  vision: ['guard-vision', '--gate'],
   review: ['guard-review', '--gate'],
 };
 

@@ -32,7 +32,8 @@
     "./gate-engine/fallow/staged-filter": "./dist/gate-engine/fallow/staged-filter.mjs",
     "./gate-engine/search-tool/guard": "./dist/gate-engine/search-tool/search-tool-guard.mjs",
     "./gate-engine/search-tool/counter": "./dist/gate-engine/search-tool/search-tool-counter.mjs",
-    "./gate-engine/sentry/check-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
+    "./gate-engine/sentry/check-sentry": "./dist/gate-engine/sentry/check-sentry.mjs",
+    "./gate-engine/vision/check-vision": "./dist/gate-engine/vision/check-vision.mjs"
   },
   "bin": {
     "devkit": "./dist/cli/index.mjs",
@@ -48,7 +49,8 @@
     "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
     "guard-structure": "./dist/gate-engine/structure/run.mjs",
     "guard-fallow-staged": "./dist/gate-engine/fallow/staged-filter.mjs",
-    "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
+    "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs",
+    "guard-vision": "./dist/gate-engine/vision/check-vision.mjs"
   },
   "files": [
     "dist"
