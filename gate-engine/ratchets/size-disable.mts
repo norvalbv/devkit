@@ -31,7 +31,7 @@ import {
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
-import { hasStagedFiles, stageBaseline, stagedSet } from './git-index.mts';
+import { stageBaseline, stagedSet } from './git-index.mts';
 
 // The impl-file predicate bundle sourceMatchers() returns (isSource/isTest/isBarrel).
 type SourceMatchers = ReturnType<typeof sourceMatchers>;
@@ -42,10 +42,22 @@ interface OversizedFile {
   lines: number;
 }
 
-// The persisted disable-count baseline (eslint/baselines/size.json).
-interface SizeBaseline {
-  fileDisables: number;
-  fnDisables: number;
+// Per-file disable counts: the value stored per path in size.json, and the per-file breakdown
+// countDisables returns.
+interface DisableCount {
+  file: number; // `eslint-disable max-lines` directives in the file
+  fn: number; // `eslint-disable max-lines-per-function` directives
+}
+// The disable baseline (eslint/baselines/size.json): grandfathered files → their disable counts.
+// Per-file (like size-lines.json) so a partial shrink can be attributed to the STAGED files and
+// auto-lowered per-commit — a parallel agent's unstaged removal is never laundered in.
+//
+// A pre-per-file `{ fileDisables, fnDisables }` baseline (no `files` key) is treated as NO
+// grandfathered debt and self-deleted on the next commit; the owner re-freezes once
+// (`guard-size freeze`, or `devkit upgrade`) to re-grandfather any real disables. Baselines are
+// regenerable state, so no dual-format gate is carried.
+interface DisableBaseline {
+  files: Record<string, DisableCount>;
 }
 
 // The persisted raw-line baseline (eslint/baselines/size-lines.json): grandfathered files → line count.
@@ -93,19 +105,22 @@ export function countDisables(root = process.cwd(), scanRoots?: string[]) {
   const rootsToScan = scanRoots ?? cfg.scanRoots;
   const match = sourceMatchers(cfg.sourceExtensions);
   const files = rootsToScan.flatMap((r: string) => walk(root, r, [], match));
-  let fileDisables = 0;
-  let fnDisables = 0;
+  // Per file → its disable counts; a file with none is omitted (the baseline never lists zeros).
+  const perFile: Record<string, DisableCount> = {};
   for (const f of files) {
     const text = readFileSync(join(root, f), 'utf8');
+    let file = 0;
+    let fn = 0;
     for (const line of text.split('\n')) {
       if (!DIRECTIVE_START.test(line)) continue;
-      const fn = (line.match(RE_MAX_LINES_PER_FN) || []).length;
-      const file = (line.replace(RE_MAX_LINES_PER_FN, '').match(RE_MAX_LINES) || []).length;
-      fnDisables += fn;
-      fileDisables += file;
+      fn += (line.match(RE_MAX_LINES_PER_FN) || []).length;
+      file += (line.replace(RE_MAX_LINES_PER_FN, '').match(RE_MAX_LINES) || []).length;
     }
+    if (file || fn) perFile[f] = { file, fn };
   }
-  return { fileDisables, fnDisables, scannedFiles: files.length };
+  const fileDisables = Object.values(perFile).reduce((s, c) => s + c.file, 0);
+  const fnDisables = Object.values(perFile).reduce((s, c) => s + c.fn, 0);
+  return { fileDisables, fnDisables, perFile, scannedFiles: files.length };
 }
 
 // Raw-line cap: source (non-test) files whose line count exceeds `maxLines`. Counts ALL lines (matches
@@ -294,6 +309,111 @@ function runLinesGate(
   }
 }
 
+// Read the disable baseline. A pre-per-file `{ fileDisables, fnDisables }` shape (no `files` key) is
+// reported empty + `legacy: true` so the gate blocks with a migrate hint (real disables) or
+// self-cleans it (a stale {0,0}); a re-freeze rewrites it to the per-file shape.
+function readDisableBaseline(baselineFile: string): {
+  grandfathered: Record<string, DisableCount>;
+  legacy: boolean;
+} {
+  if (!existsSync(baselineFile)) return { grandfathered: {}, legacy: false };
+  const raw = JSON.parse(readFileSync(baselineFile, 'utf8')) as Partial<DisableBaseline>;
+  if (raw?.files) return { grandfathered: raw.files, legacy: false };
+  return { grandfathered: {}, legacy: true };
+}
+
+// The disable gate: the max-lines-disable analogue of runLinesGate, per-file and per-commit
+// shrink-only (an unlisted file's ceiling is 0 — no NEW disables). Staged files → auto-lower/clear
+// their entries and stage the baseline; nothing staged (CI / manual) → whole-tree enforce, never
+// mutate. A pre-per-file baseline re-grandfathers via `guard-size freeze`: with real disables the
+// gate blocks (its counts aren't recognised); a stale {0,0} self-deletes in the commit.
+// Reason: sequential grow-check then per-file auto-lower, each a trivial guard at low nesting; one gate decision, mirrors runLinesGate
+// fallow-ignore-next-line complexity
+function runDisableGate(
+  root: string,
+  baselineFile: string,
+  current: ReturnType<typeof countDisables>,
+): void {
+  const { grandfathered, legacy } = readDisableBaseline(baselineFile);
+  const cur = current.perFile;
+  const staged = stagedSet(root);
+  const inCommit = staged !== null && staged.size > 0;
+  const ceil = (f: string): DisableCount => grandfathered[f] ?? { file: 0, fn: 0 };
+
+  // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). Scope to
+  // the committing files; with nothing staged, the whole tree (CI). A LEGACY baseline is always
+  // whole-tree: it has no per-file grandfathering, so any disable ANYWHERE is unrecognised and must
+  // block the migrate — else an unstaged disable slips past and the commit path below deletes
+  // size.json wholesale (changed=legacy, empty map), silently un-grandfathering it.
+  const scoped = legacy
+    ? Object.keys(cur)
+    : inCommit
+      ? [...(staged as Set<string>)]
+      : Object.keys({ ...cur, ...grandfathered });
+  const grew = scoped.filter(
+    (f) => cur[f] && (cur[f].file > ceil(f).file || cur[f].fn > ceil(f).fn),
+  );
+  if (grew.length) {
+    if (legacy) {
+      console.error(
+        `🚫 ${BASELINE} is a pre-per-file baseline — its grandfathered disables aren't recognised. Run \`guard-size freeze\` to migrate.`,
+      );
+      process.exit(1);
+    }
+    console.error('🚫 New `eslint-disable max-lines` directive(s) — size debt may only SHRINK.');
+    for (const f of grew) {
+      console.error(
+        `   ${f}: ${cur[f].file}/${cur[f].fn} file/fn disables vs ${ceil(f).file}/${ceil(f).fn} allowed`,
+      );
+    }
+    console.error('   Split the file below the cap instead of disabling.');
+    process.exit(1);
+  }
+
+  if (!inCommit || !staged) {
+    // No commit in progress → never mutate. Nudge a re-freeze if anything shrank or a legacy file lingers.
+    if (legacy) {
+      console.log(
+        `✓ ${BASELINE} is a pre-per-file baseline — run \`guard-size freeze\` to migrate.`,
+      );
+    } else if (
+      Object.keys(grandfathered).some(
+        (f) =>
+          (cur[f]?.file ?? 0) < grandfathered[f].file || (cur[f]?.fn ?? 0) < grandfathered[f].fn,
+      )
+    ) {
+      console.log('✓ size debt shrank — run `guard-size freeze` to lock it in.');
+    }
+    return;
+  }
+
+  // In a commit: tighten only the committing files' entries. A legacy baseline (empty here) is always
+  // rewritten off the old shape → its stale {0,0} is removed & staged.
+  const next = { ...grandfathered };
+  let changed = legacy;
+  for (const f of staged) {
+    if (!(f in grandfathered)) continue;
+    const c = cur[f]; // undefined = all disables healed
+    if (!c) {
+      delete next[f];
+      changed = true;
+    } else if (c.file < next[f].file || c.fn < next[f].fn) {
+      next[f] = { file: Math.min(next[f].file, c.file), fn: Math.min(next[f].fn, c.fn) };
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  if (Object.keys(next).length === 0) {
+    rmSync(baselineFile, { force: true });
+    stageBaseline(root, BASELINE);
+    console.log(`✓ size debt cleared — ${BASELINE} removed & staged.`);
+  } else {
+    writeFileSync(baselineFile, `${JSON.stringify({ files: next }, null, 2)}\n`);
+    stageBaseline(root, BASELINE);
+    console.log(`✓ size debt tightened — ${BASELINE} lowered & staged.`);
+  }
+}
+
 // Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
 // fallow-ignore-next-line complexity
 function runCli(cmd: string): void {
@@ -304,12 +424,20 @@ function runCli(cmd: string): void {
   const current = countDisables(root);
 
   if (cmd === 'freeze') {
-    const out = { fileDisables: current.fileDisables, fnDisables: current.fnDisables };
-    if (out.fileDisables || out.fnDisables) {
+    // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
+    // laundered back in. A pre-per-file (or missing) baseline has no per-file prior → this first freeze
+    // re-grandfathers current counts (the migration point).
+    const { grandfathered: prev } = readDisableBaseline(baselineFile);
+    const files: Record<string, DisableCount> = {};
+    for (const [f, c] of Object.entries(current.perFile)) {
+      const p = prev[f];
+      files[f] = p ? { file: Math.min(p.file, c.file), fn: Math.min(p.fn, c.fn) } : c;
+    }
+    if (Object.keys(files).length > 0) {
       mkdirSync(dirname(baselineFile), { recursive: true });
-      writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
+      writeFileSync(baselineFile, `${JSON.stringify({ files }, null, 2)}\n`);
       console.log(
-        `✓ ${BASELINE}: frozen max-lines disables = ${out.fileDisables} file-level, ${out.fnDisables} per-function (from ${current.scannedFiles} source files)`,
+        `✓ ${BASELINE}: frozen max-lines disables for ${Object.keys(files).length} file(s) (from ${current.scannedFiles} source files)`,
       );
     } else {
       // No disables anywhere → no debt to grandfather. Don't write an empty baseline; delete a stale one.
@@ -341,47 +469,8 @@ function runCli(cmd: string): void {
     if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
       process.exit(2); // ungoverned + un-frozen → fail open
     }
-    const frozen: SizeBaseline = hasBaseline
-      ? (JSON.parse(readFileSync(baselineFile, 'utf8')) as SizeBaseline)
-      : { fileDisables: 0, fnDisables: 0 };
-    const grewFile = current.fileDisables > frozen.fileDisables;
-    const grewFn = current.fnDisables > frozen.fnDisables;
-    if (grewFile || grewFn) {
-      console.error('🚫 New `eslint-disable max-lines` directive(s) — size debt may only SHRINK.');
-      if (grewFile)
-        console.error(
-          `   file-level: ${current.fileDisables} now vs ${frozen.fileDisables} allowed`,
-        );
-      if (grewFn)
-        console.error(`   per-function: ${current.fnDisables} now vs ${frozen.fnDisables} allowed`);
-      console.error('   Split the file below the cap instead of disabling.');
-      process.exit(1);
-    }
-    // Debt fully healed (frozen had disables, now none): self-delete the stale baseline in a real
-    // commit so it doesn't linger. A partial shrink just reminds to re-freeze.
-    const healed =
-      (frozen.fileDisables > 0 || frozen.fnDisables > 0) &&
-      current.fileDisables === 0 &&
-      current.fnDisables === 0;
-    if (healed && hasBaseline) {
-      if (hasStagedFiles(root)) {
-        rmSync(baselineFile, { force: true });
-        stageBaseline(root, BASELINE);
-        console.log(`✓ size debt cleared — ${BASELINE} removed & staged.`);
-      } else {
-        console.log(
-          `✓ size debt shrank to zero — run \`guard-size freeze\` to remove ${BASELINE}.`,
-        );
-      }
-    } else if (
-      current.fileDisables < frozen.fileDisables ||
-      current.fnDisables < frozen.fnDisables
-    ) {
-      console.log(
-        `✓ size debt shrank (${current.fileDisables}/${current.fnDisables} vs frozen ${frozen.fileDisables}/${frozen.fnDisables}) — run \`guard-size freeze\` to lock it in.`,
-      );
-    }
-
+    // Disable ratchet: per-file, per-commit shrink-only (auto-lowers as disables are removed).
+    runDisableGate(root, baselineFile, current);
     // Raw-line cap (the maxLines gate): a per-file, per-COMMIT shrink-only ratchet.
     if (cfg.maxLines) runLinesGate(root, cfg, linesBaselineFile);
     process.exit(0);

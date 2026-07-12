@@ -38,7 +38,12 @@ describe('countDisables', () => {
   it('returns zeros for an empty tree (boundary state)', () => {
     const root = makeRoot();
     mkdirSync(join(root, 'src'));
-    expect(countDisables(root)).toEqual({ fileDisables: 0, fnDisables: 0, scannedFiles: 0 });
+    expect(countDisables(root)).toEqual({
+      fileDisables: 0,
+      fnDisables: 0,
+      perFile: {},
+      scannedFiles: 0,
+    });
   });
 
   it('counts a combined one-line directive in both buckets', () => {
@@ -118,7 +123,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
     expect(run(root, 'freeze').status).toBe(0);
     const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
-    expect(frozen).toEqual({ fileDisables: 1, fnDisables: 0 });
+    expect(frozen).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
     expect(run(root, 'gate').status).toBe(0);
   });
 
@@ -408,5 +413,147 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/huge.ts', big(900));
     expect(freezeLines(root)).toBe(0);
     expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).toThrow();
+  });
+});
+
+describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
+  const run = (root, cmd) =>
+    spawnSync(process.execPath, [SCRIPT, cmd], { cwd: root, encoding: 'utf8' });
+  const readBaseline = (root) =>
+    JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
+  // n file-level `eslint-disable max-lines` directives in one file.
+  const dis = (n) => `${Array(n).fill('/* eslint-disable max-lines */').join('\n')}\nexport {};\n`;
+
+  it('a STAGED file whose disables partially shrink → gate auto-lowers its entry (no manual freeze)', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(2)); // 2 file-level disables
+    run(root, 'freeze');
+    expect(readBaseline(root).files['src/a.ts']).toEqual({ file: 2, fn: 0 });
+    write(root, 'src/a.ts', dis(1)); // removed one disable
+    gitAdd(root, 'src/a.ts');
+    expect(run(root, 'gate').status).toBe(0);
+    expect(readBaseline(root).files['src/a.ts']).toEqual({ file: 1, fn: 0 }); // ratcheted 2 → 1
+  });
+
+  it("a STAGED file's disables all heal → its entry is removed (baseline kept while others remain)", () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1));
+    write(root, 'src/b.ts', dis(1)); // a second grandfathered file keeps the baseline non-empty
+    run(root, 'freeze');
+    write(root, 'src/a.ts', 'export {};\n'); // healed
+    gitAdd(root, 'src/a.ts');
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = readBaseline(root);
+    expect(baseline.files).not.toHaveProperty('src/a.ts');
+    expect(baseline.files['src/b.ts']).toEqual({ file: 1, fn: 0 }); // untouched
+  });
+
+  it('lowers the STAGED file only; a parallel unstaged shrink is not laundered in', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/x.ts', dis(2));
+    write(root, 'src/y.ts', dis(2));
+    run(root, 'freeze'); // x:2, y:2
+    write(root, 'src/x.ts', dis(1)); // both shrink in the tree...
+    write(root, 'src/y.ts', dis(1));
+    gitAdd(root, 'src/x.ts'); // ...but only x is in THIS commit
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = readBaseline(root);
+    expect(baseline.files['src/x.ts']).toEqual({ file: 1, fn: 0 }); // lowered
+    expect(baseline.files['src/y.ts']).toEqual({ file: 2, fn: 0 }); // untouched — another agent's WIP
+  });
+
+  it('a net-zero disable SWAP (remove in A, add in B) now BLOCKS — per-file, not a global count', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1));
+    write(root, 'src/b.ts', 'export {};\n');
+    run(root, 'freeze'); // { a: {1,0} } — global total 1
+    write(root, 'src/a.ts', 'export {};\n'); // -1
+    write(root, 'src/b.ts', dis(1)); // +1 → global total unchanged at 1
+    gitAdd(root, 'src/a.ts', 'src/b.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1); // a global-count ratchet would have passed; per-file catches B
+    expect(r.stderr).toContain('may only SHRINK');
+    expect(r.stderr).toContain('src/b.ts');
+  });
+
+  it('a stale {0,0} legacy baseline self-deletes + stages in a commit (the qavis case)', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', 'export {};\n'); // no disables anywhere
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 0, fnDisables: 0 }));
+    gitAdd(root, 'src/a.ts', 'eslint/baselines/size.json');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    write(root, 'src/a.ts', 'export const x = 1;\n'); // an ordinary staged change
+    gitAdd(root, 'src/a.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('removed & staged');
+    expect(() => readBaseline(root)).toThrow(); // gone
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=D'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(staged).toContain('eslint/baselines/size.json');
+  });
+
+  it('a legacy baseline with REAL disables blocks with a migrate hint (never silently un-grandfathers)', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1)); // a real, grandfathered-in-old-format disable
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('pre-per-file baseline');
+    expect(r.stderr).toContain('guard-size freeze');
+  });
+
+  it('a legacy baseline is NOT deleted by an unrelated commit — an UNSTAGED real disable still blocks', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1)); // a real disable — stays UNSTAGED
+    write(root, 'src/b.ts', 'export {};\n');
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    gitAdd(root, 'src/a.ts', 'src/b.ts', 'eslint/baselines/size.json');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    write(root, 'src/b.ts', 'export const x = 1;\n'); // ordinary change to an UNRELATED file
+    gitAdd(root, 'src/b.ts'); // only b is staged; a.ts (with the disable) is not
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1); // must block on the whole-tree disable, never staged-scope past it
+    expect(r.stderr).toContain('pre-per-file baseline');
+    expect(() => readBaseline(root)).not.toThrow(); // size.json is NOT deleted
+  });
+
+  it('a legacy baseline migrates to per-file shape on `guard-size freeze`', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1));
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(readBaseline(root)).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
+    expect(run(root, 'gate').status).toBe(0); // now recognised, passes
+  });
+
+  it('freeze is monotone-down per file: never raises a recorded count (anti-laundering)', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(2)); // 2 disables on disk
+    // Pre-seed a lower ceiling as if a --no-verify growth is being re-frozen.
+    write(
+      root,
+      'eslint/baselines/size.json',
+      JSON.stringify({ files: { 'src/a.ts': { file: 1, fn: 0 } } }),
+    );
+    expect(run(root, 'freeze').status).toBe(0);
+    expect(readBaseline(root).files['src/a.ts']).toEqual({ file: 1, fn: 0 }); // stayed 1, NOT raised to 2
   });
 });
