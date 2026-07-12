@@ -194,6 +194,42 @@ describe('focusDiff (decisions-style evidence selection — error hunks only)', 
     expect(out).toContain('log.warn');
   });
 
+  it('splits on `diff --git` so a next file preamble never leaks into a prior hunk', () => {
+    // A REAL `git diff --cached`: a plain UI file, then a `catch-utils.ts` file. The 2nd file's
+    // `diff --git a/…/catch-utils.ts` preamble must NOT attach to the 1st file's hunk and trip
+    // ERROR_HUNK_RE (the word "catch" in the path). The UI file must still drop to header-only.
+    const diff = [
+      'diff --git a/src/ui.tsx b/src/ui.tsx',
+      'index 111..222 100644',
+      '--- a/src/ui.tsx',
+      '+++ b/src/ui.tsx',
+      '@@ -5 +5 @@',
+      '-  <span className="truncate" />',
+      '+  <span className="break-words" />',
+      'diff --git a/src/lib/catch-utils.ts b/src/lib/catch-utils.ts',
+      'index 333..444 100644',
+      '--- a/src/lib/catch-utils.ts',
+      '+++ b/src/lib/catch-utils.ts',
+      '@@ -1 +1,2 @@',
+      '+  const x = 1;',
+    ].join('\n');
+    const out = focusDiff(diff);
+    expect(out).not.toContain('className'); // UI hunk dropped, not kept via the leaked "catch" path
+    expect(out).not.toContain('const x = 1'); // catch-utils hunk is not error-relevant either
+    expect(out).toContain('src/ui.tsx');
+    expect(out).toContain('src/lib/catch-utils.ts'); // both files still listed in the header
+  });
+
+  it('KEEPS a comment/string capture hunk (evidence selection) — the LLM, not the regex, judges it', () => {
+    // focusDiff shows the hunk to the judge; it does NOT decide. A commented capture is kept as
+    // evidence; the prompt tells the judge a comment/string capture does not count (see mon-decoy-*).
+    const out = focusDiff(
+      fileDiff('src/a.ts', '+  // captureException(e) later\n+  catch (e) { log.warn(e); }'),
+    );
+    expect(out).toContain('captureException'); // shown, not silently dropped
+    expect(out).toContain('log.warn');
+  });
+
   it('empty diff → empty', () => {
     expect(focusDiff('')).toBe('');
   });

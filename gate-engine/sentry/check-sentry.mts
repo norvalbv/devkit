@@ -25,9 +25,9 @@
  *     confuse a cheap model via distractors (arXiv 2412.10079) — but FOCUSING it to error-handling
  *     hunks (focusDiff, the decisions-detect pattern) removes them. So the default feeds the FOCUSED
  *     diff, the same "evaluate the live diff" contract the decisions/reviewer judges use. On the eval
- *     (103 real-derived cases) haiku+focused-diff = F1 0.93 (precision 0.93, recall 0.93) vs message
- *     F1 0.56, and it beats sonnet on the full diff (0.88) AND edges sonnet-focused (0.92) — context
- *     + focus dominate model, and cheap wins outright.
+ *     (104 real-derived cases) haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; nondeterministic)
+ *     vs message F1 0.56, and it beats sonnet on the full diff (0.88) and matches sonnet-focused (0.92)
+ *     — context + focus dominate model, and cheap wins.
  *   - few-shot >> zero-shot, chain-of-thought does not help commit classification (arXiv 2605.02033).
  *   - self-consistency (sample N, majority-vote) reliably lifts a model; reasoning tiers give no
  *     advantage and are slow (arXiv 2510.22389) — so prefer *_SENTRY_SAMPLES over a reasoning tier.
@@ -98,7 +98,7 @@ const CWD = process.cwd();
 const MODEL = envVar('SENTRY_MODEL') ?? 'haiku';
 const SAMPLES = Number(envVar('SENTRY_SAMPLES') ?? '1') || 1;
 // Default = diff, FOCUSED (see buildContext/focusDiff). The eval (gate-engine/sentry/eval, 103 cases)
-// picked it: haiku+focused-diff = MONITOR precision 0.93 / recall 0.93 (F1 0.93) vs message 0.46/0.71
+// picked it: haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; precision ~0.90) vs message 0.46/0.71
 // (F1 0.56 — message flags every already-instrumented swallow). Focusing to error-handling hunks beats
 // the full diff (0.83), beats sonnet-full (0.88), AND edges sonnet-focused (0.92) — context + focus
 // dominate model, cheap wins. The
@@ -179,6 +179,11 @@ const DIFF_EVIDENCE_CAP = 6000;
 const ERROR_HUNK_RE =
   /\b(?:try|catch|throw|reject|captureException|captureMessage|captureMainMessage)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
 // Per-file block boundary, post-image path, hunk boundary — hoisted (a literal in a hot fn recompiles).
+// Real `git diff --cached` prefixes each file with `diff --git`/`index` — split there so a next file's
+// preamble can't leak into the previous file's last hunk (e.g. `diff --git a/catch-utils.ts` tripping
+// ERROR_HUNK_RE). A preamble-free diff (no `diff --git`) falls back to the old-file `--- ` boundary.
+const DIFF_GIT_HEADER_RE = /^diff --git /m;
+const DIFF_GIT_SPLIT_RE = /\n(?=diff --git )/;
 const DIFF_FILE_SPLIT_RE = /\n(?=--- )/;
 const DIFF_POST_PATH_RE = /^\+\+\+ (?:b\/)?(\S+)/m;
 const DIFF_HUNK_SPLIT_RE = /\n(?=@@ )/;
@@ -187,7 +192,7 @@ const DIFF_HUNK_SPLIT_RE = /\n(?=@@ )/;
  * FOCUS the staged diff to just its error-handling hunks — the decisions-detect pattern (send the
  * judge the signal, not the whole commit): a header listing every changed file, then ONLY the
  * error-relevant hunks per file, then an omission count. Dropping distractors is a MEASURED win on the
- * 103-case eval (haiku 0.83→0.93) — it kills borderline over-fires and stops the cap from truncating
+ * 104-case eval (haiku 0.83→~0.91) — it kills borderline over-fires and stops the cap from truncating
  * the signal out of a big commit. Deterministic EVIDENCE selection only; the LLM still decides.
  */
 export function focusDiff(diffText: string): string {
@@ -196,7 +201,8 @@ export function focusDiff(diffText: string): string {
   const files: string[] = [];
   const kept: string[] = [];
   let omitted = 0;
-  for (const block of text.split(DIFF_FILE_SPLIT_RE)) {
+  const boundary = DIFF_GIT_HEADER_RE.test(text) ? DIFF_GIT_SPLIT_RE : DIFF_FILE_SPLIT_RE;
+  for (const block of text.split(boundary)) {
     const m = block.match(DIFF_POST_PATH_RE);
     const file = m?.[1];
     if (file && file !== '/dev/null') files.push(file);
@@ -246,9 +252,10 @@ export function buildContext(
       `${base}\n\n` +
       'STAGED DIFF (error-handling hunks; ground truth over the message). If this diff ALREADY adds a ' +
       'Sentry capture — `Sentry.captureException`/`captureMessage` or a project wrapper such as ' +
-      '`captureMainMessage` — for the error the change handles, the surface is instrumented: reply ' +
-      'SKIP. Reply MONITOR only when a swallowed error-class is introduced or touched and the diff ' +
-      `adds NO capture for it:\n${evidence}`
+      '`captureMainMessage` — as an EXECUTABLE call for the error the change handles, the surface is ' +
+      'instrumented: reply SKIP. A capture that appears only in a COMMENT, a string literal, or test ' +
+      'code does NOT count. Reply MONITOR when a swallowed error-class is introduced or touched and the ' +
+      `diff adds NO real capture for it:\n${evidence}`
     );
   }
   if (tier !== 'names' || !nameStatus || !String(nameStatus).trim()) return base;
@@ -351,13 +358,16 @@ function stagedNameStatus() {
 
 // The staged diff for the `diff` context tier. Prefixes forced OFF-config (like the decisions detect
 // judge) so a consumer's diff.noprefix/mnemonicPrefix can't reshape what the judge reads. Best-effort:
-// a git failure returns '' → buildContext falls back to message-only for this run (fail toward judging).
+// a git failure OR a hang (timeout) returns '' → buildContext falls back to message-only for this run
+// (fail toward judging). The timeout matters: this runs INSIDE the commit-msg hook, so a wedged
+// `git diff` (index lock, a slow textconv/external diff driver) must not block the commit forever.
 function stagedDiff() {
   try {
     return execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
       cwd: CWD,
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
+      timeout: 10000,
     }).trim();
   } catch {
     return '';
