@@ -181,10 +181,12 @@ export const DEFAULTS = Object.freeze({
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
   noLlm: false,
-  // Escalate the completeness gate (commit-msg) from WARN-only to a block on a confident
-  // FAIL. GUARD_COMPLETENESS_HARD / FRINK_COMPLETENESS_HARD env still works as a one-off
-  // override; this is the standing per-repo opt-in.
-  completenessHard: false,
+  // The completeness gate (commit-msg) blocks on a confident FAIL. HARD by default: a warn
+  // printed to a headless agent is a no-op channel — the finding scrolls past and the gap
+  // ships (the same lesson that hardened the sentry gate). Set false (or
+  // GUARD_COMPLETENESS_HARD=0 / FRINK_COMPLETENESS_HARD=0 as a one-off) to soften to
+  // advisory; GUARD_NO_COMPLETENESS=1 skips entirely.
+  completenessHard: true,
 });
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the

@@ -713,34 +713,26 @@ describe('review progress JSON — the ship banner contract (engine → file →
   });
 });
 
-describe('runCompleteness — warn-by-default commit-msg gate', () => {
+describe('runCompleteness — hard-by-default commit-msg gate', () => {
   const msg = (repo, text) => {
     const f = join(repo, '.git', 'COMMIT_EDITMSG_TEST');
     writeFileSync(f, text);
     return f;
   };
 
-  it('FAIL without HARD → warn, exit 0', async () => {
+  it('FAIL → exit 1 (hard by default, no env, no config key)', async () => {
     const repo = consumerRepo({ backend: true });
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async () => 'gap: no error handling\nVERDICT: FAIL — misleading scope');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+  });
+
+  it('FAIL + guard.config.json completenessHard:false → softened to warn, exit 0', async () => {
+    const repo = consumerRepo({ backend: true, completenessHard: false });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
     expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
     expect(err.mock.calls.flat().join('\n')).toContain('WARN-only');
-  });
-
-  it('FAIL + GUARD_COMPLETENESS_HARD=1 → exit 1', async () => {
-    const repo = consumerRepo({ backend: true });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    process.env.GUARD_COMPLETENESS_HARD = '1';
-    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
-    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
-  });
-
-  it('FAIL + guard.config.json completenessHard:true → exit 1', async () => {
-    const repo = consumerRepo({ backend: true, completenessHard: true });
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
-    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
   });
 
   it('config completenessHard:true + env GUARD_COMPLETENESS_HARD=0 → env wins, exit 0 (warn)', async () => {
