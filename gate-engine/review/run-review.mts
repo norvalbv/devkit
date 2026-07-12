@@ -35,6 +35,7 @@ import path from 'node:path';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { saveTranscript } from '../judge/transcript-store.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
@@ -57,8 +58,10 @@ import {
   wrapPrompt,
 } from './reviewers.mts';
 
-/** One reviewer's cascade outcome. `transcript` rides along on a FAIL so the gate can print the
- * judge's full findings — a block whose evidence was discarded is undebuggable. */
+/** One reviewer's cascade outcome. `transcript` rides along on EVERY judged outcome (pass/fail/
+ * no-VERDICT) — the FAIL loop prints it (a block whose evidence was discarded is undebuggable) and
+ * every outcome persists it as a fetchable transcript (saveTranscript) so a passing reviewer's
+ * reasoning is showcasable, not thrown away. Absent only when no judge ran (a hard outage). */
 interface CascadeResult {
   name: string;
   status: 'pass' | 'fail' | 'inconclusive';
@@ -388,13 +391,16 @@ async function cascadeVerdict(
     };
   const firstVerdict = parseReviewVerdict(first);
   if (firstVerdict.verdict === 'PASS')
-    return { name: reviewer.name, status: 'pass', reason: '', escalated: false };
+    // Keep the judge's one-line PASS reason (the tail of its VERDICT line) instead of dropping it —
+    // it flows to the telemetry event + the terminal line, and `first` is persisted as a transcript.
+    return { name: reviewer.name, status: 'pass', reason: firstVerdict.reason, escalated: false, transcript: first };
   if (firstVerdict.verdict === null)
     return {
       name: reviewer.name,
       status: 'inconclusive',
       reason: 'no VERDICT line',
       escalated: false,
+      transcript: first,
     };
   // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
   if (reviewer.model)
@@ -418,6 +424,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'escalation outage',
       escalated: true,
+      transcript: first, // the first-pass FAIL evidence survives even when opus was dark
     };
   const finalVerdict = parseReviewVerdict(second);
   if (finalVerdict.verdict === 'FAIL')
@@ -429,12 +436,13 @@ async function cascadeVerdict(
       transcript: second,
     };
   if (finalVerdict.verdict === 'PASS')
-    return { name: reviewer.name, status: 'pass', reason: '', escalated: true };
+    return { name: reviewer.name, status: 'pass', reason: finalVerdict.reason, escalated: true, transcript: second };
   return {
     name: reviewer.name,
     status: 'inconclusive',
     reason: 'no VERDICT line',
     escalated: true,
+    transcript: second,
   };
 }
 
@@ -523,6 +531,9 @@ export async function runReviewGate(
           writeProgress(progressFile, { running, completed });
         }
         const secs = Math.round((Date.now() - t0) / 1000);
+        // Persist the full judge transcript (ship-only; null off-ship) so a PASS reviewer's reasoning
+        // is fetchable on demand rather than discarded — the event carries only the ref + one-liner.
+        const transcriptRef = res.transcript ? saveTranscript(`review-${res.name}`, res.transcript) : null;
         // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
         // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
         emitGateEvent({
@@ -533,9 +544,13 @@ export async function runReviewGate(
           model: firstModel,
           reason: res.reason,
           secs,
+          ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
         });
+        // Surface the one-line verdict reason on the completion line too (fails get theirs in the
+        // dedicated block below, with the full transcript — don't double-print it here).
+        const tail = res.status !== 'fail' && res.reason ? ` — ${res.reason}` : '';
         console.error(
-          `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`,
+          `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
         );
         return res;
       });
