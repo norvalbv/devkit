@@ -50,5 +50,8 @@
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": true }
-  }
+  },
+
+  "//completenessHard": "Escalate the completeness gate (commit-msg, feature-completeness-reviewer as a headless judge) from WARN-only to a block on a confident FAIL. Default: false (a gap-finder's verdicts are the most subjective in the chain, so it stays advisory unless a repo opts in). Env override: GUARD_COMPLETENESS_HARD / FRINK_COMPLETENESS_HARD (one-off escalation without touching this file).",
+  "completenessHard": false
 }

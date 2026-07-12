@@ -73,6 +73,7 @@ export interface GuardConfig {
   review: ReviewConfig;
   noLog: boolean;
   noLlm: boolean;
+  completenessHard: boolean;
   cwd: string;
 }
 
@@ -104,6 +105,7 @@ interface RawGuardConfigFile {
   };
   noLog?: boolean;
   noLlm?: boolean;
+  completenessHard?: boolean;
 }
 
 export const CONFIG_FILENAME = 'guard.config.json';
@@ -179,6 +181,10 @@ export const DEFAULTS = Object.freeze({
   // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
   noLog: false,
   noLlm: false,
+  // Escalate the completeness gate (commit-msg) from WARN-only to a block on a confident
+  // FAIL. GUARD_COMPLETENESS_HARD / FRINK_COMPLETENESS_HARD env still works as a one-off
+  // override; this is the standing per-repo opt-in.
+  completenessHard: false,
 });
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
@@ -244,6 +250,7 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
 
   const noLogEnv = envBool('NO_LOG');
   const noLlmEnv = envBool('DECISION_NO_LLM');
+  const completenessHardEnv = envBool('COMPLETENESS_HARD');
   const indexEnv = envVar('INDEX_PATH');
   const allowlistEnv = envVar('ALLOWLIST_PATH');
   const decisionsEnv = envVar('DECISIONS_DIR');
@@ -291,6 +298,8 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     },
     noLog: noLogEnv ?? Boolean(file.noLog ?? DEFAULTS.noLog),
     noLlm: noLlmEnv ?? Boolean(file.noLlm ?? DEFAULTS.noLlm),
+    completenessHard:
+      completenessHardEnv ?? Boolean(file.completenessHard ?? DEFAULTS.completenessHard),
     // Echo the resolution base so engines never have to re-derive it (and never reach
     // for __dirname): they resolve every path field against THIS cwd.
     cwd,

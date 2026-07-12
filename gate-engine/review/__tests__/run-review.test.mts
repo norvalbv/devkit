@@ -51,7 +51,7 @@ afterEach(() => {
 
 // A consumer repo with a backend/frontend topology, synced agent briefs, and one staged file
 // per requested domain. Returns its root.
-function consumerRepo({ backend = false, frontend = false } = {}) {
+function consumerRepo({ backend = false, frontend = false, completenessHard = undefined } = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'guard-review-gate-'));
   dirs.push(repo);
   execSync('git init -q', { cwd: repo });
@@ -60,6 +60,7 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
     JSON.stringify({
       scanRoots: ['src'],
       review: { backendRoots: ['src/main'], frontendRoots: ['src/renderer'] },
+      ...(completenessHard === undefined ? {} : { completenessHard }),
     }),
   );
   const agents = join(repo, '.claude', 'agents');
@@ -729,6 +730,30 @@ describe('runCompleteness — warn-by-default commit-msg gate', () => {
 
   it('FAIL + GUARD_COMPLETENESS_HARD=1 → exit 1', async () => {
     const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_COMPLETENESS_HARD = '1';
+    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+  });
+
+  it('FAIL + guard.config.json completenessHard:true → exit 1', async () => {
+    const repo = consumerRepo({ backend: true, completenessHard: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+  });
+
+  it('config completenessHard:true + env GUARD_COMPLETENESS_HARD=0 → env wins, exit 0 (warn)', async () => {
+    const repo = consumerRepo({ backend: true, completenessHard: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_COMPLETENESS_HARD = '0';
+    const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(err.mock.calls.flat().join('\n')).toContain('WARN-only');
+  });
+
+  it('config completenessHard:false + env GUARD_COMPLETENESS_HARD=1 → env wins, exit 1', async () => {
+    const repo = consumerRepo({ backend: true, completenessHard: false });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_COMPLETENESS_HARD = '1';
     const exec = mkExec(async () => 'VERDICT: FAIL — half-shipped');
