@@ -1,3 +1,4 @@
+import { splitDiffByFile } from '../judge/diff-focus.mts';
 // Capped, omission-accounted stdin evidence for a checklist-less gate judge that has no Bash of
 // its own to fetch its own diff (sc-1060's completeness lesson, generalized). The old contract was
 // positionally sliced at a blunt byte cap — every byte past the slice point silently vanished, and
@@ -84,7 +85,6 @@ export function renderCappedSegments(segments: NamedSegment[], opts: CapOptions)
 const EVIDENCE_TOTAL_CAP = 60000; // same total budget as the old blunt cap — no cost claim
 const SEGMENT_CAP = 8000; // no single file may eat the budget (greedy in diff order)
 const OMITTED_LIST_MAX = 40; // OMITTED pointer lines; the --stat header is the full inventory
-const SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
 const SEGMENT_PATH_RE = /^diff --git (?:a\/)?(\S+)/;
 
 function segmentPath(seg: string): string {
@@ -98,10 +98,10 @@ const diffHint = (label: string) => `run \`git diff --cached -- ${label}\``;
 export function buildCappedDiffEvidence(fullDiff: string, stat: string): string {
   const diff = String(fullDiff);
   if (diff.length <= EVIDENCE_TOTAL_CAP) return `${stat}\n${diff}`;
-  const segments = diff
-    .split(SEGMENT_SPLIT_RE)
-    .filter((s) => s.trim())
-    .map((content) => ({ label: segmentPath(content), content }));
+  const segments = splitDiffByFile(diff).map((content) => ({
+    label: segmentPath(content),
+    content,
+  }));
   const body = renderCappedSegments(segments, {
     totalCap: EVIDENCE_TOTAL_CAP,
     segmentCap: SEGMENT_CAP,

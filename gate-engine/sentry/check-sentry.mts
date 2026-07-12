@@ -64,6 +64,7 @@ import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mts';
+import { focusHunks } from '../judge/diff-focus.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
 
@@ -178,15 +179,6 @@ const DIFF_EVIDENCE_CAP = 6000;
 // Sentry capture — the swallow-vs-capture signal the judge needs. Everything else is a distractor.
 const ERROR_HUNK_RE =
   /\b(?:try|catch|throw|reject|captureException|captureMessage|captureMainMessage)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
-// Per-file block boundary, post-image path, hunk boundary — hoisted (a literal in a hot fn recompiles).
-// Real `git diff --cached` prefixes each file with `diff --git`/`index` — split there so a next file's
-// preamble can't leak into the previous file's last hunk (e.g. `diff --git a/catch-utils.ts` tripping
-// ERROR_HUNK_RE). A preamble-free diff (no `diff --git`) falls back to the old-file `--- ` boundary.
-const DIFF_GIT_HEADER_RE = /^diff --git /m;
-const DIFF_GIT_SPLIT_RE = /\n(?=diff --git )/;
-const DIFF_FILE_SPLIT_RE = /\n(?=--- )/;
-const DIFF_POST_PATH_RE = /^\+\+\+ (?:b\/)?(\S+)/m;
-const DIFF_HUNK_SPLIT_RE = /\n(?=@@ )/;
 
 /**
  * FOCUS the staged diff to just its error-handling hunks — the decisions-detect pattern (send the
@@ -194,31 +186,10 @@ const DIFF_HUNK_SPLIT_RE = /\n(?=@@ )/;
  * error-relevant hunks per file, then an omission count. Dropping distractors is a MEASURED win on the
  * 104-case eval (haiku 0.83→~0.91) — it kills borderline over-fires and stops the cap from truncating
  * the signal out of a big commit. Deterministic EVIDENCE selection only; the LLM still decides.
+ * The per-file split + hunk focus live in ../judge/diff-focus (shared with detect + the reviewers).
  */
 export function focusDiff(diffText: string): string {
-  const text = String(diffText);
-  if (!text.trim()) return '';
-  const files: string[] = [];
-  const kept: string[] = [];
-  let omitted = 0;
-  const boundary = DIFF_GIT_HEADER_RE.test(text) ? DIFF_GIT_SPLIT_RE : DIFF_FILE_SPLIT_RE;
-  for (const block of text.split(boundary)) {
-    const m = block.match(DIFF_POST_PATH_RE);
-    const file = m?.[1];
-    if (file && file !== '/dev/null') files.push(file);
-    const hunks = block.split(DIFF_HUNK_SPLIT_RE);
-    const head = hunks[0].startsWith('@@') ? '' : (hunks.shift() ?? ''); // the ---/+++ header
-    const relevant: string[] = [];
-    for (const h of hunks) {
-      if (!h.startsWith('@@')) continue;
-      if (ERROR_HUNK_RE.test(h)) relevant.push(h);
-      else omitted += 1;
-    }
-    if (relevant.length) kept.push(`${head.trim()}\n${relevant.join('\n')}`.trim());
-  }
-  const header = files.length ? `CHANGED FILES: ${files.join(', ')}\n` : '';
-  const note = omitted ? `[${omitted} non-error hunk(s) omitted]\n` : '';
-  return `${header}${note}${kept.join('\n')}`.trim();
+  return focusHunks(diffText, (h) => ERROR_HUNK_RE.test(h), 'non-error');
 }
 
 /** Build the stdin payload for the judge.

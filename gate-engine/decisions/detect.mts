@@ -29,6 +29,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mts';
+import { splitDiffByFile } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
@@ -248,7 +249,6 @@ export function gatherEntries(cwd: string, mode: DiffMode = 'cached'): DiffEntry
 const SMELL_SEGMENT_CAP = 4000;
 const EVIDENCE_TOTAL_CAP = 8000;
 const HEADER_MAX_FILES = 60;
-const DIFF_SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
 
 // A smelled path is located in a segment's HEADER LINE by containment, not by parsing the a/ b/
 // prefixes — `diff.noprefix=true` / `diff.mnemonicPrefix=true` in a CONSUMER's git config change
@@ -322,8 +322,7 @@ export function buildDetectJudgeInput(
   let evidenceChars = 0;
   let omittedRoutine = 0;
   let droppedSmell = 0;
-  for (const seg of String(fullDiff).split(DIFF_SEGMENT_SPLIT_RE)) {
-    if (!seg.trim()) continue;
+  for (const seg of splitDiffByFile(fullDiff)) {
     if (!segmentMatches(seg, smellPaths)) {
       omittedRoutine += 1;
       continue;
