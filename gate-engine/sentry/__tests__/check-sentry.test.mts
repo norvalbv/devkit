@@ -108,24 +108,24 @@ describe('sentryExit (block bounded to hard-mode + confident MONITOR)', () => {
   });
 });
 
-describe('buildContext (names tier appends changed files, never hunks)', () => {
+describe('buildContext (names tier appends files; diff tier appends the staged diff)', () => {
   it('message tier is message-only', () => {
-    expect(buildContext('fix: x', 'M\tsrc/a.ts', 'message')).toBe('COMMIT MESSAGE:\nfix: x');
+    expect(buildContext('fix: x', 'M\tsrc/a.ts', '', 'message')).toBe('COMMIT MESSAGE:\nfix: x');
   });
 
   it('names tier appends the changed-file list when present', () => {
-    const out = buildContext('fix: x', 'M\tsrc/a.ts\nA\tsrc/b.ts', 'names');
+    const out = buildContext('fix: x', 'M\tsrc/a.ts\nA\tsrc/b.ts', '', 'names');
     expect(out).toContain('CHANGED FILES');
     expect(out).toContain('M\tsrc/a.ts');
   });
 
   it('names tier with no file list degrades to message-only', () => {
-    expect(buildContext('fix: x', '', 'names')).toBe('COMMIT MESSAGE:\nfix: x');
+    expect(buildContext('fix: x', '', '', 'names')).toBe('COMMIT MESSAGE:\nfix: x');
   });
 
   it('caps a huge changed-file list at 30 lines (a big refactor commit)', () => {
     const nameStatus = Array.from({ length: 50 }, (_, i) => `M\tsrc/f${i}.ts`).join('\n');
-    const fileLines = buildContext('fix: x', nameStatus, 'names')
+    const fileLines = buildContext('fix: x', nameStatus, '', 'names')
       .split('CHANGED FILES (status\\tpath):\n')[1]
       .split('\n')
       .filter(Boolean);
@@ -134,9 +134,28 @@ describe('buildContext (names tier appends changed files, never hunks)', () => {
 
   it('caps an oversized commit message at 2000 chars', () => {
     const msg = `fix: ${'a'.repeat(5000)}`;
-    expect(buildContext(msg, '', 'message').length).toBeLessThanOrEqual(
+    expect(buildContext(msg, '', '', 'message').length).toBeLessThanOrEqual(
       'COMMIT MESSAGE:\n'.length + 2000,
     );
+  });
+
+  it('diff tier appends the staged diff + the self-clear directive', () => {
+    const diff = '--- a/src/a.ts\n+++ b/src/a.ts\n@@\n+  captureException(e);';
+    const out = buildContext('fix: swallow', 'M\tsrc/a.ts', diff, 'diff');
+    expect(out).toContain('STAGED DIFF');
+    expect(out).toContain('reply SKIP');
+    expect(out).toContain('captureException(e);');
+  });
+
+  it('diff tier with no diff degrades to message-only', () => {
+    expect(buildContext('fix: x', 'M\tsrc/a.ts', '', 'diff')).toBe('COMMIT MESSAGE:\nfix: x');
+  });
+
+  it('caps the staged diff evidence (a huge diff does not blow the payload)', () => {
+    const diff = `--- a/x\n+++ b/x\n${'+ line\n'.repeat(4000)}`;
+    const out = buildContext('fix: x', '', diff, 'diff');
+    // message (≤2000) + directive header + capped diff (≤6000) stays bounded well under the raw diff.
+    expect(out.length).toBeLessThan(2000 + 1000 + 6000 + 100);
   });
 });
 
