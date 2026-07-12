@@ -516,6 +516,23 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     expect(r.stderr).toContain('guard-size freeze');
   });
 
+  it('a legacy baseline is NOT deleted by an unrelated commit — an UNSTAGED real disable still blocks', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/a.ts', dis(1)); // a real disable — stays UNSTAGED
+    write(root, 'src/b.ts', 'export {};\n');
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    gitAdd(root, 'src/a.ts', 'src/b.ts', 'eslint/baselines/size.json');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
+    write(root, 'src/b.ts', 'export const x = 1;\n'); // ordinary change to an UNRELATED file
+    gitAdd(root, 'src/b.ts'); // only b is staged; a.ts (with the disable) is not
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1); // must block on the whole-tree disable, never staged-scope past it
+    expect(r.stderr).toContain('pre-per-file baseline');
+    expect(() => readBaseline(root)).not.toThrow(); // size.json is NOT deleted
+  });
+
   it('a legacy baseline migrates to per-file shape on `guard-size freeze`', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'] });

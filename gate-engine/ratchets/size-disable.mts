@@ -341,10 +341,15 @@ function runDisableGate(
   const ceil = (f: string): DisableCount => grandfathered[f] ?? { file: 0, fn: 0 };
 
   // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). Scope to
-  // the committing files; with nothing staged, the whole tree (CI).
-  const scoped = inCommit
-    ? [...(staged as Set<string>)]
-    : Object.keys({ ...cur, ...grandfathered });
+  // the committing files; with nothing staged, the whole tree (CI). A LEGACY baseline is always
+  // whole-tree: it has no per-file grandfathering, so any disable ANYWHERE is unrecognised and must
+  // block the migrate — else an unstaged disable slips past and the commit path below deletes
+  // size.json wholesale (changed=legacy, empty map), silently un-grandfathering it.
+  const scoped = legacy
+    ? Object.keys(cur)
+    : inCommit
+      ? [...(staged as Set<string>)]
+      : Object.keys({ ...cur, ...grandfathered });
   const grew = scoped.filter(
     (f) => cur[f] && (cur[f].file > ceil(f).file || cur[f].fn > ceil(f).fn),
   );
