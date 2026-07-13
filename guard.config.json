@@ -46,6 +46,7 @@
             "co-occurrence",
             "decisions",
             "deterministic",
+            "edge-cases",
             "fallow",
             "judge",
             "prefix-cache",
