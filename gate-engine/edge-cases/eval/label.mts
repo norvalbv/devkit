@@ -26,13 +26,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
-import { CATEGORIES, DEGENERATE_REASONS, EVIDENCE_TIERS, SEVERITIES } from './lib/schema.mts';
+import { excerptDiff } from './lib/excerpt.mts';
+import { CATEGORIES, DEGENERATE_REASONS, EVIDENCE_TIERS, SEVERITIES, sha8 } from './lib/schema.mts';
 import { scrub } from './lib/scrub.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rawDir = path.join(here, 'raw');
 const candidatesPath = path.join(rawDir, 'candidates.jsonl');
-const proposalsPath = path.join(rawDir, 'proposals.jsonl');
+const proposalsPath = process.env.LABEL_OUT ?? path.join(rawDir, 'proposals.jsonl');
 
 const MODEL = process.env.LABEL_MODEL ?? 'sonnet';
 const CONCURRENCY = 4;
@@ -137,29 +138,62 @@ Schema:
 }
 
 Rules — read carefully, they are the point of this corpus:
-1. Findings = the distinct edge cases/risks the RESPONSE surfaced. Test-writing narration is not a finding. A response that only says "nothing to test" has zero findings and degenerate=true.
+1. Findings = the distinct edge cases/risks the RESPONSE surfaced. Test-writing narration is not a finding. A response that only says "nothing to test" has zero findings and degenerate=true. NEVER return findings alongside degenerate=true — pick one.
 2. verdict "noise" means the finding is hallucinated, factually wrong about the code, a duplicate of an already-existing test, or below-severity trivia. "Plausible but never confirmed" is NOT noise — that is verdict "worth-surfacing" with wasLiveBug "unknown".
 3. wasLiveBug "true" ONLY with independent behavioural evidence you can QUOTE from the EVIDENCE bundle:
-   - tier "f2p-in-session": a test run output in the bundle shows the relevant test FAILING and a later run PASSING after a fix. A test that passed on first run is NOT this — that is tier "test-added-green" and wasLiveBug "false" (the test pinned already-correct behaviour).
+   - tier "f2p-in-session": a test run output in the bundle shows the relevant test FAILING and a later run PASSING after a fix.
    - tier "independent-fix": an entry in laterCommits (a DIFFERENT, later session's commit) clearly addresses this finding. postCommits are the SAME session committing its own work — that is compliance, never independence.
    - tier "user-confirmed": a user turn in the bundle explicitly validates this specific finding.
    The /edge-cases prompt ORDERS the agent to write tests and fix things, so mere test-writing, same-turn "fixed it" narration, or a same-session commit of the fix is compliance, not proof.
-4. evidence.detail MUST quote its source: the failing-test output line, the commit "sha subject", or the user's words. If the bundle has nothing for a finding, tier "none", wasLiveBug "unknown", and judge verdict on content quality alone.
-5. tier "rejected": the user or agent explicitly dismissed the finding as wrong → verdict "noise", wasLiveBug "false".
-6. Do not invent evidence. Do not use knowledge outside the provided material.`;
+4. A test that passed on its FIRST run is tier "test-added-green" with wasLiveBug "unknown" — NOT "false". The session often writes the fix and the test in the same turn, so a green first run cannot distinguish "behaviour was always correct" from "fix landed before the test ran". Use "false" only when the bundle shows the test existed BEFORE this session, or explicitly demonstrates the behaviour predates the diff. Skepticism must be symmetric: compliance proves neither "true" nor "false".
+5. tier "rejected" splits on WHY it was dismissed:
+   - rejected-as-WRONG (shown factually incorrect, impossible, or hallucinated) → verdict "noise", wasLiveBug "false".
+   - investigated-and-RESOLVED-SAFE (a legitimate concern the agent/user checked and found already handled correctly) → verdict "worth-surfacing", wasLiveBug "false", tier "rejected". Raising a real question that turns out safe is what a good reviewer does — it is not noise, regardless of whether the verification was a test or prose.
+6. evidence.detail MUST quote its source: the failing-test output line, the commit "sha subject", or the user's words. If the bundle has nothing for a finding, tier "none", wasLiveBug "unknown", and judge verdict on content quality alone.
+7. "files" entries MUST be repo-relative file paths (contain "/" or an extension) taken from the anchor or response — never bare symbol/component names. Use [] only when genuinely no file applies.
+8. Do not invent evidence. Do not use knowledge outside the provided material.`;
+
+const PROMPT_SHA = sha8(PROMPT);
+
+// Per-section budgets: one global slice() let a big turnTestRuns section starve laterCommits
+// (last-serialized) out of the prompt entirely — the independence tier's only source.
+const BUNDLE_BUDGETS = {
+  turnTestRuns: 12000,
+  turnFilesWritten: 2000,
+  aftermathTestRuns: 8000,
+  aftermathFilesWritten: 2000,
+  userTurnsAfter: 6000,
+  postCommits: 4000,
+  laterCommits: 4000,
+  precedingContext: 6000,
+};
+const bundleText = (bundle) =>
+  Object.entries(bundle)
+    .map(([k, v]) => {
+      const body = JSON.stringify(v, null, 1);
+      const cap = BUNDLE_BUDGETS[k] ?? 4000;
+      return `-- ${k} --\n${body.length > cap ? `${body.slice(0, cap)}\n…[${k} truncated]` : body}`;
+    })
+    .join('\n');
 
 const buildInput = (c, bundle) => {
-  const anchor = c.diffFull
-    ? `DIFF (origin: ${c.diffOrigin}):\n${c.diffFull.slice(0, 20000)}`
-    : c.statText
-      ? `DIFF STAT (no hunks recovered):\n${c.statText}`
-      : `SESSION CONTEXT BEFORE INVOCATION:\n${(c.aftermath?.precedingContext ?? '').slice(0, 8000) || '(none recovered)'}`;
+  // The labeler judges the SAME anchor view the benchmarked judge receives (shared excerptDiff) —
+  // a wider labeler view turns label/judge disagreement into a truncation artifact (audit F5).
+  let anchor;
+  if (c.diffFull) {
+    const { excerpt, truncated } = excerptDiff(c.diffFull);
+    anchor = `DIFF (origin: ${c.diffOrigin}${truncated ? '; truncated at hunk boundaries — judge sees this same view' : ''}):\n${excerpt}`;
+  } else if (c.statText) {
+    anchor = `DIFF STAT (no hunks recovered):\n${c.statText}`;
+  } else {
+    anchor = `SESSION CONTEXT BEFORE INVOCATION:\n${(c.aftermath?.precedingContext ?? '').slice(0, 8000) || '(none recovered)'}`;
+  }
   return [
     `CASE ${c.id} · repo ${c.repo} · ${c.date} · provider ${c.provider}`,
     `PROMPT VARIANT: ${c.promptVariant}`,
     `\n=== ANCHOR ===\n${anchor}`,
     `\n=== RESPONSE (the agent's edge-cases answer) ===\n${c.responseText.slice(0, 30000) || '(empty)'}`,
-    `\n=== EVIDENCE BUNDLE (mechanically gathered — the ONLY citable material) ===\n${JSON.stringify(bundle, null, 1).slice(0, 15000)}`,
+    `\n=== EVIDENCE BUNDLE (mechanically gathered — the ONLY citable material) ===\n${bundleText(bundle)}`,
   ].join('\n');
 };
 
@@ -238,6 +272,7 @@ const labelOne = async (c) => {
         degenerateReason: proposal.degenerateReason ?? null,
         findings,
         labelModel: MODEL,
+        labelPromptSha: PROMPT_SHA,
       };
     } catch {
       // malformed JSON — one retry, then give up on this case
