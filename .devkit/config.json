@@ -1,0 +1,34 @@
+{
+  "stack": "node-service",
+  "devkitRef": "v0.34.1",
+  "initVersion": 2,
+  "pkgRel": "",
+  "standalone": false,
+  "selfHost": true,
+  "components": {
+    "biome": true,
+    "tsconfig": true,
+    "skills": true,
+    "agents": true,
+    "searchSteering": false,
+    "agentHooks": false,
+    "husky": true,
+    "structure": false,
+    "fallow": false,
+    "searchCode": false,
+    "lineGrowth": true,
+    "agentTargets": [
+      "claude",
+      "cursor"
+    ],
+    "guards": [
+      "size",
+      "fanout",
+      "dup",
+      "clone",
+      "decisions",
+      "qavis-advisory",
+      "review"
+    ]
+  }
+}

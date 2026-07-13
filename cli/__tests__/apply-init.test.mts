@@ -19,6 +19,7 @@ vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mts';
 import { defaultSelection, normalizeSelection } from '../lib/components.mts';
+import { selfHostSelection } from '../lib/husky/self-host.mts';
 import { readConfig as config, tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, cleanup } = tmpRepos('apply-');
@@ -399,5 +400,49 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
     ).toBeUndefined();
     expect(existsSync(linesBaseline(root))).toBe(false);
     expect(config(root).components.lineGrowth).toBe(false);
+  });
+});
+
+describe('self-host mode (devkit dogfooding itself)', () => {
+  // A tmp repo that LOOKS like devkit: the package name triggers detection upstream, and the bin map
+  // is what installSelfHostHook's bunx→node rewrite resolves against.
+  const seedDevkitPkg = (root: string) =>
+    writeFileSync(
+      join(root, 'package.json'),
+      `${JSON.stringify(
+        {
+          name: '@norvalbv/devkit',
+          bin: {
+            'guard-deterministic': './dist/gate-engine/deterministic/run.mjs',
+            'guard-decisions': './dist/gate-engine/decisions/cli.mjs',
+            'guard-review': './dist/gate-engine/review/cli.mjs',
+            'guard-qavis-advisory': './dist/gate-engine/qavis-advisory/cli.mjs',
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+  it('adds NO self-dep, writes a source-mode hook, records selfHost, leaves package.json deps alone', async () => {
+    const root = tmpRepo();
+    seedDevkitPkg(root);
+    // skills/agents off to keep the test focused on the hook + config (asset sync is mode-agnostic).
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...selfHostSelection(), skills: false, agents: false },
+      selfHost: true,
+    });
+
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies).toBeUndefined(); // never depends on itself
+
+    const hook = readFileSync(join(root, '.husky', 'pre-commit'), 'utf8');
+    expect(hook).toContain('node gate-engine/deterministic/run.mts');
+    expect(hook).toContain('node gate-engine/review/cli.mts --gate');
+    expect(hook).toContain('--extra "lint=bun run lint"');
+    expect(hook).not.toMatch(/bunx guard-/);
+
+    expect(config(root).selfHost).toBe(true);
   });
 });

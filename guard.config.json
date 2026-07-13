@@ -15,11 +15,16 @@
         "root": "cli",
         "sourceExtensions": ["mts"],
         "entryAllowlist": ["index.mts"],
-        "libDomains": { "lib": ["generate", "guard", "help", "husky", "install", "ship"] },
+        "libDomains": {
+          "lib": ["generate", "guard", "help", "husky", "install", "ship"]
+        },
         "grammar": {
           "files": ["index.mts"],
           "folders": {
-            "commands": { "files": ["{kebab}", "{kebab_test}"], "recurse": "kebabModule" },
+            "commands": {
+              "files": ["{kebab}", "{kebab_test}"],
+              "recurse": "kebabModule"
+            },
             "lib": {
               "files": ["{kebab}", "{kebab_test}"],
               "domainGate": "lib",
@@ -73,5 +78,7 @@
       }
     ],
     "walls": []
-  }
+  },
+  "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
+  "maxLines": 500
 }

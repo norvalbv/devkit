@@ -314,3 +314,31 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(withStruct).not.toContain('--structure');
   });
 });
+
+describe('extras (--extra hard gates on the deterministic line)', () => {
+  it('emits `--extra "label=cmd"` per extra', () => {
+    const block = buildGuardBlock({
+      guards: ['size'],
+      extras: [{ label: 'lint', cmd: 'bun run lint' }],
+    });
+    expect(block).toContain('--extra "lint=bun run lint"');
+  });
+
+  it('supports multiple extras in order', () => {
+    const block = buildGuardBlock({
+      guards: ['size'],
+      extras: [
+        { label: 'lint', cmd: 'bun run lint' },
+        { label: 'types', cmd: 'bun run typecheck' },
+      ],
+    });
+    expect(block).toContain('--extra "lint=bun run lint" --extra "types=bun run typecheck"');
+  });
+
+  it('empty/absent extras is byte-identical to before (no --extra emitted)', () => {
+    const withEmpty = buildGuardBlock({ guards: ['size'], extras: [] });
+    const without = buildGuardBlock({ guards: ['size'] });
+    expect(withEmpty).toBe(without);
+    expect(without).not.toContain('--extra');
+  });
+});

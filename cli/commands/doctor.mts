@@ -15,6 +15,13 @@ import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
 import { markEnd, markStart } from '../lib/husky/husky.mts';
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
+import {
+  buildSelfHostBlock,
+  installSelfHostHook,
+  SELF_HOST_EXTRAS,
+  SELF_HOST_STRUCTURE_CMD,
+  selfHostSelection,
+} from '../lib/husky/self-host.mts';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
@@ -63,6 +70,7 @@ interface Manifest {
 interface DevkitConfig {
   overlay?: boolean;
   standalone?: boolean;
+  selfHost?: boolean;
   stack?: string;
   components?: Partial<Selection>;
   configOverrides?: string[];
@@ -708,6 +716,54 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   return hookOk && pathOk && (fix || !sync.drift) ? 0 : 1;
 }
 
+// Self-host (the devkit repo dogfooding itself) doctor: the ONE health signal is whether the
+// committed source hook still matches what the CURRENT generator produces — a mismatch means the
+// generator changed without a regen, or the hook was hand-edited. `--fix` regenerates it. Skills/
+// agents are advisory (a re-sync heals them). Pin/extends/structure/version checks don't apply —
+// the configs are hand-owned local files, not `@norvalbv/devkit/*` extends, and there is no dep.
+async function runSelfHostDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): Promise<number> {
+  const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const hookPath = join(gitRoot, '.husky', 'pre-commit');
+  console.log('devkit doctor — self-host (source-mode dogfood)\n');
+
+  let hookOk = false;
+  if (!existsSync(hookPath)) {
+    console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
+  } else {
+    const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
+    const expectedBlock = buildSelfHostBlock(
+      { ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS },
+      pkgRel,
+      cwd,
+    );
+    if (currentBlock !== null && currentBlock.trim() === expectedBlock.trim()) {
+      hookOk = true;
+      console.log('  ✓ .husky/pre-commit in sync with the generator');
+    } else if (fix) {
+      installSelfHostHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
+      hookOk = true;
+      console.log(
+        '  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)',
+      );
+    } else {
+      console.log(
+        '  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`',
+      );
+    }
+  }
+
+  // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
+  const sel: Partial<Selection> = cfg.components ?? {};
+  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
+  const advise = (r: CheckResult) =>
+    console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
+  if (sel.skills && primary) advise(await checkSkills(cwd, primary));
+  if (sel.agents && primary) advise(await checkAgents(cwd, primary));
+
+  return hookOk ? 0 : 1;
+}
+
 /**
  * Build the doctor result list for a package/standalone install from its recorded config — a pure
  * dispatch over the recorded selection, so it's unit-testable without driving the CLI. Each check
@@ -806,6 +862,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
 
   const cfg = (readJson(join(cwd, '.devkit', 'config.json')) ?? {}) as DevkitConfig;
   if (cfg.overlay) return runOverlayDoctor(cwd, cfg, fix);
+  if (cfg.selfHost) return runSelfHostDoctor(cwd, cfg, fix);
 
   const { results, sel } = await collectResults(cwd, cfg, configResult);
 

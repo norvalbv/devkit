@@ -36,6 +36,7 @@ import {
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
+import { selfHostSelection } from '../lib/husky/self-host.mts';
 import { syncHookScripts } from '../lib/install/install-hooks.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
@@ -76,6 +77,7 @@ interface DevkitConfig {
   overlay?: boolean;
   stack?: string;
   standalone?: boolean;
+  selfHost?: boolean;
   components?: Partial<Selection>;
 }
 
@@ -117,6 +119,33 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
       existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')),
   );
   const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+
+  // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
+  // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
+  // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive
+  // multiselect in the dogfood repo). Regenerate the source hook + re-sync assets from the current
+  // generator, then verify — the whole point is that `devkit upgrade` keeps the dogfood hook in
+  // lockstep with the generator, for free.
+  if (cfg.selfHost) {
+    console.log(
+      `devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — self-host (source-mode dogfood), stack=${stack}\n`,
+    );
+    console.log('Regenerating the source hook + re-syncing assets from the current generator.');
+    await applyInit(cwd, {
+      stack,
+      selection: { ...selfHostSelection(), agentTargets },
+      selfHost: true,
+      force,
+      dryRun,
+      regenStructureBaselines: false,
+    });
+    if (dryRun) {
+      console.log('\nDry-run complete — nothing written.');
+      return 0;
+    }
+    console.log('\nverify\n');
+    return doctor([], cwd);
+  }
 
   // structure: normalizeSelection ALSO defaults this to `true` when the key is absent, so a LEGACY
   // config (no `structure` key) would otherwise reach applyInit as structure:true and newly ADD

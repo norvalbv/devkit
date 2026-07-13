@@ -1,24 +1,41 @@
-# devkit dogfoods its OWN gate-engine. The bins are local (this IS the devkit repo), so the
-# gates run via `node gate-engine/...` rather than the published `bunx guard-*`. Do not run
-# `devkit init` in this repo — this hand-authored hook IS the canonical chain.
-#
-# The deterministic set runs through the SAME `guard-deterministic` orchestrator the generated
-# consumer hooks use: it owns the prefix-cache check/record (skips an identical staged tree on a
-# devkit ship retry), runs each gate under the shared trichotomy, and aggregates every failure
-# into ONE report + ONE exit code. devkit's set is a SUBSET of the guard registry plus two
-# non-guard commands, expressed as flags:
-#   --only size,fanout               the two ratchet guards (baselines in eslint/baselines/)
-#   --extra "lint=bun run lint"      Biome format+lint — hard gate (any non-zero blocks)
-#   --structure "bun run lint:structure"   folder-structure governance — hard gate
-# The AI gate (decisions) stays last and fail-fast, below.
-node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" \
-    --only size,fanout \
-    --extra "lint=bun run lint" \
-    --structure "bun run lint:structure" || exit 1
+#!/bin/sh
+# devkit generic pre-commit hook (POSIX sh). Runs the selected gate-engine set on every
+# commit. The block between the two `# devkit-guards` markers is devkit-owned and is the
+# only region init / removal touches — everything outside it is the consumer's own hook.
 
-# Decision-log gate (capture B) — smells an architectural diff with no decision staged and blocks
-# until a Target is recorded (or GUARD_NO_LOG=1 bypasses). Dogfooded via the local engine; fail-open
-# when `claude` is unavailable. The why-store lives under docs/decisions/. See the `decisions` skill.
+# GUI git clients launch with a minimal PATH that omits user bin dirs, so `bun`/`bunx`
+# can go missing → the hook fails. Prepend the standard user install locations.
+for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
+    [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
+done
+export PATH
+
+# >>> devkit-guards >>>
+# devkit:biome-format
+# Format staged files with biome, then re-stage exactly those (scoped — never a blanket
+# `git add -u`, which would sweep unrelated working-tree changes into the commit). Only
+# re-add files with NO unstaged edits, so partially-staged files commit exactly as staged.
+STAGED_FMT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(tsx?|jsx?|css|json|jsonc|mjs)$' || true)
+if [ -n "$STAGED_FMT" ]; then
+    UNSTAGED_FMT_FILE=$(mktemp)
+    git diff --name-only | sort -u >"$UNSTAGED_FMT_FILE"
+    FMT_SAFE=$(printf '%s\n' "$STAGED_FMT" | grep -Fxvf "$UNSTAGED_FMT_FILE" || true)
+    rm -f "$UNSTAGED_FMT_FILE"
+    if [ -n "$FMT_SAFE" ]; then
+        echo "🎨 Formatting staged files..."
+        echo "$FMT_SAFE" | xargs bunx biome format --write 2>/dev/null || true
+        echo "$FMT_SAFE" | xargs git add
+    fi
+fi
+# /devkit:biome-format
+
+# devkit:deterministic
+echo "🚧 Deterministic gates (aggregated)..."
+node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" || exit 1
+# /devkit:deterministic
+
+# devkit:guard-decisions
+echo "🧭 Decision-log gate..."
 ddrc=0
 node gate-engine/decisions/cli.mts detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
@@ -26,22 +43,45 @@ if [ "$ddrc" -eq 1 ]; then
     exit 1
 elif [ "$ddrc" -eq 3 ]; then
     echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
-    echo "   Check claude CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    echo "   Check \`claude\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
     echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
     exit 1
 fi
-# ddrc 0 = clean/staged/routine/bypassed, ddrc 2 = fail-open → continue; any other code blocks.
+# ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
+# /devkit:guard-decisions
 
-# qavis-advisory gate (advisory) — nudge to run qavis QA on a UI-affecting staged change. All the
-# "deserves QA?" logic + the pass-receipt live in qavis; this shells `qavis route`. Fail-open when
-# qavis or a .qavis/recipe.json is absent — devkit has no recipe, so this is a clean no-op here
-# (dogfooded for wiring parity). 3 = ADVISE under a strict ship (block); anything else continues.
+# devkit:guard-review
+echo "🔍 Reviewer gate (headless domain judges)..."
+rrc=0
+node gate-engine/review/cli.mts --gate || rrc=$?
+if [ "$rrc" -eq 1 ]; then
+    echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
+    exit 1
+elif [ "$rrc" -eq 3 ]; then
+    echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
+    echo "   Check \`claude\` CLI auth/quota, then re-run devkit ship (completed verdicts are cached)."
+    exit 1
+elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then
+    echo "   guard-review: unexpected exit $rrc — blocking the commit."
+    exit 1
+fi
+# rrc 0 = pass/cached/nothing-to-do, rrc 2 = inconclusive (non-strict fail-open) → continue.
+# /devkit:guard-review
+
+# devkit:guard-qavis-advisory
 qarc=0
 node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
 [ "$qarc" -eq 3 ] && exit 1
+# qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
+# (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
+# /devkit:guard-qavis-advisory
 
-# fallow audit (dead-code + complexity + duplication on the changed set) — advisory (fail-open):
-# surfaces findings, never blocks; no-ops when the fallow CLI is not installed.
+# devkit:fallow-advisory
+# fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
 command -v fallow >/dev/null 2>&1 && fallow audit || true
+# /devkit:fallow-advisory
+# <<< devkit-guards <<<
+
+exit 0
