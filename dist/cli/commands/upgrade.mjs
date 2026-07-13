@@ -24,6 +24,7 @@ import { AGENT_TARGETS, GUARD_OPTIONS, newBundledGates, normalizeSelection, } fr
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
+import { selfHostSelection } from "../lib/husky/self-host.mjs";
 import { syncHookScripts } from "../lib/install/install-hooks.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
@@ -81,6 +82,30 @@ export default async function upgrade(args, cwd) {
     const rawTargets = cfg.components?.agentTargets;
     const inferred = AGENT_TARGETS.filter((t) => existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')));
     const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+    // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
+    // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
+    // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive
+    // multiselect in the dogfood repo). Regenerate the source hook + re-sync assets from the current
+    // generator, then verify — the whole point is that `devkit upgrade` keeps the dogfood hook in
+    // lockstep with the generator, for free.
+    if (cfg.selfHost) {
+        console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — self-host (source-mode dogfood), stack=${stack}\n`);
+        console.log('Regenerating the source hook + re-syncing assets from the current generator.');
+        await applyInit(cwd, {
+            stack,
+            selection: { ...selfHostSelection(), agentTargets },
+            selfHost: true,
+            force,
+            dryRun,
+            regenStructureBaselines: false,
+        });
+        if (dryRun) {
+            console.log('\nDry-run complete — nothing written.');
+            return 0;
+        }
+        console.log('\nverify\n');
+        return doctor([], cwd);
+    }
     // structure: normalizeSelection ALSO defaults this to `true` when the key is absent, so a LEGACY
     // config (no `structure` key) would otherwise reach applyInit as structure:true and newly ADD
     // structure-lint to a config-driven repo that never had it. Honour the RAW recorded value; if absent
