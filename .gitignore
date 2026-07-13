@@ -48,3 +48,5 @@ gate-engine/review/eval/reviewers/progress-*.jsonl
 # committed like completeness/critique's, so do not add it here.
 gate-engine/review/eval/conventions/runs.log
 gate-engine/review/eval/conventions/transcripts/
+gate-engine/edge-cases/eval/raw/
+gate-engine/edge-cases/eval/cases.jsonl
