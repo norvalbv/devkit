@@ -19,6 +19,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { excerptDiff } from './lib/excerpt.mts';
+import { overlapCount } from './lib/match.mts';
 import { EXCERPT_ALLOWLIST, validateCase } from './lib/schema.mts';
 import { findLeaks, scrubDeep } from './lib/scrub.mts';
 
@@ -195,15 +196,20 @@ for (const p of proposals) {
       .split('\n')
       .map((l) => l.split('\t').pop() ?? '')
       .filter(Boolean);
-    const inAnchor = (f) =>
-      (f.files ?? []).some((ff) => anchorFiles.some((af) => af.endsWith(ff) || ff.endsWith(af)));
-    const covered = c.findings.filter(inAnchor).length;
+    const covered = c.findings.filter((f) => overlapCount(f.files, anchorFiles) > 0).length;
     c.anchor.coverage = Number((covered / c.findings.length).toFixed(2));
     if (c.anchor.coverage === 0) c.anchor.kind = 'session-summary';
     if (c.anchor.diffExcerpt) {
-      const inExcerpt = (f) => (f.files ?? []).some((ff) => c.anchor.diffExcerpt.includes(ff));
+      // same file-list semantics as coverage — a raw substring scan over the excerpt body would
+      // let short names match inside unrelated paths/code ("index.ts" inside "reindex.ts")
+      const excerptFiles = [...c.anchor.diffExcerpt.matchAll(/^diff --git a\/(\S+) b\//gm)].map(
+        (m) => m[1],
+      );
       c.anchor.excerptCoverage = Number(
-        (c.findings.filter(inExcerpt).length / c.findings.length).toFixed(2),
+        (
+          c.findings.filter((f) => overlapCount(f.files, excerptFiles) > 0).length /
+          c.findings.length
+        ).toFixed(2),
       );
     }
   }

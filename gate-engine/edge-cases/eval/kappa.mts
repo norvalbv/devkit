@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { overlapCount } from './lib/match.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const rawDir = path.join(here, 'raw');
@@ -83,8 +84,7 @@ const jaccard = (a, b) => {
   const inter = [...A].filter((x) => B.has(x)).length;
   return inter / (A.size + B.size - inter || 1);
 };
-const fileOverlap = (fa, fb) =>
-  (fa ?? []).filter((x) => (fb ?? []).some((y) => x.endsWith(y) || y.endsWith(x))).length;
+// shared with finalize/sources — one overlap implementation (drift here would distort κ)
 
 const second = readJsonl(secondPassPath);
 const firstById = new Map(first.map((p) => [p.id, p]));
@@ -97,12 +97,16 @@ for (const b of second) {
   const candidates = [];
   for (const fa of a.findings ?? [])
     for (const fb of b.findings ?? []) {
-      const files = fileOverlap(fa.files, fb.files);
+      const files = overlapCount(fa.files, fb.files);
       const sameCat = fa.category === fb.category;
       const jac = jaccard(fa.claim, fb.claim);
-      if ((sameCat && files > 0) || jac >= 0.35) candidates.push({ fa, fb, files, jac });
+      // the PRE-REGISTERED rule, exactly: category + file overlap; the Jaccard fallback applies
+      // ONLY when a side has no files (a looser matcher here would inflate the reported κ)
+      const emptySide = !(fa.files ?? []).length || !(fb.files ?? []).length;
+      if ((sameCat && files > 0) || (emptySide && jac >= 0.35))
+        candidates.push({ fa, fb, files, jac, sev: fa.severity === fb.severity ? 1 : 0 });
     }
-  candidates.sort((x, y) => y.files - x.files || y.jac - x.jac);
+  candidates.sort((x, y) => y.files - x.files || y.jac - x.jac || y.sev - x.sev);
   const usedA = new Set();
   const usedB = new Set();
   for (const cnd of candidates) {
@@ -126,14 +130,19 @@ const kappaOf = (key) => {
     const pb = pairs.filter(([, b]) => String(b[key]) === c).length / n;
     pe += pa * pb;
   }
-  return (agree - pe) / (1 - pe || 1);
+  // single-class degenerate case: κ is UNDEFINED (0/0), not 0 — reporting 0 would read as
+  // chance-level agreement when raw agreement is 100%
+  if (1 - pe === 0) return Number.NaN;
+  return (agree - pe) / (1 - pe);
 };
+const fmtKappa = (k) =>
+  Number.isNaN(k) ? 'undefined (single-class — see raw agreement)' : k.toFixed(3);
 
 console.log(
   `kappa: ${pairs.length} matched finding pairs (unmatched: ${unmatchedA} first-pass, ${unmatchedB} second-pass)`,
 );
-console.log(`  verdict    κ = ${kappaOf('verdict').toFixed(3)}`);
-console.log(`  wasLiveBug κ = ${kappaOf('wasLiveBug').toFixed(3)}`);
+console.log(`  verdict    κ = ${fmtKappa(kappaOf('verdict'))}`);
+console.log(`  wasLiveBug κ = ${fmtKappa(kappaOf('wasLiveBug'))}`);
 console.log(
   `  raw agreement: verdict ${((pairs.filter(([a, b]) => a.verdict === b.verdict).length / (pairs.length || 1)) * 100).toFixed(1)}% · wasLiveBug ${((pairs.filter(([a, b]) => String(a.wasLiveBug) === String(b.wasLiveBug)).length / (pairs.length || 1)) * 100).toFixed(1)}%`,
 );

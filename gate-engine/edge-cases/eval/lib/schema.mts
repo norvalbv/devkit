@@ -64,6 +64,9 @@ export const classifyPromptVariant = (text) => {
 
 const isOneOf = (value, list) => list.includes(value);
 const ID_RE = /^(cc|fk|cu)-[\w-]+-\d{8}-[0-9a-f]{8}$/;
+// a path has a separator or extension, or is a conventional extensionless root file
+// (Dockerfile/Makefile/LICENSE/README/...) — bars bare symbol names, not real files
+const PATH_SHAPED_RE = /\/|\.|^[A-Z][a-z]+file$|^[A-Z][A-Z0-9_-]{2,}$/;
 const SHA8_RE = /^[0-9a-f]{8}$/;
 
 /** Validate a finalized case row. Returns an array of error strings (empty = valid). */
@@ -107,7 +110,7 @@ export const validateCase = (c) => {
     // matching depends on real paths (audit F6): bare symbol names can never intersect an anchor
     if (c?.anchor?.kind === 'diff')
       for (const ff of f?.files ?? [])
-        if (typeof ff !== 'string' || !(ff.includes('/') || ff.includes('.')))
+        if (typeof ff !== 'string' || !PATH_SHAPED_RE.test(ff))
           err(`${fid}: non-path files entry ${JSON.stringify(ff)}`);
     if (typeof f?.text !== 'string' || !f.text) err(`${fid}: missing text`);
     if (!isOneOf(f?.severity, SEVERITIES)) err(`${fid}: bad severity ${f?.severity}`);

@@ -214,10 +214,11 @@ per-section budgets so no evidence class is silently truncated away.
   overlay). Labeler: sonnet (`labelModel`/`labelPromptSha` per row).
 - Prompt variants: `frink-cmd-v1` 87 · `frink-cmd-v0` 43 · `legacy-diff-debug-chat` 1 · custom 8.
 - Label-noise floor (blind haiku second pass, seed 1118, matched via the pre-registered rule):
-  on 12 sampled cases the two labelers' MATCHED findings agree perfectly
-  (raw 100% on verdict and wasLiveBug; κ_wasLiveBug = 1.0; κ_verdict degenerate — every matched
-  pair was positive-class), but **only 25 of sonnet's 82 findings (30%) were matched by haiku at
-  all** (haiku produced 56). The label-noise floor is FINDING SEGMENTATION, not label values:
-  any sc-1119 variant delta smaller than the segmentation/matching noise is unresolved, and
-  matcher quality dominates the benchmark's error budget (the sc-1061 lesson, now quantified).
+  on 12 sampled cases the two labelers' MATCHED findings agree perfectly (raw 100% on verdict and
+  wasLiveBug; κ undefined — every matched pair single-class), but **only 5 of sonnet's 82 findings
+  match under the strict pre-registered rule** (a looser claim-similarity matcher yields 25 — and
+  overstates agreement, which is why the strict rule is the registered one). The label-noise floor
+  is FINDING SEGMENTATION, not label values: any sc-1119 variant delta smaller than the
+  segmentation/matching noise is unresolved, and matcher quality dominates the benchmark's error
+  budget (the sc-1061 lesson, now quantified).
   Rerun: `bun gate-engine/edge-cases/eval/kappa.mts --cases 12`.

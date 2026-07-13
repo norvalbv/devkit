@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { overlapCount } from './match.mts';
 import { ANCHOR_PHRASE, classifyPromptVariant, EXCLUDED_REPOS, sha8 } from './schema.mts';
 
 const HOME = homedir();
@@ -55,15 +56,15 @@ const pickDiff = (events, invocationPos, endPos, editedFiles = []) => {
   // the one most RELEVANT to what the session actually edited — sessions often print stray diffs
   // (docs checks, unrelated files) and picking purely by position anchors the row to the wrong
   // change (the coverage invariant would then demote it).
-  const safe = [...hunked(before), ...hunked(inTurn).slice(0, 1)];
+  const pre = hunked(before);
+  const safe = [...pre, ...hunked(inTurn).slice(0, 1)];
   const suffixes = editedFiles.map((f) => f.split('/').slice(-2).join('/'));
-  const score = (e) => {
-    const files = diffFiles(e.output);
-    return suffixes.filter((suf) => files.some((f) => f.endsWith(suf) || suf.endsWith(f))).length;
-  };
+  const score = (e) => overlapCount(suffixes, diffFiles(e.output));
+  // ties prefer PRE-invocation candidates (leakage-free by construction), latest first; the
+  // earliest-in-turn candidate only wins on a strictly better relevance score
   const best = safe
-    .map((e, i) => ({ e, i, s: score(e) }))
-    .sort((a, b) => b.s - a.s || b.i - a.i)[0];
+    .map((e, i) => ({ e, i, s: score(e), isPre: i < pre.length }))
+    .sort((a, b) => b.s - a.s || Number(b.isPre) - Number(a.isPre) || b.i - a.i)[0];
   const diffFull = best?.e.output ?? '';
   const statText =
     inTurn.find((e) => GIT_STAT_RE.test(e.command) && e.output)?.output ??
