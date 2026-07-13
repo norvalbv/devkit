@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { excerptDiff } from './lib/excerpt.mts';
 import { EXCERPT_ALLOWLIST, validateCase } from './lib/schema.mts';
 import { findLeaks, scrubDeep } from './lib/scrub.mts';
 
@@ -26,10 +27,6 @@ const proposalsPath = path.join(here, 'raw', 'proposals.jsonl');
 const casesPath = path.join(here, 'cases.jsonl');
 const append = process.argv.includes('--append');
 
-const MAX_EXCERPT_LINES = 300;
-const MAX_EXCERPT_BYTES = 12 * 1024;
-
-const UNIT_START_RE = /^(@@ |diff --git )/;
 const DIFF_SECTION_RE = /^diff --git /m;
 const FILE_B_RE = / b\/(\S+)/;
 const FILE_A_RE = /^a\/(\S+)/;
@@ -45,30 +42,6 @@ const readJsonl = (file) =>
         .filter(Boolean)
         .map((l) => JSON.parse(l))
     : [];
-
-/** Truncate a unified diff at hunk boundaries — never mid-hunk. */
-const excerptDiff = (diff) => {
-  const lines = diff.split('\n');
-  const out = [];
-  let bytes = 0;
-  let truncated = false;
-  let i = 0;
-  while (i < lines.length) {
-    // find the end of the current unit: a hunk (@@) or header block runs until the next @@ / diff --git
-    let j = i + 1;
-    while (j < lines.length && !UNIT_START_RE.test(lines[j])) j++;
-    const unit = lines.slice(i, j);
-    const unitBytes = Buffer.byteLength(unit.join('\n'), 'utf8') + 1;
-    if (out.length + unit.length > MAX_EXCERPT_LINES || bytes + unitBytes > MAX_EXCERPT_BYTES) {
-      truncated = true;
-      break;
-    }
-    out.push(...unit);
-    bytes += unitBytes;
-    i = j;
-  }
-  return { excerpt: out.join('\n'), truncated };
-};
 
 /** Derive a name-status list from diff headers (A/D/M per file). */
 const nameStatusOf = (diff, statText) => {
@@ -112,7 +85,40 @@ const normalizeFinding = (f) => ({
   },
 });
 
-const proposals = readJsonl(proposalsPath);
+// Human audit edits live in an OVERLAY, never in-place: in-place edits make rubber-stamping and
+// correction indistinguishable and destroy the raw labels needed for agreement stats (audit F7,
+// anchoring per 2507.15821). Each overlay line: { ref: "<caseId>#<idx>" | "<caseId>", set: {...} } —
+// finding-level refs merge into the finding (evidence keys merge one level deeper); case-level refs
+// merge into the proposal row.
+const overlayPath = path.join(here, 'raw', 'audit-overlay.jsonl');
+const applyOverlay = (rows) => {
+  const overlays = readJsonl(overlayPath);
+  if (!overlays.length) return rows;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const o of overlays) {
+    const [caseId, idx] = o.ref.split('#');
+    const row = byId.get(caseId);
+    if (!row) {
+      console.error(`finalize: overlay ref ${o.ref} matches no proposal — skipped`);
+      continue;
+    }
+    if (idx === undefined) {
+      Object.assign(row, o.set);
+      continue;
+    }
+    const f = (row.findings ?? []).find((x) => x.idx === Number(idx));
+    if (!f) {
+      console.error(`finalize: overlay ref ${o.ref} matches no finding — skipped`);
+      continue;
+    }
+    const { evidence, ...rest } = o.set;
+    Object.assign(f, rest);
+    if (evidence) f.evidence = { ...(f.evidence ?? {}), ...evidence };
+  }
+  return rows;
+};
+
+const proposals = applyOverlay(readJsonl(proposalsPath));
 if (!proposals.length) {
   console.error('finalize: raw/proposals.jsonl is empty — run label.mts first');
   process.exit(2);
@@ -156,21 +162,59 @@ for (const p of proposals) {
     promptVariant: p.promptVariant,
     promptSha: p.promptSha,
     anchor: {
-      // a recovered "diff" that yields no file list (e.g. a bare @@-range listing) is not a usable
-      // diff anchor — demote it to session-summary rather than ship a diff row without nameStatus
-      kind: p.diffFull && nameStatusOf(p.diffFull, p.statText) ? 'diff' : 'session-summary',
+      // Demotions out of the diff-scoped denominator (methodology audit F1/F2):
+      //  - no derivable file list (bare @@-range capture) — not a usable diff anchor;
+      //  - postFixContaminated (PR-squash reconstruction) — the anchor contains post-invocation
+      //    fixes, so the gold bug may already be fixed in it (solution leakage).
+      kind:
+        p.diffFull && nameStatusOf(p.diffFull, p.statText) && !p.postFixContaminated
+          ? 'diff'
+          : 'session-summary',
       nameStatus: nameStatusOf(p.diffFull, p.statText),
       diffExcerpt: allowExcerpt ? excerpt : null,
       diffOrigin: p.diffOrigin,
       diffLines: p.diffFull ? p.diffFull.split('\n').length : 0,
       truncated,
+      postFixContaminated: !!p.postFixContaminated,
       summary: p.summary ?? '',
     },
-    findings: degenerate ? [] : findingObjects.map(normalizeFinding),
+    labelModel: p.labelModel ?? null,
+    labelPromptSha: p.labelPromptSha ?? null,
+    findings: findingObjects.map(normalizeFinding),
     degenerate,
     degenerateReason: degenerate ? (scalar(p.degenerateReason) ?? 'empty-diff') : null,
     note: p.note ?? '',
   });
+
+  // anchorCoverage (audit F2): every gold finding must be derivable from the anchor the judge
+  // sees, or judge recall measures reconstruction error. coverage = share of findings citing at
+  // least one file present in nameStatus; zero coverage with findings present demotes the row out
+  // of the diff-scoped denominator. excerptCoverage = same against the committed diffExcerpt.
+  if (c.anchor.kind === 'diff' && c.findings.length > 0) {
+    const anchorFiles = (c.anchor.nameStatus ?? '')
+      .split('\n')
+      .map((l) => l.split('\t').pop() ?? '')
+      .filter(Boolean);
+    const inAnchor = (f) =>
+      (f.files ?? []).some((ff) => anchorFiles.some((af) => af.endsWith(ff) || ff.endsWith(af)));
+    const covered = c.findings.filter(inAnchor).length;
+    c.anchor.coverage = Number((covered / c.findings.length).toFixed(2));
+    if (c.anchor.coverage === 0) c.anchor.kind = 'session-summary';
+    if (c.anchor.diffExcerpt) {
+      const inExcerpt = (f) => (f.files ?? []).some((ff) => c.anchor.diffExcerpt.includes(ff));
+      c.anchor.excerptCoverage = Number(
+        (c.findings.filter(inExcerpt).length / c.findings.length).toFixed(2),
+      );
+    }
+  }
+
+  // A degenerate verdict that ALSO lists findings is contradictory labeler output — erroring here
+  // (instead of silently dropping the findings) caught a docs-only mislabel that swallowed 6 real
+  // findings in v1 (methodology audit, minors).
+  if (degenerate && c.findings.length > 0)
+    errors.push(
+      `${c.id}: degenerate=true but ${c.findings.length} findings present — relabel or overlay`,
+    );
 
   for (const f of c.findings) {
     const needsReview = String(f.wasLiveBug) === 'true' || f.verdict === 'noise';
