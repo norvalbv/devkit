@@ -111,7 +111,9 @@ function envVar(name) {
 }
 // Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
 // as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-function envBool(name) {
+// Exported for hard-by-default gates that must distinguish unset (→ default) from an
+// explicit `=0` soften (envFlag can't — it folds unset and `=0` both to false).
+export function envBool(name) {
     const v = envVar(name);
     if (v === undefined)
         return undefined;

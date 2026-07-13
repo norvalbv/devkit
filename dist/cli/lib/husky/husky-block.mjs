@@ -16,9 +16,9 @@ import { markEnd, markStart } from "./husky.mjs";
 // code — the hook just propagates it. `--structure "<cmd>"` joins the stack-resolved structure
 // lint to the same aggregated set (config-driven stacks: `guard-structure gate`; electron:
 // `bunx eslint src`). The old hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
-const deterministicFragment = (structureCmd) => `# devkit:deterministic
+const deterministicFragment = (structureCmd, extras = []) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''} || exit 1
+bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1
 # /devkit:deterministic`;
 // The AI-guard fragments, keyed by guard id (GUARD_IDS in components.mjs). AI gates (decisions,
 // review) stay FAIL-FAST and OUTSIDE the deterministic orchestrator — an aggregated wall of AI
@@ -154,7 +154,7 @@ export function buildGuardBlock(selection, pkgRel = '') {
     if (!pkgRel && selection.biome)
         pieces.push(BIOME_FRAGMENT);
     if (wantsDeterministic(selection))
-        pieces.push(deterministicFragment(selection.structureCmd));
+        pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             pieces.push(GUARD_FRAGMENTS[id]);
