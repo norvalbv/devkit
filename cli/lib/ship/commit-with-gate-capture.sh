@@ -61,6 +61,24 @@ commit_with_gate_capture() {
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
   local repo_name; repo_name="$(basename "$root")"
 
+  # Per-SHIP gate log the collector reads for the drill-down + fail-classification. The per-branch
+  # $log (in the repo) is OVERWRITTEN by the next ship, so it can't back a historical drill-down; a
+  # durable per-ship copy lives beside the sink and its path (log_path) rides both telemetry lines so
+  # the reader can find it (an in-flight ship's row serves it once the file exists).
+  local ship_logs_dir; ship_logs_dir="$(dirname "$DEVKIT_GATE_EVENTS")/logs"
+  # Sanitise the id for the FILENAME ONLY — an env-supplied DEVKIT_SHIP_ID must never escape the dir
+  # via `/` or `..` (a path traversal into `tee`). The JSON below keeps the ORIGINAL id for correlation.
+  local ship_id_safe="${DEVKIT_SHIP_ID//[^A-Za-z0-9._-]/-}"
+  ship_id_safe="${ship_id_safe:0:64}"          # bound the filename length (a uuid is 36; caps abuse)
+  [ -n "$ship_id_safe" ] || ship_id_safe="ship"
+  local ship_log="$ship_logs_dir/${ship_id_safe}.log"
+  mkdir -p "$ship_logs_dir" 2>/dev/null || true
+
+  # Minimal JSON string-escaper for the shell-built telemetry lines below (the node gates already use
+  # JSON.stringify): a repo/branch/path containing `"` or `\` must not produce a line the collector's
+  # json.loads drops. These fields can't contain control chars, so escaping the two metacharacters is enough.
+  json_escape() { local s=${1//\\/\\\\}; printf '%s' "${s//\"/\\\"}"; }
+
   # Realistic worst case (first ship, nothing cached): deterministic prefix ~240s + decisions detect
   # ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review cascade whose
   # slow judge (correctness) can now run up to its 30-min cap (see run-review.mts) — but in practice
@@ -88,15 +106,16 @@ commit_with_gate_capture() {
   # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
   # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
   local dur_start; dur_start=$(date +%s)
-  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","ts":"%s"}\n' \
-    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "${DEVKIT_SHIP_MODE:-ship}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
+    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" \
+    "$(json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   set +e
   # ${to[@]+"${to[@]}"}: set -u-safe empty-array expansion (a bare "${to[@]}" aborts under stock-macOS
   # bash 3.2). Empty → bare git (degrade); non-empty → `timeout -k 10 <secs> git …`. PIPESTATUS[0] is the
   # timeout/git exit (124 on timeout) through both forms — never tee's. hookcfg expands the same way.
-  ${to[@]+"${to[@]}"} git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" 2>&1 | tee "$log" >&2
+  ${to[@]+"${to[@]}"} git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" 2>&1 | tee "$log" "$ship_log" >&2
   local rc=${PIPESTATUS[0]}
   set -e
 
@@ -112,9 +131,9 @@ commit_with_gate_capture() {
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
-  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"ts":"%s"}\n' \
-    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "$rc" "$timed_out" "$blocked_json" \
-    "$(( $(date +%s) - dur_start ))" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" "$rc" "$timed_out" "$blocked_json" \
+    "$(( $(date +%s) - dur_start ))" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
