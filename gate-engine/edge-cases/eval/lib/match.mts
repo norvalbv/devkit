@@ -12,7 +12,9 @@ export const samePath = (a, b) =>
   typeof b === 'string' &&
   a !== '' &&
   b !== '' &&
-  (a.endsWith(b) || b.endsWith(a));
+  // suffix matches must start at a path-separator boundary — raw endsWith would accept basename
+  // substrings ("src/reindex.ts" vs "index.ts") and overstate coverage / mispair findings
+  (a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`));
 
 /** How many entries of `files` match at least one entry of `others`. */
 export const overlapCount = (files, others) =>
