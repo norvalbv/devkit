@@ -107,54 +107,39 @@ const gitShow = (repoPath, sha) =>
   git(repoPath, ['show', '--no-color', '--format=commit %h %s', sha]);
 
 /** The diff the run was anchored to, best rung first:
- *  1. session's own commit shas (exact scope);
- *  2. the branch's squash-merge on origin/main via prNumber (whole PR = whole session's work);
- *  3. the branch tip AS OF the session date, diffed against its merge-base with origin/main —
- *     the same branch-wide diff the agent itself saw (the prompt explicitly allows for unrelated
- *     work on the branch and tells the agent to focus on the session's part). */
+ *  1. session's own PRE-invocation commit shas (exact scope);
+ *  2. the branch tip AS OF THE INVOCATION INSTANT, diffed against its merge-base with origin/main;
+ *  3. date-window commits up to the invocation instant, filtered by session-file overlap;
+ *  4. the branch's PR squash (whole PR incl. post-invocation fixes) — LAST resort, and always
+ *     flagged postFixContaminated.
+ *
+ * SOLUTION-LEAKAGE RULE (methodology audit, cf. SWE-Bench+ 2410.06992): every time bound is the
+ * invocation timestamp itself, never later — the /edge-cases prompt commands the agent to FIX what
+ * it finds, so any window extending past the invocation sweeps the fix into the anchor and the
+ * judge gets scored on a diff where the gold bug no longer exists. */
 const reconstructDiff = (r, repoPath) => {
+  const invocationIso = new Date(Date.parse(r.date)).toISOString();
   const shown = (r.preCommits ?? []).map((sha) => gitShow(repoPath, sha)).filter(Boolean);
   if (shown.length) return { diff: shown.join('\n'), origin: 'reconstructed-from-commits' };
-
-  if (r.prNumber) {
-    const squash = git(repoPath, [
-      'log',
-      'origin/main',
-      `--grep=(#${r.prNumber})`,
-      '-1',
-      '--format=%H',
-    ]);
-    if (squash) {
-      const diff = gitShow(repoPath, squash);
-      if (diff) return { diff, origin: 'reconstructed-from-pr' };
-    }
-  }
 
   if (r.branch && !['main', 'master'].includes(r.branch)) {
     for (const ref of [`origin/${r.branch}`, r.branch]) {
       if (!git(repoPath, ['rev-parse', '--verify', '--quiet', ref])) continue;
-      const until = new Date(Date.parse(r.date) + 2 * 3600 * 1000).toISOString();
-      const tip = git(repoPath, ['rev-list', '-1', `--until=${until}`, ref]) || ref;
+      const tip = git(repoPath, ['rev-list', '-1', `--until=${invocationIso}`, ref]);
+      if (!tip) continue; // branch has no pre-invocation state — do not fall back to a later tip
       const base = git(repoPath, ['merge-base', 'origin/main', tip]);
       if (!base) continue;
       const diff = git(repoPath, ['diff', '--no-color', base, tip]);
       if (diff) return { diff, origin: 'reconstructed-from-branch' };
     }
-    // Branch pruned after merge → its PR still knows the squash commit. Needs gh auth that can
-    // read the repo (GH_TOKEN already exported by the caller when required).
-    const pr = ghPrForBranch(repoPath, r.branch);
-    if (pr?.mergeCommit?.oid) {
-      const diff = gitShow(repoPath, pr.mergeCommit.oid);
-      if (diff) return { diff, origin: 'reconstructed-from-pr' };
-    }
   }
 
-  // Last rung: merge-commit workflows keep the ORIGINAL session commits (true author dates) in
-  // history. Take commits authored in the session's window whose files overlap what the session
-  // actually edited — the overlap filter keeps parallel same-day sessions out.
+  // Date-window rung: merge-commit workflows keep the ORIGINAL session commits (true author
+  // dates) in history. Commits up to the INVOCATION, filtered by session-file overlap (keeps
+  // parallel same-day sessions out).
   if (r.editedFiles?.length) {
     const since = new Date(Date.parse(r.date) - 12 * 3600 * 1000).toISOString();
-    const until = new Date(Date.parse(r.date) + 1 * 3600 * 1000).toISOString();
+    const until = invocationIso;
     const shas = git(repoPath, [
       'log',
       '--all',
@@ -179,6 +164,17 @@ const reconstructDiff = (r, repoPath) => {
         .join('\n');
       if (diff) return { diff, origin: 'reconstructed-from-date-window' };
     }
+  }
+
+  // Last resort: a squash merge contains the WHOLE PR including post-invocation fixes — it cannot
+  // be time-bounded. Usable only as flagged, contaminated context (finalize demotes it out of the
+  // diff-scoped denominator).
+  const squash = r.prNumber
+    ? git(repoPath, ['log', 'origin/main', `--grep=(#${r.prNumber})`, '-1', '--format=%H'])
+    : (ghPrForBranch(repoPath, r.branch)?.mergeCommit?.oid ?? '');
+  if (squash) {
+    const diff = gitShow(repoPath, squash);
+    if (diff) return { diff, origin: 'reconstructed-from-pr', postFixContaminated: true };
   }
   return null;
 };
@@ -216,6 +212,7 @@ const reconstructDiffs = (rows) => {
     if (!result) continue;
     r.diffFull = result.diff.slice(0, 200 * 1024);
     r.diffOrigin = result.origin;
+    r.postFixContaminated = result.postFixContaminated ?? false;
     reconstructed++;
   }
   return reconstructed;

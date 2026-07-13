@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { overlapCount } from './match.mts';
 import { ANCHOR_PHRASE, classifyPromptVariant, EXCLUDED_REPOS, sha8 } from './schema.mts';
 
 const HOME = homedir();
@@ -35,20 +36,36 @@ const TEST_CMD_RE = /\b(vitest|bun (run )?test|npm (run )?test|yarn test|pytest)
 
 /**
  * Diff recovery ladder over the session's git tool calls ({pos, command, output}, ordered):
- *  1. largest in-turn output with real hunks;
- *  2. else nearest output with hunks BEFORE the invocation (the prompt says "the git diff related
- *     to what we've built" — the anchoring diff was often already printed earlier in the session);
+ *  1. nearest output with hunks BEFORE the invocation (pre-fix by construction — the anchoring
+ *     diff was often already printed earlier in the session);
+ *  2. else the EARLIEST in-turn output with real hunks — never the largest: the /edge-cases turn
+ *     fixes what it finds, so a later, larger re-diff inside the turn already contains the fix
+ *     (solution leakage; methodology audit / SWE-Bench+ 2410.06992);
  *  3. any in-turn/nearest-preceding stat-ish git output kept separately as statText (nameStatus hint).
  */
-const pickDiff = (events, invocationPos, endPos) => {
+const DIFF_HEADER_FILE_RE = /^diff --git a\/(\S+) b\//gm;
+const diffFiles = (output) => [...output.matchAll(DIFF_HEADER_FILE_RE)].map((m) => m[1]);
+
+const pickDiff = (events, invocationPos, endPos, editedFiles = []) => {
   const inTurn = events.filter((e) => e.pos > invocationPos && e.pos < endPos);
   const before = events.filter((e) => e.pos < invocationPos);
   const hunked = (list) =>
     list.filter((e) => GIT_DIFF_RE.test(e.command) && HAS_HUNKS_RE.test(e.output));
-  const diffFull =
-    hunked(inTurn).sort((a, b) => b.output.length - a.output.length)[0]?.output ??
-    hunked(before).at(-1)?.output ??
-    '';
+  // Leakage-safe candidates only: anything pre-invocation, plus the EARLIEST in-turn output
+  // (later in-turn re-diffs already contain the turn's fixes). Among the safe candidates, prefer
+  // the one most RELEVANT to what the session actually edited — sessions often print stray diffs
+  // (docs checks, unrelated files) and picking purely by position anchors the row to the wrong
+  // change (the coverage invariant would then demote it).
+  const pre = hunked(before);
+  const safe = [...pre, ...hunked(inTurn).slice(0, 1)];
+  const suffixes = editedFiles.map((f) => f.split('/').slice(-2).join('/'));
+  const score = (e) => overlapCount(suffixes, diffFiles(e.output));
+  // ties prefer PRE-invocation candidates (leakage-free by construction), latest first; the
+  // earliest-in-turn candidate only wins on a strictly better relevance score
+  const best = safe
+    .map((e, i) => ({ e, i, s: score(e), isPre: i < pre.length }))
+    .sort((a, b) => b.s - a.s || Number(b.isPre) - Number(a.isPre) || b.i - a.i)[0];
+  const diffFull = best?.e.output ?? '';
   const statText =
     inTurn.find((e) => GIT_STAT_RE.test(e.command) && e.output)?.output ??
     before.filter((e) => GIT_STAT_RE.test(e.command) && e.output).at(-1)?.output ??
@@ -183,7 +200,6 @@ export function harvestFrinkApp(rawDir) {
             for (const sha of shasIn(output)) commitEvents.push({ pos, sha });
           }
         }
-        const { diffFull, statText } = pickDiff(events, invocationPos, endPos);
         const preCommits = commitEvents.filter((e) => e.pos < invocationPos).map((e) => e.sha);
         const postCommits = commitEvents.filter((e) => e.pos > invocationPos).map((e) => e.sha);
         const editedFiles = [];
@@ -193,6 +209,7 @@ export function harvestFrinkApp(rawDir) {
               const fp = p.input?.file_path ?? p.input?.path;
               if (fp) editedFiles.push(fp);
             }
+        const { diffFull, statText } = pickDiff(events, invocationPos, endPos, editedFiles);
         // In-turn tool activity — where the prompt's commanded test-writing/TDD-fixing happens, and
         // the only place an f2p (test seen failing, then passing) can be observed.
         const turnActivity = { filesWritten: [], testRuns: [] };
@@ -355,7 +372,6 @@ export function harvestClaudeCode() {
       let end = i + 1;
       while (end < lines.length && !isRealUserTurn(lines[end])) end++;
       const turn = lines.slice(i + 1, end);
-      const { diffFull, statText } = pickDiff(gitEvents, i, end);
       const preCommits = commitEvents.filter((e) => e.pos < i).map((e) => e.sha);
       const postCommits = commitEvents.filter((e) => e.pos > i).map((e) => e.sha);
       const editedFiles = lines
@@ -364,6 +380,7 @@ export function harvestClaudeCode() {
           t.toolUses.filter((u) => (u.name === 'Write' || u.name === 'Edit') && u.filePath),
         )
         .map((u) => u.filePath);
+      const { diffFull, statText } = pickDiff(gitEvents, i, end, editedFiles);
       const turnActivity = { filesWritten: [], testRuns: [] };
       for (const t of turn)
         for (const u of t.toolUses) {
