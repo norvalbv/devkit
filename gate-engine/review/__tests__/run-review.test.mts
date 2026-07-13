@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +30,10 @@ const ENV_KEYS = [
   'GUARD_DECISION_NO_LLM',
   'FRINK_DECISION_NO_LLM',
   'DEVKIT_REVIEW_PROGRESS',
+  // Cleared so a real ship's pre-push (which exports these) can't steer the telemetry assertions
+  // below, and so ordinary tests don't emit to the developer's live telemetry sink.
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_SHIP_ID',
 ];
 const saved = {};
 beforeEach(() => {
@@ -163,6 +167,32 @@ describe('runReviewGate — cascade + exit contract', () => {
       expect(call[0].args.join(' ')).not.toContain('opus');
     }
     expect(Object.keys(loadCache(repo)).length).toBe(5);
+  });
+
+  it('a PASS keeps the judge one-line reason + a fetchable transcript_ref under a ship', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-1';
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      return 'thorough check\nVERDICT: PASS — no correctness issues';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const reviewEvents = events.filter((e) => e.type === 'review_result');
+    expect(reviewEvents.length).toBeGreaterThan(0);
+    for (const e of reviewEvents) {
+      expect(e.status).toBe('pass');
+      expect(e.reason).toBe('no correctness issues'); // was '' before — the reason is no longer dropped
+      expect(typeof e.transcript_ref).toBe('string');
+      const abs = join(repo, e.transcript_ref); // ref is relative to the telemetry dir (= repo here)
+      expect(existsSync(abs)).toBe(true);
+      expect(readFileSync(abs, 'utf8')).toContain('thorough check'); // the full passing transcript
+    }
   });
 
   it('identical diff re-run hits the cache — zero judge spawns', async () => {
