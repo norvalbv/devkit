@@ -19,7 +19,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { excerptDiff } from './lib/excerpt.mts';
-import { overlapCount } from './lib/match.mts';
+import { anchorFilesOf, overlapCount } from './lib/match.mts';
 import { EXCERPT_ALLOWLIST, validateCase } from './lib/schema.mts';
 import { findLeaks, scrubDeep } from './lib/scrub.mts';
 
@@ -192,10 +192,7 @@ for (const p of proposals) {
   // least one file present in nameStatus; zero coverage with findings present demotes the row out
   // of the diff-scoped denominator. excerptCoverage = same against the committed diffExcerpt.
   if (c.anchor.kind === 'diff' && c.findings.length > 0) {
-    const anchorFiles = (c.anchor.nameStatus ?? '')
-      .split('\n')
-      .map((l) => l.split('\t').pop() ?? '')
-      .filter(Boolean);
+    const anchorFiles = anchorFilesOf(c.anchor.nameStatus);
     const covered = c.findings.filter((f) => overlapCount(f.files, anchorFiles) > 0).length;
     c.anchor.coverage = Number((covered / c.findings.length).toFixed(2));
     if (c.anchor.coverage === 0) c.anchor.kind = 'session-summary';
