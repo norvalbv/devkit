@@ -61,8 +61,9 @@ recorded per row as `anchor.diffOrigin`:
    the turn already contain the fix);
 2. `reconstructed-from-commits` — the session's own pre-invocation commit shas re-shown;
 3. `reconstructed-from-branch` — the branch tip **as of the invocation instant** vs merge-base;
-4. `reconstructed-from-date-window` — commits authored up to the invocation whose files overlap
-   what the session edited;
+4. `reconstructed-from-date-window` — commits with committer-date up to the invocation (git's
+   `--until` bound; rebases refresh committer dates, so post-invocation work re-committed later
+   stays excluded) whose files overlap what the session edited;
 5. `reconstructed-from-pr` — the PR squash (cannot be time-bounded): always flagged
    `postFixContaminated` and demoted to `session-summary`.
 
@@ -140,8 +141,16 @@ per-section budgets so no evidence class is silently truncated away.
 3. One J covering two Gs counts both ONLY if J's file set covers both Gs' files; otherwise the
    tie-break picks one.
 4. Unmatched judge findings on non-degenerate diff rows = false positives; on degenerate rows =
-   hallucinations; on session-summary rows = excluded.
+   hallucinations; on session-summary rows = excluded. A NON-degenerate row with zero gold
+   findings (none currently exist) scores exactly like a degenerate row: true-negative material —
+   any judge finding on it is a false positive.
 5. **No LLM matcher unless it gets its own mini-eval first** (sc-1061 lesson).
+6. **Recall denominator = ANCHORED findings only**: a gold finding enters the recall denominator
+   iff its `files` intersect the anchor's file list (computable with `lib/match.mts`'s
+   `overlapCount` — the same helper coverage uses). Partial-coverage rows stay in the corpus, but
+   their unanchored findings are EXCLUDED from recall (a judge cannot find what its input doesn't
+   contain — scoring those measures reconstruction failure, not judge quality). Precision is
+   unaffected (judge FPs are judged against the whole row).
 
 **Analysis (from the methodology audit — non-negotiable):**
 
@@ -213,12 +222,12 @@ per-section budgets so no evidence class is silently truncated away.
   findings; evidence quotes verified verbatim against raw bundles; recorded via the audit
   overlay). Labeler: sonnet (`labelModel`/`labelPromptSha` per row).
 - Prompt variants: `frink-cmd-v1` 87 · `frink-cmd-v0` 43 · `legacy-diff-debug-chat` 1 · custom 8.
-- Label-noise floor (blind haiku second pass, seed 1118, matched via the pre-registered rule):
-  on 12 sampled cases the two labelers' MATCHED findings agree perfectly (raw 100% on verdict and
-  wasLiveBug; κ undefined — every matched pair single-class), but **only 5 of sonnet's 82 findings
-  match under the strict pre-registered rule** (a looser claim-similarity matcher yields 25 — and
-  overstates agreement, which is why the strict rule is the registered one). The label-noise floor
-  is FINDING SEGMENTATION, not label values: any sc-1119 variant delta smaller than the
-  segmentation/matching noise is unresolved, and matcher quality dominates the benchmark's error
-  budget (the sc-1061 lesson, now quantified).
+- **Matcher/segmentation pilot** (blind haiku second pass, 12 cases, seed 1118 — NOT the
+  label-noise floor; the methodology requires a blind uniform 40-60 finding audit, which is a
+  REQUIRED sc-1119 pre-step and has not been run yet): matched findings agree perfectly (raw 100%
+  on verdict and wasLiveBug; κ undefined — every matched pair single-class), but only 5 of
+  sonnet's 82 findings match under the strict pre-registered rule (a looser claim-similarity
+  matcher yields 25 — and overstates agreement, which is why the strict rule is the registered
+  one). What this pilot DOES establish: finding SEGMENTATION dominates labeler disagreement, so
+  matcher quality dominates the benchmark's error budget (the sc-1061 lesson, quantified).
   Rerun: `bun gate-engine/edge-cases/eval/kappa.mts --cases 12`.
