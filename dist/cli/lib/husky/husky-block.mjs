@@ -95,7 +95,7 @@ if [ -n "$STAGED_FMT" ]; then
     if [ -n "$FMT_SAFE" ]; then
         echo "🎨 Formatting staged files..."
         echo "$FMT_SAFE" | xargs bunx biome format --write 2>/dev/null || true
-        echo "$FMT_SAFE" | xargs git add
+        echo "$FMT_SAFE" | xargs git add -f
     fi
 fi
 # /devkit:biome-format`;
