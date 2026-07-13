@@ -35,8 +35,8 @@ import path from 'node:path';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
-import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
+import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
@@ -396,7 +396,13 @@ async function cascadeVerdict(
   if (firstVerdict.verdict === 'PASS')
     // Keep the judge's one-line PASS reason (the tail of its VERDICT line) instead of dropping it —
     // it flows to the telemetry event + the terminal line, and `first` is persisted as a transcript.
-    return { name: reviewer.name, status: 'pass', reason: firstVerdict.reason, escalated: false, transcript: first };
+    return {
+      name: reviewer.name,
+      status: 'pass',
+      reason: firstVerdict.reason,
+      escalated: false,
+      transcript: first,
+    };
   if (firstVerdict.verdict === null)
     return {
       name: reviewer.name,
@@ -439,7 +445,13 @@ async function cascadeVerdict(
       transcript: second,
     };
   if (finalVerdict.verdict === 'PASS')
-    return { name: reviewer.name, status: 'pass', reason: finalVerdict.reason, escalated: true, transcript: second };
+    return {
+      name: reviewer.name,
+      status: 'pass',
+      reason: finalVerdict.reason,
+      escalated: true,
+      transcript: second,
+    };
   return {
     name: reviewer.name,
     status: 'inconclusive',
