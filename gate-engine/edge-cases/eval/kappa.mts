@@ -29,6 +29,7 @@ const rawDir = path.join(here, 'raw');
 const firstPassPath = path.join(rawDir, 'proposals.jsonl');
 const secondPassPath = path.join(rawDir, 'proposals.kappa.jsonl');
 
+const WORD_SPLIT_RE = /\W+/;
 const KAPPA_MODEL = process.env.KAPPA_MODEL ?? 'haiku';
 const argv = process.argv.slice(2);
 const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
@@ -46,7 +47,8 @@ const readJsonl = (file) =>
 
 // deterministic PRNG (mulberry32) — the sample must be reproducible and pre-registerable
 const mulberry32 = (a) => () => {
-  let t = (a += 0x6d2b79f5);
+  a += 0x6d2b79f5;
+  let t = a;
   t = Math.imul(t ^ (t >>> 15), t | 1);
   t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -75,7 +77,7 @@ const tokens = (s) =>
   new Set(
     (s ?? '')
       .toLowerCase()
-      .split(/\W+/)
+      .split(WORD_SPLIT_RE)
       .filter((w) => w.length > 2),
   );
 const jaccard = (a, b) => {

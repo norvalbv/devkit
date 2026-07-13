@@ -26,9 +26,11 @@ function telemetryDir(): string {
   return sink ? path.dirname(sink) : path.join(homedir(), '.devkit', 'telemetry');
 }
 
+const LEADING_DOTS_RE = /^\.+/;
+
 /** Collapse an agent/ship label to ONE safe path segment (no dir separators, no `..` traversal). */
 function safeSegment(s: string): string {
-  return s.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^\.+/, '') || 'agent';
+  return s.replace(/[^a-zA-Z0-9._-]/g, '-').replace(LEADING_DOTS_RE, '') || 'agent';
 }
 
 // Section markers so a stored transcript carries BOTH what the agent judged (the diff) and what it
