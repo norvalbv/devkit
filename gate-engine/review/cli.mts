@@ -7,12 +7,14 @@
  *   guard-review completeness --gate <msg-file>  feature-completeness judge (commit-msg, warn-only)
  *   guard-review scan                            reviewer→files mapping + cache status (no judges)
  *   guard-review clear-cache                     drop cached PASS verdicts
+ *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
  */
 
 import { envFlag } from '../config.mts';
+import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
 import { runReviewGate, scanReview } from './run-review.mts';
@@ -26,7 +28,20 @@ async function run(argv: string[]): Promise<number> {
     clearCache(process.cwd());
     return 0;
   }
-  console.error('Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache');
+  // The local "API" behind a transcript_ref: cat any persisted agent transcript (review-* OR
+  // decisions) the telemetry stream referenced, so a human can read the full reasoning on demand.
+  if (cmd === 'transcript' && rest[0]) {
+    const text = readTranscript(rest[0]);
+    if (text === null) {
+      console.error(`guard-review: no transcript at ${rest[0]}`);
+      return 1;
+    }
+    process.stdout.write(text);
+    return 0;
+  }
+  console.error(
+    'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | transcript <ref>',
+  );
   return 2;
 }
 
