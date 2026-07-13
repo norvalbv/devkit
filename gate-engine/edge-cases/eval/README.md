@@ -3,8 +3,9 @@
 Ground-truth corpus of historical **`/edge-cases`** runs (sc-1118, epic 1117 Track A). The
 `/edge-cases` prompt is a diff-scoped adversarial review the owner runs at the end of substantive
 sessions; it reliably surfaces real bugs. sc-1119 benchmarks prompt/channel variants of an
-automated edge-cases judge against this corpus; sc-1120 ships the judge. **No judge or bench lives
-here** — this directory is the dataset plus the tooling that produced it.
+automated edge-cases judge against this corpus (the bench lives here too — see "sc-1119 bench"
+below; its rules are frozen in `PREREGISTRATION.md`); sc-1120 ships the judge (the judge itself
+does NOT live here).
 
 **Methodology:** this corpus went through a full research-backed methodology audit
 (`docs/benchmarks/benchmark-methodology.md` — verdict, blockers, and the 20-item house checklist).
@@ -180,6 +181,50 @@ per-section budgets so no evidence class is silently truncated away.
   headline numbers (labelled "consistent with self-preference", not proof).
 - After the first run, **hand-audit exactly the findings where variants disagree with the label**
   (disagreement-triaged audit) — cheapest way to turn ranking-deciding points into gold.
+
+## sc-1119 bench
+
+The benchmark harness consuming this corpus under the contract above. **`PREREGISTRATION.md` is
+the rule book** — denominators, match rule, decision rule, seeds, K, gates and amendments are
+frozen there before any judged run; this section only orients.
+
+- `counts.mts` — denominator source of truth (derived, test-pinned; never hand-counted).
+- `guards-generate.mts` — synthetic precision-guard rows (pure-prose docs-only commits at pinned
+  shas → gitignored `guards-synthetic.jsonl`; regenerable).
+- `prompts.mts` — frozen arms (shape F/P × length S/L), channel wrappers (U / G-user / G-sys ×2
+  realizations), shared JSON footer, blinded judge-input projection, prompt shas.
+- `noise-audit.mts` — the REQUIRED label-noise floor (stratified blind n=60, two-axis relabel,
+  opus via `claude -p`; gemini cross-family leg opt-in via `--with-gemini`; frozen bundles, AC1
+  gate, owner-adjudicated ε posteriors).
+- `bench.mts` — K=3 grid runner (12 configs), pre-registered scoring via `lib/match.mts
+  matchFindings`, nested label-perturbation bootstrap, `--ceiling` calibration (sets the ship
+  target T = max(0.6·C, 0.35)), `--analyze` (paired Δs + audit queue), `--baseline`/`--fail`
+  (flip-table regression gate with comparability hashes).
+- `results.baseline.json` — committed results (IDs + numbers only; enforced by the
+  results-privacy test).
+
+Run order: `--ceiling` → `noise-audit --sample/--run/--report` → owner adjudication →
+`noise-audit --epsilon` → `--all` → `--analyze` → owner queue → `--baseline`.
+
+### Research notes (sc-1119 Phase 0 — provenance/channel design inputs)
+
+- **Instruction hierarchy / channel authority:** models are trained to weight system > user >
+  tool text (2404.13208); in agentic settings tool-delivered instructions carry the lowest trust
+  and frontier models resolve multi-source conflicts poorly (~40%, ManyIH 2604.09443). This is
+  why the provenance experiment exists: gate-delivered findings may be argued with where
+  user-attributed asks are not.
+- **Authority/sycophancy mechanics:** models respond in a GRADED way to perceived authority,
+  unprompted and mechanistically localized (2607.00415); but simple user opinion statements
+  induce sycophancy where expertise framing does NOT (2508.02087), and stated confidence
+  modulates it (2410.14746); baseline preference-driven sycophancy: 2310.13548. Design
+  consequences (all in `prompts.mts`): wrappers carry attribution ONLY — zero opinions about the
+  code, zero confidence claims, matched mood/length; the first-person shift inherent to
+  owner-voice framing is BUNDLED with the attribution construct (2508.02087 shows person itself
+  matters) and results are scoped to the wrapper set, not the construct.
+- **LLM-as-judge pitfalls** (style/position/self-preference biases): covered by the house
+  methodology (`docs/benchmarks/benchmark-methodology.md` items 9–12) — the bench's scorer is a
+  DETERMINISTIC matcher, so judge-side bias enters only through the corpus labels (addressed by
+  the blinding, uniform output footer, and the noise audit's cross-family relabel).
 
 ## Known biases (accepted, documented)
 
