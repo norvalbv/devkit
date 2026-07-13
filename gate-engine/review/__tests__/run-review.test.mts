@@ -31,7 +31,9 @@ const ENV_KEYS = [
   'FRINK_DECISION_NO_LLM',
   'DEVKIT_REVIEW_PROGRESS',
   // Cleared so a real ship's pre-push (which exports these) can't steer the telemetry assertions
-  // below, and so ordinary tests don't emit to the developer's live telemetry sink.
+  // below, and so ordinary tests don't emit to the developer's live telemetry sink. Every-commit
+  // capture stays disabled via the suite-wide DEVKIT_NO_TELEMETRY='1' (vitest.setup) — NOT cleared
+  // here, else off-ship runReviewGate would auto-capture; the ship test sets both keys explicitly.
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_SHIP_ID',
 ];

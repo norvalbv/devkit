@@ -33,7 +33,7 @@ import { splitDiffByFile } from '../judge/diff-focus.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
-import { saveTranscript } from '../judge/transcript-store.mts';
+import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mts';
 
 // 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder).
@@ -460,9 +460,11 @@ function runGate() {
       process.exit(0);
     }
     const { verdict: judged, raw } = judgeWithClaude(cwd, cfg.noLlm, input);
-    // Persist the judge's evidence + verdict as a fetchable transcript (ship-only; null off-ship).
+    // Persist the judge's evidence (the diff) + its verdict as a fetchable transcript (no-op off-run).
     const transcriptRef =
-      raw !== null ? saveTranscript('decisions', `${input}\n--- VERDICT: ${judged} ---\n${raw}`) : null;
+      raw !== null
+        ? saveTranscript('decisions', composeTranscript(input, `VERDICT: ${judged}\n${raw}`))
+        : null;
     const ref = transcriptRef ? { transcript_ref: transcriptRef } : {};
     if (judged === 'ROUTINE') {
       saveVerdict(cwd, key);
