@@ -1,5 +1,13 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -423,6 +431,37 @@ describe('--gate (integration, real git repo)', () => {
     expect(gate()).toBe(0);
   });
 
+  it('ANNOUNCES the pass on a routine edit — no longer silent under the hook header', () => {
+    writeFileSync(join(repo, 'keep.ts'), 'export const x = 2;\n');
+    git('add keep.ts');
+    const r = spawnSync('node', [DETECT, '--gate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_DECISION_NO_LLM: '1' },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('no architectural smell');
+  });
+
+  it('emits a decisions status:pass telemetry event on a clean run under a ship', () => {
+    writeFileSync(join(repo, 'keep.ts'), 'export const x = 3;\n');
+    git('add keep.ts');
+    const sink = join(repo, 'events.jsonl');
+    const r = spawnSync('node', [DETECT, '--gate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GUARD_DECISION_NO_LLM: '1',
+        DEVKIT_GATE_EVENTS: sink,
+        DEVKIT_SHIP_ID: 'ship-1',
+      },
+    });
+    expect(r.status).toBe(0);
+    const ev = JSON.parse(readFileSync(sink, 'utf8').trim());
+    expect(ev).toMatchObject({ type: 'gate_result', gate: 'decisions', status: 'pass' });
+  });
+
   it('blocks (1) on a large legacy deletion', () => {
     writeFileSync(
       join(repo, 'big.ts'),
@@ -533,6 +572,22 @@ describe('--gate (integration, real git repo)', () => {
       expect(r.stderr).toContain('dep-change'); // the crafted path was PARSED, not dropped
       expect(existsSync(join(repo, 'INJECTED'))).toBe(false);
       expect(existsSync(join(dir, 'INJECTED'))).toBe(false);
+    });
+
+    it('persists the judge transcript + references it in the pass event (fetchable evidence)', () => {
+      stageDepChange();
+      const sink = join(repo, 'events.jsonl');
+      const r = gateStubbed('echo ROUTINE\n', {
+        DEVKIT_GATE_EVENTS: sink,
+        DEVKIT_SHIP_ID: 'ship-1',
+      });
+      expect(r.status).toBe(0);
+      const ev = JSON.parse(readFileSync(sink, 'utf8').trim().split('\n').pop() as string);
+      expect(ev).toMatchObject({ gate: 'decisions', status: 'pass' });
+      expect(typeof ev.transcript_ref).toBe('string');
+      const abs = join(repo, ev.transcript_ref);
+      expect(existsSync(abs)).toBe(true);
+      expect(readFileSync(abs, 'utf8')).toContain('ROUTINE'); // the judge's evidence + verdict
     });
 
     it('an earned ROUTINE is cached: an identical re-run clears with ZERO judge spawns', () => {
