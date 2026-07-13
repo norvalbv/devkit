@@ -16,16 +16,22 @@
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { runEnvelope, telemetrySink } from './run-context.mts';
 
-/** Append one gate/reviewer/ship event to $DEVKIT_GATE_EVENTS (no-op when unset). Never throws. */
+/**
+ * Append one gate/reviewer/ship event to the telemetry sink (no-op when there is none). The sink is
+ * the ship's DEVKIT_GATE_EVENTS, or — by default for every commit, unless DEVKIT_NO_TELEMETRY=1 — the
+ * default ~/.devkit/telemetry sink. runEnvelope() stamps the correlation id (ship_id) plus, for a
+ * commit run, run_mode/repo/branch so the collector can synthesise a run. Never throws.
+ */
 export function emitGateEvent(ev: Record<string, unknown>): void {
-  const file = process.env.DEVKIT_GATE_EVENTS;
+  const file = telemetrySink();
   if (!file) return;
   try {
     mkdirSync(path.dirname(file), { recursive: true });
     const line = `${JSON.stringify({
       ...ev,
-      ship_id: process.env.DEVKIT_SHIP_ID,
+      ...runEnvelope(),
       ts: new Date().toISOString(),
     })}\n`;
     appendFileSync(file, line, { flag: 'a' });

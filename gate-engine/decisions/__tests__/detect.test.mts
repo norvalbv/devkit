@@ -363,7 +363,9 @@ describe('--gate (integration, real git repo)', () => {
     spawnSync('node', [DETECT, '--gate'], {
       cwd: repo,
       encoding: 'utf8',
-      env: { ...process.env, GUARD_DECISION_NO_LLM: '1', ...env },
+      // Every-commit capture is on by default; disable it in these spawned gates so they never emit
+      // to the real ~/.devkit/telemetry sink during the suite (ship tests set DEVKIT_GATE_EVENTS).
+      env: { ...process.env, GUARD_DECISION_NO_LLM: '1', DEVKIT_NO_TELEMETRY: '1', ...env },
     }).status;
   const scan = (args = []) =>
     spawnSync('node', [DETECT, 'scan', ...args], {
@@ -437,7 +439,7 @@ describe('--gate (integration, real git repo)', () => {
     const r = spawnSync('node', [DETECT, '--gate'], {
       cwd: repo,
       encoding: 'utf8',
-      env: { ...process.env, GUARD_DECISION_NO_LLM: '1' },
+      env: { ...process.env, GUARD_DECISION_NO_LLM: '1', DEVKIT_NO_TELEMETRY: '1' },
     });
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('no architectural smell');
@@ -453,6 +455,7 @@ describe('--gate (integration, real git repo)', () => {
       env: {
         ...process.env,
         GUARD_DECISION_NO_LLM: '1',
+        DEVKIT_NO_TELEMETRY: '1',
         DEVKIT_GATE_EVENTS: sink,
         DEVKIT_SHIP_ID: 'ship-1',
       },
@@ -523,6 +526,7 @@ describe('--gate (integration, real git repo)', () => {
           // Clear it by default; the strict cases opt back in via extraEnv.
           GUARD_AI_STRICT: '',
           FRINK_AI_STRICT: '',
+          DEVKIT_NO_TELEMETRY: '1', // capture is on by default — disable so tests don't hit the real sink
           PATH: `${stubClaude(script)}:${process.env.PATH}`,
           ...extraEnv,
         },

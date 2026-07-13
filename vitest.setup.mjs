@@ -42,3 +42,8 @@ process.env.DEVKIT_GATE_EVENTS = path.join(
   `devkit-test-gate-events-${process.pid}.jsonl`,
 );
 delete process.env.DEVKIT_SHIP_ID;
+
+// Every-commit telemetry capture is ON by default (run-context.mts) — but an OFF-ship gate spawned
+// by a test must not auto-capture (git write-tree + transcript writes it never asked for). Disable it
+// suite-wide; a ship test sets DEVKIT_SHIP_ID (unaffected), and run-context's own test toggles this.
+process.env.DEVKIT_NO_TELEMETRY = '1';
