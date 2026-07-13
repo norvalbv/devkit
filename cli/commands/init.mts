@@ -20,7 +20,12 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
-import { LINE_CAP, setMaxLines } from '../../gate-engine/ratchets/size-disable.mts';
+import {
+  enableLineGrowth,
+  hasLineCap,
+  LINE_CAP,
+  setMaxLines,
+} from '../../gate-engine/ratchets/size-disable.mts';
 import {
   AGENT_TARGETS,
   applyOverlayConstraints,
@@ -1209,11 +1214,28 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
   }
 
-  // Self-host skips the freezes: devkit has no committed ratchet baselines and its size/fanout gates
-  // already run baseline-less and green — a freeze here would grandfather nothing and only churn.
+  // Self-host skips the size/fanout freezes: devkit has 0 eslint-disable directives and no folder over
+  // the fan-out cap, so those baselines would be empty/no-op. But the RECOMMENDED line-growth ratchet is
+  // off until enabled, and devkit has files over LINE_CAP — so enable maxLines + freeze size-lines.json
+  // (grandfather the current giants shrink-only) on first adoption, exactly like `devkit upgrade` step-3b.
+  // Guarded on !hasLineCap so a re-run/upgrade never re-freezes (which would launder newly-added giants).
   if (!selfHost && (selection.guards?.includes('fanout') || selection.guards?.includes('size'))) {
     console.log('4. freeze baselines');
     runFreezes(cwd, dryRun);
+  } else if (
+    selfHost &&
+    !dryRun &&
+    selection.lineGrowth &&
+    selection.guards?.includes('size') &&
+    !hasLineCap(cwd)
+  ) {
+    console.log('4. line-growth baseline (enable maxLines + grandfather current files)');
+    const { enabled, grandfathered } = enableLineGrowth(cwd);
+    console.log(
+      enabled
+        ? `  ✓ maxLines ${LINE_CAP}; grandfathered ${grandfathered} file(s) (shrink-only)`
+        : '  ! could not enable line-growth — guard.config.json unreadable',
+    );
   }
 
   if (isStructure) {

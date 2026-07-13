@@ -77,9 +77,11 @@ node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
 # qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
 # (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
 # /devkit:guard-qavis-advisory
-# <<< devkit-guards <<<
 
-# devkit fallow audit (advisory) — dead-code / duplication / complexity on the changed set; never blocks.
+# devkit:fallow-advisory
+# fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
 command -v fallow >/dev/null 2>&1 && fallow audit || true
+# /devkit:fallow-advisory
+# <<< devkit-guards <<<
 
 exit 0

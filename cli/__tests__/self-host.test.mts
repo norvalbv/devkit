@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { extractGuardBlock } from '../lib/husky/husky-block.mts';
+import { extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
 import {
   buildSelfHostBlock,
   buildSelfHostHook,
@@ -73,12 +73,21 @@ describe('buildSelfHostHook', () => {
     expect(hook).not.toContain('@norvalbv/devkit');
   });
 
-  it('preserves the hand hook advisory fallow-audit tail (outside the block, never blocks)', () => {
+  it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain('command -v fallow >/dev/null 2>&1 && fallow audit || true');
-    // After the guard block, before the terminal exit 0.
-    expect(hook.indexOf('fallow audit')).toBeGreaterThan(hook.indexOf('<<< devkit-guards'));
+    // Inside the devkit-guards block: after the start marker, before the end marker — so
+    // replaceGuardBlock preserves it on a re-run and the parity/doctor check covers it.
+    expect(hook.indexOf('fallow audit')).toBeGreaterThan(hook.indexOf('>>> devkit-guards'));
+    expect(hook.indexOf('fallow audit')).toBeLessThan(hook.indexOf('<<< devkit-guards'));
     expect(hook.trimEnd().endsWith('exit 0')).toBe(true);
+  });
+
+  it('is idempotent through replaceGuardBlock — re-applying the block keeps the fallow fragment intact', () => {
+    const fresh = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    const block = buildSelfHostBlock(HOOK_SEL, '', ROOT);
+    const reapplied = replaceGuardBlock(fresh, block, '');
+    expect(reapplied).toBe(fresh); // no drift: the fallow fragment lives in the block, not a fragile tail
   });
 });
 

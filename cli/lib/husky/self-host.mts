@@ -23,6 +23,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS, type Selection } from '../components.mts';
 import { readJson } from '../fs-helpers.mts';
+import { markEnd } from './husky.mts';
 import {
   buildFullHook,
   buildGuardBlock,
@@ -33,8 +34,8 @@ import {
 // devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
 // and its hard biome-lint gate (`lint` = `biome check .`). The hard-lint is folded into the
 // deterministic orchestrator via `--extra` (any non-zero blocks); both run via real devDeps
-// (eslint/biome), so toSelfHost leaves them untouched. Together with the advisory fallow tail below,
-// the self-host hook preserves every gate the pre-self-host hand hook ran AND adds review + dup/clone.
+// (eslint/biome), so toSelfHost leaves them untouched. Together with the advisory fallow fragment
+// below, the self-host hook preserves every gate the pre-self-host hand hook ran AND adds review + dup/clone.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
   { label: 'lint', cmd: 'bun run lint' },
@@ -43,10 +44,15 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the
 // changed set; command-v-guarded so it no-ops without fallow, `|| true` so it never blocks). The
 // package generator emits no fallow fragment and `fallow: false` keeps fallow an opt-in COMPONENT
-// (no installer / no wireFallowGate), so preserve JUST the advisory line here — appended OUTSIDE the
-// devkit-guards markers (like any consumer's own hook lines) so the block parity check is unaffected.
-const FALLOW_ADVISORY = `# devkit fallow audit (advisory) — dead-code / duplication / complexity on the changed set; never blocks.
-command -v fallow >/dev/null 2>&1 && fallow audit || true`;
+// (no installer / no wireFallowGate), so this preserves JUST the advisory line — injected as the last
+// fragment INSIDE the devkit-guards block (a sentinel'd fragment). Inside, not a trailing tail: an
+// out-of-block line gets mis-absorbed into the preamble by replaceGuardBlock's findPreambleEnd on a
+// re-run (splitting the comment from its command), and being in-block means the parity/doctor check
+// covers it too.
+const FALLOW_FRAGMENT = `# devkit:fallow-advisory
+# fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
+command -v fallow >/dev/null 2>&1 && fallow audit || true
+# /devkit:fallow-advisory`;
 
 // The hook-builder's view of the self-host selection (Selection + the two hook-only fields the
 // generator reads). structureCmd/extras are constant for self-host — seeded here, never persisted.
@@ -96,18 +102,21 @@ export function selfHostSelection(): Selection {
   return { ...defaultSelection(), guards: [...RECOMMENDED_GUARD_IDS, 'review'] };
 }
 
-/** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
-export function buildSelfHostBlock(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  return toSelfHost(buildGuardBlock(sel, pkgRel), cwd);
+// Inject the fallow fragment as the last member of the devkit-guards block (just before its end
+// marker), in both the block-only and full-hook forms so they stay consistent.
+function withFallow(text: string, pkgRel: string): string {
+  const end = markEnd(pkgRel);
+  return text.replace(`\n${end}`, `\n\n${FALLOW_FRAGMENT}\n${end}`);
 }
 
-// Insert the advisory fallow tail just before the terminal `exit 0` (the last one in the file).
-const TERMINAL_EXIT_RE = /\nexit 0\n$/;
+/** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
+export function buildSelfHostBlock(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
+  return withFallow(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
+}
 
-/** A full fresh self-host hook (preamble + rewritten block + advisory fallow tail + exit 0). */
+/** A full fresh self-host hook (preamble + rewritten block incl. the advisory fallow fragment + exit 0). */
 export function buildSelfHostHook(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  const hook = toSelfHost(buildFullHook(sel, pkgRel), cwd);
-  return hook.replace(TERMINAL_EXIT_RE, `\n${FALLOW_ADVISORY}\n\nexit 0\n`);
+  return withFallow(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
 }
 
 /**
