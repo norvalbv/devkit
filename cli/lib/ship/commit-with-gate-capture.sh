@@ -61,13 +61,13 @@ commit_with_gate_capture() {
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
   local repo_name; repo_name="$(basename "$root")"
 
-  # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
-  # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
-  # cascade 2×300 (strict retry — transient/empty first pass only; a TIMEOUT isn't re-run) + 420 =
-  # 1020s ≈ 1800s total. A retry is FAR cheaper — prefix
-  # + earned verdicts are cached and reviewer PASSes checkpoint per-completion — so a kill here
-  # converges on re-run rather than restarting. This stays a hang CEILING, not a per-gate budget.
-  local secs=${SHIP_COMMIT_TIMEOUT:-1800}
+  # Realistic worst case (first ship, nothing cached): deterministic prefix ~240s + decisions detect
+  # ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review cascade whose
+  # slow judge (correctness) can now run up to its 30-min cap (see run-review.mts) — but in practice
+  # one slow wave + fast waves lands well under this 3600s ceiling. A kill here CONVERGES on re-run
+  # (earned verdicts cached, reviewer PASSes checkpoint per-completion), not a restart. This is a hang
+  # CEILING, not a per-gate budget — raise it (export SHIP_COMMIT_TIMEOUT) if a real ship needs more.
+  local secs=${SHIP_COMMIT_TIMEOUT:-3600}
   local to_bin to=()
   to_bin=$(command -v timeout || command -v gtimeout || true)
   if [ -n "$to_bin" ]; then
