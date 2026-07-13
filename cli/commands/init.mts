@@ -43,6 +43,7 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
+import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
   ensureFallowGitignore,
@@ -148,6 +149,7 @@ interface DevkitConfig {
   pkgRel?: string;
   standalone?: boolean;
   overlay?: boolean;
+  selfHost?: boolean;
   minDevkit?: string;
   configOverrides?: Record<string, unknown>;
   components?: RecordedComponents;
@@ -190,6 +192,9 @@ interface InitPlan {
   scanRoots?: string[] | null;
   standalone?: boolean;
   overlay?: boolean;
+  // Self-host: this IS the devkit repo dogfooding itself. No self-dep, source-mode hook
+  // (`node gate-engine/*.mts`), hand-owned configs left untouched. Auto-detected, never a flag.
+  selfHost?: boolean;
   globalCommitGate?: boolean;
   devkitRef?: string;
   regenStructureBaselines?: boolean;
@@ -1115,6 +1120,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     scanRoots = null,
     standalone = false,
     overlay = false,
+    selfHost = false,
     regenStructureBaselines = true,
   } = plan;
   // Structure-lint: config-driven stacks (react-app, component-lib) run via devkit's own eslint (the
@@ -1147,6 +1153,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   if (standalone) {
     console.log('  standalone: no package.json dep — global devkit CLI, fail-open hook');
   }
+  if (selfHost) {
+    console.log('  self-host: devkit dogfooding itself — source-mode hook, no self-dep');
+  }
   if (pkgRel) {
     console.log(`  monorepo: package "${pkgRel}" — hook + skills at the git root (${gitRoot})`);
   }
@@ -1158,7 +1167,12 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   console.log(`  components: ${on.join(', ') || '(none)'}\n`);
 
   console.log('1. configs');
-  if (standalone) installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
+  if (selfHost) {
+    // biome.jsonc / tsconfig.json / guard.config.json are hand-owned + committed in the devkit
+    // repo (its tsconfig extends the LOCAL base, not @norvalbv/devkit) — never overwrite them.
+    console.log('  • self-host: configs are hand-owned — leaving them untouched');
+  } else if (standalone)
+    installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
   else if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
   else installConfigs(cwd, selection, force, dryRun);
   applyScanRoots(cwd, scanRoots, dryRun);
@@ -1167,12 +1181,18 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   // cap in one step), never here — this apply pass would set the cap with no matching freeze.
   applyMaxLines(
     cwd,
-    !repoAdopted(cwd) && Boolean(selection.lineGrowth) && selection.guards.includes('size'),
+    // Self-host never writes maxLines — guard.config.json is hand-owned (and has no maxLines by design).
+    !selfHost &&
+      !repoAdopted(cwd) &&
+      Boolean(selection.lineGrowth) &&
+      selection.guards.includes('size'),
     dryRun,
   );
 
-  // Standalone touches NO package.json (the whole point — no private dep in a shared repo).
-  if (!standalone) {
+  // Standalone AND self-host touch NO package.json: standalone keeps a shared repo dep-free;
+  // self-host must never add @norvalbv/devkit as a dependency on ITSELF (the whole reason a plain
+  // `devkit init` can't run here).
+  if (!standalone && !selfHost) {
     console.log('2. package.json');
     patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun, stack);
   }
@@ -1181,12 +1201,17 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     console.log('3. husky pre-commit');
     // Thread the resolved structureCmd into the selection so the block emits `--structure "<cmd>"`
     // on the guard-deterministic line only when structure actually applies (structureCmd is
-    // undefined otherwise). Same path for package and standalone.
-    if (standalone) installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
+    // undefined otherwise). Same path for package and standalone. Self-host takes its own builder:
+    // the generated `bunx guard-*` lines are rewritten to `node gate-engine/*.mts` (source).
+    if (selfHost) installSelfHostHook(gitRoot, pkgRel, selection, dryRun, cwd);
+    else if (standalone)
+      installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
   }
 
-  if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
+  // Self-host skips the freezes: devkit has no committed ratchet baselines and its size/fanout gates
+  // already run baseline-less and green — a freeze here would grandfather nothing and only churn.
+  if (!selfHost && (selection.guards?.includes('fanout') || selection.guards?.includes('size'))) {
     console.log('4. freeze baselines');
     runFreezes(cwd, dryRun);
   }
@@ -1249,6 +1274,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     initVersion: INIT_VERSION,
     pkgRel,
     standalone,
+    // Self-host marker: upgrade/doctor read this to skip the pin/dep checks and regenerate the
+    // source-mode hook instead of the `bunx guard-*` one.
+    selfHost,
     components,
   };
   const configPath = join(cwd, '.devkit', 'config.json');
@@ -1357,7 +1385,15 @@ export default async function run(args: string[], cwd: string) {
     return 0;
   }
 
-  if (interactive) {
+  // Self-host: this IS the devkit repo. Auto-detected by package name → a fixed, deterministic
+  // selection + source-mode hook, bypassing the wizard AND the flag path. Never a CLI flag (it only
+  // ever applies to one repo), and the auto-detect means a stray `devkit init` here can't add a
+  // self-dep or overwrite the bespoke config.
+  const selfHost = isDevkitRepo(cwd);
+  if (selfHost) {
+    mode = 'self-host';
+    selection = selfHostSelection();
+  } else if (interactive) {
     const installed = detectInstalled(cwd);
     const result = await runWizard({
       detectedStack,
@@ -1389,7 +1425,9 @@ export default async function run(args: string[], cwd: string) {
   // hook is forced on — applied here so the wizard AND the --yes/flag path get identical invariants.
   if (mode === 'overlay') selection = applyOverlayConstraints(selection);
 
-  if (!structureAvailableFor(stack) && selection.structure) {
+  // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
+  // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
+  if (!selfHost && !structureAvailableFor(stack) && selection.structure) {
     selection.structure = false; // no template for this stack — silently skip (noted below)
     if (stack !== 'generic') {
       console.log(`devkit init: no structure-lint preset for stack "${stack}" yet — skipping it.`);
@@ -1406,9 +1444,10 @@ export default async function run(args: string[], cwd: string) {
     scanRoots: flags.scanRoots,
     standalone: mode === 'standalone',
     overlay: mode === 'overlay',
+    selfHost: mode === 'self-host',
     globalCommitGate: flags.globalCommitGate,
   });
-  if (interactive) outro('Done — run `devkit doctor` to verify.');
+  if (interactive && !selfHost) outro('Done — run `devkit doctor` to verify.');
   return 0;
 }
 
