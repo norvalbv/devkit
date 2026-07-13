@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { emitGateEvent } from '../gate-events.mts';
 
 describe('emitGateEvent', () => {
+  // A DEVKIT_SHIP_ID puts every case on the ship path, so the DEVKIT_NO_TELEMETRY default (set to '1'
+  // suite-wide in vitest.setup) never matters here — we assert the sink-set / sink-unset contract only.
   const saved = { file: process.env.DEVKIT_GATE_EVENTS, id: process.env.DEVKIT_SHIP_ID };
   let dir: string;
 

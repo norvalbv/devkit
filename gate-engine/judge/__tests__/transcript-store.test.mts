@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readTranscript, saveTranscript } from '../transcript-store.mts';
 
 describe('transcript-store', () => {
+  // Ship path under test (DEVKIT_SHIP_ID set), so the DEVKIT_NO_TELEMETRY default (set '1' suite-wide
+  // in vitest.setup) is irrelevant here; the off-run no-op cases rely on that default staying '1'.
   const saved = { file: process.env.DEVKIT_GATE_EVENTS, id: process.env.DEVKIT_SHIP_ID };
   let dir: string;
 

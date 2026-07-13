@@ -35,7 +35,7 @@ import path from 'node:path';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
-import { saveTranscript } from '../judge/transcript-store.mts';
+import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
@@ -531,9 +531,12 @@ export async function runReviewGate(
           writeProgress(progressFile, { running, completed });
         }
         const secs = Math.round((Date.now() - t0) / 1000);
-        // Persist the full judge transcript (ship-only; null off-ship) so a PASS reviewer's reasoning
-        // is fetchable on demand rather than discarded — the event carries only the ref + one-liner.
-        const transcriptRef = res.transcript ? saveTranscript(`review-${res.name}`, res.transcript) : null;
+        // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
+        // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
+        // the ref + one-liner. No-op off-run (see run-context.mts).
+        const transcriptRef = res.transcript
+          ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
+          : null;
         // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
         // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
         emitGateEvent({
