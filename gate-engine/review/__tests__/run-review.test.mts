@@ -630,10 +630,10 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     };
 
     process.env.GUARD_AI_STRICT = '1';
-    expect(await capFor(consumerRepo({ backend: true }))).toBe(420000); // STRICT_FIRST_TIMEOUT_MS
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(1800000); // STRICT_FIRST_TIMEOUT_MS (30 min)
 
     delete process.env.GUARD_AI_STRICT;
-    expect(await capFor(consumerRepo({ backend: true }))).toBe(300000); // FIRST_TIMEOUT_MS
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(1800000); // FIRST_TIMEOUT_MS (30 min)
   });
 
   it('outage-then-success: the retry recovers and the gate passes clean', async () => {
