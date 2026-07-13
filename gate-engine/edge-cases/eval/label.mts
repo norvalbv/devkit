@@ -179,7 +179,7 @@ const bundleText = (bundle) =>
 const buildInput = (c, bundle) => {
   // The labeler judges the SAME anchor view the benchmarked judge receives (shared excerptDiff) —
   // a wider labeler view turns label/judge disagreement into a truncation artifact (audit F5).
-  let anchor;
+  let anchor = '';
   if (c.diffFull) {
     const { excerpt, truncated } = excerptDiff(c.diffFull);
     anchor = `DIFF (origin: ${c.diffOrigin}${truncated ? '; truncated at hunk boundaries — judge sees this same view' : ''}):\n${excerpt}`;

@@ -58,13 +58,17 @@ function commitRunContext(): { id: string; repo: string; branch: string } | null
   // write-tree = the staged content's tree oid: identical across this commit's gate processes,
   // unique per staged content (so an amend with new content is a distinct run). Read-only re: index.
   const tree = git(['write-tree']);
-  if (!tree) return (commitCtx = null);
+  if (!tree) {
+    commitCtx = null;
+    return commitCtx;
+  }
   const top = git(['rev-parse', '--show-toplevel']);
-  return (commitCtx = {
+  commitCtx = {
     id: `commit-${tree}`,
     repo: top ? path.basename(top) : '',
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
-  });
+  };
+  return commitCtx;
 }
 
 /** The correlation id for this run: the ship id, else the per-commit id, else null (capture off). */

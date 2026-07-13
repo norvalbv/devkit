@@ -129,6 +129,64 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
   });
 });
 
+describe('biome-format re-stage step (real git)', () => {
+  // The re-stage step runs `git add` on files it just re-read from `git diff --cached` — for a
+  // release commit that force-added a gitignored `dist/` (`git add -f dist`), a plain `git add`
+  // on those same paths refuses ("ignored by gitignore", non-zero exit), and `sh -e` aborts the
+  // whole hook. Needs a REAL git repo (unlike the other tests here, which stub every external
+  // call): `git diff --cached` / `git add` are real git, not something bunx dispatches.
+  function initRepo() {
+    const repo = mkdtempSync(join(tmpdir(), 'dk-hook-git-'));
+    homes.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'a'], { cwd: repo });
+    writeFileSync(join(repo, '.gitignore'), 'dist\n');
+    execFileSync('git', ['add', '.gitignore'], { cwd: repo });
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: repo });
+    return repo;
+  }
+
+  function runInRepo(repo) {
+    const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
+    homes.push(home);
+    const bin = join(home, '.bun', 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'bunx'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(bin, 'bunx'), 0o755);
+    const hookPath = join(home, 'pre-commit');
+    writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
+    try {
+      const stdout = execFileSync('sh', ['-e', hookPath], {
+        cwd: repo,
+        env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: e.status, stdout: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+    }
+  }
+
+  it('re-stages a force-added gitignored dist/ file without aborting the hook', () => {
+    const repo = initRepo();
+    mkdirSync(join(repo, 'dist'));
+    writeFileSync(join(repo, 'dist', 'out.mjs'), 'export const x = 1;\n');
+    execFileSync('git', ['add', '-f', 'dist/out.mjs'], { cwd: repo });
+
+    const r = runInRepo(repo);
+
+    expect(r.stdout).not.toContain('ignored by gitignore');
+    expect(r.status).toBe(0);
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: repo,
+      encoding: 'utf8',
+    });
+    expect(staged).toContain('dist/out.mjs');
+  });
+});
+
 describe('assembled hook — shell/OS variants', () => {
   it.runIf(hasDash)('dash (Debian/Ubuntu /bin/sh): det-gate blocking + AI ordering hold', () => {
     const opts = { shell: '/bin/dash' };
