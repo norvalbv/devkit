@@ -48,3 +48,6 @@ gate-engine/review/eval/reviewers/progress-*.jsonl
 # committed like completeness/critique's, so do not add it here.
 gate-engine/review/eval/conventions/runs.log
 gate-engine/review/eval/conventions/transcripts/
+# vision-eval: baseline + ledger are local run artifacts (see gate-engine/vision/eval/README.md)
+gate-engine/vision/eval/results.baseline.json
+gate-engine/vision/eval/runs.log
