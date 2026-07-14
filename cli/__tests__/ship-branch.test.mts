@@ -31,6 +31,10 @@ const BASE_REF_RE = /BASE_REF=(.*)/;
 const DETACHED_RE = /detached HEAD/;
 const DIR_RE = /directory path not allowed/;
 const FLAG_RE = /unknown flag/;
+const NOTHING_RE = /nothing to commit: no changes in/;
+const GATE_RAN_RE = /GATE_RAN/;
+const DELETED_BRANCH_RE = /Deleted branch/;
+const EPHEMERAL_WT_RE = /devkit-ship-/;
 // Matches the dry-run "worktree kept" line of BOTH scripts: ship-branch prints "… (branch <br>)",
 // reship prints "… . Remove with:" — so dropWorktree cleans either (reship worktrees leaked before).
 const WT_RE = /worktree kept at (.+?)(?: \(branch|\. Remove)/;
@@ -65,7 +69,11 @@ afterAll(() => {
 });
 
 /** A throwaway repo on `branch` with `origin` set; returns the script's resolved {repo, baseRef}. */
-function buildAndRun(branch, origin, { detached = false, mkdir, pathArg = 'dummy-path' } = {}) {
+function buildAndRun(
+  branch,
+  origin,
+  { detached = false, mkdir, pathArg = 'dummy-path', extraArgs = [] } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), 'shipres-'));
   dirs.push(dir);
   const git = (args) =>
@@ -78,12 +86,16 @@ function buildAndRun(branch, origin, { detached = false, mkdir, pathArg = 'dummy
   if (mkdir) mkdirSync(join(dir, mkdir), { recursive: true });
   if (detached) git(['checkout', '-q', '--detach']);
 
-  return spawnSync('/bin/bash', [scriptPath, 'feat/__resolve_test__', 'title', pathArg], {
-    cwd: dir,
-    input: '',
-    encoding: 'utf8',
-    env: { ...process.env, ...GIT_ENV, SHIP_DRY_RUN: '1', SHIP_RESOLVE_ONLY: '1' },
-  });
+  return spawnSync(
+    '/bin/bash',
+    [scriptPath, 'feat/__resolve_test__', 'title', ...extraArgs, pathArg],
+    {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...process.env, ...GIT_ENV, SHIP_DRY_RUN: '1', SHIP_RESOLVE_ONLY: '1' },
+    },
+  );
 }
 
 function resolve(branch, origin, opts) {
@@ -251,6 +263,155 @@ describe('ship-branch.sh — PR base = the branch we branched from', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(DETACHED_RE);
   });
+
+  // --base overrides the target. These run through SHIP_RESOLVE_ONLY, which exits BEFORE the fetch —
+  // so they also pin that the seam stayed side-effect-free once --base gave it a network step.
+  it('--base overrides the current branch as the PR target', () => {
+    expect(
+      resolve('main', 'git@github.com:acme/app.git', { extraArgs: ['--base', 'studio'] }).baseRef,
+    ).toBe('studio');
+  });
+  it('--base origin/<b> targets <b> (the PR base is a branch name, not a remote-tracking ref)', () => {
+    expect(
+      resolve('main', 'git@github.com:acme/app.git', { extraArgs: ['--base', 'origin/studio'] })
+        .baseRef,
+    ).toBe('studio');
+  });
+  it('--base makes a detached HEAD shippable (there is no current branch to need)', () => {
+    expect(
+      resolve('main', 'git@github.com:acme/app.git', {
+        detached: true,
+        extraArgs: ['--base', 'studio'],
+      }).baseRef,
+    ).toBe('studio');
+  });
+});
+
+// DK-1: ship off an arbitrary base. The repro it fixes — work ALREADY COMMITTED on a source branch
+// whose PR base is a different branch — staged nothing (the paths matched HEAD), so the ship aborted
+// and force-deleted its own branch. The fix is that BASE is no longer pinned to HEAD; `git diff <base>
+// -- <paths>` was already base-vs-WORKING-TREE, so staging itself needed no change.
+describe('ship-branch.sh — --base <branch>', () => {
+  /** A repo with an `origin` bare that has a `studio` branch, and a `finalized` branch (checked out)
+   *  whose note.txt change is ALREADY COMMITTED — exactly the DK-1 repro state. */
+  function seedBaseRepo() {
+    const seeded = seedShipRepoLocalRemote();
+    const { dir, git, bare } = seeded;
+    writeFileSync(join(dir, 'note.txt'), 'studio\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'studio note'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'work:studio'], { stdio: 'ignore' }); // the PR base, on origin
+    git(['checkout', '-q', '-b', 'finalized'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'finalized\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-q', '-m', 'finalize'], { stdio: 'ignore' }); // committed → HEAD-based ship stages nothing
+    const studioTip = execFileSync('git', ['-C', bare, 'rev-parse', 'studio'], {
+      env: { ...process.env, ...GIT_ENV },
+      encoding: 'utf8',
+    }).trim();
+    return { ...seeded, studioTip };
+  }
+
+  // The acceptance criterion, and the proof that `x` and `origin/x` resolve to ONE base.
+  for (const spelling of ['studio', 'origin/studio']) {
+    it(`--base ${spelling}: ships committed work as a diff vs studio, from the finalized checkout`, () => {
+      const { dir, env, git, studioTip } = seedBaseRepo();
+      const headBefore = git(['rev-parse', 'HEAD']).trim();
+
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/dk1', 'ship it', '--base', spelling, '--', 'note.txt'],
+        { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+      );
+      dropWorktree(git, r.stderr);
+
+      expect(r.status, r.stderr).toBe(0); // the repro: this aborted "nothing to commit"
+      expect(git(['rev-parse', 'HEAD']).trim()).toBe(headBefore); // shared HEAD unmoved
+      expect(git(['rev-parse', 'feat/dk1^']).trim()).toBe(studioTip); // branched off origin/studio
+      // The diff is the FINALIZED content vs studio — i.e. read from the working tree, not from HEAD.
+      expect(git(['show', 'feat/dk1:note.txt'])).toBe('finalized\n');
+      expect(git(['diff', '--name-only', 'origin/studio', 'feat/dk1']).trim()).toBe('note.txt');
+    });
+  }
+
+  it('bases on ORIGIN’s tip, not a stale local copy of the base branch', () => {
+    const { dir, env, git, bare } = seedBaseRepo();
+    // origin/studio advances behind this checkout's back (a parallel agent's merge). This checkout
+    // never fetches, so its own origin/studio remote-tracking ref stays STALE — resolving the base
+    // from it would cut the worktree at the old tip and gate code GitHub will never merge into. Only
+    // ship's own fetch makes the base current, so this test fails if that fetch is ever dropped.
+    const clone = mkdtempSync(join(tmpdir(), 'shipadv-'));
+    dirs.push(clone);
+    const cgit = (a) =>
+      execFileSync('git', a, { cwd: clone, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' });
+    cgit(['clone', '-q', '--branch', 'studio', bare, '.']);
+    cgit(['config', 'user.email', 'a@b.c']);
+    cgit(['config', 'user.name', 'a']);
+    writeFileSync(join(clone, 'other.txt'), 'advanced\n');
+    cgit(['add', 'other.txt']);
+    cgit(['commit', '-q', '-m', 'studio advances']);
+    cgit(['push', '-q', 'origin', 'studio']);
+    const advancedTip = execFileSync('git', ['-C', bare, 'rev-parse', 'studio'], {
+      env: { ...process.env, ...GIT_ENV },
+      encoding: 'utf8',
+    }).trim();
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/fresh', 't', '--base', 'studio', '--', 'note.txt'],
+      { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['rev-parse', 'feat/fresh^']).trim()).toBe(advancedTip); // fetched, not the stale local
+  });
+
+  it('rejects a --base branch that does not exist on origin', () => {
+    const { dir, env } = seedBaseRepo();
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/x', 't', '--base', 'nope', '--', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/no branch origin\/nope/);
+  });
+
+  // A PR base must be a BRANCH — `gh pr create --base <tag|sha>` is rejected. Fetching the fully
+  // qualified refs/heads/<b> (not a bare ref, which would also match a tag) is what fails it HERE,
+  // before the push, instead of after.
+  for (const kind of ['tag', 'sha']) {
+    it(`rejects a --base ${kind} (a PR base must be a branch), before anything is pushed`, () => {
+      const { dir, env, git, bare, studioTip } = seedBaseRepo();
+      git(['tag', 'v1', 'origin/studio'], { stdio: 'ignore' });
+      git(['push', '-q', 'origin', 'v1'], { stdio: 'ignore' });
+      const ref = kind === 'tag' ? 'v1' : studioTip;
+
+      const r = spawnSync(
+        '/bin/bash',
+        [scriptPath, 'feat/x', 't', '--base', ref, '--', 'note.txt'],
+        {
+          cwd: dir,
+          input: 'b\n',
+          encoding: 'utf8',
+          env: { ...env, SHIP_DRY_RUN: '1' },
+        },
+      );
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toMatch(/must be a remote branch/);
+      expect(localBranchExists(git, 'feat/x')).toBe(false); // failed before creating anything
+      expect(remoteBranchExists(bare, 'feat/x')).toBe(false);
+    });
+  }
+
+  // The --base empty-commit hint ("already identical on origin/<base>", no checkout advice) is
+  // covered in the `empty-commit preflight` describe, beside its default-base twin.
 });
 
 describe('ship-branch.sh — isolation + arg guards', () => {
@@ -261,13 +422,113 @@ describe('ship-branch.sh — isolation + arg guards', () => {
     });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(DIR_RE);
-    expect(r.stderr).toMatch(/list its tracked files: git ls-files -- "sub"/);
   });
 
   it('rejects an unknown flag before -- (a dash-leading file path must go after --)', () => {
     const r = buildAndRun('main', 'git@github.com:acme/app.git', { pathArg: '--bogus' });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(FLAG_RE);
+  });
+});
+
+describe('ship-branch.sh — empty-commit preflight', () => {
+  // Regression: shipping paths already identical to BASE staged nothing, and NOTHING observed the
+  // empty index — the tracked-diff patch is empty (so the `[ -s "$PATCH" ] && apply` never fires) and
+  // `ls-files -o` lists nothing. Ship therefore created the branch, ran the FULL gate chain, and died
+  // on git's cryptic "nothing added to commit but untracked files present" (the untracked files being
+  // ship's own gate symlinks), whereupon the cleanup trap force-deleted the branch it had just made —
+  // "Deleted branch … (was …)" on STDOUT, unsuppressed by the trap's 2>/dev/null. Minutes of gates for
+  // an unexplained failure. reship.sh already guarded this; the new-ship path did not.
+  it('fails fast when the paths are identical to base — no gates, no branch churn', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'echo GATE_RAN >&2; exit 0' });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'already committed'], { stdio: 'ignore' });
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/empty', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(NOTHING_RE);
+    expect(r.stderr).not.toMatch(GATE_RAN_RE); // zero gate work — the chain never ran
+    expect(r.stdout).not.toMatch(DELETED_BRANCH_RE); // no create-then-delete churn
+    expect(git(['worktree', 'list'])).not.toMatch(EPHEMERAL_WT_RE);
+    expect(localBranchExists(git, 'feat/empty')).toBe(false);
+  });
+
+  // The remedy must name the base that was ACTUALLY used, or it sends the operator the wrong way.
+  // Default (no --base) the base is this checkout's branch, so "check out the branch your work is on"
+  // is the fix and --base is worth offering.
+  it('default base: names this checkout’s branch and offers --base as the alternative', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'already committed'], { stdio: 'ignore' });
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/default-base-hint', 'ship it', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      },
+    );
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(NOTHING_RE);
+    expect(r.stderr).toContain('work'); // the base actually used: this checkout's branch
+    expect(r.stderr).toContain('--base'); // the flag exists, so offering it is a real remedy
+  });
+
+  // …but under --base the base is origin/<branch>, NOT the checkout. Re-suggesting a checkout there
+  // would contradict the flag's whole purpose (ship a diff vs another base WITHOUT checking it out),
+  // so the message must name origin/<base> and stay silent about checking out.
+  it('--base: names origin/<base>, never re-suggests checking out', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'content'], { stdio: 'ignore' });
+    git(['push', '-q', 'origin', 'work:studio'], { stdio: 'ignore' }); // origin/studio has this exact content
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/base-hint', 'ship it', '--base', 'studio', '--', 'note.txt'],
+      { cwd: dir, input: 'pr body\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(NOTHING_RE);
+    expect(r.stderr).toContain('origin/studio'); // the base actually used
+    expect(r.stderr).not.toContain('check out'); // not checking out is the point of --base
+    expect(localBranchExists(git, 'feat/base-hint')).toBe(false); // no churn on the --base path either
+  });
+
+  // Guards the guard: the empty-commit check must not abort a REAL tracked edit. The worktree-
+  // integration test below ships an UNTRACKED file, exercising only the `ls-files -o` half — nothing
+  // covered the `diff --quiet` half against a false abort.
+  it('still ships a modified tracked file (the guard is not over-eager)', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    git(['add', 'note.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'base content'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'changed\n'); // tracked edit → the patch path
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/tracked', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['show', 'feat/tracked:note.txt'])).toContain('changed');
+    dropWorktree(git, r.stderr); // dry-run keeps the worktree; don't block afterAll's rm
   });
 });
 
