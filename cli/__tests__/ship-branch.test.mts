@@ -261,6 +261,7 @@ describe('ship-branch.sh — isolation + arg guards', () => {
     });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(DIR_RE);
+    expect(r.stderr).toMatch(/list its tracked files: git ls-files -- "sub"/);
   });
 
   it('rejects an unknown flag before -- (a dash-leading file path must go after --)', () => {
