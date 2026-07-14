@@ -64,6 +64,7 @@ describe('reship — resolve + arg guards', () => {
     const r = run(['feat/open', 't', '--pr', '--', 'sub'], dir);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/directory path not allowed/);
+    expect(r.stderr).toMatch(/list its tracked files: git ls-files -- "sub"/);
   });
   it('fails clearly when the PR branch does not exist on the remote', () => {
     const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
