@@ -17,7 +17,7 @@
 # and is removed on exit. Scope is explicit paths; never auto-detect, because in a
 # shared tree your files are indistinguishable from parallel work.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--base <b>] [--link <d>]... [--] <path...>
 #          # PR body via stdin; bare positional paths (no --) are also accepted.
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 set -euo pipefail
@@ -31,8 +31,10 @@ BR=${1:?branch}; TITLE=${2:?title}; shift 2
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
+BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --base) BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
@@ -82,12 +84,19 @@ if [ -z "${SHIP_DRY_RUN:-}" ]; then
 fi
 
 ROOT=$(git rev-parse --show-toplevel)
-BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
-# PR merges back into the branch we branched from. A detached HEAD has no such branch,
-# so fail fast rather than silently targeting `main` (wrong base + a bogus diff).
-BASE_REF=$(git symbolic-ref --quiet --short HEAD) || {
-  echo "detached HEAD — run ship-branch.sh from a branch (the PR targets that branch)" >&2; exit 1
-}
+# The PR target branch. Default: the branch we branched from — the PR merges back into it. A detached
+# HEAD has no such branch, so fail fast rather than silently targeting `main` (wrong base + a bogus
+# diff). With --base <branch> the PR targets THAT branch instead, so a repo whose source-of-truth
+# branch differs from its PR base can ship from either without checking out / juggling worktrees.
+if [ -n "$BASE_FLAG" ]; then
+  # `origin/x` and `x` both mean branch x: the PR base is a branch NAME, and the tip we branch off is
+  # always origin's (below) — so the two spellings must not diverge into two different bases.
+  BASE_REF=${BASE_FLAG#origin/}
+else
+  BASE_REF=$(git symbolic-ref --quiet --short HEAD) || {
+    echo "detached HEAD — run ship-branch.sh from a branch (the PR targets that branch)" >&2; exit 1
+  }
+fi
 # Resolve owner/repo from origin (NOT gh's default — a fork's upstream remote can hijack it).
 REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
 # A malformed origin leaves a bad REPO that would only surface AFTER the push — validate the shape now.
@@ -99,6 +108,51 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
+
+# The commit the ephemeral worktree is cut from — and therefore what the gates judge and what the PR
+# diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
+# side effects. Nothing between there and here reads $BASE.
+if [ -n "$BASE_FLAG" ]; then
+  # origin's tip, not the local copy: in a shared parallel-agent checkout the local base branch is
+  # routinely stale, and a worktree cut from a stale base makes the gates judge code GitHub will never
+  # merge into. (The PR DIFF would still be right — GitHub diffs from the merge-base — so this buys
+  # gate accuracy, not diff accuracy.) reship.sh sets the precedent: it fetches its base the same way.
+  # The source ref is fully-qualified `refs/heads/` — NOT a bare ref, which would also match a tag: a
+  # PR base must be a BRANCH, so a sha or tag has to fail HERE, not at `gh pr create` after the push.
+  # One round-trip proves both (the branch exists AND it is a branch).
+  git fetch -q origin "refs/heads/$BASE_REF" 2>/dev/null || {
+    echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
+    exit 1
+  }
+  BASE=$(git rev-parse FETCH_HEAD)
+else
+  BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
+fi
+
+# Nothing to commit → say so NOW. Staging (below) has exactly two inputs: the tracked diff vs BASE
+# and the untracked files in scope. Both empty ⇒ an empty index — which git only reports AFTER the
+# whole gate chain has run ("nothing added to commit but untracked files present", the untracked ones
+# being our own gate symlinks), whereupon the EXIT trap force-deletes the branch it just made and
+# prints a bare "Deleted branch … (was …)" on stdout. The operator pays a multi-minute gate run for a
+# cryptic failure. reship.sh's "no changes vs origin/$BR" guard already covers the re-push flow; here
+# is its new-ship twin, hoisted ahead of the worktree so nothing is created to churn. Mirrors the two
+# staging commands exactly (same BASE, same --exclude-standard, same pathspec) so the guard cannot
+# disagree with what staging will do. A git ERROR (non-zero but not "differences found") reads as
+# "has changes" and falls through to the old behaviour — fail toward the status quo, never toward a
+# false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
+# (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
+if git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
+   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ]; then
+  echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
+  if [ -n "$BASE_FLAG" ]; then
+    # --base already answers "your work is committed elsewhere" — the remaining causes are a base that
+    # already has this content, or a typo. Never re-suggest checking out: not doing so is the point.
+    echo "these paths are already identical on origin/$BASE_REF — wrong --base, or a misspelled path?" >&2
+  else
+    echo "already committed, wrong checkout, or a misspelled path? ship bases the PR on this checkout's branch ($BASE_REF) — check out the branch your work is on, or pass --base <branch> to diff your working tree against a different branch instead." >&2
+  fi
+  exit 1
+fi
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")

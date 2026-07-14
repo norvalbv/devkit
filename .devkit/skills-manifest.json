@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.29.0",
-  "generatedAt": "2026-07-07T12:48:29.585Z",
+  "devkitRef": "v0.35.1",
+  "generatedAt": "2026-07-14T15:28:30.182Z",
   "targets": [
     "claude",
     "cursor"
@@ -16,7 +16,7 @@
     "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
     "correctness/scripts/checklist.mjs": "a63e2425befd186c7fe3b5db1e0ee3190dfb506f29021cafa5bfb74ad8ed1d9b",
     "decisions/SKILL.md": "c85736e2b4ff81af0b299c2a7455e7ef6d5c8e81b47200c7f1d65833d5ecef4a",
-    "dup-detection/SKILL.md": "69735071633ac0edeaff3dc18141b03bcb90dacc4796c8fc1f4761d74cc50b81",
+    "dup-detection/SKILL.md": "fdc2e37d8a278f82931818807b4d5ee91907e379131be7a07532e79e3822cbda",
     "feature-critique/SKILL.md": "f40fae2d934d851c3ba9847a924c0d43bf4661d640d0a83e9bf3f9121b42429f",
     "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
     "frontend-accessibility/scripts/checklist.mjs": "495bc633bd5282fc2559ab80f3c33804366004a793096a37efc450443c2172c8",
@@ -32,6 +32,6 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "72740758745ce5ebe061a7af763312d9c82a219fcb525562b14ca10c13644d98"
+    "using-devkit/SKILL.md": "106a7a2388d9c887e83c8a9ac820bcba61649a8a440cc9c090e13af26e17cacb"
   }
 }
