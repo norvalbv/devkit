@@ -16,7 +16,7 @@ Frink catches code duplication at commit via two detectors writing one allowlist
 - You're burning down baseline entries (~460 pairs frozen pre-gate).
 - Before adding code that might already exist somewhere — check allowlist coverage first.
 
-**Heavy reference:** `scripts/co-occurrence/README.md` (calibration, decay model, full mode list). Don't duplicate — link to it.
+**Full mode list:** `guard-dup --help` (scan/reconcile/baseline) and `guard-dup-allowlist --help` (add/add-clone/remove/remove-clone/check/list/prune).
 
 ## The pre-flight rule (this is the biggest hole)
 
@@ -24,7 +24,7 @@ Frink catches code duplication at commit via two detectors writing one allowlist
 
 ```bash
 MATCHER_CHANGED_FILES="<fileA>,<fileB>" \
-  node scripts/co-occurrence/matcher.mjs scan --new --changed
+  guard-dup scan --new --changed
 # exit 0 → dup gone (or covered). Safe to proceed.
 # exit 1 → still detected. Refactor more. Do NOT trigger reviewers yet.
 # exit 2 → could-not-run (no index / Ollama down). Continue (fail-open).
@@ -37,8 +37,8 @@ Skipping this = reviewer cascade + tokens torched on a refactor that's actually 
 1. **Read the entry's metadata directly.** It already names `fileA:rangeA` + `fileB:rangeB`. Don't `searchCode` for what you already know — read those exact ranges.
 2. **Check for the architectural-mirror gotcha** (see below).
 3. **Refactor:** extract to `src/shared/lib/` (or feature-shared lib) — let both call sites import the same export.
-4. **Pre-flight:** `matcher scan --new --changed` against your two files. Iterate until exit 0.
-5. **Retire the allowlist entry:** `co-occurrence.mjs remove <symA> <fileA> <symB> <fileB>` (or `remove-clone <fragmentHash>`).
+4. **Pre-flight:** `guard-dup scan --new --changed` against your two files. Iterate until exit 0.
+5. **Retire the allowlist entry:** `guard-dup-allowlist remove <symA> <fileA> <symB> <fileB>` (or `remove-clone <fragmentHash>`).
 6. **Then** trigger reviewers + commit.
 
 ## The architectural-mirror gotcha
@@ -54,16 +54,16 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 
 | Command | What | When |
 |---|---|---|
-| `co-occurrence.mjs add <symA> <fileA> <symB> <fileB> --description "..."` | Approve a pair | Gate blocked + dup is intentional. **Prefer the gate's pre-filled command** (has `--similarity` + `--range-a/-b` filled). |
-| `co-occurrence.mjs add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. |
-| `co-occurrence.mjs remove <symA> <fileA> <symB> <fileB>` | Retire an approval | After refactoring the dup away. |
-| `co-occurrence.mjs remove-clone <hash>` | Retire a clone approval | After refactoring. |
-| `co-occurrence.mjs check <symA> <fileA> <symB> <fileB>` | exit 0 if allowlisted | Before duplicating something — coverage check. |
-| `co-occurrence.mjs prune` | **Time-based**: drops entries past `date + decayDays` | Periodic; commit-guard runs it in step 2 setup. |
-| `co-occurrence.mjs list` | List entries | Picking a burn-down target. |
-| `matcher.mjs scan --new --changed` | **Pre-flight check** (this commit's dups vs the allowlist) | Before declaring a dup-fix done. |
-| `matcher.mjs reconcile [--apply]` | **Detection-based**: drops entries `detect()` no longer produces (dead) | After bulk refactors; periodic sweep. Dry-run by default. |
-| `matcher.mjs baseline` | Freeze every current candidate | One-shot freeze-the-past (already done). |
+| `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "..."` | Approve a pair | Gate blocked + dup is intentional. **Prefer the gate's pre-filled command** (has `--similarity` + `--range-a/-b` filled). `--description` is required. |
+| `guard-dup-allowlist add-clone <hash> <fileA> <fileB> --description "..."` | Approve a clone | Same — copy gate's command. |
+| `guard-dup-allowlist remove <symA> <fileA> <symB> <fileB>` | Retire an approval | After refactoring the dup away. |
+| `guard-dup-allowlist remove-clone <hash>` | Retire a clone approval | After refactoring. |
+| `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` | exit 0 if allowlisted | Before duplicating something — coverage check. |
+| `guard-dup-allowlist prune` | **Time-based**: drops entries past `date + decayDays` | Periodic; commit-guard runs it in step 2 setup. |
+| `guard-dup-allowlist list` | List entries | Picking a burn-down target. |
+| `guard-dup scan --new --changed` | **Pre-flight check** (this commit's dups vs the allowlist) | Before declaring a dup-fix done. |
+| `guard-dup reconcile [--apply]` | **Detection-based**: drops entries `detect()` no longer produces (dead) | After bulk refactors; periodic sweep. Dry-run by default. |
+| `guard-dup baseline` | Freeze every current candidate | One-shot freeze-the-past (already done). |
 
 `reconcile` vs `prune` — easy to confuse:
 
@@ -72,20 +72,20 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 
 ## Burning down the baseline
 
-1. `co-occurrence.mjs list` — pick a target. **Skip `src/shared ↔ _shared` mirrors** (gotcha above).
-2. `co-occurrence.mjs remove …` the entry.
+1. `guard-dup-allowlist list` — pick a target. **Skip `src/shared ↔ _shared` mirrors** (gotcha above).
+2. `guard-dup-allowlist remove …` the entry.
 3. Next commit touching that code → gate re-surfaces it → refactor (use the workflow above).
-4. Periodically `matcher reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
+4. Periodically `guard-dup reconcile --apply` to sweep entries that died incidentally (someone else's refactor killed the dup without removing the entry).
 
 ## Common mistakes
 
 | Mistake | Fix |
 |---|---|
 | Running `searchCode` to find a dup the entry already pinpoints | Read `fileA:rangeA` + `fileB:rangeB` directly. searchCode is for *discovering* dups; entries are pre-discovered. |
-| Declaring done after `bun run test:run` without pre-flighting the matcher | Run `matcher scan --new --changed` — gate will block at commit if you don't. |
+| Declaring done after `bun run test:run` without pre-flighting the matcher | Run `guard-dup scan --new --changed` — gate will block at commit if you don't. |
 | Refactoring a `src/shared ↔ _shared` mirror | It's a deploy artifact (`sync-shared.mjs`). Don't touch; either path-rule it or keep the allowlist entry. |
 | Confusing `reconcile` and `prune` | `prune` = calendar age. `reconcile` = detection miss. See table. |
-| Forgetting `co-occurrence.mjs remove` after a real refactor | The entry doesn't auto-clean. `reconcile` will catch it eventually; `remove` is faster. |
+| Forgetting `guard-dup-allowlist remove` after a real refactor | The entry doesn't auto-clean. `reconcile` will catch it eventually; `remove` is faster. |
 | Hand-building `add` instead of pasting the gate's pre-filled command | Hand-built commands omit `--similarity` + `--range-a/-b` → metadata empty in the allowlist. Paste the gate's command. |
 
 ## Red flags — STOP and re-check
@@ -95,4 +95,4 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 - "This generated mirror (e.g. `vercel-serverless/_shared/`) shouldn't exist; let me refactor." → No — it's generated.
 - "What does `prune` do again?" → Re-read the table above; do not guess.
 
-**Full reference:** [`scripts/co-occurrence/README.md`](../../../scripts/co-occurrence/README.md).
+**Full reference:** `guard-dup --help` / `guard-dup-allowlist --help`.
