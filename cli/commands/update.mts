@@ -210,7 +210,7 @@ export default async function update(args: string[], cwd: string): Promise<numbe
       )?.overlay
     )
       console.log(
-        '  Overlay repo: run `devkit doctor --fix` to refresh the local gate hook to this version.',
+        '  Overlay repo: run `devkit upgrade` to reconcile the local gate hook + configs to this version (or `devkit doctor --fix` for just the hook).',
       );
   } catch {
     /* no readable overlay config — nothing to hint */

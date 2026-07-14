@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
 import { applyInit } from '../commands/init.mts';
+import update, { fetchLatestTag } from '../commands/update.mts';
+import upgrade from '../commands/upgrade.mts';
 import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts';
 import { isTracked } from '../lib/git-tracked.mts';
 import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
@@ -34,6 +36,17 @@ vi.mock('../lib/install/install-fallow.mts', async (importOriginal) => ({
   installFallow: () => ({ ok: true, method: 'bun', message: 'installed fallow@2.89.0 via bun' }),
   saveFallowBaselines: () => ({ ok: true }),
   wireFallowGate: () => ({ ok: true }),
+}));
+
+// For the overlay-upgrade suite below: keep cmpSemver / needsRerun / repoUrl REAL, but stub the
+// network (fetchLatestTag) and the install (default `update`, which for an overlay runs a global
+// `bun add -g` — it must NOT touch the machine's global CLI from a test). applyInit + doctor stay REAL
+// so the re-sync is actually exercised. No existing overlay test calls update/fetchLatestTag, so this
+// module-wide mock is inert for them (doctor imports only the real cmpSemver).
+vi.mock('../commands/update.mts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../commands/update.mts')>()),
+  default: vi.fn(async () => 0),
+  fetchLatestTag: vi.fn(),
 }));
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -786,5 +799,170 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     // doctor --fix: regenerates → exit 0, sentinel restored
     expect(await doctorRun(['--fix'], root)).toBe(0);
     expect(readHook(root)).toContain('devkit-gates: chain start');
+  });
+});
+
+// `devkit upgrade` in an overlay repo used to BAIL (exit 1, "re-run devkit init --overlay to re-sync").
+// It now re-syncs in place: the pin is .devkit/config.json's `devkitRef` (install-agnostic — overlay
+// has no package.json dep), so upgrade resolves it, optionally bumps the global CLI to a newer tag, then
+// regenerates the git-ignored gate chain + configs and verifies — the same shape as the self-host branch.
+describe('overlay upgrade (re-syncs, not the old bail)', () => {
+  const cfgPathOf = (root) => join(root, '.devkit', 'config.json');
+  const readCfg = (root) => JSON.parse(readFileSync(cfgPathOf(root), 'utf8'));
+  // The version the running CLI reports (upgrade reads its OWN package.json via packageDir()).
+  const V = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).version;
+  const mkOverlay = (root, extra = {}) =>
+    applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+      ...extra,
+    });
+
+  beforeEach(() => {
+    // Re-establish the mock impls each test (the suite's afterEach runs vi.restoreAllMocks()).
+    vi.mocked(update).mockReset().mockResolvedValue(0);
+    vi.mocked(fetchLatestTag).mockReset().mockReturnValue({ latest: '0.0.0' }); // steady state: nothing newer
+  });
+
+  it('re-syncs instead of bailing: regenerates a stale hook, exit 0, no install', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    // simulate a post-update skew: an OLD hook shape that upgrade must refresh
+    writeFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+
+    const code = await upgrade([], root);
+
+    expect(code).toBe(0); // NOT the old exit-1 bail
+    expect(vi.mocked(update)).not.toHaveBeenCalled(); // nothing newer published → no global install
+    const hook = readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8');
+    expect(hook).toContain('guard-deterministic'); // regenerated to the real overlay gate chain
+    expect(hook).toContain('.husky/pre-commit'); // still chains to the team's committed hook
+  });
+
+  it('bumps the config.json devkitRef pin when a newer tag is published (running CLI current)', async () => {
+    const root = workRepo();
+    await mkOverlay(root); // pinned at v0.7.0
+    vi.mocked(fetchLatestTag).mockReturnValue({ latest: V }); // published == running CLI → needsRerun false
+
+    const code = await upgrade([], root);
+
+    expect(code).toBe(0);
+    expect(vi.mocked(update)).toHaveBeenCalledTimes(1); // installed the newer tag (stubbed global add)
+    expect(readCfg(root).devkitRef).toBe(`v${V}`); // pin bumped in the SAME pass
+  });
+
+  it('running CLI behind latest → installs and returns NEEDS_RERUN (10), pin NOT yet bumped', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    vi.mocked(fetchLatestTag).mockReturnValue({ latest: '99.0.0' }); // newer than the running CLI
+
+    const code = await upgrade([], root);
+
+    expect(code).toBe(10);
+    expect(vi.mocked(update)).toHaveBeenCalledTimes(1);
+    expect(readCfg(root).devkitRef).toBe('v0.7.0'); // returned before reconciling
+  });
+
+  it('preserves an opted-in globalCommitGate on re-sync (never silently un-wires the shim)', async () => {
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = mkTmp('overlay-xdg-'); // sandbox the machine-global init.sh write
+    try {
+      const root = workRepo();
+      await mkOverlay(root, { globalCommitGate: true });
+      expect(readCfg(root).globalCommitGate).toBe(true);
+
+      await upgrade([], root);
+
+      expect(readCfg(root).globalCommitGate).toBe(true); // still wired after the re-sync
+    } finally {
+      if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = prevXdg;
+    }
+  });
+
+  it('idempotent: re-sync never re-freezes debt (adopted → baseline stays absent), exit 0', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    const sizeBaseline = join(root, 'eslint', 'baselines', 'size.json');
+    expect(existsSync(sizeBaseline)).toBe(false);
+
+    // add NEW size debt that a re-freeze WOULD grandfather
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'huge.ts'),
+      '// eslint-disable max-lines\nexport const x = 1;\n',
+    );
+
+    expect(await upgrade([], root)).toBe(0);
+    expect(existsSync(sizeBaseline)).toBe(false); // adopted repo → freeze skipped, debt not laundered
+  });
+
+  it('--dry-run writes nothing (a stale hook stays stale), exit 0', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    const stale = '#!/bin/sh\nexit 0\n';
+    writeFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), stale);
+
+    const code = await upgrade(['--dry-run'], root);
+
+    expect(code).toBe(0);
+    expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toBe(stale); // untouched
+  });
+
+  it('does NOT re-add biome to a --no-biome overlay (opt-out survives; applyOverlay never records biome)', async () => {
+    const root = workRepo();
+    // simulate `devkit init --overlay --no-biome`: biome off, so no biome.devkit.jsonc is written and
+    // applyOverlay's config write never records `biome` (its components literal omits the key).
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // opted out at init
+    expect(readCfg(root).components.biome).toBeUndefined(); // never persisted → the gap the fix closes
+
+    await upgrade([], root);
+
+    // upgrade infers biome from the absent on-disk marker (not normalizeSelection's true default), so
+    // the opt-out is honoured — biome.devkit.jsonc is NOT silently re-added.
+    expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
+  });
+
+  it('upgrade --force does NOT overwrite a tuned guard.config.json (configs are never overwritten)', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    const gc = join(root, 'guard.config.json');
+    const tuned = { ...JSON.parse(readFileSync(gc, 'utf8')), __tuned: 'keep-me' };
+    writeFileSync(gc, `${JSON.stringify(tuned, null, 2)}\n`);
+
+    await upgrade(['--force'], root);
+
+    // --force forwards force:false into applyOverlay's config writers, so the hand-tuned file survives.
+    expect(JSON.parse(readFileSync(gc, 'utf8')).__tuned).toBe('keep-me');
+  });
+
+  it("non-semver devkitRef ('main'/branch/SHA): resolves to the running version, never persists 'vmain'", async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    // an overlay installed off a branch, not a tag — devkitRef is not a comparable semver
+    const cfg = readCfg(root);
+    cfg.devkitRef = 'main';
+    writeFileSync(cfgPathOf(root), JSON.stringify(cfg));
+
+    expect(await upgrade([], root)).toBe(0);
+
+    const after = readCfg(root).devkitRef;
+    expect(after).not.toBe('vmain'); // NOT the corrupt ref the naive slice would persist
+    expect(after.startsWith('v')).toBe(true);
+    // the tail is a real semver (resolved from the running CLI), not the branch name
+    expect(
+      after
+        .slice(1)
+        .split('.')
+        .every((p: string) => Number.isInteger(Number(p))),
+    ).toBe(true);
   });
 });
