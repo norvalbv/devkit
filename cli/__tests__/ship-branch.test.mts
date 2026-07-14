@@ -1137,6 +1137,76 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     );
   });
 
+  // The ratchet freezes live in eslint/baselines. OVERLAY hides the dir via .git/info/exclude while
+  // init still freezes into it → untracked → absent from the checkout. It must be linked back, or the
+  // fanout gate enforces an EMPTY freeze (it can't fail open: guard.config.json IS linked) and every
+  // grandfathered folder reads as new growth.
+  const freezeHook =
+    '[ -e eslint/baselines/fanout.json ] && echo FREEZE_SEEN || echo FREEZE_MISSING\nexit 0';
+
+  it('links an untracked ratchet freeze in (fanout gate sees the grandfathering, not an empty one)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: freezeHook });
+    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    // untracked exactly as an overlay repo leaves it (excluded via .git/info/exclude, never committed)
+    writeFileSync(
+      join(dir, 'eslint/baselines/fanout.json'),
+      '{"cap":12,"dirs":{"src/icons":65}}\n',
+    );
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/freeze', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-freeze.log'), 'utf8');
+    expect(log).toMatch(/FREEZE_SEEN/); // reached the worktree = no false fanout failure
+    expect(log).not.toMatch(/FREEZE_MISSING/);
+  });
+
+  it('is a silent no-op for TRACKED baselines (devkit/frink package mode ride the checkout)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: freezeHook });
+    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    writeFileSync(join(dir, 'eslint/baselines/fanout.json'), '{"cap":12,"dirs":{}}\n');
+    git(['add', 'eslint/baselines/fanout.json'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'track freeze'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/freeze-tracked', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/absent from the committed tree/); // nothing to link → no notice
+    expect(
+      readFileSync(join(dir, '.devkit/last-ship-gates-feat-freeze-tracked.log'), 'utf8'),
+    ).toMatch(/FREEZE_SEEN/);
+  });
+
+  // The candidates array is the whole gate-parity contract, and dropping an entry breaks it SILENTLY
+  // (the gate falls to defaults and still reports a pass). Pin the set so a deletion fails loudly.
+  it('pins the fixed gate-artifact candidate set (a dropped entry silently weakens every ship)', () => {
+    const src = readFileSync(
+      fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url)),
+      'utf8',
+    );
+    const line = /^\s*local candidates=\((.*)\)\s*$/m.exec(src);
+    expect(line, 'candidates array not found — did the helper get restructured?').toBeTruthy();
+    expect((line as RegExpExecArray)[1].split(/\s+/)).toEqual([
+      'guard.config.json',
+      '.fallowrc.jsonc',
+      '.fallowrc.json',
+      '.fallow',
+      'fallow-baselines',
+      '.decisions',
+      'eslint/baselines',
+    ]);
+  });
+
   it('labels a config-resolved, gitignored index path as a cache — not a "commit it" nudge', () => {
     const { dir, env, git } = seedShipRepo();
     writeFileSync(join(dir, '.gitignore'), '.search-code/\n');
