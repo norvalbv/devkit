@@ -32,7 +32,11 @@ done
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
+  [ -d "$p" ] && {
+    echo "directory path not allowed (pass individual files): $p" >&2
+    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
+    exit 1
+  }
 done
 
 LINK_DIRS=(.husky/_ node_modules)

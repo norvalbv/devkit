@@ -46,7 +46,11 @@ done
 # agent's edits under that directory, defeating the per-file isolation. (A deleted
 # file is not a dir, so it still passes — deletions are valid pathspecs.)
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
+  [ -d "$p" ] && {
+    echo "directory path not allowed (pass individual files): $p" >&2
+    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
+    exit 1
+  }
 done
 
 # Assemble the symlink set (universal base + --link extras).
