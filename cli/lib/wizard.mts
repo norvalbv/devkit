@@ -13,8 +13,10 @@ import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@cl
 import {
   AGENT_TARGETS,
   COMPONENTS,
+  DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_OPTIONS,
   RECOMMENDED_GUARD_IDS,
+  type ReviewProfile,
   type Selection,
 } from './components.mts';
 
@@ -129,6 +131,7 @@ interface WizardResult {
   stack: string;
   selection: Partial<Selection>;
   remove: string[];
+  review: ReviewProfile;
 }
 
 // Reason: flat clack wizard orchestration: sequential numbered steps (mode→stack→components→guards→removal→summary→apply) each guarded by `if (bail(x)) return null`; the branch COUNT is high but every branch is near-flat, and the untested-complexity is acceptable because this is an interactive TTY prompt flow exercised end-to-end, not unit-tested
@@ -244,6 +247,34 @@ export async function runWizard({
     selection.guards = (guards as string[]).filter((g) => g !== LINE_GROWTH_ID);
   }
 
+  // Review execution is a separate local policy from ordinary commit/ship guards. Opt-in here;
+  // when enabled, make the positive allowlist explicit so future gates never enter cron reviews.
+  const reviewEnabled = await confirm({
+    message: 'Enable devkit review?',
+    initialValue: installed.has('devkit-review'),
+  });
+  if (bail(reviewEnabled)) return null;
+  let reviewGuards: string[] = [];
+  if (reviewEnabled) {
+    const picked = await multiselect({
+      message: 'Select guards for devkit review',
+      options: GUARD_OPTIONS.filter((g) => selection.guards?.includes(g.id)).map((g) => ({
+        value: g.id,
+        label: g.label,
+        hint: g.hint,
+      })),
+      initialValues: [...(selection.guards ?? [])],
+      required: false,
+    });
+    if (bail(picked)) return null;
+    reviewGuards = picked as string[];
+  }
+  const review: ReviewProfile = {
+    enabled: Boolean(reviewEnabled),
+    guards: reviewGuards,
+    decisionsDir: DEFAULT_REVIEW_DECISIONS_DIR,
+  };
+
   // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).
   const remove = [];
   const deselected =
@@ -275,7 +306,7 @@ export async function runWizard({
     if (yes) remove.push(id);
   }
 
-  return { mode, stack, selection, remove };
+  return { mode, stack, selection, remove, review };
 }
 
 // Concise plan summary for the note(): a ✓/· line per component + a remove line.

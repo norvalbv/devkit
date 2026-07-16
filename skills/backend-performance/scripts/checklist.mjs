@@ -45,12 +45,28 @@ const log = console.log;
 const isStringArray = (v) =>
   Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
 
+function injectedReviewRoots() {
+  const raw = process.env.DEVKIT_REVIEW_BACKEND_ROOTS;
+  if (raw === undefined) return null;
+  let roots;
+  try {
+    roots = JSON.parse(raw);
+  } catch {
+    throw new Error('DEVKIT_REVIEW_BACKEND_ROOTS must be a JSON string array');
+  }
+  if (!isStringArray(roots) || roots.length === 0)
+    throw new Error('DEVKIT_REVIEW_BACKEND_ROOTS must be a non-empty JSON string array');
+  return roots;
+}
+
 // Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
 // review.backendRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function backendRoots() {
+  const injected = injectedReviewRoots();
+  if (injected) return injected;
   let c;
   try {
     c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));

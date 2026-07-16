@@ -21,6 +21,8 @@ node $SCRIPT cleanup      # Remove checklist
 The roots the script scans are the UNION of `scanRoots`, `review.backendRoots` and
 `review.frontendRoots` from `guard.config.json` — correctness is not domain-sliceable, so a
 backend writer and its frontend reader are reviewed together. Source files only.
+During `devkit review`, `DEVKIT_REVIEW_BACKEND_ROOTS` and `DEVKIT_REVIEW_FRONTEND_ROOTS` replace
+their configured counterparts with the gate's effective topology; `scanRoots` remains in the union.
 
 Exactly four items (`state-transitions`, `concurrency-races`, `writer-reader-contracts`,
 `error-and-edge-classification`) are ALWAYS enumerated when any source file is staged — a

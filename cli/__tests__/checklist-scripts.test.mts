@@ -14,6 +14,14 @@ const SCRIPT = fileURLToPath(
   new URL('../../skills/api-security/scripts/checklist.mjs', import.meta.url),
 );
 
+const REVIEW_ROOT_CASES = [
+  ['api-security', 'DEVKIT_REVIEW_BACKEND_ROOTS', '.api-security-review.json'],
+  ['backend-performance', 'DEVKIT_REVIEW_BACKEND_ROOTS', '.backend-performance-review.json'],
+  ['frontend-security', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-security-review.json'],
+  ['frontend-performance', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-performance-review.json'],
+  ['frontend-accessibility', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-accessibility-review.json'],
+] as const;
+
 const dirs = [];
 afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
@@ -52,6 +60,77 @@ describe('skill checklist script (spawned source)', () => {
       readFileSync(join(repo, '.claude', '.api-security-review.json'), 'utf8'),
     );
     expect(state.items.length).toBeGreaterThan(0);
+  });
+
+  it.each(
+    REVIEW_ROOT_CASES,
+  )('%s consumes the exact review-mode roots injected by the gate', (skill, envName, stateName) => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-review-roots-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({ review: { backendRoots: [], frontendRoots: [] } }),
+    );
+    mkdirSync(join(repo, 'apps', 'web'), { recursive: true });
+    mkdirSync(join(repo, 'outside'), { recursive: true });
+    writeFileSync(
+      join(repo, 'apps', 'web', 'changed.tsx'),
+      'export const login = (password) => fetch("/api", { body: password });\n',
+    );
+    writeFileSync(join(repo, 'outside', 'ignored.tsx'), 'export const unrelated = true;\n');
+    git(['add', '.']);
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+    const r = spawnSync('node', [script, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, [envName]: JSON.stringify(['apps/web']) },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
+    expect(state.files ?? state.items).not.toHaveLength(0);
+    expect(JSON.stringify(state)).not.toContain('outside/ignored.tsx');
+  });
+
+  it('correctness unions scanRoots with injected domain roots outside the static topology', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-review-roots-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: ['src'],
+        review: { backendRoots: ['static-api'], frontendRoots: ['static-web'] },
+      }),
+    );
+    for (const dir of ['src', 'apps/web', 'static-api'])
+      mkdirSync(join(repo, dir), { recursive: true });
+    writeFileSync(join(repo, 'src', 'shared.ts'), 'export const shared = true;\n');
+    writeFileSync(join(repo, 'apps/web', 'changed.tsx'), 'export const changed = true;\n');
+    writeFileSync(join(repo, 'static-api', 'excluded.ts'), 'export const excluded = true;\n');
+    git(['add', '.']);
+    const script = fileURLToPath(
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+    );
+    const r = spawnSync('node', [script, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        DEVKIT_REVIEW_BACKEND_ROOTS: JSON.stringify(['apps/api']),
+        DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(['apps/web']),
+      },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual(['apps/web/changed.tsx', 'src/shared.ts']);
+    expect(JSON.stringify(state)).not.toContain('static-api/excluded.ts');
   });
 
   it('a recovery pass clears the stale failure trail (finalize cannot fail on history)', () => {

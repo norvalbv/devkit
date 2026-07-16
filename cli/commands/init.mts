@@ -32,6 +32,8 @@ import {
   COMPONENTS,
   defaultSelection,
   GUARD_IDS,
+  normalizeReviewProfile,
+  type ReviewProfile,
   type Selection,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
@@ -39,6 +41,7 @@ import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mts';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mts';
 import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mts';
+import { INIT_HELP } from '../lib/help/init-help.mts';
 import { installCommitMsgHook, removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
 import {
   buildFullHook,
@@ -65,6 +68,11 @@ import {
   syncHookScripts,
 } from '../lib/install/install-hooks.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
+import {
+  parseReviewFlags,
+  type ReviewFlagValues,
+  reviewPlanFromFlags,
+} from '../lib/install/review-profile.mts';
 import { installOverlay } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mts';
@@ -159,6 +167,7 @@ interface DevkitConfig {
   minDevkit?: string;
   configOverrides?: Record<string, unknown>;
   components?: RecordedComponents;
+  review?: Partial<ReviewProfile>;
 }
 
 // The consumer's package.json — only the maps init adds/removes entries in.
@@ -204,13 +213,14 @@ interface InitPlan {
   globalCommitGate?: boolean;
   devkitRef?: string;
   regenStructureBaselines?: boolean;
+  review?: Partial<ReviewProfile>;
 }
 
 // A component selection extended with the resolved structure-lint command — the shape the husky
 // block builders (buildFullHook / buildGuardBlock / installStandaloneHook) consume.
 type HookSelectionInput = Selection & { structureCmd?: string };
 
-interface InitFlags {
+interface InitFlags extends ReviewFlagValues {
   yes: boolean;
   dryRun: boolean;
   force: boolean;
@@ -247,6 +257,7 @@ function parseFlags(args: string[]): InitFlags {
     no: new Set(),
     guards: null,
     scanRoots: null,
+    ...parseReviewFlags(args),
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -304,6 +315,7 @@ function detectInstalled(cwd: string) {
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
   const installed = new Set<string>();
   const recorded = cfg?.components;
+  if (cfg?.review?.enabled) installed.add('devkit-review');
   if (recorded) {
     for (const id of [
       'biome',
@@ -965,9 +977,14 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
     console.log('  freeze baselines (grandfather current tree)');
     runFreezes(cwd, dryRun);
   }
-  // Opt-in: close the plain-`git commit` gap (husky reclaims core.hooksPath) with a machine-global
-  // husky init.sh shim. One file, guarded no-op outside overlaid repos, removed by `devkit clean --global`.
+  // Optional machine-global shim closes the plain-commit gap; `devkit clean --global` removes it.
   const globalCommitGate = Boolean(plan.globalCommitGate);
+  const prevConfig = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
+  const review = normalizeReviewProfile(
+    plan.review ?? prevConfig?.review,
+    selection.guards ?? [],
+    prevConfig !== null,
+  );
   if (globalCommitGate) {
     console.log(
       '  global pre-commit gate (opt-in — survives husky reclaim on a plain `git commit`)',
@@ -998,6 +1015,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
             fallow: fallowWired,
             agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
           },
+          review,
         },
         null,
         2,
@@ -1300,6 +1318,11 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     // source-mode hook instead of the `bunx guard-*` one.
     selfHost,
     components,
+    review: normalizeReviewProfile(
+      plan.review ?? prevConfig?.review,
+      components.guards,
+      prevConfig !== null,
+    ),
   };
   const configPath = join(cwd, '.devkit', 'config.json');
   if (dryRun) {
@@ -1337,34 +1360,7 @@ function structureAvailableFor(stack: string) {
 export const meta = {
   name: 'init',
   summary: 'Wire this repo onto devkit (interactive wizard; idempotent).',
-  help: `devkit init — wire this repo onto @norvalbv/devkit (interactive on a TTY, idempotent).
-
-Usage:
-  devkit init [options]
-
-  --stack <x>            electron | react-app | next | node-service | generic
-                         (default: auto-detect; structure preset ships for electron + react-app).
-  --yes                  Non-interactive: install all recommended defaults (no prompts).
-  --dry-run              Print every file action; write nothing.
-  --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
-                         own same-named skill/agent/hook collisions (default: preserve them).
-  --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
-                         --no-structure --no-guards --no-fallow.
-  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
-                         qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
-  --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
-  --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
-                         structure-RULE change). Package-mode structure stacks only.
-  --fallow               Also install the optional fallow code-health layer (off by default).
-  --search-code          Opt this repo in to the semantic search index (off by default).
-  --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
-                         bins; add nothing to package.json. Requires \`bun add -g\` devkit.
-  --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the
-                         repo's own hook, configs EXTEND the repo's. Requires global devkit.
-  --scan-root <a,b,…>    Override guard.config.json scanRoots up front (set BEFORE the freezes).
-  --remove-deselected    With --yes: remove an installed-but-now-deselected component (opt-in).
-
-See docs/glossary.md for package/standalone/overlay, gates, ratchets, baselines, scanRoot.`,
+  help: INIT_HELP,
 };
 
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
@@ -1380,11 +1376,9 @@ export default async function run(args: string[], cwd: string) {
   let selection: Selection;
   let remove: string[] = [];
   let mode = detectedMode;
+  let review: Partial<ReviewProfile> | undefined;
 
-  // --baselines-only: re-derive the structure + import-wall baselines and NOTHING else (no config
-  // emit, package.json, husky, freezes, skills/agents, .devkit/config.json). For the RARE legit
-  // regen — a structure-RULE change (the baseline is otherwise generate-once + shrink-only). Guarded
-  // to the package-mode structure stacks: overlay/standalone omit structure; a bare repo has no preset.
+  // --baselines-only re-derives structure/import-wall baselines only for package-mode presets.
   if (flags.baselinesOnly) {
     if (mode !== 'package') {
       console.error(
@@ -1424,13 +1418,17 @@ export default async function run(args: string[], cwd: string) {
       installed,
     });
     if (!result) return 0; // cancelled — nothing written
-    ({ mode, stack, remove } = result);
-    // The wizard builds selection incrementally (Partial): package/standalone set every field;
-    // overlay leaves the package-only fields for applyOverlayConstraints (line below) to fill. It's
-    // a complete Selection at every point it's read here — no missing key is accessed before then.
+    ({ mode, stack, remove, review } = result);
+    // The wizard returns a complete selection after overlay constraints fill package-only fields.
     selection = result.selection as Selection;
   } else {
     selection = selectionFromFlags(flags);
+    const reviewPlan = reviewPlanFromFlags(flags, selection);
+    if (reviewPlan.error) {
+      console.error(reviewPlan.error);
+      return 1;
+    }
+    review = reviewPlan.profile;
     // Non-interactive removal of deselected-present components only with --remove-deselected.
     if (flags.removeDeselected) {
       const installed = detectInstalled(cwd);
@@ -1468,6 +1466,7 @@ export default async function run(args: string[], cwd: string) {
     overlay: mode === 'overlay',
     selfHost: mode === 'self-host',
     globalCommitGate: flags.globalCommitGate,
+    review,
   });
   if (interactive && !selfHost) outro('Done — run `devkit doctor` to verify.');
   return 0;

@@ -26,6 +26,32 @@ export const RECOMMENDED_GUARD_IDS = [
  */
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
 
+export const DEFAULT_REVIEW_DECISIONS_DIR = 'docs/decisions';
+
+/** Local execution policy for `devkit review`; decision content stays in `decisionsDir`. */
+export interface ReviewProfile {
+  enabled: boolean;
+  guards: string[];
+  decisionsDir: string;
+}
+
+export function normalizeReviewProfile(
+  partial: Partial<ReviewProfile> | undefined,
+  installedGuards: string[],
+  enabledDefault = false,
+): ReviewProfile {
+  const installed = installedGuards.filter((g) => GUARD_IDS.includes(g));
+  const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
+  return {
+    enabled: partial?.enabled ?? enabledDefault,
+    guards: installed.filter((g) => requested.includes(g)),
+    decisionsDir:
+      typeof partial?.decisionsDir === 'string' && partial.decisionsDir.trim()
+        ? partial.decisionsDir.trim()
+        : DEFAULT_REVIEW_DECISIONS_DIR,
+  };
+}
+
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
  * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a

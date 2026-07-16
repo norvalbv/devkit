@@ -125,6 +125,33 @@ the selection in `.devkit/config.json` (so `doctor` knows what to check). Monore
 package-scoped block). Full flags, components, and removal: `devkit help init`. Verify the wiring
 anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
 
+### Local PR review profile
+
+`devkit init --review` opts the installation into `devkit review`. The behavior lives entirely in
+`.devkit/config.json`; architectural records remain ordinary Markdown in the configured directory:
+
+```json
+{
+  "review": {
+    "enabled": true,
+    "guards": ["size", "fanout", "dup", "clone", "decisions", "review"],
+    "decisionsDir": "docs/decisions"
+  }
+}
+```
+
+- `enabled` activates or disables the command for that installation.
+- `guards` is a positive allowlist drawn from installed `components.guards`. New gates do not enter
+  unattended reviews automatically. If omitted in a legacy config, it inherits `components.guards`.
+- `decisionsDir` tells the decisions gate where local decision Markdown lives; it does not store
+  decision records in the config file.
+
+Run `devkit review [--target <trusted-worktree>] [--base <ref>]`. It executes the selected gates in
+an ephemeral worktree without committing, pushing, calling GitHub, or changing the target checkout.
+Review-mode ESLint and Fallow runs establish an ephemeral baseline from the resolved merge-base and
+block only findings introduced by the final PR snapshot; stored consumer baselines are never changed.
+The caller (for example a Frink flow) owns translating findings into PR comments.
+
 ## Updating (consumers)
 
 One command reconciles a consumer fully — pin + devkitRef, emitted configs, skills/agents/hooks,

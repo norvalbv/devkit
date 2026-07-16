@@ -51,14 +51,14 @@ export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
 // covers it too.
 const FALLOW_FRAGMENT = `# devkit:fallow-advisory
 # fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
-# DEVKIT_SHIP_BASE_SHA (exported by devkit ship — see commit-with-gate-capture.sh) pins the audit's
-# comparison ref to the exact commit the ship worktree was cut from, instead of fallow's own
-# main-autodetect: a --base ship off a long-lived/stacked branch would otherwise misreport that
-# branch's own pre-existing findings vs main as "new" (DK-5). Unset on a plain \`git commit\` — fallow
-# falls back to its own default.
-FALLOW_BASE_ARGS=""
-[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true
+if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
+    __dk_review_baseline_gate fallow || true
+else
+    # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
+    FALLOW_BASE_ARGS=""
+    [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
+    command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true
+fi
 # /devkit:fallow-advisory`;
 
 // The hook-builder's view of the self-host selection (Selection + the two hook-only fields the

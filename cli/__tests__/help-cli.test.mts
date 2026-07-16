@@ -11,7 +11,7 @@ describe('devkit help surface', () => {
   it('`--help` lists every command (derived from meta)', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);
-    for (const name of ['init', 'doctor', 'ship', 'reconcile', 'guard-branch']) {
+    for (const name of ['init', 'doctor', 'ship', 'review', 'reconcile', 'guard-branch']) {
       expect(r.stdout).toContain(`devkit ${name}`);
     }
   });
@@ -21,6 +21,14 @@ describe('devkit help surface', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/devkit ship —/);
     expect(r.stdout).toMatch(/SHIP_DRY_RUN/);
+  });
+
+  it('`help review` documents the trusted target/base contract', () => {
+    const r = run(['help', 'review']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/devkit review —/);
+    expect(r.stdout).toMatch(/--target <path>/);
+    expect(r.stdout).toMatch(/--base <ref>/);
   });
 
   it('`<command> --help` works for every command generically', () => {

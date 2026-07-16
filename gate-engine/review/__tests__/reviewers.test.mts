@@ -4,6 +4,7 @@ import { resolveGuardConfig } from '../../config.mts';
 import {
   allowedToolsFor,
   cacheKey,
+  effectiveReviewConfig,
   escalatePrompt,
   parseConventionFindings,
   parseReviewVerdict,
@@ -133,6 +134,41 @@ describe('selectReviewers', () => {
       'correctness-reviewer', // domain 'all' still sees both files under scanRoot src
       'conventions-reviewer', // domain 'conventions' shares that same union
     ]);
+  });
+  it('review mode fills an empty domain from scanRoots so it never silently skips', () => {
+    const noFe = { ...cfg, review: { ...cfg.review, frontendRoots: [] } };
+    const effective = effectiveReviewConfig(noFe, {});
+    expect(effective.review.frontendRoots).toEqual(['src', 'server']);
+    expect(names(selectReviewers(['src/renderer/App.tsx'], effective))).toContain(
+      'frontend-security-reviewer',
+    );
+  });
+  it('review mode uses the repository-wide dot fallback when no roots exist at all', () => {
+    const noRoots = {
+      ...cfg,
+      scanRoots: [],
+      review: { ...cfg.review, backendRoots: [], frontendRoots: [] },
+    };
+    const effective = effectiveReviewConfig(noRoots, {});
+    expect(effective.review.backendRoots).toEqual(['.']);
+    expect(effective.review.frontendRoots).toEqual(['.']);
+    expect(names(selectReviewers(['top-level.ts'], effective))).toEqual([
+      'api-security-reviewer',
+      'backend-performance-reviewer',
+      'frontend-security-reviewer',
+      'frontend-performance-reviewer',
+      'correctness-reviewer',
+      'conventions-reviewer',
+    ]);
+  });
+  it('review-mode injected roots override config while malformed injection fails loudly', () => {
+    const effective = effectiveReviewConfig(cfg, {
+      DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(['apps/web']),
+    });
+    expect(effective.review.frontendRoots).toEqual(['apps/web']);
+    expect(() => effectiveReviewConfig(cfg, { DEVKIT_REVIEW_FRONTEND_ROOTS: '["", 3]' })).toThrow(
+      /DEVKIT_REVIEW_FRONTEND_ROOTS/,
+    );
   });
   it('commit-guard sees only SOURCE files under scanRoots (a staged JSON is not its business)', () => {
     const sel = selectReviewers(['src/config.json', 'src/main/a.ts'], cfg);
@@ -305,25 +341,39 @@ describe('verifyChecklist — the gate-side anti-hallucination contract', () => 
 
 describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
   const body = '---\nname: api-security-reviewer\nmodel: opus\n---\nCheck auth on every route.';
-  it('wraps the brief with the gate preamble, checklist mandate and pinned verdict format, frontmatter stripped', () => {
+  it('lets the brief own checklist enumeration while preserving mandatory verification and no-cleanup', () => {
     const p = wrapPrompt(body, REVIEWERS[0], ['src/main/a.ts']);
     expect(p).toContain('HEADLESS COMMIT GATE');
     expect(p).toContain('Check auth on every route.');
     expect(p).not.toContain('model: opus');
     expect(p).toContain('VERDICT: PASS | FAIL');
     expect(p).toContain('src/main/a.ts');
-    // the checklist workflow is mandated with the reviewer's own script + command names —
-    // but cleanup is FORBIDDEN (the gate must find the artifact to verify it)
-    expect(p).toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
-    expect(p).toContain('check-item');
-    expect(p).toContain('finalize');
+    expect(p).toContain('The reviewer brief owns checklist enumeration');
+    expect(p).not.toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(p).toContain('Do NOT run the `cleanup` step');
   });
-  it("commit-guard's wrapper mandates its per-file commands (init / check-file)", () => {
+  it("rewrites the brief's skill paths to the isolated review runtime", () => {
     const guard = REVIEWERS.find((r) => r.name === 'commit-guard');
-    const p = wrapPrompt('brief', guard, ['src/a.ts']);
-    expect(p).toContain('node .claude/skills/commit-guard/scripts/checklist.mjs init');
-    expect(p).toContain('check-file');
+    const p = wrapPrompt(
+      'Read .claude/skills/commit-guard/SKILL.md.',
+      guard,
+      ['src/a.ts'],
+      '/tmp/devkit-review-assets',
+    );
+    expect(p).toContain('/tmp/devkit-review-assets/skills/commit-guard/SKILL.md');
+    expect(p).not.toContain('.claude/skills/commit-guard/SKILL.md');
+  });
+  it('adds a contract reminder on retry without taking checklist ownership from the brief', () => {
+    const p = wrapPrompt(
+      body,
+      REVIEWERS[0],
+      ['src/main/a.ts'],
+      '/tmp/devkit-review-assets',
+      'checklist artifact missing',
+    );
+    expect(p).toContain('CHECKLIST-CONTRACT RETRY');
+    expect(p).toContain('prior attempt did not satisfy the brief-owned workflow');
+    expect(p).not.toContain('check-item <name>');
   });
   it('escalation embeds the first-pass transcript and keeps the wrapped brief', () => {
     const wrapped = wrapPrompt(body, REVIEWERS[0], ['src/main/a.ts']);
@@ -360,6 +410,9 @@ describe('cacheKey', () => {
     expect(cacheKey('commit-guard', 'diff-a')).not.toBe(cacheKey('commit-guard', 'diff-b'));
     expect(cacheKey('commit-guard', 'diff-a')).not.toBe(
       cacheKey('api-security-reviewer', 'diff-a'),
+    );
+    expect(cacheKey('commit-guard', 'diff-a', 'brief-v1')).not.toBe(
+      cacheKey('commit-guard', 'diff-a', 'brief-v2'),
     );
   });
 });

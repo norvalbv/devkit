@@ -13,6 +13,9 @@ The set of frontend code paths this agent reviews is **consumer-defined**, not a
 Read `review.frontendRoots` from `guard.config.json` at the repo root — the directories holding
 client/UI code. Only files under these roots are in scope. When unset/empty, this repo has no
 configured frontend topology: there is nothing for this agent to review, so exit early.
+During `devkit review`, orchestration may inject `DEVKIT_REVIEW_FRONTEND_ROOTS` for this target.
+The checklist script consumes that effective topology; use the staged files named by the invoking
+agent rather than treating an empty repository config as an instruction to skip.
 </architecture_context>
 
 <trigger_conditions>
@@ -131,7 +134,7 @@ For each item the checklist enumerated:
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
-node $SCRIPT cleanup
+if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then node $SCRIPT cleanup; fi
 ```
 `finalize` verifies every enumerated item was resolved — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work.
 

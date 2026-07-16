@@ -87,6 +87,8 @@ function commitRunContext(): { id: string; repo: string; branch: string } | null
 export function runId(): string | null {
   const ship = process.env.DEVKIT_SHIP_ID;
   if (ship) return ship;
+  const review = process.env.DEVKIT_REVIEW_ID;
+  if (review) return review;
   if (!telemetryEnabled()) return null;
   return commitRunContext()?.id ?? null;
 }
@@ -102,6 +104,15 @@ export function runEnvelope(): Record<string, unknown> {
   const source = originatingAgent();
   const ship = process.env.DEVKIT_SHIP_ID;
   if (ship) return { ship_id: ship, source };
+  const review = process.env.DEVKIT_REVIEW_ID;
+  if (review)
+    return {
+      ship_id: review,
+      run_mode: 'review',
+      repo: process.env.DEVKIT_REVIEW_REPO ?? '',
+      branch: process.env.DEVKIT_REVIEW_BRANCH ?? '',
+      source,
+    };
   const ctx = telemetryEnabled() ? commitRunContext() : null;
   if (!ctx) return {}; // capture off (or not a git repo) — emit is a no-op anyway (no sink + no id)
   return { ship_id: ctx.id, run_mode: 'commit', repo: ctx.repo, branch: ctx.branch, source };

@@ -10,6 +10,61 @@ const { tmpRepo, devkit, cleanup } = tmpRepos('init-');
 afterEach(cleanup);
 
 describe('init --yes (all recommended)', () => {
+  it('persists an explicit review profile from CLI flags', () => {
+    const root = tmpRepo();
+    const r = devkit(
+      root,
+      'init',
+      '--yes',
+      '--guards',
+      'size,decisions,review',
+      '--review',
+      '--review-guards',
+      'decisions,review',
+      '--review-decisions-dir',
+      'architecture/decisions',
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: ['decisions', 'review'],
+      decisionsDir: 'architecture/decisions',
+    });
+  });
+
+  it('rejects typoed and uninstalled review guard selections', () => {
+    const typo = tmpRepo();
+    const typoResult = devkit(typo, 'init', '--yes', '--review', '--review-guards', 'decision');
+    expect(typoResult.status).toBe(1);
+    expect(typoResult.stderr).toMatch(/invalid --review-guards.*unknown: decision/);
+
+    const uninstalled = tmpRepo();
+    const uninstalledResult = devkit(
+      uninstalled,
+      'init',
+      '--yes',
+      '--review',
+      '--review-guards',
+      'review',
+    );
+    expect(uninstalledResult.status).toBe(1);
+    expect(uninstalledResult.stderr).toMatch(/not selected by --guards: review/);
+
+    const noHook = tmpRepo();
+    const noHookResult = devkit(
+      noHook,
+      'init',
+      '--yes',
+      '--no-husky',
+      '--review',
+      '--review-guards',
+      'size',
+    );
+    expect(noHookResult.status).toBe(1);
+    expect(noHookResult.stderr).toMatch(/--review requires the husky pre-commit component/);
+  });
+
   it('emits the full generic config set + husky hook + .devkit/config.json', () => {
     const root = tmpRepo();
     const r = devkit(root, 'init', '--stack', 'generic', '--yes');

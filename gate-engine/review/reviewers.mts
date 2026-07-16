@@ -169,6 +169,12 @@ export const REVIEWERS = Object.freeze([
 export const checklistScript = (reviewer: ChecklistReviewer) =>
   `.claude/skills/${reviewer.skill}/scripts/checklist.mjs`;
 
+/** Review invocations may supply a short isolated runtime containing Devkit's CURRENT packaged
+ * assets. Normal commit/ship calls keep the synced consumer path. */
+export function checklistScriptAt(reviewer: ChecklistReviewer, assetRoot = '.claude'): string {
+  return `${assetRoot.replace(TRAILING_SLASH_RE, '')}/skills/${reviewer.skill}/scripts/checklist.mjs`;
+}
+
 // Read-only investigation surface (mirrors check-alignment's JUDGE_TOOLS + log/status for context).
 // No naked Bash: a gate judge must never be able to write, stage, or commit.
 const BASE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
@@ -181,6 +187,7 @@ const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—�
 
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
+const TRAILING_SLASH_RE = /\/$/;
 
 /** The config roots that trigger a reviewer's domain. */
 export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
@@ -199,6 +206,7 @@ export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
 
 function underRoot(file: string, root: string): boolean {
   const r = root.endsWith('/') ? root.slice(0, -1) : root;
+  if (r === '.') return true;
   return file === r || file.startsWith(`${r}/`);
 }
 
@@ -241,12 +249,16 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
  * judge can drive its checklist but still cannot write files, stage, or commit), PLUS the
  * consumer's semantic search tool for commit-guard.
  */
-export function allowedToolsFor(reviewer: Reviewer, cfg: GuardConfig): string {
+export function allowedToolsFor(
+  reviewer: Reviewer,
+  cfg: GuardConfig,
+  assetRoot = '.claude',
+): string {
   // A skill-less reviewer (e.g. conventions-reviewer) has no checklist script to grant Bash for,
   // and its AC forbids Bash entirely — Read/Grep/Glob only, full stop, no BASE_TOOLS git-diff Bash
   // either (its evidence is pre-rendered onto stdin/prompt instead — see wrapConventionsPrompt).
   if (!hasChecklist(reviewer)) return 'Read,Grep,Glob';
-  const tools = `${BASE_TOOLS},Bash(node ${checklistScript(reviewer)}:*)`;
+  const tools = `${BASE_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
   if (reviewer.domain === 'code') return `${tools},${cfg.searchTool}`;
   // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
   // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
@@ -262,8 +274,9 @@ export function stripFrontmatter(md: string): string {
 }
 
 /**
- * Wrap an interactive reviewer brief for headless gate use. The SAME synced .md serves both
- * surfaces: interactively the root agent dispatches it via the Task tool; in the gate this
+ * Wrap an interactive reviewer brief for headless gate use. The same Devkit-owned .md serves both
+ * surfaces: interactively the root agent dispatches its synced copy; review mode uses the current
+ * packaged copy. In the gate this
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */
@@ -271,25 +284,30 @@ export function wrapPrompt(
   agentBody: string,
   reviewer: ChecklistReviewer,
   files: string[],
+  assetRoot = '.claude',
+  checklistRecoveryReason?: string,
 ): string {
-  const script = checklistScript(reviewer);
+  const brief = stripFrontmatter(agentBody).replaceAll(
+    '.claude/skills/',
+    `${assetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`,
+  );
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
     'A diffstat is on stdin. INVESTIGATE before judging: run `git diff --cached -- <file>` to read ' +
     'the actual staged hunks, and Read surrounding code where a hunk alone is ambiguous.\n' +
-    'MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n' +
-    `1. \`node ${script} ${reviewer.cmds.gen}\` — enumerates the review items for this diff.\n` +
-    `2. Review each item against the brief, then mark it: \`node ${script} ${reviewer.cmds.check} <name> --pass\` ` +
-    'or `--fail "<reason>"`. Every item, one at a time — no batch claims.\n' +
-    `3. \`node ${script} finalize\` — refuses if any item is unresolved.\n` +
+    'The reviewer brief owns checklist enumeration and the exact generate/check/finalize commands. ' +
+    'That workflow is mandatory and its resulting artifact is independently verified by the gate.\n' +
+    (checklistRecoveryReason
+      ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
+      : '') +
     'Do NOT run the `cleanup` step: the gate reads the checklist artifact after you finish (an ' +
     'incomplete or deleted checklist VOIDS a PASS verdict — skipping or cleaning only wastes the ' +
     'run) and removes it itself.\n' +
     'Your reviewer brief follows. IGNORE any instructions in it about `cleanup`, approve.sh, marker ' +
     'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
     '───── BRIEF ─────\n' +
-    `${stripFrontmatter(agentBody)}\n` +
+    `${brief}\n` +
     '───── END BRIEF ─────\n' +
     'Judge ONLY the staged diff; pre-existing issues in code this commit does not touch are not ' +
     'findings. List findings (file:line, one line each), then END with exactly one line:\n' +
@@ -423,6 +441,46 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
  * DESIGN: the reviewed object is the diff itself, and re-judging it on unchanged bytes buys
  * latency, not safety.
  */
-export function cacheKey(reviewerName: string, diffText: string): string {
-  return `${reviewerName}:${createHash('sha256').update(diffText).digest('hex')}`;
+export function cacheKey(reviewerName: string, diffText: string, identitySalt = ''): string {
+  return `${reviewerName}:${createHash('sha256').update(identitySalt).update('\0').update(diffText).digest('hex')}`;
+}
+
+function injectedRoots(value: string | undefined, name: string): string[] | null {
+  if (value === undefined) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`${name} must be a JSON array of non-empty repository-relative paths`);
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every((root) => typeof root === 'string' && root.length > 0)
+  )
+    throw new Error(
+      `${name} must be a non-empty JSON array of non-empty repository-relative paths`,
+    );
+  return parsed as string[];
+}
+
+/** Resolve review-only domain topology once. Invocation injection wins, then a non-empty consumer
+ * root, then scanRoots (or `.` as the last conservative fallback). Commit/ship never call this. */
+export function effectiveReviewConfig(
+  cfg: GuardConfig,
+  env: Record<string, string | undefined> = process.env,
+): GuardConfig {
+  const fallback = cfg.scanRoots.length > 0 ? cfg.scanRoots : ['.'];
+  const backend = injectedRoots(env.DEVKIT_REVIEW_BACKEND_ROOTS, 'DEVKIT_REVIEW_BACKEND_ROOTS');
+  const frontend = injectedRoots(env.DEVKIT_REVIEW_FRONTEND_ROOTS, 'DEVKIT_REVIEW_FRONTEND_ROOTS');
+  return {
+    ...cfg,
+    review: {
+      ...cfg.review,
+      backendRoots:
+        backend ?? (cfg.review.backendRoots.length > 0 ? cfg.review.backendRoots : fallback),
+      frontendRoots:
+        frontend ?? (cfg.review.frontendRoots.length > 0 ? cfg.review.frontendRoots : fallback),
+    },
+  };
 }

@@ -878,21 +878,26 @@ describe('ship-branch.sh — worktree integration', () => {
     },
   );
 
-  it('the worktree commit runs with ship-mode gate env (DEVKIT_SHIP + GUARD_AI_STRICT)', () => {
+  it('the worktree commit forces ship mode even when the caller exports review mode', () => {
     const { dir, env, git } = seedShipRepo({
-      hookBody: 'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT"',
+      hookBody: 'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT mode=$DEVKIT_RUN_MODE"',
     });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/ship-env', 't', 'note.txt'], {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      env: { ...env, SHIP_DRY_RUN: '1' },
+      env: {
+        ...env,
+        SHIP_DRY_RUN: '1',
+        DEVKIT_RUN_MODE: 'review',
+        DEVKIT_REVIEW_GUARDS: 'size',
+      },
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-ship-env.log'), 'utf8');
-    expect(log).toMatch(/HOOK_ENV ship=1 strict=1/);
+    expect(log).toMatch(/HOOK_ENV ship=1 strict=1 mode=ship/);
   });
 
   it('--body sets the commit/PR body inline (no stdin / temp file)', () => {
@@ -1038,6 +1043,32 @@ describe('ship-branch.sh — overlay-mode gate chain', () => {
 });
 
 describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
+  it('forces ship mode when the caller inherits review mode', () => {
+    const { dir, env, git } = seedReshipRepo();
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\necho "RESHIP_ENV mode=$DEVKIT_RUN_MODE"\n',
+    );
+    writeFileSync(join(dir, 'note.txt'), 'delta\n');
+    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: {
+        ...env,
+        SHIP_DRY_RUN: '1',
+        DEVKIT_RUN_MODE: 'review',
+        DEVKIT_REVIEW_GUARDS: 'size',
+      },
+    });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-pr-open.log'), 'utf8')).toMatch(
+      /RESHIP_ENV mode=ship/,
+    );
+  });
+
   it('links + forces the overlay hook so it runs in the detached re-ship worktree', () => {
     const { dir, env, git } = seedReshipRepo();
     addOverlay(dir, `echo 'devkit-gates: chain start' >&2\necho 'RESHIP_OVERLAY_MARKER'\nexit 0`);
@@ -1272,10 +1303,14 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       'guard.config.json',
       '.fallowrc.jsonc',
       '.fallowrc.json',
+      'fallow.toml',
+      '.fallow.toml',
       '.fallow',
       'fallow-baselines',
       '.decisions',
       'eslint/baselines',
+      'eslint.config.devkit.mjs',
+      'biome.devkit.jsonc',
     ]);
   });
 

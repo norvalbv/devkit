@@ -10,6 +10,7 @@ node_modules
 .devkit/review-cache.json
 .devkit/review-progress-*.json
 .devkit/last-ship-gates-*.log
+.devkit/review-runs/
 .devkit/reconcile-manifest.json
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/

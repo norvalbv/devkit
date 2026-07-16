@@ -16,6 +16,9 @@ Scope is **consumer-defined**: the union of `scanRoots`, `review.backendRoots` a
 domain-sliceable — a writer in a backend root and its reader in a frontend root are ONE finding —
 so unlike the domain reviewers you review source files across ALL declared roots together.
 `review.trustBoundaries` (optional prose) describes which side is which.
+During `devkit review`, the gate may inject effective backend/frontend roots for the target. The
+checklist script consumes them; use the staged files named by the gate prompt as the authoritative
+review surface instead of assuming the checkout's static domain roots are complete.
 </architecture_context>
 
 <trigger_conditions>
@@ -137,7 +140,7 @@ For each item: Grep/Read the staged files and their counterparties, then mark it
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
-node $SCRIPT cleanup
+if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then node $SCRIPT cleanup; fi
 ```
 `finalize` refuses an incomplete or failed checklist, so coverage can't be claimed without
 doing the work.

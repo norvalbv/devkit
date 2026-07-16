@@ -50,6 +50,20 @@ const log = console.log;
 const isStringArray = (v) =>
   Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
 
+function injectedReviewRoots(name) {
+  const raw = process.env[name];
+  if (raw === undefined) return null;
+  let roots;
+  try {
+    roots = JSON.parse(raw);
+  } catch {
+    throw new Error(`${name} must be a JSON string array`);
+  }
+  if (!isStringArray(roots) || roots.length === 0)
+    throw new Error(`${name} must be a non-empty JSON string array`);
+  return roots;
+}
+
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
 // ANY repo's layout. No/unreadable config or no declared roots → all staged files (the gate
 // never silently no-ops). A PRESENT but invalid value warns loudly and is ignored (the other
@@ -63,11 +77,13 @@ function unionRoots() {
   }
   if (!c || typeof c !== 'object') return ['.'];
   const review = typeof c.review === 'object' && c.review !== null ? c.review : {};
+  const backend = injectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS') ?? review.backendRoots;
+  const frontend = injectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS') ?? review.frontendRoots;
   const roots = new Set();
   for (const [label, value] of [
     ['scanRoots', c.scanRoots],
-    ['review.backendRoots', review.backendRoots],
-    ['review.frontendRoots', review.frontendRoots],
+    ['review.backendRoots', backend],
+    ['review.frontendRoots', frontend],
   ]) {
     if (value === undefined) continue;
     if (!isStringArray(value)) {

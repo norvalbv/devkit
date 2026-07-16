@@ -39,6 +39,7 @@ function setAnswers(surface) {
     'Select components to install': ['skills', 'agents'],
     [SURFACE_Q]: surface,
     'Select gate guards': [],
+    'Enable devkit review?': false,
     'Apply?': true,
   });
 }
@@ -70,5 +71,22 @@ describe('wizard agent-surface selection', () => {
     await applyInit(root, { stack: 'generic', selection: r.selection, devkitRef: 'v0' });
     expect(existsSync(join(root, '.claude'))).toBe(true);
     expect(existsSync(join(root, '.cursor'))).toBe(false);
+  });
+
+  it('records an explicit local review guard profile when enabled', async () => {
+    setAnswers('claude');
+    Object.assign(answers, {
+      'Select gate guards': ['size', 'decisions'],
+      'Enable devkit review?': true,
+      'Select guards for devkit review': ['decisions'],
+    });
+
+    const r = await runWizard(WIZ_OPTS);
+
+    expect(r.review).toEqual({
+      enabled: true,
+      guards: ['decisions'],
+      decisionsDir: 'docs/decisions',
+    });
   });
 });

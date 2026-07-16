@@ -129,6 +129,12 @@ export function parseOpts(argv: string[]): ParsedOpts {
 // components.guards (written by `devkit init`). A missing/unreadable config runs the WHOLE set —
 // never silently skip a gate the hook expected to run.
 export function selectedIds(cwd: string): string[] {
+  if (process.env.DEVKIT_RUN_MODE === 'review' && process.env.DEVKIT_REVIEW_GUARDS !== undefined) {
+    const reviewGuards = process.env.DEVKIT_REVIEW_GUARDS.split(',')
+      .map((guard) => guard.trim())
+      .filter(Boolean);
+    return ALL_IDS.filter((id) => reviewGuards.includes(id));
+  }
   const cfgPath = path.join(cwd, '.devkit', 'config.json');
   if (!existsSync(cfgPath)) return ALL_IDS;
   try {
@@ -138,6 +144,12 @@ export function selectedIds(cwd: string): string[] {
   } catch {
     return ALL_IDS;
   }
+}
+
+export function prefixCacheScope(scope?: string): string | undefined {
+  return process.env.DEVKIT_RUN_MODE === 'review'
+    ? `${scope ?? 'devkit-guards'}:review:${process.env.DEVKIT_REVIEW_GUARDS ?? ''}`
+    : scope;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
@@ -179,9 +191,12 @@ function commandGate(label: string, cmd?: string): Gate {
  */
 export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts = {}) {
   const { exec = execFileSync } = opts;
+  // A review may intentionally run a strict subset. Salt the prefix scope so that subset can never
+  // authorize a later full ship/commit against the same staged tree.
+  const cacheScope = prefixCacheScope(opts.scope);
   // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
   // every gate. checkPrefix returns true = skip, false = run.
-  const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+  const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
   const fails = [];
   if (!skip) {
     // `--only`, when provided, must name known guard ids. A typo (`--only siz,fanout`) or an empty
@@ -237,7 +252,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   }
   // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
   // next time (ship only — recordPrefix is a no-op otherwise).
-  if (!skip) recordPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+  if (!skip) recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
   return 0;
 }
 
