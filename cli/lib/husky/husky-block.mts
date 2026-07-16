@@ -285,7 +285,11 @@ fi`;
 // chaining the gate inline here is the only way the audit runs. `fallow audit` exits non-zero on
 // NEW issues (pre-existing debt is grandfathered by the saved fallow-baselines/).
 const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — fail-open; skipped if fallow isn't installed.
-command -v fallow >/dev/null 2>&1 && { fallow audit || exit 1; }`;
+# DEVKIT_SHIP_BASE_SHA (set by devkit ship) narrows the audit to the exact ship base rather than
+# fallow's own main-autodetect — see self-host.mts's FALLOW_FRAGMENT for the full rationale (DK-5).
+FALLOW_BASE_ARGS=""
+[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
+command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1; }`;
 
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a

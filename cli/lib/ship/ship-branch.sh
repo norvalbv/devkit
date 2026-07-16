@@ -265,6 +265,10 @@ link_untracked_gate_configs "$WT" "$ROOT"
 # Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
 # agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+# The commit the worktree was cut from — lets in-chain gates (fallow) diff against IT, not their own
+# main-autodetect. Unconditional (not just under --base): even the default case is more precise than
+# a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
+export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
