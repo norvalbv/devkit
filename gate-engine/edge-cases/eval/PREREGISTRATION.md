@@ -211,3 +211,18 @@ judge; judge skill is not involved. Result recorded in §10 below and in
   in `results.baseline.json.hashes`.
 - Owner amendments before first relabel/judged run: gemini leg opt-in (see §9), recorded
   2026-07-13.
+
+## 11. Outcome (stamped after the run — 2026-07-16)
+
+- Noise audit: opus blind relabel + owner adjudication → decision-stratum label error 1/38
+  (ε = Beta(2,38)); global stratum 0/22. Raw verdict-AC1 gate "failed" from blind-protocol
+  information poverty (resolved-safe findings need the hidden session context), not label error —
+  owner-inspected per the registered miss path.
+- Ceiling C = 0.512 (not matcher-limited) → T = 0.35 (floor binds).
+- Sweep: 12 configs × 135 rows × K=3 = 1,620 transcripts, 0 outage-poisoned (a mid-run usage-limit
+  window wrote 1,267 judge-unavailable cells; purged, and the runner patched so outages no longer
+  persist as transcripts — bench.mts "outage is not data" guard).
+- **Verdict: NO CONFIG SHIPS** (every config fails ≥1 gate; robust under the full disputed-label
+  sensitivity bracket). Provenance (E1) = null. Best recall 0.315 < T; only guard-passer recalls
+  0.214. Details in README "Results" + `results.baseline.json` + `raw/bench/analysis.json`.
+- Two corpus errata deferred to the next regen (README).

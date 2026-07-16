@@ -293,7 +293,12 @@ const judgeCell = async (config, row, k) => {
       data = attempt === 0 ? null : { findings: null, parseFailed: true, raw };
     }
   }
-  data ??= { findings: null, parseFailed: true, judgeUnavailable: true };
+  // A judge OUTAGE (quota/offline — execJudgeAsync returned null twice) is NOT data: persisting
+  // it would make the resume path skip the cell forever and score it as a zero-finding run
+  // (the 2026-07-13 usage-limit window wrote 1,267 such cells before this guard). Only real
+  // replies — parseable or not — are transcripts; an outage cell stays absent and the next
+  // `--all` run retries it.
+  if (!data) return { findings: null, parseFailed: true, judgeUnavailable: true };
   writeTranscript(config.id, row.id, k, data);
   return data;
 };
