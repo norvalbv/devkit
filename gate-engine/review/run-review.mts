@@ -68,6 +68,11 @@ interface CascadeResult {
   reason: string;
   escalated: boolean;
   transcript?: string;
+  /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
+   * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
+   * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
+   * usage dashboard chasing a model downgrade that never happened. */
+  model?: string;
 }
 
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
@@ -391,6 +396,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'judge outage',
       escalated: false,
+      model: passModel,
     };
   const firstVerdict = parseReviewVerdict(first);
   if (firstVerdict.verdict === 'PASS')
@@ -401,6 +407,7 @@ async function cascadeVerdict(
       status: 'pass',
       reason: firstVerdict.reason,
       escalated: false,
+      model: passModel,
       transcript: first,
     };
   if (firstVerdict.verdict === null)
@@ -409,6 +416,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'no VERDICT line',
       escalated: false,
+      model: passModel,
       transcript: first,
     };
   // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
@@ -418,6 +426,7 @@ async function cascadeVerdict(
       status: 'fail',
       reason: firstVerdict.reason,
       escalated: false,
+      model: passModel,
       transcript: first,
     };
   const second = await exec({
@@ -433,6 +442,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: 'escalation outage',
       escalated: true,
+      model: passModel,
       transcript: first, // the first-pass FAIL evidence survives even when opus was dark
     };
   const finalVerdict = parseReviewVerdict(second);
@@ -442,6 +452,7 @@ async function cascadeVerdict(
       status: 'fail',
       reason: finalVerdict.reason,
       escalated: true,
+      model: passModel,
       transcript: second,
     };
   if (finalVerdict.verdict === 'PASS')
@@ -450,6 +461,7 @@ async function cascadeVerdict(
       status: 'pass',
       reason: finalVerdict.reason,
       escalated: true,
+      model: passModel,
       transcript: second,
     };
   return {
@@ -457,6 +469,7 @@ async function cascadeVerdict(
     status: 'inconclusive',
     reason: 'no VERDICT line',
     escalated: true,
+    model: passModel,
     transcript: second,
   };
 }
@@ -540,7 +553,9 @@ export async function runReviewGate(
       )
       .then((res) => {
         if (res.status === 'pass')
-          savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
+          // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
+          // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
+          savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: res.model ?? firstModel } });
         if (progressFile) {
           completed.push(res.name);
           writeProgress(progressFile, { running, completed });
@@ -559,7 +574,9 @@ export async function runReviewGate(
           reviewer: res.name,
           status: res.status,
           escalated: res.escalated,
-          model: firstModel,
+          // First-pass model that actually ran (pin-aware); firstModel only when no judge ran at
+          // all (missing brief / engine error), keeping the field always present for consumers.
+          model: res.model ?? firstModel,
           reason: res.reason,
           secs,
           ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),

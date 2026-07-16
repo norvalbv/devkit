@@ -197,6 +197,32 @@ describe('runReviewGate — cascade + exit contract', () => {
     }
   });
 
+  it('telemetry + cache record the model that actually judged — a pin is never mislabeled as the cascade default', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-model-label';
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    const byName = Object.fromEntries(
+      readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type === 'review_result')
+        .map((e) => [e.reviewer, e]),
+    );
+    // correctness is Reviewer.model-pinned to sonnet — before this fix its events carried the
+    // cascade default ('haiku'), sending dashboard readers chasing a downgrade that never happened.
+    expect(byName['correctness-reviewer'].model).toBe('sonnet');
+    expect(byName['conventions-reviewer'].model).toBe('haiku'); // pinned haiku — truthful by design, not by accident
+    expect(byName['api-security-reviewer'].model).toBe('haiku'); // unpinned → cascade default, unchanged
+    // The verdict cache records the same truth (it previously stored firstModel for every reviewer).
+    const cache = loadCache(repo);
+    const corrKey = Object.keys(cache).find((k) => k.includes('correctness'));
+    expect(corrKey).toBeTruthy();
+    expect(cache[corrKey].model).toBe('sonnet');
+  });
+
   it('identical diff re-run hits the cache — zero judge spawns', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passWithArtifact(repo) });
