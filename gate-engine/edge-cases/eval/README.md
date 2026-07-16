@@ -264,10 +264,10 @@ corpus is untouched for a verdict-irrelevant delta the sensitivity bracket alrea
 - `cc-frink-20260616-60a58840#4` — `wasLiveBug: unknown → true`, tier `test-added-green →
   f2p-in-session`: the frozen bundle shows the concurrency-guard test failing at 11:32:46 then
   passing at 11:35:03 (a real f2p receipt the original label missed as a same-turn green).
-- `cc-devkit-20260703-f8944646#10` — `verdict: worth-surfacing → noise`: "SHIP_COMMIT_TIMEOUT=0
-  is not a meaningful boundary" is a test-scope triage note, not an edge-case assertion
-  (both triage passes + owner agree). Fold both via `raw/audit-overlay.jsonl` + `finalize` on the
-  next corpus cut (tracked as an sc-1118 follow-up).
+- `cc-devkit-20260703-f8944646#10` — `verdict: worth-surfacing → noise`: the finding is a
+  test-scope triage note (a not-worth-testing boundary), not an edge-case assertion (both triage
+  passes + owner agree). Fold both via `raw/audit-overlay.jsonl` + `finalize` on the next corpus
+  cut (tracked as an sc-1118 follow-up).
 
 ### Research notes (sc-1119 Phase 0 — provenance/channel design inputs)
 
