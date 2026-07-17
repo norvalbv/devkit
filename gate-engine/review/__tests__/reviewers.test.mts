@@ -106,6 +106,16 @@ describe('selectReviewers', () => {
   it('docs-only staged → nothing runs (neither docs/ nor CLAUDE.md sit under a declared root)', () => {
     expect(selectReviewers(['docs/readme.md', 'CLAUDE.md'], cfg)).toEqual([]);
   });
+  it('prose-only staged UNDER a backend root → domain pair skips (their checklist scripts skip prose; selecting would strand the judge inconclusive)', () => {
+    const picked = names(selectReviewers(['src/main/README.md'], cfg));
+    expect(picked).not.toContain('api-security-reviewer');
+    expect(picked).not.toContain('backend-performance-reviewer');
+  });
+  it('prose riding along with source under a backend root → reviewer selected, prose dropped from its file list', () => {
+    const sel = selectReviewers(['src/main/a.ts', 'src/main/README.md'], cfg);
+    const api = sel.find((s) => s.reviewer.name === 'api-security-reviewer');
+    expect(api?.files).toEqual(['src/main/a.ts']);
+  });
   it('a totally UNCONFIGURED consumer (no guard.config.json — pure resolveGuardConfig defaults) still fires conventions-reviewer for the default src/ root, with zero custom config', () => {
     const defaults = resolveGuardConfig('/nonexistent-defaults-only');
     expect(names(selectReviewers(['src/a.ts'], defaults))).toContain('conventions-reviewer');
