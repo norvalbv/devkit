@@ -25,9 +25,11 @@
  *     confuse a cheap model via distractors (arXiv 2412.10079) — but FOCUSING it to error-handling
  *     hunks (focusDiff, the decisions-detect pattern) removes them. So the default feeds the FOCUSED
  *     diff, the same "evaluate the live diff" contract the decisions/reviewer judges use. On the eval
- *     (104 real-derived cases) haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; nondeterministic)
- *     vs message F1 0.56, and it beats sonnet on the full diff (0.88) and matches sonnet-focused (0.92)
- *     — context + focus dominate model, and cheap wins.
+ *     (127 cases: 104 real-derived, F1 ~0.89-0.91 across runs, + a deliberately-hard 23-row authored
+ *     elimination tier) haiku+focused-diff = F1 ~0.87 overall vs message F1 0.56, and focused beats
+ *     the full diff (0.83) and sonnet-full (0.88) — context + focus dominate model, and cheap wins.
+ *     The diff directive also self-clears a fix that ELIMINATES the silent path (measured on the
+ *     elimination tier: 15/23 -> 19/23 with the clause, no real-slice recall loss under K=3).
  *   - few-shot >> zero-shot, chain-of-thought does not help commit classification (arXiv 2605.02033).
  *   - self-consistency (sample N, majority-vote) reliably lifts a model; reasoning tiers give no
  *     advantage and are slow (arXiv 2510.22389) — so prefer *_SENTRY_SAMPLES over a reasoning tier.
@@ -55,7 +57,8 @@
  *
  * GOVERNING RULE (devkit "ship the generator, never the data"): every runtime path resolves against
  * the CONSUMER cwd, never __dirname. The WATCHLIST + the BASELINE stay the consumer's data (born in
- * their repo, never shipped). The eval `cases.jsonl` DOES ship — 103 real-derived cases — but it is a
+ * their repo, never shipped). The eval `cases.jsonl` DOES ship — 127 cases (104 real-derived + 23
+ * authored elimination-tier) — but it is a
  * dev-only SEED the gate never reads at runtime; a consumer copies + grows it with their own commits.
  */
 
@@ -225,7 +228,12 @@ export function buildContext(
       'Sentry capture — `Sentry.captureException`/`captureMessage` or a project wrapper such as ' +
       '`captureMainMessage` — as an EXECUTABLE call for the error the change handles, the surface is ' +
       'instrumented: reply SKIP. A capture that appears only in a COMMENT, a string literal, or test ' +
-      'code does NOT count. Reply MONITOR when a swallowed error-class is introduced or touched and the ' +
+      'code does NOT count. Likewise reply SKIP when the diff ELIMINATES the silent path itself: the ' +
+      'failure now propagates (a swallow deleted, a throw/reject added) and so auto-captures, or pure ' +
+      'logic/state handling prevents or surfaces the bad state — AND no swallowed handling remains or ' +
+      'is added anywhere in this diff. A removal is NOT elimination if the failure stays silent: the ' +
+      'caller still swallows it, the swallow merely moved or narrowed, or a crash became a silent ' +
+      'no-op. Reply MONITOR when a swallowed error-class is introduced or touched and the ' +
       `diff adds NO real capture for it:\n${evidence}`
     );
   }
@@ -425,6 +433,15 @@ function applyGateResult(result: SentryVerdict | null, message: string, hard: bo
   return code;
 }
 
+/** Hard mode may only BLOCK on diff evidence. With an empty staged diff (amend with nothing
+ * restaged, --allow-empty), the diff tier silently degrades to message-only judging — the exact
+ * config whose precision the eval REJECTED for blocking (a "fix silent X" subject reads MONITOR
+ * with no diff to self-clear against). Downgrade to warn + watchlist; never exit 1 on it.
+ * An explicitly configured message/names tier keeps its hard block — that is the owner's choice. */
+export function effectiveHard(hardEnv: boolean, tier: string, diff: string): boolean {
+  return hardEnv && (tier !== 'diff' || diff.trim() !== '');
+}
+
 /** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
 export function skipReason(message: string): string | null {
   if (envVar('NO_SENTRY_JUDGE')) return 'sentry-judge: skipped (GUARD_NO_SENTRY_JUDGE)';
@@ -450,7 +467,8 @@ export function run(gate: boolean): void {
       console.log(reportLine(result));
       process.exit(0);
     }
-    process.exit(applyGateResult(result, message, Boolean(envVar('SENTRY_HARD'))));
+    const hard = effectiveHard(Boolean(envVar('SENTRY_HARD')), CONTEXT_TIER, diff);
+    process.exit(applyGateResult(result, message, hard));
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
     console.error(`sentry-gate: could not run — ${detail}`);

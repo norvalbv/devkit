@@ -237,6 +237,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     mkdirSync(bin, { recursive: true });
     writeFileSync(
       join(bin, 'bunx'),
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional shell ${VAR:-default} expansion in the stubbed bunx script
       '#!/bin/sh\ntool="$1"; shift\ncase "$tool" in\n  guard-deterministic) exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n',
     );
     chmodSync(join(bin, 'bunx'), 0o755);
