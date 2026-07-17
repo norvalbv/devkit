@@ -37,8 +37,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveGuardConfig } from '../../../config.mts';
@@ -58,6 +57,11 @@ import {
   selectReviewers,
 } from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
+
+// Corpus + fixture-asset layer (split out to keep this file within its size ratchet).
+export * from './corpus.mts';
+
+import { benchGateHash, buildAssets, corpusHash, loadRows } from './corpus.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
@@ -87,23 +91,12 @@ export const BENCH_REVIEWERS = REVIEWERS.filter(
   (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
 );
 
-// Fixture layout every row lands in: backend rows stage under api/, frontend rows under web/, and
-// correctness (domain 'all') rows may live under any of api/, web/, or src/ (its roots = the
-// union). selectReviewers then fires exactly the row's target reviewer.
-const FIXTURE_CONFIG = {
-  scanRoots: ['api', 'web', 'src'],
-  sourceExtensions: ['ts', 'tsx', 'js', 'mjs'],
-  review: { backendRoots: ['api'], frontendRoots: ['web'] },
-};
-
 // Per-pass wall-clock estimates (seconds) for the budget line. Checklist workflow ≈ 4–10 tool
 // turns on top of diff reading; escalation reruns the whole workflow on opus.
 const EST_FIRST_SECS = { haiku: 70, sonnet: 135, opus: 270 };
 const EST_ESCALATE_SECS = 210;
 
 // ─── Small helpers ────────────────────────────────────────────────────────────────
-
-const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
 const fmtCi = (k, n) => {
   const { lo, hi } = wilson(k, n);
@@ -132,92 +125,6 @@ function preflightClaude() {
     throw new BenchAbort(2, 'reviewer-eval: `claude` CLI not available — cannot benchmark');
   }
 }
-
-// ─── Corpus ───────────────────────────────────────────────────────────────────────
-
-const casesFile = (reviewer) => path.join(here, `cases-${reviewer.skill}.jsonl`);
-
-const ROW_ENUMS = {
-  expected: ['FAIL', 'PASS'],
-  difficulty: ['clear', 'borderline', 'adversarial'],
-  provenance: ['authored', 'mined', 'adapted'],
-};
-
-/** Structural corpus lint — throws BenchAbort on the first malformed row. Cheap and always on:
- * a bad label silently mis-scoring a run is worse than a refused run. */
-export function lintRows(rows, reviewerName) {
-  const seen = new Set();
-  for (const row of rows) {
-    const where = `${reviewerName}/${row.id ?? '<no id>'}`;
-    if (!row.id || seen.has(row.id)) throw new BenchAbort(2, `duplicate/missing id: ${where}`);
-    seen.add(row.id);
-    if (!row.note)
-      throw new BenchAbort(2, `${where}: every row needs a note (why the label is right)`);
-    for (const [field, allowed] of Object.entries(ROW_ENUMS))
-      if (row[field] !== undefined && !allowed.includes(row[field]))
-        throw new BenchAbort(2, `${where}: ${field}=${row[field]} not in ${allowed.join('|')}`);
-    if (!row.expected) throw new BenchAbort(2, `${where}: missing expected`);
-    if (row.expected === 'FAIL' && !(Array.isArray(row.expectItems) && row.expectItems.length > 0))
-      throw new BenchAbort(2, `${where}: expected FAIL needs expectItems`);
-    if (!row.repo?.base || !row.repo?.staged)
-      throw new BenchAbort(2, `${where}: missing repo.base/staged`);
-    if (row.reviewer !== reviewerName)
-      throw new BenchAbort(
-        2,
-        `${where}: reviewer=${row.reviewer} but lives in ${reviewerName}'s file`,
-      );
-  }
-  return rows;
-}
-
-function loadRows(reviewer, { dev = false, only = null } = {}) {
-  const file = casesFile(reviewer);
-  if (!existsSync(file)) throw new BenchAbort(2, `reviewer-eval: missing ${path.basename(file)}`);
-  let rows = lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name);
-  if (dev) rows = rows.filter((r) => !r.holdout);
-  if (only) rows = rows.filter((r) => r.id.startsWith(only));
-  return rows;
-}
-
-// ─── Fixture assets ───────────────────────────────────────────────────────────────
-
-/**
- * The gate files a fixture repo needs before the judge runs, keyed by fixture-relative path:
- * guard.config.json (roots that make selectReviewers fire the target), the reviewer's agent brief
- * under the default agentsDir, and its checklist script at the EXACT path allowedToolsFor
- * whitelists. All read from the repo source of truth (agents/, skills/) — bench and gate share
- * one copy, so a brief/checklist edit is automatically what gets measured.
- */
-export function buildAssets(reviewer) {
-  const brief = readFileSync(path.join(repoRoot, 'agents', `${reviewer.name}.md`), 'utf8');
-  const script = readFileSync(
-    path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
-    'utf8',
-  );
-  return {
-    'guard.config.json': `${JSON.stringify(FIXTURE_CONFIG, null, 2)}\n`,
-    [`.claude/agents/${reviewer.name}.md`]: brief,
-    [checklistScript(reviewer)]: script,
-  };
-}
-
-/** gateHash: everything whose edit invalidates comparability — the cascade source, the pure gate
- * logic, and the reviewer's own brief + checklist (the brief IS gate code, completeness-eval rule). */
-export function benchGateHash(reviewer) {
-  return sha12(
-    [
-      readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
-      readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
-      readFileSync(path.join(repoRoot, 'agents', `${reviewer.name}.md`), 'utf8'),
-      readFileSync(
-        path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
-        'utf8',
-      ),
-    ].join('\n \n'),
-  );
-}
-
-const corpusHash = (reviewer) => sha12(readFileSync(casesFile(reviewer), 'utf8'));
 
 // ─── Spy exec ─────────────────────────────────────────────────────────────────────
 

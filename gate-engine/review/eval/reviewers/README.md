@@ -56,11 +56,14 @@ BENCH_MODEL=opus node bench.mts run                            # opus ceiling, r
 
 ## Corpus
 
-One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 12 rows
-each: 6 gold seeded-bugs (distinct catalog items; 3 clear / 2 borderline / 1 adversarial), 3 clean
-decoys (trigger ≥2 checklist items, genuinely fine), 2 near-miss decoys (look vulnerable, provably
-safe), 1 minimal pair (`variantOf`: the fixed twin of a gold row, expected PASS). 2 rows per file
-are `holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
+One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 13–14
+rows each (api-security 14, the rest 13): the original 12 — 6 gold seeded-bugs (distinct catalog
+items; 3 clear / 2 borderline / 1 adversarial), 3 clean decoys (trigger ≥2 checklist items,
+genuinely fine), 2 near-miss decoys (look vulnerable, provably safe), 1 minimal pair (`variantOf`:
+the fixed twin of a gold row, expected PASS) — plus gold rows for the licensed-source catalog
+refresh items (`mass-assignment`, `object-level-authz`, `sync-io`, `layout-thrash`,
+`postmessage-origin`; `command-injection` reuses its retagged original row). 2 rows per file are
+`holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
 `note` (mandatory why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are
 anonymized adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
 
@@ -77,10 +80,11 @@ Note `variantOf` is documentation/traceability only — no metric reads it; the 
 its contribution to the `cleanPass` denominator.
 
 Fixture shape: gate assets (guard.config.json with `backendRoots:["api"]` /
-`frontendRoots:["web"]`, the agent brief, the checklist script) are injected into `repo.base` at
-run time; backend rows stage under `api/`, frontend rows under `web/`, so `selectReviewers`
-fires exactly the target reviewer — selection itself is under test (`not-selected` scores as a
-miss).
+`frontendRoots:["web"]`, the agent brief, the checklist script, and the skill's SKILL.md — the
+brief's workflow sends the judge there for the detailed rules, and consumers always have it
+synced) are injected into `repo.base` at run time; backend rows stage under `api/`, frontend rows
+under `web/`, so `selectReviewers` fires exactly the target reviewer — selection itself is under
+test (`not-selected` scores as a miss).
 
 ## Scoring (deterministic, no LLM matcher)
 
@@ -114,9 +118,11 @@ Plus: right-reason split, live escalation count + mean opus seconds, inconclusiv
 `--fail` = floors + a per-row **flip table vs baseline** under two-sided mid-p McNemar (p<0.05
 with net-negative flips). Rows discordant with the baseline are re-run once; a flip counts only
 when 2-of-2 confirmed. Baselines are keyed `<reviewer>@<model>@<cascade>` and embed
-`gateHash` (run-review.mts + reviewers.mts + brief + checklist — the brief IS gate code) +
-`corpusHash`; any mismatch **skips** comparison loudly instead of lying. Regenerate with
-`--baseline` after deliberate changes. Even at this size (48 domain rows; 66 correctness) each
+`gateHash` (run-review.mts + reviewers.mts + corpus.mts (the fixture layer hashes its own
+source) + brief + checklist + SKILL.md — the brief IS gate
+code, and SKILL.md ships into fixtures) + `corpusHash`; any mismatch **skips** comparison loudly
+instead of lying. Regenerate with
+`--baseline` after deliberate changes. Even at this size (53 domain rows; 66 correctness) each
 cohort is a **large-effect tripwire, not a 5pp detector** — intervals print so nobody over-reads a
 point estimate.
 
@@ -208,9 +214,9 @@ Point estimates on the 66-row corpus (38 gold / 28 decoys). K=1 + 66 rows = trip
 
 ## Cost (concurrency 2)
 
-The domain pool is 48 rows; the `correctness` cohort is 66 (single-pass haiku, no escalation). Run
+The domain pool is 53 rows; the `correctness` cohort is 66 (single-pass haiku, no escalation). Run
 one reviewer at a time during a hunt — the numbers below are the 48-row domain pool; a full `all`
-run is ~114 rows. A budget line prints before any token is spent; every run appends one to `runs.log`.
+run is ~119 rows. A budget line prints before any token is spent; every run appends one to `runs.log`.
 
 | run | config | wall-clock |
 |---|---|---|
@@ -220,3 +226,35 @@ run is ~114 rows. A budget line prints before any token is spent; every run appe
 | domain production baseline | sonnet, cascade-on | ~1.5–2 h |
 | domain haiku sweep | haiku, cascade-on | ~1–1.5 h |
 | domain opus sweep | opus, cascade-on | ~2.5–3 h |
+
+## Results history
+
+Every entry is a full cascade-on run at the production first-pass model (haiku); rates are
+`k/n` with the run's Wilson 95% interval in `runs.log`. Single-run (K=1) unless noted — treat
+per-cell numbers as tripwires, the paired flip column as the finding.
+
+### 2026-07-17 — licensed-source catalog refresh (PR #97)
+
+BEFORE = origin/main catalogs (frozen worktree, 48 rows) · AFTER = PR #97 catalogs + 5 new gold
+rows (53 rows). Paired per-row join on the 48 shared ids: **zero flips**.
+
+| reviewer | block recall | clean-pass | first-pass recall | first-pass clean |
+|---|---|---|---|---|
+| api-security | 6/6 → **8/8** | 6/6 → 6/6 | 6/6 → 8/8 | 4/6 → 5/6 |
+| backend-performance | 6/6 → **7/7** | 5/6 → 5/6 | 6/6 → 7/7 | 5/6 → 3/6 |
+| frontend-security | 6/6 → **7/7** | 6/6 → 6/6 | 6/6 → 7/7 | 6/6 → 6/6 |
+| frontend-performance | 6/6 → **7/7** | 6/6 → 6/6 | 6/6 → 7/7 | 5/6 → 6/6 |
+| **pooled** | 24/24 → **29/29** | 23/24 → 23/24 | 24/24 → 29/29 | 20/24 → 20/24 |
+
+Notes:
+- The 5 added golds (one per flagship new item) also passed a K=2 slim proof: both runs
+  `first=FAIL final=fail (escalated) [right-item]` for every row.
+- The one clean-pass miss is `beperf-nplusone-statement-loop-fixed` — false-blocked, opus-
+  confirmed, **in both states** (pre-existing calibration, tracked as sc-1148).
+- backend-performance first-pass clean 5/6→3/6 is cost-only (opus overturns; end-to-end
+  unchanged) and within single-run judge nondeterminism (between-run agreement 0.55–0.77).
+- Mid-development the A/B caught a real regression this refresh introduced: the rewritten
+  frontend-performance SKILL.md softened the memoize-expensive-computation bar and
+  `feperf-sku-rank-per-render` went caught → stable-missed (2-of-2); the bar was sharpened and
+  the row recovered 2-of-2 (final re-baseline 13/13).
+- Corpus growth toward absolute-recall claims (≥25 rows/reviewer, mined-real, K=3) is sc-1147.
