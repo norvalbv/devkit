@@ -718,7 +718,10 @@ describe('ship-branch.sh — worktree integration', () => {
     });
     expect(r.status, r.stderr).toBe(0);
 
-    const events = readFileSync(sink, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
     const attempt = events.find((e) => e.type === 'ship_attempt');
     const prEvent = events.find((e) => e.type === 'ship_pr');
     expect(prEvent).toBeTruthy();
