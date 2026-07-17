@@ -102,7 +102,7 @@ describe('majority (self-consistency vote; tie → null preserves the no-block d
 describe('sentryExit (block bounded to hard-mode + confident MONITOR)', () => {
   it.each([
     ['MONITOR', true, 1], // the ONLY blocking case
-    ['MONITOR', false, 0], // warn-default: MONITOR alone never blocks
+    ['MONITOR', false, 0], // softened (hard=false): MONITOR alone never blocks
     ['SKIP', true, 0],
     [null, true, 0], // ambiguous / unavailable → no block
   ])('exit(verdict=%j, hard=%j) → %j', (verdict, hard, code) => {
@@ -443,7 +443,7 @@ describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent 
     expect(r.stderr).not.toContain('claude judge unavailable');
   });
 
-  it('judged commit + claude dark → exit 0 (warn-only unchanged) AND warns visibly', () => {
+  it('judged commit + claude dark → exit 0 (fail-open unchanged) AND warns visibly', () => {
     const r = gate({ PATH: stubPath('exit 3\n') }, 'fix(x): y');
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('sentry-advisory: claude judge unavailable');

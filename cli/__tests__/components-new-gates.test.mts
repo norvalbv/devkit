@@ -11,7 +11,12 @@ describe('gate registry', () => {
     expect(RECOMMENDED_GUARD_IDS).toContain('qavis-advisory');
     expect(GUARD_IDS.filter((g) => g === 'qavis-advisory')).toHaveLength(1);
     expect(new Set(GUARD_IDS).size).toBe(GUARD_IDS.length); // no duplicates
-    expect(GUARD_IDS).toContain('review'); // still the one opt-in gate
+    expect(GUARD_IDS).toContain('review'); // opt-in
+  });
+
+  it('sentry is offerable but NOT recommended (needs a Sentry-using product)', () => {
+    expect(GUARD_IDS).toContain('sentry');
+    expect(RECOMMENDED_GUARD_IDS).not.toContain('sentry');
   });
 });
 
@@ -20,7 +25,7 @@ describe('newBundledGates', () => {
     const recorded = ['size', 'fanout', 'dup', 'clone', 'decisions']; // a pre-qavis selection
     const { recommended, optIn } = newBundledGates(recorded);
     expect(recommended).toEqual(['qavis-advisory']); // newly recommended, absent
-    expect(optIn).toEqual(['review']); // bundled but never selected
+    expect(optIn).toEqual(['review', 'sentry']); // bundled but never selected
   });
 
   it('returns empty buckets when the recorded set already has every bundled gate', () => {
@@ -29,9 +34,9 @@ describe('newBundledGates', () => {
     expect(optIn).toEqual([]);
   });
 
-  it('a fully-recommended selection leaves only opt-in review outstanding', () => {
+  it('a fully-recommended selection leaves only the opt-in gates outstanding', () => {
     const { recommended, optIn } = newBundledGates([...RECOMMENDED_GUARD_IDS]);
     expect(recommended).toEqual([]);
-    expect(optIn).toEqual(['review']);
+    expect(optIn).toEqual(['review', 'sentry']);
   });
 });
