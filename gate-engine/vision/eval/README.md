@@ -54,8 +54,32 @@ Categories: `fit-own-infra` (false-OUT traps: own auth/billing/DB/deploy, codege
 project, dev tasks on the user's own infra), `fit-feature`, `fit-chore`, `fit-real`,
 `fit-deconfounded`, `out-user-backend` (announced), `out-deconfounded` (un-announced),
 `drift-off-spine` (incl. FIT-labelled traps), `edge` (verdict injection, mixed diffs,
-deletion-of-OUT, flag-gated OUT, statement variants). Keep labels deliberately reviewed — the
+deletion-of-OUT, flag-gated OUT, statement variants), `guard-degenerate` (trivial-commit guard
+rows: comment-only, lockfile-only, reindent, snapshot churn — the most common real commit shapes,
+so they bound the false-block rate where it would hurt daily; grown cheaply per the house rule
+that degenerate guards cost nothing to label). Keep labels deliberately reviewed — the
 de-confounded rows are the ones that make the floors mean anything.
+
+## Label discipline (the house benchmark-methodology checklist, applied)
+
+- **Unanimous-wrong rows are candidate LABEL errors first.** When the 3-run majority is
+  unanimous against `expected`, human-re-audit the label before scoring it a judge failure
+  (disagreement-triaged audit — the platinum-benchmark method, arXiv:2502.03461/2410.18889).
+  The one label corrected so far (`edge-adr-proposing-out`) came from exactly this loop and is
+  disclosed in its `note`; corrected rows move to `dev` so a correction never juices the holdout.
+- **Label-noise floor is UNMEASURED** — all labels are single-author. Before trusting any
+  variant delta smaller than (noise floor + the paired CI), a second rater must blind-relabel a
+  ~40-row stratified subset (expected hidden) and κ gets reported next to the floors
+  (target α ≥ 0.667; 3–6% label error flips rankings, arXiv:2103.14749). Open debt.
+- **Mild clustering caveat**: minimal-pair and same-template synthetic rows share structure, so
+  row-level CIs are slightly optimistic (unit-of-inference rule, arXiv:2411.00640). Real-diff
+  rows are unclustered; grow those over time.
+- **Style confound**: synthetic rows share one author's style; `fit-real` rows are the organic
+  control (style bias dominates judge bias, arXiv:2604.23178). More real rows is the fix, not
+  style-normalizing the synthetics.
+
+The full house methodology (retrofit checklist + audit evidence) lives in the frink repo:
+`docs/benchmarks/benchmark-methodology.md`.
 
 ## Run
 
