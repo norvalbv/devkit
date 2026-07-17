@@ -4,7 +4,7 @@
 
 # run_gates_with_capture <worktree> <root> <label> <log> <progress> -- <command...>
 run_gates_with_capture() {
-  local wt=$1 root=$2 label=$3 log=$4 progress=$5
+  local _wt=$1 _root=$2 label=$3 log=$4 progress=$5
   shift 5
   [ "${1:-}" = "--" ] && shift
   local cmd=("$@")

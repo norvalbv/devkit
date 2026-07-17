@@ -10,6 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { isAbsolute, win32 } from 'node:path';
 import { type GuardConfig, sourceMatchers } from '../config.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
@@ -188,6 +189,7 @@ const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[â€”â€
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const TRAILING_SLASH_RE = /\/$/;
+const PATH_SEPARATOR_RE = /[\\/]/u;
 
 /** The config roots that trigger a reviewer's domain. */
 export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
@@ -453,15 +455,25 @@ function injectedRoots(value: string | undefined, name: string): string[] | null
   } catch {
     throw new Error(`${name} must be a JSON array of non-empty repository-relative paths`);
   }
+  const roots = Array.isArray(parsed)
+    ? parsed.map((root) => (typeof root === 'string' ? root.trim() : root))
+    : parsed;
   if (
-    !Array.isArray(parsed) ||
-    parsed.length === 0 ||
-    !parsed.every((root) => typeof root === 'string' && root.length > 0)
+    !Array.isArray(roots) ||
+    roots.length === 0 ||
+    !roots.every(
+      (root) =>
+        typeof root === 'string' &&
+        root.length > 0 &&
+        !isAbsolute(root) &&
+        !win32.isAbsolute(root) &&
+        !root.split(PATH_SEPARATOR_RE).includes('..'),
+    )
   )
     throw new Error(
       `${name} must be a non-empty JSON array of non-empty repository-relative paths`,
     );
-  return parsed as string[];
+  return roots as string[];
 }
 
 /** Resolve review-only domain topology once. Invocation injection wins, then a non-empty consumer

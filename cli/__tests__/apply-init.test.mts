@@ -118,6 +118,8 @@ describe('selection helpers', () => {
       reviewDecisionsDir: 'architecture/decisions',
     });
     expect(parseFlags(['--no-review']).review).toBe(false);
+    expect(parseFlags(['--review-guards', ' , ']).reviewGuards).toEqual([]);
+    expect(parseFlags(['--review-guards']).reviewGuards).toEqual([]);
   });
 });
 

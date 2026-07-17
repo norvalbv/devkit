@@ -102,23 +102,34 @@ function loadReviewEnvironment(targetRoot: string): NodeJS.ProcessEnv | null {
   };
 }
 
-function validateArgs(args: string[]): string | null {
+interface ReviewArgs {
+  target: string | null;
+  base: string | null;
+}
+
+function parseArgs(args: string[]): { value: ReviewArgs } | { error: string } {
+  const value: ReviewArgs = { target: null, base: null };
+  const seen = new Set<string>();
   for (let i = 0; i < args.length; i++) {
-    if (args[i] !== '--target' && args[i] !== '--base') return `unknown argument: ${args[i]}`;
-    if (!args[i + 1]) return `${args[i]} requires a value`;
+    const flag = args[i];
+    if (flag !== '--target' && flag !== '--base') return { error: `unknown argument: ${flag}` };
+    if (seen.has(flag)) return { error: `${flag} may only be specified once` };
+    seen.add(flag);
+    if (!args[i + 1]) return { error: `${flag} requires a value` };
+    if (flag === '--target') value.target = args[i + 1];
+    else value.base = args[i + 1];
     i++;
   }
-  return null;
+  return { value };
 }
 
 export default function review(args: string[], cwd: string): number {
-  const error = validateArgs(args);
-  if (error) {
-    console.error(`devkit review: ${error}`);
+  const parsed = parseArgs(args);
+  if ('error' in parsed) {
+    console.error(`devkit review: ${parsed.error}`);
     return 1;
   }
-  const targetIndex = args.indexOf('--target');
-  const target = resolve(cwd, targetIndex === -1 ? '.' : (args[targetIndex + 1] as string));
+  const target = resolve(cwd, parsed.value.target ?? '.');
   const rootResult = spawnSync('git', ['-C', target, 'rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
   });
@@ -143,7 +154,11 @@ export default function review(args: string[], cwd: string): number {
     return 1;
   }
   const script = fileURLToPath(new URL('../lib/ship/review-target.sh', import.meta.url));
-  const result = spawnSync('bash', [script, ...args], { cwd, env, stdio: 'inherit' });
+  const scriptArgs = [
+    ...(parsed.value.target === null ? [] : ['--target', parsed.value.target]),
+    ...(parsed.value.base === null ? [] : ['--base', parsed.value.base]),
+  ];
+  const result = spawnSync('bash', [script, ...scriptArgs], { cwd, env, stdio: 'inherit' });
   if (result.error) {
     console.error(`devkit review: ${result.error.message}`);
     return 1;

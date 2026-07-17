@@ -86,6 +86,20 @@ function logPath(output: string): string {
 }
 
 describe('devkit review', () => {
+  it.each([
+    '--target',
+    '--base',
+  ])('rejects duplicate %s options before target resolution', (flag) => {
+    const { root, env } = seedReviewRepo('echo MUST_NOT_RUN\nexit 1');
+    const value = flag === '--target' ? root : 'main';
+
+    const r = review(root, env, flag, value, flag, value);
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`${flag} may only be specified once`);
+    expect(r.stderr).not.toContain('MUST_NOT_RUN');
+  });
+
   it('refuses to run when the local review profile is disabled', () => {
     const { root, env } = seedReviewRepo('echo MUST_NOT_RUN\nexit 1');
     const cfgPath = join(root, '.devkit/config.json');
@@ -478,6 +492,18 @@ describe('devkit review', () => {
 
   it('blocks when the hook reformats the ephemeral staged snapshot', () => {
     const hook = 'printf "formatted\\n" > app.ts\ngit add app.ts\nexit 0';
+    const { root, env } = seedReviewRepo(hook);
+    writeFileSync(join(root, 'app.ts'), 'needs-formatting\n');
+
+    const r = review(root, env, '--base', 'main');
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/changed the ephemeral staged snapshot/);
+    expect(readFileSync(join(root, 'app.ts'), 'utf8')).toBe('needs-formatting\n');
+  });
+
+  it('blocks when the hook makes an unstaged formatter edit', () => {
+    const hook = 'printf "formatted\\n" > app.ts\nexit 0';
     const { root, env } = seedReviewRepo(hook);
     writeFileSync(join(root, 'app.ts'), 'needs-formatting\n');
 

@@ -230,7 +230,7 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 AFTER_HOOK_TREE=$(git -C "$WT" write-tree)
-if [ "$AFTER_HOOK_TREE" != "$BEFORE_HOOK_TREE" ]; then
+if [ "$AFTER_HOOK_TREE" != "$BEFORE_HOOK_TREE" ] || ! git -C "$WT" diff --quiet; then
   echo "✗ devkit review: the pre-commit hook changed the ephemeral staged snapshot." >&2
   echo "   Format/update the target and re-run; target files were NOT modified. Full output: $LOG" >&2
   exit 1

@@ -15,7 +15,7 @@ node $SCRIPT status       # Show progress
 node $SCRIPT check-item <name> --pass   # Mark item passed
 node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
 node $SCRIPT finalize     # Verify every item was resolved; refuses if any are pending or failed
-node $SCRIPT cleanup      # Remove checklist
+if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then node $SCRIPT cleanup; fi
 ```
 
 The roots the script scans are the UNION of `scanRoots`, `review.backendRoots` and

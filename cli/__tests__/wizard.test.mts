@@ -33,6 +33,7 @@ const WIZ_OPTS = {
   installed: new Set(),
 };
 function setAnswers(surface) {
+  delete answers['Select guards for devkit review'];
   Object.assign(answers, {
     'Install mode': 'package',
     'Select your stack': 'generic',
@@ -76,6 +77,7 @@ describe('wizard agent-surface selection', () => {
   it('records an explicit local review guard profile when enabled', async () => {
     setAnswers('claude');
     Object.assign(answers, {
+      'Select components to install': ['skills', 'agents', 'husky'],
       'Select gate guards': ['size', 'decisions'],
       'Enable devkit review?': true,
       'Select guards for devkit review': ['decisions'],
@@ -86,6 +88,23 @@ describe('wizard agent-surface selection', () => {
     expect(r.review).toEqual({
       enabled: true,
       guards: ['decisions'],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
+  it('keeps an empty review allowlist when no commit guards are selected', async () => {
+    setAnswers('claude');
+    Object.assign(answers, {
+      'Select components to install': ['skills', 'agents', 'husky'],
+      'Select gate guards': [],
+      'Enable devkit review?': true,
+    });
+
+    const r = await runWizard(WIZ_OPTS);
+
+    expect(r.review).toEqual({
+      enabled: true,
+      guards: [],
       decisionsDir: 'docs/decisions',
     });
   });

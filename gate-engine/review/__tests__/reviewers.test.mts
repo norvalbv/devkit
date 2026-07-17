@@ -163,12 +163,21 @@ describe('selectReviewers', () => {
   });
   it('review-mode injected roots override config while malformed injection fails loudly', () => {
     const effective = effectiveReviewConfig(cfg, {
-      DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(['apps/web']),
+      DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify([' apps/web ', '.']),
     });
-    expect(effective.review.frontendRoots).toEqual(['apps/web']);
-    expect(() => effectiveReviewConfig(cfg, { DEVKIT_REVIEW_FRONTEND_ROOTS: '["", 3]' })).toThrow(
-      /DEVKIT_REVIEW_FRONTEND_ROOTS/,
-    );
+    expect(effective.review.frontendRoots).toEqual(['apps/web', '.']);
+    for (const roots of [
+      ['', 3],
+      [' '],
+      ['/tmp'],
+      ['../outside'],
+      ['src/../outside'],
+      ['C:\\outside'],
+    ]) {
+      expect(() =>
+        effectiveReviewConfig(cfg, { DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(roots) }),
+      ).toThrow(/DEVKIT_REVIEW_FRONTEND_ROOTS/);
+    }
   });
   it('commit-guard sees only SOURCE files under scanRoots (a staged JSON is not its business)', () => {
     const sel = selectReviewers(['src/config.json', 'src/main/a.ts'], cfg);

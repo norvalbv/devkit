@@ -22,7 +22,10 @@ export function parseReviewFlags(args: string[]): ReviewFlagValues {
     if (args[i] === '--review') flags.review = true;
     else if (args[i] === '--no-review') flags.review = false;
     else if (args[i] === '--review-guards')
-      flags.reviewGuards = (args[++i] ?? '').split(',').map((guard) => guard.trim());
+      flags.reviewGuards = (args[++i] ?? '')
+        .split(',')
+        .map((guard) => guard.trim())
+        .filter(Boolean);
     else if (args[i] === '--review-decisions-dir') flags.reviewDecisionsDir = args[++i] ?? '';
   }
   return flags;
