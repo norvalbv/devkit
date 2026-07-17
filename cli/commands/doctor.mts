@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { RECOMMENDED_GUARD_IDS, type Selection } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
+import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { markEnd, markStart } from '../lib/husky/husky.mts';
 import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import {
@@ -120,18 +121,18 @@ function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
     );
   }
   const block = extractGuardBlock(content, pkgRel) ?? '';
-  // The deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
-  // orchestrator (which re-reads the selection from .devkit/config.json at commit time); the rest
-  // (decisions/review/qavis-advisory) keep their own per-id `guard-<id>` fragment. So verify one
-  // `guard-deterministic` call when any deterministic guard is selected, plus each selected
-  // own-fragment guard's sentinel. A block that predates this collapse (per-guard `bunx guard-X`
-  // lines, no `guard-deterministic`) fails the first check and is flagged for regeneration.
+  // Deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
+  // orchestrator; decisions/review/qavis-advisory keep their own per-id `guard-<id>` fragment.
+  // Verify one orchestrator call when any deterministic guard is selected, plus each selected
+  // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
+  // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
   const OWN_FRAGMENT = new Set(['decisions', 'review', 'qavis-advisory']);
+  const gates = selectedGuards.filter((g) => g !== 'sentry');
   const missing: string[] = [];
-  if (selectedGuards.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
+  if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
     missing.push('deterministic gates');
   }
-  for (const g of selectedGuards) {
+  for (const g of gates) {
     if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`)) missing.push(g);
   }
   if (missing.length) {
@@ -146,9 +147,7 @@ function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   return check(
     '.husky/pre-commit',
     'OK',
-    selectedGuards.length
-      ? `block calls: ${selectedGuards.join(', ')}`
-      : 'block present (no guards selected)',
+    gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)',
   );
 }
 
@@ -565,12 +564,11 @@ function applyFix(
       r.name !== 'skills' &&
       r.name !== 'agents',
   );
-  // The guard block AND its structure-lint `--structure` arg both live in the .husky/pre-commit
-  // deterministic line, which init rebuilds from the recorded selection — so a drifted structure-lint
-  // result takes the same init repair path (it flags itself fixable, else --fix would no-op it).
-  const huskyDrift = results.some(
-    (r) => (r.name === '.husky/pre-commit' || r.name === 'structure-lint') && r.status !== 'OK',
-  );
+  // The guard blocks (pre-commit + commit-msg) AND the structure-lint `--structure` arg are all
+  // rebuilt by init from the recorded selection — so a drifted result on any of them takes the
+  // same init repair path (each flags itself fixable, else --fix would no-op it).
+  const HOOK_CHECKS = new Set(['.husky/pre-commit', '.husky/commit-msg', 'structure-lint']);
+  const huskyDrift = results.some((r) => HOOK_CHECKS.has(r.name) && r.status !== 'OK');
   if (needsInit || huskyDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];
     // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).
@@ -788,6 +786,8 @@ async function collectResults(
 
   const results = [configResult];
   if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []));
+  if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
+    results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
   if (sel.biome)
     results.push(
       checkExtends(cwd, 'biome.jsonc', expected.biome, 'extends', overrides.has('biome.jsonc')),
@@ -805,8 +805,7 @@ async function collectResults(
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   // structure-lint is a separate hook line (not a guard) — verify it when structure is recorded.
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
-  // Verify the synced agent files against a SELECTED surface (prefer .claude; else the first
-  // chosen one). Both surfaces get identical content, so checking one is sufficient.
+  // Verify synced agent files against ONE selected surface (identical content on both).
   const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
   const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
   if (sel.skills && primarySurface) results.push(await checkSkills(cwd, primarySurface));

@@ -11,6 +11,28 @@ done
 export PATH
 
 # >>> devkit-guards >>>
+# devkit:commit-terminal
+if [ -z "${DEVKIT_SHIP_ID:-}" ] && [ -z "${DEVKIT_NO_TELEMETRY:-}" ]; then
+    __dk_t0="$(date +%s)"
+    __dk_esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+    __dk_commit_result() {
+        [ -n "${__dk_done:-}" ] && return 0
+        __dk_done=1
+        __dk_tree="$(git write-tree 2>/dev/null)" || return 0
+        [ -n "$__dk_tree" ] || return 0
+        __dk_events="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
+        mkdir -p "$(dirname "$__dk_events")" 2>/dev/null || return 0
+        printf '{"type":"commit_result","ship_id":"commit-%s","run_mode":"commit","repo":"%s","branch":"%s","exit_code":%d,"duration_s":%d,"ts":"%s"}\n' \
+            "$__dk_tree" \
+            "$(__dk_esc "$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")")" \
+            "$(__dk_esc "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)")" \
+            "${1:-0}" "$(( $(date +%s) - __dk_t0 ))" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$__dk_events" 2>/dev/null || true
+    }
+    trap '__dk_commit_result "$?"' EXIT
+fi
+# /devkit:commit-terminal
+
 # devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
 # `git add -u`, which would sweep unrelated working-tree changes into the commit). Only

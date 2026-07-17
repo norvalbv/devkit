@@ -1,9 +1,21 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GUARD_IDS } from '../lib/components.mts';
+import {
+  buildCommitMsgBlock,
+  buildCommitMsgHook,
+  installCommitMsgHook,
+} from '../lib/husky/commit-msg-block.mts';
 import {
   buildFullHook,
   buildGuardBlock,
@@ -353,6 +365,149 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
       env: { PATH: process.env.PATH, DEVKIT_SHIP_BASE_SHA: 'deadbeef' },
     });
     expect(based.trim()).toBe('FALLOW_ARGS:audit --base deadbeef');
+  });
+});
+
+// ── the managed .husky/commit-msg (commit-msg judges: review→completeness, sentry) ──────────────
+describe('buildCommitMsgBlock', () => {
+  it('returns null when no commit-msg guard is selected (pre-commit-only guards)', () => {
+    expect(buildCommitMsgBlock({ guards: ['size', 'decisions', 'qavis-advisory'] })).toBeNull();
+    expect(buildCommitMsgBlock({})).toBeNull();
+  });
+
+  it('review-only → the completeness fragment, quoted "$1", no sentry', () => {
+    const block = buildCommitMsgBlock({ guards: ['review'] });
+    expect(block).toContain('# >>> devkit-guards >>>'); // same marker pair as pre-commit
+    expect(block).toContain('# devkit:guard-completeness');
+    expect(block).toContain('bunx guard-review completeness --gate "$1" || crc=$?');
+    expect(block).toContain('GUARD_NO_COMPLETENESS=1');
+    expect(block).not.toContain('guard-sentry');
+  });
+
+  it('sentry-only → the sentry fragment with its bypass guidance, no completeness', () => {
+    const block = buildCommitMsgBlock({ guards: ['sentry'] });
+    expect(block).toContain('# devkit:guard-sentry');
+    expect(block).toContain('bunx guard-sentry --gate "$1" || src=$?');
+    expect(block).toContain('GUARD_NO_SENTRY_JUDGE=1');
+    expect(block).not.toContain('guard-completeness');
+  });
+
+  it('both selected → completeness before sentry, ONE block-level tested-status comment', () => {
+    const block = buildCommitMsgBlock({ guards: ['sentry', 'review'] });
+    expect(block.indexOf('guard-completeness')).toBeLessThan(block.indexOf('guard-sentry'));
+    expect(block.match(/TESTED status/g)).toHaveLength(1);
+  });
+
+  it('standalone → command -v-guarded GLOBAL bins, no bunx (absent devkit never blocks)', () => {
+    const block = buildCommitMsgBlock({ guards: ['review', 'sentry'] }, '', { standalone: true });
+    expect(block).not.toContain('bunx');
+    expect(block).toContain(
+      'if command -v guard-sentry >/dev/null 2>&1; then guard-sentry --gate "$1" || src=$?; fi',
+    );
+    expect(block).toContain('command -v guard-review'); // completeness guarded the same way
+  });
+
+  it('monorepo: scoped markers, $1 absolutized BEFORE the cd, subshell propagates a block', () => {
+    const block = buildCommitMsgBlock({ guards: ['sentry'] }, 'pkg/a');
+    expect(block).toContain('# >>> devkit-guards: pkg/a >>>');
+    expect(block.indexOf('set -- "$PWD/$1"')).toBeLessThan(block.indexOf('( cd "pkg/a"'));
+    expect(block).toContain(') || exit 1');
+  });
+});
+
+describe('buildCommitMsgHook + installCommitMsgHook (the managed .husky/commit-msg)', () => {
+  const tmp = () => mkdtempSync(join(tmpdir(), 'dk-commit-msg-'));
+  const hookAt = (root) => join(root, '.husky', 'commit-msg');
+
+  it('full hook: shebang + PATH preamble + explicit trailing exit 0', () => {
+    const hook = buildCommitMsgHook({ guards: ['review', 'sentry'] });
+    expect(hook.startsWith('#!/bin/sh')).toBe(true);
+    expect(hook).toContain('export PATH');
+    expect(hook.trimEnd().endsWith('exit 0')).toBe(true); // fail-open exit 2 must never propagate
+  });
+
+  it('creates .husky/commit-msg when a commit-msg guard is selected; re-run is idempotent', () => {
+    const root = tmp();
+    installCommitMsgHook(root, '', { guards: ['review'] });
+    const once = readFileSync(hookAt(root), 'utf8');
+    expect(once).toContain('guard-completeness');
+    installCommitMsgHook(root, '', { guards: ['review'] });
+    expect(readFileSync(hookAt(root), 'utf8')).toBe(once);
+  });
+
+  it('creates NO file when no commit-msg guard is selected', () => {
+    const root = tmp();
+    installCommitMsgHook(root, '', { guards: ['size', 'decisions'] });
+    expect(existsSync(hookAt(root))).toBe(false);
+  });
+
+  it('splices into an existing consumer commit-msg, preserving its lines outside the markers', () => {
+    const root = tmp();
+    mkdirSync(join(root, '.husky'), { recursive: true });
+    writeFileSync(hookAt(root), '#!/bin/sh\nnpx commitlint --edit "$1"\n');
+    installCommitMsgHook(root, '', { guards: ['sentry'] });
+    const merged = readFileSync(hookAt(root), 'utf8');
+    expect(merged).toContain('npx commitlint --edit "$1"'); // consumer line kept
+    expect(merged).toContain('# devkit:guard-sentry');
+  });
+
+  it('deselection removes the block but keeps the consumer hook (and its own lines)', () => {
+    const root = tmp();
+    mkdirSync(join(root, '.husky'), { recursive: true });
+    writeFileSync(hookAt(root), '#!/bin/sh\nnpx commitlint --edit "$1"\n');
+    installCommitMsgHook(root, '', { guards: ['sentry'] });
+    installCommitMsgHook(root, '', { guards: ['size'] }); // sentry deselected
+    const after = readFileSync(hookAt(root), 'utf8');
+    expect(after).not.toContain('devkit-guards');
+    expect(after).toContain('npx commitlint --edit "$1"');
+  });
+
+  it('a devkit-created hook (only the devkit block) loses the block on deselect, file remains', () => {
+    const root = tmp();
+    installCommitMsgHook(root, '', { guards: ['review', 'sentry'] });
+    installCommitMsgHook(root, '', { guards: [] });
+    const after = readFileSync(hookAt(root), 'utf8');
+    expect(after).not.toContain('# >>> devkit-guards'); // preamble prose still NAMES the markers
+    expect(after).not.toContain('guard-sentry');
+  });
+});
+
+// The commit-msg fragments capture each judge's exit (`|| var=$?`) so under husky's `sh -e` an
+// exit-2 fail-open continues to the explicit `exit 0`, while a confirmed exit-1 blocks with the
+// guidance. Run the ASSEMBLED hook under a real `sh -e` with a stubbed bunx to prove the contract.
+describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 1 → 1)', () => {
+  const runCommitMsgHook = (stubExit) => {
+    const home = mkdtempSync(join(tmpdir(), 'dk-commit-msg-exec-'));
+    const bin = join(home, '.bun', 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'bunx'), `#!/bin/sh\nexit ${stubExit}\n`);
+    chmodSync(join(bin, 'bunx'), 0o755);
+    const hookPath = join(home, 'commit-msg');
+    writeFileSync(hookPath, buildCommitMsgHook({ guards: ['review', 'sentry'] }));
+    try {
+      const stdout = execFileSync('sh', ['-e', hookPath, 'COMMIT_EDITMSG'], {
+        env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: e.status, stdout: `${e.stdout ?? ''}` };
+    }
+  };
+
+  it('both judges clean (exit 0) → the hook exits 0', () => {
+    expect(runCommitMsgHook(0).status).toBe(0);
+  });
+
+  it('fail-open (exit 2) never propagates — the explicit exit 0 wins', () => {
+    expect(runCommitMsgHook(2).status).toBe(0);
+  });
+
+  it('a confirmed block (exit 1) blocks the commit with the guidance echoed', () => {
+    const r = runCommitMsgHook(1);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('Confirmed completeness gap');
   });
 });
 
