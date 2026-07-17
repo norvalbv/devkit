@@ -1204,14 +1204,14 @@ export async function applyInit(cwd: string, plan: InitPlan) {
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    // Thread structureCmd into the selection so the block emits `--structure "<cmd>"` only when
-    // structure applies; same path for package/standalone. Self-host rewrites bunx→`node …mts`.
+    // structureCmd threads into the selection; self-host rewrites bunx→`node …mts`.
     if (selfHost) installSelfHostHook(gitRoot, pkgRel, selection, dryRun, cwd);
     else if (standalone)
       installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
-    // Commit-msg judges (review→completeness, sentry) — their own managed hook; self-host opts out.
+    // Commit-msg judges (review→completeness, sentry): self-host opts out AND drops a stale block.
     if (!selfHost) installCommitMsgHook(gitRoot, pkgRel, selection, { dryRun, standalone });
+    else removeCommitMsgBlock(gitRoot, pkgRel, dryRun);
   }
 
   // Self-host skips the size/fanout freezes: devkit has 0 eslint-disable directives and no folder over

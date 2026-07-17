@@ -241,6 +241,19 @@ export function checkCommitMsgHook(
     };
   }
   const block = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel) ?? '';
+  // Symmetric sentinel check (same depth as pre-commit's checkHusky): a fragment for a DESELECTED
+  // guard lingering in the block is drift too — a stale hard gate would keep blocking commits.
+  const present = [...block.matchAll(/^# devkit:([a-z-]+)$/gm)].map((m) => m[1]);
+  const extra = present.filter((id) => !wanted.includes(id));
+  if (extra.length) {
+    return {
+      name,
+      status: 'DRIFT',
+      detail: `block contains deselected gate(s): ${extra.join(', ')}`,
+      remediation: 'run `devkit init --force` (or `devkit upgrade`) to regenerate the block',
+      fixable: true,
+    };
+  }
   const missing = wanted.filter((id) => !block.includes(`# devkit:${id}`));
   if (missing.length) {
     return {

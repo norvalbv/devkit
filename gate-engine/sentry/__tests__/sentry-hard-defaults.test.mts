@@ -47,16 +47,20 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
     return `${dir}:${process.env.PATH}`;
   };
   // MONITOR on the warn path appends to the watchlist — point it at a tmp file, never the repo's.
-  const gate = (env: Record<string, string>, msg: string) =>
-    spawnSync('node', [SCRIPT, '--gate', msg], {
+  // The tmp dir joins `stubs` so afterEach reclaims it with the claude stubs.
+  const gate = (env: Record<string, string>, msg: string) => {
+    const wlDir = mkdtempSync(join(tmpdir(), 'sentry-hard-wl-'));
+    stubs.push(wlDir);
+    return spawnSync('node', [SCRIPT, '--gate', msg], {
       env: {
         ...process.env,
         GUARD_SENTRY_CONTEXT: 'message',
-        GUARD_SENTRY_WATCHLIST: join(mkdtempSync(join(tmpdir(), 'sentry-hard-wl-')), 'wl.md'),
+        GUARD_SENTRY_WATCHLIST: join(wlDir, 'wl.md'),
         ...env,
       },
       encoding: 'utf8',
     });
+  };
   afterEach(() => {
     while (stubs.length) rmSync(stubs.pop() as string, { recursive: true, force: true });
   });
