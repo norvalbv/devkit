@@ -100,11 +100,23 @@ snapshot_tree() {
   # remains correct before doctor adds the repository ignore. A materializer may project `.devkit`
   # itself as a symlink; ignore that leaf wholesale because Git cannot traverse a child pathspec
   # beneath it. Pathspec-free `add -A` then captures every other tracked/untracked repository path.
-  local capture_excludes
+  local capture_excludes global_excludes
   capture_excludes=$(mktemp "${TMPDIR:-/tmp}/devkit-review-excludes.XXXXXX")
+  global_excludes=$(git -C "$ROOT" config --path --get core.excludesFile 2>/dev/null || true)
+  if [ -z "$global_excludes" ]; then
+    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+      global_excludes="$XDG_CONFIG_HOME/git/ignore"
+    elif [ -n "${HOME:-}" ]; then
+      global_excludes="$HOME/.config/git/ignore"
+    fi
+  fi
+  : > "$capture_excludes"
+  if [ -n "$global_excludes" ] && [ -f "$global_excludes" ]; then
+    cat "$global_excludes" >> "$capture_excludes"
+  fi
   # `.husky/_` may be a projected symlink leaf (not a directory) in a materialized PR worktree, so
   # exclude the path itself. The pattern also excludes descendants when it is an ordinary directory.
-  printf '.devkit/review-runs/\n.husky/_\n' > "$capture_excludes"
+  printf '\n.devkit/review-runs/\n.husky/_\n' >> "$capture_excludes"
   [ -L "$ROOT/.devkit" ] && printf '.devkit\n' >> "$capture_excludes"
   # A PR materializer may project current local-only gate inputs as symlinks into an old worktree.
   # They govern the review runtime and are linked AFTER staging; they are not PR content.

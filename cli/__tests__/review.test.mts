@@ -191,6 +191,30 @@ describe('devkit review', () => {
     expect(readFileSync(logPath(r.stderr), 'utf8')).toContain('PROJECTED_CONFIG_OK');
   });
 
+  it('preserves configured global excludes while adding review-only capture exclusions', () => {
+    const { root, env } = seedReviewRepo(
+      [
+        'test ! -e global-secret.txt',
+        'git diff --cached --name-only | grep -q "^global-secret.txt$" && exit 8',
+        'echo GLOBAL_EXCLUDES_OK',
+        'exit 0',
+      ].join('\n'),
+    );
+    const gitHome = mkdtempSync(join(tmpdir(), 'devkit-review-global-excludes-'));
+    roots.push(gitHome);
+    const globalExcludes = join(gitHome, 'ignore');
+    const globalConfig = join(gitHome, 'gitconfig');
+    writeFileSync(globalExcludes, 'global-secret.txt\n');
+    execFileSync('git', ['config', '--file', globalConfig, 'core.excludesFile', globalExcludes]);
+    writeFileSync(join(root, 'global-secret.txt'), 'do not review\n');
+    writeFileSync(join(root, 'app.ts'), 'reviewable change\n');
+
+    const r = review(root, { ...env, GIT_CONFIG_GLOBAL: globalConfig }, '--base', 'main');
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(logPath(r.stderr), 'utf8')).toContain('GLOBAL_EXCLUDES_OK');
+  });
+
   it('rejects review guards that are not installed commit guards', () => {
     const { root, env } = seedReviewRepo();
     const cfgPath = join(root, '.devkit/config.json');
