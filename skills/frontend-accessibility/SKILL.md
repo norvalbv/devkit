@@ -25,14 +25,13 @@ node $SCRIPT status       # Show progress
 node $SCRIPT check-item <name> --pass   # Mark item passed
 node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
 node $SCRIPT finalize     # Verify every item was resolved; refuses if any are pending or failed
-if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then node $SCRIPT cleanup; fi
+node $SCRIPT cleanup      # Remove checklist
 node $SCRIPT contrast "#foreground" "#background"  # Check color contrast ratio
 ```
 
 The frontend roots the script scans come from `guard.config.json` `review.frontendRoots` — not
 hardcoded. When that key is absent it scans all staged files; a present-but-invalid value warns
-and falls back to scanning all. `devkit review` orchestration may inject effective roots through
-`DEVKIT_REVIEW_FRONTEND_ROOTS`; that validated JSON array takes precedence.
+and falls back to scanning all.
 
 ## Structure & Semantics
 

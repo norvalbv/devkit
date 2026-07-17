@@ -296,6 +296,7 @@ export function wrapPrompt(
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
+    'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
     'A diffstat is on stdin. INVESTIGATE before judging: run `git diff --cached -- <file>` to read ' +
     'the actual staged hunks, and Read surrounding code where a hunk alone is ambiguous.\n' +
     'The reviewer brief owns checklist enumeration and the exact generate/check/finalize commands. ' +

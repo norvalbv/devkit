@@ -15,13 +15,12 @@ node $SCRIPT status       # Show progress
 node $SCRIPT check-item <name> --pass   # Mark item passed
 node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
 node $SCRIPT finalize     # Verify every item was resolved; refuses if any are pending or failed
-if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then node $SCRIPT cleanup; fi
+node $SCRIPT cleanup      # Remove checklist
 ```
 
 The backend roots the script scans come from `guard.config.json` `review.backendRoots` — not
 hardcoded. When that key is absent it scans all staged files; a present-but-invalid value warns
-and falls back to scanning all. `devkit review` injects the gate's effective roots through
-`DEVKIT_REVIEW_BACKEND_ROOTS`; that validated JSON array takes precedence.
+and falls back to scanning all.
 
 Each section below is one checklist item (or a small group). Rules name the evidence to grep for
 and the condition that makes the item a FAIL — pass anything that doesn't meet a FAIL bar. Judge

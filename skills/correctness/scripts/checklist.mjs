@@ -240,6 +240,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(ACTIVE_PATH)) {
     unlinkSync(ACTIVE_PATH);
     log('🗑️  Removed correctness checklist');

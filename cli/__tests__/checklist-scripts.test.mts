@@ -22,6 +22,16 @@ const REVIEW_ROOT_CASES = [
   ['frontend-accessibility', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-accessibility-review.json'],
 ] as const;
 
+const CHECKLIST_CASES = [
+  ['api-security', '.api-security-review.json'],
+  ['backend-performance', '.backend-performance-review.json'],
+  ['commit-guard', '.pre-commit-review.json'],
+  ['correctness', '.correctness-review.json'],
+  ['frontend-accessibility', '.frontend-accessibility-review.json'],
+  ['frontend-performance', '.frontend-performance-review.json'],
+  ['frontend-security', '.frontend-security-review.json'],
+] as const;
+
 const dirs = [];
 afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
@@ -93,6 +103,36 @@ describe('skill checklist script (spawned source)', () => {
     const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
     expect(state.files ?? state.items).not.toHaveLength(0);
     expect(JSON.stringify(state)).not.toContain('outside/ignored.tsx');
+  });
+
+  it.each(
+    CHECKLIST_CASES,
+  )('%s preserves its artifact for independent review-mode verification', (skill, stateName) => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-review-cleanup-'));
+    dirs.push(repo);
+    const stateDir = join(repo, '.claude');
+    const stateFile = join(stateDir, stateName);
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(stateFile, '{}');
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+
+    const reviewCleanup = spawnSync('node', [script, 'cleanup'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_RUN_MODE: 'review' },
+    });
+    expect(reviewCleanup.status, reviewCleanup.stderr).toBe(0);
+    expect(existsSync(stateFile)).toBe(true);
+
+    const normalCleanup = spawnSync('node', [script, 'cleanup'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
+    });
+    expect(normalCleanup.status, normalCleanup.stderr).toBe(0);
+    expect(existsSync(stateFile)).toBe(false);
   });
 
   it('correctness unions scanRoots with injected domain roots outside the static topology', () => {

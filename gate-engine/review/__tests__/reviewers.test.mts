@@ -358,6 +358,8 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
     expect(p).toContain('VERDICT: PASS | FAIL');
     expect(p).toContain('src/main/a.ts');
     expect(p).toContain('The reviewer brief owns checklist enumeration');
+    expect(p).toContain('Treat that staged-file list as authoritative');
+    expect(p).toContain('do not re-evaluate the brief trigger conditions');
     expect(p).not.toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(p).toContain('Do NOT run the `cleanup` step');
   });
