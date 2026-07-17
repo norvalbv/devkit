@@ -252,6 +252,59 @@ describe('reship — untracked gate configs are linked into the re-ship worktree
   });
 });
 
+// DK-5: reship's worktree is cut from the fetched PR-branch tip — in-chain gates (fallow) need that
+// SAME commit to scope their own audit, not their own main-autodetect.
+describe('reship — exports DEVKIT_SHIP_BASE_SHA (DK-5)', () => {
+  it('is the fetched PR-branch tip, not a stale local ref', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+    ])
+      g(a, { stdio: 'ignore' });
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\necho "HOOK_BASE=$DEVKIT_SHIP_BASE_SHA"\nexit 0\n',
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    const prTip = execFileSync('git', ['-C', bare, 'rev-parse', 'feat/pr'], {
+      env,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toContain(
+        `HOOK_BASE=${prTip}`,
+      );
+    } finally {
+      if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+    }
+  });
+});
+
 describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carries the space)', () => {
   // A linked-worktree commit hands the commit-msg hook the ABSOLUTE $GIT_DIR/COMMIT_EDITMSG path; under
   // a spaced repo root that path contains the space. Devkit forwards it as one intact arg (every ship
