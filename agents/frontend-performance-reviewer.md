@@ -79,6 +79,13 @@ For each item the checklist enumerated:
 - useEffect dependencies correct
 - State lifted appropriately
 
+**Runtime rendering cost:**
+- No forced reflow on hot paths: layout reads (getBoundingClientRect, offsetWidth/Height,
+  getComputedStyle) not interleaved with writes, in loops, or in scroll/resize handlers without
+  batching (layout-thrash)
+- Frequent/interactive animations use transform/opacity, not layout properties
+  (top/left/width/height/margin) (animation-performance)
+
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
