@@ -10,9 +10,10 @@ It imports the judge pieces **from the gate** (`buildPrompt`, `shouldJudge`, `bu
 
 ## SEED corpus (`cases.jsonl`) — replace it with your own
 
-`cases.jsonl` ships a **103-case** starter set derived from real commits (paths/subjects are
-illustrative). It is a **dev-only seed, not data the gate reads at runtime** — the gate never touches
-it. Copy it into your repo and add your own **real commit subjects** for a meaningful score, then
+`cases.jsonl` ships a **127-case** starter set — 104 derived from real commits (paths/subjects are
+illustrative) plus 23 authored `elimination` rows covering the fix-that-removes-a-silent-class tier
+(14 SKIP eliminations + 9 MONITOR traps; slice them out via `category` to score the real-derived set
+alone). It is a **dev-only seed, not data the gate reads at runtime** — the gate never touches it. Copy it into your repo and add your own **real commit subjects** for a meaningful score, then
 regenerate a baseline (`--baseline`). **No `results.baseline.json` ships** — it is yours to generate.
 
 ## Run
@@ -36,7 +37,8 @@ model — the rest free-skip with zero tokens, exactly like the gate. Budget the
 Pick the **cheapest cell that clears the F1 target**:
 
 ```bash
-BENCH_CONTEXT=message node bench.mjs   # message-only (default)
+BENCH_CONTEXT=diff    node bench.mjs   # message + focused staged diff (default — matches the gate)
+BENCH_CONTEXT=message node bench.mjs   # message-only
 BENCH_CONTEXT=names   node bench.mjs   # message + changed-file list
 BENCH_MODEL=haiku  ... ;  BENCH_MODEL=sonnet ...   # cheapest model that clears target
 BENCH_SHOTS=0 ... ;  BENCH_SHOTS=4 ...             # confirm the few-shot lift (arXiv 2605.02033)
@@ -51,12 +53,14 @@ Whatever wins becomes the gate's env defaults (`GUARD_SENTRY_MODEL` / `GUARD_SEN
 One JSON object per line:
 
 ```json
-{ "id": "...", "message": "<commit subject>", "nameStatus": "M\tpath\nA\tpath", "expected": "MONITOR|SKIP", "category": "...", "note": "..." }
+{ "id": "...", "message": "<commit subject>", "nameStatus": "M\tpath\nA\tpath", "diff": "<unified staged diff>", "expected": "MONITOR|SKIP", "category": "...", "note": "..." }
 ```
 
 - `message` — the commit subject (the gate's primary signal).
 - `nameStatus` — optional `git diff --cached --name-status` text, so the `names` tier is benchmarkable
   offline. Omit for trivial free-skip rows (they never reach the model).
+- `diff` — optional unified staged diff; only the `diff` tier reads it. Required for any row whose
+  label depends on what the diff shows (self-clear captures, eliminations, multisurface gaps).
 - `expected` — the ground-truth label. Keep these **deliberately reviewed**; the borderline rows
   (`feat`→SKIP pure-UI, `perf`→MONITOR db-write) are what pin precision.
 

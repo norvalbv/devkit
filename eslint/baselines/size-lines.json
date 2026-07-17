@@ -4,6 +4,7 @@
     "cli/commands/doctor.mts": 891,
     "cli/commands/init.mts": 1477,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
+    "cli/lib/husky/husky-block.mts": 524,
     "cli/lib/overlay.mts": 561,
     "gate-engine/co-occurrence/matcher.mts": 543,
     "gate-engine/critique/eval/bench.mts": 1177,
@@ -14,6 +15,6 @@
     "gate-engine/review/eval/bench.mts": 878,
     "gate-engine/review/eval/conventions/bench.mts": 988,
     "gate-engine/review/eval/reviewers/bench.mts": 977,
-    "gate-engine/review/run-review.mts": 623
+    "gate-engine/review/run-review.mts": 642
   }
 }
