@@ -87,12 +87,28 @@ function seedLocalSettings(root, obj) {
   writeFileSync(join(root, '.claude', 'settings.local.json'), JSON.stringify(obj));
 }
 
+// Unlike the ship-branch/reship/reconcile suites (which spawn devkit as a SUBPROCESS and isolate git
+// via an explicit `env: GENV` per call), this file calls `applyInit`/`overlay.mts` IN-PROCESS — so
+// its internal `execFileSync('git', …)` calls (e.g. installHealAlias's `alias.ci` collision check)
+// inherit whatever `process.env` already is, not anything this test passes per-call. A developer
+// machine with its OWN global `git ci` alias already set makes that check correctly (and
+// deliberately — see overlay.mts) skip installing devkit's self-heal alias, which then reads as a
+// false failure here. Isolate the whole process for the file's duration, restored after, so the
+// suite is deterministic regardless of the host's real ~/.gitconfig.
+const ORIGINAL_GIT_CONFIG_GLOBAL = process.env.GIT_CONFIG_GLOBAL;
+const ORIGINAL_GIT_CONFIG_SYSTEM = process.env.GIT_CONFIG_SYSTEM;
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
+  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+  process.env.GIT_CONFIG_SYSTEM = '/dev/null';
 });
 afterEach(() => {
   vi.restoreAllMocks();
   cleanup();
+  if (ORIGINAL_GIT_CONFIG_GLOBAL === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+  else process.env.GIT_CONFIG_GLOBAL = ORIGINAL_GIT_CONFIG_GLOBAL;
+  if (ORIGINAL_GIT_CONFIG_SYSTEM === undefined) delete process.env.GIT_CONFIG_SYSTEM;
+  else process.env.GIT_CONFIG_SYSTEM = ORIGINAL_GIT_CONFIG_SYSTEM;
 });
 
 describe('overlay (local-only) install', () => {
