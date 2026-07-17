@@ -78,10 +78,16 @@ For each item the checklist enumerated:
   request. FAIL and name the stable key it should use (e.g. `orgId:window`). Same for a cache
   whose write path and read path compute DIFFERENT keys.
 
+**Caching (lifetime):**
+- Module-scope Map/Set/object caches have eviction (TTL/LRU/max size) or a bounded lifecycle —
+  per-request growth with no eviction is a slow leak (unbounded-cache)
+
 **Async:**
 - Heavy work offloaded to queues
 - Proper async/await usage
 - No blocking operations
+- No sync fs/process calls (readFileSync, execSync, …) on request-serving paths — module init,
+  CLI, and test code get latitude (sync-io)
 
 **API Response:**
 - Reasonable payload sizes
