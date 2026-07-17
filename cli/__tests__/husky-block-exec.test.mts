@@ -211,3 +211,94 @@ describe('assembled hook — shell/OS variants', () => {
     expect(r.calls).toContain('guard-deterministic --hook');
   });
 });
+
+// ── commit-terminal telemetry ──────────────────────────────────────────────────────────────
+// The hook is the only process that knows the whole chain's outcome, so it emits the
+// `commit_result` terminal for the every-commit telemetry run (run-context.mts contract).
+// These run the ASSEMBLED hook inside a real temp git repo so `git write-tree` correlates.
+describe('commit-terminal telemetry (real temp git repo)', () => {
+  function runHookInRepo(env = {}, selection = { biome: false, guards: ALL_GUARDS }) {
+    const home = mkdtempSync(join(tmpdir(), 'dk-hook-terminal-'));
+    homes.push(home);
+    const repo = join(home, 'consumer-repo');
+    mkdirSync(repo, { recursive: true });
+    execFileSync('git', ['init', '-q', '-b', 'my-branch'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    // An initial commit so `git rev-parse --abbrev-ref HEAD` resolves the branch NAME (an unborn
+    // branch resolves to the literal "HEAD"; a real consumer repo always has commits).
+    writeFileSync(join(repo, 'init.txt'), 'init\n');
+    execFileSync('git', ['add', 'init.txt'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+    writeFileSync(join(repo, 'a.txt'), 'staged\n');
+    execFileSync('git', ['add', 'a.txt'], { cwd: repo });
+    const tree = execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim();
+    const bin = join(home, '.bun', 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, 'bunx'),
+      '#!/bin/sh\ntool="$1"; shift\ncase "$tool" in\n  guard-deterministic) exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n',
+    );
+    chmodSync(join(bin, 'bunx'), 0o755);
+    const hookPath = join(home, 'pre-commit');
+    writeFileSync(hookPath, buildFullHook(selection));
+    const sink = join(home, 'events.jsonl');
+    let status = 0;
+    // vitest.setup exports DEVKIT_NO_TELEMETRY=1 suite-wide (ordinary tests must never write a
+    // developer's live telemetry) — strip it here: THESE tests point the sink at a temp file and
+    // exist precisely to prove the capture, so inheriting the suite opt-out would no-op them.
+    const hookEnv = { ...process.env, HOME: home, PATH: '/usr/bin:/bin', DEVKIT_GATE_EVENTS: sink };
+    delete hookEnv.DEVKIT_NO_TELEMETRY;
+    delete hookEnv.DEVKIT_SHIP_ID;
+    Object.assign(hookEnv, env);
+    try {
+      execFileSync('sh', ['-e', hookPath], {
+        cwd: repo,
+        env: hookEnv,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      status = e.status;
+    }
+    let events = [];
+    if (existsSync(sink))
+      events = readFileSync(sink, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
+    return { status, events, tree };
+  }
+
+  it('a passing chain emits ONE commit_result correlated to the staged write-tree', () => {
+    const r = runHookInRepo();
+    expect(r.status).toBe(0);
+    const terminals = r.events.filter((e) => e.type === 'commit_result');
+    expect(terminals.length).toBe(1);
+    const t = terminals[0];
+    expect(t.ship_id).toBe(`commit-${r.tree}`); // same id the gates' run-context derives
+    expect(t.run_mode).toBe('commit');
+    expect(t.exit_code).toBe(0);
+    expect(t.repo).toBe('consumer-repo');
+    expect(t.branch).toBe('my-branch');
+    expect(typeof t.duration_s).toBe('number');
+    expect(t.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it('a gate-blocked chain (deterministic exit 1) emits commit_result exit_code 1', () => {
+    const r = runHookInRepo({ DET_RC: '1' });
+    expect(r.status).toBe(1);
+    const t = r.events.filter((e) => e.type === 'commit_result');
+    expect(t.length).toBe(1);
+    expect(t[0].exit_code).toBe(1);
+  });
+
+  it('inside a ship (DEVKIT_SHIP_ID set) the hook stays silent — ship_result is that terminal', () => {
+    const r = runHookInRepo({ DEVKIT_SHIP_ID: 'some-ship' });
+    expect(r.status).toBe(0);
+    expect(r.events.filter((e) => e.type === 'commit_result').length).toBe(0);
+  });
+
+  it('DEVKIT_NO_TELEMETRY opts the terminal out with the capture itself', () => {
+    const r = runHookInRepo({ DEVKIT_NO_TELEMETRY: '1' });
+    expect(r.status).toBe(0);
+    expect(r.events.filter((e) => e.type === 'commit_result').length).toBe(0);
+  });
+});
