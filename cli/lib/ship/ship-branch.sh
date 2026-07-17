@@ -293,6 +293,16 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
   PR_NUM=${PR_URL##*/}
   [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
+  # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
+  # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
+  # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
+  # the DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS that the sourced commit-with-gate-capture.sh exported;
+  # best-effort (`|| true`) so telemetry can never fail a ship. pr_number is a bare JSON number, else null.
+  if [ -n "${DEVKIT_GATE_EVENTS:-}" ] && [ -n "${DEVKIT_SHIP_ID:-}" ]; then
+    printf '{"type":"ship_pr","ship_id":"%s","pr_url":"%s","pr_number":%s,"ts":"%s"}\n' \
+      "$DEVKIT_SHIP_ID" "$PR_URL" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  fi
 fi
 
 # Record what shipped the instant the PUSH succeeded — independent of `gh pr create` — so `devkit
