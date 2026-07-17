@@ -702,6 +702,31 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(remoteBranchExists(bare, 'feat/ok')).toBe(true);
   });
 
+  // The ship emits a ship_pr telemetry line tying its ship_id to the PR it opened, so the usage
+  // tracker links a ship row straight to its PR without a gh-by-branch lookup.
+  it('emits a ship_pr telemetry event with the opened PR url + number, correlated to the ship_id', () => {
+    const { dir, env } = seedShipRepoLocalRemote();
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+    const stubBin = ghStub('echo "https://github.com/acme/app/pull/42"');
+    const sink = join(dir, 'events.jsonl');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ok', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${process.env.PATH}`, DEVKIT_GATE_EVENTS: sink },
+    });
+    expect(r.status, r.stderr).toBe(0);
+
+    const events = readFileSync(sink, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const attempt = events.find((e) => e.type === 'ship_attempt');
+    const prEvent = events.find((e) => e.type === 'ship_pr');
+    expect(prEvent).toBeTruthy();
+    expect(prEvent.pr_url).toBe('https://github.com/acme/app/pull/42');
+    expect(prEvent.pr_number).toBe(42); // a bare JSON number, not a string
+    expect(prEvent.ship_id).toBe(attempt.ship_id); // same attempt the gate events correlate under
+  });
+
   // A 0-exit `gh pr create` that prints no parseable URL (e.g. it writes the URL to stderr) must NOT be
   // mistaken for the create-failure path: the ship still succeeds and cleans up, recording pr:null —
   // which reconcile self-heals via its `gh pr view <branch>` lookup. Guards the exit-code vs
