@@ -41,7 +41,7 @@ const readPkg = (root) => JSON.parse(read(join(root, 'package.json')));
 const devkitRef = (root) => readPkg(root).devDependencies[DEP];
 
 // A doctor-clean component-lib repo on the given agent surface(s). Defaults to claude-only.
-function initFixture(extraFlags = ['--no-cursor']) {
+function initFixture(extraFlags = ['--no-cursor', '--no-codex']) {
   const root = tmpRepo(CLIB_PKG);
   const r = run(root, 'init', '--stack', 'component-lib', '--yes', '--agent-hooks', ...extraFlags);
   expect(r.status, r.stderr || r.stdout).toBe(0);
@@ -77,7 +77,7 @@ function driftFirstSkill(root) {
 
 describe('devkit upgrade — full reconcile (component-lib repro)', () => {
   it('one invocation → doctor-clean: re-pins, bumps devkitRef, re-syncs, no .cursor re-added', () => {
-    const root = initFixture(['--no-cursor']); // claude-only
+    const root = initFixture(); // claude-only
     driftRepo(root);
     driftFirstSkill(root);
 
@@ -89,12 +89,13 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(config(root).devkitRef).toBe(`v${V}`);
     // consumer opt-out survived the config rewrite (2c).
     expect(config(root).configOverrides).toEqual(['tsconfig.json']);
-    // claude-only honoured — no .cursor surface created.
+    // claude-only honoured — no other fresh-default surface created.
     expect(existsSync(join(root, '.cursor'))).toBe(false);
+    expect(existsSync(join(root, '.codex'))).toBe(false);
   });
 
   it('is idempotent: a second upgrade writes nothing and stays clean', () => {
-    const root = initFixture(['--no-cursor']);
+    const root = initFixture();
     driftRepo(root);
     run(root, 'upgrade');
 
@@ -107,7 +108,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
   });
 
   it('--dry-run writes nothing (stale pin unchanged) and skips the verify', () => {
-    const root = initFixture(['--no-cursor']);
+    const root = initFixture();
     driftRepo(root);
     const before = read(join(root, 'package.json'));
 
@@ -119,7 +120,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
   });
 
   it('infers a claude-only surface from disk when agentTargets is absent (legacy config)', () => {
-    const root = initFixture(['--no-cursor']);
+    const root = initFixture();
     const cfg = config(root);
     delete cfg.components.agentTargets; // simulate a pre-agentTargets config
     writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
@@ -127,6 +128,7 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(existsSync(join(root, '.cursor'))).toBe(false); // not re-added
+    expect(existsSync(join(root, '.codex'))).toBe(false); // fresh default not back-filled
   });
 
   it('does NOT add structure-lint to a legacy config that never recorded/wired it', () => {

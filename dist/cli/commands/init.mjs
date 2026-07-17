@@ -179,9 +179,10 @@ function selectionFromFlags(flags) {
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-    // Codex is explicit because its project hook config requires user trust review.
+    // All supported providers are fresh-install defaults. --codex remains a backwards-compatible
+    // no-op for callers that adopted the former opt-in flag; --no-codex is the canonical opt-out.
     sel.agentTargets = DEFAULT_AGENT_TARGETS.filter((t) => !flags.no.has(t));
-    if (flags.codex && !flags.no.has('codex'))
+    if (flags.codex && !flags.no.has('codex') && !sel.agentTargets.includes('codex'))
         sel.agentTargets.push('codex');
     return sel;
 }
@@ -1135,7 +1136,8 @@ Usage:
                          --no-structure --no-guards --no-fallow.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
                          qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
-  --no-claude/--no-cursor  Narrow defaults; --codex adds Codex hooks (requires \`/hooks\` trust).
+  --no-claude/--no-cursor/--no-codex  Narrow the default Claude + Cursor + Codex surfaces.
+  --codex                Backwards-compatible no-op (Codex is now a default target).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).

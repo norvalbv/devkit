@@ -1,6 +1,6 @@
 /**
  * `devkit sync-hooks` — copy devkit's bundled agent-hook scripts (agents-hooks/*) into the consumer's
- * .claude/hooks (+ .cursor/hooks, opt-in .codex/hooks) and write
+ * the selected Claude, Cursor, and Codex hook-script trees and write
  * .devkit/agent-hooks-manifest.json, so a hook like
  * decision-stop-check.sh is SOURCED from devkit + drift-tracked (like skills/agents) instead of
  * authored per-repo. Parallel to `sync-skills`/`sync-agents`, with two additions they don't need:
@@ -14,9 +14,10 @@
  * REGISTRATION-FREE: writes the hook FILES + manifest only. Unlike `devkit init`, it does NOT touch
  * settings.json hook wiring — the consumer owns their registrations (e.g. keeps knip off the Stop event).
  *
- *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor,codex>] [--dry-run] [--force]
  */
 import { join } from 'node:path';
+import { resolveExistingAgentTargets } from "../../lib/agent-targets.mjs";
 import { AGENT_TARGETS, DEFAULT_AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { readJson } from "../../lib/fs-helpers.mjs";
@@ -33,16 +34,15 @@ function listFlag(args, name) {
 }
 export const meta = {
     name: 'sync-hooks',
-    summary: 'Copy devkit agent-hook scripts into .claude/hooks + write the manifest (registration-free).',
-    help: `devkit sync-hooks — copy devkit's agent-hook scripts into .claude/hooks (+ .cursor/hooks;
-opt-in .codex/hooks) and
+    summary: 'Copy devkit agent-hook scripts into selected provider surfaces (registration-free).',
+    help: `devkit sync-hooks — copy devkit's agent-hook scripts into selected provider surfaces and
 write .devkit/agent-hooks-manifest.json (sha256 per file) so doctor can tell which side drifted.
 
 Usage:
   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor,codex>] [--dry-run] [--force]
 
 --only     sync just the named hooks (incremental per-hook adoption; ADDS to the owned set).
---targets  surfaces to write (claude|cursor|codex); default = recorded targets or claude,cursor.
+--targets  surfaces to write (claude|cursor|codex); default = recorded targets or all three for a new repo.
 --force    overwrite a hook you diverged from devkit's (default PRESERVES yours).
 
 Registration-free: writes the hook FILES + manifest only; your settings.json hook wiring stays yours.`,
@@ -51,7 +51,10 @@ export default function run(args, cwd) {
     const { gitRoot } = detectGitRoot(cwd);
     const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
     const only = listFlag(args, '--only');
-    const targets = listFlag(args, '--targets') ?? cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS;
+    const targets = listFlag(args, '--targets') ??
+        (cfg
+            ? resolveExistingAgentTargets(gitRoot, cfg.components?.agentTargets, ['hooks'])
+            : DEFAULT_AGENT_TARGETS);
     const bad = targets.filter((t) => !AGENT_TARGETS.includes(t));
     if (bad.length) {
         console.error(`sync-hooks --targets: unknown surface ${bad.join(', ')} (use ${AGENT_TARGETS.join('|')})`);

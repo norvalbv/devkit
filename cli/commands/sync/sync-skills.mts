@@ -1,6 +1,6 @@
 /**
- * `devkit sync-skills` — copy devkit's bundled skills into the consumer's .claude/skills
- * and .cursor/skills trees, recursively (SKILL.md + references/ + scripts/). Replaces the
+ * `devkit sync-skills` — copy devkit's bundled skills into the consumer's selected Claude,
+ * Cursor, and Codex skill trees, recursively (SKILL.md + references/ + scripts/). Replaces the
  * `npx skills add` flow (buggy for private repos): skills ship INSIDE the package, so the
  * source is always devkit's own packageDir()/skills, never a network fetch.
  *
@@ -10,6 +10,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { resolveExistingAgentTargets } from '../../lib/agent-targets.mts';
 import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
@@ -46,8 +47,8 @@ interface SyncOpts {
 /**
  * Sync devkit's bundled skills into the consumer's agent surfaces + write the manifest.
  *
- * `cwd` is the consumer root. `targets` are the agent surfaces to write to (default both — see
- * AGENT_TARGETS).
+ * `cwd` is the consumer root. `targets` are the agent surfaces to write to (all providers for a
+ * fresh or unconfigured invocation).
  *
  * `skipTracked` (overlay-only): a skill `<name>/` whose dir git already TRACKS in any target is
  * skipped wholesale (not written, not manifested, warned) — `.git/info/exclude` can't hide an edit
@@ -147,7 +148,7 @@ export function syncSkills(
 /**
  * The consumer's OWN skills that collide with a devkit-bundled name (on disk, unmanifested, content
  * diverges from the bundle) — what an interactive `devkit init` lists for the user to pick from.
- * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
+ * `root` is the git root; `targets` are the surfaces to check (all by default). Returns colliding
  * skill names.
  */
 export function detectSkillConflicts(
@@ -168,8 +169,8 @@ export function detectSkillConflicts(
 
 export const meta = {
   name: 'sync-skills',
-  summary: 'Copy bundled skills into .claude/skills + .cursor/skills.',
-  help: `devkit sync-skills — copy devkit's bundled skills into .claude/skills + .cursor/skills.
+  summary: 'Copy bundled skills into the selected Claude, Cursor, and Codex surfaces.',
+  help: `devkit sync-skills — copy devkit's bundled skills into the selected agent surfaces.
 
 Usage:
   devkit sync-skills [--dry-run] [--force]
@@ -187,6 +188,9 @@ export default function run(args: string[], cwd: string): number {
   // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
   // per-asset picker is `devkit init` interactive only).
   const override = args.includes('--force') ? () => true : undefined;
-  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
+  const targets = cfg
+    ? resolveExistingAgentTargets(gitRoot, cfg.components?.agentTargets, ['skills'])
+    : DEFAULT_AGENT_TARGETS;
+  syncSkills(args, gitRoot, targets, { override });
   return 0;
 }

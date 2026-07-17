@@ -5,7 +5,7 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 
 | Half      | What                                                                       | How consumers get it |
 | --------- | -------------------------------------------------------------------------- | -------------------- |
-| **AGENT** | `skills/` + `agents/` — Claude/Cursor skills + reviewer/testing subagents; Codex opt-in | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
+| **AGENT** | `skills/` + `agents/` — Claude, Cursor, and Codex skills + reviewer/testing subagents | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
 | **CODE**  | shared **configs** (Biome, tsconfig) + the portable **gate-engine**        | `bun add -D git+https://github.com/norvalbv/devkit.git#<tag>` |
 
 ## Reference
@@ -125,9 +125,11 @@ the selection in `.devkit/config.json` (so `doctor` knows what to check). Monore
 package-scoped block). Full flags, components, and removal: `devkit help init`. Verify the wiring
 anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
 
-Claude and Cursor remain the default agent targets. Add `--codex` to install Codex-native
-`.agents/skills`, `.codex/agents`, and merged `.codex/hooks.json` entries; Codex requires reviewing
-and approving project hook definitions in `/hooks` before they run.
+Claude, Cursor, and Codex are equal default agent targets for new installs. Use `--no-claude`,
+`--no-cursor`, or `--no-codex` to narrow them; the legacy `--codex` flag remains accepted as a no-op.
+Existing installations keep their recorded target set during upgrade and repair. Codex-native
+`.agents/skills`, `.codex/agents`, and selected `.codex/hooks.json` entries are installed for new
+defaults, but project hooks remain inactive until you review and approve their definitions in `/hooks`.
 
 When agent hooks are selected, finalized plan critiques are captured fail-open under
 `~/.devkit/evidence/plan-critiques/v1/`; runtime hooks do not write provider or working-tree

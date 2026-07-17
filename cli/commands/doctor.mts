@@ -10,9 +10,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveExistingAgentTargets } from '../lib/agent-targets.mts';
 import {
+  AGENT_TARGETS,
   agentSurfaceDir,
-  DEFAULT_AGENT_TARGETS,
   RECOMMENDED_GUARD_IDS,
   type Selection,
 } from '../lib/components.mts';
@@ -514,7 +515,12 @@ function repairExtends(path: string, expected: string): boolean {
 
 // Turn a recorded component selection into the init flag list that reproduces it, so
 // `--fix` re-runs init for the RECORDED selection (not the all-on --yes default).
-function selectionFlags(sel: Partial<Selection>): string[] {
+function selectedAgentTargets(cwd: string, recorded?: string[]): string[] {
+  const { gitRoot } = detectGitRoot(cwd);
+  return resolveExistingAgentTargets(gitRoot, recorded);
+}
+
+function selectionFlags(cwd: string, sel: Partial<Selection>): string[] {
   const flags = ['--yes'];
   const toggles: (keyof Selection)[] = ['biome', 'tsconfig', 'skills', 'husky', 'structure'];
   for (const id of toggles) {
@@ -523,10 +529,10 @@ function selectionFlags(sel: Partial<Selection>): string[] {
   if (!sel.guards?.length) flags.push('--no-guards');
   else flags.push('--guards', sel.guards.join(','));
   // Preserve the recorded agent-surface choice so --fix never re-adds a deselected surface.
-  for (const t of DEFAULT_AGENT_TARGETS) {
-    if (sel.agentTargets && !sel.agentTargets.includes(t)) flags.push(`--no-${t}`);
+  const surfaces = selectedAgentTargets(cwd, sel.agentTargets);
+  for (const target of AGENT_TARGETS) {
+    if (!surfaces.includes(target)) flags.push(`--no-${target}`);
   }
-  if (sel.agentTargets?.includes('codex')) flags.push('--codex');
   return flags;
 }
 
@@ -571,7 +577,7 @@ function applyFix(
   const HOOK_CHECKS = new Set(['.husky/pre-commit', '.husky/commit-msg', 'structure-lint']);
   const huskyDrift = results.some((r) => HOOK_CHECKS.has(r.name) && r.status !== 'OK');
   if (needsInit || huskyDrift) {
-    const args = ['init', '--stack', stack, ...selectionFlags(sel)];
+    const args = ['init', '--stack', stack, ...selectionFlags(cwd, sel)];
     // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).
     if (standalone) args.push('--standalone');
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), ...args], {
@@ -688,7 +694,7 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   }
   // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
   const sel: Partial<Selection> = cfg?.components ?? {};
-  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
+  const surfaces = selectedAgentTargets(cwd, sel.agentTargets);
   const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
@@ -756,7 +762,7 @@ async function runSelfHostDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): 
 
   // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
   const sel: Partial<Selection> = cfg.components ?? {};
-  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
+  const surfaces = selectedAgentTargets(cwd, sel.agentTargets);
   const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
@@ -809,7 +815,7 @@ async function collectResults(
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
   // Synced content is identical across selected surfaces, so one representative is sufficient.
-  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
+  const surfaces = selectedAgentTargets(cwd, sel.agentTargets);
   const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
   if (sel.skills && primarySurface) results.push(await checkSkills(cwd, primarySurface));
   if (sel.agents && primarySurface) results.push(await checkAgents(cwd, primarySurface));

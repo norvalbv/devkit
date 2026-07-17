@@ -10,7 +10,7 @@
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
 import { AGENT_TARGETS, COMPONENTS, DEFAULT_AGENT_TARGETS, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS, } from "./components.mjs";
-// The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
+// The components that sync into an agent surface (.claude / .cursor / .codex). Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
 // Components OFFERED in OVERLAY mode (no package): the agent-half + the biome extend. Excludes
@@ -143,29 +143,32 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
             selection.structure = false;
     }
     // Agent surface(s): asked whenever something syncs into a provider surface (every mode now does). A
-    // repo that uses only one tool picks just that surface → no redundant copy in the other's dir. A
-    // single SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only"
-    // require actively DESELECTing Cursor — easy to miss, so both got installed. Radio = explicit intent.
+    // repo that uses fewer tools can narrow the all-provider default. A single SELECT (radio), not a
+    // multiselect: pre-checked surfaces make narrowing easy to miss. Radio = explicit intent.
     selection.agentTargets = [...DEFAULT_AGENT_TARGETS];
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         const surface = await select({
             message: 'Sync skills/agents/hooks to which agent surface(s)?',
             options: [
-                { value: 'both', label: 'Claude + Cursor', hint: 'current default' },
-                { value: 'all', label: 'All three', hint: 'adds Codex + hook trust review' },
+                {
+                    value: 'all',
+                    label: 'Claude + Cursor + Codex',
+                    hint: 'default; Codex hooks need trust review',
+                },
+                { value: 'both', label: 'Claude + Cursor', hint: 'exclude Codex' },
                 { value: 'claude', label: 'Claude only', hint: '.claude/' },
                 { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
                 { value: 'codex', label: 'Codex only', hint: '.agents/ + .codex/' },
             ],
-            initialValue: 'both',
+            initialValue: 'all',
         });
         if (bail(surface))
             return null;
         selection.agentTargets =
-            surface === 'both'
+            surface === 'all'
                 ? [...DEFAULT_AGENT_TARGETS]
-                : surface === 'all'
-                    ? [...AGENT_TARGETS]
+                : surface === 'both'
+                    ? AGENT_TARGETS.filter((target) => target !== 'codex')
                     : [surface];
     }
     // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook). The
@@ -224,7 +227,11 @@ function summarize(mode, selection, structureAvailable, deselected) {
     const guards = selection.guards ?? [];
     if (mode === 'overlay') {
         const g = guards.length ? ` (${guards.join(', ')})` : '';
-        const surfaces = (selection.agentTargets ?? AGENT_TARGETS).join(', ');
+        const selectedTargets = selection.agentTargets ?? DEFAULT_AGENT_TARGETS;
+        const surfaces = selectedTargets.join(', ');
+        const hookFiles = selectedTargets
+            .map((target) => target === 'claude' ? '.claude/settings.local.json' : `.${target}/hooks.json`)
+            .join(' + ');
         const on = (id) => (selection[id] ? '✓' : '·');
         return [
             'overlay — everything git-ignored, nothing committed:',
@@ -232,7 +239,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
             '✓ local hook → chains to the repo’s own',
             `${on('biome')} biome overlay (extends the repo, staged files)`,
             `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
-            `${on('agentHooks')} agent hooks → .claude/settings.local.json + .cursor/hooks.json (if untracked)`,
+            `${on('agentHooks')} agent hooks → ${hookFiles} (if untracked; Codex hooks need trust review)`,
             `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
         ].join('\n');
     }

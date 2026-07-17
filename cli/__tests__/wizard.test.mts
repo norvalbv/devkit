@@ -1,6 +1,6 @@
 /**
  * Wizard agent-surface selection. Regression for: "I only selected claude but .cursor hooks also
- * got installed." The picker used to be a multiselect pre-checking BOTH surfaces, so choosing
+ * got installed." The picker used to be a multiselect pre-checking surfaces, so choosing
  * Claude without DESELECTing Cursor left both on. It's now a single SELECT — "Claude only" maps to
  * exactly ['claude'], and the apply layer must then write nothing under .cursor.
  */
@@ -57,6 +57,7 @@ describe('wizard agent-surface selection', () => {
     ['claude', ['claude']],
     ['cursor', ['cursor']],
     ['both', ['claude', 'cursor']],
+    ['all', ['claude', 'cursor', 'codex']],
   ])('select "%s" → agentTargets %j', async (surface, expected) => {
     setAnswers(surface);
     const r = await runWizard(WIZ_OPTS);

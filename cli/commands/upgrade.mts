@@ -26,11 +26,9 @@ import {
   LINE_CAP,
   previewGrandfather,
 } from '../../gate-engine/ratchets/size-disable.mts';
+import { resolveExistingAgentTargets } from '../lib/agent-targets.mts';
 import {
-  AGENT_TARGETS,
-  agentSurfaceDir,
   applyOverlayConstraints,
-  DEFAULT_AGENT_TARGETS,
   GUARD_OPTIONS,
   newBundledGates,
   normalizeSelection,
@@ -113,16 +111,11 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   const standalone = Boolean(cfg.standalone);
   const { gitRoot } = detectGitRoot(cwd);
 
-  // agentTargets: normalizeSelection ALWAYS fills this (both surfaces), so read the RAW recorded
+  // agentTargets: normalizeSelection ALWAYS fills the fresh defaults, so read the RAW recorded
   // value first — else a legacy claude-only repo gets .cursor re-added. When absent (legacy config),
-  // infer from which surfaces currently hold devkit content; fall back to both.
+  // infer from which surfaces currently hold devkit content; otherwise retain the legacy pair.
   const rawTargets = cfg.components?.agentTargets;
-  const inferred = AGENT_TARGETS.filter(
-    (t) =>
-      existsSync(join(gitRoot, agentSurfaceDir(t, 'skills'))) ||
-      existsSync(join(gitRoot, agentSurfaceDir(t, 'agents'))),
-  );
-  const agentTargets = rawTargets ?? (inferred.length ? inferred : DEFAULT_AGENT_TARGETS);
+  const agentTargets = resolveExistingAgentTargets(gitRoot, rawTargets, ['skills', 'agents']);
 
   // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
   // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the

@@ -153,7 +153,7 @@ export function syncHookScripts(
  * The consumer's OWN agent-hook scripts that collide with a devkit-bundled name (on disk,
  * unmanifested, divergent) — what an interactive `devkit init` lists for the user to pick from.
  * @param {string} root git root
- * @param {string[]} [targets] surfaces to check (default both)
+ * @param {string[]} [targets] surfaces to check (default all supported providers)
  * @returns {string[]} colliding hook-script filenames
  */
 export function detectHookConflicts(
@@ -277,7 +277,7 @@ function addCursor(
 
 /**
  * Install (merge) the hook registrations for the selected components into the selected agent
- * surfaces (default both).
+ * surfaces (default all supported providers).
  *
  * @param {string} root the git root (hooks are repo-wide, like skills/agents)
  * @param {string[]} componentIds selected components that own hook registrations
@@ -354,7 +354,7 @@ export function installHookRegistrations(
       if (!dryRun) writeIfAbsent(codexPath, `${JSON.stringify(codex, null, 2)}\n`, { force: true });
       wrote.push(codexRel);
       console.log(
-        '  ! Codex project hooks require trust review: open `/hooks` and approve the installed definitions.',
+        `  ! ${codexRel} contains project commands that remain inactive until you open \`/hooks\`, review them, and approve their exact definitions.`,
       );
     }
   }

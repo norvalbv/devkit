@@ -20,7 +20,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, agentSurfaceDir, applyOverlayConstraints, DEFAULT_AGENT_TARGETS, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
+import { resolveExistingAgentTargets } from "../lib/agent-targets.mjs";
+import { applyOverlayConstraints, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
@@ -74,13 +75,11 @@ export default async function upgrade(args, cwd) {
     const stack = cfg.stack ?? detectStack(cwd);
     const standalone = Boolean(cfg.standalone);
     const { gitRoot } = detectGitRoot(cwd);
-    // agentTargets: normalizeSelection ALWAYS fills this (both surfaces), so read the RAW recorded
+    // agentTargets: normalizeSelection ALWAYS fills the fresh defaults, so read the RAW recorded
     // value first — else a legacy claude-only repo gets .cursor re-added. When absent (legacy config),
-    // infer from which surfaces currently hold devkit content; fall back to both.
+    // infer from which surfaces currently hold devkit content; otherwise retain the legacy pair.
     const rawTargets = cfg.components?.agentTargets;
-    const inferred = AGENT_TARGETS.filter((t) => existsSync(join(gitRoot, agentSurfaceDir(t, 'skills'))) ||
-        existsSync(join(gitRoot, agentSurfaceDir(t, 'agents'))));
-    const agentTargets = rawTargets ?? (inferred.length ? inferred : DEFAULT_AGENT_TARGETS);
+    const agentTargets = resolveExistingAgentTargets(gitRoot, rawTargets, ['skills', 'agents']);
     // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
     // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
     // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive

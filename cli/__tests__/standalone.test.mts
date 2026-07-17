@@ -75,9 +75,10 @@ describe('standalone (no-package) install', () => {
     expect(hooksPath).toBe('.husky');
 
     // config records standalone so doctor skips the pin / package checks
-    expect(JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8')).standalone).toBe(
-      true,
-    );
+    const cfg = JSON.parse(readFileSync(join(root, '.devkit/config.json'), 'utf8'));
+    expect(cfg.standalone).toBe(true);
+    expect(cfg.components.agentTargets).toEqual(['claude', 'cursor', 'codex']);
+    expect(existsSync(join(root, '.codex/agents/feature-critique.md'))).toBe(true);
   });
 
   it('doctor --fix on a standalone repo: no phantom package dep, config deltas preserved', async () => {

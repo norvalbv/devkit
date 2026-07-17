@@ -490,10 +490,18 @@ describe('overlay (local-only) install', () => {
 
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
     expect(existsSync(join(root, '.cursor', 'agents'))).toBe(true);
+    expect(existsSync(join(root, '.agents', 'skills'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'agents'))).toBe(true);
     expect(existsSync(join(root, '.devkit', 'skills-manifest.json'))).toBe(true);
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).components
+        .agentTargets,
+    ).toEqual(['claude', 'cursor', 'codex']);
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.claude/skills/');
     expect(exclude).toContain('.cursor/agents/');
+    expect(exclude).toContain('.agents/skills/');
+    expect(exclude).toContain('.codex/agents/');
     // INVISIBLE: every synced file is excluded → status stays clean
     expect(
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
@@ -658,7 +666,7 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     // devkit created settings.local.json + it's now empty after stripping → removed (no footprint)
     expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(false);
-    // exclude pruned of EVERY devkit line — no orphans (skills/agents/hooks/settings/fallow, both surfaces)
+    // exclude pruned of EVERY devkit line — no provider/settings/fallow orphans
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     for (const line of [
       '.claude/skills/',

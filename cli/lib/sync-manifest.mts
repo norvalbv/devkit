@@ -3,7 +3,7 @@
  * devkit's vs the consumer's." Two halves:
  *   - FORWARD (sync-time): `findConflicts`/`matchesBundle`/`ownedNames` tell the sync step which
  *     same-named asset the consumer authored (preserve) vs devkit's own (overwrite).
- *   - REVERSE (uninstall): remove the devkit-synced files a manifest records (from .claude + .cursor)
+ *   - REVERSE (uninstall): remove manifest-recorded files from selected provider surfaces
  *     and drop the manifest; the no-manifest fallback reuses the SAME ownership signal so it never
  *     deletes a preserved user asset. Shared by `init`/`init --remove-deselected`/`clean`. `root` is
  *     the git root (skills + agents are repo-wide), = cwd for a single-package repo.
@@ -202,7 +202,7 @@ export function removeManifested(
 /**
  * @param root git root
  * @param dryRun
- * @param targets surfaces to remove from (default both)
+ * @param targets surfaces to remove from (default all supported providers)
  * @param dropManifest also delete the manifest (default true — a full uninstall)
  */
 export function removeSkills(

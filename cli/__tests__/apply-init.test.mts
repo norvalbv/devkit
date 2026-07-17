@@ -18,7 +18,7 @@ const fallowSpies = vi.hoisted(() => ({
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mts';
-import { defaultSelection, normalizeSelection } from '../lib/components.mts';
+import { defaultSelection, existingAgentTargets, normalizeSelection } from '../lib/components.mts';
 import { selfHostSelection } from '../lib/husky/self-host.mts';
 import { readConfig as config, tmpRepos } from './_helpers.mts';
 
@@ -75,19 +75,37 @@ describe('selection helpers', () => {
     expect(sel.guards).toEqual(['fanout']);
   });
 
-  it('agentTargets: both by default, narrowed by --no-claude / --no-cursor', () => {
-    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual(['claude', 'cursor']);
+  it('agentTargets: all providers by default, narrowed by --no-*', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual([
+      'claude',
+      'cursor',
+      'codex',
+    ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-cursor'])).agentTargets).toEqual([
       'claude',
+      'codex',
     ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
       'cursor',
+      'codex',
     ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-codex'])).agentTargets).toEqual([
+      'claude',
+      'cursor',
+    ]);
+    // Backwards-compatible opt-in flag is idempotent now that Codex is already a default.
     expect(selectionFromFlags(parseFlags(['--yes', '--codex'])).agentTargets).toEqual([
       'claude',
       'cursor',
       'codex',
     ]);
+  });
+
+  it('existing provider resolution preserves records, infers legacy surfaces, then falls back', () => {
+    expect(existingAgentTargets(['codex'])).toEqual(['codex']);
+    expect(existingAgentTargets([], ['claude', 'cursor', 'codex'])).toEqual([]);
+    expect(existingAgentTargets(undefined, ['claude'])).toEqual(['claude']);
+    expect(existingAgentTargets()).toEqual(['claude', 'cursor']);
   });
 
   it('fallow is OPT-IN: off by default, on with --fallow, off again with --no-fallow', () => {
@@ -169,7 +187,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(config(root).components.agentTargets).toEqual(['claude']);
   });
 
-  it('Codex is opt-in and uses Codex-native project directories', async () => {
+  it('Codex-only narrowing uses Codex-native project directories', async () => {
     const root = tmpRepo();
     await applyInit(root, {
       stack: 'generic',

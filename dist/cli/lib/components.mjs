@@ -25,11 +25,19 @@ export const RECOMMENDED_GUARD_IDS = [
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`), Cursor
- * (`.cursor/`), and opt-in Codex (`.agents/skills` + `.codex/agents|hooks`). Claude + Cursor remain
- * the default so an upgrade never grows a new provider directory without explicit selection.
+ * (`.cursor/`), and Codex (`.agents/skills` + `.codex/agents|hooks`). All three are equal defaults
+ * for NEW installs. Existing installs resolve their recorded/inferred set through
+ * `existingAgentTargets`, so changing the fresh default never grows a provider directory on repair.
  */
 export const AGENT_TARGETS = ['claude', 'cursor', 'codex'];
-export const DEFAULT_AGENT_TARGETS = ['claude', 'cursor'];
+export const DEFAULT_AGENT_TARGETS = [...AGENT_TARGETS];
+export const LEGACY_AGENT_TARGETS = ['claude', 'cursor'];
+/** Preserve an existing install's explicit/inferred surfaces; missing legacy state falls back to
+ * the historical Claude + Cursor pair, never the broader fresh-install default. */
+export function existingAgentTargets(recorded, inferred = []) {
+    const source = recorded ?? (inferred.length ? inferred : LEGACY_AGENT_TARGETS);
+    return [...new Set(source.filter((target) => AGENT_TARGETS.includes(target)))];
+}
 export function agentSurfaceDir(target, kind) {
     if (target === 'codex' && kind === 'skills')
         return '.agents/skills';
@@ -54,7 +62,7 @@ export const COMPONENTS = [
     {
         id: 'skills',
         label: 'Agent skills',
-        hint: 'sync to Claude/Cursor; Codex opt-in',
+        hint: 'sync to Claude, Cursor, and Codex by default',
         recommended: true,
     },
     {
@@ -71,7 +79,7 @@ export const COMPONENTS = [
     },
     {
         id: 'agentHooks',
-        label: 'Agent hooks (Claude/Cursor; Codex opt-in)',
+        label: 'Agent hooks (selected provider surfaces)',
         hint: 'lifecycle hooks: plan evidence, decision nudge, rule recall, format-after-edit, QA, compaction',
         recommended: false,
     },

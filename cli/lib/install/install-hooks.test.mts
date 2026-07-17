@@ -1,7 +1,7 @@
 /**
  * install-hooks tests — the agent-hook registration installer (Claude settings.json +
- * Cursor hooks.json). All IO runs against a real tmp repo (à la install-fallow.test.mjs).
- * console.log is silenced. Covers: merge shape, both surfaces, idempotency (re-run does not
+ * Cursor/Codex hooks.json). All IO runs against a real tmp repo (à la install-fallow.test.mjs).
+ * console.log is silenced. Covers: merge shape, default surfaces, idempotency (re-run does not
  * duplicate), preservation of a foreign hook, the Cursor event mapping, and removal.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe('installHookRegistrations', () => {
-  it('writes both surfaces for searchSteering (PreToolUse guard + PostToolUse counter)', () => {
+  it('writes all default surfaces and explains Codex trust', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['searchSteering']);
     const cmds = claudeCommands(root);
@@ -52,6 +52,9 @@ describe('installHookRegistrations', () => {
     const cur = cursor(root).hooks;
     expect(cur.beforeShellExecution).toHaveLength(1);
     expect(cur.afterShellExecution).toHaveLength(1);
+    expect(codex(root).hooks.PreToolUse).toHaveLength(1);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('remain inactive'));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('/hooks'));
   });
 
   it('registers plan evidence plus the existing agent hooks across provider events', () => {

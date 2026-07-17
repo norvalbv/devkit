@@ -1,6 +1,6 @@
 /**
  * `devkit sync-agents` — copy devkit's bundled agent definitions (agents/*.md) into the
- * consumer's .claude/agents + .cursor/agents trees. Parallel to `sync-skills`: agents ship
+ * consumer's selected Claude, Cursor, and Codex agent trees. Parallel to `sync-skills`: agents ship
  * INSIDE the package (same repo, same tag as the gate-engine an agent's review skill drives),
  * so the source is always devkit's own packageDir()/agents, never a network fetch.
  *
@@ -10,6 +10,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveExistingAgentTargets } from '../../lib/agent-targets.mts';
 import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
@@ -43,7 +44,7 @@ interface SyncOpts {
  * Sync devkit's bundled agents into the consumer's agent surfaces + write the manifest.
  *
  * `cwd` is the consumer root (the git root — agents are repo-wide, like skills). `targets` are the
- * agent surfaces to write to (default both — see AGENT_TARGETS).
+ * agent surfaces to write to (all providers for a new/unrecorded invocation).
  *
  * `skipTracked` (overlay-only): an agent `.md` git already TRACKS in any target is skipped (not
  * written, not manifested, warned) — C2. `override(kind, name)` (default never): an agent that
@@ -124,7 +125,7 @@ export function syncAgents(
 /**
  * The consumer's OWN agents that collide with a devkit-bundled name (on disk, unmanifested, divergent)
  * — what an interactive `devkit init` lists for the user to pick from. `root` is the git root;
- * `targets` are the surfaces to check (default both). Returns colliding agent filenames.
+ * `targets` are the surfaces to check (all by default). Returns colliding agent filenames.
  */
 export function detectAgentConflicts(
   root: string,
@@ -143,8 +144,8 @@ export function detectAgentConflicts(
 
 export const meta = {
   name: 'sync-agents',
-  summary: 'Copy review/testing agents into .claude + .cursor.',
-  help: `devkit sync-agents — copy devkit's review/testing agents into .claude/agents + .cursor/agents.
+  summary: 'Copy review/testing agents into selected Claude, Cursor, and Codex surfaces.',
+  help: `devkit sync-agents — copy devkit's review/testing agents into selected agent surfaces.
 
 Usage:
   devkit sync-agents [--dry-run] [--force]
@@ -160,6 +161,9 @@ export default function run(args: string[], cwd: string): number {
   const { gitRoot } = detectGitRoot(cwd);
   const cfg: DevkitConfig | null = readJson(join(gitRoot, '.devkit', 'config.json'));
   const override = args.includes('--force') ? () => true : undefined;
-  syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
+  const targets = cfg
+    ? resolveExistingAgentTargets(gitRoot, cfg.components?.agentTargets, ['agents'])
+    : DEFAULT_AGENT_TARGETS;
+  syncAgents(args, gitRoot, targets, { override });
   return 0;
 }

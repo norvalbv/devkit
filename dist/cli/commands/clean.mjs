@@ -14,7 +14,8 @@ import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { purgePlanCritiqueBindings } from "../../gate-engine/critique/evidence-bindings.mjs";
 import { purgePlanCritiqueEvidence } from "../../gate-engine/critique/evidence-store.mjs";
-import { AGENT_TARGETS, agentSurfaceDir, DEFAULT_AGENT_TARGETS } from "../lib/components.mjs";
+import { resolveExistingAgentTargets } from "../lib/agent-targets.mjs";
+import { AGENT_TARGETS, agentSurfaceDir } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { isTracked } from "../lib/git-tracked.mjs";
@@ -145,7 +146,7 @@ function cleanOverlay(cwd, cfg, dryRun) {
     // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
     // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
     const comp = cfg.components ?? {};
-    const targets = comp.agentTargets ?? DEFAULT_AGENT_TARGETS;
+    const targets = resolveExistingAgentTargets(gitRoot, comp.agentTargets);
     if (comp.skills)
         removeSkills(gitRoot, dryRun, targets);
     if (comp.agents)
@@ -254,9 +255,9 @@ function cleanPackage(cwd, cfg, dryRun) {
     }
     // The managed commit-msg block (review/sentry judges) — silent no-op when never installed.
     removeCommitMsgBlock(gitRoot, cfg.pkgRel ?? '', dryRun);
-    // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
+    // skills + agents: remove the devkit-SYNCED files (per each manifest) from selected providers,
     // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
-    const targets = cfg.components?.agentTargets ?? DEFAULT_AGENT_TARGETS;
+    const targets = resolveExistingAgentTargets(gitRoot, cfg.components?.agentTargets);
     removeSkills(gitRoot, dryRun, targets);
     removeAgents(gitRoot, dryRun, targets);
     // agent-hook scripts + the hook registrations they wrote.

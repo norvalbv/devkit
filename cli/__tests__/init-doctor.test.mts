@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
@@ -36,6 +36,11 @@ describe('init --yes (all recommended)', () => {
       'qavis-advisory',
     ]);
     expect(cfg.components.structure).toBe(false);
+    expect(cfg.components.agentTargets).toEqual(['claude', 'cursor', 'codex']);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.agents/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/feature-critique.md'))).toBe(true);
   });
 
   it('is idempotent: a second run reports "already wired", writes no new files', () => {
@@ -54,6 +59,24 @@ describe('init --yes (all recommended)', () => {
     expect(r.status).toBe(0);
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
     expect(existsSync(join(root, '.devkit/config.json'))).toBe(false);
+  });
+
+  it('doctor --fix infers a legacy provider set instead of adding fresh defaults', () => {
+    const root = tmpRepo();
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--no-cursor', '--no-codex').status,
+    ).toBe(0);
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = config(root);
+    delete cfg.components.agentTargets;
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    rmSync(join(root, '.husky', 'pre-commit'));
+
+    const fixed = devkit(root, 'doctor', '--fix');
+    expect(fixed.status, fixed.stderr || fixed.stdout).toBe(1);
+    expect(config(root).components.agentTargets).toEqual(['claude']);
+    expect(existsSync(join(root, '.cursor'))).toBe(false);
+    expect(existsSync(join(root, '.codex'))).toBe(false);
   });
 
   it('generic stack wires no structure-lint (no --structure arg on the deterministic line)', () => {
