@@ -30,6 +30,18 @@ export function telemetryEnabled(): boolean {
   return !truthy(process.env.DEVKIT_NO_TELEMETRY);
 }
 
+/**
+ * The agent that triggered this run, inferred from its env fingerprint so ship/commit telemetry can
+ * be filtered by originator downstream. Claude Code exports CLAUDECODE=1; the Codex sandbox exports
+ * CODEX_* (CODEX_HOME / CODEX_CLI_PATH). Neither (e.g. a plain terminal, CI) → 'unknown'. The env is
+ * inherited through git→husky→node, so it is visible in every in-chain gate process.
+ */
+export function originatingAgent(): 'claude' | 'codex' | 'unknown' {
+  if (truthy(process.env.CLAUDECODE)) return 'claude';
+  if (process.env.CODEX_HOME || process.env.CODEX_CLI_PATH) return 'codex';
+  return 'unknown';
+}
+
 /** The telemetry JSONL sink: the ship's DEVKIT_GATE_EVENTS, else the every-commit default, else none. */
 export function telemetrySink(): string | undefined {
   return (
@@ -83,13 +95,16 @@ export function runId(): string | null {
  * Fields stamped onto every emitted event so the collector can correlate — and, for a commit run,
  * synthesise a run row: `run_mode` + repo + branch ride the gate events themselves. A ship omits
  * those (its ship_attempt already carries repo/branch); `ship_id` is the correlation key either way.
+ * Every non-silent envelope also carries `source` — the originating agent — so a downstream reader
+ * can attribute each ship/commit to Claude vs Codex.
  */
 export function runEnvelope(): Record<string, unknown> {
+  const source = originatingAgent();
   const ship = process.env.DEVKIT_SHIP_ID;
-  if (ship) return { ship_id: ship };
+  if (ship) return { ship_id: ship, source };
   const ctx = telemetryEnabled() ? commitRunContext() : null;
   if (!ctx) return {}; // capture off (or not a git repo) — emit is a no-op anyway (no sink + no id)
-  return { ship_id: ctx.id, run_mode: 'commit', repo: ctx.repo, branch: ctx.branch };
+  return { ship_id: ctx.id, run_mode: 'commit', repo: ctx.repo, branch: ctx.branch, source };
 }
 
 /** Test seam: drop the memoised commit context so a test can switch git state between assertions. */
