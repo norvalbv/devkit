@@ -118,7 +118,8 @@ Plus: right-reason split, live escalation count + mean opus seconds, inconclusiv
 `--fail` = floors + a per-row **flip table vs baseline** under two-sided mid-p McNemar (p<0.05
 with net-negative flips). Rows discordant with the baseline are re-run once; a flip counts only
 when 2-of-2 confirmed. Baselines are keyed `<reviewer>@<model>@<cascade>` and embed
-`gateHash` (run-review.mts + reviewers.mts + brief + checklist + SKILL.md — the brief IS gate
+`gateHash` (run-review.mts + reviewers.mts + corpus.mts (the fixture layer hashes its own
+source) + brief + checklist + SKILL.md — the brief IS gate
 code, and SKILL.md ships into fixtures) + `corpusHash`; any mismatch **skips** comparison loudly
 instead of lying. Regenerate with
 `--baseline` after deliberate changes. Even at this size (53 domain rows; 66 correctness) each
@@ -213,9 +214,9 @@ Point estimates on the 66-row corpus (38 gold / 28 decoys). K=1 + 66 rows = trip
 
 ## Cost (concurrency 2)
 
-The domain pool is 48 rows; the `correctness` cohort is 66 (single-pass haiku, no escalation). Run
+The domain pool is 53 rows; the `correctness` cohort is 66 (single-pass haiku, no escalation). Run
 one reviewer at a time during a hunt — the numbers below are the 48-row domain pool; a full `all`
-run is ~114 rows. A budget line prints before any token is spent; every run appends one to `runs.log`.
+run is ~119 rows. A budget line prints before any token is spent; every run appends one to `runs.log`.
 
 | run | config | wall-clock |
 |---|---|---|
@@ -225,3 +226,35 @@ run is ~114 rows. A budget line prints before any token is spent; every run appe
 | domain production baseline | sonnet, cascade-on | ~1.5–2 h |
 | domain haiku sweep | haiku, cascade-on | ~1–1.5 h |
 | domain opus sweep | opus, cascade-on | ~2.5–3 h |
+
+## Results history
+
+Every entry is a full cascade-on run at the production first-pass model (haiku); rates are
+`k/n` with the run's Wilson 95% interval in `runs.log`. Single-run (K=1) unless noted — treat
+per-cell numbers as tripwires, the paired flip column as the finding.
+
+### 2026-07-17 — licensed-source catalog refresh (PR #97)
+
+BEFORE = origin/main catalogs (frozen worktree, 48 rows) · AFTER = PR #97 catalogs + 5 new gold
+rows (53 rows). Paired per-row join on the 48 shared ids: **zero flips**.
+
+| reviewer | block recall | clean-pass | first-pass recall | first-pass clean |
+|---|---|---|---|---|
+| api-security | 6/6 → **8/8** | 6/6 → 6/6 | 6/6 → 8/8 | 4/6 → 5/6 |
+| backend-performance | 6/6 → **7/7** | 5/6 → 5/6 | 6/6 → 7/7 | 5/6 → 3/6 |
+| frontend-security | 6/6 → **7/7** | 6/6 → 6/6 | 6/6 → 7/7 | 6/6 → 6/6 |
+| frontend-performance | 6/6 → **7/7** | 6/6 → 6/6 | 6/6 → 7/7 | 5/6 → 6/6 |
+| **pooled** | 24/24 → **29/29** | 23/24 → 23/24 | 24/24 → 29/29 | 20/24 → 20/24 |
+
+Notes:
+- The 5 added golds (one per flagship new item) also passed a K=2 slim proof: both runs
+  `first=FAIL final=fail (escalated) [right-item]` for every row.
+- The one clean-pass miss is `beperf-nplusone-statement-loop-fixed` — false-blocked, opus-
+  confirmed, **in both states** (pre-existing calibration, tracked as sc-1148).
+- backend-performance first-pass clean 5/6→3/6 is cost-only (opus overturns; end-to-end
+  unchanged) and within single-run judge nondeterminism (between-run agreement 0.55–0.77).
+- Mid-development the A/B caught a real regression this refresh introduced: the rewritten
+  frontend-performance SKILL.md softened the memoize-expensive-computation bar and
+  `feperf-sku-rank-per-render` went caught → stable-missed (2-of-2); the bar was sharpened and
+  the row recovered 2-of-2 (final re-baseline 13/13).
+- Corpus growth toward absolute-recall claims (≥25 rows/reviewer, mined-real, K=3) is sc-1147.

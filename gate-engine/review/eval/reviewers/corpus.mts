@@ -107,6 +107,9 @@ export function benchGateHash(reviewer) {
     [
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
+      // This module IS the fixture layer (FIXTURE_CONFIG, buildAssets) — hash its own source so a
+      // fixture-behavior edit can never be compared against an incompatible baseline.
+      readFileSync(fileURLToPath(import.meta.url), 'utf8'),
       readFileSync(path.join(repoRoot, 'agents', `${reviewer.name}.md`), 'utf8'),
       readFileSync(
         path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),

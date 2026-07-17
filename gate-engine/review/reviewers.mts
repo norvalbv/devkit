@@ -202,6 +202,10 @@ function underRoot(file: string, root: string): boolean {
   return file === r || file.startsWith(`${r}/`);
 }
 
+// Mirrors the prose exclusion inside each skill's checklist.mjs getStagedFiles — the two lists
+// must agree or a prose-only selection strands the judge with an empty checklist.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
+
 /**
  * Which reviewers must run for this staged set → [{reviewer, files}]. Backend/frontend trigger on
  * ANY staged file under their roots (matching the old husky HAS_BACKEND/HAS_FRONTEND semantics);
@@ -214,6 +218,11 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
   return REVIEWERS.map((reviewer) => {
     const roots = rootsFor(reviewer, cfg);
     let files = stagedFiles.filter((f) => roots.some((r) => underRoot(f, r)));
+    // Backend/frontend judges read code diffs, and their checklist scripts skip prose files
+    // outright — selecting a reviewer for a prose-only diff strands its judge with an empty
+    // checklist (scored inconclusive, fail-closed under ship). Keep selection and script agreed.
+    if (reviewer.domain === 'backend' || reviewer.domain === 'frontend')
+      files = files.filter((f) => !RE_PROSE_FILE.test(f));
     // code + all trigger only on SOURCE files: a staged JSON/doc is neither a duplication nor a
     // correctness concern.
     if (reviewer.domain === 'code' || reviewer.domain === 'all')
