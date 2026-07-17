@@ -10,10 +10,13 @@
  * network/db/fs/native/IPC failure handled without crashing. Those never reach a handler unless the
  * code calls captureException explicitly. This nudges the author at commit time.
  *
- * WARN-BY-DEFAULT — like every devkit judge gate, the LLM never CREATES a block. There is no
- * deterministic floor for "should be monitored", so a nondeterministic MONITOR must not be the sole
- * creator of a hard stop (a false MONITOR would train reflexive bypass → dead gate). MONITOR warns
- * (exit 0) and appends to the watchlist; *_SENTRY_HARD=1 escalates a confident MONITOR to exit 1.
+ * HARD-BY-DEFAULT — a confident MONITOR blocks (exit 1) unless softened for one run with
+ * *_SENTRY_HARD=0. The warn channel measured structurally dark in the consumer (frink: 18 unseen
+ * MONITOR verdicts in 17 days) and the 2026-07-12 Target rules all judge gates hard by default —
+ * the exit code is the only channel that reliably reaches a headless agent. The block stays
+ * bounded: `effectiveHard` degrades an empty-staged-diff run (amend/--allow-empty) to warn +
+ * watchlist, an ambiguous/split vote never blocks, and hard mode votes a 3-sample majority (the
+ * confidence contract).
  *
  * Lives in the `commit-msg` hook, NOT pre-commit: the message only exists once git has it (passed as
  * the message-file path); pre-commit can't see it on interactive commits.
@@ -43,8 +46,9 @@
  *
  * Knobs (read GUARD_* first, then FRINK_* as a back-compat alias):
  *   NO_SENTRY_JUDGE=1 (skip) · SENTRY_NO_LLM=1 (skip — can't judge without the LLM) ·
- *   SENTRY_HARD=1 (MONITOR→block) · SENTRY_MODEL (default haiku) ·
- *   SENTRY_CONTEXT=message|names|diff (default diff, focused) · SENTRY_SAMPLES=N (default 1) ·
+ *   SENTRY_HARD (default ON — =0 softens a confident MONITOR to warn) · SENTRY_MODEL (default haiku) ·
+ *   SENTRY_CONTEXT=message|names|diff (default diff, focused) ·
+ *   SENTRY_SAMPLES=N (default 3 when hard, 1 when warn) ·
  *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd) ·
  *   SENTRY_DIFF_FULL=1 (feed the whole diff, not just error-handling hunks — A/B).
  *
@@ -66,7 +70,7 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from '../config.mts';
+import { envBool, resolveGuardConfig } from '../config.mts';
 import { focusHunks } from '../judge/diff-focus.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
@@ -100,7 +104,13 @@ interface SentryJudgeOpts {
 const CWD = process.cwd();
 
 const MODEL = envVar('SENTRY_MODEL') ?? 'haiku';
-const SAMPLES = Number(envVar('SENTRY_SAMPLES') ?? '1') || 1;
+
+/** Samples follow the confidence contract: a run that can BLOCK votes a 3-sample majority;
+ * warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
+export function resolveSamples(hard: boolean): number {
+  const env = Number(envVar('SENTRY_SAMPLES') ?? '');
+  return env > 0 ? env : hard ? 3 : 1;
+}
 // Default = diff, FOCUSED (see buildContext/focusDiff). The eval (gate-engine/sentry/eval, 103 cases)
 // picked it: haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; precision ~0.90) vs message 0.46/0.71
 // (F1 0.56 — message flags every already-instrumented swallow). Focusing to error-handling hunks beats
@@ -307,7 +317,7 @@ function runJudgeOnce(input: string, model: string, prompt: string): SentryRun |
  */
 export function judge(
   input: string,
-  { model = MODEL, samples = SAMPLES, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
+  { model = MODEL, samples = 1, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
 ): SentryVerdict | null {
   if (envVar('SENTRY_NO_LLM') || !String(input).trim()) return null;
   try {
@@ -462,12 +472,16 @@ export function run(gate: boolean): void {
     }
     const nameStatus = CONTEXT_TIER === 'names' ? stagedNameStatus() : '';
     const diff = CONTEXT_TIER === 'diff' ? stagedDiff() : '';
-    const result = judge(buildContext(message, nameStatus, diff, CONTEXT_TIER));
+    // Hard-by-default (envBool distinguishes unset → hard from an explicit =0 soften); resolve it
+    // BEFORE judging so the samples default can follow it. Report mode never blocks → warn tier.
+    const hard = gate && effectiveHard(envBool('SENTRY_HARD') ?? true, CONTEXT_TIER, diff);
+    const result = judge(buildContext(message, nameStatus, diff, CONTEXT_TIER), {
+      samples: resolveSamples(hard),
+    });
     if (!gate) {
       console.log(reportLine(result));
       process.exit(0);
     }
-    const hard = effectiveHard(Boolean(envVar('SENTRY_HARD')), CONTEXT_TIER, diff);
     process.exit(applyGateResult(result, message, hard));
   } catch (e: unknown) {
     const detail = e instanceof Error ? e.message : String(e);
