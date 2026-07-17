@@ -79,7 +79,7 @@ export function loadRows(reviewer, { dev = false, only = null } = {}) {
  * and the skill's SKILL.md (the brief's workflow sends the judge there for the detailed rules;
  * consumers always have it synced, so a fixture without it under-equips the judge). All read from
  * the repo source of truth (agents/, skills/) — bench and gate share one copy, so a brief/
- * checklist/SKILL edit is automatically what gets measured.
+ * checklist/SKILL/shared-support edit is automatically what gets measured.
  */
 export function buildAssets(reviewer) {
   const brief = readFileSync(path.join(repoRoot, 'agents', `${reviewer.name}.md`), 'utf8');
@@ -88,10 +88,12 @@ export function buildAssets(reviewer) {
     'utf8',
   );
   const skillMd = path.join(repoRoot, 'skills', reviewer.skill, 'SKILL.md');
+  const reviewRootsHelper = path.join(repoRoot, 'skills', '_devkit', 'review-roots.mjs');
   const assets = {
     'guard.config.json': `${JSON.stringify(FIXTURE_CONFIG, null, 2)}\n`,
     [`.claude/agents/${reviewer.name}.md`]: brief,
     [checklistScript(reviewer)]: script,
+    '.claude/skills/_devkit/review-roots.mjs': readFileSync(reviewRootsHelper, 'utf8'),
   };
   if (existsSync(skillMd))
     assets[`.claude/skills/${reviewer.skill}/SKILL.md`] = readFileSync(skillMd, 'utf8');
@@ -99,8 +101,8 @@ export function buildAssets(reviewer) {
 }
 
 /** gateHash: everything whose edit invalidates comparability — the cascade source, the pure gate
- * logic, and the reviewer's own brief + checklist + SKILL.md (the brief IS gate code, and
- * SKILL.md ships into fixtures, so its edits change what the judge reads). */
+ * logic, and the reviewer's own brief + checklist + SKILL.md + shared checklist support (the brief
+ * IS gate code, and every listed asset ships into fixtures, so its edits change execution). */
 export function benchGateHash(reviewer) {
   const skillMd = path.join(repoRoot, 'skills', reviewer.skill, 'SKILL.md');
   return sha12(
@@ -115,6 +117,7 @@ export function benchGateHash(reviewer) {
         path.join(repoRoot, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
         'utf8',
       ),
+      readFileSync(path.join(repoRoot, 'skills', '_devkit', 'review-roots.mjs'), 'utf8'),
       existsSync(skillMd) ? readFileSync(skillMd, 'utf8') : '',
     ].join('\n\x00\n'),
   );

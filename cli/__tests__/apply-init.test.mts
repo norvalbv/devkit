@@ -270,6 +270,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
       devkitRef: 'v0.3.0',
     });
     expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.claude/skills/_devkit/review-roots.mjs'))).toBe(true);
     expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
     expect(config(root).components.agentTargets).toEqual(['claude']);
   });

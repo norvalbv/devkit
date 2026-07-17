@@ -20,10 +20,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, win32 } from 'node:path';
+import { dirname } from 'node:path';
+import { isNonEmptyStringArray, parseInjectedReviewRoots } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
-const PATH_SEPARATOR_RE = /[\\/]/u;
 
 const RE_LEADING_DOT = /^\./;
 const RE_TEST_INFIX = /\.(test|spec)\./;
@@ -48,33 +48,6 @@ const lensPath = (lens) => (lens ? `.claude/.correctness-review-${lens}.json` : 
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
-
-function injectedReviewRoots(name) {
-  const raw = process.env[name];
-  if (raw === undefined) return null;
-  let roots;
-  try {
-    roots = JSON.parse(raw);
-  } catch {
-    throw new Error(`${name} must be a JSON string array`);
-  }
-  const normalized = Array.isArray(roots)
-    ? roots.map((root) => (typeof root === 'string' ? root.trim() : root))
-    : roots;
-  if (
-    !isStringArray(normalized) ||
-    normalized.length === 0 ||
-    normalized.some(
-      (root) =>
-        isAbsolute(root) || win32.isAbsolute(root) || root.split(PATH_SEPARATOR_RE).includes('..'),
-    )
-  )
-    throw new Error(`${name} must be a non-empty JSON array of repository-relative paths`);
-  return normalized;
-}
-
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
 // ANY repo's layout. No/unreadable config or no declared roots → all staged files (the gate
 // never silently no-ops). A PRESENT but invalid value warns loudly and is ignored (the other
@@ -88,8 +61,8 @@ function unionRoots() {
   }
   if (!c || typeof c !== 'object') return ['.'];
   const review = typeof c.review === 'object' && c.review !== null ? c.review : {};
-  const backend = injectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS') ?? review.backendRoots;
-  const frontend = injectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS') ?? review.frontendRoots;
+  const backend = parseInjectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS') ?? review.backendRoots;
+  const frontend = parseInjectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS') ?? review.frontendRoots;
   const roots = new Set();
   for (const [label, value] of [
     ['scanRoots', c.scanRoots],
@@ -97,7 +70,7 @@ function unionRoots() {
     ['review.frontendRoots', frontend],
   ]) {
     if (value === undefined) continue;
-    if (!isStringArray(value)) {
+    if (!isNonEmptyStringArray(value)) {
       console.error(
         `⚠️  correctness: ignoring invalid \`${label}\` in guard.config.json (expected an array of non-empty strings).`,
       );
@@ -112,7 +85,7 @@ function unionRoots() {
 function sourceExtensions() {
   try {
     const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-    if (isStringArray(c?.sourceExtensions)) return c.sourceExtensions;
+    if (isNonEmptyStringArray(c?.sourceExtensions)) return c.sourceExtensions;
   } catch {
     /* defaults stand */
   }

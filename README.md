@@ -146,6 +146,10 @@ anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
 - `decisionsDir` tells the decisions gate where local decision Markdown lives; it does not store
   decision records in the config file.
 
+This installation profile is intentionally separate from `guard.config.json`'s `review` object,
+which describes the target repository's backend/frontend topology. The distinction is also called
+out in `guard.config.example.json` and every emitted stack template.
+
 Run `devkit review [--target <trusted-worktree>] [--base <ref>]`. It executes the selected gates in
 an ephemeral worktree without committing, pushing, calling GitHub, or changing the target checkout.
 Review-mode ESLint and Fallow runs establish an ephemeral baseline from the resolved merge-base and

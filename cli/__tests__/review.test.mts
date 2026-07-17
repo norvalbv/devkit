@@ -139,6 +139,7 @@ describe('devkit review', () => {
         'test -n "$DEVKIT_REVIEW_ASSET_ROOT"',
         'test -f "$DEVKIT_REVIEW_ASSET_ROOT/agents/api-security-reviewer.md"',
         'test -f "$DEVKIT_REVIEW_ASSET_ROOT/skills/api-security/SKILL.md"',
+        'test -f "$DEVKIT_REVIEW_ASSET_ROOT/skills/_devkit/review-roots.mjs"',
         'case "$DEVKIT_REVIEW_ASSET_ROOT" in *" "*) exit 9;; esac',
         'echo REVIEW_ASSETS_OK',
         'exit 0',

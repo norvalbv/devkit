@@ -11,6 +11,8 @@ import {
   verifyChecklist,
 } from './reviewers.mts';
 
+const REVIEW_ROOTS_HELPER = ['skills', '_devkit', 'review-roots.mjs'] as const;
+
 export interface ReviewOutcome {
   name: string;
   status: 'pass' | 'fail' | 'inconclusive' | 'error';
@@ -44,6 +46,7 @@ export function preflightReviewAssets(
 ): Map<string, string> {
   if (!assetRoot || !path.isAbsolute(assetRoot))
     throw new Error('DEVKIT_REVIEW_ASSET_ROOT is missing or not absolute');
+  const reviewRootsHelper = readFileSync(path.join(assetRoot, ...REVIEW_ROOTS_HELPER));
   const identities = new Map<string, string>();
   for (const { reviewer } of selected) {
     const hash = createHash('sha256')
@@ -54,6 +57,7 @@ export function preflightReviewAssets(
         throw new Error(`${reviewer.name} has an invalid checklist registry binding`);
       hash.update(readFileSync(path.join(assetRoot, 'skills', reviewer.skill, 'SKILL.md')));
       hash.update(readFileSync(checklistScriptAt(reviewer, assetRoot)));
+      hash.update(reviewRootsHelper);
     }
     hash.update(
       JSON.stringify({

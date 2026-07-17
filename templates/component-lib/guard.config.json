@@ -22,7 +22,7 @@
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
   "decisionsDir": "docs/decisions",
 
-  "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "//review": "Target topology read by reviewer subagents and checklist scripts. This is distinct from .devkit/config.json.review, the local execution profile written by devkit init --review (enabled, guard allowlist, decisionsDir override). backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
   "review": {
     "backendRoots": [],
     "frontendRoots": ["src"],

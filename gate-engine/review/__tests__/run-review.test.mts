@@ -102,6 +102,8 @@ function reviewAssets(): string {
   const root = mkdtempSync(join(tmpdir(), 'guard-review-assets-'));
   dirs.push(root);
   mkdirSync(join(root, 'agents'), { recursive: true });
+  mkdirSync(join(root, 'skills', '_devkit'), { recursive: true });
+  writeFileSync(join(root, 'skills', '_devkit', 'review-roots.mjs'), '// shared support\n');
   for (const reviewer of REVIEWERS) {
     writeFileSync(
       join(root, 'agents', `${reviewer.name}.md`),
@@ -226,6 +228,24 @@ describe('runReviewGate — cascade + exit contract', () => {
 
     expect(await runReviewGate(repo, { exec })).toBe(0);
     expect(exec.mock.calls.map(([opts]) => opts.label)).toEqual(['review:api-security-reviewer']);
+  });
+
+  it('review-mode cache invalidates checklist reviewers when shared support changes', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    writeFileSync(join(assets, 'skills', '_devkit', 'review-roots.mjs'), '// shared support v2\n');
+    const exec = passWithArtifact(repo);
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([opts]) => opts.label)).toEqual([
+      'review:api-security-reviewer',
+      'review:backend-performance-reviewer',
+      'review:commit-guard',
+      'review:correctness-reviewer',
+    ]);
   });
 
   it('review mode injects scanRoots for an empty frontend topology into selector and judges', async () => {
