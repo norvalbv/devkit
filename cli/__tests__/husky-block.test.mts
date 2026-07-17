@@ -315,6 +315,47 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
   });
 });
 
+// DK-5: overlay's fallow gate BLOCKS on new findings (unlike the self-host advisory twin), and it
+// runs inline (core.hooksPath shadows fallow's own installed hook), so it must see the same
+// DEVKIT_SHIP_BASE_SHA scoping — else a --base ship off a stacked branch fails the audit on that
+// branch's own pre-existing findings vs main.
+describe('buildOverlayHook — fallow gate (overlay)', () => {
+  const hook = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit', '', {
+    fallow: true,
+  });
+
+  it('emits the fallow gate scoped by DEVKIT_SHIP_BASE_SHA', () => {
+    expect(hook).toContain('[ -n "${DEVKIT_SHIP_BASE_SHA:-}" ]');
+    expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
+    expect(hook).toContain('fallow audit $FALLOW_BASE_ARGS || exit 1');
+  });
+
+  it('omits the fallow gate entirely when fallow is not opted in', () => {
+    const withoutFallow = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit');
+    expect(withoutFallow).not.toContain('fallow audit');
+  });
+
+  it('passes the ship base through to a stubbed fallow (no real binary needed)', () => {
+    const fragment = hook.match(
+      /# devkit fallow gate \(overlay\)[\s\S]*?fallow audit \$FALLOW_BASE_ARGS \|\| exit 1; \}/,
+    )?.[0];
+    expect(fragment).toBeDefined();
+    const script = `fallow() { echo "FALLOW_ARGS:$*"; }\n${fragment}`;
+
+    const unset = execFileSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH },
+    });
+    expect(unset.trim()).toBe('FALLOW_ARGS:audit');
+
+    const based = execFileSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, DEVKIT_SHIP_BASE_SHA: 'deadbeef' },
+    });
+    expect(based.trim()).toBe('FALLOW_ARGS:audit --base deadbeef');
+  });
+});
+
 describe('extras (--extra hard gates on the deterministic line)', () => {
   it('emits `--extra "label=cmd"` per extra', () => {
     const block = buildGuardBlock({

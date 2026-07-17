@@ -107,6 +107,38 @@ const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1
     [ "$qarc" -eq 3 ] && exit 1
 fi`;
 
+// Terminal marker for the every-commit telemetry run (run-context.mts contract). A ship's
+// ship_result is its terminal, but a plain commit's gates have no wrapper process — so the HOOK
+// emits `commit_result` when it exits, and the usage dashboard settles the run immediately
+// instead of waiting out a 35-minute quiet window (its fallback for hooks without this fragment).
+// The tree hash is computed AT EMIT TIME, not when the trap is armed: the biome fragment restages
+// formatted files, and the gates correlate under the POST-format `git write-tree`. Fail-open
+// everywhere; same opt-outs as the capture itself (any DEVKIT_NO_TELEMETRY value disables; inside
+// a ship DEVKIT_SHIP_ID is set and this stays silent — ship_result is that run's terminal).
+// Caveat: claims the shell's single EXIT trap — a consumer hook defining its own EXIT trap after
+// this block would replace it (none of devkit's fragments do).
+const COMMIT_TERMINAL_FRAGMENT = `# devkit:commit-terminal
+if [ -z "\${DEVKIT_SHIP_ID:-}" ] && [ -z "\${DEVKIT_NO_TELEMETRY:-}" ]; then
+    __dk_t0="$(date +%s)"
+    __dk_esc() { printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
+    __dk_commit_result() {
+        [ -n "\${__dk_done:-}" ] && return 0
+        __dk_done=1
+        __dk_tree="$(git write-tree 2>/dev/null)" || return 0
+        [ -n "$__dk_tree" ] || return 0
+        __dk_events="\${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
+        mkdir -p "$(dirname "$__dk_events")" 2>/dev/null || return 0
+        printf '{"type":"commit_result","ship_id":"commit-%s","run_mode":"commit","repo":"%s","branch":"%s","exit_code":%d,"duration_s":%d,"ts":"%s"}\\n' \\
+            "$__dk_tree" \\
+            "$(__dk_esc "$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")")" \\
+            "$(__dk_esc "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)")" \\
+            "\${1:-0}" "$(( $(date +%s) - __dk_t0 ))" \\
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$__dk_events" 2>/dev/null || true
+    }
+    trap '__dk_commit_result "$?"' EXIT
+fi
+# /devkit:commit-terminal`;
+
 // The biome format-staged-files step (only when the `biome` component is selected).
 const BIOME_FRAGMENT = `# devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
@@ -185,6 +217,8 @@ function wantsDeterministic(selection: HookSelection): boolean {
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   const pieces = [];
+  // First so a first-gate block still records the run's terminal (the trap covers every exit path).
+  pieces.push(COMMIT_TERMINAL_FRAGMENT);
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   if (wantsDeterministic(selection))
     pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
@@ -239,6 +273,7 @@ const DK_GATE_AI_HELPER =
 export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): string {
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
+    COMMIT_TERMINAL_FRAGMENT,
     DK_GATE_AI_HELPER,
   ];
   if (wantsDeterministic(selection)) {
@@ -285,7 +320,11 @@ fi`;
 // chaining the gate inline here is the only way the audit runs. `fallow audit` exits non-zero on
 // NEW issues (pre-existing debt is grandfathered by the saved fallow-baselines/).
 const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — fail-open; skipped if fallow isn't installed.
-command -v fallow >/dev/null 2>&1 && { fallow audit || exit 1; }`;
+# DEVKIT_SHIP_BASE_SHA (set by devkit ship) narrows the audit to the exact ship base rather than
+# fallow's own main-autodetect — see self-host.mts's FALLOW_FRAGMENT for the full rationale (DK-5).
+FALLOW_BASE_ARGS=""
+[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
+command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1; }`;
 
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
@@ -304,7 +343,7 @@ export function buildOverlayHook(
   pkgRel = '',
   { fallow = false }: { fallow?: boolean } = {},
 ): string {
-  const gates = [DK_GATE_AI_HELPER];
+  const gates = [COMMIT_TERMINAL_FRAGMENT, DK_GATE_AI_HELPER];
   if (wantsDeterministic(selection)) gates.push(standaloneDeterministicLines());
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))
@@ -328,6 +367,11 @@ ${scoped}
 # run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
 # would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
 [ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+
+# devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
+# EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome
+# (the chained repo hook may still block the commit on its own gates).
+command -v __dk_commit_result >/dev/null 2>&1 && { trap - EXIT; __dk_commit_result 0; }
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"

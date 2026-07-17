@@ -155,13 +155,13 @@ function dropWorktree(git, stderr) {
  * bare path fails its shape check), while the absolute path stays reachable from BOTH ROOT (ls-remote)
  * and the ephemeral $WT (push) with no network. Drives the real non-dry push + manifest path offline.
  */
-function seedShipRepoLocalRemote() {
+function seedShipRepoLocalRemote({ hookBody } = {}) {
   const ghRoot = mkdtempSync(join(tmpdir(), 'shipgh-'));
   dirs.push(ghRoot);
   const bare = join(ghRoot, 'github.com', 'acme', 'app.git');
   mkdirSync(join(ghRoot, 'github.com', 'acme'), { recursive: true });
   execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
-  return { ...seedShipRepo({ origin: bare }), bare };
+  return { ...seedShipRepo({ origin: bare, ...(hookBody ? { hookBody } : {}) }), bare };
 }
 
 /**
@@ -294,8 +294,8 @@ describe('ship-branch.sh — PR base = the branch we branched from', () => {
 describe('ship-branch.sh — --base <branch>', () => {
   /** A repo with an `origin` bare that has a `studio` branch, and a `finalized` branch (checked out)
    *  whose note.txt change is ALREADY COMMITTED — exactly the DK-1 repro state. */
-  function seedBaseRepo() {
-    const seeded = seedShipRepoLocalRemote();
+  function seedBaseRepo({ hookBody } = {}) {
+    const seeded = seedShipRepoLocalRemote({ hookBody });
     const { dir, git, bare } = seeded;
     writeFileSync(join(dir, 'note.txt'), 'studio\n');
     git(['add', 'note.txt'], { stdio: 'ignore' });
@@ -412,6 +412,24 @@ describe('ship-branch.sh — --base <branch>', () => {
 
   // The --base empty-commit hint ("already identical on origin/<base>", no checkout advice) is
   // covered in the `empty-commit preflight` describe, beside its default-base twin.
+
+  // DK-5: the worktree is cut from origin's fetched studio tip — in-chain gates (fallow) need that
+  // SAME commit exported so they scope their own audit against it instead of their own
+  // main-autodetect, which would misreport studio's own pre-existing findings vs main as "new".
+  it("exports DEVKIT_SHIP_BASE_SHA = origin's fetched studio tip, not a stale local ref", () => {
+    const { dir, env, git, studioTip } = seedBaseRepo({
+      hookBody: 'echo "HOOK_BASE=$DEVKIT_SHIP_BASE_SHA"',
+    });
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/base-sha-flag', 't', '--base', 'studio', '--', 'note.txt'],
+      { cwd: dir, input: 'b\n', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-base-sha-flag.log'), 'utf8');
+    expect(log).toContain(`HOOK_BASE=${studioTip}`);
+  });
 });
 
 describe('ship-branch.sh — isolation + arg guards', () => {
@@ -860,6 +878,32 @@ describe('ship-branch.sh — worktree integration', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     expect(git(['show', '-s', '--format=%b', 'feat/body'])).toMatch(/BODY_INLINE_XYZ/);
+  });
+
+  // DK-5: the worktree is cut from $BASE (default: this checkout's HEAD; --base: origin's fetched
+  // tip), and in-chain gates (fallow) need that SAME commit to scope their own audit correctly —
+  // else a --base ship off a stacked branch misreports that branch's pre-existing findings vs main
+  // as "new". Assert the exported var matches the commit the worktree was ACTUALLY cut from, not a
+  // stale local ref.
+  it("exports DEVKIT_SHIP_BASE_SHA = this checkout's HEAD for a default (no --base) ship", () => {
+    const { dir, env, git } = seedShipRepo({
+      hookBody: 'echo "HOOK_BASE=$DEVKIT_SHIP_BASE_SHA"',
+    });
+    const headSha = git(['rev-parse', 'HEAD']).trim();
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/base-sha-default', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(
+      join(dir, '.devkit/last-ship-gates-feat-base-sha-default.log'),
+      'utf8',
+    );
+    expect(log).toContain(`HOOK_BASE=${headSha}`);
   });
 });
 
