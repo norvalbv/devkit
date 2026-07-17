@@ -307,36 +307,64 @@ describe('overlay (local-only) install', () => {
   });
 
   it('installs a per-clone `git ci` self-heal alias that re-points core.hooksPath', async () => {
-    const root = workRepo();
-    const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
-    await applyInit(root, {
-      stack: 'react-app',
-      selection: defaultSelection(),
-      overlay: true,
-      devkitRef: 'v0.9.0',
-    });
+    // Isolate global git config: the installer deliberately skips on collision with a user's
+    // own global `ci` alias (verified below), so this install-path assertion must not inherit
+    // the developer machine's real ~/.gitconfig.
+    const prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(mkTmp('ghome-'), '.gitconfig');
+    try {
+      const root = workRepo();
+      const git = (...a) => execFileSync('git', a, { cwd: root, encoding: 'utf8' });
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: defaultSelection(),
+        overlay: true,
+        devkitRef: 'v0.9.0',
+      });
 
-    expect(git('config', '--local', '--get', 'alias.ci').trim()).toBe(HEAL_ALIAS_CMD);
+      expect(git('config', '--local', '--get', 'alias.ci').trim()).toBe(HEAL_ALIAS_CMD);
 
-    // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
-    git('config', 'core.hooksPath', '.husky/_');
-    git('ci', '--allow-empty', '-m', 'heal');
-    expect(git('config', '--get', 'core.hooksPath').trim()).toBe('.devkit/hooks');
+      // simulate husky re-claiming the hook on `bun install`, then heal via `git ci`
+      git('config', 'core.hooksPath', '.husky/_');
+      git('ci', '--allow-empty', '-m', 'heal');
+      expect(git('config', '--get', 'core.hooksPath').trim()).toBe('.devkit/hooks');
+    } finally {
+      if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+    }
   });
 
   it('clean removes the self-heal alias', async () => {
-    const root = workRepo();
-    await applyInit(root, {
-      stack: 'react-app',
-      selection: defaultSelection(),
-      overlay: true,
-      devkitRef: 'v0.9.0',
-    });
-    const cleanRun = (await import('../commands/clean.mts')).default;
-    await cleanRun(['--yes'], root);
-    expect(() =>
-      execFileSync('git', ['config', '--local', '--get', 'alias.ci'], { cwd: root, stdio: 'pipe' }),
-    ).toThrow(); // unset → git exits 1
+    // Same isolation: without it, a global `ci` alias makes install skip and this test pass
+    // vacuously (get throws because nothing was ever installed).
+    const prevGlobal = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(mkTmp('ghome-'), '.gitconfig');
+    try {
+      const root = workRepo();
+      await applyInit(root, {
+        stack: 'react-app',
+        selection: defaultSelection(),
+        overlay: true,
+        devkitRef: 'v0.9.0',
+      });
+      expect(
+        execFileSync('git', ['config', '--local', '--get', 'alias.ci'], {
+          cwd: root,
+          encoding: 'utf8',
+        }).trim(),
+      ).toBe(HEAL_ALIAS_CMD);
+      const cleanRun = (await import('../commands/clean.mts')).default;
+      await cleanRun(['--yes'], root);
+      expect(() =>
+        execFileSync('git', ['config', '--local', '--get', 'alias.ci'], {
+          cwd: root,
+          stdio: 'pipe',
+        }),
+      ).toThrow(); // unset → git exits 1
+    } finally {
+      if (prevGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = prevGlobal;
+    }
   });
 
   it("never clobbers a user's GLOBAL `ci` alias (skip-on-collision)", async () => {

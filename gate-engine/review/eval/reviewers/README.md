@@ -56,11 +56,14 @@ BENCH_MODEL=opus node bench.mts run                            # opus ceiling, r
 
 ## Corpus
 
-One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 12 rows
-each: 6 gold seeded-bugs (distinct catalog items; 3 clear / 2 borderline / 1 adversarial), 3 clean
-decoys (trigger ≥2 checklist items, genuinely fine), 2 near-miss decoys (look vulnerable, provably
-safe), 1 minimal pair (`variantOf`: the fixed twin of a gold row, expected PASS). 2 rows per file
-are `holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
+One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 13–14
+rows each (api-security 14, the rest 13): the original 12 — 6 gold seeded-bugs (distinct catalog
+items; 3 clear / 2 borderline / 1 adversarial), 3 clean decoys (trigger ≥2 checklist items,
+genuinely fine), 2 near-miss decoys (look vulnerable, provably safe), 1 minimal pair (`variantOf`:
+the fixed twin of a gold row, expected PASS) — plus gold rows for the licensed-source catalog
+refresh items (`mass-assignment`, `object-level-authz`, `sync-io`, `layout-thrash`,
+`postmessage-origin`; `command-injection` reuses its retagged original row). 2 rows per file are
+`holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
 `note` (mandatory why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are
 anonymized adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
 
@@ -77,10 +80,11 @@ Note `variantOf` is documentation/traceability only — no metric reads it; the 
 its contribution to the `cleanPass` denominator.
 
 Fixture shape: gate assets (guard.config.json with `backendRoots:["api"]` /
-`frontendRoots:["web"]`, the agent brief, the checklist script) are injected into `repo.base` at
-run time; backend rows stage under `api/`, frontend rows under `web/`, so `selectReviewers`
-fires exactly the target reviewer — selection itself is under test (`not-selected` scores as a
-miss).
+`frontendRoots:["web"]`, the agent brief, the checklist script, and the skill's SKILL.md — the
+brief's workflow sends the judge there for the detailed rules, and consumers always have it
+synced) are injected into `repo.base` at run time; backend rows stage under `api/`, frontend rows
+under `web/`, so `selectReviewers` fires exactly the target reviewer — selection itself is under
+test (`not-selected` scores as a miss).
 
 ## Scoring (deterministic, no LLM matcher)
 
@@ -114,9 +118,10 @@ Plus: right-reason split, live escalation count + mean opus seconds, inconclusiv
 `--fail` = floors + a per-row **flip table vs baseline** under two-sided mid-p McNemar (p<0.05
 with net-negative flips). Rows discordant with the baseline are re-run once; a flip counts only
 when 2-of-2 confirmed. Baselines are keyed `<reviewer>@<model>@<cascade>` and embed
-`gateHash` (run-review.mts + reviewers.mts + brief + checklist — the brief IS gate code) +
-`corpusHash`; any mismatch **skips** comparison loudly instead of lying. Regenerate with
-`--baseline` after deliberate changes. Even at this size (48 domain rows; 66 correctness) each
+`gateHash` (run-review.mts + reviewers.mts + brief + checklist + SKILL.md — the brief IS gate
+code, and SKILL.md ships into fixtures) + `corpusHash`; any mismatch **skips** comparison loudly
+instead of lying. Regenerate with
+`--baseline` after deliberate changes. Even at this size (53 domain rows; 66 correctness) each
 cohort is a **large-effect tripwire, not a 5pp detector** — intervals print so nobody over-reads a
 point estimate.
 
