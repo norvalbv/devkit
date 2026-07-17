@@ -5,13 +5,23 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   _resetRunContextForTests,
+  originatingAgent,
   runEnvelope,
   runId,
   telemetryEnabled,
   telemetrySink,
 } from '../run-context.mts';
 
-const ENV = ['DEVKIT_SHIP_ID', 'DEVKIT_GATE_EVENTS', 'DEVKIT_NO_TELEMETRY'];
+// The agent-fingerprint vars are cleared per test so `source` is deterministically 'unknown' here,
+// regardless of the runner's own env (the test process itself runs under Claude Code = CLAUDECODE=1).
+const ENV = [
+  'DEVKIT_SHIP_ID',
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_NO_TELEMETRY',
+  'CLAUDECODE',
+  'CODEX_HOME',
+  'CODEX_CLI_PATH',
+];
 const saved: Record<string, string | undefined> = {};
 let origCwd: string;
 const repos: string[] = [];
@@ -50,7 +60,7 @@ describe('run-context', () => {
     process.env.DEVKIT_SHIP_ID = 'ship-9';
     process.env.DEVKIT_GATE_EVENTS = '/tmp/x/gate-events.jsonl';
     expect(runId()).toBe('ship-9');
-    expect(runEnvelope()).toEqual({ ship_id: 'ship-9' });
+    expect(runEnvelope()).toEqual({ ship_id: 'ship-9', source: 'unknown' });
     expect(telemetrySink()).toBe('/tmp/x/gate-events.jsonl');
   });
 
@@ -66,6 +76,7 @@ describe('run-context', () => {
     expect(env.run_mode).toBe('commit');
     expect(typeof env.repo).toBe('string');
     expect(typeof env.branch).toBe('string');
+    expect(env.source).toBe('unknown'); // agent vars cleared → unknown
     expect(telemetrySink()).toMatch(/\.devkit[/\\]telemetry[/\\]gate-events\.jsonl$/);
   });
 
@@ -92,7 +103,7 @@ describe('run-context', () => {
     process.env.DEVKIT_SHIP_ID = 'ship-1';
     _resetRunContextForTests();
     expect(runId()).toBe('ship-1');
-    expect(runEnvelope()).toEqual({ ship_id: 'ship-1' });
+    expect(runEnvelope()).toEqual({ ship_id: 'ship-1', source: 'unknown' });
   });
 
   it('capture on but not a git repo: fail-safe silent (runId null)', () => {
@@ -102,5 +113,36 @@ describe('run-context', () => {
     _resetRunContextForTests();
     expect(runId()).toBeNull();
     expect(runEnvelope()).toEqual({});
+  });
+
+  describe('originatingAgent (source fingerprint)', () => {
+    it('CLAUDECODE truthy → claude, and rides the ship envelope', () => {
+      process.env.CLAUDECODE = '1';
+      process.env.DEVKIT_SHIP_ID = 'ship-c';
+      expect(originatingAgent()).toBe('claude');
+      expect(runEnvelope()).toEqual({ ship_id: 'ship-c', source: 'claude' });
+    });
+
+    it('CODEX_HOME (or CODEX_CLI_PATH) set, no CLAUDECODE → codex', () => {
+      process.env.CODEX_HOME = '/Users/x/.codex';
+      expect(originatingAgent()).toBe('codex');
+      process.env.DEVKIT_SHIP_ID = 'ship-x';
+      expect(runEnvelope()).toEqual({ ship_id: 'ship-x', source: 'codex' });
+    });
+
+    it('CLAUDECODE wins when both are present (Claude is the active agent)', () => {
+      process.env.CLAUDECODE = '1';
+      process.env.CODEX_HOME = '/Users/x/.codex';
+      expect(originatingAgent()).toBe('claude');
+    });
+
+    it('neither present → unknown', () => {
+      expect(originatingAgent()).toBe('unknown');
+    });
+
+    it('CLAUDECODE=0/empty is not truthy → not claude', () => {
+      process.env.CLAUDECODE = '0';
+      expect(originatingAgent()).toBe('unknown');
+    });
   });
 });
