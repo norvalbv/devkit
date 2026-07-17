@@ -161,7 +161,7 @@ fi
 // The PATH-setup snippet (GUI git clients launch with a minimal PATH that omits user bin dirs, so
 // `bun`/`bunx` go missing). devkit's gates need it to have run BEFORE them — it's part of a fresh hook's
 // preamble, and is INJECTED just ahead of an inserted block when an existing hook has no PATH setup.
-const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
+export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
 for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
     [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac

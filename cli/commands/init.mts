@@ -39,6 +39,7 @@ import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mts';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mts';
 import { generateStructureBaselines } from '../lib/generate/generate-structure-baseline.mts';
+import { installCommitMsgHook, removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
 import {
   buildFullHook,
   buildGuardBlock,
@@ -517,9 +518,8 @@ function patchPackageJson(
 }
 
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
-// which is `cwd` for a single-package repo, or the monorepo root when init runs in a package
-// subdir). `pkgRel` scopes the block + `cd`s the gates into the package. Fresh repo → full
-// hook; existing hook → replace/insert THIS package's devkit-guards block (others untouched).
+// `cwd` for a single-package repo, else the monorepo root). `pkgRel` scopes the block + `cd`s
+// the gates into the package. Fresh repo → full hook; existing → replace THIS package's block.
 function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string, dryRun: boolean) {
   const where = pkgRel ? ` (git root, scoped to ${pkgRel})` : '';
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
@@ -825,9 +825,9 @@ function removeTsconfig(cwd: string, dryRun: boolean) {
   );
 }
 
-// Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
-// other packages' blocks intact.
+// Remove this package's devkit-guards blocks (pre-commit + commit-msg), other content intact.
 function removeHusky(hookRoot: string, pkgRel: string, dryRun: boolean) {
+  removeCommitMsgBlock(hookRoot, pkgRel, dryRun);
   const hookPath = join(hookRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return;
   const { content, removed } = removeGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
@@ -1204,14 +1204,14 @@ export async function applyInit(cwd: string, plan: InitPlan) {
 
   if (selection.husky) {
     console.log('3. husky pre-commit');
-    // Thread the resolved structureCmd into the selection so the block emits `--structure "<cmd>"`
-    // on the guard-deterministic line only when structure actually applies (structureCmd is
-    // undefined otherwise). Same path for package and standalone. Self-host takes its own builder:
-    // the generated `bunx guard-*` lines are rewritten to `node gate-engine/*.mts` (source).
+    // Thread structureCmd into the selection so the block emits `--structure "<cmd>"` only when
+    // structure applies; same path for package/standalone. Self-host rewrites bunx→`node …mts`.
     if (selfHost) installSelfHostHook(gitRoot, pkgRel, selection, dryRun, cwd);
     else if (standalone)
       installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
+    // Commit-msg judges (review→completeness, sentry) — their own managed hook; self-host opts out.
+    if (!selfHost) installCommitMsgHook(gitRoot, pkgRel, selection, { dryRun, standalone });
   }
 
   // Self-host skips the size/fanout freezes: devkit has 0 eslint-disable directives and no folder over
@@ -1350,8 +1350,8 @@ Usage:
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow.
-  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,review;
-                         review — the in-chain reviewer judges — is opt-in, off by default).
+  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
+                         qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
   --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
