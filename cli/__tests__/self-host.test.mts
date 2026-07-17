@@ -4,6 +4,7 @@
  * If the parity test fails, the hook drifted from the generator: regenerate it (`devkit init` in the
  * repo, or `devkit doctor --fix`) and re-commit.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,12 +76,41 @@ describe('buildSelfHostHook', () => {
 
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
-    expect(hook).toContain('command -v fallow >/dev/null 2>&1 && fallow audit || true');
+    expect(hook).toContain(
+      'command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true',
+    );
     // Inside the devkit-guards block: after the start marker, before the end marker — so
     // replaceGuardBlock preserves it on a re-run and the parity/doctor check covers it.
     expect(hook.indexOf('fallow audit')).toBeGreaterThan(hook.indexOf('>>> devkit-guards'));
     expect(hook.indexOf('fallow audit')).toBeLessThan(hook.indexOf('<<< devkit-guards'));
     expect(hook.trimEnd().endsWith('exit 0')).toBe(true);
+  });
+
+  // DK-5: a --base ship cuts the gate worktree from a possibly non-main base, so the advisory fallow
+  // audit must diff against THAT commit (DEVKIT_SHIP_BASE_SHA, exported by ship-branch.sh/reship.sh)
+  // rather than fallow's own main-autodetect — else a stacked branch's own pre-existing findings
+  // misreport as "new". No real fallow binary in this sandbox: stub it and assert on the args it sees.
+  it('scopes the fallow audit to DEVKIT_SHIP_BASE_SHA when a ship exported it', () => {
+    const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
+    expect(hook).toContain('[ -n "${DEVKIT_SHIP_BASE_SHA:-}" ]');
+    expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
+    const fragment = extractGuardBlock(hook, '')?.match(
+      /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
+    )?.[0];
+    expect(fragment).toBeDefined();
+    const script = `fallow() { echo "FALLOW_ARGS:$*"; }\n${fragment}`;
+
+    const unset = execFileSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH },
+    });
+    expect(unset.trim()).toBe('FALLOW_ARGS:audit');
+
+    const based = execFileSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, DEVKIT_SHIP_BASE_SHA: 'deadbeef' },
+    });
+    expect(based.trim()).toBe('FALLOW_ARGS:audit --base deadbeef');
   });
 
   it('is idempotent through replaceGuardBlock — re-applying the block keeps the fallow fragment intact', () => {
