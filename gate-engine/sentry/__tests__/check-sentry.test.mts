@@ -12,6 +12,7 @@ import {
   buildContext,
   buildPrompt,
   cleanMessage,
+  effectiveHard,
   extractEvidence,
   focusDiff,
   judge,
@@ -106,6 +107,20 @@ describe('sentryExit (block bounded to hard-mode + confident MONITOR)', () => {
     [null, true, 0], // ambiguous / unavailable → no block
   ])('exit(verdict=%j, hard=%j) → %j', (verdict, hard, code) => {
     expect(sentryExit(verdict, hard)).toBe(code);
+  });
+});
+
+describe('effectiveHard (a hard block requires diff evidence on the diff tier)', () => {
+  it.each([
+    // [hardEnv, tier, diff, expected]
+    [true, 'diff', '--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b', true],
+    [true, 'diff', '', false], // amend / --allow-empty: message-only fallback never blocks
+    [true, 'diff', '   \n', false],
+    [true, 'message', '', true], // explicitly configured message tier keeps its hard block
+    [true, 'names', '', true],
+    [false, 'diff', 'x', false],
+  ])('effectiveHard(%j, %j, %j) → %j', (hardEnv, tier, diff, expected) => {
+    expect(effectiveHard(hardEnv, tier, diff)).toBe(expected);
   });
 });
 

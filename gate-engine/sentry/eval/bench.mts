@@ -9,9 +9,10 @@
  * It imports the judge pieces FROM THE GATE (buildPrompt / shouldJudge / buildContext / judge), so the
  * benchmark exercises the exact path the gate runs — prompt and logic never drift.
  *
- * SEED corpus: cases.jsonl ships a 103-case starter set derived from real commits (paths/subjects are
- * illustrative, not generic). It is a dev-only seed, not data the gate reads at runtime — copy it and
- * add your own real commit subjects to score your codebase. No baseline ships: generate with --baseline.
+ * SEED corpus: cases.jsonl ships a 127-case starter set — 104 derived from real commits (paths/
+ * subjects illustrative) + 23 authored `elimination` rows (fix-removes-a-silent-class tier). It is a
+ * dev-only seed, not data the gate reads at runtime — copy it and add your own real commit subjects
+ * to score your codebase. No baseline ships: generate with --baseline.
  *
  * Each row in cases.jsonl: { id, message, nameStatus?, diff?, expected:"MONITOR"|"SKIP", category, note }.
  * `diff` (the staged diff) is only read by the `diff` context tier; the self-clear rows (a MONITOR-worthy
@@ -21,7 +22,7 @@
  *
  * Sweeps (the token-economy validation — pick the cheapest cell that clears the F1 target):
  *   BENCH_MODEL=haiku|sonnet         model (default haiku)
- *   BENCH_CONTEXT=message|names|diff message-only · + changed-file list · + the staged diff (default message)
+ *   BENCH_CONTEXT=message|names|diff message-only · + changed-file list · + the staged diff (default diff)
  *   BENCH_SHOTS=0|4              zero- vs few-shot (default 4)
  *   BENCH_SAMPLES=1|3            self-consistency majority-vote (default 1)
  *
