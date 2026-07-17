@@ -48,6 +48,13 @@ commit_with_gate_capture() {
   #                           outside ship keep their fail-open default.
   #   DEVKIT_REVIEW_PROGRESS  where guard-review records {running,completed} reviewer names, so a
   #                           timeout can name the ones left unfinished (structured, not stderr prose).
+  #   DEVKIT_SHIP_BASE_SHA    the commit the worktree was cut from — NOT exported here, but by this
+  #                           function's CALLERS (ship-branch.sh / reship.sh, right beside their own
+  #                           DEVKIT_SHIP_MODE export), since they're the ones who resolved $BASE.
+  #                           Listed here so this stays the one place to look for every ship-mode env
+  #                           var. Consumed by devkit's own fallow-advisory/overlay fragments to scope
+  #                           `fallow audit --base` at the real ship base instead of its own
+  #                           main-autodetect (DK-5).
   export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
