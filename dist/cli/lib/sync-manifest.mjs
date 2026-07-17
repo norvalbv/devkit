@@ -10,7 +10,7 @@
  */
 import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "./components.mjs";
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from "./components.mjs";
 import { packageDir, readJson, sha256 } from "./fs-helpers.mjs";
 import { isTracked } from "./git-tracked.mjs";
 // ── ownership inference (forward: sync-time conflict detection) ───────────────────────────────
@@ -74,7 +74,7 @@ export function findConflicts(root, srcDir, names, targets, subdir, manifest) {
     const owned = ownedNames(manifest);
     const ownedTargets = manifest?.targets ? new Set(manifest.targets) : null;
     return names.filter((name) => targets.some((t) => {
-        const dir = `.${t}/${subdir}`;
+        const dir = agentSurfaceDir(t, subdir);
         if (!existsSync(join(root, dir, name)) || matchesBundle(root, dir, name, srcDir))
             return false;
         // diverges from the bundle → the consumer's, UNLESS devkit owns this name ON THIS surface
@@ -168,13 +168,13 @@ export function removeManifested(root, manifestRel, dirs, kind, dryRun, dropMani
  * @param targets surfaces to remove from (default both)
  * @param dropManifest also delete the manifest (default true — a full uninstall)
  */
-export function removeSkills(root, dryRun, targets = AGENT_TARGETS, dropManifest = true) {
-    const dirs = targets.map((t) => `.${t}/skills`);
+export function removeSkills(root, dryRun, targets = DEFAULT_AGENT_TARGETS, dropManifest = true) {
+    const dirs = targets.map((t) => agentSurfaceDir(t, 'skills'));
     const fallback = bundledNames('skills', (e) => e.isDirectory());
     removeManifested(root, 'skills-manifest.json', dirs, 'skill', dryRun, dropManifest, fallback, join(packageDir(), 'skills'));
 }
-export function removeAgents(root, dryRun, targets = AGENT_TARGETS, dropManifest = true) {
-    const dirs = targets.map((t) => `.${t}/agents`);
+export function removeAgents(root, dryRun, targets = DEFAULT_AGENT_TARGETS, dropManifest = true) {
+    const dirs = targets.map((t) => agentSurfaceDir(t, 'agents'));
     const fallback = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md'));
     removeManifested(root, 'agents-manifest.json', dirs, 'agent', dryRun, dropManifest, fallback, join(packageDir(), 'agents'));
 }

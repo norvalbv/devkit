@@ -63,6 +63,12 @@ describe('wizard agent-surface selection', () => {
     expect(r.selection.agentTargets).toEqual(expected);
   });
 
+  it('selects Codex without enabling the default Claude/Cursor surfaces', async () => {
+    setAnswers('codex');
+    const r = await runWizard(WIZ_OPTS);
+    expect(r.selection.agentTargets).toEqual(['codex']);
+  });
+
   it('claude-only install writes .claude but NO .cursor (the reported bug)', async () => {
     setAnswers('claude');
     const r = await runWizard(WIZ_OPTS);

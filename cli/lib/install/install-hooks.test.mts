@@ -4,7 +4,7 @@
  * console.log is silenced. Covers: merge shape, both surfaces, idempotency (re-run does not
  * duplicate), preservation of a foreign hook, the Cursor event mapping, and removal.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +23,7 @@ function tmpRepo() {
 }
 const claude = (root) => JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8'));
 const cursor = (root) => JSON.parse(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8'));
+const codex = (root) => JSON.parse(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8'));
 // Every command across every Claude event/matcher group, flattened.
 function claudeCommands(root) {
   return Object.values(claude(root).hooks).flatMap((gs) =>
@@ -53,16 +54,18 @@ describe('installHookRegistrations', () => {
     expect(cur.afterShellExecution).toHaveLength(1);
   });
 
-  it('registers all six agentHooks across the correct Claude events', () => {
+  it('registers plan evidence plus the existing agent hooks across provider events', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['agentHooks']);
     const h = claude(root).hooks;
     expect(h.UserPromptSubmit).toHaveLength(1);
-    expect(h.Stop[0].hooks).toHaveLength(3); // decision + lint + knip
+    expect(h.Stop[0].hooks).toHaveLength(4); // plan observation + decision + lint + knip
+    expect(h.SubagentStop[0].hooks).toHaveLength(1);
     expect(h.PreCompact).toHaveLength(1);
-    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1); UserPromptSubmit dropped.
+    // Cursor has no composer-mode field, but still captures SubagentStop structured results.
     const cur = cursor(root).hooks;
-    expect(cur.stop).toHaveLength(3);
+    expect(cur.stop).toHaveLength(4);
+    expect(cur.subagentStop).toHaveLength(1);
     expect(cur.afterFileEdit).toHaveLength(1);
     expect(cur.preCompact).toHaveLength(1);
     expect(cur.UserPromptSubmit).toBeUndefined();
@@ -74,7 +77,32 @@ describe('installHookRegistrations', () => {
     const first = claudeCommands(root).length;
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     expect(claudeCommands(root).length).toBe(first);
-    expect(first).toBe(8);
+    expect(first).toBe(10);
+  });
+
+  it('installs Codex only when selected, preserves user hooks, and uses git-root commands', () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.codex'), { recursive: true });
+    writeFileSync(
+      join(root, '.codex', 'hooks.json'),
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } }),
+    );
+    installHookRegistrations(root, ['agentHooks'], { targets: ['codex'] });
+    expect(existsSync(join(root, '.claude'))).toBe(false);
+    const hooks = codex(root).hooks;
+    const commands = Object.values(hooks).flatMap((groups) =>
+      groups.flatMap((group) => group.hooks.map((hook) => hook.command)),
+    );
+    expect(
+      commands.some(
+        (command) => command.includes('plan-critique-evidence.mjs') && command.includes('codex'),
+      ),
+    ).toBe(true);
+    expect(commands.some((command) => command.includes('git rev-parse --show-toplevel'))).toBe(
+      true,
+    );
+    expect(commands).toContain('echo mine');
+    expect(checkHookRegistrations(root, ['agentHooks'], { targets: ['codex'] }).ok).toBe(true);
   });
 
   it('preserves a foreign (non-devkit) hook command on merge', () => {

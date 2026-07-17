@@ -5,32 +5,32 @@
 // runDetectJudge et al. comes from two substitutes instead:
 //   · the agent body is read FROM SOURCE (agents/feature-critique.md — never a .claude/.cursor
 //     synced copy, which is derived and may lag `devkit sync-agents`), at spawn time;
-//   · the baseline embeds agentHash (the md) and runnerHash (this file + matcher.mts) — see
+//   · the baseline embeds agentHash (the md) and runnerHash (this file + matcher.mts + contract.mts) — see
 //     bench.mts; a changed prompt or a changed harness is a changed experiment, never a silent one.
 //
 // Fidelity: production dispatch makes the md the SUBAGENT'S SYSTEM PROMPT. `--append-system-prompt`
-// is the closest `claude -p` analog, and it keeps the user prompt = the critique request alone —
-// which is what lets the EDGE_CASES_ID contract row genuinely test the md's "top of the prompt"
-// clause. Residual gaps (no Task-tool env, no deep-research MCP under -p) are documented README
+// is the closest `claude -p` analog and keeps the user prompt = the critique request alone.
+// Residual gaps (no Task-tool env, no deep-research MCP under -p) are documented README
 // departures, not hidden.
 //
 // Two spawn modes, one per row mode:
 //   intrinsic  — no tools (JUDGE_READ_ONLY), the BENCHMARK directive inlines everything; scores the
 //                agent's frame reasoning alone. Cheap (~30–60 s a row).
-//   workflow   — the full contract in a disposable fixture repo: tools allowed, the agent writes
-//                .cursor/.feature-critique.md + the edge-cases artifact, stdout is the compact
-//                summary. Expensive (2–6 min a row).
+//   workflow   — the full contract in a disposable fixture repo: read-only tools allowed and stdout
+//                is the sole exact JSON response. Expensive (2–6 min a row).
 //
 // Argv order is load-bearing: `--allowedTools`/`--disallowedTools` are VARIADIC — anything after
 // them (including a positional prompt) is swallowed as a tool name (see check-alignment.mts:205).
 // The positional prompt therefore sits BEFORE the tool flags, and tool flags go LAST.
 
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { stripFrontmatter } from '../../review/reviewers.mts';
+import { parsePlanCritiqueResponse } from '../contract.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,7 +42,7 @@ export const WORKFLOW_TIMEOUT_MS = 600_000; // agentic opus with tool use runs 2
 
 /** What the workflow agent may touch inside its fixture. Single comma-joined string (the flag is
  * variadic — one argv slot keeps the prompt safe), prefix-colon Bash rule per check-alignment. */
-export const WORKFLOW_TOOLS = 'Read,Grep,Glob,LS,Write,Edit,Bash(git:*)';
+export const WORKFLOW_TOOLS = 'Read,Grep,Glob,LS,Bash(git:*)';
 
 /**
  * The intrinsic-mode directive — ported from scripts/agent-benchmarks/run.mjs and EXTENDED to
@@ -55,9 +55,8 @@ export const BENCHMARK_DIRECTIVE = [
   'Everything you need is in the CRITIQUE REQUEST below. Do NOT run any tools, scripts, research,',
   'MCP calls, or file reads, and do NOT write any files — treat the inlined "RECORDED TARGET(S)" as',
   'the authoritative decision log (none inlined = no decision log; alignment unverified). Apply',
-  'your full judgement (especially the Frame check), then output ONLY the compact summary block of',
-  'Phase 5 — CRITIQUE (write "none — benchmark mode"), VERDICT, FEASIBILITY, CRITICAL_ISSUES,',
-  'WARNINGS, UX_IMPACT, FRAME_META, SUMMARY, ACTIONS. No file writes, no edge-case artifact.',
+  'your full judgement (especially the Frame check), then output ONLY the exact raw JSON contract',
+  'defined by the agent. No markdown fence, preamble, file write, artifact, or compact summary.',
   '',
   '=== CRITIQUE REQUEST ===',
   '',
@@ -118,21 +117,38 @@ export interface RunCriticOpts {
   prompt: string;
   /** Workflow: the materialized fixture repo (cwd + where artifacts land). */
   fixtureDir?: string;
-  /** For the EDGE_CASES_ID contract row — prefixed at the very top of the user prompt. */
-  edgeCasesId?: string;
   exec?: typeof execJudgeAsync;
   onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
 }
 
 export interface WorkflowRunOutput {
-  /** stdout — the compact summary block (or null on outage). */
+  /** stdout — the exact JSON response (or null on outage). */
   raw: string | null;
-  /** .cursor/.feature-critique.md content from the fixture, or null when not written. */
+  /** Findings rendered for the existing audited slot matcher; derived only from valid JSON. */
   report: string | null;
-  /** The edge-cases artifact content, or null when not written. */
+  /** Exact JSON retained by salvage; edge cases are read from this response, not a file. */
   artifact: string | null;
-  /** Where the artifact was expected — depends on edgeCasesId per the md's contract. */
+  /** Logical source for diagnostics. */
   artifactPath: string;
+  contractValid: boolean;
+  repositoryUnchanged: boolean;
+  providerArtifactsAbsent: boolean;
+}
+
+const PROVIDER_ARTIFACT_RE = /^edge-cases.*\.json$/i;
+
+function hasProviderArtifact(root: string): boolean {
+  const matches = (name: string): boolean =>
+    name === 'feature-critique.md' || PROVIDER_ARTIFACT_RE.test(name);
+  const hasAtSurfaceRoot = (dir: string): boolean => {
+    if (!existsSync(dir)) return false;
+    return readdirSync(dir, { withFileTypes: true }).some(
+      (entry) => entry.isFile() && matches(entry.name),
+    );
+  };
+  return ['.claude', '.cursor', '.codex', '.agents'].some((surface) =>
+    hasAtSurfaceRoot(path.join(root, surface)),
+  );
 }
 
 export async function runIntrinsic({
@@ -153,40 +169,50 @@ export async function runWorkflow({
   critic,
   prompt,
   fixtureDir,
-  edgeCasesId,
   exec = execJudgeAsync,
   onOutage,
 }: RunCriticOpts): Promise<WorkflowRunOutput> {
   if (!fixtureDir) throw new Error('critique-eval: workflow run needs a fixtureDir');
-  const userPrompt = edgeCasesId ? `EDGE_CASES_ID=${edgeCasesId}\n---\n${prompt}` : prompt;
+  const before = execFileSync('git', ['status', '--porcelain=v1', '-z'], {
+    cwd: fixtureDir,
+    encoding: 'utf8',
+  });
   const raw = await exec({
     label: 'critique-eval:workflow',
-    args: buildWorkflowArgs(userPrompt, critic),
+    args: buildWorkflowArgs(prompt, critic),
     timeout: WORKFLOW_TIMEOUT_MS,
     cwd: fixtureDir,
     onOutage,
   });
-  const artifactPath = path.join(
-    fixtureDir,
-    '.cursor',
-    edgeCasesId ? `.edge-cases-${edgeCasesId}.json` : '.edge-cases.json',
-  );
-  const readOrNull = (p: string): string | null => {
-    try {
-      return readFileSync(p, 'utf8');
-    } catch {
-      return null; // absence is a scored contract miss, not a crash
-    }
-  };
+  const after = execFileSync('git', ['status', '--porcelain=v1', '-z'], {
+    cwd: fixtureDir,
+    encoding: 'utf8',
+  });
+  const contract = raw ? parsePlanCritiqueResponse(raw) : null;
+  const report = contract?.value
+    ? [
+        '## Critical Issues (Blockers)',
+        ...contract.value.findings
+          .filter((finding) => finding.severity === 'critical')
+          .map((finding, index) => `${index + 1}. **${finding.claim}**\n   ${finding.impact}`),
+        '## Warnings (Non-blocking but significant)',
+        ...contract.value.findings
+          .filter((finding) => finding.severity !== 'critical')
+          .map((finding, index) => `${index + 1}. **${finding.claim}**\n   ${finding.impact}`),
+      ].join('\n')
+    : null;
   return {
     raw,
-    report: readOrNull(path.join(fixtureDir, '.cursor', '.feature-critique.md')),
-    artifact: readOrNull(artifactPath),
-    artifactPath,
+    report,
+    artifact: raw,
+    artifactPath: 'response.edgeCases',
+    contractValid: contract?.state === 'valid',
+    repositoryUnchanged: before === after,
+    providerArtifactsAbsent: !hasProviderArtifact(fixtureDir),
   };
 }
 
-// ─── Compact-summary parsing (deterministic) ──────────────────────────────────────
+// ─── JSON-contract parsing (deterministic) ────────────────────────────────────────
 
 export const VERDICTS = ['PROCEED WITH CHANGES', 'PROCEED', 'RETHINK', 'REJECT'] as const;
 export type Verdict = (typeof VERDICTS)[number];
@@ -200,37 +226,30 @@ export interface ParsedSummary {
   criticalCount: number | null;
   warningCount: number | null;
   uxImpact: string | null;
-  /** ~tokens of the whole message (chars/4 heuristic) for the ≤300-token contract check. */
+  /** Informational whole-response size using the existing chars/4 heuristic. */
   approxTokens: number;
 }
 
-const line = (raw: string, label: string): string | null => {
-  const m = raw.match(new RegExp(`^[\\s>*#-]*\\**${label}\\**\\s*:\\s*(.+)$`, 'im'));
-  return m ? m[1].trim() : null;
-};
-
-const count = (raw: string, label: string): number | null => {
-  const v = line(raw, label);
-  if (v === null) return null;
-  const n = Number.parseInt(v, 10);
-  return Number.isInteger(n) && n >= 0 ? n : null;
-};
-
-/** Parse the compact summary. Missing/ambiguous fields parse null — NULL is a verdict column in
- * the bench, never an exception. 'PROCEED WITH CHANGES' is matched before its 'PROCEED' prefix. */
+/** Parse strict JSON into the benchmark's historical closed-set columns. */
 export function parseSummary(raw: string): ParsedSummary {
-  const v = line(raw, 'VERDICT')?.toUpperCase() ?? '';
-  const verdict = VERDICTS.find((k) => v.includes(k)) ?? null;
-  const metaRaw = line(raw, 'FRAME_META')?.toUpperCase() ?? '';
-  const metaHits = FRAME_METAS.filter((k) => metaRaw.includes(k));
+  const contract = parsePlanCritiqueResponse(raw);
+  const value = contract.value;
+  const verdict =
+    value?.verdict === 'PROCEED_WITH_CHANGES'
+      ? 'PROCEED WITH CHANGES'
+      : ((value?.verdict as Verdict | null) ?? null);
   return {
     verdict,
-    // Exactly one token per the md's contract — two hits is ambiguity, scored NULL.
-    frameMeta: metaHits.length === 1 ? metaHits[0] : null,
-    feasibility: line(raw, 'FEASIBILITY'),
-    criticalCount: count(raw, 'CRITICAL_ISSUES'),
-    warningCount: count(raw, 'WARNINGS'),
-    uxImpact: line(raw, 'UX_IMPACT'),
+    frameMeta: value?.frameMeta ?? null,
+    feasibility: value?.feasibility ?? null,
+    criticalCount: value
+      ? value.findings.filter((finding) => finding.severity === 'critical').length
+      : null,
+    warningCount: value
+      ? value.findings.filter((finding) => finding.severity === 'warning').length
+      : null,
+    uxImpact:
+      value?.findings.find((finding) => finding.lens === 'ux')?.impact ?? (value ? 'none' : null),
     approxTokens: Math.ceil(raw.length / 4),
   };
 }

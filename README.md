@@ -5,7 +5,7 @@ Single source of truth for my reusable developer toolkit. One git repo, two halv
 
 | Half      | What                                                                       | How consumers get it |
 | --------- | -------------------------------------------------------------------------- | -------------------- |
-| **AGENT** | `skills/` + `agents/` — Claude/Cursor skills + reviewer/testing subagents  | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
+| **AGENT** | `skills/` + `agents/` — Claude/Cursor skills + reviewer/testing subagents; Codex opt-in | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
 | **CODE**  | shared **configs** (Biome, tsconfig) + the portable **gate-engine**        | `bun add -D git+https://github.com/norvalbv/devkit.git#<tag>` |
 
 ## Reference
@@ -124,6 +124,31 @@ the selection in `.devkit/config.json` (so `doctor` knows what to check). Monore
 **inside the package** — devkit is git-root-aware (the hook installs at the git root with a
 package-scoped block). Full flags, components, and removal: `devkit help init`. Verify the wiring
 anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
+
+Claude and Cursor remain the default agent targets. Add `--codex` to install Codex-native
+`.agents/skills`, `.codex/agents`, and merged `.codex/hooks.json` entries; Codex requires reviewing
+and approving project hook definitions in `/hooks` before they run.
+
+When agent hooks are selected, finalized plan critiques are captured fail-open under
+`~/.devkit/evidence/plan-critiques/v1/`; runtime hooks do not write provider or working-tree
+artifacts. `DEVKIT_NO_TELEMETRY=1` disables capture, and `devkit clean --evidence` explicitly
+purges the private spool plus this worktree's immutable bindings.
+
+`~/.devkit` means the current user's home-state directory, not this package's checkout and not a
+consumer repository. Evidence therefore survives reinstalling a repository-local package and can
+be imported across repositories. Capture support depends on how devkit is installed:
+
+| install shape | plan-critique capture |
+|---|---|
+| repository-local `@norvalbv/devkit` dependency + `devkit init --agent-hooks` | supported; the hook resolves the package runtime from `node_modules` |
+| devkit self-host checkout + agent hooks | supported; the hook resolves the source runtime |
+| adding the dependency without running init | inactive; no provider hooks are registered |
+| package-less standalone or overlay | currently unavailable; critique remains visible, but the fail-open hook cannot resolve a capture runtime |
+
+Standalone/overlay support must ship the capture runtime beside the installed provider hook and
+pass the same provider/retention benchmarks before this table can claim support. Repo-local
+evidence storage is intentionally not a fallback: it would leak private runtime data into the
+working tree and fragment the cross-repository corpus.
 
 ## Updating (consumers)
 

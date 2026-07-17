@@ -83,6 +83,11 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
       'cursor',
     ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--codex'])).agentTargets).toEqual([
+      'claude',
+      'cursor',
+      'codex',
+    ]);
   });
 
   it('fallow is OPT-IN: off by default, on with --fallow, off again with --no-fallow', () => {
@@ -162,6 +167,31 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
     expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
     expect(config(root).components.agentTargets).toEqual(['claude']);
+  });
+
+  it('Codex is opt-in and uses Codex-native project directories', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: true,
+        agentHooks: true,
+        husky: false,
+        structure: false,
+        agentTargets: ['codex'],
+        guards: [],
+      },
+      devkitRef: 'v0.3.0',
+    });
+    expect(existsSync(join(root, '.agents/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/feature-critique.md'))).toBe(true);
+    expect(existsSync(join(root, '.codex/hooks/plan-critique-evidence.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.codex/hooks.json'))).toBe(true);
+    expect(existsSync(join(root, '.claude'))).toBe(false);
+    expect(existsSync(join(root, '.cursor'))).toBe(false);
   });
 
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {

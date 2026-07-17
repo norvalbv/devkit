@@ -10,7 +10,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../../lib/components.mts';
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
@@ -55,11 +55,11 @@ interface SyncOpts {
 export function syncAgents(
   args: string[],
   cwd: string,
-  targets: string[] = AGENT_TARGETS,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
   { skipTracked, override = () => false }: SyncOpts = {},
 ): AssetManifest {
   const dryRun = args.includes('--dry-run');
-  const targetDirs = targets.map((t) => `.${t}/agents`);
+  const targetDirs = targets.map((t) => agentSurfaceDir(t, 'agents'));
   const agentsSrc = join(packageDir(), 'agents');
   const rels = listAgents(agentsSrc);
 
@@ -126,7 +126,10 @@ export function syncAgents(
  * — what an interactive `devkit init` lists for the user to pick from. `root` is the git root;
  * `targets` are the surfaces to check (default both). Returns colliding agent filenames.
  */
-export function detectAgentConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
+export function detectAgentConflicts(
+  root: string,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
+): string[] {
   const agentsSrc = join(packageDir(), 'agents');
   return findConflicts(
     root,
@@ -157,6 +160,6 @@ export default function run(args: string[], cwd: string): number {
   const { gitRoot } = detectGitRoot(cwd);
   const cfg: DevkitConfig | null = readJson(join(gitRoot, '.devkit', 'config.json'));
   const override = args.includes('--force') ? () => true : undefined;
-  syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+  syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
   return 0;
 }

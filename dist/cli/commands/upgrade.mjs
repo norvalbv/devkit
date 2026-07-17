@@ -20,10 +20,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
+import { AGENT_TARGETS, agentSurfaceDir, applyOverlayConstraints, DEFAULT_AGENT_TARGETS, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
+import { selfHostSelection } from "../lib/husky/self-host.mjs";
 import { syncHookScripts } from "../lib/install/install-hooks.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
@@ -56,6 +57,8 @@ init stay callable for scripts, but upgrade composes them + the emitted-config r
 // Exit for "installed a newer tag; re-run to reconcile" — distinct from 0 (done) / 1 (drift) so a
 // scripted `devkit upgrade && …` doesn't treat a still-stale repo as finished.
 const NEEDS_RERUN = 10;
+// A clean version tag, for validating a recorded overlay `devkitRef` pin (mirrors doctor.mts).
+const SEMVER = /^\d+\.\d+\.\d+$/;
 // Reason: flat top-level pipeline — sequential guarded steps (preflight → version/pin → config reconcile →
 // broad refresh → force-adopt → verify), each a single delegated call with near-zero nesting; the
 // real logic lives in the composed commands (applyInit / computeMigration / doctor / update).
@@ -68,10 +71,6 @@ export default async function upgrade(args, cwd) {
         console.error('devkit upgrade: not initialized — run `devkit init` first.');
         return 2;
     }
-    if (cfg.overlay) {
-        console.error('devkit upgrade: this is an overlay (local-only) repo — re-run `devkit init --overlay` to re-sync.');
-        return 1;
-    }
     const stack = cfg.stack ?? detectStack(cwd);
     const standalone = Boolean(cfg.standalone);
     const { gitRoot } = detectGitRoot(cwd);
@@ -79,8 +78,118 @@ export default async function upgrade(args, cwd) {
     // value first — else a legacy claude-only repo gets .cursor re-added. When absent (legacy config),
     // infer from which surfaces currently hold devkit content; fall back to both.
     const rawTargets = cfg.components?.agentTargets;
-    const inferred = AGENT_TARGETS.filter((t) => existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')));
-    const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+    const inferred = AGENT_TARGETS.filter((t) => existsSync(join(gitRoot, agentSurfaceDir(t, 'skills'))) ||
+        existsSync(join(gitRoot, agentSurfaceDir(t, 'agents'))));
+    const agentTargets = rawTargets ?? (inferred.length ? inferred : DEFAULT_AGENT_TARGETS);
+    // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
+    // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
+    // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive
+    // multiselect in the dogfood repo). Regenerate the source hook + re-sync assets from the current
+    // generator, then verify — the whole point is that `devkit upgrade` keeps the dogfood hook in
+    // lockstep with the generator, for free.
+    if (cfg.selfHost) {
+        console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — self-host (source-mode dogfood), stack=${stack}\n`);
+        console.log('Regenerating the source hook + re-syncing assets from the current generator.');
+        await applyInit(cwd, {
+            stack,
+            selection: { ...selfHostSelection(), agentTargets },
+            selfHost: true,
+            force,
+            dryRun,
+            regenStructureBaselines: false,
+        });
+        if (dryRun) {
+            console.log('\nDry-run complete — nothing written.');
+            return 0;
+        }
+        console.log('\nverify\n');
+        return doctor([], cwd);
+    }
+    // Overlay (local-only): the version pin is .devkit/config.json's `devkitRef` — there's no package.json
+    // dep because the gates run off the GLOBAL devkit CLI (node_modules' analog). Resolve the pin the same
+    // install-agnostic way and, like package mode, chase a newer PUBLISHED tag (updating the global install
+    // — the analog of `bun install`), then re-sync the git-ignored gate chain + configs + skills/agents
+    // against it and verify. Idempotent: baselining is init-only (repoAdopted), so a re-sync never
+    // re-freezes debt. Was formerly a bail pointing at `devkit init --overlay` — that re-sync is now safe.
+    if (cfg.overlay) {
+        const runningVersion = readJson(join(packageDir(), 'package.json'))
+            ?.version;
+        // devkitRef is the overlay's version pin, but it can also be 'main' / a branch / a SHA (an
+        // unversioned overlay install) — only a clean `v<semver>` tag is a comparable pin. Anything else
+        // falls back to the running CLI version; otherwise cmpSemver would return NaN (silently defeating the
+        // update check) and `v${target}` would persist a corrupt ref like `vmain`. Mirrors doctor.mts.
+        const stamped = cfg.devkitRef?.startsWith('v') && SEMVER.test(cfg.devkitRef.slice(1))
+            ? cfg.devkitRef.slice(1)
+            : undefined;
+        const current = stamped || runningVersion;
+        if (!current) {
+            console.error('devkit upgrade: could not resolve the installed devkit version.');
+            return 1;
+        }
+        let target = current;
+        console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — overlay (local-only), stack=${stack}\n`);
+        console.log('1. version / pin');
+        // ponytail: inline copy of the package path's version-check (the version/pin step below); extract a
+        // shared resolveTarget() only if a 4th mode needs it. Kept inline so the package path is untouched.
+        const { latest, error } = fetchLatestTag();
+        if (error) {
+            console.log(`  ! ${error} — reconciling against the installed v${current}.`);
+        }
+        else if (latest && cmpSemver(latest, current) > 0) {
+            console.log(`  newer devkit published: v${latest} (installed v${current})`);
+            if (dryRun) {
+                console.log(`  [dry-run] would install v${latest}${needsRerun(latest, runningVersion) ? ', then re-run to reconcile' : ' and reconcile in this pass'}.`);
+                return 0;
+            }
+            const code = await update([], cwd);
+            if (code !== 0)
+                return code;
+            // A re-run is needed only when the RUNNING global CLI is itself behind latest — it can't hot-swap
+            // to the code it just installed. When already >= latest it reconciles the overlay in this pass.
+            if (needsRerun(latest, runningVersion)) {
+                console.log('\nInstalled a newer devkit. Re-run `devkit upgrade` to reconcile the overlay under the new version.');
+                return NEEDS_RERUN;
+            }
+            target = latest;
+            console.log(`  ✓ installed v${latest} — running CLI already current, reconciling in this pass.`);
+        }
+        console.log('\n2. re-sync (regenerate the git-ignored gate chain + configs for the recorded selection)');
+        // biome is a pass-through overlay opt-out that applyOverlay never persists into config.components, so
+        // normalizeSelection would default it back to `true` and silently re-add biome.devkit.jsonc to a repo
+        // init'd with --no-biome. Honour the recorded value; else infer from the on-disk overlay marker (the
+        // same legacy-inference idiom as `structure` above) — biome.devkit.jsonc is written iff biome was on.
+        const biome = cfg.components?.biome ?? existsSync(join(cwd, 'biome.devkit.jsonc'));
+        const sel = applyOverlayConstraints({
+            ...normalizeSelection(cfg.components),
+            agentTargets,
+            biome,
+        });
+        // `--force` must NOT reach applyOverlay's config writers: writeIfAbsent(guard.config.json) and
+        // writeBiomeOverlay OVERWRITE on force, but upgrade's contract (and the package-mode branch, which
+        // hardcodes force:false) is that tuned configs are NEVER overwritten. Refreshing overlay configs is
+        // the deliberate `devkit init --overlay --force`, not upgrade.
+        // ponytail: overlay upgrade has no assets-only force-adopt pass (package Step 5); add if needed.
+        if (force) {
+            console.log('  • --force: tuned overlay configs are never overwritten by upgrade — run `devkit init --overlay --force` to refresh them.');
+        }
+        await applyInit(cwd, {
+            stack,
+            selection: sel,
+            overlay: true,
+            devkitRef: `v${target}`,
+            // Preserve an opted-in machine-global commit gate: applyOverlay reads plan.globalCommitGate (NOT
+            // the existing config) and rewrites the flag from it — omitting it would silently un-wire the shim.
+            globalCommitGate: cfg.globalCommitGate,
+            force: false,
+            dryRun,
+        });
+        if (dryRun) {
+            console.log('\nDry-run complete — nothing written.');
+            return 0;
+        }
+        console.log('\nverify\n');
+        return doctor([], cwd);
+    }
     // structure: normalizeSelection ALSO defaults this to `true` when the key is absent, so a LEGACY
     // config (no `structure` key) would otherwise reach applyInit as structure:true and newly ADD
     // structure-lint to a config-driven repo that never had it. Honour the RAW recorded value; if absent

@@ -10,7 +10,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AGENT_TARGETS } from '../../lib/components.mts';
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
@@ -60,11 +60,11 @@ interface SyncOpts {
 export function syncSkills(
   args: string[],
   cwd: string,
-  targets: string[] = AGENT_TARGETS,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
   { skipTracked, override = () => false }: SyncOpts = {},
 ): AssetManifest {
   const dryRun = args.includes('--dry-run');
-  const targetDirs = targets.map((t) => `.${t}/skills`);
+  const targetDirs = targets.map((t) => agentSurfaceDir(t, 'skills'));
   const skillsSrc = join(packageDir(), 'skills');
   const rels = walk(skillsSrc);
 
@@ -150,7 +150,10 @@ export function syncSkills(
  * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
  * skill names.
  */
-export function detectSkillConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
+export function detectSkillConflicts(
+  root: string,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
+): string[] {
   const skillsSrc = join(packageDir(), 'skills');
   const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
   return findConflicts(
@@ -184,6 +187,6 @@ export default function run(args: string[], cwd: string): number {
   // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
   // per-asset picker is `devkit init` interactive only).
   const override = args.includes('--force') ? () => true : undefined;
-  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
   return 0;
 }

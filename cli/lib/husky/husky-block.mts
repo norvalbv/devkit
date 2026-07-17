@@ -1,7 +1,6 @@
 /**
- * Assemble the `# devkit-guards` pre-commit block from a component selection, and
- * surgically remove individual pieces (a single guard, the biome-format step, the whole
- * block) without disturbing the consumer's own hook lines outside the markers.
+ * Assemble the `# devkit-guards` block from a selection, and surgically remove individual pieces
+ * without disturbing the consumer's own hook lines outside the markers.
  *
  * The block is COMPOSED from fragments rather than copied from a static template so that
  * `devkit init` can emit exactly the selected guards + the biome step, and the removal
@@ -11,6 +10,7 @@
  */
 
 import { markEnd, markStart } from './husky.mts';
+import { PLAN_CRITIQUE_SHADOW_FRAGMENT } from './plan-critique-shadow.mts';
 
 /**
  * The block-builder's view of a component selection: whether the biome format step is wanted,
@@ -216,9 +216,8 @@ function wantsDeterministic(selection: HookSelection): boolean {
  * git root ('' = root install).
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
-  const pieces = [];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  pieces.push(COMMIT_TERMINAL_FRAGMENT);
+  const pieces = [COMMIT_TERMINAL_FRAGMENT, PLAN_CRITIQUE_SHADOW_FRAGMENT];
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   if (wantsDeterministic(selection))
     pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
@@ -274,6 +273,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     COMMIT_TERMINAL_FRAGMENT,
+    PLAN_CRITIQUE_SHADOW_FRAGMENT,
     DK_GATE_AI_HELPER,
   ];
   if (wantsDeterministic(selection)) {
@@ -343,7 +343,7 @@ export function buildOverlayHook(
   pkgRel = '',
   { fallow = false }: { fallow?: boolean } = {},
 ): string {
-  const gates = [COMMIT_TERMINAL_FRAGMENT, DK_GATE_AI_HELPER];
+  const gates = [COMMIT_TERMINAL_FRAGMENT, PLAN_CRITIQUE_SHADOW_FRAGMENT, DK_GATE_AI_HELPER];
   if (wantsDeterministic(selection)) gates.push(standaloneDeterministicLines());
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))

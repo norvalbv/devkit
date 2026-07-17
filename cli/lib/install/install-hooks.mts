@@ -15,7 +15,7 @@
 
 import { chmodSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../components.mts';
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../components.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mts';
 import { isTracked } from '../git-tracked.mts';
 import {
@@ -24,7 +24,15 @@ import {
   removeManifested,
   type SyncManifest,
 } from '../sync-manifest.mts';
-import { registrationsFor } from './hook-registrations.mts';
+import {
+  addClaude,
+  type ClaudeSettings,
+  isDevkitHookCommand,
+  stripClaude,
+  toClaudeRegistration,
+  toCodexRegistration,
+} from './grouped-hook-config.mts';
+import { type HookRegistration, registrationsFor } from './hook-registrations.mts';
 
 // Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
 // (gitignored by default, never tracked → invisible, never needs the tracked-skip), every other
@@ -34,7 +42,7 @@ const claudeSettingsFile = (overlay: boolean) =>
   overlay ? 'settings.local.json' : 'settings.json';
 
 // Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
-const hookDirs = (targets: string[]) => targets.map((t) => `.${t}/hooks`);
+const hookDirs = (targets: string[]) => targets.map((t) => agentSurfaceDir(t, 'hooks'));
 
 // Options for `syncHookScripts` (see its JSDoc for the per-field behaviour).
 interface SyncHookScriptsOptions {
@@ -77,7 +85,7 @@ export function syncHookScripts(
   root: string,
   {
     dryRun = false,
-    targets = AGENT_TARGETS,
+    targets = DEFAULT_AGENT_TARGETS,
     only,
     skipTracked,
     override = () => false,
@@ -148,7 +156,10 @@ export function syncHookScripts(
  * @param {string[]} [targets] surfaces to check (default both)
  * @returns {string[]} colliding hook-script filenames
  */
-export function detectHookConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
+export function detectHookConflicts(
+  root: string,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
+): string[] {
   const src = join(packageDir(), 'agents-hooks');
   const rels = readdirSync(src, { withFileTypes: true })
     .filter((e) => e.isFile())
@@ -173,7 +184,11 @@ export function detectHookConflicts(root: string, targets: string[] = AGENT_TARG
  */
 export function removeHookScripts(
   root: string,
-  { dryRun = false, targets = AGENT_TARGETS, dropManifest = true }: RemoveHookScriptsOptions = {},
+  {
+    dryRun = false,
+    targets = DEFAULT_AGENT_TARGETS,
+    dropManifest = true,
+  }: RemoveHookScriptsOptions = {},
 ): void {
   // Hook scripts are flat files in <surface>/hooks — the same teardown removeManifested does for
   // skills/agents (manifest names, or the bundled set as fallback, tracked-safe on the fallback).
@@ -189,34 +204,11 @@ export function removeHookScripts(
   );
 }
 
-// A command is devkit-owned iff it references one of these path fragments. Used to dedupe on
-// re-install and to strip on removal without touching the consumer's own hook commands. The hook-dir
-// markers carry NO leading slash so they match BOTH the Claude form (`$CLAUDE_PROJECT_DIR/.claude/
-// hooks/…`) and the Cursor form (`toCursorCommand` strips the `$CLAUDE_PROJECT_DIR/` prefix →
-// `.cursor/hooks/…`) — a leading-slash marker silently failed to strip the Cursor commands.
-const DEVKIT_MARKERS = ['@norvalbv/devkit/gate-engine', '.claude/hooks/', '.cursor/hooks/'];
-
-const isDevkit = (cmd: string) => DEVKIT_MARKERS.some((m) => cmd.includes(m));
-
-// One registry entry (hook-registrations.mts): a Claude event + matcher + the shell command it wires.
-interface HookRegistration {
-  event: string;
-  matcher: string;
-  command: string;
-}
-
 // Shared options for install/remove of the hook registrations across the agent surfaces.
 interface HookRegistrationOptions {
   dryRun?: boolean;
   targets?: string[];
   overlay?: boolean;
-}
-
-// The consumer's Claude `settings.json` / `settings.local.json`: the `hooks` block devkit merges
-// into, plus arbitrary consumer-owned keys the merge must preserve (round-tripped through JSON).
-interface ClaudeSettings {
-  hooks?: ClaudeHooksBlock;
-  [key: string]: unknown;
 }
 
 // The consumer's Cursor `hooks.json`: a versioned wrapper around the `hooks` block, other keys kept.
@@ -226,55 +218,11 @@ interface CursorSettings {
   [key: string]: unknown;
 }
 
-// Claude `.claude/settings.json` hooks block: event → matcher-groups, each group holding commands.
-interface ClaudeHook {
-  type?: string;
-  command?: string;
-}
-interface ClaudeHookGroup {
-  matcher?: string;
-  hooks?: ClaudeHook[];
-}
-type ClaudeHooksBlock = Record<string, ClaudeHookGroup[]>;
-
 // Cursor `.cursor/hooks.json` hooks block: lowercase-event → flat command entries.
 interface CursorHook {
   command?: string;
 }
 type CursorHooksBlock = Record<string, CursorHook[]>;
-
-// ── Claude (.claude/settings.json) — { hooks: { <Event>: [{ matcher, hooks: [{type,command}] }] } }
-// Strip every devkit-owned command from a Claude hooks block, dropping now-empty matcher/event groups.
-function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
-  const out: ClaudeHooksBlock = {};
-  for (const [event, groups] of Object.entries(hooks ?? {})) {
-    const kept: ClaudeHookGroup[] = [];
-    for (const group of groups) {
-      const cmds = (group.hooks ?? []).filter((h) => !(h.command && isDevkit(h.command)));
-      if (cmds.length) kept.push({ ...group, hooks: cmds });
-    }
-    if (kept.length) out[event] = kept;
-  }
-  return out;
-}
-
-// Merge one registration into a Claude hooks block (append to the matching event+matcher group,
-// or create it). Mutates + returns `hooks`.
-function addClaude(
-  hooks: ClaudeHooksBlock,
-  { event, matcher, command }: HookRegistration,
-): ClaudeHooksBlock {
-  if (!hooks[event]) hooks[event] = [];
-  const groups = hooks[event];
-  let group = groups.find((g) => (g.matcher ?? '') === matcher);
-  if (!group) {
-    group = { matcher, hooks: [] };
-    groups.push(group);
-  }
-  if (!group.hooks) group.hooks = [];
-  group.hooks.push({ type: 'command', command });
-  return hooks;
-}
 
 // ── Cursor (.cursor/hooks.json) — { version, hooks: { <lowercaseEvent>: [{ command, … }] } }
 // Cursor's event vocabulary differs from Claude's; map only the events that translate cleanly.
@@ -282,6 +230,7 @@ const CURSOR_EVENT: Record<string, Record<string, string>> = {
   PreToolUse: { Bash: 'beforeShellExecution' },
   PostToolUse: { Bash: 'afterShellExecution', 'Edit|Write|MultiEdit': 'afterFileEdit' },
   Stop: { '': 'stop' },
+  SubagentStop: { 'feature-critique|plan-critique': 'subagentStop' },
   PreCompact: { '': 'preCompact' },
   // UserPromptSubmit has no Cursor analogue → omitted from the Cursor mirror.
 };
@@ -296,6 +245,7 @@ const QUOTE_RE = /"/g;
 // repo root and uses no env prefix; .claude/hooks scripts are mirrored to .cursor/hooks).
 function toCursorCommand(command: string): string {
   return command
+    .replaceAll('__DEVKIT_PROVIDER__', 'cursor')
     .replace(RUNNER_RE, '')
     .replace(PROJECT_DIR_RE, '')
     .replace(CLAUDE_HOOKS_RE, '.cursor/hooks/')
@@ -306,7 +256,9 @@ function toCursorCommand(command: string): string {
 function stripCursor(hooks?: CursorHooksBlock): CursorHooksBlock {
   const out: CursorHooksBlock = {};
   for (const [event, list] of Object.entries(hooks ?? {})) {
-    const kept = (list ?? []).filter((h) => !(h.command && isDevkit(h.command)));
+    const kept = (list ?? []).filter(
+      (hook) => !(hook.command && isDevkitHookCommand(hook.command)),
+    );
     if (kept.length) out[event] = kept;
   }
   return out;
@@ -337,7 +289,11 @@ function addCursor(
 export function installHookRegistrations(
   root: string,
   componentIds: string[],
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
+  {
+    dryRun = false,
+    targets = DEFAULT_AGENT_TARGETS,
+    overlay = false,
+  }: HookRegistrationOptions = {},
 ): { wrote: string[] } {
   const regs = registrationsFor(componentIds);
   if (!regs.length) return { wrote: [] };
@@ -352,7 +308,7 @@ export function installHookRegistrations(
     const claudePath = join(root, claudeRel);
     const claude: ClaudeSettings = (readJson(claudePath) as ClaudeSettings | null) ?? {};
     let claudeHooks = stripClaude(claude.hooks);
-    for (const reg of regs) claudeHooks = addClaude(claudeHooks, reg);
+    for (const reg of regs) claudeHooks = addClaude(claudeHooks, toClaudeRegistration(reg));
     claude.hooks = claudeHooks;
     if (!dryRun) writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
     wrote.push(claudeRel);
@@ -380,6 +336,28 @@ export function installHookRegistrations(
       wrote.push(cursorRel);
     }
   }
+  // Codex uses the Claude-shaped event/matcher/handler schema, but loads it from
+  // `.codex/hooks.json`. Project hooks are skipped until the user reviews and trusts their exact
+  // hash in `/hooks`; installation calls this out rather than pretending the hook is already live.
+  if (targets.includes('codex')) {
+    const codexRel = '.codex/hooks.json';
+    if (overlay && isTracked(root, codexRel)) {
+      console.log(
+        `  ! ${codexRel} is git-tracked — skipping (can't hide a tracked edit). Add devkit Codex hooks manually if wanted.`,
+      );
+    } else {
+      const codexPath = join(root, codexRel);
+      const codex: ClaudeSettings = (readJson(codexPath) as ClaudeSettings | null) ?? {};
+      let codexHooks = stripClaude(codex.hooks);
+      for (const reg of regs) codexHooks = addClaude(codexHooks, toCodexRegistration(reg));
+      codex.hooks = codexHooks;
+      if (!dryRun) writeIfAbsent(codexPath, `${JSON.stringify(codex, null, 2)}\n`, { force: true });
+      wrote.push(codexRel);
+      console.log(
+        '  ! Codex project hooks require trust review: open `/hooks` and approve the installed definitions.',
+      );
+    }
+  }
 
   if (dryRun) {
     console.log(`  [dry-run] merge hook registrations → ${wrote.join(' + ')}`);
@@ -398,7 +376,11 @@ export function installHookRegistrations(
  */
 export function removeHookRegistrations(
   root: string,
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
+  {
+    dryRun = false,
+    targets = DEFAULT_AGENT_TARGETS,
+    overlay = false,
+  }: HookRegistrationOptions = {},
 ): void {
   const claudePath = join(root, '.claude', claudeSettingsFile(overlay));
   const claude = targets.includes('claude')
@@ -408,7 +390,9 @@ export function removeHookRegistrations(
   const cursor = targets.includes('cursor')
     ? (readJson(cursorPath) as CursorSettings | null)
     : null;
-  if (!claude && !cursor) {
+  const codexPath = join(root, '.codex', 'hooks.json');
+  const codex = targets.includes('codex') ? (readJson(codexPath) as ClaudeSettings | null) : null;
+  if (!claude && !cursor && !codex) {
     console.log('  • no agent settings — no hook registrations to remove');
     return;
   }
@@ -424,6 +408,10 @@ export function removeHookRegistrations(
     cursor.hooks = stripCursor(cursor.hooks);
     writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
   }
+  if (codex) {
+    codex.hooks = stripClaude(codex.hooks);
+    writeIfAbsent(codexPath, `${JSON.stringify(codex, null, 2)}\n`, { force: true });
+  }
   console.log('  ✓ removed devkit hook registrations');
 }
 
@@ -438,19 +426,43 @@ export function removeHookRegistrations(
 export function checkHookRegistrations(
   root: string,
   componentIds: string[],
-  { overlay = false }: { overlay?: boolean } = {},
+  { overlay = false, targets = ['claude'] }: { overlay?: boolean; targets?: string[] } = {},
 ) {
   const regs = registrationsFor(componentIds);
   if (!regs.length) return { ok: true, missing: [] };
-  const claude = readJson(join(root, '.claude', claudeSettingsFile(overlay))) as {
-    hooks?: ClaudeHooksBlock;
-  } | null;
-  const present = new Set<string>();
-  for (const groups of Object.values(claude?.hooks ?? {})) {
-    for (const group of groups) {
-      for (const h of group.hooks ?? []) if (h.command) present.add(h.command);
+  const missing: string[] = [];
+  for (const target of targets) {
+    const present = new Set<string>();
+    if (target === 'cursor') {
+      const cursor = readJson(join(root, '.cursor', 'hooks.json')) as CursorSettings | null;
+      for (const hooks of Object.values(cursor?.hooks ?? {})) {
+        for (const hook of hooks) if (hook.command) present.add(hook.command);
+      }
+      for (const registration of regs) {
+        const event = CURSOR_EVENT[registration.event]?.[registration.matcher];
+        if (!event) continue;
+        const command = toCursorCommand(registration.command);
+        if (!present.has(command)) missing.push(`${target}:${command}`);
+      }
+      continue;
+    }
+    const path =
+      target === 'codex'
+        ? join(root, '.codex', 'hooks.json')
+        : join(root, '.claude', claudeSettingsFile(overlay));
+    const settings = readJson(path) as ClaudeSettings | null;
+    for (const groups of Object.values(settings?.hooks ?? {})) {
+      for (const group of groups) {
+        for (const hook of group.hooks ?? []) if (hook.command) present.add(hook.command);
+      }
+    }
+    for (const registration of regs) {
+      const expected =
+        target === 'codex'
+          ? toCodexRegistration(registration).command
+          : toClaudeRegistration(registration).command;
+      if (!present.has(expected)) missing.push(`${target}:${expected}`);
     }
   }
-  const missing = regs.filter((r) => !present.has(r.command)).map((r) => r.command);
   return { ok: missing.length === 0, missing };
 }

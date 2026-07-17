@@ -10,7 +10,7 @@
  */
 import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from './components.mts';
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from './components.mts';
 import { packageDir, readJson, sha256 } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
 
@@ -90,7 +90,7 @@ export function findConflicts(
   const ownedTargets = manifest?.targets ? new Set(manifest.targets) : null;
   return names.filter((name) =>
     targets.some((t) => {
-      const dir = `.${t}/${subdir}`;
+      const dir = agentSurfaceDir(t, subdir as 'skills' | 'agents' | 'hooks');
       if (!existsSync(join(root, dir, name)) || matchesBundle(root, dir, name, srcDir))
         return false;
       // diverges from the bundle → the consumer's, UNLESS devkit owns this name ON THIS surface
@@ -208,10 +208,10 @@ export function removeManifested(
 export function removeSkills(
   root: string,
   dryRun: boolean,
-  targets: string[] = AGENT_TARGETS,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
   dropManifest = true,
 ): void {
-  const dirs = targets.map((t) => `.${t}/skills`);
+  const dirs = targets.map((t) => agentSurfaceDir(t, 'skills'));
   const fallback = bundledNames('skills', (e) => e.isDirectory());
   removeManifested(
     root,
@@ -228,10 +228,10 @@ export function removeSkills(
 export function removeAgents(
   root: string,
   dryRun: boolean,
-  targets: string[] = AGENT_TARGETS,
+  targets: string[] = DEFAULT_AGENT_TARGETS,
   dropManifest = true,
 ): void {
-  const dirs = targets.map((t) => `.${t}/agents`);
+  const dirs = targets.map((t) => agentSurfaceDir(t, 'agents'));
   const fallback = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md'));
   removeManifested(
     root,

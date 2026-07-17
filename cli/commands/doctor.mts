@@ -10,7 +10,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RECOMMENDED_GUARD_IDS, type Selection } from '../lib/components.mts';
+import {
+  agentSurfaceDir,
+  DEFAULT_AGENT_TARGETS,
+  RECOMMENDED_GUARD_IDS,
+  type Selection,
+} from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
@@ -290,18 +295,15 @@ async function checkSkills(cwd: string, surface = 'claude'): Promise<CheckResult
   for (const [rel, recordedSha] of Object.entries(manifest.files)) {
     const srcPath = join(skillsSrc, rel);
     if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, `.${surface}`, 'skills', rel);
+    const consumerPath = join(gitRoot, agentSurfaceDir(surface, 'skills'), rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
-  // Bundle-completeness: a NEW bundled skill the (stale) manifest doesn't list — and that was never
-  // synced under .<surface>/skills — is drift the per-file loop above can't see (it iterates manifest
-  // keys only, so a just-added skill is invisible). A consumer-authored same-named skill (present on
-  // disk, deliberately off-manifest) is NOT drift, so require absent-on-disk too — see the
-  // non-devkit-asset-collision-preserve decision.
+  // A new bundled skill absent from both manifest and disk is drift; consumer collisions are not.
   const manifestSkillDirs = new Set(Object.keys(manifest.files).map((k) => k.split('/')[0]));
   const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter(
     (dir) =>
-      !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)),
+      !manifestSkillDirs.has(dir) &&
+      !existsSync(join(gitRoot, agentSurfaceDir(surface, 'skills'), dir)),
   );
   if (sourceDrift.length || consumerDrift.length || unsynced.length) {
     const parts: string[] = [];
@@ -331,16 +333,14 @@ async function checkAgents(cwd: string, surface = 'claude'): Promise<CheckResult
   for (const [rel, recordedSha] of Object.entries(manifest.files)) {
     const srcPath = join(agentsSrc, rel);
     if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, `.${surface}`, 'agents', rel);
+    const consumerPath = join(gitRoot, agentSurfaceDir(surface, 'agents'), rel);
     if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
   }
-  // Bundle-completeness: a NEW bundled agent the (stale) manifest doesn't list — and that was never
-  // synced under .<surface>/agents — is drift the per-file loop above can't see (it iterates manifest
-  // keys only). A consumer-authored same-named agent (present on disk, deliberately off-manifest) is
-  // NOT drift, so require absent-on-disk too — see the non-devkit-asset-collision-preserve decision.
+  // A new bundled agent absent from both manifest and disk is drift; consumer collisions are not.
   const unsynced = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md')).filter(
     (name) =>
-      !(name in manifest.files) && !existsSync(join(gitRoot, `.${surface}`, 'agents', name)),
+      !(name in manifest.files) &&
+      !existsSync(join(gitRoot, agentSurfaceDir(surface, 'agents'), name)),
   );
   if (sourceDrift.length || consumerDrift.length || unsynced.length) {
     const parts: string[] = [];
@@ -371,7 +371,7 @@ function checkAgentHookScripts(cwd: string, surface = 'claude'): CheckResult {
     );
   }
   const drift = Object.keys(manifest.files).filter((rel) => {
-    const p = join(gitRoot, `.${surface}`, 'hooks', rel);
+    const p = join(gitRoot, agentSurfaceDir(surface, 'hooks'), rel);
     return !existsSync(p) || sha256(p) !== manifest.files[rel];
   });
   if (drift.length) {
@@ -387,14 +387,14 @@ function checkAgentHookScripts(cwd: string, surface = 'claude'): CheckResult {
 }
 
 // Hook registrations present in .claude/settings.json for the selected hook-owning components.
-function checkRegistrations(cwd: string, hookComponents: string[]): CheckResult {
+function checkRegistrations(cwd: string, hookComponents: string[], targets: string[]): CheckResult {
   const { gitRoot } = detectGitRoot(cwd);
-  const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents);
+  const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents, { targets });
   if (ok) return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
   return check(
     'hook registrations',
     'DRIFT',
-    `${missing.length} command(s) not in .claude/settings.json`,
+    `${missing.length} command(s) missing from selected provider hook config`,
     'run `devkit init` to re-register',
     true,
   );
@@ -523,9 +523,10 @@ function selectionFlags(sel: Partial<Selection>): string[] {
   if (!sel.guards?.length) flags.push('--no-guards');
   else flags.push('--guards', sel.guards.join(','));
   // Preserve the recorded agent-surface choice so --fix never re-adds a deselected surface.
-  for (const t of ['claude', 'cursor']) {
+  for (const t of DEFAULT_AGENT_TARGETS) {
     if (sel.agentTargets && !sel.agentTargets.includes(t)) flags.push(`--no-${t}`);
   }
+  if (sel.agentTargets?.includes('codex')) flags.push('--codex');
   return flags;
 }
 
@@ -687,17 +688,20 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   }
   // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
   const sel: Partial<Selection> = cfg?.components ?? {};
-  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
   const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
   if (sel.skills && primary) advise(await checkSkills(cwd, primary));
   if (sel.agents && primary) advise(await checkAgents(cwd, primary));
   if (sel.agentHooks && primary) advise(checkAgentHookScripts(cwd, primary));
-  if (sel.agentHooks && surfaces.includes('claude')) {
-    const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], { overlay: true });
+  if (sel.agentHooks && surfaces.length > 0) {
+    const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], {
+      overlay: true,
+      targets: surfaces,
+    });
     console.log(
-      `  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks in .claude/settings.local.json' : 'not in settings.local.json (re-run init)'}`,
+      `  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks present for selected providers' : 'provider hook config drifted (re-run init)'}`,
     );
   }
   if (sel.fallow) {
@@ -752,7 +756,7 @@ async function runSelfHostDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): 
 
   // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
   const sel: Partial<Selection> = cfg.components ?? {};
-  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
   const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
@@ -803,23 +807,19 @@ async function collectResults(
       ),
     );
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
-  // structure-lint is a separate hook line (not a guard) — verify it when structure is recorded.
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
-  // Verify synced agent files against ONE selected surface (identical content on both).
-  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+  // Synced content is identical across selected surfaces, so one representative is sufficient.
+  const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
   const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
   if (sel.skills && primarySurface) results.push(await checkSkills(cwd, primarySurface));
   if (sel.agents && primarySurface) results.push(await checkAgents(cwd, primarySurface));
   if (sel.agentHooks && primarySurface) results.push(checkAgentHookScripts(cwd, primarySurface));
   if (sel.searchSteering) results.push(checkSearchToolBins());
-  // Hook-owning components register into the surfaces' settings. checkHookRegistrations reads the
-  // Claude-shaped settings.json, so only verify when .claude is a selected surface.
   const hookComponents = [
     sel.searchSteering && 'searchSteering',
     sel.agentHooks && 'agentHooks',
   ].filter((x): x is 'searchSteering' | 'agentHooks' => Boolean(x));
-  if (hookComponents.length && surfaces.includes('claude'))
-    results.push(checkRegistrations(cwd, hookComponents));
+  if (hookComponents.length) results.push(checkRegistrations(cwd, hookComponents, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));

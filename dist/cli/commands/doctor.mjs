@@ -17,11 +17,13 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RECOMMENDED_GUARD_IDS } from "../lib/components.mjs";
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS, RECOMMENDED_GUARD_IDS, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256 } from "../lib/fs-helpers.mjs";
+import { checkCommitMsgHook, commitMsgGuards } from "../lib/husky/commit-msg-block.mjs";
 import { markEnd, markStart } from "../lib/husky/husky.mjs";
 import { extractGuardBlock } from "../lib/husky/husky-block.mjs";
+import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../lib/husky/self-host.mjs";
 import { checkHookRegistrations } from "../lib/install/install-hooks.mjs";
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from "../lib/overlay.mjs";
 import { globalHookInstalled, globalInitPath } from "../lib/overlay-global-hook.mjs";
@@ -57,27 +59,25 @@ function checkHusky(cwd, selectedGuards) {
         return check('.husky/pre-commit', 'DRIFT', pkgRel ? `no devkit-guards block for "${pkgRel}"` : 'no devkit-guards marker block', 'run `devkit init` (appends the block)', true);
     }
     const block = extractGuardBlock(content, pkgRel) ?? '';
-    // The deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
-    // orchestrator (which re-reads the selection from .devkit/config.json at commit time); the rest
-    // (decisions/review/qavis-advisory) keep their own per-id `guard-<id>` fragment. So verify one
-    // `guard-deterministic` call when any deterministic guard is selected, plus each selected
-    // own-fragment guard's sentinel. A block that predates this collapse (per-guard `bunx guard-X`
-    // lines, no `guard-deterministic`) fails the first check and is flagged for regeneration.
+    // Deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
+    // orchestrator; decisions/review/qavis-advisory keep their own per-id `guard-<id>` fragment.
+    // Verify one orchestrator call when any deterministic guard is selected, plus each selected
+    // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
+    // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
     const OWN_FRAGMENT = new Set(['decisions', 'review', 'qavis-advisory']);
+    const gates = selectedGuards.filter((g) => g !== 'sentry');
     const missing = [];
-    if (selectedGuards.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
+    if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
         missing.push('deterministic gates');
     }
-    for (const g of selectedGuards) {
+    for (const g of gates) {
         if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`))
             missing.push(g);
     }
     if (missing.length) {
         return check('.husky/pre-commit', 'DRIFT', `block missing gate(s): ${missing.join(', ')}`, 'run `devkit init --force` (or `devkit upgrade`) to regenerate the block', true);
     }
-    return check('.husky/pre-commit', 'OK', selectedGuards.length
-        ? `block calls: ${selectedGuards.join(', ')}`
-        : 'block present (no guards selected)');
+    return check('.husky/pre-commit', 'OK', gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)');
 }
 // Structure-lint check (only when `structure` is selected). `structure` is NOT a guard, so
 // checkHusky never verifies it. Structure joins the deterministic orchestrator via a `--structure
@@ -197,17 +197,14 @@ async function checkSkills(cwd, surface = 'claude') {
         const srcPath = join(skillsSrc, rel);
         if (existsSync(srcPath) && sha256(srcPath) !== recordedSha)
             sourceDrift.push(rel);
-        const consumerPath = join(gitRoot, `.${surface}`, 'skills', rel);
+        const consumerPath = join(gitRoot, agentSurfaceDir(surface, 'skills'), rel);
         if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha)
             consumerDrift.push(rel);
     }
-    // Bundle-completeness: a NEW bundled skill the (stale) manifest doesn't list — and that was never
-    // synced under .<surface>/skills — is drift the per-file loop above can't see (it iterates manifest
-    // keys only, so a just-added skill is invisible). A consumer-authored same-named skill (present on
-    // disk, deliberately off-manifest) is NOT drift, so require absent-on-disk too — see the
-    // non-devkit-asset-collision-preserve decision.
+    // A new bundled skill absent from both manifest and disk is drift; consumer collisions are not.
     const manifestSkillDirs = new Set(Object.keys(manifest.files).map((k) => k.split('/')[0]));
-    const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter((dir) => !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)));
+    const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter((dir) => !manifestSkillDirs.has(dir) &&
+        !existsSync(join(gitRoot, agentSurfaceDir(surface, 'skills'), dir)));
     if (sourceDrift.length || consumerDrift.length || unsynced.length) {
         const parts = [];
         if (sourceDrift.length)
@@ -236,15 +233,13 @@ async function checkAgents(cwd, surface = 'claude') {
         const srcPath = join(agentsSrc, rel);
         if (existsSync(srcPath) && sha256(srcPath) !== recordedSha)
             sourceDrift.push(rel);
-        const consumerPath = join(gitRoot, `.${surface}`, 'agents', rel);
+        const consumerPath = join(gitRoot, agentSurfaceDir(surface, 'agents'), rel);
         if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha)
             consumerDrift.push(rel);
     }
-    // Bundle-completeness: a NEW bundled agent the (stale) manifest doesn't list — and that was never
-    // synced under .<surface>/agents — is drift the per-file loop above can't see (it iterates manifest
-    // keys only). A consumer-authored same-named agent (present on disk, deliberately off-manifest) is
-    // NOT drift, so require absent-on-disk too — see the non-devkit-asset-collision-preserve decision.
-    const unsynced = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md')).filter((name) => !(name in manifest.files) && !existsSync(join(gitRoot, `.${surface}`, 'agents', name)));
+    // A new bundled agent absent from both manifest and disk is drift; consumer collisions are not.
+    const unsynced = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md')).filter((name) => !(name in manifest.files) &&
+        !existsSync(join(gitRoot, agentSurfaceDir(surface, 'agents'), name)));
     if (sourceDrift.length || consumerDrift.length || unsynced.length) {
         const parts = [];
         if (sourceDrift.length)
@@ -265,7 +260,7 @@ function checkAgentHookScripts(cwd, surface = 'claude') {
         return check('agent-hooks', 'MISSING', 'no agent-hooks-manifest.json', 'run `devkit init`', true);
     }
     const drift = Object.keys(manifest.files).filter((rel) => {
-        const p = join(gitRoot, `.${surface}`, 'hooks', rel);
+        const p = join(gitRoot, agentSurfaceDir(surface, 'hooks'), rel);
         return !existsSync(p) || sha256(p) !== manifest.files[rel];
     });
     if (drift.length) {
@@ -274,12 +269,12 @@ function checkAgentHookScripts(cwd, surface = 'claude') {
     return check('agent-hooks', 'OK', `${Object.keys(manifest.files).length} hook script(s) in sync`);
 }
 // Hook registrations present in .claude/settings.json for the selected hook-owning components.
-function checkRegistrations(cwd, hookComponents) {
+function checkRegistrations(cwd, hookComponents, targets) {
     const { gitRoot } = detectGitRoot(cwd);
-    const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents);
+    const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents, { targets });
     if (ok)
         return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
-    return check('hook registrations', 'DRIFT', `${missing.length} command(s) not in .claude/settings.json`, 'run `devkit init` to re-register', true);
+    return check('hook registrations', 'DRIFT', `${missing.length} command(s) missing from selected provider hook config`, 'run `devkit init` to re-register', true);
 }
 // searchSteering: the guard + counter engine bins are present in the installed package.
 function checkSearchToolBins() {
@@ -378,10 +373,12 @@ function selectionFlags(sel) {
     else
         flags.push('--guards', sel.guards.join(','));
     // Preserve the recorded agent-surface choice so --fix never re-adds a deselected surface.
-    for (const t of ['claude', 'cursor']) {
+    for (const t of DEFAULT_AGENT_TARGETS) {
         if (sel.agentTargets && !sel.agentTargets.includes(t))
             flags.push(`--no-${t}`);
     }
+    if (sel.agentTargets?.includes('codex'))
+        flags.push('--codex');
     return flags;
 }
 // --fix: repair fixable findings. NEVER refreeze (only recreate MISSING baselines), and NEVER
@@ -408,10 +405,11 @@ function applyFix(cwd, results, sel, stack, standalone) {
         r.name !== 'baselines' &&
         r.name !== 'skills' &&
         r.name !== 'agents');
-    // The guard block AND its structure-lint `--structure` arg both live in the .husky/pre-commit
-    // deterministic line, which init rebuilds from the recorded selection — so a drifted structure-lint
-    // result takes the same init repair path (it flags itself fixable, else --fix would no-op it).
-    const huskyDrift = results.some((r) => (r.name === '.husky/pre-commit' || r.name === 'structure-lint') && r.status !== 'OK');
+    // The guard blocks (pre-commit + commit-msg) AND the structure-lint `--structure` arg are all
+    // rebuilt by init from the recorded selection — so a drifted result on any of them takes the
+    // same init repair path (each flags itself fixable, else --fix would no-op it).
+    const HOOK_CHECKS = new Set(['.husky/pre-commit', '.husky/commit-msg', 'structure-lint']);
+    const huskyDrift = results.some((r) => HOOK_CHECKS.has(r.name) && r.status !== 'OK');
     if (needsInit || huskyDrift) {
         const args = ['init', '--stack', stack, ...selectionFlags(sel)];
         // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).
@@ -514,7 +512,7 @@ async function runOverlayDoctor(cwd, cfg, fix) {
     }
     // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
     const sel = cfg?.components ?? {};
-    const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+    const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
     const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
     const advise = (r) => console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
     if (sel.skills && primary)
@@ -523,9 +521,12 @@ async function runOverlayDoctor(cwd, cfg, fix) {
         advise(await checkAgents(cwd, primary));
     if (sel.agentHooks && primary)
         advise(checkAgentHookScripts(cwd, primary));
-    if (sel.agentHooks && surfaces.includes('claude')) {
-        const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], { overlay: true });
-        console.log(`  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks in .claude/settings.local.json' : 'not in settings.local.json (re-run init)'}`);
+    if (sel.agentHooks && surfaces.length > 0) {
+        const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], {
+            overlay: true,
+            targets: surfaces,
+        });
+        console.log(`  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks present for selected providers' : 'provider hook config drifted (re-run init)'}`);
     }
     if (sel.fallow) {
         const wired = hookOk &&
@@ -534,6 +535,46 @@ async function runOverlayDoctor(cwd, cfg, fix) {
     }
     // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
     return hookOk && pathOk && (fix || !sync.drift) ? 0 : 1;
+}
+// Self-host (the devkit repo dogfooding itself) doctor: the ONE health signal is whether the
+// committed source hook still matches what the CURRENT generator produces — a mismatch means the
+// generator changed without a regen, or the hook was hand-edited. `--fix` regenerates it. Skills/
+// agents are advisory (a re-sync heals them). Pin/extends/structure/version checks don't apply —
+// the configs are hand-owned local files, not `@norvalbv/devkit/*` extends, and there is no dep.
+async function runSelfHostDoctor(cwd, cfg, fix) {
+    const { gitRoot, pkgRel } = detectGitRoot(cwd);
+    const hookPath = join(gitRoot, '.husky', 'pre-commit');
+    console.log('devkit doctor — self-host (source-mode dogfood)\n');
+    let hookOk = false;
+    if (!existsSync(hookPath)) {
+        console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
+    }
+    else {
+        const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
+        const expectedBlock = buildSelfHostBlock({ ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS }, pkgRel, cwd);
+        if (currentBlock !== null && currentBlock.trim() === expectedBlock.trim()) {
+            hookOk = true;
+            console.log('  ✓ .husky/pre-commit in sync with the generator');
+        }
+        else if (fix) {
+            installSelfHostHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
+            hookOk = true;
+            console.log('  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)');
+        }
+        else {
+            console.log('  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`');
+        }
+    }
+    // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
+    const sel = cfg.components ?? {};
+    const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
+    const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
+    const advise = (r) => console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
+    if (sel.skills && primary)
+        advise(await checkSkills(cwd, primary));
+    if (sel.agents && primary)
+        advise(await checkAgents(cwd, primary));
+    return hookOk ? 0 : 1;
 }
 /**
  * Build the doctor result list for a package/standalone install from its recorded config — a pure
@@ -555,18 +596,18 @@ async function collectResults(cwd, cfg, configResult) {
     const results = [configResult];
     if (sel.husky)
         results.push(checkHusky(cwd, sel.guards ?? []));
+    if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
+        results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
     if (sel.biome)
         results.push(checkExtends(cwd, 'biome.jsonc', expected.biome, 'extends', overrides.has('biome.jsonc')));
     if (sel.tsconfig)
         results.push(checkExtends(cwd, 'tsconfig.json', expected.tsconfig, 'extends', overrides.has('tsconfig.json')));
     if (sel.guards?.length || sel.structure)
         results.push(await checkGuardConfig(cwd));
-    // structure-lint is a separate hook line (not a guard) — verify it when structure is recorded.
     if (sel.structure && sel.husky)
         results.push(checkStructureLint(cwd, stack));
-    // Verify the synced agent files against a SELECTED surface (prefer .claude; else the first
-    // chosen one). Both surfaces get identical content, so checking one is sufficient.
-    const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
+    // Synced content is identical across selected surfaces, so one representative is sufficient.
+    const surfaces = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
     const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
     if (sel.skills && primarySurface)
         results.push(await checkSkills(cwd, primarySurface));
@@ -576,14 +617,12 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkAgentHookScripts(cwd, primarySurface));
     if (sel.searchSteering)
         results.push(checkSearchToolBins());
-    // Hook-owning components register into the surfaces' settings. checkHookRegistrations reads the
-    // Claude-shaped settings.json, so only verify when .claude is a selected surface.
     const hookComponents = [
         sel.searchSteering && 'searchSteering',
         sel.agentHooks && 'agentHooks',
     ].filter((x) => Boolean(x));
-    if (hookComponents.length && surfaces.includes('claude'))
-        results.push(checkRegistrations(cwd, hookComponents));
+    if (hookComponents.length)
+        results.push(checkRegistrations(cwd, hookComponents, surfaces));
     if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
         results.push(checkBaselines(cwd));
     if (!standalone)
@@ -621,6 +660,8 @@ export default async function run(args, cwd) {
     const cfg = (readJson(join(cwd, '.devkit', 'config.json')) ?? {});
     if (cfg.overlay)
         return runOverlayDoctor(cwd, cfg, fix);
+    if (cfg.selfHost)
+        return runSelfHostDoctor(cwd, cfg, fix);
     const { results, sel } = await collectResults(cwd, cfg, configResult);
     console.log('devkit doctor\n');
     const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };

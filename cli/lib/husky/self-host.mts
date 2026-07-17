@@ -71,6 +71,8 @@ type SelfHostHookInput = Selection & {
 // Matches the `bunx guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
 // covered by `[a-z-]+`. `bunx biome` has no `guard-` prefix → correctly left alone.
 const BUNX_GUARD_RE = /\bbunx (guard-[a-z-]+)\b/g;
+const PACKAGE_CRITIQUE_CAPTURE_RE =
+  /for __dk_pc in\s+node_modules\/@norvalbv\/devkit\/dist\/gate-engine\/critique\/capture\.mjs\s+gate-engine\/critique\/capture\.mts; do/;
 // The `./dist/<...>.mjs` → `<...>.mts` transform pieces (hoisted — useTopLevelRegex).
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;
@@ -97,7 +99,9 @@ export function sourceBinFor(cwd: string, binName: string): string {
 
 /** Rewrite every `bunx guard-<x>` in a generated hook to `node <source .mts>`. */
 export function toSelfHost(hookText: string, cwd: string): string {
-  return hookText.replace(BUNX_GUARD_RE, (_m, bin: string) => `node ${sourceBinFor(cwd, bin)}`);
+  return hookText
+    .replace(BUNX_GUARD_RE, (_m, bin: string) => `node ${sourceBinFor(cwd, bin)}`)
+    .replace(PACKAGE_CRITIQUE_CAPTURE_RE, 'for __dk_pc in gate-engine/critique/capture.mts; do');
 }
 
 /**

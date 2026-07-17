@@ -27,14 +27,16 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
-import { LINE_CAP, setMaxLines } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, defaultSelection, GUARD_IDS, } from "../lib/components.mjs";
+import { enableLineGrowth, hasLineCap, LINE_CAP, setMaxLines, } from "../../gate-engine/ratchets/size-disable.mjs";
+import { AGENT_TARGETS, agentSettingsFile, agentSurfaceDir, applyOverlayConstraints, COMPONENTS, DEFAULT_AGENT_TARGETS, defaultSelection, GUARD_IDS, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson, writeIfAbsent } from "../lib/fs-helpers.mjs";
 import { generateImportWallBaseline } from "../lib/generate/generate-import-wall-baseline.mjs";
 import { generateStructureBaselines } from "../lib/generate/generate-structure-baseline.mjs";
+import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
+import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowGate, } from "../lib/install/install-fallow.mjs";
 import { detectHookConflicts, installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "../lib/install/install-hooks.mjs";
@@ -104,6 +106,7 @@ function parseFlags(args) {
         fallow: false,
         searchSteering: false,
         agentHooks: false,
+        codex: false,
         searchCode: false,
         standalone: false,
         overlay: false,
@@ -128,6 +131,8 @@ function parseFlags(args) {
             flags.searchSteering = true;
         else if (a === '--agent-hooks')
             flags.agentHooks = true;
+        else if (a === '--codex')
+            flags.codex = true;
         else if (a === '--search-code')
             flags.searchCode = true;
         else if (a === '--standalone')
@@ -174,9 +179,10 @@ function selectionFromFlags(flags) {
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-    // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
-    // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
-    sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
+    // Codex is explicit because its project hook config requires user trust review.
+    sel.agentTargets = DEFAULT_AGENT_TARGETS.filter((t) => !flags.no.has(t));
+    if (flags.codex && !flags.no.has('codex'))
+        sel.agentTargets.push('codex');
     return sel;
 }
 // Which components are currently wired? Read the recorded set first (authoritative), then
@@ -391,9 +397,8 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
     console.log(`  ✓ package.json: ${added.join(', ')}`);
 }
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
-// which is `cwd` for a single-package repo, or the monorepo root when init runs in a package
-// subdir). `pkgRel` scopes the block + `cd`s the gates into the package. Fresh repo → full
-// hook; existing hook → replace/insert THIS package's devkit-guards block (others untouched).
+// `cwd` for a single-package repo, else the monorepo root). `pkgRel` scopes the block + `cd`s
+// the gates into the package. Fresh repo → full hook; existing → replace THIS package's block.
 function installHusky(sel, hookRoot, pkgRel, dryRun) {
     const where = pkgRel ? ` (git root, scoped to ${pkgRel})` : '';
     const hookPath = join(hookRoot, '.husky', 'pre-commit');
@@ -528,7 +533,7 @@ async function subConfirm(message, { interactive, fallback }) {
 // Reason: flat policy resolver: the branches ARE the four resolution modes (none / force / non-interactive / interactive-pick), each a single guarded return; no nesting
 // fallow-ignore-next-line complexity
 async function resolveAssetConflicts(gitRoot, selection, { interactive, force }) {
-    const targets = selection.agentTargets ?? AGENT_TARGETS;
+    const targets = selection.agentTargets ?? DEFAULT_AGENT_TARGETS;
     const found = [];
     if (selection.skills)
         for (const name of detectSkillConflicts(gitRoot, targets))
@@ -683,9 +688,9 @@ function removeTsconfig(cwd, dryRun) {
     writeFileSync(file, `${JSON.stringify(parsed, null, 2)}\n`);
     console.log(`  ✓ stripped devkit extends from tsconfig.json${onlyExtends ? ' (file now has no extends — review/remove if empty)' : ''}`);
 }
-// Remove this package's devkit-guards block from the (git-root) hook, leaving the rest + any
-// other packages' blocks intact.
+// Remove this package's devkit-guards blocks (pre-commit + commit-msg), other content intact.
 function removeHusky(hookRoot, pkgRel, dryRun) {
+    removeCommitMsgBlock(hookRoot, pkgRel, dryRun);
     const hookPath = join(hookRoot, '.husky', 'pre-commit');
     if (!existsSync(hookPath))
         return;
@@ -838,7 +843,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
                 agentHooks: Boolean(selection.agentHooks),
                 searchSteering: false, // never wired in overlay (no resolvable bin without the package)
                 fallow: fallowWired,
-                agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
+                agentTargets: [...(selection.agentTargets ?? DEFAULT_AGENT_TARGETS)],
             },
         }, null, 2)}\n`);
         console.log('  ✓ wrote .devkit/config.json (git-ignored)');
@@ -848,13 +853,12 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         ? '  Global pre-commit gate wired — a plain `git commit` stays gated across `bun install`s.'
         : '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath),\n  or add --global-commit-gate once to gate plain `git commit` too.');
 }
-// Sync skills / agents / agent-hook scripts + their hook registrations to the SELECTED agent
-// surface(s) (.claude / .cursor), then prune any surface a prior run installed but that's now
-// deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
+// Sync skills/agents/hooks to the selected surfaces, then prune surfaces a prior run installed.
+// Repo-wide → operates on the git root. Returns resolved agentTargets for config persistence.
 // Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
 // fallow-ignore-next-line complexity
 function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false) {
-    const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
+    const agentTargets = selection.agentTargets ?? DEFAULT_AGENT_TARGETS;
     if (selection.skills) {
         console.log('7. skills');
         // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest). A
@@ -890,14 +894,7 @@ function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false
 // fresh install where the dropped surface has no devkit dir (no work, no noise).
 function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun) {
     const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
-    // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
-    // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
-    const settingsFile = {
-        claude: '.claude/settings.json',
-        cursor: '.cursor/hooks.json',
-    };
-    const hasPrunableContent = prunedTargets.some((t) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
-        existsSync(join(gitRoot, settingsFile[t])));
+    const hasPrunableContent = prunedTargets.some((t) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, agentSurfaceDir(t, kind)))) || existsSync(join(gitRoot, agentSettingsFile(t))));
     if (!prunedTargets.length || !hasPrunableContent)
         return;
     console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -936,7 +933,7 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponent
 // Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
 // fallow-ignore-next-line complexity
 export async function applyInit(cwd, plan) {
-    const { stack, selection, remove = [], force = false, dryRun = false, interactive = false, scanRoots = null, standalone = false, overlay = false, regenStructureBaselines = true, } = plan;
+    const { stack, selection, remove = [], force = false, dryRun = false, interactive = false, scanRoots = null, standalone = false, overlay = false, selfHost = false, regenStructureBaselines = true, } = plan;
     // Structure-lint: config-driven stacks (react-app, component-lib) run via devkit's own eslint (the
     // `guard-structure` bin), so they work even in standalone (no consumer eslint/plugin). Electron's
     // preset needs consumer-side eslint/parser/plugin, so it stays package-only.
@@ -963,6 +960,9 @@ export async function applyInit(cwd, plan) {
     if (standalone) {
         console.log('  standalone: no package.json dep — global devkit CLI, fail-open hook');
     }
+    if (selfHost) {
+        console.log('  self-host: devkit dogfooding itself — source-mode hook, no self-dep');
+    }
     if (pkgRel) {
         console.log(`  monorepo: package "${pkgRel}" — hook + skills at the git root (${gitRoot})`);
     }
@@ -971,7 +971,12 @@ export async function applyInit(cwd, plan) {
         : selection[c.id] && !(c.id === 'structure' && !isStructure)).map((c) => c.id);
     console.log(`  components: ${on.join(', ') || '(none)'}\n`);
     console.log('1. configs');
-    if (standalone)
+    if (selfHost) {
+        // biome.jsonc / tsconfig.json / guard.config.json are hand-owned + committed in the devkit
+        // repo (its tsconfig extends the LOCAL base, not @norvalbv/devkit) — never overwrite them.
+        console.log('  • self-host: configs are hand-owned — leaving them untouched');
+    }
+    else if (standalone)
         installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
     else if (isStructure)
         installStructureFiles(cwd, stack, force, dryRun);
@@ -981,25 +986,53 @@ export async function applyInit(cwd, plan) {
     // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)
     // and only when the size guard runs it. An adopted repo enables it via `devkit upgrade` (freeze +
     // cap in one step), never here — this apply pass would set the cap with no matching freeze.
-    applyMaxLines(cwd, !repoAdopted(cwd) && Boolean(selection.lineGrowth) && selection.guards.includes('size'), dryRun);
-    // Standalone touches NO package.json (the whole point — no private dep in a shared repo).
-    if (!standalone) {
+    applyMaxLines(cwd,
+    // Self-host never writes maxLines — guard.config.json is hand-owned (and has no maxLines by design).
+    !selfHost &&
+        !repoAdopted(cwd) &&
+        Boolean(selection.lineGrowth) &&
+        selection.guards.includes('size'), dryRun);
+    // Standalone AND self-host touch NO package.json: standalone keeps a shared repo dep-free;
+    // self-host must never add @norvalbv/devkit as a dependency on ITSELF (the whole reason a plain
+    // `devkit init` can't run here).
+    if (!standalone && !selfHost) {
         console.log('2. package.json');
         patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun, stack);
     }
     if (selection.husky) {
         console.log('3. husky pre-commit');
-        // Thread the resolved structureCmd into the selection so the block emits `--structure "<cmd>"`
-        // on the guard-deterministic line only when structure actually applies (structureCmd is
-        // undefined otherwise). Same path for package and standalone.
-        if (standalone)
+        // structureCmd threads into the selection; self-host rewrites bunx→`node …mts`.
+        if (selfHost)
+            installSelfHostHook(gitRoot, pkgRel, selection, dryRun, cwd);
+        else if (standalone)
             installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
         else
             installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
+        // Commit-msg judges (review→completeness, sentry): self-host opts out AND drops a stale block.
+        if (!selfHost)
+            installCommitMsgHook(gitRoot, pkgRel, selection, { dryRun, standalone });
+        else
+            removeCommitMsgBlock(gitRoot, pkgRel, dryRun);
     }
-    if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
+    // Self-host skips the size/fanout freezes: devkit has 0 eslint-disable directives and no folder over
+    // the fan-out cap, so those baselines would be empty/no-op. But the RECOMMENDED line-growth ratchet is
+    // off until enabled, and devkit has files over LINE_CAP — so enable maxLines + freeze size-lines.json
+    // (grandfather the current giants shrink-only) on first adoption, exactly like `devkit upgrade` step-3b.
+    // Guarded on !hasLineCap so a re-run/upgrade never re-freezes (which would launder newly-added giants).
+    if (!selfHost && (selection.guards?.includes('fanout') || selection.guards?.includes('size'))) {
         console.log('4. freeze baselines');
         runFreezes(cwd, dryRun);
+    }
+    else if (selfHost &&
+        !dryRun &&
+        selection.lineGrowth &&
+        selection.guards?.includes('size') &&
+        !hasLineCap(cwd)) {
+        console.log('4. line-growth baseline (enable maxLines + grandfather current files)');
+        const { enabled, grandfathered } = enableLineGrowth(cwd);
+        console.log(enabled
+            ? `  ✓ maxLines ${LINE_CAP}; grandfathered ${grandfathered} file(s) (shrink-only)`
+            : '  ! could not enable line-growth — guard.config.json unreadable');
     }
     if (isStructure) {
         console.log('5. structure + import-wall baselines (grandfather current tree)');
@@ -1054,6 +1087,9 @@ export async function applyInit(cwd, plan) {
         initVersion: INIT_VERSION,
         pkgRel,
         standalone,
+        // Self-host marker: upgrade/doctor read this to skip the pin/dep checks and regenerate the
+        // source-mode hook instead of the `bunx guard-*` one.
+        selfHost,
         components,
     };
     const configPath = join(cwd, '.devkit', 'config.json');
@@ -1097,9 +1133,9 @@ Usage:
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
                          --no-structure --no-guards --no-fallow.
-  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,review;
-                         review — the in-chain reviewer judges — is opt-in, off by default).
-  --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
+  --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
+                         qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
+  --no-claude/--no-cursor  Narrow defaults; --codex adds Codex hooks (requires \`/hooks\` trust).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).
@@ -1146,7 +1182,16 @@ export default async function run(args, cwd) {
         await runStructureBaselines(cwd, stack, flags.dryRun);
         return 0;
     }
-    if (interactive) {
+    // Self-host: this IS the devkit repo. Auto-detected by package name → a fixed, deterministic
+    // selection + source-mode hook, bypassing the wizard AND the flag path. Never a CLI flag (it only
+    // ever applies to one repo), and the auto-detect means a stray `devkit init` here can't add a
+    // self-dep or overwrite the bespoke config.
+    const selfHost = isDevkitRepo(cwd);
+    if (selfHost) {
+        mode = 'self-host';
+        selection = selfHostSelection();
+    }
+    else if (interactive) {
         const installed = detectInstalled(cwd);
         const result = await runWizard({
             detectedStack,
@@ -1179,7 +1224,9 @@ export default async function run(args, cwd) {
     // hook is forced on — applied here so the wizard AND the --yes/flag path get identical invariants.
     if (mode === 'overlay')
         selection = applyOverlayConstraints(selection);
-    if (!structureAvailableFor(stack) && selection.structure) {
+    // Self-host runs structure via `bun run lint:structure` (eslint), not a template preset, so skip
+    // the "no preset → disable structure" flip (which would otherwise print a misleading notice).
+    if (!selfHost && !structureAvailableFor(stack) && selection.structure) {
         selection.structure = false; // no template for this stack — silently skip (noted below)
         if (stack !== 'generic') {
             console.log(`devkit init: no structure-lint preset for stack "${stack}" yet — skipping it.`);
@@ -1195,9 +1242,10 @@ export default async function run(args, cwd) {
         scanRoots: flags.scanRoots,
         standalone: mode === 'standalone',
         overlay: mode === 'overlay',
+        selfHost: mode === 'self-host',
         globalCommitGate: flags.globalCommitGate,
     });
-    if (interactive)
+    if (interactive && !selfHost)
         outro('Done — run `devkit doctor` to verify.');
     return 0;
 }

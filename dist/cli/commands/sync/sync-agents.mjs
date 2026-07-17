@@ -9,7 +9,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "../../lib/components.mjs";
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
@@ -32,9 +32,9 @@ function listAgents(dir) {
  *
  * Returns the manifest (for init to embed in its log).
  */
-export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
+export function syncAgents(args, cwd, targets = DEFAULT_AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
     const dryRun = args.includes('--dry-run');
-    const targetDirs = targets.map((t) => `.${t}/agents`);
+    const targetDirs = targets.map((t) => agentSurfaceDir(t, 'agents'));
     const agentsSrc = join(packageDir(), 'agents');
     const rels = listAgents(agentsSrc);
     const devkitPkg = readJson(join(packageDir(), 'package.json'));
@@ -93,7 +93,7 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
  * — what an interactive `devkit init` lists for the user to pick from. `root` is the git root;
  * `targets` are the surfaces to check (default both). Returns colliding agent filenames.
  */
-export function detectAgentConflicts(root, targets = AGENT_TARGETS) {
+export function detectAgentConflicts(root, targets = DEFAULT_AGENT_TARGETS) {
     const agentsSrc = join(packageDir(), 'agents');
     return findConflicts(root, agentsSrc, listAgents(agentsSrc), targets, 'agents', readJson(join(root, '.devkit', 'agents-manifest.json')));
 }
@@ -115,6 +115,6 @@ export default function run(args, cwd) {
     const { gitRoot } = detectGitRoot(cwd);
     const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
     const override = args.includes('--force') ? () => true : undefined;
-    syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+    syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
     return 0;
 }

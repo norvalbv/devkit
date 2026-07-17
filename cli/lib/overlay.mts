@@ -31,7 +31,12 @@ import {
 import { join } from 'node:path';
 import { syncAgents } from '../commands/sync/sync-agents.mts';
 import { syncSkills } from '../commands/sync/sync-skills.mts';
-import { AGENT_TARGETS, normalizeSelection, type Selection } from './components.mts';
+import {
+  agentSurfaceDir,
+  DEFAULT_AGENT_TARGETS,
+  normalizeSelection,
+  type Selection,
+} from './components.mts';
 import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
@@ -423,11 +428,8 @@ function resolveOverlayFallow(cwd: string, dryRun: boolean) {
   return true;
 }
 
-// Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
-// any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
-// relative paths to hide via .git/info/exclude (derived from each sync's returned manifest, so a
-// skipped-because-tracked file is never excluded for). searchSteering is deliberately NOT wired in
-// overlay: its hooks resolve a node_modules/@norvalbv/devkit path the package-less overlay lacks (C1).
+// Sync the agent half into selected surfaces, skipping tracked paths that exclude cannot hide.
+// searchSteering stays off because a package-less overlay cannot resolve its node_modules runtime.
 // Reason: flat overlay agent-surface orchestration: ordered `if (sel.x) sync + derive excludes` steps (skills → agents → hook scripts → registrations) mirroring installAgentSurfaces; high branch COUNT, each trivial, no nesting
 // fallow-ignore-next-line complexity
 function installOverlayAgentSurfaces(
@@ -436,11 +438,9 @@ function installOverlayAgentSurfaces(
   dryRun: boolean,
   force = false,
 ) {
-  const targets = sel.agentTargets ?? AGENT_TARGETS;
+  const targets = sel.agentTargets ?? DEFAULT_AGENT_TARGETS;
   const skipTracked = (rel: string) => isTracked(gitRoot, rel);
-  // Overlay has no interactive picker; --force is its all-or-nothing override of a non-devkit
-  // collision (matches the standalone CLI), else default-preserve. (A git-TRACKED collision is still
-  // left untouched by skipTracked regardless — exclude can't hide a tracked edit.)
+  // --force adopts non-devkit collisions; tracked files remain untouched regardless.
   const override = force ? () => true : undefined;
   const args = dryRun ? ['--dry-run'] : [];
   const excl = [];
@@ -448,7 +448,7 @@ function installOverlayAgentSurfaces(
     console.log('  skills');
     const m = syncSkills(args, gitRoot, targets, { skipTracked, override });
     for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
-      for (const t of targets) excl.push(`.${t}/skills/${name}/`);
+      for (const t of targets) excl.push(`${agentSurfaceDir(t, 'skills')}/${name}/`);
     // The sync ALWAYS writes the git-root manifest (even when every asset is preserved → files {}),
     // so it must be hidden unconditionally — else an all-preserved run leaks it into `git status`.
     excl.push('.devkit/skills-manifest.json');
@@ -457,14 +457,14 @@ function installOverlayAgentSurfaces(
     console.log('  agents');
     const m = syncAgents(args, gitRoot, targets, { skipTracked, override });
     for (const rel of Object.keys(m.files))
-      for (const t of targets) excl.push(`.${t}/agents/${rel}`);
+      for (const t of targets) excl.push(`${agentSurfaceDir(t, 'agents')}/${rel}`);
     excl.push('.devkit/agents-manifest.json');
   }
   if (sel.agentHooks) {
     console.log('  agent-hook scripts');
     const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked, override });
     for (const rel of Object.keys(m.files))
-      for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
+      for (const t of targets) excl.push(`${agentSurfaceDir(t, 'hooks')}/${rel}`);
     excl.push('.devkit/agent-hooks-manifest.json');
     console.log('  agent hook registrations');
     const { wrote } = installHookRegistrations(gitRoot, ['agentHooks'], {

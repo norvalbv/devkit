@@ -7,7 +7,7 @@
     "cli/lib/husky/husky-block.mts": 528,
     "cli/lib/overlay.mts": 561,
     "gate-engine/co-occurrence/matcher.mts": 543,
-    "gate-engine/critique/eval/bench.mts": 1177,
+    "gate-engine/critique/eval/bench.mts": 1170,
     "gate-engine/decisions/decisions.mts": 708,
     "gate-engine/decisions/detect.mts": 525,
     "gate-engine/decisions/eval/bench.mts": 1062,

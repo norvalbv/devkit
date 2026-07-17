@@ -27,12 +27,21 @@ export const RECOMMENDED_GUARD_IDS = [
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
 
 /**
- * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
- * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a
- * repo that only uses one tool doesn't get a redundant copy in the other's dir. Surface `<name>`
- * maps to the `.<name>/` dir (claude → .claude, cursor → .cursor).
+ * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`), Cursor
+ * (`.cursor/`), and opt-in Codex (`.agents/skills` + `.codex/agents|hooks`). Claude + Cursor remain
+ * the default so an upgrade never grows a new provider directory without explicit selection.
  */
-export const AGENT_TARGETS = ['claude', 'cursor'];
+export const AGENT_TARGETS = ['claude', 'cursor', 'codex'];
+export const DEFAULT_AGENT_TARGETS = ['claude', 'cursor'];
+
+export function agentSurfaceDir(target: string, kind: 'skills' | 'agents' | 'hooks'): string {
+  if (target === 'codex' && kind === 'skills') return '.agents/skills';
+  return `.${target}/${kind}`;
+}
+
+export function agentSettingsFile(target: string): string {
+  return target === 'claude' ? '.claude/settings.json' : `.${target}/hooks.json`;
+}
 
 /**
  * The top-level components, in wizard order. `recommended` seeds the --yes / non-TTY
@@ -47,11 +56,16 @@ export const COMPONENTS = [
     hint: 'tsconfig extending the devkit base',
     recommended: true,
   },
-  { id: 'skills', label: 'Agent skills', hint: 'sync to .claude + .cursor', recommended: true },
+  {
+    id: 'skills',
+    label: 'Agent skills',
+    hint: 'sync to Claude/Cursor; Codex opt-in',
+    recommended: true,
+  },
   {
     id: 'agents',
     label: 'Review agents',
-    hint: 'review/testing subagents → .claude/.cursor agents',
+    hint: 'review/testing subagents → selected agent surfaces',
     recommended: true,
   },
   {
@@ -62,8 +76,8 @@ export const COMPONENTS = [
   },
   {
     id: 'agentHooks',
-    label: 'Agent hooks (Claude/Cursor)',
-    hint: 'Stop/PostToolUse/UserPromptSubmit/PreCompact: decision nudge, rule recall, format-after-edit, QA, compaction',
+    label: 'Agent hooks (Claude/Cursor; Codex opt-in)',
+    hint: 'lifecycle hooks: plan evidence, decision nudge, rule recall, format-after-edit, QA, compaction',
     recommended: false,
   },
   { id: 'husky', label: 'Husky pre-commit', hint: 'the gate hook', recommended: true },
@@ -150,7 +164,7 @@ export function defaultSelection(): Selection {
     // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
     // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
     lineGrowth: true,
-    agentTargets: [...AGENT_TARGETS],
+    agentTargets: [...DEFAULT_AGENT_TARGETS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
 }

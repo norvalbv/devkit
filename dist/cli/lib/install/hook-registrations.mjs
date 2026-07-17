@@ -40,6 +40,16 @@ export const HOOK_REGISTRATIONS = {
     // their tool/config is absent). UserPromptSubmit nudge, Stop QA trio, format-after-edit, compactor.
     agentHooks: [
         {
+            event: 'SubagentStop',
+            matcher: 'feature-critique|plan-critique',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-critique-evidence.mjs" __DEVKIT_PROVIDER__ subagent-stop',
+        },
+        {
+            event: 'Stop',
+            matcher: '',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-critique-evidence.mjs" __DEVKIT_PROVIDER__ stop',
+        },
+        {
             event: 'UserPromptSubmit',
             matcher: '',
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',

@@ -70,6 +70,7 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('node gate-engine/decisions/cli.mts detect --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).toContain('--structure "bun run lint:structure"');
+    expect(hook).toContain('for __dk_pc in gate-engine/critique/capture.mts; do');
     expect(hook).not.toMatch(/bunx guard-/);
     expect(hook).not.toContain('@norvalbv/devkit');
   });

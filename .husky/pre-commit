@@ -33,6 +33,16 @@ if [ -z "${DEVKIT_SHIP_ID:-}" ] && [ -z "${DEVKIT_NO_TELEMETRY:-}" ]; then
 fi
 # /devkit:commit-terminal
 
+# devkit:plan-critique-shadow
+for __dk_pc in gate-engine/critique/capture.mts; do
+    if [ -f "$__dk_pc" ]; then
+        node "$__dk_pc" commit-projection >/dev/null 2>&1 || true
+        break
+    fi
+done
+unset __dk_pc
+# /devkit:plan-critique-shadow
+
 # devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
 # `git add -u`, which would sweep unrelated working-tree changes into the commit). Only

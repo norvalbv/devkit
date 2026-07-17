@@ -63,6 +63,11 @@ describe('buildGuardBlock', () => {
     // AI guards keep their own fail-fast fragments.
     expect(block).toContain('bunx guard-decisions');
     expect(block).toContain('bunx guard-review');
+    expect(block).toContain('# devkit:plan-critique-shadow');
+    expect(block).toContain('node "$__dk_pc" commit-projection >/dev/null 2>&1 || true');
+    expect(block.indexOf('# devkit:plan-critique-shadow')).toBeLessThan(
+      block.indexOf('bunx guard-review'),
+    );
   });
 
   it('omits the biome step when biome is deselected', () => {

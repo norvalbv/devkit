@@ -1,10 +1,14 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import runClean from '../commands/clean.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, devkit, cleanup } = tmpRepos('clean-');
-afterEach(cleanup);
+afterEach(() => {
+  delete process.env.DEVKIT_PLAN_CRITIQUE_EVIDENCE_DIR;
+  cleanup();
+});
 
 describe('clean (package mode)', () => {
   it('removes the SYNCED skill files, not just the manifest', () => {
@@ -35,5 +39,18 @@ describe('clean (package mode)', () => {
     expect(c.status).toBe(0);
     expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
     expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
+  });
+
+  it('--evidence purges only the local evidence store without requiring an install', async () => {
+    const root = tmpRepo();
+    const evidence = join(root, 'private-evidence');
+    const sentinel = join(root, 'unrelated-user-file.txt');
+    mkdirSync(join(evidence, 'records'), { recursive: true });
+    writeFileSync(join(evidence, 'records', 'one.json'), '{}');
+    writeFileSync(sentinel, 'keep me');
+    process.env.DEVKIT_PLAN_CRITIQUE_EVIDENCE_DIR = evidence;
+    expect(await runClean(['--evidence', '--yes'], root)).toBe(0);
+    expect(existsSync(evidence)).toBe(false);
+    expect(existsSync(sentinel)).toBe(true);
   });
 });

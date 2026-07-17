@@ -24,7 +24,7 @@ const PKG = 'node_modules/@norvalbv/devkit';
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
 // One registry entry: a Claude hook event + matcher + the shell command it wires (see the header).
-interface HookRegistration {
+export interface HookRegistration {
   event: string;
   matcher: string;
   command: string;
@@ -48,6 +48,18 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
   // story 17 — agent-hooks: synced scripts under the consumer's .claude/hooks/ (self-skip when
   // their tool/config is absent). UserPromptSubmit nudge, Stop QA trio, format-after-edit, compactor.
   agentHooks: [
+    {
+      event: 'SubagentStop',
+      matcher: 'feature-critique|plan-critique',
+      command:
+        'node "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-critique-evidence.mjs" __DEVKIT_PROVIDER__ subagent-stop',
+    },
+    {
+      event: 'Stop',
+      matcher: '',
+      command:
+        'node "$CLAUDE_PROJECT_DIR/.claude/hooks/plan-critique-evidence.mjs" __DEVKIT_PROVIDER__ stop',
+    },
     {
       event: 'UserPromptSubmit',
       matcher: '',

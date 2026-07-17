@@ -9,7 +9,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AGENT_TARGETS } from "../../lib/components.mjs";
+import { agentSurfaceDir, DEFAULT_AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
@@ -39,9 +39,9 @@ function walk(dir, base = dir) {
  *
  * Returns the manifest (for init to embed in its log).
  */
-export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
+export function syncSkills(args, cwd, targets = DEFAULT_AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
     const dryRun = args.includes('--dry-run');
-    const targetDirs = targets.map((t) => `.${t}/skills`);
+    const targetDirs = targets.map((t) => agentSurfaceDir(t, 'skills'));
     const skillsSrc = join(packageDir(), 'skills');
     const rels = walk(skillsSrc);
     const devkitPkg = readJson(join(packageDir(), 'package.json'));
@@ -113,7 +113,7 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
  * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
  * skill names.
  */
-export function detectSkillConflicts(root, targets = AGENT_TARGETS) {
+export function detectSkillConflicts(root, targets = DEFAULT_AGENT_TARGETS) {
     const skillsSrc = join(packageDir(), 'skills');
     const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
     return findConflicts(root, skillsSrc, names, targets, 'skills', readJson(join(root, '.devkit', 'skills-manifest.json')));
@@ -138,6 +138,6 @@ export default function run(args, cwd) {
     // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
     // per-asset picker is `devkit init` interactive only).
     const override = args.includes('--force') ? () => true : undefined;
-    syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+    syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? DEFAULT_AGENT_TARGETS, { override });
     return 0;
 }

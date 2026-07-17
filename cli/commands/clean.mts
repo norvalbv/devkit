@@ -13,6 +13,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
+import { purgePlanCritiqueBindings } from '../../gate-engine/critique/evidence-bindings.mts';
+import { purgePlanCritiqueEvidence } from '../../gate-engine/critique/evidence-store.mts';
+import { AGENT_TARGETS, agentSurfaceDir, DEFAULT_AGENT_TARGETS } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { isTracked } from '../lib/git-tracked.mts';
@@ -33,6 +36,7 @@ interface DevkitComponents {
   searchSteering?: boolean;
   fallow?: boolean;
   searchCode?: boolean;
+  agentTargets?: string[];
 }
 /** The subset of .devkit/config.json that `clean` reads to reverse an install. */
 interface DevkitConfig {
@@ -78,7 +82,7 @@ function extendsDevkit(path: string): boolean {
 // agent-half + fallow lines (added when overlay grew past the lint/guard set) are prefix-tolerant
 // (`(.*\/)?`) so a monorepo `pkgRel/`-scoped entry is pruned too — a miss orphans the line.
 const DEVKIT_EXCLUDE_LINE =
-  /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.cursor\/hooks\.json|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/)/;
+  /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/)/;
 const BLANK_RUN_RE = /\n{3,}/g;
 const LEADING_BLANKS_RE = /^\n+/;
 function pruneGitExclude(gitRoot: string, dryRun: boolean): void {
@@ -108,9 +112,9 @@ function hasOverlayStrays(gitRoot: string): boolean {
         .filter((e) => e.isDirectory())
         .map((e) => e.name)
     : [];
-  for (const surface of ['claude', 'cursor']) {
+  for (const surface of AGENT_TARGETS) {
     for (const name of names) {
-      const rel = `.${surface}/skills/${name}`;
+      const rel = `${agentSurfaceDir(surface, 'skills')}/${name}`;
       if (existsSync(join(gitRoot, rel)) && !isTracked(gitRoot, rel)) return true;
     }
   }
@@ -123,10 +127,10 @@ function hasOverlayStrays(gitRoot: string): boolean {
 // the per-package overlay configs (in cwd) are removed only if git doesn't track them (never the
 // user's own guard.config.json / eslint dir).
 function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void {
-  removeSkills(gitRoot, dryRun);
-  removeAgents(gitRoot, dryRun);
-  removeHookScripts(gitRoot, { dryRun });
-  removeHookRegistrations(gitRoot, { dryRun, overlay: true });
+  removeSkills(gitRoot, dryRun, AGENT_TARGETS);
+  removeAgents(gitRoot, dryRun, AGENT_TARGETS);
+  removeHookScripts(gitRoot, { dryRun, targets: AGENT_TARGETS });
+  removeHookRegistrations(gitRoot, { dryRun, overlay: true, targets: AGENT_TARGETS });
   removeEmptyOverlaySettings(gitRoot, dryRun);
   const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
   const rmUntracked = (rel: string, label: string) => {
@@ -172,13 +176,14 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
   // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
   const comp = cfg.components ?? {};
-  if (comp.skills) removeSkills(gitRoot, dryRun);
-  if (comp.agents) removeAgents(gitRoot, dryRun);
-  if (comp.agentHooks) removeHookScripts(gitRoot, { dryRun });
+  const targets = comp.agentTargets ?? DEFAULT_AGENT_TARGETS;
+  if (comp.skills) removeSkills(gitRoot, dryRun, targets);
+  if (comp.agents) removeAgents(gitRoot, dryRun, targets);
+  if (comp.agentHooks) removeHookScripts(gitRoot, { dryRun, targets });
   // Strip devkit hooks from the LOCAL-override settings.local.json (where overlay registered them) +
   // .cursor/hooks.json; never delete the files (they may hold the user's own local settings/hooks).
   if (comp.agentHooks || comp.searchSteering) {
-    removeHookRegistrations(gitRoot, { dryRun, overlay: true });
+    removeHookRegistrations(gitRoot, { dryRun, overlay: true, targets });
     removeEmptyOverlaySettings(gitRoot, dryRun);
   }
   rm(join(gitRoot, '.devkit'), '.devkit/ (git-root hooks)', dryRun);
@@ -242,6 +247,10 @@ function removeEmptyOverlaySettings(gitRoot: string, dryRun: boolean): void {
   const cursor = readJson(cursorP) as SettingsShape | null;
   if (cursor && onlyEmptyHooks(cursor, ['version', 'hooks']))
     rm(cursorP, '.cursor/hooks.json (devkit-created, now empty)', dryRun);
+  const codexP = join(gitRoot, '.codex', 'hooks.json');
+  const codex = readJson(codexP) as SettingsShape | null;
+  if (codex && onlyEmptyHooks(codex, ['hooks']))
+    rm(codexP, '.codex/hooks.json (devkit-created, now empty)', dryRun);
 }
 
 // Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
@@ -277,11 +286,12 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   removeCommitMsgBlock(gitRoot, cfg.pkgRel ?? '', dryRun);
   // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
   // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
-  removeSkills(gitRoot, dryRun);
-  removeAgents(gitRoot, dryRun);
+  const targets = cfg.components?.agentTargets ?? DEFAULT_AGENT_TARGETS;
+  removeSkills(gitRoot, dryRun, targets);
+  removeAgents(gitRoot, dryRun, targets);
   // agent-hook scripts + the hook registrations they wrote.
-  removeHookScripts(gitRoot, { dryRun });
-  removeHookRegistrations(gitRoot, { dryRun });
+  removeHookScripts(gitRoot, { dryRun, targets });
+  removeHookRegistrations(gitRoot, { dryRun, targets });
   // devkit-created configs/data in the package.
   for (const f of ['biome.jsonc', 'tsconfig.json']) {
     if (extendsDevkit(join(cwd, f))) rm(join(cwd, f), f, dryRun);
@@ -316,9 +326,11 @@ export const meta = {
 
 Usage:
   devkit clean [--yes] [--dry-run]
+  devkit clean --evidence [--older-than-days N] [--yes] [--dry-run]
 
 Overlay restores core.hooksPath + prunes .git/info/exclude; package/standalone removes configs,
-the hook block, deps, and synced skills/agents. Safe — only removes what devkit created.`,
+the hook block, deps, and synced skills/agents. \`--evidence\` purges local plan-critique evidence
+instead of uninstalling devkit. Safe — only removes what devkit created.`,
 };
 
 // Reason: flat clean dispatch: parse flags, then a linear cascade of guards (no config → orphaned-overlay recovery vs no-op; TTY confirm; overlay vs package branch); high branch COUNT from sequential early-returns, each trivial, extracting them scatters one entry-point's control flow
@@ -326,6 +338,41 @@ the hook block, deps, and synced skills/agents. Safe — only removes what devki
 export default async function run(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
   const yes = args.includes('--yes') || args.includes('-y');
+  const evidenceOnly = args.includes('--evidence');
+  if (evidenceOnly) {
+    const ageIndex = args.indexOf('--older-than-days');
+    const ageDays = ageIndex === -1 ? null : Number.parseInt(args[ageIndex + 1] ?? '', 10);
+    if (ageIndex !== -1 && (ageDays === null || !Number.isFinite(ageDays) || ageDays <= 0)) {
+      console.error('devkit clean --evidence: --older-than-days must be a positive integer');
+      return 1;
+    }
+    if (!yes && !dryRun && process.stdout.isTTY) {
+      const go = await confirm({
+        message: ageDays
+          ? `Purge plan-critique evidence older than ${ageDays} day(s)?`
+          : 'Purge ALL local plan-critique evidence?',
+        initialValue: false,
+      });
+      if (isCancel(go) || !go) {
+        console.log('Aborted — no evidence removed.');
+        return 0;
+      }
+    }
+    const purgeOptions = {
+      olderThanMs: ageDays ? ageDays * 24 * 60 * 60 * 1000 : undefined,
+      dryRun,
+    };
+    const evidence = purgePlanCritiqueEvidence(purgeOptions);
+    const bindings = purgePlanCritiqueBindings(cwd, purgeOptions);
+    const result = {
+      files: evidence.files + bindings.files,
+      bytes: evidence.bytes + bindings.bytes,
+    };
+    console.log(
+      `devkit clean --evidence${dryRun ? ' (dry-run)' : ''}: ${result.files} file(s), ${result.bytes} byte(s) ${dryRun ? 'would be removed' : 'removed'}`,
+    );
+    return 0;
+  }
   // --global: remove the machine-global opt-in pre-commit shim (~/.config/husky/init.sh). It's shared
   // by every overlaid repo, so it is NEVER removed by a per-repo clean — only this explicit flag.
   const removeGlobal = args.includes('--global');

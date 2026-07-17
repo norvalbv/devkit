@@ -13,6 +13,7 @@ import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@cl
 import {
   AGENT_TARGETS,
   COMPONENTS,
+  DEFAULT_AGENT_TARGETS,
   GUARD_OPTIONS,
   RECOMMENDED_GUARD_IDS,
   type Selection,
@@ -203,23 +204,30 @@ export async function runWizard({
     if (!structAvail) selection.structure = false;
   }
 
-  // Agent surface(s): asked whenever something syncs into .claude/.cursor (every mode now does). A
+  // Agent surface(s): asked whenever something syncs into a provider surface (every mode now does). A
   // repo that uses only one tool picks just that surface → no redundant copy in the other's dir. A
   // single SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only"
   // require actively DESELECTing Cursor — easy to miss, so both got installed. Radio = explicit intent.
-  selection.agentTargets = [...AGENT_TARGETS];
+  selection.agentTargets = [...DEFAULT_AGENT_TARGETS];
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
     const surface = await select({
       message: 'Sync skills/agents/hooks to which agent surface(s)?',
       options: [
-        { value: 'both', label: 'Both', hint: '.claude/ + .cursor/' },
+        { value: 'both', label: 'Claude + Cursor', hint: 'current default' },
+        { value: 'all', label: 'All three', hint: 'adds Codex + hook trust review' },
         { value: 'claude', label: 'Claude only', hint: '.claude/' },
         { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
+        { value: 'codex', label: 'Codex only', hint: '.agents/ + .codex/' },
       ],
       initialValue: 'both',
     });
     if (bail(surface)) return null;
-    selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
+    selection.agentTargets =
+      surface === 'both'
+        ? [...DEFAULT_AGENT_TARGETS]
+        : surface === 'all'
+          ? [...AGENT_TARGETS]
+          : [surface];
   }
 
   // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook). The

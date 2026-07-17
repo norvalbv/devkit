@@ -28,8 +28,11 @@ import {
 } from '../../gate-engine/ratchets/size-disable.mts';
 import {
   AGENT_TARGETS,
+  agentSettingsFile,
+  agentSurfaceDir,
   applyOverlayConstraints,
   COMPONENTS,
+  DEFAULT_AGENT_TARGETS,
   defaultSelection,
   GUARD_IDS,
   type Selection,
@@ -219,6 +222,7 @@ interface InitFlags {
   fallow: boolean;
   searchSteering: boolean;
   agentHooks: boolean;
+  codex: boolean;
   searchCode: boolean;
   standalone: boolean;
   overlay: boolean;
@@ -240,6 +244,7 @@ function parseFlags(args: string[]): InitFlags {
     fallow: false,
     searchSteering: false,
     agentHooks: false,
+    codex: false,
     searchCode: false,
     standalone: false,
     overlay: false,
@@ -257,6 +262,7 @@ function parseFlags(args: string[]): InitFlags {
     else if (a === '--fallow') flags.fallow = true;
     else if (a === '--search-steering') flags.searchSteering = true;
     else if (a === '--agent-hooks') flags.agentHooks = true;
+    else if (a === '--codex') flags.codex = true;
     else if (a === '--search-code') flags.searchCode = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
@@ -292,9 +298,9 @@ function selectionFromFlags(flags: InitFlags): Selection {
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-  // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
-  // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
-  sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
+  // Codex is explicit because its project hook config requires user trust review.
+  sel.agentTargets = DEFAULT_AGENT_TARGETS.filter((t) => !flags.no.has(t));
+  if (flags.codex && !flags.no.has('codex')) sel.agentTargets.push('codex');
   return sel;
 }
 
@@ -664,7 +670,7 @@ async function resolveAssetConflicts(
   selection: Selection,
   { interactive, force }: { interactive: boolean; force: boolean },
 ): Promise<(kind: string, name: string) => boolean> {
-  const targets = selection.agentTargets ?? AGENT_TARGETS;
+  const targets = selection.agentTargets ?? DEFAULT_AGENT_TARGETS;
   const found: Array<{ kind: string; name: string }> = [];
   if (selection.skills)
     for (const name of detectSkillConflicts(gitRoot, targets)) found.push({ kind: 'skill', name });
@@ -996,7 +1002,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
             agentHooks: Boolean(selection.agentHooks),
             searchSteering: false, // never wired in overlay (no resolvable bin without the package)
             fallow: fallowWired,
-            agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
+            agentTargets: [...(selection.agentTargets ?? DEFAULT_AGENT_TARGETS)],
           },
         },
         null,
@@ -1015,9 +1021,8 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   );
 }
 
-// Sync skills / agents / agent-hook scripts + their hook registrations to the SELECTED agent
-// surface(s) (.claude / .cursor), then prune any surface a prior run installed but that's now
-// deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
+// Sync skills/agents/hooks to the selected surfaces, then prune surfaces a prior run installed.
+// Repo-wide → operates on the git root. Returns resolved agentTargets for config persistence.
 // Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
 // fallow-ignore-next-line complexity
 function installAgentSurfaces(
@@ -1026,7 +1031,7 @@ function installAgentSurfaces(
   dryRun: boolean,
   override: (kind: string, name: string) => boolean = () => false,
 ) {
-  const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
+  const agentTargets = selection.agentTargets ?? DEFAULT_AGENT_TARGETS;
   if (selection.skills) {
     console.log('7. skills');
     // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest). A
@@ -1069,16 +1074,11 @@ function pruneDeselectedSurfaces(
   dryRun: boolean,
 ) {
   const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
-  // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
-  // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
-  const settingsFile: Record<string, string> = {
-    claude: '.claude/settings.json',
-    cursor: '.cursor/hooks.json',
-  };
   const hasPrunableContent = prunedTargets.some(
     (t) =>
-      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
-      existsSync(join(gitRoot, settingsFile[t])),
+      (['skills', 'agents', 'hooks'] as const).some((kind) =>
+        existsSync(join(gitRoot, agentSurfaceDir(t, kind))),
+      ) || existsSync(join(gitRoot, agentSettingsFile(t))),
   );
   if (!prunedTargets.length || !hasPrunableContent) return;
   console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -1352,7 +1352,7 @@ Usage:
                          --no-structure --no-guards --no-fallow.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
                          qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
-  --no-claude/--no-cursor  Sync skills/agents/hooks to ONE agent surface only (default both).
+  --no-claude/--no-cursor  Narrow defaults; --codex adds Codex hooks (requires \`/hooks\` trust).
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).

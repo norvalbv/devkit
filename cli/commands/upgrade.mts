@@ -28,7 +28,9 @@ import {
 } from '../../gate-engine/ratchets/size-disable.mts';
 import {
   AGENT_TARGETS,
+  agentSurfaceDir,
   applyOverlayConstraints,
+  DEFAULT_AGENT_TARGETS,
   GUARD_OPTIONS,
   newBundledGates,
   normalizeSelection,
@@ -117,9 +119,10 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   const rawTargets = cfg.components?.agentTargets;
   const inferred = AGENT_TARGETS.filter(
     (t) =>
-      existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')),
+      existsSync(join(gitRoot, agentSurfaceDir(t, 'skills'))) ||
+      existsSync(join(gitRoot, agentSurfaceDir(t, 'agents'))),
   );
-  const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+  const agentTargets = rawTargets ?? (inferred.length ? inferred : DEFAULT_AGENT_TARGETS);
 
   // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
   // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
