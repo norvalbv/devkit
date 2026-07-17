@@ -17,6 +17,7 @@ const SCRIPT = fileURLToPath(
 const REVIEW_ROOT_CASES = [
   ['api-security', 'DEVKIT_REVIEW_BACKEND_ROOTS', '.api-security-review.json'],
   ['backend-performance', 'DEVKIT_REVIEW_BACKEND_ROOTS', '.backend-performance-review.json'],
+  ['correctness', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.correctness-review.json'],
   ['frontend-security', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-security-review.json'],
   ['frontend-performance', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-performance-review.json'],
   ['frontend-accessibility', 'DEVKIT_REVIEW_FRONTEND_ROOTS', '.frontend-accessibility-review.json'],
@@ -97,7 +98,7 @@ describe('skill checklist script (spawned source)', () => {
     const r = spawnSync('node', [script, 'generate'], {
       cwd: repo,
       encoding: 'utf8',
-      env: { ...process.env, [envName]: JSON.stringify(['apps/web']) },
+      env: { ...process.env, [envName]: JSON.stringify([' apps/web ']) },
     });
     expect(r.status, r.stderr).toBe(0);
     const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
@@ -161,8 +162,8 @@ describe('skill checklist script (spawned source)', () => {
       encoding: 'utf8',
       env: {
         ...process.env,
-        DEVKIT_REVIEW_BACKEND_ROOTS: JSON.stringify(['apps/api']),
-        DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(['apps/web']),
+        DEVKIT_REVIEW_BACKEND_ROOTS: JSON.stringify([' apps/api ']),
+        DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify([' apps/web ']),
       },
     });
     expect(r.status, r.stderr).toBe(0);
@@ -171,6 +172,40 @@ describe('skill checklist script (spawned source)', () => {
     );
     expect(state.files).toEqual(['apps/web/changed.tsx', 'src/shared.ts']);
     expect(JSON.stringify(state)).not.toContain('static-api/excluded.ts');
+  });
+
+  it.each(
+    REVIEW_ROOT_CASES,
+  )('%s rejects unsafe injected roots before constructing a Git pathspec', (skill, envName) => {
+    const repo = repoWithCraftedFile();
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+    for (const roots of [
+      [],
+      [''],
+      ['   '],
+      ['/outside'],
+      ['../outside'],
+      ['src/../outside'],
+      ['C:\\outside'],
+      [3],
+    ]) {
+      const r = spawnSync('node', [script, 'generate'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, [envName]: JSON.stringify(roots) },
+      });
+      expect(r.status, `${JSON.stringify(roots)}\n${r.stderr}`).not.toBe(0);
+      expect(r.stderr).toContain(envName);
+    }
+
+    const dot = spawnSync('node', [script, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, [envName]: JSON.stringify([' . ']) },
+    });
+    expect(dot.status, dot.stderr).toBe(0);
   });
 
   it('a recovery pass clears the stale failure trail (finalize cannot fail on history)', () => {

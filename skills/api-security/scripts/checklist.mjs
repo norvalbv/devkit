@@ -9,9 +9,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, win32 } from 'node:path';
 
 const CHECKLIST_PATH = '.claude/.api-security-review.json';
+const PATH_SEPARATOR_RE = /[\\/]/u;
 
 // Top-level regex patterns for performance
 const RE_AUTH = /\b(auth|login|signin|signup|password|credential|encryption|encrypt|decrypt|hash)/i;
@@ -60,9 +61,21 @@ function injectedReviewRoots() {
   } catch {
     throw new Error('DEVKIT_REVIEW_BACKEND_ROOTS must be a JSON string array');
   }
-  if (!isStringArray(roots) || roots.length === 0)
-    throw new Error('DEVKIT_REVIEW_BACKEND_ROOTS must be a non-empty JSON string array');
-  return roots;
+  const normalized = Array.isArray(roots)
+    ? roots.map((root) => (typeof root === 'string' ? root.trim() : root))
+    : roots;
+  if (
+    !isStringArray(normalized) ||
+    normalized.length === 0 ||
+    normalized.some(
+      (root) =>
+        isAbsolute(root) || win32.isAbsolute(root) || root.split(PATH_SEPARATOR_RE).includes('..'),
+    )
+  )
+    throw new Error(
+      'DEVKIT_REVIEW_BACKEND_ROOTS must be a non-empty JSON array of repository-relative paths',
+    );
+  return normalized;
 }
 
 // Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
@@ -92,10 +105,11 @@ function backendRoots() {
 }
 
 function getStagedFiles() {
+  const roots = backendRoots();
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...backendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...roots],
       { encoding: 'utf-8' },
     );
     return output

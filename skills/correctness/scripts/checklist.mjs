@@ -20,9 +20,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, win32 } from 'node:path';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
+const PATH_SEPARATOR_RE = /[\\/]/u;
 
 const RE_LEADING_DOT = /^\./;
 const RE_TEST_INFIX = /\.(test|spec)\./;
@@ -59,9 +60,19 @@ function injectedReviewRoots(name) {
   } catch {
     throw new Error(`${name} must be a JSON string array`);
   }
-  if (!isStringArray(roots) || roots.length === 0)
-    throw new Error(`${name} must be a non-empty JSON string array`);
-  return roots;
+  const normalized = Array.isArray(roots)
+    ? roots.map((root) => (typeof root === 'string' ? root.trim() : root))
+    : roots;
+  if (
+    !isStringArray(normalized) ||
+    normalized.length === 0 ||
+    normalized.some(
+      (root) =>
+        isAbsolute(root) || win32.isAbsolute(root) || root.split(PATH_SEPARATOR_RE).includes('..'),
+    )
+  )
+    throw new Error(`${name} must be a non-empty JSON array of repository-relative paths`);
+  return normalized;
 }
 
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
@@ -109,10 +120,11 @@ function sourceExtensions() {
 }
 
 function getStagedFiles() {
+  const roots = unionRoots();
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...unionRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...roots],
       { encoding: 'utf-8' },
     );
     const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
