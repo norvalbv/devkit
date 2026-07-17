@@ -403,6 +403,55 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
   });
 });
 
+describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () => {
+  const base = { biome: false, tsconfig: false, skills: false, husky: true, structure: false };
+  const hookAt = (root) => join(root, '.husky', 'commit-msg');
+
+  it('review selected → commit-msg written with the completeness fragment only', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['review'] },
+      devkitRef: 'v0.3.0',
+    });
+    const hook = readFileSync(hookAt(root), 'utf8');
+    expect(hook).toContain('guard-review completeness --gate "$1"');
+    expect(hook).not.toContain('guard-sentry');
+  });
+
+  it('sentry selected → commit-msg carries the sentry fragment', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['size', 'sentry'] },
+      devkitRef: 'v0.3.0',
+    });
+    expect(readFileSync(hookAt(root), 'utf8')).toContain('bunx guard-sentry --gate "$1"');
+  });
+
+  it('default (recommended) guards → NO commit-msg hook is created', async () => {
+    const root = tmpRepo();
+    await applyInit(root, { stack: 'generic', selection: defaultSelection(), devkitRef: 'v0.3.0' });
+    expect(existsSync(hookAt(root))).toBe(false);
+  });
+
+  it('deselecting the commit-msg guards on re-init removes the block', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['sentry'] },
+      devkitRef: 'v0.3.0',
+    });
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['size'] },
+      devkitRef: 'v0.3.0',
+    });
+    // Marker block gone (the devkit preamble's prose still names the markers — check the marker).
+    expect(readFileSync(hookAt(root), 'utf8')).not.toContain('# >>> devkit-guards');
+  });
+});
+
 describe('self-host mode (devkit dogfooding itself)', () => {
   // A tmp repo that LOOKS like devkit: the package name triggers detection upstream, and the bin map
   // is what installSelfHostHook's bunx→node rewrite resolves against.

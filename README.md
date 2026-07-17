@@ -90,7 +90,7 @@ drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/con
 | `guard-fanout`        | folder fan-out ratchet (≤N impl files/folder, any depth) |
 | `guard-size`          | size-disable ratchet (`eslint-disable max-lines` may only shrink) |
 | `guard-fallow-staged` | re-scopes a `fallow audit` JSON to the staged-diff overlap |
-| `guard-sentry`        | commit-msg advisory judge — flags a swallowed runtime error-class worth a Sentry capture |
+| `guard-sentry`        | commit-msg judge (hard-by-default) — flags a swallowed runtime error-class lacking a Sentry capture |
 | `guard-review`        | in-chain reviewer gate — headless domain judges over the staged diff (sonnet → opus on FAIL), diff-keyed PASS cache |
 | `guard-structure`     | folder-structure lint via devkit's own eslint + plugin (config-driven stacks) |
 | `guard-prefix`        | deterministic-prefix pass cache for `devkit ship` retries (`check`/`record`/`clear` — an identical staged tree skips the deterministic gates) |
