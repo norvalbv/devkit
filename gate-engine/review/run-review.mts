@@ -555,7 +555,9 @@ export async function runReviewGate(
         if (res.status === 'pass')
           // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
           // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
-          savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: res.model ?? firstModel } });
+          savePasses(cwd, {
+            [t.key]: { at: new Date().toISOString(), model: res.model ?? firstModel },
+          });
         if (progressFile) {
           completed.push(res.name);
           writeProgress(progressFile, { running, completed });
