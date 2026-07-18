@@ -91,14 +91,27 @@ describe('wizard agent-surface selection', () => {
     });
   });
 
-  it('keeps an enabled review profile empty when no installed guard is available', async () => {
+  it('does not offer or persist commit-msg-only guards in a review profile', async () => {
     setAnswers('claude');
     Object.assign(answers, {
       'Select components to install': ['skills', 'agents', 'husky'],
-      'Select gate guards': [],
+      'Select gate guards': ['decisions', 'sentry'],
       'Enable devkit review?': true,
-      // If the wizard incorrectly opens an optionless picker, this impossible answer leaks through.
-      'Select guards for devkit review': ['size'],
+      'Select guards for devkit review': ['decisions', 'sentry'],
+    });
+
+    const r = await runWizard(WIZ_OPTS);
+
+    expect(r.review.guards).toEqual(['decisions']);
+  });
+
+  it('skips the review picker when no selected guard can run at pre-commit', async () => {
+    setAnswers('claude');
+    Object.assign(answers, {
+      'Select components to install': ['skills', 'agents', 'husky'],
+      'Select gate guards': ['sentry'],
+      'Enable devkit review?': true,
+      'Select guards for devkit review': undefined,
     });
 
     const r = await runWizard(WIZ_OPTS);

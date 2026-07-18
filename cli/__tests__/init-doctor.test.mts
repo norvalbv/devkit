@@ -81,6 +81,20 @@ describe('init --yes (all recommended)', () => {
     expect(typoResult.status).toBe(1);
     expect(typoResult.stderr).toMatch(/invalid --review-guards.*unknown: decision/);
 
+    const commitMsgOnly = tmpRepo();
+    const commitMsgOnlyResult = devkit(
+      commitMsgOnly,
+      'init',
+      '--yes',
+      '--guards',
+      'sentry',
+      '--review',
+      '--review-guards',
+      'sentry',
+    );
+    expect(commitMsgOnlyResult.status).toBe(1);
+    expect(commitMsgOnlyResult.stderr).toMatch(/invalid --review-guards.*unknown: sentry/);
+
     const uninstalled = tmpRepo();
     const uninstalledResult = devkit(
       uninstalled,

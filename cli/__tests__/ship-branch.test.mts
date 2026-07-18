@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { hasAnyCommand } from './_helpers.mts';
 
 // Coverage for ship-branch.sh: the pure resolution seam (the fork-upstream bug — gh's default repo
 // can resolve to a fork's UPSTREAM remote instead of origin, opening the PR against the wrong repo;
@@ -44,25 +45,11 @@ const dirs = [];
 
 // The commit-failure cleanup test runs the REAL non-dry path, which needs `gh` on PATH
 // for the preflight (it never calls gh — the commit fails first). Skip where gh is absent.
-const hasGh = (() => {
-  try {
-    execFileSync('bash', ['-c', 'command -v gh'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+const hasGh = hasAnyCommand('gh');
 
 // R2's gate-hang timeout needs coreutils `timeout`/`gtimeout`; stock macOS has neither (R2 degrades to
 // bare there). Gate the hang test on its presence — the bare-degrade path is covered by the other tests.
-const hasTimeoutBin = (() => {
-  try {
-    execFileSync('bash', ['-c', 'command -v timeout || command -v gtimeout'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
+const hasTimeoutBin = hasAnyCommand('timeout', 'gtimeout');
 
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
