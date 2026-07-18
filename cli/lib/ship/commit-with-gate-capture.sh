@@ -126,6 +126,22 @@ commit_with_gate_capture() {
   local rc=${PIPESTATUS[0]}
   set -e
 
+  # Did OUR outer `git commit` die on its own HEAD finalize, or did a GATE merely PRINT the same git
+  # error? The captured log is a COMBINED stream (`2>&1 | tee` above folds hook output in), so the two
+  # are textually indistinguishable — and devkit's own suite emits this string deliberately, so a gate
+  # running it would forge the phrase. Decide on EVIDENCE instead: the ship worktree's HEAD must
+  # actually have moved off the commit we cut it from. A gate that prints the error and exits non-zero
+  # leaves HEAD at the base, so it stays attributed to that gate. No commit exists on the failure path,
+  # so HEAD==base is the only honest "nothing moved" state. DEVKIT_SHIP_BASE_SHA is exported by BOTH
+  # callers (ship-branch.sh / reship.sh); with it unset we can prove nothing, so we deliberately fall
+  # through to the gate greps rather than claim every gate passed.
+  local head_now="" head_clobbered=0
+  if [ "$rc" -ne 0 ] && [ -n "${DEVKIT_SHIP_BASE_SHA:-}" ] \
+     && grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then
+    head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
+    if [ -n "$head_now" ] && [ "$head_now" != "$DEVKIT_SHIP_BASE_SHA" ]; then head_clobbered=1; fi
+  fi
+
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
@@ -137,7 +153,7 @@ commit_with_gate_capture() {
   # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
   # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
   # can sit in the same log, and the review arm would otherwise claim a failure it did not cause.
-  elif grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then blocked_json='"worktree_head_clobbered"'; timed_out=false
+  elif [ "$head_clobbered" -eq 1 ]; then blocked_json='"worktree_head_clobbered"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
@@ -194,7 +210,10 @@ commit_with_gate_capture() {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
     } >&2
-  elif grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then
+  elif [ "$head_clobbered" -eq 1 ]; then
+    # Reuses the SAME evidence-checked verdict as the telemetry above — never a second independent
+    # grep, which could drift from it and let this banner claim "every gate PASSED" for a run the
+    # telemetry attributed to a gate.
     # Every gate passed and the commit still died — another process moved this worktree's HEAD while
     # the gate chain was running (it runs for MINUTES, so the window is wide). Without this banner the
     # failure reads as a push problem: the git fatal is the log's last line, long after the PASS lines.

@@ -489,6 +489,65 @@ describe('reship — HEAD clobbered mid-commit is attributed, not reported as "u
       .find((e) => e.type === 'ship_result');
     expect(result.blocked_gate).toBe('worktree_head_clobbered'); // not "review"
   });
+
+  it('does NOT claim a clobber when a GATE merely prints the same git error and fails', () => {
+    // The captured log folds hook output in with git's own (`2>&1 | tee`), so the phrase alone proves
+    // nothing — and devkit's suite emits this exact string, so a gate running the tests would forge it.
+    // Here a gate PRINTS the fatal and exits non-zero WITHOUT touching HEAD. Attributing that to a
+    // clobber would tell the operator "every gate PASSED, re-running is safe" about a real gate block.
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+      ['push', '-q', 'origin', 'main'],
+    ])
+      g(a, { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    // Prints the fatal verbatim (as a nested ship's test output would), then blocks. HEAD never moves.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\n' +
+        'echo "✗ deterministic gates failed"\n' +
+        'echo "fatal: cannot lock ref \'HEAD\': is at 1111111111111111111111111111111111111111 but expected 2222222222222222222222222222222222222222"\n' +
+        'exit 1\n',
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    const events = join(mkdtempSync(join(tmpdir(), 'reship-tel-')), 'gate-events.jsonl');
+    dirs.push(events);
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, {
+      SHIP_DRY_RUN: '1',
+      DEVKIT_GATE_EVENTS: events,
+    });
+
+    expect(r.status).not.toBe(0);
+    const result = readFileSync(events, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .find((e) => e.type === 'ship_result');
+    expect(result.blocked_gate).toBe('deterministic'); // the real cause, NOT the forged phrase
+    expect(r.stderr).not.toMatch(/HEAD was moved by ANOTHER process mid-commit/); // no false all-clear
+  });
 });
 
 describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carries the space)', () => {
