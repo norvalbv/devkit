@@ -133,6 +133,11 @@ commit_with_gate_capture() {
   local blocked_json timed_out
   if [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
+  # NOT a blocked gate: every gate PASSED and `git commit` then died on its finalize ref-update
+  # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
+  # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
+  # can sit in the same log, and the review arm would otherwise claim a failure it did not cause.
+  elif grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then blocked_json='"worktree_head_clobbered"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
@@ -188,6 +193,24 @@ commit_with_gate_capture() {
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
+    } >&2
+  elif grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then
+    # Every gate passed and the commit still died — another process moved this worktree's HEAD while
+    # the gate chain was running (it runs for MINUTES, so the window is wide). Without this banner the
+    # failure reads as a push problem: the git fatal is the log's last line, long after the PASS lines.
+    # Known cause: fallow < 3.4.2 registered its audit base-snapshot as a git worktree and its cleanup
+    # was not scoped to the entry it owned. devkit pins fallow >= 3.6.0 (see install-fallow.mts); a
+    # consumer on an older global fallow still hits it. If this ever fires on a current fallow, the
+    # upgrade path is re-pointing HEAD at the ship base and retrying the commit here — cheap, because
+    # every earned verdict is already cached.
+    {
+      echo "🔀 ship: the ship worktree's HEAD was moved by ANOTHER process mid-commit, so git refused"
+      echo "   to finalise (\"cannot lock ref 'HEAD'\"). Every gate PASSED — this is not a gate block,"
+      echo "   and NOTHING was pushed. Re-running the same devkit ship command is safe and fast"
+      echo "   (cleared judgements + reviewer verdicts are cached)."
+      echo "   Most likely an outdated fallow: its audit base-snapshot cleanup could reach outside its"
+      echo "   own worktree before 3.4.2. Check with: fallow --version  (devkit pins >= 3.6.0)."
+      echo "   Full log: $log"
     } >&2
   else
     # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log
