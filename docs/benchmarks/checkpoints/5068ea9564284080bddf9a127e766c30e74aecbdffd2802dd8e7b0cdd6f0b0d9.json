@@ -1,0 +1,173 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Full matcher tier with K=3 and zero outages"
+  },
+  "adapter": "conventions",
+  "capturedAt": "2026-07-10T09:36:54+01:00",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:032c8d33b93a3a9b6bf84a88126c603aef5ad115b66ff852e4800a5310e8a4d4",
+    "implementation": "sha256:1039e4a405c8d66055c69ca25d5d8999fdee2cd35424092a4fa53727542d816a",
+    "runner": "sha256:391f62fbc4ff0557f26725f9d538e0122a1cbb405b4740c140a34b533c88d2f1",
+    "scorer": "sha256:33f0f899a39725894e786b2d03f08147ef83705a703c2fc9a1d0c7cf9231890b"
+  },
+  "metrics": [
+    {
+      "denominator": 18,
+      "direction": "higher",
+      "floor": 0.7,
+      "id": "gap-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.8241207763533425,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Gold gap recall",
+      "numerator": 18,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "ceiling": 0.25,
+      "denominator": 14,
+      "direction": "lower",
+      "id": "false-flag-rate",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.012722215247890939,
+        "method": "wilson-95",
+        "upper": 0.31468704424151117
+      },
+      "label": "Decoy false-flag rate",
+      "numerator": 1,
+      "unit": "ratio",
+      "value": 0.07142857142857142
+    },
+    {
+      "denominator": 26,
+      "direction": "higher",
+      "id": "verdict-accuracy",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.8110722109696524,
+        "method": "wilson-95",
+        "upper": 0.9931780150064564
+      },
+      "label": "Verdict accuracy",
+      "numerator": 25,
+      "unit": "ratio",
+      "value": 0.9615384615384616
+    }
+  ],
+  "rows": {
+    "clean-control-forwardref": {
+      "ok": true,
+      "stable": true
+    },
+    "clean-control-magic-numbers": {
+      "ok": true,
+      "stable": true
+    },
+    "clean-control-type-hints": {
+      "ok": true,
+      "stable": true
+    },
+    "forbidden-prop-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "forbidden-prop-clear": {
+      "ok": true,
+      "stable": false
+    },
+    "forbidden-prop-directional": {
+      "ok": true,
+      "stable": true
+    },
+    "forbidden-prop-invariance": {
+      "ok": true,
+      "stable": true
+    },
+    "gen-file-edit-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "gen-file-edit-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "gen-file-edit-invariance": {
+      "ok": true,
+      "stable": true
+    },
+    "layering-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "layering-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "layering-recorded-exception-pass": {
+      "ok": false,
+      "stable": true
+    },
+    "logging-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "logging-borderline": {
+      "ok": true,
+      "stable": true
+    },
+    "logging-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "naming-kebab-buried-borderline": {
+      "ok": true,
+      "stable": true
+    },
+    "naming-kebab-buried-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "root-cause-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "root-cause-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "root-cause-decoy-pass": {
+      "ok": true,
+      "stable": true
+    },
+    "schema-pk-adversarial": {
+      "ok": true,
+      "stable": true
+    },
+    "schema-pk-clear": {
+      "ok": true,
+      "stable": true
+    },
+    "scoping-inventory-nested-pass": {
+      "ok": true,
+      "stable": true
+    },
+    "scoping-inventory-only-pass": {
+      "ok": true,
+      "stable": true
+    },
+    "scoping-orders-violation-with-sibling-decoy": {
+      "ok": true,
+      "stable": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "974989b709ae1ee04ca4a54b425f14fee692b060",
+  "suiteId": "conventions"
+}

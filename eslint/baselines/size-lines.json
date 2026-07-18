@@ -10,7 +10,7 @@
     "gate-engine/critique/eval/bench.mts": 1177,
     "gate-engine/decisions/decisions.mts": 708,
     "gate-engine/decisions/detect.mts": 525,
-    "gate-engine/decisions/eval/bench.mts": 1062,
+    "gate-engine/decisions/eval/bench.mts": 1059,
     "gate-engine/edge-cases/eval/lib/sources.mts": 571,
     "gate-engine/review/eval/bench.mts": 878,
     "gate-engine/review/eval/conventions/bench.mts": 988,
