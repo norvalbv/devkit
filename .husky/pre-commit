@@ -53,7 +53,7 @@ fi
 
 # devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" || exit 1
+node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
 # /devkit:deterministic
 
 # devkit:guard-decisions
