@@ -1,0 +1,734 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "K=3 full run with zero outages"
+  },
+  "adapter": "critique",
+  "capturedAt": "2026-07-06T14:38:41+01:00",
+  "comparisons": [
+    {
+      "method": "shared-row descriptive flip table; adapter verdict",
+      "negativeDiscordant": 0,
+      "positiveDiscordant": 5,
+      "predecessorEventId": "evt-2026-07-06-critique-21598db86ade",
+      "sharedRows": 33,
+      "verdict": "improved"
+    }
+  ],
+  "hashes": {
+    "corpus": "sha256:a272a2216e6057f13d6f83e81c4dd1f380284b84d57f170f25cf0df6b3069629",
+    "implementation": "sha256:96a6ec499676aef15aabf9973679026ba883b28ed030142f912985c2716a8b8e",
+    "runner": "sha256:eaa6cbdaa2c33f1b51a2596a50701f41ddf2f3df4f37e5eb0372df70751f305e",
+    "scorer": "sha256:711867f24ec8fbc22f3e8b3b79f198c5d8cab2df213ec43e6ebec8da26f639d5"
+  },
+  "metrics": [
+    {
+      "assessment": "improved",
+      "denominator": 24,
+      "direction": "higher",
+      "floor": 0.75,
+      "id": "recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.7975819352134406,
+        "method": "wilson-95",
+        "upper": 0.9926065438344942
+      },
+      "label": "Gold finding recall",
+      "numerator": 23,
+      "unit": "ratio",
+      "value": 0.9583333333333334
+    },
+    {
+      "assessment": "improved",
+      "denominator": 5,
+      "direction": "higher",
+      "id": "clean-rate",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.37553462976252533,
+        "method": "wilson-95",
+        "upper": 0.9637758913675698
+      },
+      "label": "Clean-plan pass rate",
+      "numerator": 4,
+      "unit": "ratio",
+      "value": 0.8
+    },
+    {
+      "assessment": "improved",
+      "denominator": 20,
+      "direction": "lower",
+      "id": "decoy-flag-rate",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.027866481213768224,
+        "method": "wilson-95",
+        "upper": 0.3010336452284873
+      },
+      "label": "Decoy flag rate",
+      "numerator": 2,
+      "unit": "ratio",
+      "value": 0.1
+    },
+    {
+      "assessment": "improved",
+      "denominator": 33,
+      "direction": "higher",
+      "id": "verdict-accuracy",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.846812746178811,
+        "method": "wilson-95",
+        "upper": 0.9946305894631283
+      },
+      "label": "Verdict accuracy",
+      "numerator": 32,
+      "unit": "ratio",
+      "value": 0.9696969696969697
+    },
+    {
+      "assessment": "flat",
+      "denominator": 12,
+      "direction": "higher",
+      "id": "frame-accuracy",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.7575059933447592,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Frame metadata accuracy",
+      "numerator": 12,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "assessment": "improved",
+      "denominator": 23,
+      "direction": "higher",
+      "id": "severity-exact",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5809651698373599,
+        "method": "wilson-95",
+        "upper": 0.9033602197341379
+      },
+      "label": "Severity exact match",
+      "numerator": 18,
+      "unit": "ratio",
+      "value": 0.782608695652174
+    },
+    {
+      "assessment": "improved",
+      "denominator": 20,
+      "direction": "higher",
+      "id": "token-budget",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.763868806553258,
+        "method": "wilson-95",
+        "upper": 0.9911185511992047
+      },
+      "label": "Within token budget",
+      "numerator": 19,
+      "unit": "ratio",
+      "value": 0.95
+    }
+  ],
+  "rows": {
+    "int-bandaid-skill-dedup": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-bandaid-skill-dedup-v1": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-contradict-env-denylist": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-fine-relative-time": {
+      "expected": "PROCEED",
+      "falseAlarm": null,
+      "got": "PROCEED",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-notabug-cursor-advisory": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-notabug-cursor-advisory-flip": {
+      "expected": "PROCEED",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-realfix-null-parse": {
+      "expected": "PROCEED",
+      "falseAlarm": null,
+      "got": "PROCEED",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "int-verbose-decoy": {
+      "expected": "PROCEED",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "ses-desktop-novnc": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "ses-integration-mcp": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "ses-overlay-selfheal": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "ses-reship-manifest": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "ses-sc1048-strict-cap": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {},
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-bsd-grep-slash-s": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-guard-idea": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-bsd-portability": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-conflict-second-matcher": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-matcher-need": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-duplicate-matcher": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-contract-edgecases-id": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-flag-approach": {
+          "got": "mentioned",
+          "ok": true,
+          "stable": false
+        },
+        "F-json-contract": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-cursor-hardcode": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": false,
+      "outage": false,
+      "slots": {
+        "D-file-not-inline": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-fixed-path-ux": {
+          "got": "miss",
+          "ok": false,
+          "stable": false
+        },
+        "F-surface-hygiene": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-dataflow-index-order": {
+      "expected": "PROCEED WITH CHANGES",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": false,
+      "outage": false,
+      "slots": {
+        "D-dedupe-need": {
+          "got": "flagged",
+          "ok": false,
+          "stable": false
+        },
+        "F-keep-first-stale": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": false,
+      "verdictStable": true
+    },
+    "wf-decoy-manifest-checksum": {
+      "expected": "PROCEED",
+      "falseAlarm": {
+        "got": true,
+        "ok": false,
+        "stable": true
+      },
+      "got": "PROCEED WITH CHANGES",
+      "ok": false,
+      "outage": false,
+      "slots": {
+        "D-manifest-mechanism": {
+          "got": "flagged",
+          "ok": false,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-decoy-null-guard": {
+      "expected": "PROCEED",
+      "falseAlarm": {
+        "got": false,
+        "ok": true,
+        "stable": true
+      },
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-early-return": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-decoy-posix-space": {
+      "expected": "PROCEED",
+      "falseAlarm": {
+        "got": false,
+        "ok": true,
+        "stable": true
+      },
+      "got": "PROCEED",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-implements-target": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-decoy-verbose-scary": {
+      "expected": "PROCEED",
+      "falseAlarm": {
+        "got": false,
+        "ok": true,
+        "stable": false
+      },
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-memo-choice": {
+          "got": "mentioned",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-decoy-wilson": {
+      "expected": "PROCEED",
+      "falseAlarm": {
+        "got": false,
+        "ok": true,
+        "stable": true
+      },
+      "got": "PROCEED WITH CHANGES",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-flip-gate": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "D-wilson-choice": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-eval-gate-on-deltas": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-wilson-stays": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-contradicts-target": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-eval-gate-on-deltas-v1": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-wilson-stays": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-contradicts-target": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-git-ssh-default": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-env-override": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-cryptic-error": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-ssh-clone-fails": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-hooks-import-devkit": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-single-resolver": {
+          "got": "clean",
+          "ok": true,
+          "stable": false
+        },
+        "F-no-fallback": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-no-node-modules": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-posix-space-flip": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "F-reverses-posix": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-release-direct-push": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-one-command": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-ruleset-blocks": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-tag-target": {
+          "got": "hit",
+          "ok": true,
+          "stable": false
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-security-config-cmd": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-extension-need": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-cmd-portability": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-repo-rce": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-security-env-telemetry": {
+      "expected": "REJECT",
+      "falseAlarm": null,
+      "got": "REJECT",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-debuggability": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-env-exfiltration": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-no-consent": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": false
+    },
+    "wf-symlink-skills": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-ssot-goal": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-dangling": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-git-platform": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-symlink-follow": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    },
+    "wf-ux-hard-block-warns": {
+      "expected": "RETHINK",
+      "falseAlarm": null,
+      "got": "RETHINK",
+      "ok": true,
+      "outage": false,
+      "slots": {
+        "D-thin-problem": {
+          "got": "clean",
+          "ok": true,
+          "stable": true
+        },
+        "F-no-escape": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        },
+        "F-warn-tier-dx": {
+          "got": "hit",
+          "ok": true,
+          "stable": true
+        }
+      },
+      "verdictOk": true,
+      "verdictStable": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "51aedb014e9b371325eb381043f2056df4efb8eb",
+  "suiteId": "critique"
+}

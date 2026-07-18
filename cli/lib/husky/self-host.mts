@@ -39,6 +39,7 @@ import {
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
   { label: 'lint', cmd: 'bun run lint' },
+  { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
 ];
 
 // The hand hook ended with an ADVISORY fallow audit (dead-code / duplication / complexity on the

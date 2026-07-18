@@ -78,6 +78,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mts';
+import { wilsonScoreInterval } from '../../eval/statistics.mts';
 import {
   judgeDetailed,
   matchScope,
@@ -86,6 +87,7 @@ import {
 } from '../check-alignment.mts';
 import { currentTarget, parseDecision } from '../decisions.mts';
 import { buildDetectJudgeInput, detectSmells, parseVerdict, runDetectJudge } from '../detect.mts';
+import { DECISIONS_ACCEPTANCE, selectAlignmentContradiction } from './acceptance.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const baselinePath = path.join(here, 'results.baseline.json');
@@ -217,13 +219,8 @@ export function tally(rows, classes) {
 
 /** Wilson 95% score interval for k successes of n. */
 export function wilson(k, n, z = 1.96) {
-  if (n === 0) return { lo: 0, hi: 1 };
-  const p = k / n;
-  const z2 = z * z;
-  const denom = 1 + z2 / n;
-  const centre = (p + z2 / (2 * n)) / denom;
-  const half = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / denom;
-  return { lo: Math.max(0, centre - half), hi: Math.min(1, centre + half) };
+  const { lower, upper } = wilsonScoreInterval(k, n, z);
+  return { lo: lower, hi: upper };
 }
 
 const fmtCi = (k, n) => {
@@ -683,7 +680,7 @@ const COMPARED = {
     ['accuracy (scored rows)', (s) => s.accuracyScored],
   ],
   alignment: [
-    ['CONTRADICT precision', (s) => (s.cascade ? s.final : s.firstPass).contradict.precision],
+    ['CONTRADICT precision', (s) => selectAlignmentContradiction(s).precision],
     ['macro-F1', (s) => (s.cascade ? s.final : s.firstPass).macroF1],
   ],
   depth: [['accuracy', (s) => s.accuracy]],
@@ -699,13 +696,13 @@ const CONFIG_KEYS = {
 // fails immediately regardless of flip statistics. Point estimates, not Wilson bounds — the lower
 // bound is uselessly wide at this n.
 const FLOORS = {
-  detect: ['DECISION recall', (s) => s.decision.recall, 0.75],
+  detect: ['DECISION recall', (s) => s.decision.recall, DECISIONS_ACCEPTANCE.floors.decisionRecall],
   alignment: [
     'CONTRADICT precision',
-    (s) => (s.cascade ? s.final : s.firstPass).contradict.precision,
-    0.75,
+    (s) => selectAlignmentContradiction(s).precision,
+    DECISIONS_ACCEPTANCE.floors.contradictionPrecision,
   ],
-  depth: ['accuracy', (s) => s.accuracy / 100, 0.75],
+  depth: ['accuracy', (s) => s.accuracy / 100, DECISIONS_ACCEPTANCE.floors.depthAccuracy],
 };
 
 /**

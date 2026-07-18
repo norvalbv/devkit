@@ -63,12 +63,13 @@ describe('selfHostSelection', () => {
 });
 
 describe('buildSelfHostHook', () => {
-  it('emits source gates + the hard-lint extra + the structure cmd; no bunx guard, no self-dep', () => {
+  it('emits source gates + hard deterministic extras + the structure cmd; no bunx guard, no self-dep', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('node gate-engine/decisions/cli.mts detect --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
+    expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
     expect(hook).toContain('--structure "bun run lint:structure"');
     expect(hook).not.toMatch(/bunx guard-/);
     expect(hook).not.toContain('@norvalbv/devkit');
@@ -92,7 +93,7 @@ describe('buildSelfHostHook', () => {
   // misreport as "new". No real fallow binary in this sandbox: stub it and assert on the args it sees.
   it('scopes the fallow audit to DEVKIT_SHIP_BASE_SHA when a ship exported it', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
-    expect(hook).toContain('[ -n "${DEVKIT_SHIP_BASE_SHA:-}" ]');
+    expect(hook).toContain(`[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ]`);
     expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
     const fragment = extractGuardBlock(hook, '')?.match(
       /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
