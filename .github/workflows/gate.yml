@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -28,13 +30,21 @@ jobs:
         run: bun run lint:structure
 
       - name: Ratchet — folder fan-out
-        run: node gate-engine/ratchets/folder-fanout.mjs gate
+        run: node gate-engine/ratchets/folder-fanout.mts gate
 
       - name: Ratchet — size-disable
-        run: node gate-engine/ratchets/size-disable.mjs gate
+        run: node gate-engine/ratchets/size-disable.mts gate
 
       - name: Typecheck
         run: bun run typecheck
+
+      - name: Benchmark tracker typecheck
+        run: bun run benchmarks:typecheck
+
+      - name: Benchmark evidence (committed tree + append-only base)
+        env:
+          BENCHMARK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
 
       - name: Tests
         run: bun run test:run

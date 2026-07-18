@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="586" viewBox="0 0 1200 586" role="img" aria-labelledby="title desc">
+<title id="title">devkit benchmark evidence dashboard</title>
+<desc id="desc">4 suites have accepted evidence. 4 shipped agents have no benchmark evidence. Rows use symbols and words as well as color. Full equivalent tables are in the README.</desc>
+<style>
+  .title{font:700 26px ui-sans-serif,system-ui;fill:#F0F6FC} .summary{font:600 15px ui-sans-serif,system-ui;fill:#B7C3D0}
+  .suite{font:600 15px ui-sans-serif,system-ui;fill:#F0F6FC} .metric{font:14px ui-sans-serif,system-ui;fill:#B7C3D0}
+  .status{font:700 14px ui-sans-serif,system-ui}.good{fill:#66D98B}.warn{fill:#FFD166}.bad{fill:#FF8B8B}.info{fill:#79C0FF}
+</style>
+<rect width="1200" height="586" rx="18" fill="#0D1117"/><rect x="16" y="16" width="1168" height="554" rx="12" fill="#161B22" stroke="#52606D"/>
+<text class="title" x="32" y="52">Benchmark evidence, not benchmark vibes</text>
+<text class="summary" x="32" y="82">4 accepted suites · 4 shipped-agent evidence gaps · growth curve: insufficient evidence</text>
+<text class="summary" x="32" y="112">✓ accepted   ! stale   × no-ship   ? missing — status never relies on color alone</text>
+<g transform="translate(32 150)"><text class="suite" y="0">Feature critique</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold finding recall: 23/24 (95.8%) · Clean-pl…</text></g>
+<g transform="translate(32 188)"><text class="suite" y="0">Feature completeness</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold gap recall: 25/35 (71.4%) · Decoy false-…</text></g>
+<g transform="translate(32 226)"><text class="suite" y="0">Repository conventions</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold gap recall: 18/18 (100.0%) · Decoy false…</text></g>
+<g transform="translate(32 264)"><text class="suite" y="0">Domain and correctness reviewers</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">Gold rows before catalog refresh: 24 · Gold r…</text></g>
+<g transform="translate(32 302)"><text class="suite" y="0">Decision governance</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">Detect accuracy: 45/49 (91.8%) · DECISION rec…</text></g>
+<g transform="translate(32 340)"><text class="suite" y="0">Sentry capture judge</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">Commit-message F1: 56/100 (56.0%) · Focused-d…</text></g>
+<g transform="translate(32 378)"><text class="suite" y="0">Edge-case autonomy</text><text class="status warn" x="300" y="0">!× stale no-ship</text><text class="metric" x="470" y="0">Judge-free ceiling: 51.2% · Pre-registered ta…</text></g>
+<g transform="translate(32 416)"><text class="suite" y="0">Semantic search retrieval</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">No accepted local checkpoint</text></g>
+<g transform="translate(32 454)"><text class="suite" y="0">Duplication matcher</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">No accepted local checkpoint</text></g>
+<g transform="translate(32 492)"><text class="suite" y="0">Commit-guard retrieval</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">Clone retrieval recall at 10: 59.0% · Semanti…</text></g>
+<g transform="translate(32 530)"><text class="suite" y="0">qavis visual QA</text><text class="status info" x="300" y="0">· external</text><text class="metric" x="470" y="0">No accepted local checkpoint</text></g>
+</svg>
