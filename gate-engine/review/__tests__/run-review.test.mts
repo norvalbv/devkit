@@ -214,6 +214,28 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it('review mode refuses to checkpoint a PASS when its packaged assets change mid-review', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      if (label === 'review:api-security-reviewer') {
+        writeFileSync(
+          join(assets, 'agents', 'api-security-reviewer.md'),
+          '---\nname: api-security-reviewer\n---\nMUTATED while running.',
+        );
+      }
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('api-security-reviewer REVIEW ERROR');
+    expect(Object.keys(loadCache(repo))).toHaveLength(4);
+  });
+
   it('review-mode cache invalidates only the reviewer whose packaged brief changed', async () => {
     const repo = consumerRepo({ backend: true });
     const assets = reviewAssets();

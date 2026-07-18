@@ -188,7 +188,7 @@ export { HEAL_ALIAS_CMD, HEAL_ALIAS_NAME, isHealAlias };
 // prior overlay is already in place (current === .devkit/hooks), recording that would make clean
 // restore a value devkit itself deleted — so recover the real original from the prior overlay's
 // config, else detect husky (.husky/_), else '' (unset). This makes re-running overlay idempotent.
-function captureOrigHooksPath(gitRoot: string, cwd: string): string {
+export function captureOrigHooksPath(gitRoot: string, cwd: string): string {
   const current = readHooksPath(gitRoot);
   if (current && current !== LOCAL_HOOKS) return current;
   const prev = readJson(join(cwd, '.devkit', 'config.json'));
@@ -205,7 +205,7 @@ function captureOrigHooksPath(gitRoot: string, cwd: string): string {
 
 // Where the repo's hook SCRIPTS live (git-root-relative). husky's .husky/_ → the scripts are the
 // parent's .husky/<hook>; a custom hooksPath holds them directly; unset → .git/hooks.
-function hookScriptDir(origHooksPath: string) {
+export function overlayHookScriptDir(origHooksPath: string) {
   if (origHooksPath && origHooksPath !== LOCAL_HOOKS) {
     return origHooksPath.replace(HUSKY_UNDERSCORE_RE, '');
   }
@@ -313,7 +313,7 @@ function installOverlayHook(
   dryRun: boolean,
   fallow = false,
 ) {
-  const scriptDir = hookScriptDir(origHooksPath);
+  const scriptDir = overlayHookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
   const passthrough = existing.filter((h) => h !== 'pre-commit');
@@ -367,7 +367,7 @@ export function syncOverlayHook(
   // Use the RECORDED origHooksPath — post-install core.hooksPath is `.devkit/hooks`, so reading it
   // live would chain the overlay to ITSELF. Fall back to the same recovery init uses.
   const origHooksPath = cfg.origHooksPath ?? captureOrigHooksPath(gitRoot, cwd);
-  const scriptDir = hookScriptDir(origHooksPath);
+  const scriptDir = overlayHookScriptDir(origHooksPath);
   const existing = detectExistingHooks(gitRoot, scriptDir);
   const preCommitChain = existing.includes('pre-commit') ? `${scriptDir}/pre-commit` : '';
   const expected = buildOverlayHook(sel, preCommitChain, pkgRel, { fallow });
