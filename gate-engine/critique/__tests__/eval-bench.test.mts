@@ -2,10 +2,12 @@
 // injected execs (zero claude calls, zero tokens). The fixture-repo paths use REAL git in a
 // tmpdir (the decisions-eval convention) — cheap, and the materialize contract is load-bearing.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { critiqueEligibility, parsePlanCritiqueResponse } from '../contract.mts';
 import {
   aggregateSummaries,
   compare,
@@ -18,6 +20,7 @@ import {
   type Summary,
   summarize,
 } from '../eval/bench.mts';
+import { runPhaseContractBench, scoreContractResponse } from '../eval/contract-bench.mts';
 import {
   buildDecoyPrompt,
   buildGoldPrompt,
@@ -32,6 +35,7 @@ import {
   scoreCase,
   voteSlot,
 } from '../eval/matcher.mts';
+import { summarizePlanUplift } from '../eval/plan-uplift.mts';
 import {
   BENCHMARK_DIRECTIVE,
   buildIntrinsicArgs,
@@ -43,19 +47,54 @@ import {
 
 const critic = { body: 'AGENT BODY', model: 'opus', raw: '---\nmodel: opus\n---\nAGENT BODY' };
 
-const SUMMARY_OK = [
-  'CRITIQUE: .cursor/.feature-critique.md',
-  'VERDICT: RETHINK',
-  'FEASIBILITY: Partially Feasible',
-  'CRITICAL_ISSUES: 2',
-  'WARNINGS: 1',
-  'UX_IMPACT: none',
-  'FRAME_META: BANDAID',
-  '',
-  'SUMMARY: The fix hides the symptom.',
-  'ACTIONS:',
-  '- Implement the canonical home first',
-].join('\n');
+const jsonResponse = (verdict = 'RETHINK', frameMeta = 'BANDAID', findings: unknown[] = []) =>
+  JSON.stringify({
+    schemaVersion: 1,
+    kind: 'plan_critique',
+    phase: 'plan',
+    status: 'reviewed',
+    verdict,
+    feasibility: 'Partially Feasible',
+    frameMeta,
+    summary: 'The fix hides the symptom.',
+    findings,
+    edgeCases: [
+      {
+        risk: 'unhandled input',
+        scenario: 'the input is malformed',
+        expectedBehavior: 'return an ineligible record',
+        testType: 'unit',
+      },
+    ],
+    actions: ['Implement the canonical home first'],
+  });
+
+const SUMMARY_OK = jsonResponse('RETHINK', 'BANDAID', [
+  {
+    severity: 'critical',
+    lens: 'frame',
+    claim: 'The plan fixes the wrong layer.',
+    evidence: 'Target x assigns the responsibility elsewhere.',
+    impact: 'The root cause remains.',
+    recommendation: 'Implement the target state.',
+  },
+  {
+    severity: 'critical',
+    lens: 'alignment',
+    claim: 'The plan contradicts the target.',
+    evidence: 'Target x rejects this mechanism.',
+    impact: 'The decision gate blocks.',
+    recommendation: 'Revise the mechanism.',
+  },
+  {
+    severity: 'warning',
+    lens: 'ux',
+    claim: 'Migration copy is incomplete.',
+    evidence: 'The plan omits existing users.',
+    impact: 'Users see extra friction.',
+    recommendation: 'Add migration guidance.',
+  },
+]);
 
 // ─── run-critic: argv order (the variadic-swallow trap) ───────────────────────────
 
@@ -80,13 +119,15 @@ describe('argv builders', () => {
     expect(args[allowed + 1]).toBe(WORKFLOW_TOOLS);
     expect(args.filter((a) => a === '--allowedTools')).toHaveLength(1);
     expect(args).not.toContain('--disallowedTools');
+    expect(WORKFLOW_TOOLS).not.toContain('Bash(git:*)');
+    expect(WORKFLOW_TOOLS).toContain('Bash(git status:*)');
   });
 });
 
 // ─── run-critic: summary parsing ──────────────────────────────────────────────────
 
 describe('parseSummary', () => {
-  it('parses the full compact block', () => {
+  it('parses the exact JSON contract', () => {
     const s = parseSummary(SUMMARY_OK);
     expect(s.verdict).toBe('RETHINK');
     expect(s.frameMeta).toBe('BANDAID');
@@ -95,19 +136,145 @@ describe('parseSummary', () => {
     expect(s.feasibility).toBe('Partially Feasible');
   });
 
-  it('matches PROCEED WITH CHANGES before its PROCEED prefix', () => {
-    expect(parseSummary('VERDICT: PROCEED WITH CHANGES').verdict).toBe('PROCEED WITH CHANGES');
-    expect(parseSummary('VERDICT: PROCEED').verdict).toBe('PROCEED');
+  it('maps the JSON underscore verdict onto the historical benchmark label', () => {
+    expect(parseSummary(jsonResponse('PROCEED_WITH_CHANGES', 'SOUND')).verdict).toBe(
+      'PROCEED WITH CHANGES',
+    );
+    expect(parseSummary(jsonResponse('PROCEED', 'SOUND')).verdict).toBe('PROCEED');
   });
 
   it('ambiguity parses NULL, never a guess', () => {
     expect(parseSummary('no block at all').verdict).toBeNull();
-    expect(parseSummary('FRAME_META: SOUND or maybe BANDAID').frameMeta).toBeNull();
-    expect(parseSummary('CRITICAL_ISSUES: several').criticalCount).toBeNull();
+    expect(parseSummary('```json\n{}\n```').frameMeta).toBeNull();
+    expect(parseSummary('{"kind":').criticalCount).toBeNull();
   });
 
-  it('tolerates markdown dressing on labels', () => {
-    expect(parseSummary('**VERDICT**: REJECT').verdict).toBe('REJECT');
+  it('rejects legacy compact-summary output', () => {
+    expect(parseSummary('**VERDICT**: REJECT').verdict).toBeNull();
+  });
+});
+
+describe('contract regression corpus', () => {
+  it('locks mined legacy formats, wrong-phase handling, malformed JSON, and no flow id', () => {
+    const rows = readFileSync(new URL('../eval/cases-contract.jsonl', import.meta.url), 'utf8')
+      .trim()
+      .split('\n')
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            id: string;
+            raw: string;
+            contractState: 'valid' | 'invalid';
+            eligibilityReason: string;
+            livePrompt?: string;
+            expectedStatus?: string;
+          },
+      );
+    expect(rows).toHaveLength(6);
+    expect(rows[0]).toMatchObject({
+      expectedStatus: 'wrong_phase',
+      livePrompt: expect.stringContaining('implementation is complete'),
+    });
+    for (const row of rows) {
+      const contract = parsePlanCritiqueResponse(row.raw);
+      expect(contract.state, row.id).toBe(row.contractState);
+      expect(critiqueEligibility(contract).reason, row.id).toBe(row.eligibilityReason);
+    }
+  });
+
+  it('requires populated edge cases for reviewed critiques', () => {
+    const populated = scoreContractResponse(jsonResponse(), true, {
+      repositoryUnchanged: true,
+      providerArtifactsAbsent: true,
+    });
+    const emptyResponse = JSON.parse(jsonResponse()) as Record<string, unknown>;
+    emptyResponse.edgeCases = [];
+    const empty = scoreContractResponse(JSON.stringify(emptyResponse), true, {
+      repositoryUnchanged: true,
+      providerArtifactsAbsent: true,
+    });
+
+    expect(populated.edgeCasesValid).toBe(true);
+    expect(empty).toMatchObject({ jsonContractValid: true, edgeCasesValid: false });
+  });
+
+  it('requires wrong-phase responses to keep edge cases empty', () => {
+    const response = JSON.parse(jsonResponse()) as Record<string, unknown>;
+    response.status = 'wrong_phase';
+    response.verdict = null;
+    response.edgeCases = [];
+    expect(scoreContractResponse(JSON.stringify(response), false, {}).edgeCasesValid).toBe(true);
+
+    response.edgeCases = [
+      {
+        risk: 'post-implementation review',
+        scenario: 'the implementation is already complete',
+        expectedBehavior: 'redirect to the implementation reviewer',
+        testType: 'unit',
+      },
+    ];
+    expect(scoreContractResponse(JSON.stringify(response), false, {}).edgeCasesValid).toBe(false);
+  });
+
+  it('excludes aborted edge cases from the metric denominator', () => {
+    const response = JSON.parse(jsonResponse()) as Record<string, unknown>;
+    response.status = 'aborted';
+    response.verdict = null;
+    expect(scoreContractResponse(JSON.stringify(response), false, {}).edgeCasesValid).toBeNull();
+
+    response.edgeCases = [];
+    expect(scoreContractResponse(JSON.stringify(response), false, {}).edgeCasesValid).toBeNull();
+  });
+});
+
+describe('paired plan uplift', () => {
+  it('reports paired gains, harms, sound-plan revisions, cost, and pass arms separately', () => {
+    const assessment = (
+      residualGoldFlawIds: string[],
+      introducedDefectIds: string[],
+      completeness: number,
+      tokens: number,
+      latencyMs: number,
+    ) => ({
+      residualGoldFlawIds,
+      introducedDefectIds,
+      completeness,
+      contractValid: true,
+      tokens,
+      latencyMs,
+    });
+    const result = summarizePlanUplift([
+      {
+        schemaVersion: 1,
+        caseId: 'flawed',
+        generatorModelFamily: 'family-a',
+        criticModelFamily: 'family-b',
+        critiquePasses: 1,
+        revised: true,
+        goldFlawIds: ['f1'],
+        initial: assessment(['f1'], [], 0.6, 100, 1000),
+        refined: assessment([], [], 0.9, 140, 1400),
+      },
+      {
+        schemaVersion: 1,
+        caseId: 'sound',
+        generatorModelFamily: 'family-a',
+        criticModelFamily: 'family-a',
+        critiquePasses: 2,
+        revised: true,
+        goldFlawIds: [],
+        initial: assessment([], [], 1, 100, 1000),
+        refined: assessment([], ['new-defect'], 0.8, 180, 1800),
+      },
+    ]);
+    expect(result.all.residualGoldFlaws).toEqual({ initial: 1, refined: 0, delta: -1 });
+    expect(result.all.pairedResidual).toEqual({ improved: 1, worsened: 0, tied: 1 });
+    expect(result.all.introducedDefects.delta).toBe(1);
+    expect(result.all.falseRevisions).toMatchObject({ count: 1, total: 1, rate: 1 });
+    expect(result.all.critiqueCycles).toEqual({ total: 3, mean: 1.5 });
+    expect(result.all.sameFamilyPairs).toBe(1);
+    expect(result.onePass.cases).toBe(1);
+    expect(result.twoPass.cases).toBe(1);
   });
 });
 
@@ -354,9 +521,9 @@ const noDeps: Omit<RunDeps, 'critic' | 'runs'> = { registerCleanup: () => {} };
 describe('runIntrinsicRow', () => {
   it('votes K trials and applies the ported text checks', async () => {
     const outs = [
-      'VERDICT: RETHINK\nFRAME_META: BANDAID\ncanonical home',
-      'VERDICT: RETHINK\nFRAME_META: BANDAID\nband-aid',
-      'VERDICT: PROCEED\nFRAME_META: SOUND\nfine',
+      jsonResponse('RETHINK', 'BANDAID'),
+      jsonResponse('RETHINK', 'BANDAID').replace('canonical home', 'band-aid'),
+      jsonResponse('PROCEED', 'SOUND').replace('canonical home', 'fine'),
     ];
     let k = 0;
     const r = await runIntrinsicRow(
@@ -396,8 +563,11 @@ describe('runWorkflowRow', () => {
   const wfOut = (raw: string | null) => async () => ({
     raw,
     report: raw === null ? null : REPORT,
-    artifact: '{"risks":[{"id":"R1"}]}',
+    artifact: raw,
     artifactPath: 'x',
+    contractValid: raw !== null,
+    repositoryUnchanged: true,
+    providerArtifactsAbsent: true,
   });
   const matchStub = async () => [
     { slotId: 'F1', kind: 'gold' as const, match: 1, stable: true, outage: false },
@@ -409,27 +579,43 @@ describe('runWorkflowRow', () => {
       ...noDeps,
       critic,
       runs: 1,
-      execWorkflow: wfOut('VERDICT: RETHINK\nFRAME_META: BANDAID') as never,
+      execWorkflow: wfOut(jsonResponse()) as never,
       match: matchStub as never,
     });
     expect(r.outage).toBe(false);
     expect(r.slots.F1).toMatchObject({ got: 'hit', ok: true });
     expect(r.slots.D1).toMatchObject({ got: 'clean', ok: true });
     expect(r.contract).toMatchObject({
-      reportWritten: true,
-      artifactValid: true,
-      summaryParsed: true,
+      jsonContractValid: true,
+      edgeCasesValid: true,
+      repositoryUnchanged: true,
+      providerArtifactsAbsent: true,
     });
     expect(r.falseAlarm).toBeNull(); // row has gold — not a decoy-only instrument
     expect(r.ok).toBe(true);
   });
 
+  it('keeps aborted edge-case output out of the aggregate denominator', async () => {
+    const response = JSON.parse(jsonResponse()) as Record<string, unknown>;
+    response.status = 'aborted';
+    response.verdict = null;
+    const r = await runWorkflowRow(row, {
+      ...noDeps,
+      critic,
+      runs: 1,
+      execWorkflow: wfOut(JSON.stringify(response)) as never,
+      match: matchStub as never,
+    });
+
+    expect(r.contract).toMatchObject({ jsonContractValid: true, edgeCasesValid: null });
+  });
+
   it('salvaged trials replace spawning entirely; missing artifact scores null, not fail', async () => {
     let spawns = 0;
     const salvage = () => [
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
+      { raw: jsonResponse(), report: REPORT, artifact: null },
+      { raw: jsonResponse(), report: REPORT, artifact: null },
+      { raw: jsonResponse(), report: REPORT, artifact: null },
     ];
     const r = await runWorkflowRow(row, {
       ...noDeps,
@@ -438,14 +624,27 @@ describe('runWorkflowRow', () => {
       salvage,
       execWorkflow: (async () => {
         spawns += 1;
-        return { raw: null, report: null, artifact: null, artifactPath: '' };
+        return {
+          raw: null,
+          report: null,
+          artifact: null,
+          artifactPath: '',
+          contractValid: false,
+          repositoryUnchanged: true,
+          providerArtifactsAbsent: true,
+        };
       }) as never,
       match: matchStub as never,
     });
     expect(spawns).toBe(0); // already-paid trials — nothing re-bought
     expect(r.outage).toBe(false);
     expect(r.verdict).toMatchObject({ got: 'RETHINK', ok: true, stable: true });
-    expect(r.contract).toMatchObject({ reportWritten: true, artifactValid: null });
+    expect(r.contract).toMatchObject({
+      jsonContractValid: true,
+      edgeCasesValid: true,
+      repositoryUnchanged: null,
+      providerArtifactsAbsent: null,
+    });
   });
 
   it('too few salvaged trials for a K-majority falls back to live spawning', async () => {
@@ -454,20 +653,23 @@ describe('runWorkflowRow', () => {
       ...noDeps,
       critic,
       runs: 3,
-      salvage: () => [{ raw: 'VERDICT: RETHINK', report: null, artifact: null }], // 1 < 2
+      salvage: () => [{ raw: jsonResponse(), report: null, artifact: null }], // 1 < 2
       execWorkflow: (async () => {
         spawns += 1;
         return {
-          raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID',
+          raw: jsonResponse(),
           report: REPORT,
-          artifact: '{"risks":[{"id":"R1"}]}',
+          artifact: jsonResponse(),
           artifactPath: 'x',
+          contractValid: true,
+          repositoryUnchanged: true,
+          providerArtifactsAbsent: true,
         };
       }) as never,
       match: matchStub as never,
     });
     expect(spawns).toBe(3);
-    expect(r.contract).toMatchObject({ artifactValid: true });
+    expect(r.contract).toMatchObject({ edgeCasesValid: true, repositoryUnchanged: true });
   });
 
   it('scores NULL when completed trials fall below the K-majority minimum', async () => {
@@ -483,32 +685,117 @@ describe('runWorkflowRow', () => {
   });
 });
 
-// ─── run-critic: workflow artifact reading + EDGE_CASES_ID plumbing ───────────────
+// ─── run-critic: workflow JSON + no-write contract ────────────────────────────────
 
 describe('runWorkflow', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'critique-eval-test-'));
+  execFileSync('git', ['init', '-q', dir]);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('reads report + id-suffixed artifact from the fixture and prefixes the prompt', async () => {
-    mkdirSync(path.join(dir, '.cursor'), { recursive: true });
-    writeFileSync(path.join(dir, '.cursor', '.feature-critique.md'), '# report');
-    writeFileSync(path.join(dir, '.cursor', '.edge-cases-bench42.json'), '{"risks":[]}');
+  it('derives matcher findings from JSON and leaves the fixture untouched', async () => {
     let seenPrompt = '';
+    const raw = jsonResponse('PROCEED', 'SOUND');
     const exec = async ({ args }: { args: string[] }) => {
       seenPrompt = args.find((a) => a.includes('critique this')) ?? '';
-      return 'VERDICT: PROCEED';
+      return raw;
     };
     const out = await runWorkflow({
       critic,
       prompt: 'critique this',
       fixtureDir: dir,
-      edgeCasesId: 'bench42',
       exec: exec as never,
     });
-    expect(seenPrompt.startsWith('EDGE_CASES_ID=bench42\n---\n')).toBe(true);
-    expect(out.report).toBe('# report');
-    expect(out.artifact).toBe('{"risks":[]}');
-    expect(out.artifactPath).toContain('.edge-cases-bench42.json');
+    expect(seenPrompt).toBe('critique this');
+    expect(out.report).toContain('## Critical Issues');
+    expect(out.artifact).toBe(raw);
+    expect(out.artifactPath).toBe('response.edgeCases');
+    expect(out).toMatchObject({
+      contractValid: true,
+      repositoryUnchanged: true,
+      providerArtifactsAbsent: true,
+    });
+  });
+
+  it('detects the dotted legacy provider artifacts that runtime hooks used to write', async () => {
+    const providerDir = path.join(dir, '.cursor');
+    mkdirSync(providerDir, { recursive: true });
+    const raw = jsonResponse('PROCEED', 'SOUND');
+    const exec = async () => raw;
+
+    for (const name of ['.feature-critique.md', '.edge-cases.json', '.edge-cases-task-1.json']) {
+      const artifact = path.join(providerDir, name);
+      writeFileSync(artifact, '{}');
+      const out = await runWorkflow({
+        critic,
+        prompt: 'critique this',
+        fixtureDir: dir,
+        exec: exec as never,
+      });
+      expect(out.providerArtifactsAbsent, name).toBe(false);
+      rmSync(artifact);
+    }
+    rmSync(providerDir, { recursive: true, force: true });
+  });
+
+  it('detects a clean-worktree commit that changes HEAD and refs', async () => {
+    const raw = jsonResponse('PROCEED', 'SOUND');
+    const exec = async () => {
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Critique Test',
+          '-c',
+          'user.email=critique@example.test',
+          'commit',
+          '--allow-empty',
+          '-m',
+          'unexpected mutation',
+        ],
+        { cwd: dir },
+      );
+      return raw;
+    };
+    const out = await runWorkflow({
+      critic,
+      prompt: 'critique this',
+      fixtureDir: dir,
+      exec: exec as never,
+    });
+    expect(out.repositoryUnchanged).toBe(false);
+  });
+});
+
+describe('phase-contract benchmark recovery', () => {
+  it('reports an all-outage row instead of calling majority with an empty vote set', async () => {
+    const casesDir = mkdtempSync(path.join(tmpdir(), 'critique-phase-contract-test-'));
+    const casesPath = path.join(casesDir, 'cases.jsonl');
+    writeFileSync(
+      casesPath,
+      `${JSON.stringify({ id: 'wrong-phase', livePrompt: 'review this', expectedStatus: 'wrong_phase' })}\n`,
+    );
+    let majorityCalled = false;
+    try {
+      const code = await runPhaseContractBench({
+        casesPath,
+        runs: 3,
+        critic: { model: 'test' },
+        run: async () => null,
+        majority: () => {
+          majorityCalled = true;
+          throw new Error('majority must not receive an empty vote set');
+        },
+      });
+      expect(code).toBe(2);
+      expect(majorityCalled).toBe(false);
+    } finally {
+      rmSync(casesDir, { recursive: true, force: true });
+    }
+  });
+
+  it('includes the contract scorer in the runner compatibility hash inputs', () => {
+    const source = readFileSync(new URL('../eval/bench.mts', import.meta.url), 'utf8');
+    expect(source).toMatch(/contract-bench.*SELF_EXT/);
   });
 });
 
@@ -703,10 +990,10 @@ describe('summarize helpers', () => {
         severity: [],
         falseAlarm: null,
         contract: {
-          summaryParsed: true,
-          withinTokenBudget: false,
-          reportWritten: true,
-          artifactValid: false,
+          jsonContractValid: true,
+          edgeCasesValid: false,
+          repositoryUnchanged: true,
+          providerArtifactsAbsent: false,
         },
         fabricatedPerRun: [1],
         findingCount: 4,
@@ -718,7 +1005,7 @@ describe('summarize helpers', () => {
     expect(s.perClass.security).toEqual({ hits: 1, total: 2 });
     expect(s.decoyFlags).toEqual({ flagged: 1, mentioned: 1, total: 2 });
     expect(s.recall).toEqual({ hits: 1, total: 2 });
-    expect(s.contract.withinTokenBudget).toEqual({ ok: 0, total: 1 });
+    expect(s.contract.edgeCasesValid).toEqual({ ok: 0, total: 1 });
     expect(s.precisionInfo).toEqual({ matched: 1, emitted: 4 });
   });
 });

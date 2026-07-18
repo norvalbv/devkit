@@ -12,7 +12,7 @@ corpus, so a prompt edit is a measured delta instead of a vibe. Follows the hous
 | wrong class blindness | **per-class recall** (7 critique classes) | reported table | a missed *security* flaw ≠ a missed nice-to-have; never averaged away |
 | frame misjudgement | verdict (set-membership) + FRAME_META accuracy | reported | the 2026-06-10 bandaid miss class |
 | tier miscalibration | severity calibration (hit flaws: CRITICAL vs WARNING) | warn tier | |
-| format drift | contract checks (summary parses, ≤~300 tokens, report written, artifact valid) | reported, deterministic | prompt regressions that break downstream parsers |
+| format drift | exact-JSON contract, phase-appropriate edge cases, no flow id, no repo/provider artifacts | reported, deterministic | prompt regressions that break capture or recreate tracked runtime state |
 
 **Overall finding precision prints informationally only**: the gold set is not exhaustive, so an
 unmatched finding is not provably wrong (sc-1058 convention). The *measured* false-alarm
@@ -26,6 +26,8 @@ node bench.mts --dev --only wf-decoy    # id-prefix subset
 BENCH_RUNS=3 node bench.mts --baseline  # baseline tier: majority-of-3 per row (committed)
 BENCH_RUNS=3 node bench.mts --fail      # gate tier: exit 1 on floor breach / significant flips
 node bench.mts coverage                 # corpus coverage matrix — zero claude calls
+BENCH_RUNS=3 node bench.mts phase-contract
+                                        # plan-only boundary (post-implementation → wrong_phase)
 node bench.mts matcher-audit            # matcher agreement vs committed labels (% + Cohen's κ)
 BENCH_RUNS=3 node bench.mts --baseline --salvage <transcripts-dir>
                                         # resume an interrupted run: rows with enough saved
@@ -33,8 +35,8 @@ BENCH_RUNS=3 node bench.mts --baseline --salvage <transcripts-dir>
                                         # not) — only never-run rows spend critic tokens
 ```
 
-**Interruption/salvage:** every completed trial persists to `transcripts/` (summary + report +
-artifact + an `agent.hash` marker). If a run dies (quota, ^C, crash), copy `transcripts/` aside
+**Interruption/salvage:** every completed trial persists to `transcripts/` (exact response + a
+matcher rendering + an `agent.hash` marker). If a run dies (quota, ^C, crash), copy `transcripts/` aside
 and pass it to `--salvage`: trials are exchangeable across runs of the same agent md (the marker
 is verified; a changed md refuses). Salvaged trials predating artifact persistence score
 `artifactValid: null` — unknown, excluded from that contract denominator, never assumed. The
@@ -56,9 +58,10 @@ machine-contention SIGTERM class, sc-1049).
   including the permanent 2026-06-10 regression row, plus 5 verbatim real prompts mined from
   session history with outcome-derived labels.
 - **`workflow`** — the full contract in a disposable fixture git repo (`materializeFixture`):
-  tools allowed, `guard.config.json` / `docs/decisions/` present per row, the agent writes
-  `.cursor/.feature-critique.md` + the edge-cases artifact, stdout is the compact summary. The
-  finding-set metrics live here, scored via the matcher. 2–6 min a row.
+  read-only tools, `guard.config.json` / `docs/decisions/` present per row, and one exact JSON
+  response. The runner deterministically verifies the repository is unchanged, provider artifacts
+  are absent, and no flow identifier appears. Finding-set metrics use a JSON-derived matcher
+  rendering. 2–6 min a row.
 
 ## The matcher (the open-output problem)
 
@@ -71,7 +74,7 @@ never regression evidence). Per-slot forced choice over one holistic mapping cal
 (arXiv:2410.03608); pointwise over pairwise: arXiv:2504.14716.
 
 The matcher is itself a measurement instrument with error, so: (1) its prompts/parser are hashed
-into the baseline (`runnerHash`) — a matcher edit invalidates comparisons exactly like an agent
+into the baseline (`runnerHash`) — a matcher or contract edit invalidates comparisons exactly like an agent
 edit; (2) `matcher-audit` scores it against the committed, hand-labelled `matcher-audit.jsonl` —
 **adversarially seeded** (near-miss paraphrases, same-file-different-problem traps, two-slot
 compound findings, decoy mention-vs-objection pairs) — reporting percent agreement **and Cohen's
@@ -103,7 +106,7 @@ Verbatim house rules (decisions-eval README §Statistical honesty), plus the clu
   "do it once and leave it"): a slot is hit if credited in ≥2/3 completed trials; verdict is the
   trial majority (tie → NULL). At K=3 a row needs ≥2 completed trials or it scores NULL and
   counts as an outage.
-- Baselines embed `agentHash` (the source md), `runnerHash` (run-critic.mts + matcher.mts),
+- Baselines embed `agentHash` (the source md), `runnerHash` (run-critic.mts + matcher.mts + contract.mts),
   `corpusHash`, and the config; any mismatch **skips the comparison mechanically** — never
   silently misleads. **A baseline refuses to write with outages > 0**; `--fail` skips comparison
   when the current run has outages.
@@ -161,7 +164,8 @@ everything was dark).
 4. **Matcher layer + κ audit** (open finding-set output; decisions judges emit closed labels).
 5. **`results.baseline.json` is COMMITTED** (ticket DoD; decisions-eval gitignores theirs) —
    `.gitignore` covers only `runs.log` + `transcripts/`.
-6. **Workflow rows are not read-only** — artifact writes are part of the contract under test.
+6. **Workflow rows are read-only** — exact JSON and absence of repository/provider artifacts are
+   part of the contract under test.
 7. **Row-level flip units** for finding-set metrics (clustering rationale above).
 8. **Critic rows run K=3 at baseline/gate tier** (user ruling), where sc-1058's completeness eval
    runs its expensive reviewer K=1 + discordance-retry and gives the vote budget to the matcher.
@@ -200,3 +204,15 @@ evidence burden for Critical Issues, verdict-blocker coupling, evidence-based se
 (prior art: pr-agent / sweep / code-review-gpt restraint prompts). Every headline moved the right
 way; `--fail` vs the B2 baseline exits 0. Remaining known weakness: ux-class recall 2/3 (one gold
 slot) — documented debt, not worth a baseline re-buy on its own.
+
+The v1 exact-JSON contract changes the agent and runner hashes, so B2 is historical and the bench
+mechanically refuses to compare it with the new loop. A fresh K=3/zero-outage baseline must be
+recorded before this benchmark can gate the new prompt. Contract regressions that do not require
+model calls live in `cases-contract.jsonl`; the paired plan-quality arm is locked in
+`PLAN_UPLIFT_PREREGISTRATION.md` and summarized by `plan-uplift.mts`.
+
+What carries forward is the labelled 33-row corpus, gold/decoy slots, audited matcher, floors,
+holdouts, and paired-flip method. What does not carry forward is B2's measured score: the JSON
+prompt changes critic behavior and output cost, while JSON parsing changes the runner. The runner
+maps `PROCEED_WITH_CHANGES` back to the historical verdict category and derives matcher text from
+structured findings, but only a fresh K=3 run can measure whether quality itself moved.

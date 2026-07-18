@@ -10,9 +10,8 @@
  * Two row modes (one bench):
  *   intrinsic — no tools, everything inlined (BENCHMARK directive); scores the closed-set summary
  *               fields (VERDICT / FRAME_META / counts) + the seed benches' ported text checks.
- *   workflow  — the full contract in a disposable fixture repo (tools, report file, edge-cases
- *               artifact); adds the finding-set metrics via the audited matcher. The headline
- *               metrics live here.
+ *   workflow  — the exact JSON contract in a disposable fixture repo with read-only tools; adds
+ *               finding-set metrics and asserts that runtime repository artifacts remain absent.
  *
  *   node bench.mts                     # full run
  *   node bench.mts --dev               # prompt-iteration tier: holdout rows excluded
@@ -40,7 +39,7 @@
  * aggregate deltas, and never on slot-level pairing (slots within a row share one critic
  * transcript and are correlated; slot-level McNemar is anti-conservative — cluster by item
  * source, Miller arXiv:2411.00640). Baselines embed agentHash + runnerHash (run-critic.mts +
- * matcher.mts) + corpusHash + config; any mismatch skips the comparison mechanically. runs.log is
+ * matcher.mts + contract.mts) + corpusHash + config; any mismatch skips the comparison mechanically. runs.log is
  * the anti-Goodhart ledger. Holdout rows are excluded from --dev and included in baseline/gate.
  *
  * NULL is a verdict: an unparseable summary scores NULL (its own confusion column). An outage is
@@ -74,6 +73,13 @@ import {
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import {
+  type ContractRunOutcome,
+  nullableMajority,
+  runPhaseContractBench,
+  scoreContractResponse,
+  summarizeContract,
+} from './contract-bench.mts';
+import {
   buildDecoyPrompt,
   buildGoldPrompt,
   CRITIQUE_CLASSES,
@@ -106,6 +112,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const baselinePath = path.join(here, 'results.baseline.json');
 const casesPath = path.join(here, 'cases-critique.jsonl');
+const contractCasesPath = path.join(here, 'cases-contract.jsonl');
 const auditPath = path.join(here, 'matcher-audit.jsonl');
 const transcriptsDir = path.join(here, 'transcripts');
 
@@ -122,7 +129,6 @@ const RECALL_FLOOR = 0.75;
 const CLEAN_RATE_FLOOR = 0.75;
 const DECOY_FLAG_CEILING = 0.25;
 /** ≤300-token contract with chars/4 heuristic slack — measured, reported, never floored. */
-const SUMMARY_TOKEN_BUDGET = 330;
 
 // ─── Corpus ───────────────────────────────────────────────────────────────────────
 
@@ -130,7 +136,6 @@ export interface Row {
   id: string;
   mode: 'intrinsic' | 'workflow';
   prompt: string;
-  edgeCasesId?: string;
   repo?: { base: Record<string, string>; staged: Record<string, string | null> };
   gold?: GoldSlot[];
   decoys?: DecoySlot[];
@@ -230,10 +235,11 @@ export interface RowResult {
   /** Decoy-only rows: did any run-majority fabricate a CRITICAL? null elsewhere. */
   falseAlarm: { got: boolean; ok: boolean; stable: boolean } | null;
   contract: {
-    summaryParsed: boolean;
-    withinTokenBudget: boolean;
-    reportWritten: boolean | null;
-    artifactValid: boolean | null;
+    jsonContractValid: boolean;
+    edgeCasesValid: boolean | null;
+    noFlowId: boolean;
+    repositoryUnchanged: boolean | null;
+    providerArtifactsAbsent: boolean | null;
   } | null;
   fabricatedPerRun: number[];
   findingCount: number;
@@ -369,12 +375,7 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const gold = row.gold ?? [];
   const decoys = row.decoys ?? [];
   const summaries: ParsedSummary[] = [];
-  const contractPerRun: {
-    summaryParsed: boolean;
-    withinTokenBudget: boolean;
-    reportWritten: boolean;
-    artifactValid: boolean | null;
-  }[] = [];
+  const contractPerRun: ContractRunOutcome[] = [];
   const slotGotPerRun: Record<string, string>[] = [];
   const severityPerRun: { slotId: string; got: FindingSeverity }[][] = [];
   const fabricatedPerRun: number[] = [];
@@ -385,31 +386,20 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   // trial predates artifact persistence: validity scores null (excluded from the denominator),
   // never an assumed pass/fail.
   const scoreTrial = async (
-    out: { raw: string; report: string | null; artifact: string | null },
-    artifactKnowable: boolean,
+    out: {
+      raw: string;
+      report: string | null;
+      artifact: string | null;
+      repositoryUnchanged?: boolean | null;
+      providerArtifactsAbsent?: boolean | null;
+    },
+    repositoryEffectsKnowable: boolean,
   ) => {
     const summary = parseSummary(out.raw);
     summaries.push(summary);
     const findings = out.report ? parseReportFindings(out.report) : [];
     findingCount = Math.max(findingCount, findings.length);
-    let artifactValid: boolean | null = artifactKnowable ? false : null;
-    if (out.artifact) {
-      try {
-        const a = JSON.parse(out.artifact) as { risks?: unknown[]; flowId?: string };
-        artifactValid =
-          Array.isArray(a.risks) &&
-          a.risks.length > 0 &&
-          (!row.edgeCasesId || a.flowId === row.edgeCasesId);
-      } catch {
-        artifactValid = false;
-      }
-    }
-    contractPerRun.push({
-      summaryParsed: summary.verdict !== null,
-      withinTokenBudget: summary.approxTokens <= SUMMARY_TOKEN_BUDGET,
-      reportWritten: out.report !== null,
-      artifactValid,
-    });
+    contractPerRun.push(scoreContractResponse(out.raw, repositoryEffectsKnowable, out));
     const outcomes = await (deps.match ?? runMatcher)(gold, decoys, findings, {
       model: MATCH_MODEL,
       runs: MATCH_RUNS,
@@ -425,7 +415,7 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
     // Already-paid trials from an interrupted run: no fixture, no spawn — matcher only.
     for (const t of salvaged) {
       completed += 1;
-      await scoreTrial(t, t.artifact !== null);
+      await scoreTrial(t, false);
     }
   } else {
     for (let k = 0; k < deps.runs; k += 1) {
@@ -436,7 +426,6 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
           critic: deps.critic,
           prompt: row.prompt,
           fixtureDir: fx.repo,
-          edgeCasesId: row.edgeCasesId,
         });
         if (out.raw === null) continue; // expensive class: score what completed, count the outage
         completed += 1;
@@ -444,7 +433,16 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
         if (out.report) deps.saveTranscript?.(`${row.id}.run${k + 1}.report.md`, out.report);
         if (out.artifact)
           deps.saveTranscript?.(`${row.id}.run${k + 1}.artifact.json`, out.artifact);
-        await scoreTrial({ raw: out.raw, report: out.report, artifact: out.artifact }, true);
+        await scoreTrial(
+          {
+            raw: out.raw,
+            report: out.report,
+            artifact: out.artifact,
+            repositoryUnchanged: out.repositoryUnchanged,
+            providerArtifactsAbsent: out.providerArtifactsAbsent,
+          },
+          true,
+        );
       } finally {
         fx.cleanup();
         deps.registerCleanup(null);
@@ -505,15 +503,12 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const falseAlarm = isDecoyOnly(row)
     ? { got: fabricated.got, ok: !fabricated.got, stable: fabricated.stable }
     : null;
-  const artifactVals = contractPerRun
-    .map((c) => c.artifactValid)
-    .filter((v): v is boolean => v !== null);
   const contract: RowResult['contract'] = {
-    summaryParsed: majorityBool(contractPerRun.map((c) => c.summaryParsed)).got,
-    withinTokenBudget: majorityBool(contractPerRun.map((c) => c.withinTokenBudget)).got,
-    reportWritten: majorityBool(contractPerRun.map((c) => c.reportWritten)).got,
-    // All trials unknowable (pre-persistence salvage) → null: unknown, not pass/fail.
-    artifactValid: artifactVals.length ? majorityBool(artifactVals).got : null,
+    jsonContractValid: majorityBool(contractPerRun.map((c) => c.jsonContractValid)).got,
+    edgeCasesValid: nullableMajority(contractPerRun.map((c) => c.edgeCasesValid)),
+    noFlowId: majorityBool(contractPerRun.map((c) => c.noFlowId)).got,
+    repositoryUnchanged: nullableMajority(contractPerRun.map((c) => c.repositoryUnchanged)),
+    providerArtifactsAbsent: nullableMajority(contractPerRun.map((c) => c.providerArtifactsAbsent)),
   };
   const goldOk = gold.every((g) => slots[g.id]?.ok);
   const decoysOk = decoys.every((d) => slots[d.id]?.ok);
@@ -602,22 +597,7 @@ export function summarize(results: RowResult[], critic: { model: string }): Summ
   const metaRows = scored.filter((r) => r.frameMeta !== null);
   const sev = scored.flatMap((r) => r.severity);
   const workflowScored = scored.filter((r) => r.mode === 'workflow');
-  const contractKeys = [
-    'summaryParsed',
-    'withinTokenBudget',
-    'reportWritten',
-    'artifactValid',
-  ] as const;
-  const contract = Object.fromEntries(
-    contractKeys.map((key) => [
-      key,
-      {
-        ok: workflowScored.filter((r) => r.contract?.[key] === true).length,
-        // null = unknowable for that row (pre-persistence salvage) — out of the denominator.
-        total: workflowScored.filter((r) => r.contract !== null && r.contract[key] !== null).length,
-      },
-    ]),
-  );
+  const contract = summarizeContract(workflowScored);
   // Informational precision: emitted findings matched to gold vs emitted (majority findingCount).
   const matched = goldSlots.filter((s) => s.ok).length;
   const emitted = workflowScored.reduce((n, r) => n + r.findingCount, 0);
@@ -760,10 +740,8 @@ export function compare(summary: Summary, base: Summary | undefined) {
         else lostUnstable = true;
       } else if (!p.ok && s.ok) gained.push(sid);
     }
-    // Mirror conditions on both sides (a stray composite-ok gate here undercounted improvements
-    // and skewed the McNemar b/c ratio toward false regressions). The b-side stability gate is
-    // the one deliberate asymmetry, as in verdict/false-alarm handling: a regression must be
-    // stable to count; an improvement counts as-is (conservative direction).
+    // Mirror both sides: a stray composite-ok gate undercounted improvements and skewed McNemar.
+    // The b-side stability gate is deliberate: regressions must be stable; improvements count as-is.
     if (lost.length && !gained.length) tables[1].b.push(id);
     else if (gained.length && !lost.length) tables[1].c.push(id);
     else if (lostUnstable) tables[1].unstable.push(id);
@@ -804,7 +782,9 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 export const runnerHash = () =>
   sha12(
     readFileSync(path.join(here, `run-critic${SELF_EXT}`), 'utf8') +
-      readFileSync(path.join(here, `matcher${SELF_EXT}`), 'utf8'),
+      readFileSync(path.join(here, `matcher${SELF_EXT}`), 'utf8') +
+      readFileSync(path.join(here, `contract-bench${SELF_EXT}`), 'utf8') +
+      readFileSync(path.join(here, `../contract${SELF_EXT}`), 'utf8'),
   );
 
 function printCoverage(rows: Row[]) {
@@ -967,6 +947,18 @@ async function main(argv: string[]) {
   if (args.has('matcher-audit')) {
     await runMatcherAudit();
     process.exit(0);
+  }
+  if (args.has('phase-contract')) {
+    const critic = loadCritic();
+    process.exit(
+      await runPhaseContractBench({
+        casesPath: contractCasesPath,
+        runs: RUNS,
+        critic,
+        run: (prompt) => runIntrinsic({ critic, prompt }),
+        majority: (statuses) => majorityVerdict(statuses).verdict,
+      }),
+    );
   }
 
   if (devOnly && (writeBaseline || failOnRegression))
