@@ -105,9 +105,6 @@ export function judgeOnce({
     input,
     timeout,
     cwd,
-    // Factory-built gates have no gate-level transcript store of their own (unlike the review
-    // gate) — opt into the exec-level one so their sessions are inspectable downstream.
-    transcript: true,
   });
   return raw === null ? null : parse(raw);
 }

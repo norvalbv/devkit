@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe('judge_exec telemetry', () => {
-  it('success emits one ok event with model/duration/sizes and no transcript by default', () => {
+  it('success emits one ok event with model/duration/sizes AND a transcript by default', () => {
     fakeClaude('echo FIT');
     const out = execJudge({
       label: 'vision',
@@ -78,17 +78,30 @@ describe('judge_exec telemetry', () => {
     expect(typeof ev.duration_ms).toBe('number');
     expect(ev.input_chars).toBe('CHANGED PATHS:\nx.ts'.length);
     expect(ev.output_chars).toBeGreaterThan(0);
+    expect(typeof ev.transcript_ref).toBe('string'); // collected by default
+  });
+
+  it('transcript: false suppresses the transcript (gates with their own gate-level store)', () => {
+    fakeClaude('echo FIT');
+    execJudge({
+      label: 'review:api-security-reviewer',
+      args: ['-p', '--model', 'haiku', 'x'],
+      input: 'y',
+      timeout: 30000,
+      transcript: false,
+    });
+    const [ev] = events();
+    expect(ev.outcome).toBe('ok');
     expect(ev.transcript_ref).toBeUndefined();
   });
 
-  it('transcript: true persists input+output and stamps transcript_ref', () => {
+  it('default transcript persists input+output and stamps transcript_ref', () => {
     fakeClaude('echo OUT');
     execJudge({
       label: 'sentry-advisory',
       args: ['-p', '--model', 'haiku', 'judge'],
       input: 'the diff body',
       timeout: 30000,
-      transcript: true,
     });
     const [ev] = events();
     expect(typeof ev.transcript_ref).toBe('string');

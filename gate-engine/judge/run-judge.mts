@@ -92,8 +92,10 @@ function isJudgeTimeout(e: unknown): boolean {
  * @returns {string|null}
  */
 // Options for both execJudge and its async twin. onOutage is optional — most callers don't retry.
-// `transcript: true` additionally persists the full input+output via the transcript store — opt-in
-// so gates that already save their own transcripts (the review gate) don't store every diff twice.
+// Transcripts are collected BY DEFAULT (the ledger's whole point is that judgements stay
+// inspectable without any caller remembering to ask); `transcript: false` opts out — for gates
+// that already persist their own gate-level transcript (the review gate) so every diff isn't
+// stored twice.
 interface ExecJudgeOpts {
   label: string;
   args: string[];
@@ -128,7 +130,7 @@ function emitJudgeExec(
   // invocation's output — never silently rewritten by a later sample OR a later process (a
   // retried/amended commit shares the same run id). Uniqueness is the filesystem's, not ours.
   const ref =
-    outcome === 'ok' && opts.transcript && output
+    outcome === 'ok' && opts.transcript !== false && output
       ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', output))
       : null;
   emitGateEvent({

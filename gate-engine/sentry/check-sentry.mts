@@ -304,10 +304,6 @@ function runJudgeOnce(input: string, model: string, prompt: string): SentryRun |
     // payload is tiny, but `claude -p` cold-start is ~20-40s here; generous ceiling so a slow start
     // doesn't false-timeout into a null verdict.
     timeout: 120000,
-    // No gate-level transcript store here — the exec-level one makes the judgement inspectable.
-    // Multi-sample runs store one transcript PER sample (the exec seam suffixes repeated labels),
-    // so each sample's judge_exec event resolves to its own output.
-    transcript: true,
     cwd: CWD,
   });
   // null = outage (execJudge warned) → propagate so judge() bails (no per-sample re-warn).
