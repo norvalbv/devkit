@@ -66,6 +66,42 @@ export function saveTranscript(agent: string, text: string): string | null {
   }
 }
 
+/**
+ * Like saveTranscript, but NEVER overwrites: the file is created with the exclusive flag (`wx`),
+ * and an existing name bumps to `<agent>.2`, `<agent>.3`, … until a fresh slot is found. This is
+ * what a per-invocation ledger (judge_exec) needs — its event line is appended durably, so the ref
+ * it carries must keep resolving to THAT invocation's output even when a later process (a retried
+ * or amended commit on the same staged tree → same run id, or a multi-sample vote) writes the same
+ * label again. Uniqueness comes from the filesystem, not process-local bookkeeping, so it holds
+ * across processes. Bounded probe (then one entropy fallback) keeps the pathological case cheap.
+ */
+export function saveTranscriptUnique(agent: string, text: string): string | null {
+  const id = runId();
+  if (!telemetrySink() || !id) return null;
+  const dir = path.join('transcripts', safeSegment(id));
+  const base = safeSegment(agent);
+  try {
+    mkdirSync(path.join(telemetryDir(), dir), { recursive: true });
+    for (let n = 1; n <= 100; n++) {
+      const rel = path.join(dir, `${n === 1 ? base : `${base}.${n}`}.txt`);
+      try {
+        writeFileSync(path.join(telemetryDir(), rel), text, { flag: 'wx' });
+        pruneRuns(telemetryDir());
+        return rel;
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'EEXIST') throw e;
+      }
+    }
+    // 100 collisions — entropy fallback so the write still lands uniquely.
+    const rel = path.join(dir, `${base}.${process.pid}-${Date.now()}.txt`);
+    writeFileSync(path.join(telemetryDir(), rel), text, { flag: 'wx' });
+    pruneRuns(telemetryDir());
+    return rel;
+  } catch {
+    return null; // best-effort — never fail a gate over a transcript
+  }
+}
+
 /** Best-effort retention: keep the most-recent N run dirs under transcripts/, delete older. Never
  * throws (a prune failure must not fail a gate). Cheap on the common path — only sorts when over cap. */
 function pruneRuns(base: string): void {
