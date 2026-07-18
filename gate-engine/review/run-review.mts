@@ -26,12 +26,11 @@
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
  * allowlist — a gate judge can never write, stage, or commit.
  *
- * W-3: config + git + agent .md files all resolve against the CONSUMER cwd.
+ * W-3: config + git resolve against the CONSUMER cwd. Commit/ship briefs resolve there too;
+ * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, rmSync } from 'node:fs';
-import path from 'node:path';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
@@ -44,36 +43,32 @@ import { blockingNote, reconcile } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
   allowedToolsFor,
-  type ChecklistState,
   cacheKey,
+  effectiveReviewConfig,
   escalatePrompt,
   hasChecklist,
   parseConventionFindings,
   parseReviewVerdict,
-  type Reviewer,
   type ReviewerSelection,
   selectReviewers,
-  verifyChecklist,
   wrapConventionsPrompt,
   wrapPrompt,
 } from './reviewers.mts';
+import {
+  agentBody,
+  cleanupChecklistState,
+  enforceChecklistContract,
+  preflightReviewAssets,
+  type ReviewOutcome,
+  readChecklistState,
+  reviewJudgeEnv,
+} from './runtime.mts';
 
 /** One reviewer's cascade outcome. `transcript` rides along on EVERY judged outcome (pass/fail/
  * no-VERDICT) — the FAIL loop prints it (a block whose evidence was discarded is undebuggable) and
  * every outcome persists it as a fetchable transcript (saveTranscript) so a passing reviewer's
  * reasoning is showcasable, not thrown away. Absent only when no judge ran (a hard outage). */
-interface CascadeResult {
-  name: string;
-  status: 'pass' | 'fail' | 'inconclusive';
-  reason: string;
-  escalated: boolean;
-  transcript?: string;
-  /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
-   * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
-   * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
-   * usage dashboard chasing a model downgrade that never happened. */
-  model?: string;
-}
+type CascadeResult = ReviewOutcome;
 
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
@@ -98,27 +93,15 @@ interface CascadeOpts {
   exec?: typeof execJudgeAsync;
   firstModel?: string;
   retryFirst?: boolean;
+  assetRoot?: string;
+  judgeEnv?: NodeJS.ProcessEnv;
+  checklistRecoveryReason?: string;
 }
 
-// Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
-// diff investigation. The per-pass caps are GENEROUS (30 min): the correctness reviewer's deep
-// four-lens investigation legitimately runs past the old 420s cap and got SIGKILLed mid-verdict —
-// measured on the usage-tracker as repeated 421s inconclusive timeouts while the median run is
-// ~60-250s. The cap is sized for the slow-but-working judge, not the median. A judge that TIMES OUT
-// is never re-run (see cascadeVerdict), so a stuck judge still costs at most one cap, not two.
-//
-// Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
-// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate. PER-CASCADE worst ≈
-// 1×1800 (first pass) + 1800 (escalate) = 3600s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY,
-// default 2) cascades run in ceil(N/K) WAVES, so the theoretical worst wall-clock far exceeds
-// SHIP_COMMIT_TIMEOUT (now 3600s default) — by design: a killed ship CONVERGES on re-run because
-// PASSes checkpoint per-completion and the caches skip everything already earned
-// (docs/decisions/ship-gates-converge-not-restart.md). In practice only correctness approaches the
-// cap; the rest finish <300s, so a real ship is one slow wave + fast waves, comfortably under 3600s.
-//
-// NOTE: a single pass can now exceed the 600s foreground tool cap — an AGENT-driven commit (the gate
-// run inside a Bash tool) is still killed at 600s, so the generous caps take FULL effect only for a
-// commit run in a real terminal (or a detached ship), where SHIP_COMMIT_TIMEOUT is the outer bound.
+// Each pass includes checklist generation/marking/finalization. The 30-minute cap accommodates the
+// measured slow correctness reviewer; timeouts are never retried. The outer SHIP_COMMIT_TIMEOUT
+// bounds the whole hook while per-reviewer PASS checkpoints make a killed ship converge on re-run
+// (docs/decisions/ship-gates-converge-not-restart.md). Normal reviewers finish well below the cap.
 const FIRST_TIMEOUT_MS = 1800000; // 30 min — the slow-but-working reviewer (correctness) needs the room
 // ship/strict first pass shares the same generous cap; the outer SHIP_COMMIT_TIMEOUT is the safety net.
 const STRICT_FIRST_TIMEOUT_MS = 1800000;
@@ -176,36 +159,6 @@ function stagedFiles(cwd: string): string[] {
     .filter(Boolean);
 }
 
-function agentBody(cwd: string, cfg: GuardConfig, name: string): string | null {
-  const dir = cfg.review.agentsDir;
-  const file = path.join(path.isAbsolute(dir) ? dir : path.resolve(cwd, dir), `${name}.md`);
-  try {
-    return readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-/** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
- * all — a skill-less reviewer has no stateFile to read → unverifiable). */
-function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistState | null {
-  if (!reviewer.stateFile) return null;
-  try {
-    return JSON.parse(
-      readFileSync(path.resolve(cwd, reviewer.stateFile), 'utf8'),
-    ) as ChecklistState;
-  } catch {
-    return null;
-  }
-}
-
-/** Remove a reviewer's checklist artifact so a stale one can never satisfy the NEXT run. A
- * skill-less reviewer has no stateFile — nothing to clean up. */
-function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
-  if (!reviewer.stateFile) return;
-  rmSync(path.resolve(cwd, reviewer.stateFile), { force: true });
-}
-
 /**
  * One reviewer's cascade → {name, status: 'pass'|'fail'|'inconclusive', reason, escalated}.
  * `exec` is injectable for tests; the gate always passes execJudgeAsync.
@@ -257,18 +210,10 @@ export async function runCascade(
 ): Promise<CascadeResult> {
   const { cwd } = opts;
   cleanupChecklistState(cwd, sel.reviewer);
-  const res = await cascadeVerdict(sel, opts);
-  if (res.status === 'pass' && sel.reviewer.stateFile) {
-    // A skill-less reviewer (no stateFile) has no artifact to verify — its PASS is trusted
-    // directly, the same trust level completeness.mts already uses for its own straight verdict;
-    // its substitute anti-hallucination mechanism is the AC's own quote-both-or-stay-silent
-    // contract, enforced by the brief, not an artifact this gate can independently check.
-    const hole = verifyChecklist(readChecklistState(cwd, sel.reviewer), 'PASS');
-    if (hole) {
-      res.status = 'inconclusive';
-      res.reason = hole;
-    }
-  }
+  let res = await cascadeVerdict(sel, opts);
+  res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, (reason) =>
+    cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason }),
+  );
   // Override valve — a single-pass (model-pinned) reviewer's FAIL blocks unless each failed lens is
   // waived with a rationale (env OVERRIDE_<fp>_RATIONALE or .devkit/correctness-overrides.json). All
   // waived → PASS; any un-waived → still FAIL, its reason names the fingerprints + how to waive them.
@@ -329,9 +274,18 @@ export async function runCascade(
 
 async function cascadeVerdict(
   { reviewer, files }: ReviewerSelection,
-  { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false }: CascadeOpts,
+  {
+    cwd,
+    cfg,
+    exec = execJudgeAsync,
+    firstModel = 'haiku',
+    retryFirst = false,
+    assetRoot,
+    judgeEnv,
+    checklistRecoveryReason,
+  }: CascadeOpts,
 ): Promise<CascadeResult> {
-  const body = agentBody(cwd, cfg, reviewer.name);
+  const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
   if (body === null)
     // A missing brief must never be judged as an EMPTY brief (a wrapper-only prompt fake-passes):
     // inconclusive → fail-open on a normal commit, fail-closed on a ship — exactly the loudness
@@ -348,7 +302,7 @@ async function cascadeVerdict(
   // into the prompt itself.
   const stat = gitCached(cwd, ['--stat'], files);
   const prompt = hasChecklist(reviewer)
-    ? wrapPrompt(body, reviewer, files)
+    ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason)
     : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files));
   const input = hasChecklist(reviewer)
     ? stat
@@ -360,7 +314,7 @@ async function cascadeVerdict(
     model,
     ...JUDGE_ISOLATION,
     '--allowedTools',
-    allowedToolsFor(reviewer, cfg),
+    allowedToolsFor(reviewer, cfg, assetRoot),
   ];
   // A model-pinned reviewer (correctness, conventions) runs single-pass at its pinned model — no escalation.
   const passModel = reviewer.model ?? firstModel;
@@ -372,6 +326,7 @@ async function cascadeVerdict(
     timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
     transcript: false, // this gate persists its own review-<name> transcript — don't store twice
+    env: judgeEnv,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       firstOutage = kind;
     },
@@ -435,6 +390,7 @@ async function cascadeVerdict(
     timeout: ESCALATE_TIMEOUT_MS,
     cwd,
     transcript: false, // this gate persists its own review-<name> transcript — don't store twice
+    env: judgeEnv,
   });
   if (second === null)
     return {
@@ -486,12 +442,16 @@ export async function runReviewGate(
 ): Promise<number> {
   if (envFlag('NO_REVIEW')) return 0;
   const strict = envFlag('AI_STRICT'); // the ship path sets this: retry once, then fail CLOSED
+  const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
   let cfg: GuardConfig;
   let selected: ReviewerSelection[];
   let diffs: string[];
+  let assetRoot: string | undefined;
+  let identitySalts = new Map<string, string>();
   try {
     cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return 0;
+    if (reviewMode) cfg = effectiveReviewConfig(cfg);
     selected = selectReviewers(stagedFiles(cwd), cfg);
     const skip = skippedReviewers();
     if (skip.size > 0) {
@@ -501,9 +461,19 @@ export async function runReviewGate(
       selected = selected.filter((s) => !skip.has(s.reviewer.name));
     }
     if (selected.length === 0) return 0;
+    if (reviewMode) {
+      assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
+      identitySalts = preflightReviewAssets(assetRoot, selected, cfg);
+    }
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
     diffs = selected.map((s) => gitCached(cwd, [], s.files));
   } catch (e: unknown) {
+    if (reviewMode) {
+      console.error(
+        `guard-review: review setup failure — ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return 1;
+    }
     console.error(
       `guard-review: could not run — ${e instanceof Error ? e.message : String(e)}${strict ? ' (strict ship mode: failing closed)' : ''}`,
     );
@@ -513,9 +483,14 @@ export async function runReviewGate(
   const cache = loadCache(cwd);
   const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
   const concurrency = reviewConcurrency();
+  const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
   const toRun: { sel: ReviewerSelection; key: string; diffText: string }[] = [];
   for (let i = 0; i < selected.length; i++) {
-    const key = cacheKey(selected[i].reviewer.name, diffs[i]);
+    const key = cacheKey(
+      selected[i].reviewer.name,
+      diffs[i],
+      identitySalts.get(selected[i].reviewer.name) ?? '',
+    );
     if (cache[key])
       console.error(`guard-review: ${selected[i].reviewer.name} — cached PASS (identical diff)`);
     else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
@@ -542,11 +517,19 @@ export async function runReviewGate(
   if (progressFile) writeProgress(progressFile, { running, completed });
   const results = await mapLimit(toRun, concurrency, (t) => {
     const t0 = Date.now();
-    return runCascade(t.sel, { cwd, cfg, exec, firstModel, retryFirst: strict })
+    return runCascade(t.sel, {
+      cwd,
+      cfg,
+      exec,
+      firstModel,
+      retryFirst: strict,
+      assetRoot,
+      judgeEnv,
+    })
       .catch(
         (e): CascadeResult => ({
           name: t.sel.reviewer.name,
-          status: 'inconclusive',
+          status: reviewMode ? 'error' : 'inconclusive',
           reason: `engine error: ${e?.message ?? e}`,
           escalated: false,
         }),
@@ -585,7 +568,8 @@ export async function runReviewGate(
         });
         // Surface the one-line verdict reason on the completion line too (fails get theirs in the
         // dedicated block below, with the full transcript — don't double-print it here).
-        const tail = res.status !== 'fail' && res.reason ? ` — ${res.reason}` : '';
+        const tail =
+          !['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '';
         console.error(
           `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
         );
@@ -601,7 +585,12 @@ export async function runReviewGate(
     );
     if (f.transcript) console.error(f.transcript.trim());
   }
-  if (fails.length > 0) return 1;
+  const errors = results.filter((r) => r.status === 'error');
+  for (const r of errors) {
+    console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
+    if (r.transcript) console.error(r.transcript.trim());
+  }
+  if (fails.length > 0 || errors.length > 0) return 1;
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
   for (const r of inconclusive) {
     // The remedy must match the CAUSE: a missing brief (cascadeVerdict) or missing checklist artifact
