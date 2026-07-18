@@ -16,6 +16,7 @@ import {
   DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_OPTIONS,
   RECOMMENDED_GUARD_IDS,
+  REVIEWABLE_GUARD_IDS,
   type ReviewProfile,
   type Selection,
 } from './components.mts';
@@ -261,20 +262,24 @@ export async function runWizard({
   if (bail(reviewEnabled)) return null;
   let reviewGuards: string[] = [];
   if (reviewEnabled) {
-    const options = GUARD_OPTIONS.filter((g) => selection.guards?.includes(g.id)).map((g) => ({
-      value: g.id,
-      label: g.label,
-      hint: g.hint,
-    }));
-    if (options.length > 0) {
+    const reviewableSelected = (selection.guards ?? []).filter((guard) =>
+      REVIEWABLE_GUARD_IDS.includes(guard),
+    );
+    if (reviewableSelected.length > 0) {
       const picked = await multiselect({
         message: 'Select guards for devkit review',
-        options,
-        initialValues: [...(selection.guards ?? [])],
+        options: GUARD_OPTIONS.filter((guard) => reviewableSelected.includes(guard.id)).map(
+          (g) => ({
+            value: g.id,
+            label: g.label,
+            hint: g.hint,
+          }),
+        ),
+        initialValues: reviewableSelected,
         required: false,
       });
       if (bail(picked)) return null;
-      reviewGuards = picked as string[];
+      reviewGuards = (picked as string[]).filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
     }
   }
   const review: ReviewProfile = {

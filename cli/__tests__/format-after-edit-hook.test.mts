@@ -13,7 +13,7 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rootRegistry } from './_helpers.mts';
+import { hasAnyCommand, rootRegistry } from './_helpers.mts';
 
 const HOOK = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -22,7 +22,7 @@ const HOOK = join(
   'agents-hooks',
   'format-after-edit.sh',
 );
-const HAS_BUN = spawnSync('bash', ['-c', 'command -v bun'], { encoding: 'utf8' }).status === 0;
+const HAS_BUN = hasAnyCommand('bun');
 
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
