@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.34.1",
+  "version": "0.36.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -60,6 +60,9 @@
     "playground": "bun scripts/playground.mts",
     "lint": "biome check .",
     "lint:structure": "eslint cli gate-engine",
+    "benchmarks:check": "bun gate-engine/eval/cli.mts check",
+    "benchmarks:render": "bun gate-engine/eval/cli.mts render",
+    "benchmarks:typecheck": "tsc -p gate-engine/eval/tsconfig.json",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
     "prepare": "husky",

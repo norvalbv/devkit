@@ -17,11 +17,12 @@ export const RECOMMENDED_GUARD_IDS = [
     'qavis-advisory',
 ];
 /**
- * Every selectable sub-gate inside the husky `# devkit-guards` block. `review` (the in-chain
- * headless reviewer judges) is the one selectable-but-OFF-by-default gate — it spends real model
- * budget on every commit, so a consumer opts in with `--guards …,review` or the wizard.
+ * Every selectable sub-gate inside the husky `# devkit-guards` block. Two are selectable-but-OFF
+ * by default: `review` (the in-chain headless reviewer judges) spends real model budget on every
+ * commit, and `sentry` (the commit-msg Sentry-capture judge) only makes sense in a repo whose
+ * product actually uses Sentry — a consumer opts in with `--guards …,review,sentry` or the wizard.
  */
-export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
  * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a
@@ -84,6 +85,11 @@ export const GUARD_OPTIONS = [
     { id: 'clone', label: 'clone', hint: 'verbatim copy-paste (jscpd)' },
     { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
     { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
+    {
+        id: 'sentry',
+        label: 'sentry',
+        hint: 'commit-msg judge: flags silent runtime error-classes lacking a Sentry capture (hard-block, diff-tier)',
+    },
     {
         id: 'qavis-advisory',
         label: 'qavis-advisory',
