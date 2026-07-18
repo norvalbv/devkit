@@ -12,22 +12,31 @@
  * (guard.config.json itself, the fallow files, the caches) are devkit's own fixed artifact names and
  * stay hardcoded in the shell.
  *
- * Usage:  gate-config-paths.mjs [<root>]   # root defaults to cwd; prints e.g. ".search-code/index.db"
+ * Usage:  gate-config-paths.mjs [<root>] [field] [--null]
+ * `field` optionally selects one configured path. `--null` makes review callers filename-safe while
+ * the default newline protocol remains compatible with the existing ship/reship helper.
  * Emits nothing (exit 0) when a field is unset/opted-out or resolves outside the repo. A throw from
  * resolveGuardConfig (an unparseable guard.config.json) surfaces as a non-zero exit; the shell caller
  * falls back to its hardcoded set and lets the worktree gate fail loud on the same bad config.
  */
-import { relative } from 'node:path';
+import { isAbsolute, relative, sep } from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from '../../../gate-engine/config.mts';
 
 const root = process.argv[2] ?? process.cwd();
 const cfg = resolveGuardConfig(root);
+const pathFields = ['indexPath', 'allowlistPath', 'decisionsDir'] as const;
+const args = process.argv.slice(3);
+const nullDelimited = args.includes('--null');
+const requestedField = args.find((arg) => arg !== '--null');
+const fields = requestedField ? pathFields.filter((field) => field === requestedField) : pathFields;
 
-for (const field of ['indexPath', 'allowlistPath', 'decisionsDir'] as const) {
+for (const field of fields) {
   const abs = resolveFromCwd(cfg, field);
   if (!abs) continue; // opted-out (indexPath null) → nothing to link
   const rel = relative(root, abs);
   // A path inside the repo is what we can symlink into the worktree by the same relative name; an
-  // absolute path elsewhere (rel starts with `..`) is the consumer's own business — skip it.
-  if (rel && !rel.startsWith('..')) process.stdout.write(`${rel}\n`);
+  // absolute path elsewhere is the consumer's own business — skip it. A valid in-repo name may begin
+  // with two dots (`..cache`), so only reject the actual parent segment.
+  const escapesRoot = rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+  if (rel && !escapesRoot) process.stdout.write(`${rel}${nullDelimited ? '\0' : '\n'}`);
 }
