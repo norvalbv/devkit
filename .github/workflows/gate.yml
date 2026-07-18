@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -35,6 +37,14 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
+
+      - name: Benchmark tracker typecheck
+        run: bun run benchmarks:typecheck
+
+      - name: Benchmark evidence (committed tree + append-only base)
+        env:
+          BENCHMARK_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
 
       - name: Tests
         run: bun run test:run

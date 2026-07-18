@@ -1,0 +1,215 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Full matcher tier with K=3 and zero outages"
+  },
+  "adapter": "completeness",
+  "capturedAt": "2026-07-06T17:36:47+01:00",
+  "comparisons": [
+    {
+      "method": "adapter comparability contract",
+      "note": "Corpus or scoring contract changed",
+      "predecessorEventId": "evt-2026-07-06-completeness-92c7cc929c28",
+      "verdict": "not-comparable"
+    }
+  ],
+  "hashes": {
+    "corpus": "sha256:bd27e9e2eb90ec36e54c49f810b366abcedfe8484ad6d03770b41959f74e4dce",
+    "implementation": "sha256:053be5d6bf057522aca627f4db1599ca26fa4f8680e457c32fdc4a1bc9131199",
+    "runner": "sha256:0158d3a7662ea203fdf853a720044a444faa457c1435dfd740c465908ffb62af",
+    "scorer": "sha256:687336b366e611fb63f5491255d14d6f4d29845b3d910825ffb0690a02c2f12c"
+  },
+  "metrics": [
+    {
+      "denominator": 35,
+      "direction": "higher",
+      "floor": 0.7,
+      "id": "gap-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5494506513681738,
+        "method": "wilson-95",
+        "upper": 0.836734637635653
+      },
+      "label": "Gold gap recall",
+      "numerator": 25,
+      "unit": "ratio",
+      "value": 0.7142857142857143
+    },
+    {
+      "ceiling": 0.25,
+      "denominator": 27,
+      "direction": "lower",
+      "id": "false-flag-rate",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.020554654060988622,
+        "method": "wilson-95",
+        "upper": 0.23369592683023144
+      },
+      "label": "Decoy false-flag rate",
+      "numerator": 2,
+      "unit": "ratio",
+      "value": 0.07407407407407407
+    },
+    {
+      "denominator": 31,
+      "direction": "higher",
+      "id": "verdict-accuracy",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6018758161665794,
+        "method": "wilson-95",
+        "upper": 0.886048644387375
+      },
+      "label": "Verdict accuracy",
+      "numerator": 24,
+      "unit": "ratio",
+      "value": 0.7741935483870968
+    },
+    {
+      "denominator": 25,
+      "direction": "higher",
+      "id": "severity-exact",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5657031664457093,
+        "method": "wilson-95",
+        "upper": 0.8850368630659855
+      },
+      "label": "Severity exact match",
+      "numerator": 19,
+      "unit": "ratio",
+      "value": 0.76
+    }
+  ],
+  "rows": {
+    "adapted-anti-drift-helper-bypassed": {
+      "ok": true,
+      "stable": true
+    },
+    "adapted-cache-key-mismatch": {
+      "ok": false,
+      "stable": true
+    },
+    "adapted-cascade-delete-bypass": {
+      "ok": false,
+      "stable": true
+    },
+    "adapted-clean-extraction": {
+      "ok": true,
+      "stable": true
+    },
+    "adapted-cloud-path-loses-briefing": {
+      "ok": true,
+      "stable": false
+    },
+    "adapted-docs-third-flow-silent": {
+      "ok": false,
+      "stable": true
+    },
+    "adapted-gitignore-still-tracked": {
+      "ok": false,
+      "stable": false
+    },
+    "adapted-indefensible-deferral": {
+      "ok": true,
+      "stable": true
+    },
+    "adapted-partial-fix-overflow": {
+      "ok": true,
+      "stable": true
+    },
+    "adapted-reauth-provider-enum": {
+      "ok": false,
+      "stable": false
+    },
+    "adapted-reduced-motion-hang": {
+      "ok": false,
+      "stable": true
+    },
+    "adapted-strands-victim": {
+      "ok": false,
+      "stable": true
+    },
+    "adapted-tool-config-drift": {
+      "ok": true,
+      "stable": true
+    },
+    "adapted-watcher-dedup-eviction": {
+      "ok": false,
+      "stable": true
+    },
+    "adversarial-diffcap-burial": {
+      "ok": true,
+      "stable": true
+    },
+    "adversarial-keyword-bait": {
+      "ok": true,
+      "stable": true
+    },
+    "adversarial-omitted-burial": {
+      "ok": true,
+      "stable": true
+    },
+    "adversarial-verbose-missing-backfill": {
+      "ok": true,
+      "stable": true
+    },
+    "bandaid-config-dup-suppress": {
+      "ok": true,
+      "stable": true
+    },
+    "bandaid-config-dup-suppress-var": {
+      "ok": true,
+      "stable": true
+    },
+    "clean-complete-extract-helper": {
+      "ok": true,
+      "stable": true
+    },
+    "clean-complete-off-by-one-fix": {
+      "ok": true,
+      "stable": true
+    },
+    "contradicts-target-payment-retry": {
+      "ok": true,
+      "stable": true
+    },
+    "contradicts-target-payment-retry-dir": {
+      "ok": false,
+      "stable": false
+    },
+    "contradicts-target-payment-retry-var": {
+      "ok": true,
+      "stable": true
+    },
+    "incomplete-claim-signup-validation": {
+      "ok": true,
+      "stable": true
+    },
+    "mined-devkit-overlay-force-dropped": {
+      "ok": false,
+      "stable": false
+    },
+    "mined-devkit-posix-class-sibling": {
+      "ok": true,
+      "stable": true
+    },
+    "missing-error-handling-webhook": {
+      "ok": true,
+      "stable": true
+    },
+    "registration-gap-shortcut-help": {
+      "ok": true,
+      "stable": true
+    },
+    "stale-user-docs-export-format": {
+      "ok": true,
+      "stable": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "e3fa232dfde49030cb286240ee4b77c26c55e862",
+  "suiteId": "completeness"
+}
