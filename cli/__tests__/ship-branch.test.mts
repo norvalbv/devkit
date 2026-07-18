@@ -1344,9 +1344,14 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url)),
       'utf8',
     );
-    const line = /^\s*local candidates=\((.*)\)\s*$/m.exec(src);
-    expect(line, 'candidates array not found — did the helper get restructured?').toBeTruthy();
-    expect((line as RegExpExecArray)[1].split(/\s+/)).toEqual([
+    const block = /GATE_PROJECTION_FIXED_CANDIDATES=\(\n([\s\S]*?)\n\)/.exec(src);
+    expect(block, 'candidate registry not found — did the helper get restructured?').toBeTruthy();
+    expect(
+      (block as RegExpExecArray)[1]
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ).toEqual([
       'guard.config.json',
       '.fallowrc.jsonc',
       '.fallowrc.json',
