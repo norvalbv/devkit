@@ -15,6 +15,7 @@ import { confirm, isCancel } from '@clack/prompts';
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { isTracked } from "../lib/git-tracked.mjs";
+import { removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { removeGuardBlock } from "../lib/husky/husky-block.mjs";
 import { pruneDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { removeHookRegistrations, removeHookScripts } from "../lib/install/install-hooks.mjs";
@@ -243,6 +244,8 @@ function cleanPackage(cwd, cfg, dryRun) {
                 writeFileSync(hookPath, content);
         }
     }
+    // The managed commit-msg block (review/sentry judges) — silent no-op when never installed.
+    removeCommitMsgBlock(gitRoot, cfg.pkgRel ?? '', dryRun);
     // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
     // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
     removeSkills(gitRoot, dryRun);
