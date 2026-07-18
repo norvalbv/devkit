@@ -19,6 +19,11 @@ afterEach(() => {
 });
 
 describe('ensureDevkitCacheGitignore', () => {
+  it('manages the review run directory without ignoring tracked devkit state', () => {
+    expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/review-runs/');
+    expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/');
+  });
+
   it('appends every cache pattern when .gitignore is absent', () => {
     const d = tmp();
     ensureDevkitCacheGitignore(d, false);
