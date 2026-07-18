@@ -371,19 +371,18 @@ async function cascadeVerdict(
     input,
     timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
     cwd,
+    transcript: false, // this gate persists its own review-<name> transcript — don't store twice
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       firstOutage = kind;
     },
   };
   let first = await exec(firstOpts);
   if (first === null && retryFirst && firstOutage !== 'timeout') {
-    // Strict (ship) runs get ONE first-pass retry — a TRANSIENT API failure or empty output must not
-    // fail a ship closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
-    // STRICT_FIRST_TIMEOUT_MS, so a re-run would burn that same budget again and push the cascade past
-    // the ship ceiling for no gain (a contended judge got its extra time UP FRONT). The escalation
-    // pass is never retried either: its outage stays inconclusive (blocked under strict).
-    // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
-    // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
+    // Strict (ship) runs get ONE first-pass retry — a TRANSIENT/empty failure must not fail a ship
+    // closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
+    // STRICT_FIRST_TIMEOUT_MS (a contended judge got its extra time UP FRONT), so a re-run burns the
+    // same budget past the ship ceiling. The escalation pass never retries: outage stays inconclusive.
+    // Colon (not " — ") on purpose: the ship timeout banner's awk reads `<name> — ` as COMPLETED.
     console.error(
       `guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`,
     );
@@ -435,6 +434,7 @@ async function cascadeVerdict(
     input: stat,
     timeout: ESCALATE_TIMEOUT_MS,
     cwd,
+    transcript: false, // this gate persists its own review-<name> transcript — don't store twice
   });
   if (second === null)
     return {

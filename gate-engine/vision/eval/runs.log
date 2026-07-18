@@ -1,0 +1,1 @@
+{"at":"2026-07-17T22:39:54.856Z","model":"opus","runs":3,"split":"all","all":{"accuracy":93.6,"precision":0.8888888888888888,"recall":1},"dev":{"n":96,"precision":0.875,"recall":1},"holdout":{"n":45,"precision":0.9166666666666666,"recall":1,"floorsMet":true},"flipRate":0.121}
