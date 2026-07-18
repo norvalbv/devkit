@@ -27,6 +27,9 @@ export const RECOMMENDED_GUARD_IDS = [
  */
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
 
+/** Guards that can execute in a pre-commit review (excludes commit-msg-only Sentry capture). */
+export const REVIEWABLE_GUARD_IDS = GUARD_IDS.filter((guard) => guard !== 'sentry');
+
 export const DEFAULT_REVIEW_DECISIONS_DIR = 'docs/decisions';
 
 /** Local execution policy for `devkit review`; decision content stays in `decisionsDir`. */
@@ -46,7 +49,7 @@ export function normalizeReviewProfile(
   installedGuards: string[],
   { enabledDefault = false, available = true }: NormalizeReviewProfileOptions = {},
 ): ReviewProfile {
-  const installed = installedGuards.filter((g) => GUARD_IDS.includes(g));
+  const installed = installedGuards.filter((g) => REVIEWABLE_GUARD_IDS.includes(g));
   const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
   return {
     enabled: available && (partial?.enabled ?? enabledDefault),
