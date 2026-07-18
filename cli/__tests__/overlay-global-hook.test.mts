@@ -141,22 +141,45 @@ describe('global shim dispatch (sourced like husky _/h)', () => {
     const driverDir = mkdtempSync(join(tmpdir(), 'dk-driver-'));
     dirs.push(driverDir);
     const driver = join(driverDir, hookName);
-    writeFileSync(driver, `#!/bin/sh\n. "${globalInitPath()}"\nexit 0\n`);
+    writeFileSync(
+      driver,
+      `#!/bin/sh\n. "${globalInitPath()}"\nprintf '%s' "\${DEVKIT_PLAN_CRITIQUE_OBSERVED:-}" > "$DK_LATCH_MARKER"\nexit 0\n`,
+    );
     const marker = join(driverDir, 'marker');
+    const latchMarker = join(driverDir, 'latch-marker');
     const r = spawnSync('sh', [driver], {
       cwd,
       encoding: 'utf8',
-      env: { ...GENV, DK_MARKER: marker, DK_STUB_EXIT: '0', ...env },
+      env: {
+        ...GENV,
+        DK_MARKER: marker,
+        DK_LATCH_MARKER: latchMarker,
+        DK_STUB_EXIT: '0',
+        ...env,
+      },
     });
-    return { status: r.status, via: existsSync(marker) ? read(marker).trim() : null };
+    return {
+      status: r.status,
+      via: existsSync(marker) ? read(marker).trim() : null,
+      observed: existsSync(latchMarker) ? read(latchMarker).trim() : null,
+    };
   }
 
   it('runs the overlay gates with DEVKIT_VIA_HUSKY_INIT=1 on a pre-commit in an overlaid repo (EC5)', () => {
     const root = overlaidRepo();
     installGlobalHook({});
-    const { status, via } = runShim({ cwd: root });
+    const { status, via, observed } = runShim({ cwd: root });
     expect(status).toBe(0);
     expect(via).toBe('VIA=1');
+    expect(observed).toBe('');
+  });
+
+  it('maps the overlay observation signal to a parent latch without failing the hook', () => {
+    const root = overlaidRepo();
+    installGlobalHook({});
+    const { status, observed } = runShim({ cwd: root, env: { DK_STUB_EXIT: '88' } });
+    expect(status).toBe(0);
+    expect(observed).toBe('1');
   });
 
   it('propagates a failing gate (stub exit 1) to abort the commit (EC6)', () => {

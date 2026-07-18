@@ -56,6 +56,7 @@ commit_with_gate_capture() {
   #                           `fallow audit --base` at the real ship base instead of its own
   #                           main-autodetect (DK-5).
   export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
+  export DEVKIT_PLAN_CRITIQUE_SOURCE_CWD="$root"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
   # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the

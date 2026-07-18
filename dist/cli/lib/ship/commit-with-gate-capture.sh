@@ -49,6 +49,7 @@ commit_with_gate_capture() {
   #   DEVKIT_REVIEW_PROGRESS  where guard-review records {running,completed} reviewer names, so a
   #                           timeout can name the ones left unfinished (structured, not stderr prose).
   export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
+  export DEVKIT_PLAN_CRITIQUE_SOURCE_CWD="$root"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
   # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the

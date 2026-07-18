@@ -10,6 +10,7 @@
  * brittle regex against shell prose.
  */
 import { markEnd, markStart } from "./husky.mjs";
+import * as planCritique from "./plan-critique-shadow.mjs";
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
@@ -151,6 +152,8 @@ function wantsDeterministic(selection) {
  */
 export function buildGuardBlock(selection, pkgRel = '') {
     const pieces = [];
+    if (!pkgRel)
+        pieces.push(planCritique.planCritiqueShadowFragment(pkgRel));
     if (!pkgRel && selection.biome)
         pieces.push(BIOME_FRAGMENT);
     if (wantsDeterministic(selection))
@@ -168,7 +171,7 @@ export function buildGuardBlock(selection, pkgRel = '') {
         return `${start}\n${body}\n${end}`;
     // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
     // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-    return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+    return `${start}\n${planCritique.planCritiqueShadowFragment(pkgRel)}\n\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
 }
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
 export function buildFullHook(selection, pkgRel = '') {
@@ -201,8 +204,10 @@ const DK_GATE_AI_HELPER = '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || r
 export function buildStandaloneBlock(selection, pkgRel = '') {
     const pieces = [
         '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
-        DK_GATE_AI_HELPER,
     ];
+    if (!pkgRel)
+        pieces.push(planCritique.planCritiqueShadowFragment(pkgRel));
+    pieces.push(DK_GATE_AI_HELPER);
     if (wantsDeterministic(selection)) {
         pieces.push(standaloneDeterministicLines(selection.structureCmd));
     }
@@ -217,7 +222,7 @@ export function buildStandaloneBlock(selection, pkgRel = '') {
     const end = markEnd(pkgRel);
     if (!pkgRel)
         return `${start}\n${body}\n${end}`;
-    return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+    return `${start}\n${planCritique.planCritiqueShadowFragment(pkgRel)}\n\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
 }
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
 export function buildStandaloneHook(selection, pkgRel = '') {
@@ -279,12 +284,10 @@ export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', p
 # no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
 # \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
 [ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
+${planCritique.planCritiqueShadowFragment(pkgRel)}
 ${scoped}
 
-# Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
-# run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
-# would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
-[ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+${planCritique.planCritiqueGatesOnlyFragment}
 
 # Chain to the repo's own pre-commit (exec → its exit code becomes the hook's).
 [ -f ${JSON.stringify(chainTarget)} ] && exec sh ${JSON.stringify(chainTarget)} "$@"

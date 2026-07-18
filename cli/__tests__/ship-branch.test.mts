@@ -880,7 +880,8 @@ describe('ship-branch.sh — worktree integration', () => {
 
   it('the worktree commit runs with ship-mode gate env (DEVKIT_SHIP + GUARD_AI_STRICT)', () => {
     const { dir, env, git } = seedShipRepo({
-      hookBody: 'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT"',
+      hookBody:
+        'echo "HOOK_ENV ship=$DEVKIT_SHIP strict=$GUARD_AI_STRICT source=$DEVKIT_PLAN_CRITIQUE_SOURCE_CWD"',
     });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/ship-env', 't', 'note.txt'], {
@@ -892,7 +893,7 @@ describe('ship-branch.sh — worktree integration', () => {
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-ship-env.log'), 'utf8');
-    expect(log).toMatch(/HOOK_ENV ship=1 strict=1/);
+    expect(log).toContain(`HOOK_ENV ship=1 strict=1 source=${realpathSync(dir)}`);
   });
 
   it('--body sets the commit/PR body inline (no stdin / temp file)', () => {

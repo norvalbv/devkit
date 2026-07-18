@@ -127,7 +127,7 @@ function shipConfig(repoRoot) {
     return { command: DEFAULT_SHIP, extraArgs: [] };
 }
 /** POSIX single-quote a token so it copy-pastes safely (literal, no expansion). */
-const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+export const quoteShellToken = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 /** kebab slug of the title for the auto branch name. */
 const slug = (title) => title
     .toLowerCase()
@@ -158,21 +158,21 @@ export function decide(input, cwd, rand) {
     if (paths.length === 0) {
         return `${head}\nStage the files you mean first (\`git add <files>\`), then commit — the guard reads the staged set as the ship scope.`;
     }
-    const pathArgs = paths.map(q).join(' ');
+    const pathArgs = paths.map(quoteShellToken).join(' ');
     const extras = cfg.extraArgs.length ? `${cfg.extraArgs.join(' ')} ` : '';
     // A multi-`-m` body is passed via `--body '<body>'` so the agent copy-pastes ONE clean command
-    // (no stdin pipe, no temp file) and the body lands on the PR. q() single-quotes it so embedded
-    // newlines / quotes / % / $ survive the paste; ship's --body takes precedence over stdin.
-    const bodyArg = intent.body ? `--body ${q(intent.body)} ` : '';
+    // (no stdin pipe, no temp file) and the body lands on the PR. quoteShellToken() single-quotes it
+    // so embedded newlines / quotes / % / $ survive the paste; ship's --body takes precedence over stdin.
+    const bodyArg = intent.body ? `--body ${quoteShellToken(intent.body)} ` : '';
     let ship;
     let note;
     if (intent.prBranch) {
-        ship = `${cfg.command} ${q(intent.prBranch)} ${q(intent.title)} --pr ${bodyArg}${extras}-- ${pathArgs}`;
+        ship = `${cfg.command} ${quoteShellToken(intent.prBranch)} ${quoteShellToken(intent.title)} --pr ${bodyArg}${extras}-- ${pathArgs}`;
         note = `Adds these changes to the existing PR on \`${intent.prBranch}\` (fast-forward, never --force).`;
     }
     else {
         const suffix = rand ?? Math.random().toString(36).slice(2, 8);
-        ship = `${cfg.command} ${q(`agent/${slug(intent.title)}-${suffix}`)} ${q(intent.title)} ${bodyArg}${extras}-- ${pathArgs}`;
+        ship = `${cfg.command} ${quoteShellToken(`agent/${slug(intent.title)}-${suffix}`)} ${quoteShellToken(intent.title)} ${bodyArg}${extras}-- ${pathArgs}`;
         note =
             'Commits your staged files onto a fresh branch + opens a PR; the shared HEAD never moves. The PR URL is printed; to add more commits later, `git commit --pr <that-branch> -m "…"`.';
     }

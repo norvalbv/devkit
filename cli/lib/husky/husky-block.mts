@@ -11,6 +11,7 @@
  */
 
 import { markEnd, markStart } from './husky.mts';
+import * as planCritique from './plan-critique-shadow.mts';
 
 /**
  * The block-builder's view of a component selection: whether the biome format step is wanted,
@@ -216,9 +217,9 @@ function wantsDeterministic(selection: HookSelection): boolean {
  * git root ('' = root install).
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
-  const pieces = [];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  pieces.push(COMMIT_TERMINAL_FRAGMENT);
+  const pieces = [COMMIT_TERMINAL_FRAGMENT];
+  if (!pkgRel) pieces.push(planCritique.planCritiqueShadowFragment(pkgRel));
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   if (wantsDeterministic(selection))
     pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
@@ -232,7 +233,7 @@ export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
   if (!pkgRel) return `${start}\n${body}\n${end}`;
   // Run the package's gates from its own dir. An inner `exit 1` exits the SUBSHELL; the
   // `) || exit 1` then propagates that failure to the hook (a bare subshell would swallow it).
-  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
+  return `${start}\n${planCritique.planCritiqueShadowFragment(pkgRel)}\n\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh hook (preamble + assembled block + trailing exit 0) for a repo with no hook. */
@@ -274,8 +275,9 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     COMMIT_TERMINAL_FRAGMENT,
-    DK_GATE_AI_HELPER,
   ];
+  if (!pkgRel) pieces.push(planCritique.planCritiqueShadowFragment(pkgRel));
+  pieces.push(DK_GATE_AI_HELPER);
   if (wantsDeterministic(selection)) {
     pieces.push(standaloneDeterministicLines(selection.structureCmd));
   }
@@ -288,7 +290,7 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
   if (!pkgRel) return `${start}\n${body}\n${end}`;
-  return `${start}\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
+  return `${start}\n${planCritique.planCritiqueShadowFragment(pkgRel)}\n\nDK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd "${pkgRel}" || exit 1\n${body}\n) || exit 1\n${end}`;
 }
 
 /** A full fresh STANDALONE hook (preamble + standalone block + exit 0). */
@@ -361,12 +363,10 @@ export function buildOverlayHook(
 # no-op and never report "gates ran" when they didn't. Only during ship (DEVKIT_SHIP=1) — a normal
 # \`git ci\` stays quiet. Emitted before the gates so even a first-gate block still records it.
 [ -n "\${DEVKIT_SHIP:-}" ] && echo 'devkit-gates: chain start' >&2
+${planCritique.planCritiqueShadowFragment(pkgRel)}
 ${scoped}
 
-# Invoked by the global init.sh shim (husky reclaimed core.hooksPath on a plain \`git commit\`):
-# run gates ONLY and stop — husky's _/h runs the repo's committed hook itself, so chaining here
-# would run it twice. Reached only after the gates above PASSED (a failure already exited 1).
-[ -n "\${DEVKIT_VIA_HUSKY_INIT:-}" ] && exit 0
+${planCritique.planCritiqueGatesOnlyFragment}
 
 # devkit gates passed — emit the commit-run terminal NOW: \`exec\` replaces this process, so the
 # EXIT trap would never fire on the pass path. commit_result records the DEVKIT chain's outcome

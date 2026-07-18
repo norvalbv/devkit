@@ -279,5 +279,5 @@ export function observeCommitProjection(cwd = process.cwd()) {
 // Internal hook entry point. This is intentionally not exported as a devkit command: generated
 // commit hooks invoke the shipped module by path and always ignore its exit status.
 if (CAPTURE_ENTRY_RE.test(process.argv[1] ?? '') && process.argv[2] === 'commit-projection') {
-    observeCommitProjection(process.cwd());
+    observeCommitProjection(process.argv[3] ?? process.cwd());
 }

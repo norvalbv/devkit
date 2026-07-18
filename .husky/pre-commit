@@ -33,6 +33,23 @@ if [ -z "${DEVKIT_SHIP_ID:-}" ] && [ -z "${DEVKIT_NO_TELEMETRY:-}" ]; then
 fi
 # /devkit:commit-terminal
 
+# devkit:plan-critique-shadow
+if [ -z "${DEVKIT_PLAN_CRITIQUE_OBSERVED:-}" ]; then
+    __dk_pc_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+    [ -n "$__dk_pc_root" ] || __dk_pc_root="$PWD"
+    __dk_pc_cwd="${DEVKIT_PLAN_CRITIQUE_SOURCE_CWD:-$__dk_pc_root}"
+    for __dk_pc in "$__dk_pc_root/gate-engine/critique/capture.mts"; do
+        if [ -f "$__dk_pc" ]; then
+            DEVKIT_PLAN_CRITIQUE_OBSERVED=1
+            export DEVKIT_PLAN_CRITIQUE_OBSERVED
+            node "$__dk_pc" commit-projection "$__dk_pc_cwd" >/dev/null 2>&1 || true
+            break
+        fi
+    done
+    unset __dk_pc __dk_pc_root __dk_pc_cwd
+fi
+# /devkit:plan-critique-shadow
+
 # devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
 # `git add -u`, which would sweep unrelated working-tree changes into the commit). Only

@@ -19,6 +19,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { PLAN_CRITIQUE_OBSERVED_EXIT } from './husky/plan-critique-shadow.mts';
 
 const MARK_START = '# >>> devkit overlay global pre-commit gate >>>';
 const MARK_END = '# <<< devkit overlay global pre-commit gate <<<';
@@ -40,7 +41,17 @@ const BLOCK = `${MARK_START}
 if [ "\${HUSKY:-}" != "0" ] && [ "\${0##*/}" = "pre-commit" ]; then
   __dk_root=$(git rev-parse --show-toplevel 2>/dev/null) || __dk_root=
   if [ -n "$__dk_root" ] && [ -x "$__dk_root/.devkit/hooks/pre-commit" ]; then
-    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/.devkit/hooks/pre-commit" "$@" || exit $?
+    __dk_overlay_rc=0
+    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/.devkit/hooks/pre-commit" "$@" || __dk_overlay_rc=$?
+    if [ "$__dk_overlay_rc" -eq ${PLAN_CRITIQUE_OBSERVED_EXIT} ]; then
+      # The child attempted shadow observation. Convert its internal signal back to success and
+      # latch this sourced husky parent before it runs the committed hook and would observe twice.
+      DEVKIT_PLAN_CRITIQUE_OBSERVED=1
+      export DEVKIT_PLAN_CRITIQUE_OBSERVED
+    elif [ "$__dk_overlay_rc" -ne 0 ]; then
+      exit "$__dk_overlay_rc"
+    fi
+    unset __dk_overlay_rc
   fi
   unset __dk_root
 fi

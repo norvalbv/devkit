@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { captureSubagentStop, observeCommitProjection, observePlanStop } from '../capture.mts';
 import { resolveEligibleBinding } from '../evidence-bindings.mts';
@@ -15,6 +16,8 @@ import {
   cleanupCaptureFixtures,
   captureFixture as fixture,
 } from './capture-fixtures.mts';
+
+const captureEntry = fileURLToPath(new URL('../capture.mts', import.meta.url));
 
 afterEach(() => {
   cleanupCaptureFixtures();
@@ -77,6 +80,35 @@ describe('plan critique evidence capture', () => {
     expect(projection.summary).toBeUndefined();
     expect(projection.actions).toBeUndefined();
     expect(JSON.stringify(projection)).not.toContain('The hook is fail-open.');
+  });
+
+  it('accepts the source checkout explicitly when a ship hook runs elsewhere', () => {
+    const { root, repo, evidence } = fixture();
+    captureSubagentStop(
+      'codex',
+      {
+        cwd: repo,
+        turn_id: 'turn-ship-source',
+        agent_type: 'feature-critique',
+        last_assistant_message: cleanResponse,
+      },
+      repo,
+    );
+
+    execFileSync(process.execPath, [captureEntry, 'commit-projection', repo], {
+      cwd: root,
+      env: { ...process.env, DEVKIT_PLAN_CRITIQUE_EVIDENCE_DIR: evidence },
+    });
+
+    const observations = readdirSync(join(evidence, 'commit-projections'));
+    expect(observations).toHaveLength(1);
+    expect(
+      JSON.parse(readFileSync(join(evidence, 'commit-projections', observations[0]), 'utf8')),
+    ).toMatchObject({
+      status: 'matched',
+      reason: 'matched',
+      projection: { critiqueId: expect.any(String) },
+    });
   });
 
   it('supports Cursor summary capture but refuses to infer plan mode at Stop', () => {

@@ -5,10 +5,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GUARD_IDS } from '../lib/components.mts';
 import {
@@ -20,6 +22,7 @@ import {
   buildFullHook,
   buildGuardBlock,
   buildOverlayHook,
+  buildStandaloneBlock,
   findPreambleEnd,
   hasFragment,
   removeFragment,
@@ -63,6 +66,99 @@ describe('buildGuardBlock', () => {
     // AI guards keep their own fail-fast fragments.
     expect(block).toContain('bunx guard-decisions');
     expect(block).toContain('bunx guard-review');
+    expect(block).toContain('# devkit:plan-critique-shadow');
+    expect(block).toContain(
+      'node "$__dk_pc" commit-projection "$__dk_pc_cwd" >/dev/null 2>&1 || true',
+    );
+    expect(block.indexOf('# devkit:plan-critique-shadow')).toBeLessThan(
+      block.indexOf('bunx guard-review'),
+    );
+  });
+
+  it('keeps shadow observation fail-open in package, standalone, and overlay hooks', () => {
+    const hooks = [
+      buildGuardBlock({ guards: [] }),
+      buildStandaloneBlock({ guards: [] }),
+      buildOverlayHook({ guards: [] }),
+    ];
+    for (const hook of hooks) {
+      expect(hook.match(/# devkit:plan-critique-shadow/g)).toHaveLength(1);
+      expect(hook).toContain(
+        'node "$__dk_pc" commit-projection "$__dk_pc_cwd" >/dev/null 2>&1 || true',
+      );
+    }
+  });
+
+  it('finds hoisted or later package runtimes and records once across package blocks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dk-plan-shadow-'));
+    const runtime = join(
+      root,
+      'node_modules',
+      '@norvalbv',
+      'devkit',
+      'dist',
+      'gate-engine',
+      'critique',
+      'capture.mjs',
+    );
+    const bin = join(root, 'bin');
+    const calls = join(root, 'calls.txt');
+    mkdirSync(dirname(runtime), { recursive: true });
+    mkdirSync(join(root, 'packages', 'a'), { recursive: true });
+    mkdirSync(join(root, 'packages', 'b'), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(runtime, 'fixture');
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DK_CAPTURE_CALLS"\n');
+    chmodSync(join(bin, 'node'), 0o755);
+    execFileSync('git', ['init', '-q'], { cwd: root });
+
+    const script = [
+      buildGuardBlock({ guards: [] }, 'packages/a'),
+      buildGuardBlock({ guards: [] }, 'packages/b'),
+    ].join('\n');
+    execFileSync('sh', ['-c', script], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        DK_CAPTURE_CALLS: calls,
+        DEVKIT_NO_TELEMETRY: '1',
+      },
+    });
+
+    expect(readFileSync(calls, 'utf8').trim().split('\n')).toEqual([
+      `${realpathSync(runtime)} commit-projection ${realpathSync(root)}`,
+    ]);
+
+    unlinkSync(runtime);
+    const laterRuntime = join(
+      root,
+      'packages',
+      'b',
+      'node_modules',
+      '@norvalbv',
+      'devkit',
+      'dist',
+      'gate-engine',
+      'critique',
+      'capture.mjs',
+    );
+    mkdirSync(dirname(laterRuntime), { recursive: true });
+    writeFileSync(laterRuntime, 'fixture');
+    writeFileSync(calls, '');
+    execFileSync('sh', ['-c', script], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PATH: `${bin}:/usr/bin:/bin`,
+        DK_CAPTURE_CALLS: calls,
+        DEVKIT_NO_TELEMETRY: '1',
+      },
+    });
+
+    expect(readFileSync(calls, 'utf8').trim().split('\n')).toEqual([
+      `packages/b/node_modules/@norvalbv/devkit/dist/gate-engine/critique/capture.mjs commit-projection ${realpathSync(root)}`,
+    ]);
   });
 
   it('omits the biome step when biome is deselected', () => {
@@ -293,7 +389,9 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
 
   it('emits the gates-only env guard (gates passed via the shim → exit 0, husky runs the committed hook)', () => {
     expect(guardIdx).toBeGreaterThan(-1);
-    expect(hook).toContain('&& exit 0');
+    expect(hook).toContain('exit 88');
+    expect(hook).toContain('trap - EXIT; __dk_commit_result 0;');
+    expect(hook).toContain('exit 0');
   });
 
   it('emits the ship sentinel (DEVKIT_SHIP-gated) BEFORE the gates so ship can detect a no-op chain', () => {
