@@ -1,13 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { linkSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isRecord } from './schema.mts';
 
@@ -23,6 +15,26 @@ interface TakeoverOwner {
   pid: number;
   createdAt: number;
   token: string;
+}
+
+function createOwnedFileAtomically(lockPath: string, owner: string): boolean {
+  const candidatePath = `${lockPath}.${process.pid}.${randomUUID()}.candidate`;
+  try {
+    writeFileSync(candidatePath, owner, { flag: 'wx', mode: 0o600 });
+    try {
+      linkSync(candidatePath, lockPath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    }
+  } finally {
+    try {
+      unlinkSync(candidatePath);
+    } catch {
+      // A uniquely named candidate cannot block another publisher; cleanup is best effort.
+    }
+  }
 }
 
 function processIsRunning(pid: number): boolean {
@@ -84,18 +96,13 @@ function staleTakeover(lockPath: string): boolean {
 function acquireTakeover(lockPath: string): string | undefined {
   const owner = JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: randomUUID() });
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      writeFileSync(lockPath, owner, { flag: 'wx' });
-      return owner;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (!staleTakeover(lockPath)) return undefined;
-    }
+    if (createOwnedFileAtomically(lockPath, owner)) return owner;
+    if (!staleTakeover(lockPath)) return undefined;
   }
   return undefined;
 }
 
-function releaseTakeover(lockPath: string, owner: string): void {
+function releaseOwnedFile(lockPath: string, owner: string): void {
   try {
     if (readFileSync(lockPath, 'utf8') === owner) unlinkSync(lockPath);
   } catch (error) {
@@ -115,7 +122,18 @@ function inspectPublishLock(lockPath: string): LockInspection {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'removed';
       throw error;
     }
-    if (!raw) return 'busy';
+    if (!raw) {
+      const age = Date.now() - statSync(lockPath).mtimeMs;
+      if (age <= INCOMPLETE_TAKEOVER_STALE_MS) return 'busy';
+      try {
+        if (readFileSync(lockPath, 'utf8')) return 'busy';
+        unlinkSync(lockPath);
+        return 'removed';
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'removed';
+        throw error;
+      }
+    }
     let owner: unknown;
     try {
       owner = JSON.parse(raw) as unknown;
@@ -134,31 +152,20 @@ function inspectPublishLock(lockPath: string): LockInspection {
       throw error;
     }
   } finally {
-    releaseTakeover(takeoverPath, takeover);
+    releaseOwnedFile(takeoverPath, takeover);
   }
 }
 
-function acquirePublishLock(lockPath: string): number {
+function acquirePublishLock(lockPath: string): string {
+  const owner = JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: randomUUID() });
   for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
-    try {
-      const descriptor = openSync(lockPath, 'wx');
-      try {
-        writeFileSync(descriptor, JSON.stringify({ pid: process.pid }));
-        return descriptor;
-      } catch (error) {
-        closeSync(descriptor);
-        unlinkSync(lockPath);
-        throw error;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const inspection = inspectPublishLock(lockPath);
-      if (inspection === 'invalid')
-        throw new Error('Another benchmark publish is in progress or left an unreadable lock');
-      if (inspection === 'self') throw new Error('Another benchmark publish is in progress');
-      if (inspection === 'removed') continue;
-      Atomics.wait(LOCK_WAIT_ARRAY, 0, 0, LOCK_WAIT_MS);
-    }
+    if (createOwnedFileAtomically(lockPath, owner)) return owner;
+    const inspection = inspectPublishLock(lockPath);
+    if (inspection === 'invalid')
+      throw new Error('Another benchmark publish is in progress or left an unreadable lock');
+    if (inspection === 'self') throw new Error('Another benchmark publish is in progress');
+    if (inspection === 'removed') continue;
+    Atomics.wait(LOCK_WAIT_ARRAY, 0, 0, LOCK_WAIT_MS);
   }
   throw new Error('Could not acquire benchmark publish lock');
 }
@@ -169,7 +176,6 @@ export function withPublishFileLock<T>(lockPath: string, action: () => T): T {
   try {
     return action();
   } finally {
-    closeSync(lock);
-    unlinkSync(lockPath);
+    releaseOwnedFile(lockPath, lock);
   }
 }

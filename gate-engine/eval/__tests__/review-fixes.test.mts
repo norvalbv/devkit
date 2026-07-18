@@ -159,6 +159,22 @@ describe('review feedback regressions', () => {
     }
   });
 
+  it('recovers an orphaned primary lock left empty by a killed process', () => {
+    const root = mkdtempSync(join(tmpdir(), 'benchmark-publish-orphaned-primary-'));
+    try {
+      const benchmarkRoot = join(root, 'docs/benchmarks');
+      mkdirSync(benchmarkRoot, { recursive: true });
+      const primary = join(benchmarkRoot, '.publish.lock');
+      writeFileSync(primary, '');
+      utimesSync(primary, new Date(0), new Date(0));
+      const { artifact, event } = fixture();
+      appendPublishedEvent(root, event, artifact);
+      expect(readFileSync(join(benchmarkRoot, 'history.jsonl'), 'utf8')).toContain(event.id);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('reconciles only valid canonical events and preserves instant ordering', () => {
     const { event } = fixture();
     const eventB = { ...event, id: 'evt-b', recordedAt: '2026-02-01T00:00:00Z' };
