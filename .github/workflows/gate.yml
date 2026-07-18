@@ -30,10 +30,10 @@ jobs:
         run: bun run lint:structure
 
       - name: Ratchet — folder fan-out
-        run: node gate-engine/ratchets/folder-fanout.mjs gate
+        run: node gate-engine/ratchets/folder-fanout.mts gate
 
       - name: Ratchet — size-disable
-        run: node gate-engine/ratchets/size-disable.mjs gate
+        run: node gate-engine/ratchets/size-disable.mts gate
 
       - name: Typecheck
         run: bun run typecheck
