@@ -10,7 +10,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RECOMMENDED_GUARD_IDS, type Selection, structureCmdFor } from '../lib/components.mts';
+import {
+  RECOMMENDED_GUARD_IDS,
+  REVIEWABLE_GUARD_IDS,
+  type Selection,
+  structureCmdFor,
+} from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
@@ -126,7 +131,7 @@ function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
   // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
   const OWN_FRAGMENT = new Set(['decisions', 'review', 'qavis-advisory']);
-  const gates = selectedGuards.filter((g) => g !== 'sentry');
+  const gates = selectedGuards.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
   const missing: string[] = [];
   if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
     missing.push('deterministic gates');
