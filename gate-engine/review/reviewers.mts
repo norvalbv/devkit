@@ -167,13 +167,16 @@ export const REVIEWERS = Object.freeze([
 // Synced-skill layout is devkit's own convention (sync-skills targets .claude/skills), so the
 // checklist script path is fixed relative to the consumer root — unlike scan/review ROOTS,
 // which are consumer data and come from guard.config.json.
+export const checklistAssetPath = (reviewer: ChecklistReviewer) =>
+  `skills/${reviewer.skill}/scripts/checklist.mjs`;
+
 export const checklistScript = (reviewer: ChecklistReviewer) =>
-  `.claude/skills/${reviewer.skill}/scripts/checklist.mjs`;
+  `.claude/${checklistAssetPath(reviewer)}`;
 
 /** Review invocations may supply a short isolated runtime containing Devkit's CURRENT packaged
  * assets. Normal commit/ship calls keep the synced consumer path. */
 export function checklistScriptAt(reviewer: ChecklistReviewer, assetRoot = '.claude'): string {
-  return `${assetRoot.replace(TRAILING_SLASH_RE, '')}/skills/${reviewer.skill}/scripts/checklist.mjs`;
+  return `${assetRoot.replace(TRAILING_SLASH_RE, '')}/${checklistAssetPath(reviewer)}`;
 }
 
 // Read-only investigation surface (mirrors check-alignment's JUDGE_TOOLS + log/status for context).
