@@ -269,6 +269,18 @@ function readCheckpoint(
   return raw ? (JSON.parse(raw) as CheckpointEnvelope) : undefined;
 }
 
+export function parsePublishBaseline(suiteId: string, adapter: string, raw: string) {
+  let baseline: ReturnType<typeof parseBaseline>;
+  try {
+    baseline = parseBaseline(adapter, JSON.parse(raw));
+  } catch (error) {
+    throw new Error(`Adapter rejected ${suiteId}: ${(error as Error).message}`);
+  }
+  if (!baseline.acceptance.accepted)
+    throw new Error(`Adapter rejected ${suiteId}: ${baseline.acceptance.reason}`);
+  return baseline;
+}
+
 function publishLocked(args: string[], append: LockedAppend): void {
   const parsed = options(args);
   const suiteId = parsed.values.suite;
@@ -296,9 +308,7 @@ function publishLocked(args: string[], append: LockedAppend): void {
   if (!baselinePath) throw new Error(`Suite ${suiteId} has no baseline path; pass --baseline`);
   const raw = source.read(baselinePath);
   if (!raw) throw new Error(`Missing baseline ${baselinePath} at ${tree}`);
-  const baseline = parseBaseline(suite.adapter, JSON.parse(raw));
-  if (!baseline.acceptance.accepted)
-    throw new Error(`Adapter rejected ${suiteId}: ${baseline.acceptance.reason}`);
+  const baseline = parsePublishBaseline(suiteId, suite.adapter, raw);
   const requestedChangeType =
     parsed.values['change-type'] ?? (suite.lifecycle === 'no-ship' ? 'no-ship' : 'quality');
   if (!(CHANGE_TYPES as readonly string[]).includes(requestedChangeType))

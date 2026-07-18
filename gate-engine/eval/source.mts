@@ -5,6 +5,7 @@ import { relative, resolve } from 'node:path';
 import type { HashSet, TrackerMode } from './types.mts';
 
 const DOUBLE_STAR_TOKEN = '___DEVKIT_DOUBLE_STAR___';
+const DOUBLE_STAR_DIRECTORY_TOKEN = '___DEVKIT_DOUBLE_STAR_DIRECTORY___';
 
 function git(cwd: string, args: string[], allowFailure = false): string {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -92,8 +93,10 @@ export function repositorySource(cwd: string, mode: TrackerMode, ref?: string): 
 function matchGlob(path: string, glob: string): boolean {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*\//g, DOUBLE_STAR_DIRECTORY_TOKEN)
     .replace(/\*\*/g, DOUBLE_STAR_TOKEN)
     .replace(/\*/g, '[^/]*')
+    .replaceAll(DOUBLE_STAR_DIRECTORY_TOKEN, '(?:.*/)?')
     .replaceAll(DOUBLE_STAR_TOKEN, '.*');
   return new RegExp(`^${escaped}$`).test(path);
 }

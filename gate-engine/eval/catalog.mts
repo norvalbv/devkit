@@ -51,7 +51,14 @@ export function baselinePublicationErrors(
     if (!accepted?.checkpoint) continue;
     const baselineRaw = source.read(baselinePath);
     const checkpointRaw = source.read(accepted.checkpoint.path);
-    if (!baselineRaw || !checkpointRaw) continue;
+    if (baselineRaw === null) {
+      errors.push(`Missing accepted baseline: ${baselinePath}`);
+      continue;
+    }
+    if (checkpointRaw === null) {
+      errors.push(`Missing accepted checkpoint: ${accepted.checkpoint.path}`);
+      continue;
+    }
     try {
       const baseline = parseBaseline(suite.adapter, JSON.parse(baselineRaw));
       const checkpoint = JSON.parse(checkpointRaw) as CheckpointEnvelope;
@@ -116,6 +123,8 @@ export function validateCatalog(source: RepositorySource, catalog: BenchmarkCata
     }
     if (suite.runner && !files.includes(suite.runner))
       errors.push(`Suite ${suite.id}: missing benchmark runner ${suite.runner}`);
+    if (suite.baseline && !files.includes(suite.baseline))
+      errors.push(`Suite ${suite.id}: missing baseline ${suite.baseline}`);
   }
   const subjectIds = catalog.subjects.map((subject) => subject.id);
   const suiteIds = catalog.suites.map((suite) => suite.id);

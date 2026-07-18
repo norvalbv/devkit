@@ -8,10 +8,11 @@ import {
   METRIC_UNITS,
 } from './types.mts';
 
-const ABSOLUTE_PATH_RE = /(?:^|\s)(?:\/Users\/|\/home\/|[A-Za-z]:\\)/;
+const ABSOLUTE_PATH_RE =
+  /(?:^|[\s=:])(?:\/(?:Users|home|root|var|tmp|private|opt|srv|etc)(?:\/|$)|[A-Za-z]:[\\/]|\\\\[^\\\s]+\\)/;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const UNPUBLISHED_REF_RE = /refs\/(?:heads|stash|remotes)\//;
-const PRIVATE_KEY_RE = /BEGIN (?:PRIVATE|OPENSSH|RSA) KEY/;
+const PRIVATE_KEY_RE = /BEGIN (?:(?:[A-Z0-9]+ )*PRIVATE|OPENSSH|RSA) KEY/;
 const FORBIDDEN_FIELD_RE =
   /^(?:absolutePath|branch|branchName|email|gitRef|messages|privateSourceText|prompt|rawPrompt|sourceText|transcript)$/i;
 const SHA256_RE = /^sha256:[a-f0-9]{64}$/;
@@ -85,6 +86,12 @@ function metricErrors(value: unknown, location: string): string[] {
     errors.push(`${location}: numerator must be non-negative and finite`);
   if (value.denominator !== undefined && (!finite(value.denominator) || value.denominator < 0))
     errors.push(`${location}: denominator must be non-negative`);
+  const hasNumerator = value.numerator !== undefined;
+  const hasDenominator = value.denominator !== undefined;
+  if (value.unit === 'ratio' && hasNumerator !== hasDenominator)
+    errors.push(`${location}: ratio numerator and denominator must be provided together`);
+  if (value.unit === 'ratio' && finite(value.denominator) && value.denominator <= 0)
+    errors.push(`${location}: ratio denominator must be positive`);
   if (
     value.unit === 'ratio' &&
     finite(value.numerator) &&
@@ -92,6 +99,16 @@ function metricErrors(value: unknown, location: string): string[] {
     value.numerator > value.denominator
   )
     errors.push(`${location}: ratio numerator cannot exceed denominator`);
+  if (
+    value.unit === 'ratio' &&
+    finite(value.value) &&
+    finite(value.numerator) &&
+    finite(value.denominator) &&
+    value.denominator > 0 &&
+    Math.abs(value.value - value.numerator / value.denominator) > Number.EPSILON * 8
+  ) {
+    errors.push(`${location}: ratio value does not match numerator divided by denominator`);
+  }
   for (const threshold of ['floor', 'ceiling', 'mde', 'noiseFloor'] as const) {
     if (value[threshold] !== undefined && !finite(value[threshold]))
       errors.push(`${location}: ${threshold} must be finite`);
@@ -196,6 +213,8 @@ export function eventErrors(value: unknown, location: string): string[] {
   if (!oneOf(ASSESSMENTS, value.assessment)) errors.push(`${location}: invalid assessment`);
   if (value.evidence === 'accepted' && value.hashes === undefined)
     errors.push(`${location}: accepted event requires hashes`);
+  if (value.evidence === 'accepted' && value.checkpoint === undefined)
+    errors.push(`${location}: accepted event requires a checkpoint`);
   if (value.hashes !== undefined) errors.push(...hashErrors(value.hashes, `${location}.hashes`));
   if (!Array.isArray(value.metrics)) errors.push(`${location}: metrics must be an array`);
   else

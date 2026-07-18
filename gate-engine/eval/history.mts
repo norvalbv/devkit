@@ -1,18 +1,10 @@
 import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { withPublishFileLock } from './publish-lock.mts';
 import {
   BARE_SHA256_RE,
   checkpointErrors,
-  EVENT_ID_RE,
   eventErrors,
   isRecord,
   privacyErrors,
@@ -69,18 +61,35 @@ export function eventLine(event: BenchmarkEvent): string {
   return JSON.stringify(sorted(event));
 }
 
+interface RawHistoryEntry {
+  value: unknown;
+  line: string;
+  lineNumber: number;
+}
+
+function parseRawHistory(source: RepositorySource): RawHistoryEntry[] {
+  const content = source.read(HISTORY_PATH);
+  if (content === null) throw new Error(`Missing ${HISTORY_PATH}`);
+  return content
+    .split('\n')
+    .filter(Boolean)
+    .map((line, index) => {
+      try {
+        return { value: JSON.parse(line) as unknown, line, lineNumber: index + 1 };
+      } catch (error) {
+        throw new Error(`${HISTORY_PATH}:${index + 1}: invalid JSON: ${(error as Error).message}`);
+      }
+    });
+}
+
 export function parseHistory(
   source: RepositorySource,
 ): Array<{ event: BenchmarkEvent; line: string }> {
-  const content = source.read(HISTORY_PATH);
-  if (content === null) throw new Error(`Missing ${HISTORY_PATH}`);
-  const lines = content.split('\n').filter(Boolean);
-  return lines.map((line, index) => {
-    try {
-      return { event: JSON.parse(line) as BenchmarkEvent, line };
-    } catch (error) {
-      throw new Error(`${HISTORY_PATH}:${index + 1}: invalid JSON: ${(error as Error).message}`);
-    }
+  return parseRawHistory(source).map(({ value, line, lineNumber }) => {
+    const location = `${HISTORY_PATH}:${lineNumber}`;
+    const errors = eventErrors(value, location);
+    if (errors.length) throw new Error(errors.join('\n'));
+    return { event: value as BenchmarkEvent, line };
   });
 }
 
@@ -119,12 +128,25 @@ export function publicationErrors(event: BenchmarkEvent, checkpoint: CheckpointE
 
 export function validateHistory(source: RepositorySource): string[] {
   const errors: string[] = [];
-  const entries = parseHistory(source);
-  const eventsById = new Map(entries.map(({ event }) => [event.id, event]));
+  const entries = parseRawHistory(source);
+  const eventsById = new Map<string, BenchmarkEvent>();
+  for (const { value } of entries) {
+    if (isRecord(value) && typeof value.id === 'string')
+      eventsById.set(value.id, value as unknown as BenchmarkEvent);
+  }
   const ids = new Map<string, string>();
-  for (const { event, line } of entries) {
-    const location = event.id || '<missing>';
-    errors.push(...eventErrors(event, location));
+  for (const { value, line, lineNumber } of entries) {
+    const location =
+      isRecord(value) && typeof value.id === 'string' && value.id
+        ? value.id
+        : `${HISTORY_PATH}:${lineNumber}`;
+    errors.push(...eventErrors(value, location));
+    if (!isRecord(value)) {
+      privacyErrors(value, location, errors);
+      continue;
+    }
+    const event = value as unknown as BenchmarkEvent;
+    if (line !== eventLine(event)) errors.push(`${location}: event bytes are not canonical`);
     if (event.supersedes && !ids.has(event.supersedes))
       errors.push(`${location}: supersedes must reference an earlier event`);
     if (
@@ -147,8 +169,6 @@ export function validateHistory(source: RepositorySource): string[] {
           : `Conflicting event bytes for id: ${event.id}`,
       );
     ids.set(event.id, line);
-    if (event.evidence === 'accepted' && !event.checkpoint)
-      errors.push(`${event.id}: accepted event has no checkpoint`);
     if (event.checkpoint) {
       if (
         typeof event.checkpoint.sha256 !== 'string' ||
@@ -166,9 +186,19 @@ export function validateHistory(source: RepositorySource): string[] {
       else {
         if (sha256(content) !== event.checkpoint.sha256)
           errors.push(`${event.id}: checkpoint digest mismatch`);
+        let parsedCheckpoint: unknown;
         try {
-          const checkpoint = JSON.parse(content) as CheckpointEnvelope;
-          errors.push(...checkpointErrors(checkpoint, event.checkpoint.path));
+          parsedCheckpoint = JSON.parse(content) as unknown;
+        } catch {
+          errors.push(`${event.id}: checkpoint is not valid JSON`);
+          privacyErrors(event, location, errors);
+          continue;
+        }
+        errors.push(...checkpointErrors(parsedCheckpoint, event.checkpoint.path));
+        if (content !== canonicalJson(parsedCheckpoint))
+          errors.push(`${event.id}: checkpoint bytes are not canonical`);
+        if (isRecord(parsedCheckpoint)) {
+          const checkpoint = parsedCheckpoint as unknown as CheckpointEnvelope;
           if (checkpoint.suiteId !== event.suiteId)
             errors.push(`${event.id}: checkpoint suite mismatch`);
           if (canonicalJson(event.hashes) !== canonicalJson(checkpoint.hashes))
@@ -177,17 +207,18 @@ export function validateHistory(source: RepositorySource): string[] {
             errors.push(`${event.id}: event metrics do not match checkpoint`);
           if (canonicalJson(event.comparisons) !== canonicalJson(checkpoint.comparisons))
             errors.push(`${event.id}: event comparisons do not match checkpoint`);
-          if (event.provenance.sourceCommit !== checkpoint.sourceCommit)
+          const sourceCommit = isRecord(event.provenance)
+            ? event.provenance.sourceCommit
+            : undefined;
+          if (sourceCommit !== checkpoint.sourceCommit)
             errors.push(`${event.id}: event source commit does not match checkpoint`);
           if (event.recordedAt !== checkpoint.capturedAt)
             errors.push(`${event.id}: event recordedAt does not match checkpoint capturedAt`);
           privacyErrors(checkpoint, event.checkpoint.path, errors);
-        } catch {
-          errors.push(`${event.id}: checkpoint is not valid JSON`);
         }
       }
     }
-    privacyErrors(event, event.id, errors);
+    privacyErrors(event, location, errors);
   }
   return errors;
 }
@@ -220,52 +251,6 @@ export function writeAtomically(path: string, content: string): void {
   renameSync(temporary, path);
 }
 
-function processIsRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
-    throw error;
-  }
-}
-
-function acquirePublishLock(lockPath: string): number {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const descriptor = openSync(lockPath, 'wx');
-      try {
-        writeFileSync(descriptor, JSON.stringify({ pid: process.pid }));
-        return descriptor;
-      } catch (error) {
-        closeSync(descriptor);
-        unlinkSync(lockPath);
-        throw error;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let owner: unknown;
-      try {
-        owner = JSON.parse(requireRead(lockPath));
-      } catch (readError) {
-        if ((readError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw new Error('Another benchmark publish is in progress or left an unreadable lock');
-      }
-      const pid = isRecord(owner) ? owner.pid : undefined;
-      if (typeof pid !== 'number' || processIsRunning(pid))
-        throw new Error('Another benchmark publish is in progress');
-      try {
-        unlinkSync(lockPath);
-      } catch (unlinkError) {
-        if ((unlinkError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw unlinkError;
-      }
-    }
-  }
-  throw new Error('Could not acquire benchmark publish lock');
-}
-
 export type LockedAppend = (
   event: BenchmarkEvent,
   checkpoint: { path: string; content: string },
@@ -287,7 +272,10 @@ function appendPublishedEventUnlocked(
   })();
   const lines = current.split('\n').filter(Boolean);
   for (const line of lines) {
-    const existing = JSON.parse(line) as BenchmarkEvent;
+    const parsed: unknown = JSON.parse(line);
+    if (!isRecord(parsed) || typeof parsed.id !== 'string')
+      throw new Error('Existing benchmark history contains an invalid event');
+    const existing = parsed as unknown as BenchmarkEvent;
     if (existing.id === event.id) throw new Error(`Event id already exists: ${event.id}`);
   }
   const checkpointPath = join(cwd, checkpoint.path);
@@ -307,14 +295,9 @@ function appendPublishedEventUnlocked(
 
 export function withPublishLock<T>(cwd: string, action: (append: LockedAppend) => T): T {
   const lockPath = join(cwd, 'docs/benchmarks/.publish.lock');
-  mkdirSync(dirname(lockPath), { recursive: true });
-  const lock = acquirePublishLock(lockPath);
-  try {
+  return withPublishFileLock(lockPath, () => {
     return action((event, checkpoint) => appendPublishedEventUnlocked(cwd, event, checkpoint));
-  } finally {
-    closeSync(lock);
-    unlinkSync(lockPath);
-  }
+  });
 }
 
 export function appendPublishedEvent(
@@ -335,9 +318,17 @@ export function reconcileHistory(contents: string[]): string {
   for (const [contentIndex, content] of contents.entries()) {
     const additions: Array<{ id: string; line: string; recordedAt: string }> = [];
     for (const line of content.split('\n').filter(Boolean)) {
-      const event = JSON.parse(line) as BenchmarkEvent;
-      if (!EVENT_ID_RE.test(event.id) || Number.isNaN(Date.parse(event.recordedAt)))
-        throw new Error('Cannot reconcile an event without a valid id and recordedAt');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line) as unknown;
+      } catch {
+        throw new Error('Cannot reconcile an event that is not valid JSON');
+      }
+      const validation = eventErrors(parsed, 'reconcile event');
+      if (validation.length) throw new Error(`Cannot reconcile invalid event: ${validation[0]}`);
+      const event = parsed as BenchmarkEvent;
+      if (line !== eventLine(event))
+        throw new Error(`Non-canonical event bytes for id: ${event.id}`);
       const prior = byId.get(event.id);
       if (prior && prior !== line) throw new Error(`Conflicting event bytes for id: ${event.id}`);
       if (!prior) additions.push({ id: event.id, line, recordedAt: event.recordedAt });

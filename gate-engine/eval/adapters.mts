@@ -16,12 +16,14 @@ function ratio(
   direction: 'higher' | 'lower' = 'higher',
   extra: Partial<MetricObservation> = {},
 ): MetricObservation {
+  if (!Number.isFinite(denominator) || denominator <= 0)
+    throw new Error(`Metric ${id} requires a positive denominator`);
   return {
     id,
     label,
     numerator,
     denominator,
-    value: denominator === 0 ? 0 : numerator / denominator,
+    value: numerator / denominator,
     unit: 'ratio',
     direction,
     inferenceUnit: 'row',
@@ -395,17 +397,31 @@ export function parseSentry(input: Json): ParsedBaseline {
   const fp = resultRows.filter((row) => row.expected === 'SKIP' && row.got === 'MONITOR').length;
   const fn = resultRows.filter((row) => row.expected === 'MONITOR' && row.got !== 'MONITOR').length;
   if (resultRows.length > 0) {
-    metrics.push(ratio('precision', 'Precision', tp, tp + fp));
-    metrics.push(ratio('recall', 'Recall', tp, tp + fn));
+    const rowRatio = (id: string, label: string, numerator: number, denominator: number) =>
+      denominator > 0
+        ? ratio(id, label, numerator, denominator)
+        : scalar(id, label, 0, 'higher', 'ratio', { inferenceUnit: 'row' });
+    metrics.push(rowRatio('precision', 'Precision', tp, tp + fp));
+    metrics.push(rowRatio('recall', 'Recall', tp, tp + fn));
+    const f1Denominator = 2 * tp + fp + fn;
+    metrics.push(
+      scalar('f1', 'F1', f1Denominator > 0 ? (2 * tp) / f1Denominator : 0, 'higher', 'ratio', {
+        inferenceUnit: 'row',
+      }),
+    );
   } else {
     if (value.precision !== undefined)
       metrics.push(scalar('precision', 'Precision', value.precision, 'higher', 'ratio'));
     if (value.recall !== undefined)
       metrics.push(scalar('recall', 'Recall', value.recall, 'higher', 'ratio'));
+    if (value.f1 !== undefined) metrics.push(scalar('f1', 'F1', value.f1, 'higher', 'ratio'));
   }
-  if (value.f1 !== undefined) metrics.push(scalar('f1', 'F1', value.f1, 'higher', 'ratio'));
+  const denominatorsDefined = tp + fp > 0 && tp + fn > 0 && 2 * tp + fp + fn > 0;
   const accepted =
-    metrics.length >= 3 && Object.keys(sentryRows).length > 0 && Number(value.outages ?? 0) === 0;
+    metrics.length >= 3 &&
+    Object.keys(sentryRows).length > 0 &&
+    denominatorsDefined &&
+    Number(value.outages ?? 0) === 0;
   return {
     metrics,
     rows: Object.keys(sentryRows).length > 0 ? sentryRows : rows(value),
@@ -413,7 +429,7 @@ export function parseSentry(input: Json): ParsedBaseline {
       accepted,
       reason: accepted
         ? 'Complete row-backed precision/recall/F1 cell'
-        : 'Reported summary lacks complete persisted row evidence',
+        : 'Reported summary lacks complete persisted row evidence or defined classifier ratios',
     },
   };
 }

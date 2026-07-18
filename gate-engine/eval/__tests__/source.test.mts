@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { repositorySource } from '../source.mts';
+import type { RepositorySource } from '../source.mts';
+import { hashPaths, repositorySource } from '../source.mts';
 
 const roots: string[] = [];
 
@@ -58,6 +59,25 @@ describe('repository source modes', () => {
     );
     expect(() => repositorySource(root, 'staged').read('../private.json')).toThrow(
       /Path escapes repository/,
+    );
+  });
+
+  it('matches double-star globs at zero or many directory levels', () => {
+    const source = (files: Record<string, string>): RepositorySource => ({
+      mode: 'working',
+      listFiles: () => Object.keys(files),
+      read: (path) => files[path] ?? null,
+    });
+    const original = {
+      'root.json': 'root',
+      'src/x.mts': 'direct',
+      'src/nested/x.mts': 'nested',
+    };
+    expect(hashPaths(source(original), ['**/*.json'])).not.toBe(
+      hashPaths(source({ ...original, 'root.json': 'changed' }), ['**/*.json']),
+    );
+    expect(hashPaths(source(original), ['src/**/x.mts'])).not.toBe(
+      hashPaths(source({ ...original, 'src/x.mts': 'changed' }), ['src/**/x.mts']),
     );
   });
 });

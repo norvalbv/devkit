@@ -154,7 +154,7 @@ describe('benchmark adapters', () => {
     const sentry = parseSentry({
       precision: 1,
       recall: 1,
-      f1: 1,
+      f1: 0,
       outages: 0,
       results: [
         { id: 'monitor-1', expected: 'MONITOR', got: 'MONITOR', ok: true },
@@ -165,6 +165,10 @@ describe('benchmark adapters', () => {
     expect(sentry.metrics.find((metric) => metric.id === 'precision')).toMatchObject({
       numerator: 1,
       denominator: 1,
+    });
+    expect(sentry.metrics.find((metric) => metric.id === 'f1')).toMatchObject({
+      value: 1,
+      inferenceUnit: 'row',
     });
     expect(sentry.rows).toHaveProperty('monitor-1');
 
@@ -197,6 +201,14 @@ describe('benchmark adapters', () => {
       }).acceptance.accepted,
     ).toBe(false);
     expect(parseSentry({ precision: 1, recall: 1, f1: 1 }).acceptance.accepted).toBe(false);
+    const allSkip = parseSentry({
+      results: [{ id: 'skip-1', expected: 'SKIP', got: 'SKIP', ok: true }],
+    });
+    expect(allSkip.acceptance.accepted).toBe(false);
+    expect(allSkip.metrics.find((metric) => metric.id === 'precision')).toMatchObject({
+      value: 0,
+      inferenceUnit: 'row',
+    });
   });
 
   it('rejects native reviewer and decisions evidence below suite safety policy', () => {
@@ -243,5 +255,11 @@ describe('benchmark adapters', () => {
     expect(() => parseBaseline('unknown', {})).toThrow(/Unknown benchmark adapter/);
     expect(wilson(0, 1)).toMatchObject({ method: 'wilson-95', lower: 0 });
     expect(wilson(1, 1)?.upper).toBe(1);
+  });
+
+  it('rejects ratio metrics with a zero denominator', () => {
+    const baseline = json('gate-engine/critique/eval/results.baseline.json');
+    baseline.critique.recall.total = 0;
+    expect(() => parseCritique(baseline)).toThrow(/positive denominator/);
   });
 });

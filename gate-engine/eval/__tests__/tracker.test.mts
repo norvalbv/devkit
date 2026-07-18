@@ -15,82 +15,19 @@ import {
   activeEvents,
   appendPublishedEvent,
   canonicalJson,
-  checkpointArtifact,
-  compareRecordedAt,
+  eventLine,
   immutableErrors,
   latestRecordedEvent,
-  reconcileHistory,
   validateHistory,
   withPublishLock,
 } from '../history.mts';
 import { generatedOutputs, latestEvents, replaceMarker } from '../render.mts';
 import type { RepositorySource } from '../source.mts';
 import { repositorySource } from '../source.mts';
-import type { BenchmarkEvent, CheckpointEnvelope, MetricObservation } from '../types.mts';
+import type { BenchmarkEvent, MetricObservation } from '../types.mts';
+import { trackerFixture as fixture, memory, readableSnapshot } from './tracker-fixtures.mts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
-
-function memory(files: Record<string, string>): RepositorySource {
-  return {
-    mode: 'working',
-    listFiles: () => Object.keys(files).sort(),
-    read: (path) => files[path] ?? null,
-  };
-}
-
-function readableSnapshot(source: RepositorySource): Record<string, string> {
-  const files: Record<string, string> = {};
-  for (const path of source.listFiles()) {
-    try {
-      const content = source.read(path);
-      if (content !== null) files[path] = content;
-    } catch (error) {
-      if ((error as Error).message.startsWith('Path escapes repository:')) continue;
-      throw error;
-    }
-  }
-  return files;
-}
-
-function fixture() {
-  const checkpoint: CheckpointEnvelope = {
-    schemaVersion: 1,
-    suiteId: 'suite',
-    capturedAt: '2026-07-01T00:00:00Z',
-    sourceCommit: 'a'.repeat(40),
-    adapter: 'critique',
-    hashes: {
-      implementation: `sha256:${'1'.repeat(64)}`,
-      corpus: `sha256:${'2'.repeat(64)}`,
-      scorer: `sha256:${'3'.repeat(64)}`,
-      runner: `sha256:${'4'.repeat(64)}`,
-    },
-    metrics: [],
-    comparisons: [],
-    rows: { row: { ok: true } },
-    acceptance: { accepted: true, reason: 'test' },
-  };
-  const artifact = checkpointArtifact(checkpoint);
-  const event: BenchmarkEvent = {
-    schemaVersion: 1,
-    id: 'evt-test',
-    recordedAt: checkpoint.capturedAt,
-    suiteId: 'suite',
-    subjectIds: ['subject'],
-    lifecycle: 'shipped',
-    evidence: 'accepted',
-    freshness: 'current',
-    changeType: 'quality',
-    assessment: 'flat',
-    provenance: { tier: 'accepted', source: 'test', sourceCommit: checkpoint.sourceCommit },
-    hashes: checkpoint.hashes,
-    checkpoint: { sha256: artifact.sha256, path: artifact.path },
-    metrics: [],
-    comparisons: [],
-    note: 'test',
-  };
-  return { checkpoint, artifact, event, line: JSON.stringify(event) };
-}
 
 describe('immutable evidence', () => {
   it('canonicalizes checkpoint content and validates its content address', () => {
@@ -238,23 +175,6 @@ describe('immutable evidence', () => {
     }
   });
 
-  it('reconciles additions without reordering the first ledger and rejects conflicting IDs', () => {
-    const first = '{"id":"evt-b","recordedAt":"2026-02-01"}\n';
-    const second =
-      '{"id":"evt-a","recordedAt":"2026-01-01"}\n{"id":"evt-c","recordedAt":"2026-03-01"}\n';
-    expect(reconcileHistory([first, second])).toBe(`${first.trim()}\n${second.trim()}\n`);
-    expect(() => reconcileHistory([first, '{"id":"evt-b","recordedAt":"2026-04-01"}\n'])).toThrow(
-      /Conflicting/,
-    );
-    const offsetOrdered = reconcileHistory([
-      '',
-      '{"id":"evt-later","recordedAt":"2026-06-30T23:30:00Z"}\n' +
-        '{"id":"evt-earlier","recordedAt":"2026-07-01T01:00:00+02:00"}\n',
-    ]);
-    expect(offsetOrdered.indexOf('evt-earlier')).toBeLessThan(offsetOrdered.indexOf('evt-later'));
-    expect(compareRecordedAt('2026-07-01T01:00:00+02:00', '2026-06-30T23:30:00Z')).toBeLessThan(0);
-  });
-
   it('selects the newest predecessor by instant rather than append order', () => {
     const { event } = fixture();
     const newer: BenchmarkEvent = {
@@ -297,8 +217,16 @@ describe('immutable evidence', () => {
       const first = join(root, 'first.jsonl');
       const second = join(root, 'second.jsonl');
       const custom = join(root, 'merged.jsonl');
-      writeFileSync(first, '{"id":"evt-first","recordedAt":"2026-07-01T00:00:00Z"}\n');
-      writeFileSync(second, '{"id":"evt-second","recordedAt":"2026-07-02T00:00:00Z"}\n');
+      const { event } = fixture();
+      writeFileSync(first, `${eventLine({ ...event, id: 'evt-first' })}\n`);
+      writeFileSync(
+        second,
+        `${eventLine({
+          ...event,
+          id: 'evt-second',
+          recordedAt: '2026-07-02T00:00:00Z',
+        })}\n`,
+      );
       withPublishLock(root, () => {
         expect(() =>
           reconcileLedgers(root, [first, second], join(root, 'docs/benchmarks/history.jsonl')),

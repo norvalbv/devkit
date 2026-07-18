@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { parseBaseline } from './adapters.mts';
 import { loadCatalog } from './catalog.mts';
 import { canonicalJson, sha256 } from './history.mts';
@@ -14,6 +14,27 @@ function category(subject: string): string {
   if (normalized.includes('edge-case')) return 'edge-cases';
   if (normalized.includes('eval')) return 'evaluation';
   return 'benchmark';
+}
+
+export function localLogAggregate(cwd: string, path: string, source: number) {
+  const root = realpathSync(resolve(cwd));
+  const candidate = resolve(root, path);
+  if (!existsSync(candidate)) return { source, rows: 0, rejected: true };
+  const absolute = realpathSync(candidate);
+  const localPath = relative(root, absolute);
+  if (
+    localPath === '..' ||
+    localPath.startsWith(`..${sep}`) ||
+    isAbsolute(localPath) ||
+    !statSync(absolute).isFile()
+  ) {
+    return { source, rows: 0, rejected: true };
+  }
+  return {
+    source,
+    rows: readFileSync(absolute, 'utf8').split('\n').filter(Boolean).length,
+    rejected: false,
+  };
 }
 
 export function backfill(cwd: string, since = '2026-07-01', localLogPaths: string[] = []): void {
@@ -81,16 +102,7 @@ export function backfill(cwd: string, since = '2026-07-01', localLogPaths: strin
       }
     }
   }
-  const localLogs = localLogPaths.map((path, index) => {
-    const absolute = resolve(cwd, path);
-    if (!absolute.startsWith(`${resolve(cwd)}/`) || !existsSync(absolute))
-      return { source: index + 1, rows: 0, rejected: true };
-    return {
-      source: index + 1,
-      rows: readFileSync(absolute, 'utf8').split('\n').filter(Boolean).length,
-      rejected: false,
-    };
-  });
+  const localLogs = localLogPaths.map((path, index) => localLogAggregate(cwd, path, index + 1));
   console.log(
     JSON.stringify(
       {
