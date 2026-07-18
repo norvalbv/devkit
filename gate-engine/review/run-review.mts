@@ -58,6 +58,7 @@ import {
   agentBody,
   cleanupChecklistState,
   enforceChecklistContract,
+  passAssetVerifier,
   preflightReviewAssets,
   type ReviewOutcome,
   readChecklistState,
@@ -69,12 +70,10 @@ import {
  * every outcome persists it as a fetchable transcript (saveTranscript) so a passing reviewer's
  * reasoning is showcasable, not thrown away. Absent only when no judge ran (a hard outage). */
 type CascadeResult = ReviewOutcome;
-
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
 // (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
 const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
-
 // GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
 // per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
 function skippedReviewers(): Set<string> {
@@ -499,6 +498,7 @@ export async function runReviewGate(
   const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
   const concurrency = reviewConcurrency();
   const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
+  const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
   const toRun: { sel: ReviewerSelection; key: string; diffText: string }[] = [];
   for (let i = 0; i < selected.length; i++) {
     const key = cacheKey(
@@ -511,7 +511,6 @@ export async function runReviewGate(
     else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
   }
   if (toRun.length === 0) return 0;
-
   console.error(
     `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`,
   );
@@ -549,7 +548,8 @@ export async function runReviewGate(
           escalated: false,
         }),
       )
-      .then((res) => {
+      .then((outcome) => {
+        const res = verifyAssets(outcome, t.sel);
         if (res.status === 'pass')
           // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
           // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
