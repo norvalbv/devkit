@@ -305,6 +305,251 @@ describe('reship — exports DEVKIT_SHIP_BASE_SHA (DK-5)', () => {
   });
 });
 
+// A PR branch based on a NON-default branch (frink ships release branches this way: PR base 0.0.9,
+// origin/HEAD -> main). reship must cut its worktree from the fetched PR-branch tip; anything that
+// reached for origin/HEAD instead would parent the commit on main and lose the base branch's history.
+describe('reship — PR branch based on a non-default branch', () => {
+  it('parents the new commit on the PR-branch tip, not on origin/HEAD (main)', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+      ['push', '-q', 'origin', 'main'],
+    ])
+      g(a, { stdio: 'ignore' });
+    writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    // origin/HEAD -> main, so a wrong implementation has something plausible to grab.
+    g(['remote', 'set-head', 'origin', 'main'], { stdio: 'ignore' });
+    const mainTip = g(['rev-parse', 'main']).trim();
+
+    // Release branch off main, then the PR branch off the RELEASE branch (never off main).
+    g(['checkout', '-q', '-b', 'rel/0.0.9'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'rel.ts'), 'release-only\n');
+    g(['add', 'rel.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'release-only change'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'rel/0.0.9'], { stdio: 'ignore' });
+    const relTip = g(['rev-parse', 'rel/0.0.9']).trim();
+
+    g(['checkout', '-q', '-b', 'feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'feat/pr'], { stdio: 'ignore' });
+    const prTip = g(['rev-parse', 'feat/pr']).trim();
+
+    // The agent edits a.ts and re-ships onto the open PR.
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, { SHIP_DRY_RUN: '1' });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0);
+      const gwt = (a) => execFileSync('git', ['-C', wt, ...a], { env, encoding: 'utf8' }).trim();
+      expect(gwt(['rev-parse', 'HEAD~1'])).toBe(prTip); // parented on the PR tip...
+      expect(gwt(['rev-parse', 'HEAD~1'])).not.toBe(mainTip); // ...not on origin/HEAD
+      expect(gwt(['show', 'HEAD:a.ts'])).toBe('v2');
+      // The release branch's own commit survives — proof the base branch's history was not dropped.
+      expect(gwt(['show', 'HEAD:rel.ts'])).toBe('release-only');
+      expect(gwt(['merge-base', '--is-ancestor', relTip, 'HEAD']) === '').toBe(true);
+    } finally {
+      if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+    }
+  });
+});
+
+// A gate chain runs for MINUTES inside the ship worktree, so another process can move that worktree's
+// HEAD before git finalises the commit — git then aborts with `cannot lock ref 'HEAD'` AFTER every gate
+// passed. (Real cause: fallow < 3.4.2 registered its audit base-snapshot as a worktree and its cleanup
+// was not scoped to its own entry.) This must be attributed, not swallowed into blocked_gate "unknown".
+describe('reship — HEAD clobbered mid-commit is attributed, not reported as "unknown"', () => {
+  it('classifies the ref-lock failure and names the cause on stderr', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+      ['push', '-q', 'origin', 'main'],
+    ])
+      g(a, { stdio: 'ignore' });
+    const mainTip = g(['rev-parse', 'main']).trim();
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    // The clobber, reproduced: the gate chain PASSES (exit 0) but leaves the worktree's detached HEAD
+    // pointing somewhere else, exactly as an out-of-scope worktree cleanup would. git's finalize
+    // ref-update is a compare-and-swap, so the commit then dies with `cannot lock ref 'HEAD'`.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\necho "gate: all clear"\ngit update-ref --no-deref HEAD ${mainTip}\nexit 0\n`,
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    const events = join(mkdtempSync(join(tmpdir(), 'reship-tel-')), 'gate-events.jsonl');
+    dirs.push(events);
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, {
+      SHIP_DRY_RUN: '1',
+      DEVKIT_GATE_EVENTS: events,
+    });
+
+    expect(r.status).not.toBe(0); // nothing was committed, nothing pushed
+    expect(r.stderr).toMatch(/cannot lock ref 'HEAD'/); // git's own fatal reached the operator
+    expect(r.stderr).toMatch(/HEAD was moved by ANOTHER process mid-commit/); // ...with the diagnosis
+    expect(r.stderr).toMatch(/fallow/); // ...and the known cause to check
+
+    const result = readFileSync(events, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .find((e) => e.type === 'ship_result');
+    expect(result.blocked_gate).toBe('worktree_head_clobbered'); // NOT "unknown"
+    expect(result.timed_out).toBe(false);
+  });
+
+  it('still attributes the clobber when a fail-open reviewer line sits in the same log', () => {
+    // guard-review INCONCLUSIVE is fail-OPEN (exit 2 — the chain continues), so it can coexist with a
+    // later clobber. Grepping the gate arms first would blame the reviewer for a failure it did not
+    // cause; this locks the ordering of the attribution chain.
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+      ['push', '-q', 'origin', 'main'],
+    ])
+      g(a, { stdio: 'ignore' });
+    const mainTip = g(['rev-parse', 'main']).trim();
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\necho "guard-review: api-security-reviewer INCONCLUSIVE"\ngit update-ref --no-deref HEAD ${mainTip}\nexit 0\n`,
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    const events = join(mkdtempSync(join(tmpdir(), 'reship-tel-')), 'gate-events.jsonl');
+    dirs.push(events);
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, {
+      SHIP_DRY_RUN: '1',
+      DEVKIT_GATE_EVENTS: events,
+    });
+    expect(r.status).not.toBe(0);
+    const result = readFileSync(events, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .find((e) => e.type === 'ship_result');
+    expect(result.blocked_gate).toBe('worktree_head_clobbered'); // not "review"
+  });
+
+  it('does NOT claim a clobber when a GATE merely prints the same git error and fails', () => {
+    // The captured log folds hook output in with git's own (`2>&1 | tee`), so the phrase alone proves
+    // nothing — and devkit's suite emits this exact string, so a gate running the tests would forge it.
+    // Here a gate PRINTS the fatal and exits non-zero WITHOUT touching HEAD. Attributing that to a
+    // clobber would tell the operator "every gate PASSED, re-running is safe" about a real gate block.
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'main'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+      ['push', '-q', 'origin', 'main'],
+    ])
+      g(a, { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    // Prints the fatal verbatim (as a nested ship's test output would), then blocks. HEAD never moves.
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      '#!/bin/sh\n' +
+        'echo "✗ deterministic gates failed"\n' +
+        'echo "fatal: cannot lock ref \'HEAD\': is at 1111111111111111111111111111111111111111 but expected 2222222222222222222222222222222222222222"\n' +
+        'exit 1\n',
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    const events = join(mkdtempSync(join(tmpdir(), 'reship-tel-')), 'gate-events.jsonl');
+    dirs.push(events);
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'a.ts'], dir, {
+      SHIP_DRY_RUN: '1',
+      DEVKIT_GATE_EVENTS: events,
+    });
+
+    expect(r.status).not.toBe(0);
+    const result = readFileSync(events, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .find((e) => e.type === 'ship_result');
+    expect(result.blocked_gate).toBe('deterministic'); // the real cause, NOT the forged phrase
+    expect(r.stderr).not.toMatch(/HEAD was moved by ANOTHER process mid-commit/); // no false all-clear
+  });
+});
+
 describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carries the space)', () => {
   // A linked-worktree commit hands the commit-msg hook the ABSOLUTE $GIT_DIR/COMMIT_EDITMSG path; under
   // a spaced repo root that path contains the space. Devkit forwards it as one intact arg (every ship
