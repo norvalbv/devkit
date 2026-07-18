@@ -21,20 +21,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { JSCPD_OWN_ROOT, JSCPD_PATH_TERMINAL, resolveJscpdBin, } from "../co-occurrence/jscpd-bin.mjs";
 import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { canonicalJson } from "../deterministic/canonical-json.mjs";
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
-// Stable, key-order-independent JSON so a semantically identical config hashes identically (an editor
-// that reorders keys must not flap the cache). Recurses arrays + objects; primitives via JSON.stringify.
-function canonicalJSON(v) {
-    if (v === null || typeof v !== 'object')
-        return JSON.stringify(v) ?? 'null';
-    if (Array.isArray(v))
-        return `[${v.map(canonicalJSON).join(',')}]`;
-    const obj = v;
-    return `{${Object.keys(obj)
-        .sort()
-        .map((k) => `${JSON.stringify(k)}:${canonicalJSON(obj[k])}`)
-        .join(',')}}`;
-}
 // Content fingerprint of a directory tree: sorted `relpath:sha256` for every file, or the 'absent'
 // token when the dir doesn't exist. A read error mid-walk bubbles (→ null key → run the gates).
 function fingerprintDir(dir) {
@@ -96,5 +84,5 @@ export function gateConfigFingerprint(cwd) {
         repoRoot: cwd,
     });
     const jscpd = bin === JSCPD_PATH_TERMINAL ? 'jscpd:path' : `jscpd:${statProxy(bin, 'missing')}`;
-    return sha256([canonicalJSON(behavioral), baselines, allowlist, index, jscpd].join('\0'));
+    return sha256([canonicalJson(behavioral), baselines, allowlist, index, jscpd].join('\0'));
 }

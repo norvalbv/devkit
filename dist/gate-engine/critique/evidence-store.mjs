@@ -4,6 +4,7 @@ import { join, relative, resolve } from 'node:path';
 import { critiqueEligibility } from "./contract.mjs";
 import { evidenceRoot, isPlanCritiqueBlobPath, isPlanCritiqueId, isSha256, sha256Text, withEvidenceLock, writeContentBlob, } from "./evidence-files.mjs";
 import { atomicWrite } from "./immutable-file.mjs";
+import { applyProviderLifecycleStatus, } from "./provider-lifecycle.mjs";
 export { evidenceRoot, isPlanCritiqueBlobPath, isPlanCritiqueId, isSha256, persistImmutableJson, sha256Text, withEvidenceLock, writeContentBlob, } from "./evidence-files.mjs";
 const RECORD_VERSION = 1;
 const SECRET_KEY = /(?:api[_-]?key|authorization|cookie|password|secret|token)/i;
@@ -153,7 +154,9 @@ export function persistRecord(record) {
 }
 export function makeRecord(input) {
     const critiqueId = randomUUID();
-    const eligibility = critiqueEligibility(input.contract);
+    const providerStatus = input.providerStatus ?? null;
+    const contract = applyProviderLifecycleStatus(input.contract, input.provider, providerStatus);
+    const eligibility = critiqueEligibility(contract);
     const pass = input.pass ?? 1;
     const retryLimitExceeded = pass > 2;
     const record = {
@@ -166,11 +169,12 @@ export function makeRecord(input) {
             parentCritiqueId: input.parentCritiqueId ?? null,
         },
         provider: input.provider,
+        providerStatus,
         model: input.model ?? null,
         modelHash: input.model ? sha256Text(input.model) : null,
         promptHash: input.prompt ? sha256Text(input.prompt) : null,
-        responseHash: sha256Text(input.contract.exactRaw),
-        exactResponseBlob: `blobs/${sha256Text(input.contract.exactRaw)}.json`,
+        responseHash: sha256Text(contract.exactRaw),
+        exactResponseBlob: `blobs/${sha256Text(contract.exactRaw)}.json`,
         transcriptBlob: input.transcriptBlob ?? null,
         transcriptExpiresAt: input.transcriptExpiresAt ?? null,
         repositoryFingerprint: input.context.repositoryFingerprint,
@@ -180,22 +184,22 @@ export function makeRecord(input) {
         capturedAt: new Date().toISOString(),
         completedAt: input.completedAt ?? null,
         contract: {
-            state: input.contract.state,
-            errors: input.contract.errors,
+            state: contract.state,
+            errors: contract.errors,
             eligible: eligibility.eligible && !retryLimitExceeded,
             eligibilityReason: retryLimitExceeded ? 'retry_limit_exceeded' : eligibility.reason,
             criticalCount: eligibility.criticalCount,
         },
         // The exact parsed response is retained for reproducibility. Consumers must use only the
         // allowlisted sanitizedProjection below; exactResponse is never injected into another prompt.
-        exactResponse: input.contract.exactResponse,
-        sanitizedProjection: input.contract.value && input.contract.state === 'valid'
-            ? buildProjection(critiqueId, input.contract.value)
+        exactResponse: contract.exactResponse,
+        sanitizedProjection: contract.value && contract.state === 'valid'
+            ? buildProjection(critiqueId, contract.value)
             : null,
     };
     // The non-enumerable symbol is omitted from JSON and structural comparisons, so persistRecord
     // can publish the exact-response blob and record in one lock without storing a second raw body.
-    Object.defineProperty(record, EXACT_RESPONSE_RAW, { value: input.contract.exactRaw });
+    Object.defineProperty(record, EXACT_RESPONSE_RAW, { value: contract.exactRaw });
     return record;
 }
 function evidenceFiles(path) {

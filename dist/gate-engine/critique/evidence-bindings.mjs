@@ -5,6 +5,7 @@ import { critiqueEligibility, parsePlanCritiqueResponse } from "./contract.mjs";
 import { evidenceRoot, isPlanCritiqueBlobPath, isPlanCritiqueId, isSha256, sha256Text, withEvidenceLock, } from "./evidence-files.mjs";
 import { buildProjection, readRecord } from "./evidence-store.mjs";
 import { atomicWrite } from "./immutable-file.mjs";
+import { applyProviderLifecycleStatus, isPlanCritiqueProviderStatus, } from "./provider-lifecycle.mjs";
 const SCP_REMOTE = /^(?:[^@/:]+@)?([^:]+):(.+)$/;
 const LEADING_SLASHES = /^\/+/;
 const TRAILING_SLASHES = /\/+$/;
@@ -152,6 +153,8 @@ function validDate(value, nullable = false) {
 function validStoredRecord(record) {
     const lineage = record.lineage;
     const contractState = record.contract;
+    const providerStatus = record.providerStatus ?? null;
+    const untrustedLegacyCursor = record.provider === 'cursor' && record.providerStatus === undefined;
     if (record.schemaVersion !== 1 ||
         record.kind !== 'plan_critique_record' ||
         !isPlanCritiqueId(record.critiqueId) ||
@@ -161,6 +164,9 @@ function validStoredRecord(record) {
         lineage.pass < 1 ||
         (lineage.parentCritiqueId !== null && !isPlanCritiqueId(lineage.parentCritiqueId)) ||
         !['claude', 'codex', 'cursor'].includes(record.provider) ||
+        !isPlanCritiqueProviderStatus(providerStatus) ||
+        (record.provider !== 'cursor' && providerStatus !== null) ||
+        untrustedLegacyCursor ||
         (record.model !== null && typeof record.model !== 'string') ||
         (record.model === null
             ? record.modelHash !== null
@@ -202,7 +208,7 @@ function validStoredRecord(record) {
     }
     if (sha256Text(raw) !== record.responseHash)
         return false;
-    const parsed = parsePlanCritiqueResponse(raw);
+    const parsed = applyProviderLifecycleStatus(parsePlanCritiqueResponse(raw), record.provider, providerStatus);
     const eligibility = critiqueEligibility(parsed);
     const retryLimitExceeded = lineage.pass > 2;
     const expectedEligible = eligibility.eligible && !retryLimitExceeded;
@@ -217,7 +223,7 @@ function validStoredRecord(record) {
     const projection = parsed.value ? buildProjection(record.critiqueId, parsed.value) : null;
     return JSON.stringify(record.sanitizedProjection) === JSON.stringify(projection);
 }
-export function resolveEligibleBinding(cwd, workId) {
+export function resolveEligibleBinding(cwd, workId, critiqueId) {
     let context;
     try {
         context = repositoryContext(cwd);
@@ -230,6 +236,7 @@ export function resolveEligibleBinding(cwd, workId) {
     const root = workId ? join(bindingRoot(context), workId) : bindingRoot(context);
     const matches = [];
     const skippedReasons = new Set();
+    let sawDifferentCritique = false;
     for (const path of bindingFiles(root)) {
         let binding;
         try {
@@ -253,6 +260,10 @@ export function resolveEligibleBinding(cwd, workId) {
             !validDate(binding.createdAt) ||
             (workId !== undefined && binding.workId !== workId)) {
             skippedReasons.add('malformed_binding');
+            continue;
+        }
+        if (critiqueId !== undefined && binding.critiqueId !== critiqueId) {
+            sawDifferentCritique = true;
             continue;
         }
         if (binding.repositoryFingerprint !== context.repositoryFingerprint) {
@@ -302,7 +313,7 @@ export function resolveEligibleBinding(cwd, workId) {
         ].find((candidate) => skippedReasons.has(candidate));
         return {
             status: 'skipped',
-            reason: reason ?? 'no_matching_binding',
+            reason: reason ?? (sawDifferentCritique ? 'capture_binding_mismatch' : 'no_matching_binding'),
             record: null,
             candidates: 0,
         };

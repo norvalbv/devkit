@@ -14,6 +14,11 @@ import {
   writeContentBlob,
 } from './evidence-files.mts';
 import { atomicWrite } from './immutable-file.mts';
+import {
+  applyProviderLifecycleStatus,
+  type PlanCritiqueProvider,
+  type PlanCritiqueProviderStatus,
+} from './provider-lifecycle.mts';
 
 export {
   evidenceRoot,
@@ -37,8 +42,6 @@ type PreparedPlanCritiqueRecordV1 = PlanCritiqueRecordV1 & {
   [EXACT_RESPONSE_RAW]?: string;
 };
 
-export type PlanCritiqueProvider = 'claude' | 'codex' | 'cursor';
-
 export interface PlanCritiqueRecordV1 {
   schemaVersion: typeof RECORD_VERSION;
   kind: 'plan_critique_record';
@@ -46,6 +49,8 @@ export interface PlanCritiqueRecordV1 {
   workId: string;
   lineage: { pass: number; parentCritiqueId: string | null };
   provider: PlanCritiqueProvider;
+  /** Absent only on pre-capture-adapter v1 records; see legacy validation in evidence-bindings. */
+  providerStatus?: PlanCritiqueProviderStatus;
   model: string | null;
   modelHash: string | null;
   promptHash: string | null;
@@ -267,6 +272,7 @@ export function makeRecord(input: {
   context: RepositoryContext;
   workId: string;
   provider: PlanCritiqueProvider;
+  providerStatus?: PlanCritiqueProviderStatus;
   model?: string | null;
   prompt?: string | null;
   parentCritiqueId?: string | null;
@@ -276,7 +282,9 @@ export function makeRecord(input: {
   completedAt?: string | null;
 }): PlanCritiqueRecordV1 {
   const critiqueId = randomUUID();
-  const eligibility = critiqueEligibility(input.contract);
+  const providerStatus = input.providerStatus ?? null;
+  const contract = applyProviderLifecycleStatus(input.contract, input.provider, providerStatus);
+  const eligibility = critiqueEligibility(contract);
   const pass = input.pass ?? 1;
   const retryLimitExceeded = pass > 2;
   const record: PreparedPlanCritiqueRecordV1 = {
@@ -289,11 +297,12 @@ export function makeRecord(input: {
       parentCritiqueId: input.parentCritiqueId ?? null,
     },
     provider: input.provider,
+    providerStatus,
     model: input.model ?? null,
     modelHash: input.model ? sha256Text(input.model) : null,
     promptHash: input.prompt ? sha256Text(input.prompt) : null,
-    responseHash: sha256Text(input.contract.exactRaw),
-    exactResponseBlob: `blobs/${sha256Text(input.contract.exactRaw)}.json`,
+    responseHash: sha256Text(contract.exactRaw),
+    exactResponseBlob: `blobs/${sha256Text(contract.exactRaw)}.json`,
     transcriptBlob: input.transcriptBlob ?? null,
     transcriptExpiresAt: input.transcriptExpiresAt ?? null,
     repositoryFingerprint: input.context.repositoryFingerprint,
@@ -303,23 +312,23 @@ export function makeRecord(input: {
     capturedAt: new Date().toISOString(),
     completedAt: input.completedAt ?? null,
     contract: {
-      state: input.contract.state,
-      errors: input.contract.errors,
+      state: contract.state,
+      errors: contract.errors,
       eligible: eligibility.eligible && !retryLimitExceeded,
       eligibilityReason: retryLimitExceeded ? 'retry_limit_exceeded' : eligibility.reason,
       criticalCount: eligibility.criticalCount,
     },
     // The exact parsed response is retained for reproducibility. Consumers must use only the
     // allowlisted sanitizedProjection below; exactResponse is never injected into another prompt.
-    exactResponse: input.contract.exactResponse,
+    exactResponse: contract.exactResponse,
     sanitizedProjection:
-      input.contract.value && input.contract.state === 'valid'
-        ? buildProjection(critiqueId, input.contract.value)
+      contract.value && contract.state === 'valid'
+        ? buildProjection(critiqueId, contract.value)
         : null,
   };
   // The non-enumerable symbol is omitted from JSON and structural comparisons, so persistRecord
   // can publish the exact-response blob and record in one lock without storing a second raw body.
-  Object.defineProperty(record, EXACT_RESPONSE_RAW, { value: input.contract.exactRaw });
+  Object.defineProperty(record, EXACT_RESPONSE_RAW, { value: contract.exactRaw });
   return record;
 }
 

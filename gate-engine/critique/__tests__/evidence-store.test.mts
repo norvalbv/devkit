@@ -33,6 +33,7 @@ import {
   withEvidenceLock,
   writeContentBlob,
 } from '../evidence-store.mts';
+import { initCritiqueTestRepo } from './capture-fixtures.mts';
 
 const roots: string[] = [];
 const externalFiles: string[] = [];
@@ -166,12 +167,7 @@ function git(cwd: string, args: string[]): string {
 function repositoryFixture(): string {
   const repo = mkdtempSync(join(tmpdir(), 'plan-critique-repo-'));
   roots.push(repo);
-  git(repo, ['init', '-q', '-b', 'main']);
-  git(repo, ['config', 'user.email', 'test@example.com']);
-  git(repo, ['config', 'user.name', 'Test']);
-  writeFileSync(join(repo, 'README.md'), 'fixture\n');
-  git(repo, ['add', 'README.md']);
-  git(repo, ['commit', '-qm', 'fixture']);
+  initCritiqueTestRepo(repo, 'main');
   return repo;
 }
 

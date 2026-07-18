@@ -21,6 +21,10 @@ import {
 } from './evidence-files.mts';
 import { buildProjection, type PlanCritiqueRecordV1, readRecord } from './evidence-store.mts';
 import { atomicWrite } from './immutable-file.mts';
+import {
+  applyProviderLifecycleStatus,
+  isPlanCritiqueProviderStatus,
+} from './provider-lifecycle.mts';
 
 const SCP_REMOTE = /^(?:[^@/:]+@)?([^:]+):(.+)$/;
 const LEADING_SLASHES = /^\/+/;
@@ -204,6 +208,8 @@ function validDate(value: unknown, nullable = false): boolean {
 function validStoredRecord(record: PlanCritiqueRecordV1): boolean {
   const lineage = record.lineage;
   const contractState = record.contract;
+  const providerStatus = record.providerStatus ?? null;
+  const untrustedLegacyCursor = record.provider === 'cursor' && record.providerStatus === undefined;
   if (
     record.schemaVersion !== 1 ||
     record.kind !== 'plan_critique_record' ||
@@ -214,6 +220,9 @@ function validStoredRecord(record: PlanCritiqueRecordV1): boolean {
     lineage.pass < 1 ||
     (lineage.parentCritiqueId !== null && !isPlanCritiqueId(lineage.parentCritiqueId)) ||
     !['claude', 'codex', 'cursor'].includes(record.provider) ||
+    !isPlanCritiqueProviderStatus(providerStatus) ||
+    (record.provider !== 'cursor' && providerStatus !== null) ||
+    untrustedLegacyCursor ||
     (record.model !== null && typeof record.model !== 'string') ||
     (record.model === null
       ? record.modelHash !== null
@@ -253,7 +262,11 @@ function validStoredRecord(record: PlanCritiqueRecordV1): boolean {
     return false;
   }
   if (sha256Text(raw) !== record.responseHash) return false;
-  const parsed = parsePlanCritiqueResponse(raw);
+  const parsed = applyProviderLifecycleStatus(
+    parsePlanCritiqueResponse(raw),
+    record.provider,
+    providerStatus,
+  );
   const eligibility = critiqueEligibility(parsed);
   const retryLimitExceeded = lineage.pass > 2;
   const expectedEligible = eligibility.eligible && !retryLimitExceeded;
@@ -271,7 +284,11 @@ function validStoredRecord(record: PlanCritiqueRecordV1): boolean {
   return JSON.stringify(record.sanitizedProjection) === JSON.stringify(projection);
 }
 
-export function resolveEligibleBinding(cwd: string, workId?: string): BindingResolution {
+export function resolveEligibleBinding(
+  cwd: string,
+  workId?: string,
+  critiqueId?: string,
+): BindingResolution {
   let context: RepositoryContext;
   try {
     context = repositoryContext(cwd);
@@ -283,6 +300,7 @@ export function resolveEligibleBinding(cwd: string, workId?: string): BindingRes
   const root = workId ? join(bindingRoot(context), workId) : bindingRoot(context);
   const matches: PlanCritiqueRecordV1[] = [];
   const skippedReasons = new Set<string>();
+  let sawDifferentCritique = false;
   for (const path of bindingFiles(root)) {
     let binding: PlanCritiqueBindingV1;
     try {
@@ -307,6 +325,10 @@ export function resolveEligibleBinding(cwd: string, workId?: string): BindingRes
       (workId !== undefined && binding.workId !== workId)
     ) {
       skippedReasons.add('malformed_binding');
+      continue;
+    }
+    if (critiqueId !== undefined && binding.critiqueId !== critiqueId) {
+      sawDifferentCritique = true;
       continue;
     }
     if (binding.repositoryFingerprint !== context.repositoryFingerprint) {
@@ -360,7 +382,7 @@ export function resolveEligibleBinding(cwd: string, workId?: string): BindingRes
     ].find((candidate) => skippedReasons.has(candidate));
     return {
       status: 'skipped',
-      reason: reason ?? 'no_matching_binding',
+      reason: reason ?? (sawDifferentCritique ? 'capture_binding_mismatch' : 'no_matching_binding'),
       record: null,
       candidates: 0,
     };
