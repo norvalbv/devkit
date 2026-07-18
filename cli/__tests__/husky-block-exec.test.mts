@@ -268,6 +268,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     // exist precisely to prove the capture, so inheriting the suite opt-out would no-op them.
     const hookEnv = { ...process.env, HOME: home, PATH: '/usr/bin:/bin', DEVKIT_GATE_EVENTS: sink };
     delete hookEnv.DEVKIT_NO_TELEMETRY;
+    delete hookEnv.DEVKIT_REVIEW_ID;
     delete hookEnv.DEVKIT_SHIP_ID;
     Object.assign(hookEnv, env);
     try {
@@ -284,6 +285,11 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     if (existsSync(sink))
       events = readFileSync(sink, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
     return { status, events, tree };
+  }
+
+  function expectNoCommitTerminal(result: { status: number; events: Array<{ type?: string }> }) {
+    expect(result.status).toBe(0);
+    expect(result.events.filter((event) => event.type === 'commit_result')).toEqual([]);
   }
 
   it('a passing chain emits ONE commit_result correlated to the staged write-tree', () => {
@@ -310,14 +316,20 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
   });
 
   it('inside a ship (DEVKIT_SHIP_ID set) the hook stays silent — ship_result is that terminal', () => {
-    const r = runHookInRepo({ DEVKIT_SHIP_ID: 'some-ship' });
-    expect(r.status).toBe(0);
-    expect(r.events.filter((e) => e.type === 'commit_result').length).toBe(0);
+    expectNoCommitTerminal(runHookInRepo({ DEVKIT_SHIP_ID: 'some-ship' }));
+  });
+
+  it('inside a review (DEVKIT_REVIEW_ID set) the hook stays silent — review events own that run', () => {
+    expectNoCommitTerminal(
+      runHookInRepo({
+        DEVKIT_REVIEW_ID: 'some-review',
+        DEVKIT_RUN_MODE: 'review',
+        DEVKIT_REVIEW_GUARDS: '',
+      }),
+    );
   });
 
   it('DEVKIT_NO_TELEMETRY opts the terminal out with the capture itself', () => {
-    const r = runHookInRepo({ DEVKIT_NO_TELEMETRY: '1' });
-    expect(r.status).toBe(0);
-    expect(r.events.filter((e) => e.type === 'commit_result').length).toBe(0);
+    expectNoCommitTerminal(runHookInRepo({ DEVKIT_NO_TELEMETRY: '1' }));
   });
 });

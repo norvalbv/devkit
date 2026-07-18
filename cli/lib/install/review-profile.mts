@@ -1,6 +1,6 @@
 import {
   DEFAULT_REVIEW_DECISIONS_DIR,
-  GUARD_IDS,
+  REVIEWABLE_GUARD_IDS,
   type ReviewProfile,
   type Selection,
 } from '../components.mts';
@@ -9,6 +9,24 @@ export interface ReviewFlagValues {
   review: boolean | null;
   reviewGuards: string[] | null;
   reviewDecisionsDir: string | null;
+}
+
+export interface ReviewGuardIssues {
+  invalid: string[];
+  unknown: string[];
+  uninstalled: string[];
+}
+
+/** Classify requested review guards once so init and review enforce the same allowlist. */
+export function reviewGuardIssues(requested: string[], installed: string[]): ReviewGuardIssues {
+  const issues: ReviewGuardIssues = { invalid: [], unknown: [], uninstalled: [] };
+  for (const guard of requested) {
+    if (!REVIEWABLE_GUARD_IDS.includes(guard)) issues.unknown.push(guard);
+    else if (!installed.includes(guard)) issues.uninstalled.push(guard);
+    else continue;
+    issues.invalid.push(guard);
+  }
+  return issues;
 }
 
 /** Parse the review-profile slice independently so init orchestration stays below its size ceiling. */
@@ -49,10 +67,7 @@ export function reviewPlanFromFlags(
       error: 'devkit init: --review requires the husky pre-commit component (remove --no-husky).',
     };
   }
-  const unknown = (flags.reviewGuards ?? []).filter((guard) => !GUARD_IDS.includes(guard));
-  const uninstalled = (flags.reviewGuards ?? []).filter(
-    (guard) => GUARD_IDS.includes(guard) && !selection.guards.includes(guard),
-  );
+  const { unknown, uninstalled } = reviewGuardIssues(flags.reviewGuards ?? [], selection.guards);
   if (unknown.length > 0 || uninstalled.length > 0) {
     const details = [
       unknown.length ? `unknown: ${unknown.join(', ')}` : '',
