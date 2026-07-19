@@ -98,10 +98,25 @@ interface CascadeOpts {
   checklistRecoveryReason?: string;
 }
 
-// Each pass includes checklist generation/marking/finalization. The 30-minute cap accommodates the
-// measured slow correctness reviewer; timeouts are never retried. The outer SHIP_COMMIT_TIMEOUT
-// bounds the whole hook while per-reviewer PASS checkpoints make a killed ship converge on re-run
-// (docs/decisions/ship-gates-converge-not-restart.md). Normal reviewers finish well below the cap.
+// Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
+// diff investigation. The per-pass caps are GENEROUS (30 min): the correctness reviewer's deep
+// four-lens investigation legitimately runs past the old 420s cap and got SIGKILLed mid-verdict —
+// measured on the usage-tracker as repeated 421s inconclusive timeouts while the median run is
+// ~60-250s. The cap is sized for the slow-but-working judge, not the median. A judge that TIMES OUT
+// is never re-run (see cascadeVerdict), so a stuck judge still costs at most one cap, not two.
+//
+// Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
+// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate. PER-CASCADE worst ≈
+// 1×1800 (first pass) + 1800 (escalate) = 3600s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY,
+// default 2) cascades run in ceil(N/K) WAVES, so the theoretical worst wall-clock far exceeds
+// SHIP_COMMIT_TIMEOUT (now 3600s default) — by design: a killed ship CONVERGES on re-run because
+// PASSes checkpoint per-completion and the caches skip everything already earned
+// (docs/decisions/ship-gates-converge-not-restart.md). In practice only correctness approaches the
+// cap; the rest finish <300s, so a real ship is one slow wave + fast waves, comfortably under 3600s.
+//
+// NOTE: a single pass can now exceed the 600s foreground tool cap — an AGENT-driven commit (the gate
+// run inside a Bash tool) is still killed at 600s, so the generous caps take FULL effect only for a
+// commit run in a real terminal (or a detached ship), where SHIP_COMMIT_TIMEOUT is the outer bound.
 const FIRST_TIMEOUT_MS = 1800000; // 30 min — the slow-but-working reviewer (correctness) needs the room
 // ship/strict first pass shares the same generous cap; the outer SHIP_COMMIT_TIMEOUT is the safety net.
 const STRICT_FIRST_TIMEOUT_MS = 1800000;
