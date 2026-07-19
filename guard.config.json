@@ -50,6 +50,7 @@
           "@root": [
             "co-occurrence",
             "coverage",
+            "critique",
             "decisions",
             "deterministic",
             "edge-cases",

@@ -5,6 +5,7 @@ import { syncSkills } from '../../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, type Selection } from '../components.mts';
 import { removeAgents, removeSkills } from '../sync-manifest.mts';
 import { selectedHookAssets } from './agent-hook-selection.mts';
+import { LEGACY_AGENT_PROVIDERS } from './agent-providers.mts';
 import {
   reconcileHookRegistrations,
   removeHookRegistrations,
@@ -21,7 +22,7 @@ function pruneDeselectedSurfaces(
   hookScripts: string[],
   dryRun: boolean,
 ) {
-  const prunedTargets = AGENT_TARGETS.filter((target) => !agentTargets.includes(target));
+  const prunedTargets = LEGACY_AGENT_PROVIDERS.filter((target) => !agentTargets.includes(target));
   const settingsFile: Record<string, string> = {
     claude: '.claude/settings.json',
     cursor: '.cursor/hooks.json',

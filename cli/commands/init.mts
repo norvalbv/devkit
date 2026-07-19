@@ -284,8 +284,7 @@ function selectionFromFlags(flags: InitFlags): Selection {
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-  // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
-  // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
+  // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
   sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
   return sel;
 }
