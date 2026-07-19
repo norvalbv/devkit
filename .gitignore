@@ -4,6 +4,8 @@ node_modules
 # devkit's own gate artifacts (regenerated; not source)
 .fallow/
 .search-code/
+# qavis pass-receipt: content-addressed cache written by `qavis qa` (specific file — .qavis/recipe.json stays tracked)
+.qavis/receipt.json
 # ship/gate caches under .devkit/ (regenerated, per-branch/-tree keyed; tracked manifests stay tracked)
 .devkit/prefix-cache.json
 .devkit/decisions-verdict-cache.json
