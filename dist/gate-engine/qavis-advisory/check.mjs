@@ -19,7 +19,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { envFlag } from '../config.mjs';
+import { envFlag } from "../config.mjs";
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
 function defaultRouteVerdict(cwd) {

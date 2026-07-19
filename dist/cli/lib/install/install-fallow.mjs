@@ -15,29 +15,13 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { writeIfAbsent } from '../fs-helpers.mjs';
+import { writeIfAbsent } from "../fs-helpers.mjs";
 /**
  * Pinned fallow version. NEVER @latest — a floating tag makes the gate non-deterministic
- * and can drift below FALLOW_GATE_MIN_VERSION. 3.6.0 sits well above the default floor
+ * and can drift below FALLOW_GATE_MIN_VERSION. 2.89.0 sits well above the default floor
  * (2.46.0), so a pinned install always satisfies the gate's version check.
- *
- * The floor here is >=3.4.2, not just "newer is nicer". Through 2.x, `fallow audit`
- * materialised its comparison base as a REGISTERED git worktree and its cleanup was not
- * scoped to the entry it owned — so a long-running audit (a devkit ship's gate chain runs
- * for minutes) could reset the SHIP worktree's HEAD to the audit's own base, and the
- * commit then died on its finalize ref-update with
- * `fatal: cannot lock ref 'HEAD': is at <base> but expected <ship base>`, having passed
- * every gate. fallow 3.4.2 unregisters the snapshot immediately and restricts "Git
- * administration cleanup ... to the current repository's verified worktree entry"; 3.6.0
- * holds the reuse lock for the audit lifetime so a concurrent cleanup or a different-base
- * rebuild cannot pull files out from under a running audit. 3.4.2 also auto-deregisters
- * the worktree entries leaked by earlier versions on the next audit.
- *
- * fallow 3.0.0 is a platform milestone, NOT a breaking change: CLI flags, config, and the
- * `audit --format json` contract this repo parses (gate-engine/fallow/staged-filter.mts)
- * are unchanged across the major.
  */
-export const FALLOW_PINNED_VERSION = '3.6.0';
+export const FALLOW_PINNED_VERSION = '2.89.0';
 // The three per-analysis baselines `fallow audit` consumes (--dead-code-baseline etc.).
 // Each maps a sub-analysis save command to its file under fallow-baselines/.
 const BASELINES = [

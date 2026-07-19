@@ -15,7 +15,7 @@
  * regexParameters = the canonical token table (tokenRegex, per the tree's exts) + one `<key>_domain`
  * alternation per libDomains key. ignorePatterns = ignoredDirs globs + the generated baseline + exempt.
  */
-import { STRUCTURE_TOKENS, tokenRegex } from './grammar.mjs';
+import { STRUCTURE_TOKENS, tokenRegex } from "./grammar.mjs";
 // The plugin matches a file's path RELATIVE to structureRoot, and the structure ROOT node's `name`
 // must be the structureRoot's last path segment (NOT the tree's logical name) — else nothing matches
 // and the rule silently passes everything. `src` → `src`; `src/renderer` → `renderer`.

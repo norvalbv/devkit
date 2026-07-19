@@ -45,8 +45,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
-import { writeFileAtomic } from './atomic-write.mjs';
+import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { writeFileAtomic } from "./atomic-write.mjs";
 const EMBED_URL = 'http://localhost:11434/api/embed';
 const EMBED_MODEL = 'nomic-embed-text';
 const FM_ORDER = ['slug', 'created']; // append-only: two immutable fields, no current/updated/status

@@ -18,8 +18,8 @@
 // "frame error", so a nondeterministic verdict must not be the sole creator of a hard stop (a false
 // block trains reflexive bypass → dead gate). The block is therefore bounded to {hard mode AND a
 // confident block-verdict}; everything else passes (exit 0). Fail-open on any could-not-run (exit 2).
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from './judge-isolation.mjs';
-import { execJudge } from './run-judge.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "./judge-isolation.mjs";
+import { execJudge } from "./run-judge.mjs";
 // ─── Pure verdict logic (testable without claude) ───────────────────────────────
 /**
  * Build a confident single-word verdict parser over a vocabulary. Word-boundary matchers

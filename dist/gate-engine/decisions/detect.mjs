@@ -26,13 +26,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from '../config.mjs';
-import { splitDiffByFile } from '../judge/diff-focus.mjs';
-import { emitGateEvent } from '../judge/gate-events.mjs';
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
-import { execJudge } from '../judge/run-judge.mjs';
-import { composeTranscript, saveTranscript } from '../judge/transcript-store.mjs';
-import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
+import { resolveGuardConfig } from "../config.mjs";
+import { emitGateEvent } from "../judge/gate-events.mjs";
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
+import { execJudge } from "../judge/run-judge.mjs";
+import { hasVerdict, saveVerdict, verdictKey } from "./verdict-cache.mjs";
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 const PKG_RE = /(^|\/)package\.json$/;
 const DEP_KEYS = [
@@ -201,6 +199,7 @@ export function gatherEntries(cwd, mode = 'cached') {
 const SMELL_SEGMENT_CAP = 4000;
 const EVIDENCE_TOTAL_CAP = 8000;
 const HEADER_MAX_FILES = 60;
+const DIFF_SEGMENT_SPLIT_RE = /^(?=diff --git )/m;
 // A smelled path is located in a segment's HEADER LINE by containment, not by parsing the a/ b/
 // prefixes — `diff.noprefix=true` / `diff.mnemonicPrefix=true` in a CONSUMER's git config change
 // the prefix format (W-3: the gate runs against the consumer's config, which devkit does not
@@ -265,7 +264,9 @@ export function buildDetectJudgeInput(fullDiff, entries, boundaries = []) {
     let evidenceChars = 0;
     let omittedRoutine = 0;
     let droppedSmell = 0;
-    for (const seg of splitDiffByFile(fullDiff)) {
+    for (const seg of String(fullDiff).split(DIFF_SEGMENT_SPLIT_RE)) {
+        if (!seg.trim())
+            continue;
         if (!segmentMatches(seg, smellPaths)) {
             omittedRoutine += 1;
             continue;
@@ -319,15 +320,13 @@ export function runDetectJudge(cwd, diff, model = 'haiku') {
 // LLM downgrade: a confident ROUTINE clears a regex block; DECISION / error → the block stands.
 // Never escalates. An outage is surfaced as 'OUTAGE' (distinct from a judged DECISION) so the
 // gate can say WHY the block stood — a dark judge must never read as a confirmed smell verdict.
-// Returns the raw judge transcript alongside the verdict so the caller can persist it (fetchable
-// evidence for the dashboard); raw is null when the judge did not run (noLlm/empty) or on outage.
 function judgeWithClaude(cwd, noLlm, diff) {
     if (noLlm || !diff)
-        return { verdict: null, raw: null };
+        return null;
     const raw = runDetectJudge(cwd, diff);
     if (raw === null)
-        return { verdict: 'OUTAGE', raw: null };
-    return { verdict: parseVerdict(raw), raw };
+        return 'OUTAGE';
+    return parseVerdict(raw);
 }
 // GUARD_AI_STRICT/FRINK_AI_STRICT truthy check (ship-only strict mode). Local copy on
 // purpose for now — the shared hoist is tracked (envFlag consolidation).
@@ -352,21 +351,13 @@ function runGate() {
         const decisionMatcher = decisionFileRe(cfg.decisionsDir);
         const entries = gatherEntries(cwd);
         const smells = detectSmells(entries, cfg.boundaries);
-        const staged = decisionStaged(cwd, decisionMatcher);
-        const verdict = gateVerdict({ bypass: cfg.noLog, decisionStaged: staged, smells });
-        if (verdict === 0) {
-            // Announce the pass (parity with the reviewer gate, which prints a line per reviewer) so a
-            // clean run is visibly RUN, not silently absent — under the hook's "🧭 Decision-log gate…"
-            // header, and as a telemetry pass event the dashboard can surface.
-            const detail = cfg.noLog
-                ? 'bypassed (GUARD_NO_LOG)'
-                : smells.length === 0
-                    ? 'no architectural smell — routine ✓'
-                    : `decision recorded ✓ (${smells.join(', ')})`;
-            console.error(`decision-gate: ${detail}`);
-            emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail });
+        const verdict = gateVerdict({
+            bypass: cfg.noLog,
+            decisionStaged: decisionStaged(cwd, decisionMatcher),
+            smells,
+        });
+        if (verdict === 0)
             process.exit(0);
-        }
         // Regex says block — let the LLM try to clear a false positive (dep bump, sync, etc.).
         // Evidence-only input: the smelled files' hunks, never the whole diff (see buildDetectJudgeInput).
         // Prefixes forced OFF-config: a consumer's diff.noprefix/mnemonicPrefix must not change the
@@ -383,22 +374,12 @@ function runGate() {
         // retry after an unrelated gate/timeout failure) clears without re-spending the judge.
         const key = verdictKey('detect', input);
         if (hasVerdict(cwd, key)) {
-            const detail = 'cached ROUTINE (identical evidence) — cleared';
-            console.error(`decision-gate: ${detail}`);
-            emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail });
+            console.error('decision-gate: cached ROUTINE (identical evidence) — cleared');
             process.exit(0);
         }
-        const { verdict: judged, raw } = judgeWithClaude(cwd, cfg.noLlm, input);
-        // Persist the judge's evidence (the diff) + its verdict as a fetchable transcript (no-op off-run).
-        const transcriptRef = raw !== null
-            ? saveTranscript('decisions', composeTranscript(input, `VERDICT: ${judged}\n${raw}`))
-            : null;
-        const ref = transcriptRef ? { transcript_ref: transcriptRef } : {};
+        const judged = judgeWithClaude(cwd, cfg.noLlm, input);
         if (judged === 'ROUTINE') {
             saveVerdict(cwd, key);
-            const detail = `judge cleared as ROUTINE ✓ (was: ${smells.join(', ')})`;
-            console.error(`decision-gate: ${detail}`);
-            emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail, ...ref });
             process.exit(0);
         }
         if (judged === 'OUTAGE') {
@@ -415,7 +396,6 @@ function runGate() {
                     gate: 'decisions',
                     status: 'fail',
                     detail: smells.join(', '),
-                    ...ref,
                 });
                 process.exit(3);
             }
@@ -426,7 +406,6 @@ function runGate() {
             gate: 'decisions',
             status: 'fail',
             detail: smells.join(', '),
-            ...ref,
         });
         process.exit(1);
     }

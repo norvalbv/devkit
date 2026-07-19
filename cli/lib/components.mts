@@ -36,11 +36,15 @@ export interface ReviewProfile {
   decisionsDir: string;
 }
 
+interface NormalizeReviewProfileOptions {
+  enabledDefault?: boolean;
+  available?: boolean;
+}
+
 export function normalizeReviewProfile(
   partial: Partial<ReviewProfile> | undefined,
   installedGuards: string[],
-  enabledDefault = false,
-  available = true,
+  { enabledDefault = false, available = true }: NormalizeReviewProfileOptions = {},
 ): ReviewProfile {
   const installed = installedGuards.filter((g) => GUARD_IDS.includes(g));
   const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
@@ -52,6 +56,14 @@ export function normalizeReviewProfile(
         ? partial.decisionsDir.trim()
         : DEFAULT_REVIEW_DECISIONS_DIR,
   };
+}
+
+/** Stacks whose structure rules are compiled from guard.config.json by devkit itself. */
+export const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
+
+/** The structure-lint command emitted by init and checked by doctor/review preflight. */
+export function structureCmdFor(stack: string): string {
+  return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
 }
 
 /**

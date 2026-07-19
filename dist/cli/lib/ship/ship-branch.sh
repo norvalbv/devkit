@@ -17,7 +17,7 @@
 # and is removed on exit. Scope is explicit paths; never auto-detect, because in a
 # shared tree your files are indistinguishable from parallel work.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--base <b>] [--link <d>]... [--] <path...>
+# Usage:   ship-branch.sh <branch> "<title>" [--link <d>]... [--] <path...>
 #          # PR body via stdin; bare positional paths (no --) are also accepted.
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 set -euo pipefail
@@ -31,10 +31,8 @@ BR=${1:?branch}; TITLE=${2:?title}; shift 2
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
-BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --base) BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
@@ -48,15 +46,11 @@ done
 # agent's edits under that directory, defeating the per-file isolation. (A deleted
 # file is not a dir, so it still passes — deletions are valid pathspecs.)
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && {
-    echo "directory path not allowed (pass individual files): $p" >&2
-    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-    exit 1
-  }
+  [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
 done
 
-# Assemble extra symlinks; prepare-gate-worktree.sh adds the universal base.
-LINK_DIRS=()
+# Assemble the symlink set (universal base + --link extras).
+LINK_DIRS=(.husky/_ node_modules)
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
 # Preflight, fail fast before touching anything.
@@ -84,19 +78,12 @@ if [ -z "${SHIP_DRY_RUN:-}" ]; then
 fi
 
 ROOT=$(git rev-parse --show-toplevel)
-# The PR target branch. Default: the branch we branched from — the PR merges back into it. A detached
-# HEAD has no such branch, so fail fast rather than silently targeting `main` (wrong base + a bogus
-# diff). With --base <branch> the PR targets THAT branch instead, so a repo whose source-of-truth
-# branch differs from its PR base can ship from either without checking out / juggling worktrees.
-if [ -n "$BASE_FLAG" ]; then
-  # `origin/x` and `x` both mean branch x: the PR base is a branch NAME, and the tip we branch off is
-  # always origin's (below) — so the two spellings must not diverge into two different bases.
-  BASE_REF=${BASE_FLAG#origin/}
-else
-  BASE_REF=$(git symbolic-ref --quiet --short HEAD) || {
-    echo "detached HEAD — run ship-branch.sh from a branch (the PR targets that branch)" >&2; exit 1
-  }
-fi
+BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
+# PR merges back into the branch we branched from. A detached HEAD has no such branch,
+# so fail fast rather than silently targeting `main` (wrong base + a bogus diff).
+BASE_REF=$(git symbolic-ref --quiet --short HEAD) || {
+  echo "detached HEAD — run ship-branch.sh from a branch (the PR targets that branch)" >&2; exit 1
+}
 # Resolve owner/repo from origin (NOT gh's default — a fork's upstream remote can hijack it).
 REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git$##')
 # A malformed origin leaves a bad REPO that would only surface AFTER the push — validate the shape now.
@@ -108,51 +95,6 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
-
-# The commit the ephemeral worktree is cut from — and therefore what the gates judge and what the PR
-# diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
-# side effects. Nothing between there and here reads $BASE.
-if [ -n "$BASE_FLAG" ]; then
-  # origin's tip, not the local copy: in a shared parallel-agent checkout the local base branch is
-  # routinely stale, and a worktree cut from a stale base makes the gates judge code GitHub will never
-  # merge into. (The PR DIFF would still be right — GitHub diffs from the merge-base — so this buys
-  # gate accuracy, not diff accuracy.) reship.sh sets the precedent: it fetches its base the same way.
-  # The source ref is fully-qualified `refs/heads/` — NOT a bare ref, which would also match a tag: a
-  # PR base must be a BRANCH, so a sha or tag has to fail HERE, not at `gh pr create` after the push.
-  # One round-trip proves both (the branch exists AND it is a branch).
-  git fetch -q origin "refs/heads/$BASE_REF" 2>/dev/null || {
-    echo "--base: no branch origin/$BASE_REF (a PR base must be a remote branch — not a sha or a tag)" >&2
-    exit 1
-  }
-  BASE=$(git rev-parse FETCH_HEAD)
-else
-  BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
-fi
-
-# Nothing to commit → say so NOW. Staging (below) has exactly two inputs: the tracked diff vs BASE
-# and the untracked files in scope. Both empty ⇒ an empty index — which git only reports AFTER the
-# whole gate chain has run ("nothing added to commit but untracked files present", the untracked ones
-# being our own gate symlinks), whereupon the EXIT trap force-deletes the branch it just made and
-# prints a bare "Deleted branch … (was …)" on stdout. The operator pays a multi-minute gate run for a
-# cryptic failure. reship.sh's "no changes vs origin/$BR" guard already covers the re-push flow; here
-# is its new-ship twin, hoisted ahead of the worktree so nothing is created to churn. Mirrors the two
-# staging commands exactly (same BASE, same --exclude-standard, same pathspec) so the guard cannot
-# disagree with what staging will do. A git ERROR (non-zero but not "differences found") reads as
-# "has changes" and falls through to the old behaviour — fail toward the status quo, never toward a
-# false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
-# (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
-if git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
-   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ]; then
-  echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
-  if [ -n "$BASE_FLAG" ]; then
-    # --base already answers "your work is committed elsewhere" — the remaining causes are a base that
-    # already has this content, or a typo. Never re-suggest checking out: not doing so is the point.
-    echo "these paths are already identical on origin/$BASE_REF — wrong --base, or a misspelled path?" >&2
-  else
-    echo "already committed, wrong checkout, or a misspelled path? ship bases the PR on this checkout's branch ($BASE_REF) — check out the branch your work is on, or pass --base <branch> to diff your working tree against a different branch instead." >&2
-  fi
-  exit 1
-fi
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
@@ -195,6 +137,57 @@ trap cleanup EXIT
 
 git worktree add -q -b "$BR" "$WT" "$BASE" >&2
 
+# Symlink gitignored gate deps from the main checkout so the hooks actually run.
+# .husky/_ is the husky RUNNER dir (gitignored, generated by `prepare`); without it
+# core.hooksPath=.husky/_ resolves to nothing and the whole gate chain silently
+# no-ops. node_modules -> bunx/eslint/guard-*; --link extras -> a repo's own gate deps.
+# SYNC CONTRACT: the universal base (.husky/_, node_modules) + each repo's --link set must
+# cover what its pre-commit hook needs — a missing gitignored dep makes that gate fail-open.
+# Fail CLOSED if the husky runner is absent: without it the worktree commit runs with NO gates,
+# silently shipping ungated code. Run dependency setup (`prepare` / `husky`) before shipping.
+# ponytail: husky-assumed (.husky/_) — a lefthook / non-husky repo would need a hook-runner knob;
+# every devkit-onboarded repo wires husky, so the realistic consumer set always has it.
+#
+# Overlay mode keeps the gate chain in .devkit/hooks/pre-commit — git-excluded, so it never
+# materializes in a fresh worktree and the husky shim silently no-ops (shipping UNGATED code).
+# Link it so the chain runs; fail CLOSED if the config declares overlay but the hook is missing
+# (mirrors the .husky/_ contract — gates must not fail open). The commit itself forces
+# core.hooksPath=.devkit/hooks so the overlay hook fires regardless of husky-reclaim state.
+# ponytail: naive JSON grep for the flag; swap for a real parser if the config schema drifts.
+if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$ROOT/.devkit/config.json" 2>/dev/null; then
+  [ -x "$ROOT/.devkit/hooks/pre-commit" ] || {
+    echo "overlay mode but $ROOT/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
+    exit 1
+  }
+  LINK_DIRS+=(.devkit)
+fi
+if [ ! -e "$ROOT/.husky/_" ]; then
+  echo "missing $ROOT/.husky/_ — run dependency setup before shipping (gates must not fail open)" >&2
+  exit 1
+fi
+for d in "${LINK_DIRS[@]}"; do
+  [ -e "$ROOT/$d" ] && ln -s "$ROOT/$d" "$WT/$d"
+done
+
+# .claude/{agents,skills} are devkit sync artifacts (devkit sync-agents / sync-skills). In an overlay
+# consumer they're git-ignored, so a fresh worktree lacks them and guard-review can't load reviewer
+# briefs (.claude/agents/<name>.md) or run the judge checklist (.claude/skills/<skill>/scripts/
+# checklist.mjs) — every reviewer INCONCLUSIVEs, which under ship strict (GUARD_AI_STRICT) fails CLOSED,
+# aborting every overlay ship. Link the two SUBDIRS — not the whole .claude: the checklist writes
+# per-run state to .claude/.<skill>-review.json in cwd, which must stay in the ephemeral worktree, not
+# leak into the shared main tree. Skip a subdir already checked out (repos that TRACK .claude, e.g.
+# devkit itself, get it via git checkout — a symlink onto it nests a bogus .../agents/agents).
+# ponytail: .claude/agents is sync-agents' hardcoded write target AND guard-review's agentsDir default;
+# a custom RELATIVE review.agentsDir isn't covered (still fails CLOSED, not open).
+if [ -d "$ROOT/.claude/agents" ] || [ -d "$ROOT/.claude/skills" ]; then
+  mkdir -p "$WT/.claude"
+  for sub in agents skills; do
+    if [ -e "$ROOT/.claude/$sub" ] && [ ! -e "$WT/.claude/$sub" ]; then
+      ln -s "$ROOT/.claude/$sub" "$WT/.claude/$sub"
+    fi
+  done
+fi
+
 # Tracked edits (modify + delete, binary-safe) -> worktree index.
 git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
 [ -s "$PATCH" ] && git -C "$WT" apply --index "$PATCH"
@@ -206,10 +199,6 @@ git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read
   git -C "$WT" add -- "$f"
 done
 
-# Only after caller content is staged: runtime symlinks must never enter the shipped diff.
-. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
-prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
-
 # Link gate configs that live in the repo but aren't in this fresh checkout (an untracked config, a
 # gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
 . "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
@@ -218,12 +207,7 @@ link_untracked_gate_configs "$WT" "$ROOT"
 # Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
 # agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
-# The commit the worktree was cut from — lets in-chain gates (fallow) diff against IT, not their own
-# main-autodetect. Unconditional (not just under --base): even the default case is more precise than
-# a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
-export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
-export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
@@ -247,16 +231,6 @@ if [ -z "$PR_CREATE_FAILED" ]; then
   # The PR number is the trailing path segment of the URL gh just printed (one gh call, not two).
   PR_NUM=${PR_URL##*/}
   [[ "$PR_NUM" =~ ^[0-9]+$ ]] || PR_NUM=""
-  # Telemetry: tie this ship's id to the PR it opened, so the usage tracker links a ship row to its
-  # PR directly (no gh-by-branch lookup needed). ship_result already fired during the gate chain —
-  # before the PR existed — so this is a separate line the collector upserts onto the ship. Reuses
-  # the DEVKIT_SHIP_ID/DEVKIT_GATE_EVENTS that the sourced commit-with-gate-capture.sh exported;
-  # best-effort (`|| true`) so telemetry can never fail a ship. pr_number is a bare JSON number, else null.
-  if [ -n "${DEVKIT_GATE_EVENTS:-}" ] && [ -n "${DEVKIT_SHIP_ID:-}" ]; then
-    printf '{"type":"ship_pr","ship_id":"%s","pr_url":"%s","pr_number":%s,"ts":"%s"}\n' \
-      "$DEVKIT_SHIP_ID" "$PR_URL" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
-  fi
 fi
 
 # Record what shipped the instant the PUSH succeeded — independent of `gh pr create` — so `devkit

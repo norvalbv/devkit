@@ -9,34 +9,23 @@
  * network/db/fs/native/IPC failure handled without crashing. Those never reach a handler unless the
  * code calls captureException explicitly. This nudges the author at commit time.
  *
- * HARD-BY-DEFAULT — a confident MONITOR blocks (exit 1) unless softened for one run with
- * *_SENTRY_HARD=0. The warn channel measured structurally dark in the consumer (frink: 18 unseen
- * MONITOR verdicts in 17 days) and the 2026-07-12 Target rules all judge gates hard by default —
- * the exit code is the only channel that reliably reaches a headless agent. The block stays
- * bounded: `effectiveHard` degrades an empty-staged-diff run (amend/--allow-empty) to warn +
- * watchlist, an ambiguous/split vote never blocks, and hard mode votes a 3-sample majority (the
- * confidence contract).
+ * WARN-BY-DEFAULT — like every devkit judge gate, the LLM never CREATES a block. There is no
+ * deterministic floor for "should be monitored", so a nondeterministic MONITOR must not be the sole
+ * creator of a hard stop (a false MONITOR would train reflexive bypass → dead gate). MONITOR warns
+ * (exit 0) and appends to the watchlist; *_SENTRY_HARD=1 escalates a confident MONITOR to exit 1.
  *
  * Lives in the `commit-msg` hook, NOT pre-commit: the message only exists once git has it (passed as
  * the message-file path); pre-commit can't see it on interactive commits.
  *
  * Research basis (the context tier + prompt shape are tuned, not guessed):
- *   - message-alone underfits (arXiv 1711.05340) AND is structurally blind to sc-1116: it cannot see
- *     that a swallowed error is ALREADY instrumented in the same commit, so it re-flags a surface the
- *     diff already fixed (measured: message precision 0.46 regardless of model). A FULL diff can
- *     confuse a cheap model via distractors (arXiv 2412.10079) — but FOCUSING it to error-handling
- *     hunks (focusDiff, the decisions-detect pattern) removes them. So the default feeds the FOCUSED
- *     diff, the same "evaluate the live diff" contract the decisions/reviewer judges use. On the eval
- *     (127 cases: 104 real-derived, F1 ~0.89-0.91 across runs, + a deliberately-hard 23-row authored
- *     elimination tier) haiku+focused-diff = F1 ~0.87 overall vs message F1 0.56, and focused beats
- *     the full diff (0.83) and sonnet-full (0.88) — context + focus dominate model, and cheap wins.
- *     The diff directive also self-clears a fix that ELIMINATES the silent path (measured on the
- *     elimination tier: 15/23 -> 19/23 with the clause, no real-slice recall loss under K=3).
+ *   - message-alone underfits; message + file-level change features (paths + A/M/D, NOT hunks) lifts
+ *     cross-project commit classification ~+20pp (arXiv 1711.05340). Full diff would only confuse a
+ *     cheap model via distractors (arXiv 2412.10079) — so we feed name-status, never hunks.
  *   - few-shot >> zero-shot, chain-of-thought does not help commit classification (arXiv 2605.02033).
  *   - self-consistency (sample N, majority-vote) reliably lifts a model; reasoning tiers give no
  *     advantage and are slow (arXiv 2510.22389) — so prefer *_SENTRY_SAMPLES over a reasoning tier.
- * The eval/ benchmark sweeps {model, context, shots, samples}; the env defaults below are the cell the
- * seed corpus picks (haiku + diff — see the CONTEXT_TIER note) — re-run the sweep on your own corpus.
+ * The eval/ benchmark sweeps {model, context, shots, samples}; the env defaults below are a sane
+ * starting cell (haiku + message-only) — re-run the sweep on your own corpus to re-decide.
  *
  *   --gate    : exit 0 = SKIP / warn-only / skipped / fail-open · exit 1 = hard mode + confident MONITOR · exit 2 = could-not-run
  *   (no flag) : report mode — judge the given message and PRINT the verdict, exit 0.
@@ -45,33 +34,23 @@
  *
  * Knobs (read GUARD_* first, then FRINK_* as a back-compat alias):
  *   NO_SENTRY_JUDGE=1 (skip) · SENTRY_NO_LLM=1 (skip — can't judge without the LLM) ·
- *   SENTRY_HARD (default ON — =0 softens a confident MONITOR to warn) · SENTRY_MODEL (default haiku) ·
- *   SENTRY_CONTEXT=message|names|diff (default diff, focused) ·
- *   SENTRY_SAMPLES=N (default 3 when hard, 1 when warn) ·
- *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd) ·
- *   SENTRY_DIFF_FULL=1 (feed the whole diff, not just error-handling hunks — A/B).
- *
- * DATA BOUNDARY: the `diff` tier sends the FOCUSED staged source (error-handling hunks, capped 6000c)
- * to the configured Claude judge — more than the message tier's metadata. focusDiff limits it to
- * error-relevant hunks, never whole files. Set SENTRY_CONTEXT=message to send only the commit message,
- * or NO_SENTRY_JUDGE=1 to disable the judge entirely.
+ *   SENTRY_HARD=1 (MONITOR→block) · SENTRY_MODEL (default haiku) ·
+ *   SENTRY_CONTEXT=message|names (default message) · SENTRY_SAMPLES=N (default 1) ·
+ *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd).
  * No `claude` binary / offline / quota-exhausted → fail-open, but execJudge prints one stderr warning
  * so the dark judge is VISIBLE (no longer a silent no-op). See ../judge/run-judge.mjs.
  *
- * GOVERNING RULE (devkit "ship the generator, never the data"): every runtime path resolves against
- * the CONSUMER cwd, never __dirname. The WATCHLIST + the BASELINE stay the consumer's data (born in
- * their repo, never shipped). The eval `cases.jsonl` DOES ship — 127 cases (104 real-derived + 23
- * authored elimination-tier) — but it is a
- * dev-only SEED the gate never reads at runtime; a consumer copies + grows it with their own commits.
+ * GOVERNING RULE (devkit "ship the generator, never the data"): every path resolves against the
+ * CONSUMER cwd, never __dirname. The watchlist + the eval corpus + the baseline are the consumer's
+ * data, born in their repo — none ships here.
  */
 import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { envBool, resolveGuardConfig } from '../config.mjs';
-import { focusHunks } from '../judge/diff-focus.mjs';
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
-import { execJudge } from '../judge/run-judge.mjs';
+import { resolveGuardConfig } from "../config.mjs";
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
+import { execJudge } from "../judge/run-judge.mjs";
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
 // gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
 function envVar(name) {
@@ -80,20 +59,10 @@ function envVar(name) {
 }
 const CWD = process.cwd();
 const MODEL = envVar('SENTRY_MODEL') ?? 'haiku';
-/** Samples follow the confidence contract: a run that can BLOCK votes a 3-sample majority;
- * warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
-export function resolveSamples(hard) {
-    const env = Number(envVar('SENTRY_SAMPLES') ?? '');
-    return env > 0 ? env : hard ? 3 : 1;
-}
-// Default = diff, FOCUSED (see buildContext/focusDiff). The eval (gate-engine/sentry/eval, 103 cases)
-// picked it: haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; precision ~0.90) vs message 0.46/0.71
-// (F1 0.56 — message flags every already-instrumented swallow). Focusing to error-handling hunks beats
-// the full diff (0.83), beats sonnet-full (0.88), AND edges sonnet-focused (0.92) — context + focus
-// dominate model, cheap wins. The
-// diff tier erases the sc-1116 false-positive at no recall cost and still MONITORs a surface a capture
-// ELSEWHERE leaves un-instrumented. `message`/`names` stay available via *_SENTRY_CONTEXT.
-const CONTEXT_TIER = envVar('SENTRY_CONTEXT') ?? 'diff';
+const SAMPLES = Number(envVar('SENTRY_SAMPLES') ?? '1') || 1;
+// Default = message-only: a sweep typically finds message ≈ names (name-status adds tokens + a git
+// call for little accuracy gain). `names` stays available via *_SENTRY_CONTEXT=names.
+const CONTEXT_TIER = envVar('SENTRY_CONTEXT') ?? 'message';
 const DEFAULT_WATCHLIST = 'docs/sentry-watchlist.md';
 /** Absolute watchlist path, resolved from the CONSUMER cwd (env override > default), never __dirname. */
 function watchlistPath() {
@@ -143,56 +112,10 @@ export function subjectOf(message) {
 export function shouldJudge(message) {
     return SENTRY_JUDGE_TYPE_RE.test(subjectOf(message));
 }
-// Cap the staged-diff evidence fed to the `diff` tier.
-const DIFF_EVIDENCE_CAP = 6000;
-// A hunk is error-handling-relevant if it touches a catch/throw/reject/.catch, a log.warn|error, or a
-// Sentry capture — the swallow-vs-capture signal the judge needs. Everything else is a distractor.
-const ERROR_HUNK_RE = /\b(?:try|catch|throw|reject|captureException|captureMessage|captureMainMessage)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
-/**
- * FOCUS the staged diff to just its error-handling hunks — the decisions-detect pattern (send the
- * judge the signal, not the whole commit): a header listing every changed file, then ONLY the
- * error-relevant hunks per file, then an omission count. Dropping distractors is a MEASURED win on the
- * 104-case eval (haiku 0.83→~0.91) — it kills borderline over-fires and stops the cap from truncating
- * the signal out of a big commit. Deterministic EVIDENCE selection only; the LLM still decides.
- * The per-file split + hunk focus live in ../judge/diff-focus (shared with detect + the reviewers).
- */
-export function focusDiff(diffText) {
-    return focusHunks(diffText, (h) => ERROR_HUNK_RE.test(h), 'non-error');
-}
-/** Build the stdin payload for the judge.
- *   message : commit subject/body only (the tuned default).
- *   names   : + the changed-file list (status + path), never hunks.
- *   diff    : + the staged diff, FOCUSED to its error-handling hunks (focusDiff — the decisions
- *             pattern), then capped — lets the judge SEE whether the change already instruments the
- *             error it handles (so a MONITOR self-clears when the capture is present). The directive is
- *             inlined so the MODEL decides from the diff — no regex verdict. GUARD_SENTRY_DIFF_FULL=1
- *             feeds the whole diff instead (A/B escape hatch). */
-export function buildContext(message, nameStatus, diff = '', tier = CONTEXT_TIER) {
+/** Build the stdin payload. `names` tier appends the changed-file list (status + path), never hunks. */
+export function buildContext(message, nameStatus, tier = CONTEXT_TIER) {
     const msg = String(message).trim().slice(0, 2000);
     const base = `COMMIT MESSAGE:\n${msg}`;
-    if (tier === 'diff' && diff && String(diff).trim()) {
-        const focused = envVar('SENTRY_DIFF_FULL') ? '' : focusDiff(diff);
-        // Truncation fail-safe: if the (focused) evidence overflows the cap, a later swallow can be cut
-        // while an early capture survives — the judge must NOT read that absence as instrumented. Mark it
-        // incomplete (mirrors the decisions detect judge's INCOMPLETE fail-safe). focusDiff makes overflow
-        // rare (error hunks only), but a genuinely large multisurface commit can still hit it.
-        const full = focused || String(diff).trim();
-        const evidence = full.length > DIFF_EVIDENCE_CAP
-            ? `${full.slice(0, DIFF_EVIDENCE_CAP)}\n[EVIDENCE TRUNCATED — later hunks omitted; a swallow whose capture is not shown here may still be UN-instrumented. Do NOT infer SKIP from an absent capture.]`
-            : full;
-        return (`${base}\n\n` +
-            'STAGED DIFF (error-handling hunks; ground truth over the message). If this diff ALREADY adds a ' +
-            'Sentry capture — `Sentry.captureException`/`captureMessage` or a project wrapper such as ' +
-            '`captureMainMessage` — as an EXECUTABLE call for the error the change handles, the surface is ' +
-            'instrumented: reply SKIP. A capture that appears only in a COMMENT, a string literal, or test ' +
-            'code does NOT count. Likewise reply SKIP when the diff ELIMINATES the silent path itself: the ' +
-            'failure now propagates (a swallow deleted, a throw/reject added) and so auto-captures, or pure ' +
-            'logic/state handling prevents or surfaces the bad state — AND no swallowed handling remains or ' +
-            'is added anywhere in this diff. A removal is NOT elimination if the failure stays silent: the ' +
-            'caller still swallows it, the swallow merely moved or narrowed, or a crash became a silent ' +
-            'no-op. Reply MONITOR when a swallowed error-class is introduced or touched and the ' +
-            `diff adds NO real capture for it:\n${evidence}`);
-    }
     if (tier !== 'names' || !nameStatus || !String(nameStatus).trim())
         return base;
     const files = String(nameStatus).trim().split('\n').slice(0, 30).join('\n').slice(0, 2000);
@@ -258,7 +181,7 @@ function runJudgeOnce(input, model, prompt) {
  * N times and majority-votes (self-consistency). Shared so the gate and the benchmark exercise the
  * exact same path — prompt/parser/voting never drift.
  */
-export function judge(input, { model = MODEL, samples = 1, prompt = SENTRY_JUDGE_PROMPT } = {}) {
+export function judge(input, { model = MODEL, samples = SAMPLES, prompt = SENTRY_JUDGE_PROMPT } = {}) {
     if (envVar('SENTRY_NO_LLM') || !String(input).trim())
         return null;
     try {
@@ -281,24 +204,6 @@ export function judge(input, { model = MODEL, samples = 1, prompt = SENTRY_JUDGE
 function stagedNameStatus() {
     try {
         return execSync('git diff --cached --name-status', { cwd: CWD, encoding: 'utf8' }).trim();
-    }
-    catch {
-        return '';
-    }
-}
-// The staged diff for the `diff` context tier. Prefixes forced OFF-config (like the decisions detect
-// judge) so a consumer's diff.noprefix/mnemonicPrefix can't reshape what the judge reads. Best-effort:
-// a git failure OR a hang (timeout) returns '' → buildContext falls back to message-only for this run
-// (fail toward judging). The timeout matters: this runs INSIDE the commit-msg hook, so a wedged
-// `git diff` (index lock, a slow textconv/external diff driver) must not block the commit forever.
-function stagedDiff() {
-    try {
-        return execSync('git -c diff.noprefix=false -c diff.mnemonicPrefix=false diff --cached', {
-            cwd: CWD,
-            encoding: 'utf8',
-            maxBuffer: 64 * 1024 * 1024,
-            timeout: 10000,
-        }).trim();
     }
     catch {
         return '';
@@ -378,14 +283,6 @@ function applyGateResult(result, message, hard) {
     }
     return code;
 }
-/** Hard mode may only BLOCK on diff evidence. With an empty staged diff (amend with nothing
- * restaged, --allow-empty), the diff tier silently degrades to message-only judging — the exact
- * config whose precision the eval REJECTED for blocking (a "fix silent X" subject reads MONITOR
- * with no diff to self-clear against). Downgrade to warn + watchlist; never exit 1 on it.
- * An explicitly configured message/names tier keeps its hard block — that is the owner's choice. */
-export function effectiveHard(hardEnv, tier, diff) {
-    return hardEnv && (tier !== 'diff' || diff.trim() !== '');
-}
 /** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
 export function skipReason(message) {
     if (envVar('NO_SENTRY_JUDGE'))
@@ -407,18 +304,12 @@ export function run(gate) {
             process.exit(0);
         }
         const nameStatus = CONTEXT_TIER === 'names' ? stagedNameStatus() : '';
-        const diff = CONTEXT_TIER === 'diff' ? stagedDiff() : '';
-        // Hard-by-default (envBool distinguishes unset → hard from an explicit =0 soften); resolve it
-        // BEFORE judging so the samples default can follow it. Report mode never blocks → warn tier.
-        const hard = gate && effectiveHard(envBool('SENTRY_HARD') ?? true, CONTEXT_TIER, diff);
-        const result = judge(buildContext(message, nameStatus, diff, CONTEXT_TIER), {
-            samples: resolveSamples(hard),
-        });
+        const result = judge(buildContext(message, nameStatus, CONTEXT_TIER));
         if (!gate) {
             console.log(reportLine(result));
             process.exit(0);
         }
-        process.exit(applyGateResult(result, message, hard));
+        process.exit(applyGateResult(result, message, Boolean(envVar('SENTRY_HARD'))));
     }
     catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
