@@ -2,11 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseOpts, runDeterministic, selectedIds } from '../run.mts';
+import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
 
 const dirs = [];
 afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
+  delete process.env.DEVKIT_RUN_MODE;
+  delete process.env.DEVKIT_REVIEW_GUARDS;
+  delete process.env.DEVKIT_SHIP;
   vi.restoreAllMocks();
 });
 
@@ -159,6 +162,28 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('empty selection');
     expect(exec).not.toHaveBeenCalled();
   });
+
+  it('review --only cannot re-enable a gate outside the configured review allowlist', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size';
+
+    expect(runDeterministic(repo(['size', 'fanout']), { exec, only: ['fanout'] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('not enabled for review: fanout');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('review --only may narrow the allowlist and runs the canonical subset once', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'fanout,size';
+
+    expect(runDeterministic(repo(['clone']), { exec, only: ['fanout', 'fanout'] })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0][1][0]).toContain('folder-fanout');
+  });
 });
 
 describe('parseOpts — the argv tokenizer the real hook depends on', () => {
@@ -207,6 +232,17 @@ describe('selectedIds', () => {
   it('EXCLUDES opt-in coverage from the missing-config fallback (unadopted repo never wedged)', () => {
     expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
   });
+
+  it('uses the explicit review allowlist instead of components.guards in review mode', () => {
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = ' clone, size ,decisions ';
+    expect(selectedIds(d)).toEqual(['size', 'clone']);
+    process.env.DEVKIT_REVIEW_GUARDS = '';
+    expect(selectedIds(d)).toEqual([]);
+    delete process.env.DEVKIT_REVIEW_GUARDS;
+    expect(selectedIds(d)).toEqual([]);
+  });
 });
 
 describe('coverage — opt-in wiring through runDeterministic', () => {
@@ -223,5 +259,26 @@ describe('coverage — opt-in wiring through runDeterministic', () => {
     const exec = mkExec({});
     expect(runDeterministic(repo(null), { exec })).toBe(0);
     expect(exec.mock.calls.some(([, argv]) => argv[0].includes('coverage/run'))).toBe(false);
+  });
+});
+
+describe('prefixCacheScope', () => {
+  it('salts review entries with mode and allowlist while leaving commit/ship scopes unchanged', () => {
+    expect(prefixCacheScope()).toBeUndefined();
+    expect(prefixCacheScope('custom')).toBe('custom');
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,decisions';
+    expect(prefixCacheScope()).toBe('devkit-guards:review:size');
+    expect(prefixCacheScope('custom')).toBe('custom:review:size');
+  });
+
+  it('canonicalizes the effective guard set so order and duplicates share one cache key', () => {
+    process.env.DEVKIT_RUN_MODE = 'review';
+    expect(prefixCacheScope(undefined, ['fanout', 'size', 'fanout'])).toBe(
+      'devkit-guards:review:size,fanout',
+    );
+    expect(prefixCacheScope(undefined, ['size', 'fanout'])).toBe(
+      'devkit-guards:review:size,fanout',
+    );
   });
 });
