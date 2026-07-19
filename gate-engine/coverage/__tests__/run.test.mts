@@ -72,6 +72,18 @@ describe('computePercentages — istanbul/V8 aggregation', () => {
       1,
     );
   });
+
+  it('THROWS on a non-object root or a null/array/non-object entry (parseable but malformed)', () => {
+    expect(() => computePercentages(null)).toThrow();
+    expect(() => computePercentages([FILE])).toThrow();
+    expect(() => computePercentages({ '/x/a.ts': null })).toThrow();
+    expect(() => computePercentages({ '/x/a.ts': [1, 2] })).toThrow();
+    expect(() => computePercentages({ '/x/a.ts': 42 })).toThrow();
+  });
+
+  it('THROWS on a non-array branch counter', () => {
+    expect(() => computePercentages({ '/x/a.ts': { b: { '0': 5 } } })).toThrow();
+  });
 });
 
 describe('runCoverage — fail-closed gate', () => {
@@ -125,13 +137,33 @@ describe('runCoverage — fail-closed gate', () => {
     expect(text(s.err)).not.toMatch(/functions:/); // functions met → not listed
   });
 
-  it('artifact present but not valid JSON → FAIL (corrupt data is not verification)', () => {
+  it('artifact present but unparseable JSON → FAIL (corrupt data is not verification)', () => {
     const root = makeRoot();
     mkdirSync(join(root, 'coverage'), { recursive: true });
     writeFileSync(join(root, 'coverage', 'coverage-final.json'), '{ not json');
     const s = spy();
     expect(runCoverage(root)).toBe(1);
-    expect(text(s.err)).toMatch(/not valid JSON/i);
+    expect(text(s.err)).toMatch(/not valid coverage data/i);
+  });
+
+  it('parseable but malformed shape (garbage entry) → FAIL, never a silent 100% pass', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, 'coverage'), { recursive: true });
+    writeFileSync(join(root, 'coverage', 'coverage-final.json'), JSON.stringify({ '/x/a.ts': 42 }));
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toMatch(/not valid coverage data/i);
+    expect(text(s.log)).not.toMatch(/passed/i);
+  });
+
+  it('parseable but a null entry → FAIL cleanly, no uncaught crash', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, 'coverage'), { recursive: true });
+    writeFileSync(
+      join(root, 'coverage', 'coverage-final.json'),
+      JSON.stringify({ '/x/a.ts': null }),
+    );
+    expect(runCoverage(root)).toBe(1);
   });
 });
 

@@ -35,8 +35,17 @@ interface FileCoverage {
 const pct = (covered: number, total: number): number =>
   total === 0 ? 100 : parseFloat(((covered / total) * 100).toFixed(1));
 
-/** Aggregate statement/function/branch/line percentages across every file in a coverage-final.json. */
-export function computePercentages(cov: Record<string, FileCoverage>): Record<Metric, number> {
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Aggregate statement/function/branch/line percentages across every file in a coverage-final.json.
+ * Validates the shape and THROWS on parseable-but-malformed input (a non-object root, a null/array/
+ * non-object entry, a non-array branch counter) so the caller's catch fails CLOSED with a clean
+ * message — rather than crashing on a TypeError, or silently reading garbage as 100%.
+ */
+export function computePercentages(cov: unknown): Record<Metric, number> {
+  if (!isRecord(cov)) throw new Error('coverage-final.json is not an object');
   let ts = 0,
     cs = 0,
     tf = 0,
@@ -45,14 +54,17 @@ export function computePercentages(cov: Record<string, FileCoverage>): Record<Me
     cb = 0,
     tl = 0,
     cl = 0;
-  for (const file of Object.values(cov)) {
+  for (const entry of Object.values(cov)) {
+    if (!isRecord(entry)) throw new Error('coverage entry is not an object');
+    const file = entry as FileCoverage;
     const s = Object.values(file.s ?? {});
     ts += s.length;
     cs += s.filter((v) => v > 0).length;
     const fn = Object.values(file.f ?? {});
     tf += fn.length;
     cf += fn.filter((v) => v > 0).length;
-    for (const arms of Object.values(file.b ?? {})) {
+    for (const arms of Object.values((file.b ?? {}) as Record<string, unknown>)) {
+      if (!Array.isArray(arms)) throw new Error('branch counter is not an array');
       tb += arms.length;
       cb += arms.filter((v) => v > 0).length;
     }
@@ -92,18 +104,21 @@ export function runCoverage(cwd = process.cwd()): number {
     return 1;
   }
 
-  let parsed: Record<string, FileCoverage>;
+  // One catch for BOTH failure modes: unparseable JSON and parseable-but-malformed shape
+  // (computePercentages throws on the latter). Either way, corrupt data is not verification →
+  // fail CLOSED with a clean message instead of crashing or reading garbage as coverage.
+  let computed: Record<Metric, number>;
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, FileCoverage>;
+    computed = computePercentages(JSON.parse(readFileSync(file, 'utf8')));
   } catch {
-    console.error(`🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid JSON.`);
     console.error(
-      '   Corrupt coverage data is not verification. Re-run `bun run test:run:coverage`.',
+      `🚫 Coverage gate FAILED — ${COVERAGE_FILE} is present but not valid coverage data.`,
+    );
+    console.error(
+      '   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.',
     );
     return 1;
   }
-
-  const computed = computePercentages(parsed);
   const shortfalls = METRICS.filter(
     (m) => typeof coverage[m] === 'number' && computed[m] < (coverage[m] as number),
   );
