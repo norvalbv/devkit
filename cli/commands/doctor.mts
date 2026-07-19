@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { RECOMMENDED_GUARD_IDS, type Selection } from '../lib/components.mts';
+import { RECOMMENDED_GUARD_IDS, type Selection, structureCmdFor } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
@@ -27,7 +27,6 @@ import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
 import { bundledNames } from '../lib/sync-manifest.mts';
-import { structureCmdFor } from './init.mts';
 import { cmpSemver } from './update.mts';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.

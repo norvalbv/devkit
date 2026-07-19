@@ -104,23 +104,16 @@ For each item the checklist enumerated:
 - HTTPS enforcement
 - Rate limiting
 - Auth on all endpoints
-- Object-level authorization: ID-keyed lookups scoped to the caller (owner/tenant clause or
-  explicit ownership check) — route auth alone is not enough
 
 **Input:**
 - Schema validation (zod, etc.)
 - Parameterized queries (no SQL concat)
 - XXE prevention
-- No request-shaped spreads into writes (mass assignment) — named fields or strict schema parse
-- Shell commands via execFile/argv, never exec with interpolated request data
-- Request-derived paths contained to a base dir after resolve (traversal)
-- Outbound URLs built from request data validated against a scheme+host allowlist (SSRF)
 
 **Output:**
 - Security headers present
 - No sensitive data in responses
 - Proper error handling (no stack traces)
-- Redirect targets never taken raw from request data (open redirect)
 
 ## 4. Finalize
 ```bash

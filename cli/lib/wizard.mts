@@ -261,15 +261,15 @@ export async function runWizard({
   if (bail(reviewEnabled)) return null;
   let reviewGuards: string[] = [];
   if (reviewEnabled) {
-    const availableOptions = GUARD_OPTIONS.filter((g) => selection.guards?.includes(g.id));
-    if (availableOptions.length > 0) {
+    const options = GUARD_OPTIONS.filter((g) => selection.guards?.includes(g.id)).map((g) => ({
+      value: g.id,
+      label: g.label,
+      hint: g.hint,
+    }));
+    if (options.length > 0) {
       const picked = await multiselect({
         message: 'Select guards for devkit review',
-        options: availableOptions.map((g) => ({
-          value: g.id,
-          label: g.label,
-          hint: g.hint,
-        })),
+        options,
         initialValues: [...(selection.guards ?? [])],
         required: false,
       });

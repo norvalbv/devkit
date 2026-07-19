@@ -12,7 +12,7 @@
  * Both check and record are no-ops outside a ship run (DEVKIT_SHIP=1) — check misses,
  * record writes nothing. Resolves from process.cwd() — the consumer repo (W-3).
  */
-import { checkPrefix, clearPrefix, recordPrefix } from './prefix-cache.mjs';
+import { checkPrefix, clearPrefix, recordPrefix } from "./prefix-cache.mjs";
 function parseOpts(rest) {
     const opts = {};
     for (let i = 0; i < rest.length; i++) {

@@ -14,11 +14,11 @@
  */
 import { chmodSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../components.mjs';
-import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
-import { isTracked } from '../git-tracked.mjs';
-import { bundledNames, findConflicts, removeManifested, } from '../sync-manifest.mjs';
-import { registrationsFor } from './hook-registrations.mjs';
+import { AGENT_TARGETS } from "../components.mjs";
+import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
+import { isTracked } from "../git-tracked.mjs";
+import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest.mjs";
+import { registrationsFor } from "./hook-registrations.mjs";
 // Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
 // (gitignored by default, never tracked → invisible, never needs the tracked-skip), every other
 // mode into the shared `settings.json`. The Claude install/remove/check paths all resolve through
