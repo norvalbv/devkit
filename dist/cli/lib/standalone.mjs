@@ -16,8 +16,8 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir, writeIfAbsent } from './fs-helpers.mjs';
-import { buildStandaloneBlock, buildStandaloneHook, replaceGuardBlock, } from './husky/husky-block.mjs';
+import { packageDir, writeIfAbsent } from "./fs-helpers.mjs";
+import { buildStandaloneBlock, buildStandaloneHook, replaceGuardBlock, } from "./husky/husky-block.mjs";
 const firstLine = (e) => {
     let raw = '';
     if (e && typeof e === 'object') {

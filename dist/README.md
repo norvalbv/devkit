@@ -1,161 +1,147 @@
 # @norvalbv/devkit
 
-A versioned developer toolkit that keeps agent instructions, project conventions, and commit-time governance in one place. devkit ships reusable agent skills alongside the code that installs and enforces them, so consumer repositories do not have to maintain two drifting systems.
+Single source of truth for my reusable developer toolkit. One git repo, two halves shipped on the
+**same tag** so an agent skill and the engine it drives can never drift apart:
 
-> This repository is presented for external inspection and use, but its package metadata remains private. It does not currently include project-level licensing or contribution-policy files.
+| Half      | What                                                                       | How consumers get it |
+| --------- | -------------------------------------------------------------------------- | -------------------- |
+| **AGENT** | `skills/` + `agents/` — Claude/Cursor skills + reviewer/testing subagents  | bundled in the package; `devkit init` / `devkit sync-skills` / `devkit sync-agents` copy them in |
+| **CODE**  | shared **configs** (Biome, tsconfig) + the portable **gate-engine**        | `bun add -D git+https://github.com/norvalbv/devkit.git#<tag>` |
 
-## What devkit provides
+## Reference
 
-| Surface | Purpose | Delivered as |
-| --- | --- | --- |
-| Agent skills and reviewers | Repeatable security, performance, correctness, testing, conventions, and workflow guidance | `skills/` and `agents/`, copied by `devkit init` or sync commands |
-| Shared configuration | Biome and strict TypeScript presets for common stacks | Stable package export paths |
-| Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
-| Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
+- **Commands:** `devkit help` lists them all; `devkit help <command>` (or `devkit <command> --help`) prints full options.
+- **[docs/glossary.md](docs/glossary.md)** — package/standalone/overlay modes, gates, ratchets, baselines, scanRoot, manifest, self-heal.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — missing git, corrupt config JSON, monorepo setup, overlay self-heal, blocked commits, post-merge reconcile.
+- **[docs/structure-governance.md](docs/structure-governance.md)** · **[docs/directory-structure.md](docs/directory-structure.md)** — folder + import-wall governance.
+- **[docs/decisions/INDEX.md](docs/decisions/INDEX.md)** — the why-store (current ruling per architectural axis).
 
-The package and agent assets use the same release tag. A prompt or skill cannot silently drift away from the installer and gate implementation that consumes it.
+## The one rule: ship the generator, never the data
 
-## Prerequisites
+devkit ships **mechanisms** — the gate engines, the config loader, the shared lint/TS configs. It
+never ships a consumer's **data**: no baselines, no allowlists, no decision log, no
+`guard.config.json`. Those are born and live in each consumer repo. Bump the tag to update the
+engine; your data is untouched because it was never in here.
 
-- Git
-- [Bun](https://bun.sh/) for installation and repository development
-- Node.js 23.6 or newer when running the emitted JavaScript directly
-- A supported agent host when using the optional Claude/Cursor agent surfaces
+**W-3 — everything resolves against the CONSUMER cwd.** Every path the engine touches (`scanRoots`,
+the decisions dir, the allowlist, the search-code index) resolves against the consumer's working
+directory, never `__dirname` (the package dir in `node_modules`). An engine run from another repo
+scans **that** repo.
 
-## Quick start
+## Three ways to consume devkit
 
-Install a released tag into a consumer repository:
+| Mode | How | When |
+| ---- | --- | ---- |
+| **Package** (default) | `bun add -D` the git dep; configs `extends "@norvalbv/devkit/…"`; hook calls `bunx guard-*` | your own repos — auto-updates on a tag bump |
+| **Standalone** (`--standalone`) | `bun add -g` devkit once; vendors configs + a **fail-open** hook calling the global `guard-*` bins; **nothing in package.json** | shared / work repos where a private dep is unwanted, or you want zero tool deps |
+| **Overlay** (`--overlay`) | global devkit; everything **git-ignored**, the hook **chains** to the repo's own, configs **extend** theirs | a repo you **can't modify** — local + invisible |
+
+See [docs/glossary.md](docs/glossary.md) for what each mode means and `devkit help init` for the flags.
+
+**Zero consumer tool-deps.** devkit bundles the gate tools (jscpd, eslint + the structure plugin), so
+a consumer's `package.json` never gains them. The clone gate resolves devkit's own jscpd; structure-lint
+runs through the `guard-structure` bin (devkit's own eslint + plugin) for the config-driven stacks
+(react-app, component-lib). So **package mode adds only `@norvalbv/devkit` (+ biome/husky)**, and
+**standalone adds nothing at all** — with structure-lint now included in both. (electron keeps its
+consumer-side eslint preset.) Standalone gates are **fail-open**, so CI/contributors must install the
+pinned global devkit (`bun add -g …#<devkitRef>`); without it the gates silently skip.
+
+## Install (package mode)
 
 ```bash
-bun add -D git+https://github.com/norvalbv/devkit.git#<release-tag>
-bunx devkit init
-bunx devkit doctor
+bun add -D git+https://github.com/norvalbv/devkit.git#<tag>
 ```
 
-`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Use `--yes` for defaults or `--dry-run` to preview.
+- **Public repo → `git+https://`** (above): no auth, and bun clones it reliably (bun's `git+ssh`
+  clone fails on machines whose ssh auth doesn't reach its spawned git).
+- **Private fork / ssh host alias:** use the `git+ssh://` form instead — and for `devkit update`, set
+  `DEVKIT_REPO=git+ssh://git@github.com/norvalbv/devkit.git`. Never bun's `github:` shorthand: it
+  resolves through GitHub's API tarball endpoint, which 404s on a private repo.
+- **TypeScript source, prebuilt `.mjs` — no build on your side.** devkit is authored in TypeScript
+  (`.mts`); `devkit release` compiles it to a `dist/` of runnable `.mjs` and commits that on the
+  release tag. A git-installed consumer at a tag gets the prebuilt `.mjs` — nothing compiles on your
+  machine, and Node runs it straight from `node_modules`. (Working on devkit itself runs the `.mts`
+  source directly under Node 23.6+ / bun via native type-stripping — no build in the dev loop.)
 
-Extend the stable, extension-free package exports:
+### Extend the BARE subpath, never a file path
 
 ```jsonc
 // biome.jsonc
-{ "extends": ["@norvalbv/devkit/biome/base"] }
-
+{ "extends": ["@norvalbv/devkit/biome/base"] }    // or "@norvalbv/devkit/biome/react"
 // tsconfig.json
-{ "extends": "@norvalbv/devkit/tsconfig/base" }
+{ "extends": "@norvalbv/devkit/tsconfig/base" }   // also .../tsconfig/next · .../tsconfig/node
 ```
 
-## Operating modes
+Do **not** write `@norvalbv/devkit/biome/base.jsonc` — the exports map owns the file extension;
+commit to the stable bare name and the package decides what backs it.
 
-| Mode | Installation | Best fit |
+## gate-engine — portable governance gates
+
+Ten bins, run from your repo root (e.g. in a pre-commit hook), each scanning the **consumer's**
+cwd. They read **one** config — `guard.config.json` at the repo root (copy `guard.config.example.json`,
+drop the `//`-comment keys). The shared loader `@norvalbv/devkit/gate-engine/config`
+(`resolveGuardConfig`) is the single source of defaults + `GUARD_*` env overrides.
+
+| bin                   | engine |
+| --------------------- | ------ |
+| `guard-decisions`     | append-only decision-log CLI + architectural-smell gate (`detect`) + flip-flop guard (`check-alignment`) |
+| `guard-dup`           | semantic cross-file duplication matcher (search-code index) |
+| `guard-clone`         | token-level copy-paste / clone detector (jscpd) |
+| `guard-fanout`        | folder fan-out ratchet (≤N impl files/folder, any depth) |
+| `guard-size`          | size-disable ratchet (`eslint-disable max-lines` may only shrink) |
+| `guard-fallow-staged` | re-scopes a `fallow audit` JSON to the staged-diff overlap |
+| `guard-sentry`        | commit-msg advisory judge — flags a swallowed runtime error-class worth a Sentry capture |
+| `guard-review`        | in-chain reviewer gate — headless domain judges over the staged diff (sonnet → opus on FAIL), diff-keyed PASS cache |
+| `guard-structure`     | folder-structure lint via devkit's own eslint + plugin (config-driven stacks) |
+| `guard-prefix`        | deterministic-prefix pass cache for `devkit ship` retries (`check`/`record`/`clear` — an identical staged tree skips the deterministic gates) |
+| `guard-deterministic` | orchestrates the deterministic set in one gate (prefix check → size/fanout/dup/clone → aggregate → record) — one exit code, one report, replacing the per-guard hook protocol. `--structure "<cmd>"` folds structure-lint into the same report (config-driven `guard-structure gate` / electron `bunx eslint src`); `--extra "<label>=<cmd>"` (repeatable) adds a repo-specific gate; `--only "<id,id>"` restricts the built-in set |
+
+## Evals — every LLM judge is benchmarked
+
+Each LLM judge/agent devkit ships is scored against a labelled corpus, so a prompt edit lands as
+a measured delta, not a vibe. Shared method (Wilson CIs, flip-table gating under mid-p McNemar,
+hard floors, hashed baselines, anti-Goodhart run ledger): `gate-engine/decisions/eval/README.md`
+is the house standard. Current numbers and their history live in each eval's README — **a PR
+that regenerates a baseline must append a row to that README's results table**:
+
+| eval | subject | README (results + how to validate) |
 | --- | --- | --- |
-| Package | Git dependency plus generated repository assets | Repositories that can commit devkit configuration |
-| Standalone | Globally installed CLI; no package dependency | Shared or work repositories where a private dependency is unsuitable |
-| Overlay | Git-ignored local assets that chain to existing hooks/config | Repositories you cannot modify |
+| decisions-eval | the 3 decisions-gate judges (detect / alignment / depth) | `gate-engine/decisions/eval/README.md` |
+| critique-eval | the feature-critique agent | `gate-engine/critique/eval/README.md` |
 
-Package mode is the default. Standalone gates fail open when the pinned global CLI is unavailable, so CI and contributors must install the same release. Overlay mode is intentionally local and invisible to the host repository.
+Validate any published number: `BENCH_RUNS=3 node bench.mts --fail` in the eval dir at that
+commit — exit 0 and headlines within the printed MDE. Benches spend real tokens and never run in
+CI; cost prints before spend.
 
-## Core commands
-
-| Command | Outcome |
-| --- | --- |
-| `devkit init` | Detect and install selected components |
-| `devkit doctor` | Report configuration, hook, skill, and agent drift |
-| `devkit doctor --fix` | Re-run the recorded installation idempotently |
-| `devkit upgrade` | Re-pin and reconcile configs, assets, hooks, and gates |
-| `devkit sync-skills` / `sync-agents` | Refresh only the selected agent surfaces |
-| `devkit move` | Move source files and rewrite imports safely |
-| `devkit ship` | Commit from an isolated worktree and run the configured gate chain |
-| `devkit reconcile` | Refresh a shared checkout after shipped work merges |
-| `devkit clean` | Remove the recorded installation |
-
-Run `devkit help` for the command index and `devkit help <command>` for authoritative options.
-
-## Governance capabilities
-
-- Append-only architectural decisions and scope-aware alignment checks
-- Domain and correctness reviewer gates over staged changes
-- Semantic duplication and token-clone detection
-- Folder fan-out, source-size, and project-structure ratchets
-- Deterministic gate checkpointing for safe ship retries
-- Sentry-capture review for swallowed runtime failures
-- Optional qavis advisory routing for UI changes
-
-Every path the engine touches resolves from the consumer repository’s working directory. devkit ships mechanisms, not a consumer’s baselines, allowlists, decision history, or `guard.config.json`.
-
-## Benchmark evidence
-
-The dashboard below is generated from an append-only event ledger and immutable, sanitized checkpoints. The Markdown tables are the complete text alternative for the visual.
-
-<!-- benchmark-dashboard:start -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 4 suites have accepted checkpoints, 0 are current, and 4 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
-</picture>
-
-The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
-
-| Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| Feature critique | shipped | accepted | stale | quality | ↑ improved | Gold finding recall: 23/24 (95.8%) · Clean-plan pass rate: 4/5 (80.0%) |
-| Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
-| Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
-| Domain and correctness reviewers | shipped | evidence-only | unknown | coverage | → flat | Gold rows before catalog refresh: 24 · Gold rows after catalog refresh: 29 |
-| Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
-| Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
-| Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
-| Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
-| Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
-| Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
-
-### Shipped-agent coverage
-
-| Shipped agent | Lifecycle | Evidence mode | Suite(s) |
-| --- | --- | --- | --- |
-| API security agent | shipped | evidence-only | reviewer-fleet |
-| Backend performance agent | shipped | evidence-only | reviewer-fleet |
-| Commit guard agent | shipped | evidence-only | commit-guard-retrieval |
-| Conventions agent | shipped | accepted | conventions |
-| Correctness agent | shipped | evidence-only | reviewer-fleet |
-| Feature completeness agent | shipped | accepted | completeness |
-| Feature critique agent | shipped | accepted | critique |
-| Upstream-fix agent | shipped | none | — |
-| Frontend accessibility agent | shipped | none | — |
-| Frontend performance agent | shipped | evidence-only | reviewer-fleet |
-| Frontend security agent | shipped | evidence-only | reviewer-fleet |
-| Testing agent | shipped | none | — |
-| Testing reviewer agent | shipped | none | — |
-
-[Methodology, immutable checkpoints, full subject inventory, and provenance audit](docs/benchmarks/README.md)
-<!-- benchmark-dashboard:end -->
-
-## Known limitations
-
-- LLM benchmarks consume real tokens and never run in CI. CI validates published evidence and generated views without making model or network calls.
-- Several shipped agents and deterministic tools do not yet have an accepted benchmark. They remain visible as evidence gaps rather than being counted as covered.
-- A changed implementation, corpus, scorer, or runner hash makes the prior score stale until a suite adapter accepts a new checkpoint.
-- External systems such as qavis retain their own evidence; the local catalog marks them `external-required`.
-- The package is installed from Git releases rather than a public package registry.
-
-## Developing this repository
+## Onboarding — `devkit init`
 
 ```bash
-bun install --frozen-lockfile
-bun run test:run
-bun run typecheck
-bun run lint
-bun run lint:structure
-bun run benchmarks:check
+bunx devkit init     # interactive wizard on a TTY; --yes for all defaults; --dry-run to preview
 ```
 
-Benchmark tracker development additionally uses `bun run benchmarks:typecheck`. Release builds compile `.mts` sources into `dist/`; day-to-day changes should not hand-edit generated `dist` files.
+Auto-detects the stack, lets you pick components + gate-engine guards, scaffolds them, and records
+the selection in `.devkit/config.json` (so `doctor` knows what to check). Monorepo: run `init`
+**inside the package** — devkit is git-root-aware (the hook installs at the git root with a
+package-scoped block). Full flags, components, and removal: `devkit help init`. Verify the wiring
+anytime with `devkit doctor` (`--fix` re-runs init for the recorded selection).
 
-## Documentation
+## Updating (consumers)
 
-- [Benchmark methodology and immutable history](docs/benchmarks/README.md)
-- [Glossary and operating modes](docs/glossary.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Structure governance](docs/structure-governance.md)
-- [Directory structure](docs/directory-structure.md)
-- [Architectural decision index](docs/decisions/INDEX.md)
+One command reconciles a consumer fully — pin + devkitRef, emitted configs, skills/agents/hooks,
+and the husky/guard block — reading the recorded selection from `.devkit/config.json`:
+
+```bash
+bunx devkit upgrade            # --dry-run to preview; --force to adopt consumer-authored asset collisions
+```
+
+`upgrade` composes the individual slices idempotently and ends by running `doctor`. If a newer tag
+has been *published*, it installs it, then asks you to re-run only when the running CLI is itself
+behind that tag (it can't hot-swap to just-installed code) — a running CLI already at/above latest
+installs and reconciles in the same pass. For a local checkout / already-current install it
+reconciles in one pass and never re-adds a deselected agent surface. Consumer-tuned configs are never overwritten — record an
+intentional override in `.devkit/config.json` `configOverrides: ["tsconfig.json"]` so `doctor`
+treats it as OK, not drift.
+
+The lower-level slices stay callable for scripts: `devkit update` (self-update the package),
+`devkit sync-skills` / `devkit sync-agents`, and `devkit doctor --fix` (re-run init for the recorded
+selection). The emitted-config reconcile is no longer a standalone command — `devkit upgrade` folds it in.

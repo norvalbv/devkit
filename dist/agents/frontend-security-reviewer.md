@@ -81,11 +81,6 @@ For each item the checklist enumerated:
 **CSP:**
 - Content Security Policy headers configured
 
-**Cross-Origin:**
-- message handlers verify event.origin with an exact match before using event.data
-- postMessage names an explicit target origin — never '*' with sensitive payloads
-- event.data treated as untrusted input (postmessage-origin)
-
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
