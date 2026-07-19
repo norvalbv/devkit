@@ -7,7 +7,10 @@
 prepare_gate_worktree() {
   local wt=$1 root=$2 purpose=$3
   shift 3
-  local link_dirs=(.husky/_ node_modules)
+  # `coverage` (the gitignored coverage/coverage-final.json artifact the coverage gate reads) is
+  # linked so the gate can verify it inside the worktree; absent in $root → not linked (the loop
+  # below skips missing dirs) → the coverage gate fails hard, exactly as intended.
+  local link_dirs=(.husky/_ node_modules coverage)
   [ "$#" -gt 0 ] && link_dirs+=("$@")
 
   # Overlay mode stores its complete hook chain under ignored .devkit/hooks. It must be linked and
