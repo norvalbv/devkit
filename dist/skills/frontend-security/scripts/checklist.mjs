@@ -32,6 +32,13 @@ const RE_JWT = /\b(jwt|jsonwebtoken|expiresIn|decode|verify|sign)\b/i;
 const RE_OAUTH = /\b(oauth|authorize|redirect_uri|state|scope|grant_type)\b/i;
 const RE_HARDCODED = /\b(users|pass|key|secret|token)\s*[:=]\s*["'][^"']{8,}["']/i;
 const RE_DEBUG_LOG = /\bconsole\.(log|debug|info|warn|error)\s*\(/i;
+// Cross-origin messaging (coverage from OWASP ASVS v5 V3 — see SKILL.md Provenance).
+const RE_POSTMESSAGE =
+  /\bpostMessage\s*\(|addEventListener\s*\(\s*['"]message['"]|\bonmessage\s*=/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
@@ -72,7 +79,8 @@ function getStagedFiles() {
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0 && !f.endsWith('.pen'));
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -159,6 +167,14 @@ function detectSecurityPatterns(_files, diffs) {
   }
   if (RE_WINDOW_OPEN.test(fullDiff)) {
     items.push({ name: 'window-open', category: 'XSS Prevention', status: 'pending', issues: [] });
+  }
+  if (RE_POSTMESSAGE.test(fullDiff)) {
+    items.push({
+      name: 'postmessage-origin',
+      category: 'Cross-Origin',
+      status: 'pending',
+      issues: [],
+    });
   }
   if (RE_EVAL.test(fullDiff)) {
     items.push({

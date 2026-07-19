@@ -25,7 +25,7 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     return path;
 };
 import { realpathSync } from 'node:fs';
-import { main as decisionsMain } from "./decisions.mjs";
+import { main as decisionsMain } from './decisions.mjs';
 // Dev runs the .mts source (Node strips types); the shipped dist is compiled .mjs. Derive the
 // runtime extension from THIS module so the sub-engine URLs resolve in both.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';

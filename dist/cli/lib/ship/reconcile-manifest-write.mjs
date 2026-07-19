@@ -39,7 +39,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { writeFileAtomic } from "../atomic-write.mjs";
+import { writeFileAtomic } from '../atomic-write.mjs';
 const LOCK_STALE_MS = 60_000; // a lock dir older than this is a dead writer/reader — reap it
 const LOCK_WAIT_MS = 5_000; // total time to retry a contended lock before throwing (never write unlocked)
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns

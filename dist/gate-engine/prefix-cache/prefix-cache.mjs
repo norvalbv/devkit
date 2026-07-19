@@ -33,8 +33,8 @@ import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { clearEntries, devkitDataFile, loadEntries, saveEntries } from "../judge/verdict-store.mjs";
-import { gateConfigFingerprint } from "./config-fingerprint.mjs";
+import { clearEntries, devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
+import { gateConfigFingerprint } from './config-fingerprint.mjs';
 const STORE_FILE = 'prefix-cache.json';
 // This package's own version — a behaviour salt, not consumer data, so the one sanctioned
 // exception to W-3's "no import.meta.url" rule (gate semantics change across versions).

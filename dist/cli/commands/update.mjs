@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from "../lib/fs-helpers.mjs";
+import { readJson } from '../lib/fs-helpers.mjs';
 export const DEP = '@norvalbv/devkit';
 /**
  * The devkit git remote for `git ls-remote` + `bun add`. Defaults to git+https: the repo is public,
@@ -176,7 +176,7 @@ export default async function update(args, cwd) {
     // NOT regenerate — so a new hook shape (e.g. an added ship gate) won't apply until it's refreshed.
     try {
         if (JSON.parse(readFileSync(join(cwd, '.devkit', 'config.json'), 'utf8'))?.overlay)
-            console.log('  Overlay repo: run `devkit doctor --fix` to refresh the local gate hook to this version.');
+            console.log('  Overlay repo: run `devkit upgrade` to reconcile the local gate hook + configs to this version (or `devkit doctor --fix` for just the hook).');
     }
     catch {
         /* no readable overlay config — nothing to hint */

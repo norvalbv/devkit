@@ -5,7 +5,7 @@
  * future phase branch on it without re-detecting.
  */
 import { join } from 'node:path';
-import { readJson } from "./fs-helpers.mjs";
+import { readJson } from './fs-helpers.mjs';
 // A dep is "present" if it appears in dependencies OR devDependencies.
 function hasDep(pkg, name) {
     return Boolean(pkg.dependencies?.[name] || pkg.devDependencies?.[name]);

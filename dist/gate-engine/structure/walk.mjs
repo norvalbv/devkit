@@ -20,7 +20,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { matchesFolderName, resolvePatterns } from "./grammar.mjs";
+import { matchesFolderName, resolvePatterns } from './grammar.mjs';
 /**
  * Walk one structure.trees[] entry and return sorted tree-relative violator paths (the grandfather
  * set). `treeSpec` is the tree entry ({ root, grammar, libDomains?, frozenDirs?, ignoredDirs?,
