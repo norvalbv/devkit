@@ -1,5 +1,15 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,6 +28,7 @@ import {
   sha256,
   validateHistory,
 } from '../history.mts';
+import { withFileLock, withPublishFileLock } from '../publish-lock.mts';
 import { checkpointErrors, privacyErrors } from '../schema.mts';
 import { repositorySource } from '../source.mts';
 import type { BenchmarkEvent } from '../types.mts';
@@ -26,6 +37,48 @@ import { trackerFixture as fixture, memory, readableSnapshot } from './tracker-f
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
 describe('review feedback regressions', () => {
+  it('generalizes file locking without changing benchmark lock behavior', () => {
+    const root = mkdtempSync(join(tmpdir(), 'generic-file-lock-'));
+    const lockPath = join(root, 'operation.lock');
+    try {
+      expect(
+        withFileLock(lockPath, 'evidence write', () => {
+          const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as Record<string, unknown>;
+          expect(owner).toMatchObject({ pid: process.pid });
+          expect(owner.createdAt).toEqual(expect.any(Number));
+          expect(owner.token).toEqual(expect.any(String));
+          expect(statSync(lockPath).mode & 0o777).toBe(0o600);
+          expect(() => withFileLock(lockPath, 'evidence write', () => undefined)).toThrow(
+            /^Another evidence write is in progress$/,
+          );
+          return 'result';
+        }),
+      ).toBe('result');
+      expect(existsSync(lockPath)).toBe(false);
+
+      expect(() =>
+        withFileLock(lockPath, 'evidence write', () => {
+          throw new Error('action failed');
+        }),
+      ).toThrow(/^action failed$/);
+      expect(existsSync(lockPath)).toBe(false);
+
+      writeFileSync(lockPath, 'occupied');
+      expect(() => withFileLock(lockPath, 'evidence write', () => undefined)).toThrow(
+        /^Another evidence write is in progress or left an unreadable lock$/,
+      );
+      unlinkSync(lockPath);
+
+      withPublishFileLock(lockPath, () => {
+        expect(() => withPublishFileLock(lockPath, () => undefined)).toThrow(
+          /^Another benchmark publish is in progress$/,
+        );
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects null records and non-canonical event or checkpoint bytes without crashing', () => {
     expect(validateHistory(memory({ 'docs/benchmarks/history.jsonl': 'null\n' }))).toContain(
       'docs/benchmarks/history.jsonl:1: event must be an object',

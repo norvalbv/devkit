@@ -110,7 +110,7 @@ function releaseOwnedFile(lockPath: string, owner: string): void {
   }
 }
 
-function inspectPublishLock(lockPath: string): LockInspection {
+function inspectFileLock(lockPath: string): LockInspection {
   const takeoverPath = `${lockPath}.takeover`;
   const takeover = acquireTakeover(takeoverPath);
   if (!takeover) return 'busy';
@@ -156,26 +156,30 @@ function inspectPublishLock(lockPath: string): LockInspection {
   }
 }
 
-function acquirePublishLock(lockPath: string): string {
+function acquireFileLock(lockPath: string, operation: string): string {
   const owner = JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: randomUUID() });
   for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
     if (createOwnedFileAtomically(lockPath, owner)) return owner;
-    const inspection = inspectPublishLock(lockPath);
+    const inspection = inspectFileLock(lockPath);
     if (inspection === 'invalid')
-      throw new Error('Another benchmark publish is in progress or left an unreadable lock');
-    if (inspection === 'self') throw new Error('Another benchmark publish is in progress');
+      throw new Error(`Another ${operation} is in progress or left an unreadable lock`);
+    if (inspection === 'self') throw new Error(`Another ${operation} is in progress`);
     if (inspection === 'removed') continue;
     Atomics.wait(LOCK_WAIT_ARRAY, 0, 0, LOCK_WAIT_MS);
   }
-  throw new Error('Could not acquire benchmark publish lock');
+  throw new Error(`Could not acquire ${operation} lock`);
 }
 
-export function withPublishFileLock<T>(lockPath: string, action: () => T): T {
+export function withFileLock<T>(lockPath: string, operation: string, action: () => T): T {
   mkdirSync(dirname(lockPath), { recursive: true });
-  const lock = acquirePublishLock(lockPath);
+  const lock = acquireFileLock(lockPath, operation);
   try {
     return action();
   } finally {
     releaseOwnedFile(lockPath, lock);
   }
+}
+
+export function withPublishFileLock<T>(lockPath: string, action: () => T): T {
+  return withFileLock(lockPath, 'benchmark publish', action);
 }
