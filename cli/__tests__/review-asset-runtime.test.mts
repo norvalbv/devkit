@@ -17,9 +17,14 @@ import { resolveGuardConfig } from '../../gate-engine/config.mts';
 import { REVIEWERS, type ReviewerSelection } from '../../gate-engine/review/reviewers.mts';
 import {
   PACKAGED_REVIEW_ASSET_PATHS,
+  PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
+  PACKAGED_REVIEW_RUNTIME_MODULE_STEMS,
   preflightReviewAssets,
 } from '../../gate-engine/review/runtime.mts';
-import { materializeReviewAssetRuntime } from '../lib/ship/review/asset-runtime.mts';
+import {
+  materializeReviewAssetRuntime,
+  verifyReviewAssetRuntime,
+} from '../lib/ship/review/asset-runtime.mts';
 import { reviewRuntimeFingerprint } from '../lib/ship/review/runtime-fingerprint.mts';
 import { rootRegistry } from './_helpers.mts';
 
@@ -48,6 +53,10 @@ const EXPECTED_ASSETS = [
   'skills/frontend-security/SKILL.md',
   'skills/frontend-security/scripts/checklist.mjs',
 ] as const;
+const EXPECTED_RUNTIME_MODULES = [
+  'gate-engine/review/baseline-fallow-paths',
+  'gate-engine/review/baseline-gate',
+] as const;
 
 const { mkTmp, cleanup } = rootRegistry();
 
@@ -60,10 +69,30 @@ function write(root: string, path: string, contents = `asset:${path}\n`): string
   return destination;
 }
 
-function packageFixture(prefix = 'devkit-review-package-'): string {
+function packageFixture(
+  prefix = 'devkit-review-package-',
+  extension: '.mjs' | '.mts' = '.mts',
+): string {
   const root = mkTmp(prefix);
   for (const assetPath of PACKAGED_REVIEW_ASSET_PATHS) write(root, assetPath);
+  write(
+    root,
+    `gate-engine/review/baseline-fallow-paths${extension}`,
+    "export const frozenBaselineMarker = 'frozen-baseline';\n",
+  );
+  write(
+    root,
+    `gate-engine/review/baseline-gate${extension}`,
+    `import { frozenBaselineMarker } from './baseline-fallow-paths${extension}';\nprocess.stdout.write(frozenBaselineMarker);\n`,
+  );
   return root;
+}
+
+function expectedRuntimePaths(extension: '.mjs' | '.mts'): string[] {
+  return [
+    ...EXPECTED_ASSETS,
+    ...EXPECTED_RUNTIME_MODULES.map((stem) => `${stem}${extension}`),
+  ].sort();
 }
 
 function destination(prefix = 'devkit-review-assets-parent-'): string {
@@ -79,6 +108,8 @@ function verifyFingerprint(expected: string, path: string) {
 describe('packaged reviewer asset runtime', () => {
   it('derives one exact, sorted asset set from the reviewer registry', () => {
     expect(PACKAGED_REVIEW_ASSET_PATHS).toEqual(EXPECTED_ASSETS);
+    expect(PACKAGED_REVIEW_RUNTIME_MODULE_STEMS).toEqual(EXPECTED_RUNTIME_MODULES);
+    expect(PACKAGED_REVIEW_RUNTIME_ENTRYPOINT).toBe('gate-engine/review/baseline-gate');
     expect(PACKAGED_REVIEW_ASSET_PATHS).not.toContain('agents/frontend-accessibility-reviewer.md');
     expect(PACKAGED_REVIEW_ASSET_PATHS).not.toContain('skills/brainstorming/SKILL.md');
   });
@@ -102,7 +133,7 @@ describe('packaged reviewer asset runtime', () => {
     const captured = materializeReviewAssetRuntime(source, requested);
 
     expect(captured.root).toBe(realpathSync(requested));
-    expect(captured.paths).toEqual(EXPECTED_ASSETS);
+    expect(captured.paths).toEqual(expectedRuntimePaths('.mts'));
     expect(captured.fingerprint).toBe(reviewRuntimeFingerprint(captured.root));
     expect(existsSync(join(captured.root, 'agents/unregistered.md'))).toBe(false);
     expect(existsSync(join(captured.root, 'skills/unregistered'))).toBe(false);
@@ -124,6 +155,45 @@ describe('packaged reviewer asset runtime', () => {
     ]);
   });
 
+  it.each([
+    '.mts',
+    '.mjs',
+  ] as const)('materializes a usable private package runtime from %s package modules', (extension) => {
+    const source = packageFixture('devkit-review-package-', extension);
+    const captured = materializeReviewAssetRuntime(source, destination());
+    const entrypoint = join(captured.root, `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension}`);
+
+    expect(captured.paths).toEqual(expectedRuntimePaths(extension));
+    expect(existsSync(entrypoint)).toBe(true);
+    expect(
+      existsSync(
+        join(
+          captured.root,
+          `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension === '.mts' ? '.mjs' : '.mts'}`,
+        ),
+      ),
+    ).toBe(false);
+    const result = spawnSync(process.execPath, [entrypoint], {
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REVIEW_PACKAGE_ROOT: captured.root },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('frozen-baseline');
+  });
+
+  it('mirrors the hook extension preference and rejects an incomplete preferred module set', () => {
+    const source = packageFixture();
+    write(
+      source,
+      'gate-engine/review/baseline-gate.mjs',
+      "import './baseline-fallow-paths.mjs';\n",
+    );
+
+    expect(() => materializeReviewAssetRuntime(source, destination())).toThrow(
+      /missing: .*baseline-fallow-paths\.mjs/,
+    );
+  });
+
   it('fails coherently and removes the private runtime when package bytes change during capture', () => {
     const source = packageFixture();
     const runtime = destination();
@@ -137,6 +207,29 @@ describe('packaged reviewer asset runtime', () => {
     expect(existsSync(runtime)).toBe(false);
   });
 
+  it('fails coherently when the hook-preferred package extension changes during capture', () => {
+    const source = packageFixture();
+    const runtime = destination();
+
+    expect(() =>
+      materializeReviewAssetRuntime(source, runtime, {
+        beforeSourceVerification: () => {
+          write(
+            source,
+            'gate-engine/review/baseline-fallow-paths.mjs',
+            "export const frozenBaselineMarker = 'changed';\n",
+          );
+          write(
+            source,
+            'gate-engine/review/baseline-gate.mjs',
+            "import './baseline-fallow-paths.mjs';\n",
+          );
+        },
+      }),
+    ).toThrow(/changed during private runtime capture/);
+    expect(existsSync(runtime)).toBe(false);
+  });
+
   it('rejects assets whose symlink target escapes the canonical package root', () => {
     const source = packageFixture();
     const runtime = destination();
@@ -144,6 +237,18 @@ describe('packaged reviewer asset runtime', () => {
     const external = write(mkTmp('devkit-review-external-'), 'brief.md');
     rmSync(brief);
     symlinkSync(external, brief);
+
+    expect(() => materializeReviewAssetRuntime(source, runtime)).toThrow(/escapes package root/);
+    expect(existsSync(runtime)).toBe(false);
+  });
+
+  it('rejects a baseline module whose symlink target escapes the canonical package root', () => {
+    const source = packageFixture();
+    const runtime = destination();
+    const helper = join(source, 'gate-engine/review/baseline-fallow-paths.mts');
+    const external = write(mkTmp('devkit-review-external-'), 'baseline-fallow-paths.mts');
+    rmSync(helper);
+    symlinkSync(external, helper);
 
     expect(() => materializeReviewAssetRuntime(source, runtime)).toThrow(/escapes package root/);
     expect(existsSync(runtime)).toBe(false);
@@ -189,6 +294,35 @@ describe('packaged reviewer asset runtime', () => {
     expect(mutated.stderr).toContain(captured.root);
   });
 
+  it('post-verifies both the packaged source and immutable private runtime', () => {
+    const source = packageFixture();
+    const captured = materializeReviewAssetRuntime(source, destination());
+    expect(() =>
+      verifyReviewAssetRuntime(source, captured.root, captured.fingerprint),
+    ).not.toThrow();
+
+    const brief = join(source, 'agents/api-security-reviewer.md');
+    const original = readFileSync(brief);
+    writeFileSync(brief, 'changed package\n');
+    expect(() => verifyReviewAssetRuntime(source, captured.root, captured.fingerprint)).toThrow(
+      /packaged reviewer asset changed/,
+    );
+
+    writeFileSync(brief, original);
+    const baselineHelper = join(source, 'gate-engine/review/baseline-gate.mts');
+    const originalBaselineHelper = readFileSync(baselineHelper);
+    writeFileSync(baselineHelper, 'changed helper\n');
+    expect(() => verifyReviewAssetRuntime(source, captured.root, captured.fingerprint)).toThrow(
+      /baseline-gate\.mts/,
+    );
+
+    writeFileSync(baselineHelper, originalBaselineHelper);
+    writeFileSync(join(captured.root, 'agents/api-security-reviewer.md'), 'changed runtime\n');
+    expect(() => verifyReviewAssetRuntime(source, captured.root, captured.fingerprint)).toThrow(
+      /private reviewer asset runtime changed/,
+    );
+  });
+
   it('materializes through the CLI when the package path is a symlink containing spaces', () => {
     const source = packageFixture();
     const parent = mkTmp('devkit-review-package-link-');
@@ -196,7 +330,7 @@ describe('packaged reviewer asset runtime', () => {
     symlinkSync(source, packageLink);
     const runtime = destination();
 
-    const result = spawnSync(process.execPath, [ASSET_CLI, packageLink, runtime], {
+    const result = spawnSync(process.execPath, [ASSET_CLI, 'materialize', packageLink, runtime], {
       encoding: 'utf8',
     });
 
