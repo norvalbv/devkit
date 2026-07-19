@@ -4,7 +4,7 @@
     "cli/commands/doctor.mts": 890,
     "cli/commands/init.mts": 1477,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
-    "cli/lib/husky/husky-block.mts": 528,
+    "cli/lib/husky/husky-block.mts": 527,
     "cli/lib/overlay.mts": 561,
     "gate-engine/co-occurrence/matcher.mts": 543,
     "gate-engine/critique/eval/bench.mts": 1177,

@@ -96,6 +96,24 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     expect(r.calls).toContain('guard-review');
   });
 
+  it('review mode runs only AI gates in the explicit review allowlist', () => {
+    const r = runHook({ DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'decisions' });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-decisions');
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('trims review allowlist entries consistently with the deterministic parser', () => {
+    const r = runHook({
+      DEVKIT_RUN_MODE: 'review',
+      DEVKIT_REVIEW_GUARDS: ' decisions , review ',
+    });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-decisions');
+    expect(r.calls).toContain('guard-review');
+  });
+
   it('passes the resolved structure command through to the orchestrator', () => {
     const r = runHook(
       { DET_RC: '0' },
