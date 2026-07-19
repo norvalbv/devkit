@@ -59,8 +59,16 @@ const DETERMINISTIC = [
         module: '../co-occurrence/clone-detector.mjs',
         args: ['scan', '--changed', '--gate'],
     },
+    // Coverage reads coverage/coverage-final.json and enforces guard.config.json `coverage` thresholds.
+    // `optIn`: never swept in by the missing-config fallback below — it runs ONLY when a repo explicitly
+    // selects it (an unadopted/CI repo must not fail hard on a coverage artifact it never asked for).
+    // Fail-CLOSED once selected: no 2 (fail-open) path — absent data exits 1.
+    { id: 'coverage', module: '../coverage/run.mjs', args: ['gate'], optIn: true },
 ];
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
+// The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
+// and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
+const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
 const WHITESPACE_RE = /\s+/;
@@ -93,20 +101,21 @@ export function parseOpts(argv) {
     return opts;
 }
 // Which deterministic guards this repo selected. Source of truth = .devkit/config.json
-// components.guards (written by `devkit init`). A missing/unreadable config runs the WHOLE set —
-// never silently skip a gate the hook expected to run.
+// components.guards (written by `devkit init`). A missing/unreadable config runs the DEFAULT set —
+// never silently skip a gate the hook expected to run — but opt-in guards (coverage) run ONLY when
+// explicitly selected, so an unadopted/CI repo is never wedged by a gate it never asked for.
 export function selectedIds(cwd) {
     const cfgPath = path.join(cwd, '.devkit', 'config.json');
     if (!existsSync(cfgPath))
-        return ALL_IDS;
+        return DEFAULT_IDS;
     try {
         const guards = JSON.parse(readFileSync(cfgPath, 'utf8'))?.components?.guards;
         if (!Array.isArray(guards))
-            return ALL_IDS;
+            return DEFAULT_IDS;
         return ALL_IDS.filter((id) => guards.includes(id));
     }
     catch {
-        return ALL_IDS;
+        return DEFAULT_IDS;
     }
 }
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
