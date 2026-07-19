@@ -110,17 +110,11 @@ function inspectChild(
   }
 }
 
-/**
- * Resolve/create private children below a trusted existing directory without following symlinks.
- *
- * Node does not expose openat/linkat. Pre/post inode and realpath checks therefore fail closed when
- * replacement is observed, while non-writable ancestry prevents other-user races. A malicious
- * process running as the same uid can still race an individual path syscall between those checks.
- */
-export function managedPath(
+function resolveManagedPath(
   anchor: string,
   segments: readonly string[],
   create: boolean,
+  privateLeaf: boolean,
 ): string | null {
   const anchorIdentity = inspectDirectory(anchor);
   assertDirectoryPermissions(anchor, anchorIdentity, false);
@@ -135,7 +129,12 @@ export function managedPath(
   for (const [index, segment] of segments.entries()) {
     assertSameDirectory(current, currentIdentity);
     const child = childPath(current, segment, create);
-    const childIdentity = inspectChild(child, confinedRoot, index === segments.length - 1, create);
+    const childIdentity = inspectChild(
+      child,
+      confinedRoot,
+      privateLeaf && index === segments.length - 1,
+      create,
+    );
     if (!childIdentity) return null;
     assertSameDirectory(current, currentIdentity);
     current = childIdentity.realPath;
@@ -144,6 +143,30 @@ export function managedPath(
   assertConfined(confinedRoot, currentIdentity.realPath);
   assertSameDirectory(current, currentIdentity);
   return current;
+}
+
+/**
+ * Resolve/create private children below a trusted existing directory without following symlinks.
+ *
+ * Node does not expose openat/linkat. Pre/post inode and realpath checks therefore fail closed when
+ * replacement is observed, while non-writable ancestry prevents other-user races. A malicious
+ * process running as the same uid can still race an individual path syscall between those checks.
+ */
+export function managedPath(
+  anchor: string,
+  segments: readonly string[],
+  create: boolean,
+): string | null {
+  return resolveManagedPath(anchor, segments, create, true);
+}
+
+/** Resolve/create non-writable ancestry whose final directory need not have private-leaf mode. */
+export function managedParentPath(
+  anchor: string,
+  segments: readonly string[],
+  create: boolean,
+): string | null {
+  return resolveManagedPath(anchor, segments, create, false);
 }
 
 function filePath(directory: string, name: string): { directory: DirectoryIdentity; file: string } {

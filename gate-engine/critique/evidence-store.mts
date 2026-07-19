@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import path from 'node:path';
 import {
   assertPlanCritiquePayloadRefs,
   type BlobRefV1,
@@ -25,6 +23,7 @@ import {
   publishImmutable,
   readPrivateFile,
 } from './immutable-file.mts';
+import { resolvePlanCritiqueEvidenceRoot } from './persistence-lock.mts';
 
 export {
   type BlobRefV1,
@@ -355,17 +354,6 @@ function validateRecord(value: unknown): asserts value is PlanCritiqueRecordV1 {
   validateContract(record);
 }
 
-function storeRoot(options: { root?: string }, create: boolean): string | null {
-  if (options.root === undefined)
-    return managedPath(homedir(), ['.devkit', 'evidence', 'plan-critiques', 'v1'], create);
-  requireValue(
-    typeof options.root === 'string' && options.root.length > 0 && path.isAbsolute(options.root),
-    '$.root',
-  );
-  const requested = path.normalize(options.root);
-  return managedPath(path.dirname(requested), [path.basename(requested)], create);
-}
-
 function validatePersistedParent(record: PlanCritiqueRecordV1, options: { root?: string }): void {
   if (record.lineage.pass === 1) return;
   const parentId = record.lineage.parentCritiqueId as string;
@@ -395,7 +383,7 @@ export function persistPlanCritiqueRecord(
   validateRecord(record);
   assertPlanCritiquePayloadRefs(record, snapshots);
   validatePersistedParent(record, options);
-  const base = storeRoot(options, true) as string;
+  const base = resolvePlanCritiqueEvidenceRoot(options, true) as string;
   const records = managedPath(base, ['records'], true) as string;
   const state = publishImmutable(
     records,
@@ -414,7 +402,7 @@ export function persistPlanCritiqueRecord(
 
 function readStoredBlob(ref: BlobRefV1, options: { root?: string }): Buffer | null {
   validateRef({ sha256: ref.sha256, byteLength: ref.byteLength, ref: ref.ref }, '$.blob');
-  const base = storeRoot(options, false);
+  const base = resolvePlanCritiqueEvidenceRoot(options, false);
   const blobs = base && managedPath(base, ['blobs', 'sha256'], false);
   if (!blobs) return null;
   const value = readPrivateFile(blobs, ref.sha256);
@@ -428,7 +416,7 @@ export function readPlanCritiqueRecord(
   options: { root?: string } = {},
 ): PlanCritiqueRecordV1 | null {
   if (!ID.test(critiqueId)) return null;
-  const base = storeRoot(options, false);
+  const base = resolvePlanCritiqueEvidenceRoot(options, false);
   const records = base && managedPath(base, ['records'], false);
   if (!records) return null;
   const raw = readPrivateFile(records, `${critiqueId}.json`);
@@ -476,7 +464,7 @@ export function readPlanCritiqueTranscript(
 }
 
 export function listPlanCritiqueRecords(options: { root?: string } = {}): PlanCritiqueRecordV1[] {
-  const base = storeRoot(options, false);
+  const base = resolvePlanCritiqueEvidenceRoot(options, false);
   const records = base && managedPath(base, ['records'], false);
   if (!records) return [];
   return listPrivateFiles(records)
