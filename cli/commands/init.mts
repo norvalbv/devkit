@@ -50,6 +50,7 @@ import {
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
+import { LEGACY_AGENT_PROVIDERS } from '../lib/install/agent-providers.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
   ensureFallowGitignore,
@@ -292,8 +293,7 @@ function selectionFromFlags(flags: InitFlags): Selection {
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-  // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
-  // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
+  // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
   sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
   return sel;
 }
@@ -1068,7 +1068,7 @@ function pruneDeselectedSurfaces(
   hookComponents: string[],
   dryRun: boolean,
 ) {
-  const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
+  const prunedTargets = LEGACY_AGENT_PROVIDERS.filter((t) => !agentTargets.includes(t));
   // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
   // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
   const settingsFile: Record<string, string> = {

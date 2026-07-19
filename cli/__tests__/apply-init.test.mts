@@ -43,6 +43,7 @@ describe('selection helpers', () => {
       structure: true,
     });
     expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
+    expect(s.agentTargets).toEqual(['claude', 'cursor']);
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {
@@ -50,6 +51,10 @@ describe('selection helpers', () => {
     expect(s.biome).toBe(false);
     expect(s.tsconfig).toBe(true);
     expect(s.guards).toEqual(['size']);
+    expect(normalizeSelection({ agentTargets: null as never }).agentTargets).toEqual([
+      'claude',
+      'cursor',
+    ]);
   });
 
   it('parseFlags reads --no-* and --guards and --remove-deselected', () => {

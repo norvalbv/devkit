@@ -27,7 +27,6 @@ import {
   previewGrandfather,
 } from '../../gate-engine/ratchets/size-disable.mts';
 import {
-  AGENT_TARGETS,
   applyOverlayConstraints,
   GUARD_OPTIONS,
   newBundledGates,
@@ -38,6 +37,7 @@ import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { selfHostSelection } from '../lib/husky/self-host.mts';
+import { resolveExistingAgentProviders } from '../lib/install/agent-providers.mts';
 import { syncHookScripts } from '../lib/install/install-hooks.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
@@ -111,15 +111,11 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   const standalone = Boolean(cfg.standalone);
   const { gitRoot } = detectGitRoot(cwd);
 
-  // agentTargets: normalizeSelection ALWAYS fills this (both surfaces), so read the RAW recorded
+  // agentTargets: normalizeSelection ALWAYS fills the fresh defaults, so read the RAW recorded
   // value first — else a legacy claude-only repo gets .cursor re-added. When absent (legacy config),
-  // infer from which surfaces currently hold devkit content; fall back to both.
+  // infer only historical Claude/Cursor ownership; arbitrary .codex/.agents content is user-owned.
   const rawTargets = cfg.components?.agentTargets;
-  const inferred = AGENT_TARGETS.filter(
-    (t) =>
-      existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')),
-  );
-  const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+  const agentTargets = resolveExistingAgentProviders(gitRoot, rawTargets, ['skills', 'agents']);
 
   // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
   // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
