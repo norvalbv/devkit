@@ -12,6 +12,7 @@
     "gate-engine/decisions/detect.mts": 550,
     "gate-engine/decisions/eval/bench.mts": 1059,
     "gate-engine/edge-cases/eval/lib/sources.mts": 571,
+    "gate-engine/judge/verdict-store.mts": 524,
     "gate-engine/review/eval/bench.mts": 878,
     "gate-engine/review/eval/conventions/bench.mts": 988,
     "gate-engine/review/eval/reviewers/bench.mts": 977,
