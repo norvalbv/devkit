@@ -12,7 +12,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { devkitDataFile, loadEntries, saveEntries } from "../judge/verdict-store.mjs";
+import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
 const STORE_FILE = 'decisions-verdict-cache.json';
 // Version salt (same rationale as prefix-cache): a devkit upgrade can change a judge's prompt
 // or parsing, so verdicts earned by an older judge must not be honoured by a newer one.

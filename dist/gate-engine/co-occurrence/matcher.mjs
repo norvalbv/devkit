@@ -42,11 +42,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
-import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from "./allowlist-io.mjs";
-import { loadChangedSet } from "./changed-files.mjs";
-import { classifyPair } from "./classify.mjs";
-import { isExpired } from "./decay.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from './allowlist-io.mjs';
+import { loadChangedSet } from './changed-files.mjs';
+import { classifyPair } from './classify.mjs';
+import { isExpired } from './decay.mjs';
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
 // Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every

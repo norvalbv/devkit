@@ -42,11 +42,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { envFlag, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
-import { execJudge } from "../judge/run-judge.mjs";
-import { currentTarget, parseDecision } from "./decisions.mjs";
-import { hasVerdict, saveVerdict, verdictKey } from "./verdict-cache.mjs";
+import { envFlag, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
+import { currentTarget, parseDecision } from './decisions.mjs';
+import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
 const GLOB_ESC_RE = /[.+^${}()|[\]\\]/g;
 const GLOB_STARS_RE = /\*\*|\*|\?/g; // wildcards in ONE pass (** before *; ? is single-char, no placeholder)

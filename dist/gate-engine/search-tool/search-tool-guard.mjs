@@ -17,9 +17,9 @@
  * never hardcoded. devkit ships no frink-specific tool names.
  */
 import { readFileSync } from 'node:fs';
-import { resolveGuardConfig } from "../config.mjs";
-import { classify, extractPattern, hasCommandSearch, normalize, } from "./search-tool-lib.mjs";
-import { resolveSearchTools } from "./tools.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { classify, extractPattern, hasCommandSearch, normalize, } from './search-tool-lib.mjs';
+import { resolveSearchTools } from './tools.mjs';
 const MODE = process.env.SEARCH_GUARD_MODE || 'warn'; // warn | block | off
 if (MODE === 'off')
     process.exit(0);

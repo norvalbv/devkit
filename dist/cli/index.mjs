@@ -15,8 +15,8 @@
  * Consumers install prebuilt .mjs — no build on their side.
  */
 import { readFileSync } from 'node:fs';
-import { assertGit } from "./lib/guard/require-git.mjs";
-import { renderCommandHelp, renderTopLevelHelp } from "./lib/help/render.mjs";
+import { assertGit } from './lib/guard/require-git.mjs';
+import { renderCommandHelp, renderTopLevelHelp } from './lib/help/render.mjs';
 /** devkit's own version, read from the package it ships in (always accurate). */
 function devkitVersion() {
     // readFileSync + JSON.parse boundary — the shipped package.json always carries a version.
@@ -24,19 +24,19 @@ function devkitVersion() {
     return pkg.version;
 }
 const COMMANDS = {
-    init: () => import("./commands/init.mjs"),
-    doctor: () => import("./commands/doctor.mjs"),
-    clean: () => import("./commands/clean.mjs"),
-    'sync-skills': () => import("./commands/sync/sync-skills.mjs"),
-    'sync-agents': () => import("./commands/sync/sync-agents.mjs"),
-    'sync-hooks': () => import("./commands/sync/sync-hooks.mjs"),
-    release: () => import("./commands/release.mjs"),
-    update: () => import("./commands/update.mjs"),
-    upgrade: () => import("./commands/upgrade.mjs"),
-    move: () => import("./commands/move.mjs"),
-    reconcile: () => import("./commands/reconcile.mjs"),
-    ship: () => import("./commands/ship.mjs"),
-    'guard-branch': () => import("./commands/guard-branch.mjs"),
+    init: () => import('./commands/init.mjs'),
+    doctor: () => import('./commands/doctor.mjs'),
+    clean: () => import('./commands/clean.mjs'),
+    'sync-skills': () => import('./commands/sync/sync-skills.mjs'),
+    'sync-agents': () => import('./commands/sync/sync-agents.mjs'),
+    'sync-hooks': () => import('./commands/sync/sync-hooks.mjs'),
+    release: () => import('./commands/release.mjs'),
+    update: () => import('./commands/update.mjs'),
+    upgrade: () => import('./commands/upgrade.mjs'),
+    move: () => import('./commands/move.mjs'),
+    reconcile: () => import('./commands/reconcile.mjs'),
+    ship: () => import('./commands/ship.mjs'),
+    'guard-branch': () => import('./commands/guard-branch.mjs'),
 };
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([

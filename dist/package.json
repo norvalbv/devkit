@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.34.1",
+  "version": "0.37.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -46,6 +46,7 @@
     "guard-clone": "./dist/gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./dist/gate-engine/ratchets/folder-fanout.mjs",
     "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
+    "guard-coverage": "./dist/gate-engine/coverage/run.mjs",
     "guard-structure": "./dist/gate-engine/structure/run.mjs",
     "guard-fallow-staged": "./dist/gate-engine/fallow/staged-filter.mjs",
     "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"
@@ -60,6 +61,9 @@
     "playground": "bun scripts/playground.mts",
     "lint": "biome check .",
     "lint:structure": "eslint cli gate-engine",
+    "benchmarks:check": "bun gate-engine/eval/cli.mts check",
+    "benchmarks:render": "bun gate-engine/eval/cli.mts render",
+    "benchmarks:typecheck": "tsc -p gate-engine/eval/tsconfig.json",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
     "prepare": "husky",

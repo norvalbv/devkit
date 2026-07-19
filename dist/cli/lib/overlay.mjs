@@ -20,15 +20,15 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from "../commands/sync/sync-agents.mjs";
-import { syncSkills } from "../commands/sync/sync-skills.mjs";
-import { AGENT_TARGETS, normalizeSelection } from "./components.mjs";
-import { detectGitRoot } from "./detect-git-root.mjs";
-import { packageDir, readJson, writeIfAbsent } from "./fs-helpers.mjs";
-import { isTracked } from "./git-tracked.mjs";
-import { buildOverlayHook, buildPassthroughHook } from "./husky/husky-block.mjs";
-import { detectFallow, installFallow, saveFallowBaselines } from "./install/install-fallow.mjs";
-import { installHookRegistrations, syncHookScripts } from "./install/install-hooks.mjs";
+import { syncAgents } from '../commands/sync/sync-agents.mjs';
+import { syncSkills } from '../commands/sync/sync-skills.mjs';
+import { AGENT_TARGETS, normalizeSelection } from './components.mjs';
+import { detectGitRoot } from './detect-git-root.mjs';
+import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
+import { isTracked } from './git-tracked.mjs';
+import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs';
+import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mjs';
+import { installHookRegistrations, syncHookScripts } from './install/install-hooks.mjs';
 const firstLine = (e) => {
     let raw = '';
     if (e && typeof e === 'object') {

@@ -29,7 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from "../../../gate-engine/config.mjs";
+import { resolveGuardConfig } from '../../../gate-engine/config.mjs';
 const OUT = 'eslint/baselines/imports.mjs';
 const RULE = 'project-structure/independent-modules';
 const IMPORT_PATH_RE = /Import path\s*=\s*"([^"]+)"/;
