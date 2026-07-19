@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { runDirectReviewCli } from './run-direct.mts';
@@ -115,7 +116,21 @@ function verifyPairs(pairs: string[]): void {
   }
 }
 
+/** Copy one descriptor-pinned regular file into a new private runtime path. */
+export function pinReviewRuntimeFile(source: string, destination: string): string {
+  const pinned = readPinnedReviewFile(source);
+  const mode = (pinned.mode & 0o111) === 0 ? 0o600 : 0o700;
+  writeFileSync(destination, pinned.content, { flag: 'wx', mode });
+  return reviewRuntimeFileFingerprint(pinned.content, pinned.mode);
+}
+
 function runCli(args: string[]): void {
+  if (args[0] === '--pin') {
+    if (args.length !== 3)
+      throw new Error('usage: runtime-fingerprint --pin <source> <destination>');
+    process.stdout.write(pinReviewRuntimeFile(args[1] as string, args[2] as string));
+    return;
+  }
   if (args[0] === '--verify') {
     verifyPairs(args.slice(1));
     return;
