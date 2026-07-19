@@ -19,7 +19,10 @@ export interface ReviewOutcome {
   reason: string;
   escalated: boolean;
   transcript?: string;
-  /** The model that actually ran the first pass; absent only when no judge ran. */
+  /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
+   * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
+   * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
+   * usage dashboard chasing a model downgrade that never happened. */
   model?: string;
 }
 
@@ -81,6 +84,8 @@ export function reviewJudgeEnv(cfg: GuardConfig): NodeJS.ProcessEnv {
   };
 }
 
+/** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
+ * all — a skill-less reviewer has no stateFile to read → unverifiable). */
 export function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistState | null {
   if (!reviewer.stateFile) return null;
   try {
@@ -92,6 +97,8 @@ export function readChecklistState(cwd: string, reviewer: Reviewer): ChecklistSt
   }
 }
 
+/** Remove a reviewer's checklist artifact so a stale one can never satisfy the NEXT run. A
+ * skill-less reviewer has no stateFile — nothing to clean up. */
 export function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
   if (reviewer.stateFile) rmSync(path.resolve(cwd, reviewer.stateFile), { force: true });
 }
@@ -104,6 +111,10 @@ export async function enforceChecklistContract(
   assetRoot: string | undefined,
   retry: (reason: string) => Promise<ReviewOutcome>,
 ): Promise<ReviewOutcome> {
+  // A skill-less reviewer (no stateFile) has no artifact to verify — its PASS is trusted
+  // directly, the same trust level completeness.mts already uses for its own straight verdict;
+  // its substitute anti-hallucination mechanism is the AC's own quote-both-or-stay-silent
+  // contract, enforced by the brief, not an artifact this gate can independently check.
   if (initial.status !== 'pass' || !selection.reviewer.stateFile) return initial;
   let result = initial;
   let hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
