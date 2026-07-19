@@ -102,6 +102,23 @@ describe('selection helpers', () => {
     ]);
     expect(parseFlags(['--scan-roots', 'a/src, b/src']).scanRoots).toEqual(['a/src', 'b/src']);
   });
+
+  it('parseFlags reads the local review profile flags', () => {
+    expect(
+      parseFlags([
+        '--review',
+        '--review-guards',
+        'size,decisions',
+        '--review-decisions-dir',
+        'architecture/decisions',
+      ]),
+    ).toMatchObject({
+      review: true,
+      reviewGuards: ['size', 'decisions'],
+      reviewDecisionsDir: 'architecture/decisions',
+    });
+    expect(parseFlags(['--no-review']).review).toBe(false);
+  });
 });
 
 describe('applyInit (direct chosen map — the wizard seam)', () => {
@@ -125,6 +142,97 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
     const cfg = config(root);
     expect(cfg.components).toMatchObject({ biome: false, skills: false, guards: ['size'] });
+    expect(cfg.review).toEqual({
+      enabled: false,
+      guards: ['size'],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
+  it('writes and preserves a local review profile, pruning guards removed from the install', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: false,
+      husky: true,
+      structure: false,
+      guards: ['size', 'decisions'],
+    };
+    await applyInit(root, {
+      stack: 'generic',
+      selection,
+      review: {
+        enabled: true,
+        guards: ['decisions'],
+        decisionsDir: 'architecture/decisions',
+      },
+    });
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: ['decisions'],
+      decisionsDir: 'architecture/decisions',
+    });
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...selection, guards: ['size'] },
+    });
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: [],
+      decisionsDir: 'architecture/decisions',
+    });
+  });
+
+  it('migrates a legacy initialized config without a review section as enabled', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: false,
+      husky: true,
+      structure: false,
+      guards: ['size'],
+    };
+    await applyInit(root, { stack: 'generic', selection });
+    const cfgPath = join(root, '.devkit/config.json');
+    const legacy = config(root);
+    delete legacy.review;
+    writeFileSync(cfgPath, `${JSON.stringify(legacy, null, 2)}\n`);
+
+    await applyInit(root, { stack: 'generic', selection });
+
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: ['size'],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
+  it('preserves legacy-enabled review behavior when reapplying an overlay', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: false,
+      husky: true,
+      structure: false,
+      guards: ['size'],
+    };
+    await applyInit(root, { stack: 'generic', selection, overlay: true });
+    const cfgPath = join(root, '.devkit/config.json');
+    const legacy = config(root);
+    delete legacy.review;
+    writeFileSync(cfgPath, `${JSON.stringify(legacy, null, 2)}\n`);
+
+    await applyInit(root, { stack: 'generic', selection, overlay: true });
+
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: ['size'],
+      decisionsDir: 'docs/decisions',
+    });
   });
 
   it('removes a deselected-but-present component when listed in `remove`', async () => {
