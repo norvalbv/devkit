@@ -11,7 +11,7 @@
  * import them without executing a bin.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { writeFileAtomic } from './atomic-write.mjs';
+import { writeFileAtomic } from "./atomic-write.mjs";
 /** The bin that owns allowlist CRUD — the exact name the gates print as their approval
  * remedy. One source of truth so the printed remedy and the `package.json` bin can't drift. */
 export const ALLOWLIST_CLI = 'guard-dup-allowlist';

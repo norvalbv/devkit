@@ -1,6 +1,6 @@
 ---
 name: Frontend Performance
-description: Performance optimization for frontend/client-side code. Use when optimizing page load times, bundle sizes, images, fonts, or Core Web Vitals. Covers HTML/CSS/JS optimization, image handling, lazy loading, critical CSS, code splitting, rendering cost, and performance measurement.
+description: Performance optimization for frontend/client-side code. Use when optimizing page load times, bundle sizes, images, fonts, or Core Web Vitals. Covers HTML/CSS/JS optimization, image handling, lazy loading, critical CSS, code splitting, and performance measurement.
 ---
 
 # Frontend Performance
@@ -22,130 +22,119 @@ The frontend roots the script scans come from `guard.config.json` `review.fronte
 hardcoded. When that key is absent it scans all staged files; a present-but-invalid value warns
 and falls back to scanning all.
 
-Each section below is one checklist item (or a small group). Rules name the evidence to grep for
-and the condition that makes the item a FAIL — pass anything that doesn't meet a FAIL bar. Weigh
-findings by where they run: a hot list row or scroll handler is held to a stricter bar than a
-settings page.
+## High Priority
 
-## Images (`image-optimization`)
+- Keep your page weight < 1500 KB (ideally < 500 kb)
+- Keep your page load time < 3 seconds
+- GZIP / Brotli compression is enabled
+- Minimize HTTP Requests
+- Compress your images / keep the image count low
+- Set HTTP cache headers properly
+- Keep the Time To First Byte < 1.3 seconds
+- Non Blocking JavaScript: Use async / defer
+- Minify your JavaScript
+- Minified CSS - Remove comments, whitespaces etc
+- Inline the Critical CSS (above the fold CSS)
+- CSS files are non-blocking
+- Use HTTPs on your website
+- Choose your image format appropriately
+- Avoid requesting unreachable files (404)
+- Serve files from the same protocol
+- Minimize number of iframes
+- Avoid the embedded / inline CSS
+- Analyse stylesheets complexity
 
 ```html
+<!-- Non-blocking CSS -->
+<link rel="preload" href="styles.css" as="style" onload="this.rel='stylesheet'">
+
+<!-- Async/defer scripts -->
+<script src="analytics.js" async></script>
+<script src="app.js" defer></script>
+```
+
+## Medium Priority
+
+- Minified HTML - Remove comments and whitespaces
+- Use Content Delivery Network
+- Prefer using vector image rather than bitmap images
+- Set width and height attributes on images (aspect ratio)
+- Avoid using Base64 images
+- Offscreen images are loaded lazily
+- Ensure to serve images that are close to your display size
+- Avoid multiple inline JavaScript snippets `<script>`
+- Keep your dependencies up to date
+- Check for performance problems in your JavaScript files
+- Service Workers for caching / performing heavy tasks
+- Cookie size should be less than 4096 bytes
+- Keep the cookie count less than 20
+
+```html
+<!-- Lazy loading images -->
 <img src="photo.jpg" loading="lazy" width="800" height="600" alt="...">
 
+<!-- Responsive images -->
 <img srcset="small.jpg 300w, medium.jpg 600w, large.jpg 1200w"
      sizes="(max-width: 600px) 300px, 600px"
      src="medium.jpg" alt="...">
 ```
 
-- FAIL new below-the-fold images without lazy loading.
-- FAIL images without dimensions (width/height or CSS aspect-ratio) — undimensioned images shift
-  layout as they load.
-- FAIL obviously oversized or legacy-format assets added to the bundle (multi-hundred-KB PNG
-  where WebP/AVIF or an SVG serves); FAIL base64-inlined images beyond icon size.
+## Low Priority
 
-## CSS (`css-optimization`, `inline-styles`)
-
-- `css-optimization`: FAIL render-blocking additions to the critical path (new synchronous
-  stylesheet links for below-the-fold features); FAIL selector explosions (deeply nested or
-  universal selectors on hot DOM).
-- `inline-styles`: FAIL a new object literal passed to `style={}` on every render of a hot
-  component — it defeats memoization and allocates per render. Hoist or memoize; static styles
-  belong in classes.
-
-## JavaScript Loading (`bundle-size`, `script-loading`, `code-splitting`, `dependency-size`)
-
-- `bundle-size`: FAIL whole-library imports where a subpath import exists (`import _ from
-  'lodash'` vs `lodash/pick`); FAIL importing a heavy module into a light entry.
-- `script-loading`: FAIL new synchronous `<script>` tags in the document head without
-  `async`/`defer` — they block first paint.
-- `code-splitting`: FAIL a large, route-scoped, or rarely-used feature imported statically into
-  a shared entry when the repo already lazy-loads siblings (`React.lazy`, `dynamic()`).
-- `dependency-size`: FAIL a new dependency added for something the stdlib/platform or an
-  existing dependency already does; weigh its size against its job.
-
-## Rendering (`react-rendering`, `hooks-optimization`, `list-rendering`)
-
-- `react-rendering`: FAIL new-per-render object/array/function props flowing into memoized or
-  hot children (breaks reference equality); FAIL state lifted so high that keystrokes re-render
-  whole trees.
-- `hooks-optimization`: FAIL heavy computation (sorting/ranking/filtering a large list, text
-  scoring, O(n·m) work) called bare in a render body. Every render re-runs it — including
-  renders from unrelated state (a toggle elsewhere in the same component) — so "the inputs
-  change anyway" is not a pass: wrap it in `useMemo` keyed on its actual inputs, and consider
-  `useDeferredValue`/debounce when an input is keystroke-driven. Memoizing a cheap downstream
-  value (a count label) while the expensive call above it stays bare is still a FAIL. Also FAIL
-  effect dependency arrays that re-fire every render for stable work, and `useMemo`/`useCallback`
-  spam on trivial values only when the diff adds many.
-- `list-rendering`: FAIL `key={index}` on reorderable/mutable lists; FAIL rendering unbounded
-  lists (hundreds+) with no virtualization when the repo has a virtual list primitive.
-
-## Layout Thrash (`layout-thrash`)
-
-- FAIL synchronous layout reads (`getBoundingClientRect`, `offsetWidth/Height`,
-  `getComputedStyle`, `scrollWidth`, …) interleaved with DOM writes, in loops, or inside
-  scroll/resize/animation-frame handlers without batching — each read after a write forces a
-  full reflow.
-- PASS one-off measurements in event handlers or effects that run once per interaction; the FAIL
-  bar is repeated forced reflow on a hot path (per frame, per list item, per keystroke).
-
-## Animation (`animation-performance`)
-
-- FAIL animating layout-affecting properties (`top`, `left`, `width`, `height`, `margin`) on
-  elements that animate frequently or during interaction — every frame relayouts. Use
-  `transform`/`opacity`, which composite off the main thread.
-- PASS one-shot transitions on small, isolated elements where a layout animation is the honest
-  simplest tool; the bar is hot/continuous animation.
-
-## Data Fetching (`data-fetching`)
-
-- FAIL fetch calls issued during render (component body) instead of effects/loaders/query hooks.
-- FAIL new fetch paths with no caching/dedup when the repo already has a query layer
-  (React Query, SWR, tRPC) the diff bypasses.
-- FAIL request waterfalls (await A then B when independent) on route-critical data.
-
-## Service Worker (`service-worker`)
-
-- FAIL cache-first strategies applied to API/auth responses (stale-auth bugs); FAIL unbounded
-  runtime caches with no version/cleanup — old entries live forever.
-
-## Cookies (`cookie-optimization`)
-
-- FAIL large payloads written into cookies (they ride every request); state that only the client
-  needs belongs in storage APIs, not cookies.
-
-## Resource Hints (`resource-hints`)
-
-- FAIL `preload` of resources the page doesn't use promptly (wasted bandwidth, warning noise).
-- Cross-origin font/API hosts used at startup should carry `preconnect`; flag only when the diff
-  adds such a host without one.
-
-## Fonts (`font-optimization`)
+- Pre-load URLs where possible
+- Concatenate CSS into a single file
+- Remove unused CSS
+- Use WOFF2 font format
+- Use preconnect to load your fonts faster
+- Keep the web font size under 300kb
+- Prevent Flash or Invisible Text
+- Keep an eye on the size of dependencies
 
 ```html
+<!-- Resource hints -->
+<link rel="preconnect" href="https://api.example.com">
+<link rel="dns-prefetch" href="https://cdn.example.com">
+<link rel="preload" href="/critical.css" as="style">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 ```
 
-- FAIL new font faces without `font-display` (invisible-text risk) or in legacy-only formats
-  (WOFF2 is the baseline); flag font additions that plainly duplicate an existing family.
+## Performance Tools
 
-## iframes (`iframe-usage`)
+| Tool | Use Case |
+|------|----------|
+| Page Speed Insights | Field + lab data |
+| Lighthouse | Overall audit |
+| WebPageTest | Detailed waterfall |
+| Chrome DevTools | Runtime profiling |
 
-- FAIL new iframes without `loading="lazy"` where offscreen; each iframe is a document-weight
-  dependency — challenge additions that a component could serve.
+## Checklist
 
-## Provenance
+**High priority:**
+- [ ] Page weight < 1500KB (ideally < 500KB)
+- [ ] Load time < 3 seconds
+- [ ] TTFB < 1.3 seconds
+- [ ] GZIP/Brotli enabled
+- [ ] Images optimized
+- [ ] JS/CSS minified
+- [ ] Critical CSS inlined
+- [ ] Non-blocking CSS/JS
+- [ ] HTTPS enabled
+- [ ] No 404s
+- [ ] HTTP cache headers set
 
-Rule text above is written for this repo. Topic coverage was diffed against:
+**Medium priority:**
+- [ ] HTML minified
+- [ ] CDN for assets
+- [ ] Lazy loading images
+- [ ] Responsive images
+- [ ] Dependencies up to date
+- [ ] Service Worker caching
+- [ ] Cookie size < 4096 bytes
+- [ ] Cookie count < 20
 
-- **roadmap.sh Frontend Performance best practices** (coverage checklist only; content license
-  is personal-use): High/Medium/Low priority sections → items `image-optimization`,
-  `css-optimization`, `inline-styles`, `bundle-size`, `script-loading`, `iframe-usage`,
-  `service-worker`, `cookie-optimization`, `resource-hints`, `font-optimization`,
-  `dependency-size`, `code-splitting`.
-- Own additions for runtime rendering cost, which the load-time-focused source list predates
-  (no external source text): `react-rendering`, `hooks-optimization`, `list-rendering`,
-  `data-fetching`, `layout-thrash`, `animation-performance`.
-
-Rejected topics (build/infra outputs, not judgeable from a staged source diff): minification,
-HTML minification, gzip/brotli config, page-weight/TTFB/load-time budgets, CDN setup, HTTP cache
-headers, same-protocol serving, 404-avoidance, CSS concatenation, unused-CSS removal audits.
+**Low priority:**
+- [ ] Remove unused CSS
+- [ ] WOFF2 fonts
+- [ ] Preconnect hints
+- [ ] CSS concatenation
+- [ ] Font size < 300KB

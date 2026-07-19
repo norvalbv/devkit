@@ -20,8 +20,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
-import { hasStagedFiles, stageBaseline } from './git-index.mjs';
+import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
+import { hasStagedFiles, stageBaseline } from "./git-index.mjs";
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/fanout.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '__tests__', '_shared']);

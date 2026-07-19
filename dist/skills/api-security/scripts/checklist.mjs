@@ -28,23 +28,6 @@ const RE_HEADERS = /\b(header|X-Content-Type|X-Frame|Content-Security-Policy|HST
 const RE_ERROR = /\b(catch|error|throw|exception|stack)/i;
 const RE_PROCESSING = /\b(debug|DEBUG|NODE_ENV|upload|multer|stream|file)/i;
 const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|audit|monitor)/i;
-// Injection/authz surfaces beyond SQL (coverage from OWASP ASVS v5 V1/V2/V4/V8 — see SKILL.md
-// Provenance). Two-regex items AND a sink pattern with a request-input marker so the item only
-// fires when both halves are present in the staged diff.
-const RE_MASS_ASSIGN =
-  /\.\.\.\s*(req\.(body|query|params)|body|payload)\b|Object\.assign\([^)]*\breq\./;
-const RE_COMMAND = /\b(exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|child_process/;
-const RE_FS_SINK =
-  /\b(sendFile|createReadStream|createWriteStream|readFile|writeFile|appendFile|unlink|rmSync|rm|mkdir|readdir|stat)\w*\s*\(/;
-const RE_REQ_INPUT = /\breq\.(params|query|body)\b|\bparams\.\w+/;
-const RE_OBJECT_LOOKUP =
-  /\b(findUnique|findFirst|findById|getById|updateMany|deleteMany|update|delete)\s*\(/;
-const RE_REDIRECT = /\bredirect\s*\(/i;
-const RE_OUTBOUND_DYNAMIC = /\b(fetch|axios[.\w]*|got)\s*\(\s*(`[^`\n]*\$\{|[^'"`\s)])/;
-
-// Prose files under a root ride along with source commits; their text trips the item
-// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
-const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
@@ -85,8 +68,7 @@ function getStagedFiles() {
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0)
-      .filter((f) => !RE_PROSE_FILE.test(f));
+      .filter((f) => f.length > 0);
   } catch {
     return [];
   }
@@ -127,18 +109,6 @@ function detectSecurityPatterns(_files, diffs) {
   if (RE_XXE.test(fullDiff)) {
     items.push({ name: 'xxe-prevention', category: 'Input', status: 'pending', issues: [] });
   }
-  if (RE_MASS_ASSIGN.test(fullDiff)) {
-    items.push({ name: 'mass-assignment', category: 'Input', status: 'pending', issues: [] });
-  }
-  if (RE_COMMAND.test(fullDiff)) {
-    items.push({ name: 'command-injection', category: 'Input', status: 'pending', issues: [] });
-  }
-  if (RE_FS_SINK.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
-    items.push({ name: 'path-traversal', category: 'Input', status: 'pending', issues: [] });
-  }
-  if (RE_OUTBOUND_DYNAMIC.test(fullDiff)) {
-    items.push({ name: 'ssrf-prevention', category: 'Input', status: 'pending', issues: [] });
-  }
   if (RE_ENDPOINT.test(fullDiff)) {
     items.push({
       name: 'endpoint-auth',
@@ -154,17 +124,6 @@ function detectSecurityPatterns(_files, diffs) {
       status: 'pending',
       issues: [],
     });
-  }
-  if (RE_OBJECT_LOOKUP.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
-    items.push({
-      name: 'object-level-authz',
-      category: 'Access Control',
-      status: 'pending',
-      issues: [],
-    });
-  }
-  if (RE_REDIRECT.test(fullDiff)) {
-    items.push({ name: 'open-redirect', category: 'Output', status: 'pending', issues: [] });
   }
   if (RE_RESPONSE.test(fullDiff)) {
     items.push({ name: 'output-security', category: 'Output', status: 'pending', issues: [] });

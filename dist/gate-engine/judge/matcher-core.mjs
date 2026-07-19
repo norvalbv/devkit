@@ -10,8 +10,8 @@
 // A matcher-core edit invalidates ALL THREE benches' matcherHash simultaneously — a new cross-bench
 // hazard versus each bench owning its own matcher file. Re-run every consumer's `matcher-audit`
 // after touching this file.
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from './judge-isolation.mjs';
-import { execJudgeAsync } from './run-judge.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "./judge-isolation.mjs";
+import { execJudgeAsync } from "./run-judge.mjs";
 export const MATCH_TIMEOUT_MS = 60000;
 /** Tiny bounded-concurrency map — dep-free, order-preserving. */
 export async function mapPool(items, width, fn) {

@@ -30,11 +30,13 @@ import {
   AGENT_TARGETS,
   applyOverlayConstraints,
   COMPONENTS,
+  CONFIG_DRIVEN_STRUCTURE,
   defaultSelection,
   GUARD_IDS,
   normalizeReviewProfile,
   type ReviewProfile,
   type Selection,
+  structureCmdFor,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
@@ -94,17 +96,6 @@ const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 // eslint/plugin dep). These get structure-lint even in standalone mode. Electron is EXCLUDED: its
 // preset imports the plugin + @typescript-eslint/parser directly in a consumer eslint.config.mjs and
 // uses eslint/domains.mjs, so it stays package-mode with consumer-side deps.
-const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
-
-// The structure-lint command a stack runs on the guard-deterministic `--structure` arg. Config-driven
-// stacks use devkit's own `guard-structure` bin (the orchestrator resolves it as a sibling module, so
-// no consumer eslint dep); every other structure stack (electron) keeps its consumer-side `bunx eslint
-// src`. Shared with doctor's checkStructureLint so the expected arg stays in lockstep with what init
-// emits when the stack rules change.
-export function structureCmdFor(stack: string): string {
-  return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
-}
-
 // The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
 // The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
 const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {
@@ -980,11 +971,9 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   // Optional machine-global shim closes the plain-commit gap; `devkit clean --global` removes it.
   const globalCommitGate = Boolean(plan.globalCommitGate);
   const prevConfig = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
-  const review = normalizeReviewProfile(
-    plan.review ?? prevConfig?.review,
-    selection.guards ?? [],
-    prevConfig !== null,
-  );
+  const review = normalizeReviewProfile(plan.review ?? prevConfig?.review, selection.guards ?? [], {
+    enabledDefault: prevConfig !== null,
+  });
   if (globalCommitGate) {
     console.log(
       '  global pre-commit gate (opt-in — survives husky reclaim on a plain `git commit`)',
@@ -1318,12 +1307,10 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     // source-mode hook instead of the `bunx guard-*` one.
     selfHost,
     components,
-    review: normalizeReviewProfile(
-      plan.review ?? prevConfig?.review,
-      components.guards,
-      prevConfig !== null,
-      selection.husky,
-    ),
+    review: normalizeReviewProfile(plan.review ?? prevConfig?.review, components.guards, {
+      enabledDefault: prevConfig !== null,
+      available: selection.husky,
+    }),
   };
   const configPath = join(cwd, '.devkit', 'config.json');
   if (dryRun) {

@@ -19,8 +19,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { JSCPD_OWN_ROOT, JSCPD_PATH_TERMINAL, resolveJscpdBin, } from '../co-occurrence/jscpd-bin.mjs';
-import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { JSCPD_OWN_ROOT, JSCPD_PATH_TERMINAL, resolveJscpdBin, } from "../co-occurrence/jscpd-bin.mjs";
+import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 // Stable, key-order-independent JSON so a semantically identical config hashes identically (an editor
 // that reorders keys must not flap the cache). Recurses arrays + objects; primitives via JSON.stringify.

@@ -17,25 +17,11 @@ export const RECOMMENDED_GUARD_IDS = [
     'qavis-advisory',
 ];
 /**
- * Every selectable sub-gate inside the husky `# devkit-guards` block. Three are selectable-but-OFF
- * by default: `review` (the in-chain headless reviewer judges) spends real model budget on every
- * commit, `sentry` (the commit-msg Sentry-capture judge) only makes sense in a repo whose product
- * actually uses Sentry, and `coverage` needs a `test:run:coverage` provider the repo may not have —
- * a consumer opts in with `--guards …,review,sentry,coverage` or the wizard.
+ * Every selectable sub-gate inside the husky `# devkit-guards` block. `review` (the in-chain
+ * headless reviewer judges) is the one selectable-but-OFF-by-default gate — it spends real model
+ * budget on every commit, so a consumer opts in with `--guards …,review` or the wizard.
  */
-export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
-export const DEFAULT_REVIEW_DECISIONS_DIR = 'docs/decisions';
-export function normalizeReviewProfile(partial, installedGuards, enabledDefault = false, available = true) {
-    const installed = installedGuards.filter((g) => GUARD_IDS.includes(g));
-    const requested = Array.isArray(partial?.guards) ? partial.guards : installed;
-    return {
-        enabled: available && (partial?.enabled ?? enabledDefault),
-        guards: installed.filter((g) => requested.includes(g)),
-        decisionsDir: typeof partial?.decisionsDir === 'string' && partial.decisionsDir.trim()
-            ? partial.decisionsDir.trim()
-            : DEFAULT_REVIEW_DECISIONS_DIR,
-    };
-}
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review'];
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
  * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a
@@ -99,19 +85,9 @@ export const GUARD_OPTIONS = [
     { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
     { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
     {
-        id: 'sentry',
-        label: 'sentry',
-        hint: 'commit-msg judge: flags silent runtime error-classes lacking a Sentry capture (hard-block, diff-tier)',
-    },
-    {
         id: 'qavis-advisory',
         label: 'qavis-advisory',
         hint: 'nudge to run qavis QA on UI diffs (needs qavis on PATH + .qavis/recipe.json)',
-    },
-    {
-        id: 'coverage',
-        label: 'coverage',
-        hint: 'coverage floor from guard.config.json (needs test:run:coverage + a coverage provider)',
     },
 ];
 /**

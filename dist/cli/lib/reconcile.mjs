@@ -25,7 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from './atomic-write.mjs';
+import { writeFileAtomic } from "./atomic-write.mjs";
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
 const LOCK_STALE_MS = 60_000;
 const LOCK_WAIT_MS = 5_000;

@@ -33,7 +33,22 @@ commit_with_gate_capture() {
   local wt="$1" root="$2" br="$3" title="$4" body="$5"
   local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
   local progress="$root/.devkit/review-progress-${br//\//-}.json"
-  . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
+  # The progress READER lives beside gate-engine — resolve it relative to THIS script so it works in
+  # every install mode (package node_modules, standalone, devkit's own repo) with no bunx/registry hit.
+  local progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mts"
+  [ -f "$progress_reader" ] || progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mjs"
+  mkdir -p "$root/.devkit"
+  rm -f "$progress"   # a stale file from a prior attempt must not mislead this run's timeout banner
+
+  # Ship-mode gate contract, inherited by the hook chain through git → husky → node:
+  #   DEVKIT_SHIP=1           arms the deterministic-prefix cache (guard-prefix check/record) — only a
+  #                           ship worktree guarantees working tree ≡ index, the key's soundness bound.
+  #   GUARD_AI_STRICT=1       AI judges retry once then FAIL CLOSED (exit 3) instead of skipping —
+  #                           a ship never silently drops the checks it exists to run. Ad-hoc commits
+  #                           outside ship keep their fail-open default.
+  #   DEVKIT_REVIEW_PROGRESS  where guard-review records {running,completed} reviewer names, so a
+  #                           timeout can name the ones left unfinished (structured, not stderr prose).
+  export DEVKIT_SHIP=1 GUARD_AI_STRICT=1 DEVKIT_REVIEW_PROGRESS="$progress"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
   # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the
@@ -46,23 +61,21 @@ commit_with_gate_capture() {
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
   local repo_name; repo_name="$(basename "$root")"
 
-  # Per-SHIP gate log the collector reads for the drill-down + fail-classification. The per-branch
-  # $log (in the repo) is OVERWRITTEN by the next ship, so it can't back a historical drill-down; a
-  # durable per-ship copy lives beside the sink and its path (log_path) rides both telemetry lines so
-  # the reader can find it (an in-flight ship's row serves it once the file exists).
-  local ship_logs_dir; ship_logs_dir="$(dirname "$DEVKIT_GATE_EVENTS")/logs"
-  # Sanitise the id for the FILENAME ONLY — an env-supplied DEVKIT_SHIP_ID must never escape the dir
-  # via `/` or `..` (a path traversal into `tee`). The JSON below keeps the ORIGINAL id for correlation.
-  local ship_id_safe="${DEVKIT_SHIP_ID//[^A-Za-z0-9._-]/-}"
-  ship_id_safe="${ship_id_safe:0:64}"          # bound the filename length (a uuid is 36; caps abuse)
-  [ -n "$ship_id_safe" ] || ship_id_safe="ship"
-  local ship_log="$ship_logs_dir/${ship_id_safe}.log"
-  mkdir -p "$ship_logs_dir" 2>/dev/null || true
+  # Full-chain worst case (first ship, nothing cached): deterministic prefix ~240s + decisions
+  # detect ≤60s + alignment cascade ≤480s (only when a scoped Target matches) + one review
+  # cascade 2×300 (strict retry — transient/empty first pass only; a TIMEOUT isn't re-run) + 420 =
+  # 1020s ≈ 1800s total. A retry is FAR cheaper — prefix
+  # + earned verdicts are cached and reviewer PASSes checkpoint per-completion — so a kill here
+  # converges on re-run rather than restarting. This stays a hang CEILING, not a per-gate budget.
+  local secs=${SHIP_COMMIT_TIMEOUT:-1800}
+  local to_bin to=()
+  to_bin=$(command -v timeout || command -v gtimeout || true)
+  if [ -n "$to_bin" ]; then
+    to=("$to_bin" -k 10 "$secs")           # -k 10: SIGKILL escalation for a gate that traps TERM
+  else
+    echo "ship: no timeout/gtimeout on PATH — gate-hang protection disabled (brew install coreutils to enable)" >&2
+  fi
 
-  # Minimal JSON string-escaper for the shell-built telemetry lines below (the node gates already use
-  # JSON.stringify): a repo/branch/path containing `"` or `\` must not produce a line the collector's
-  # json.loads drops. These fields can't contain control chars, so escaping the two metacharacters is enough.
-  json_escape() { local s=${1//\\/\\\\}; printf '%s' "${s//\"/\\\"}"; }
   # Overlay mode: force core.hooksPath at the .devkit overlay hook so the FULL gate chain runs in the
   # ship worktree in EVERY state. A plain `git commit` otherwise honours the husky-reclaimed
   # core.hooksPath=.husky/_ and runs only the team's committed hook — the overlay chain (devkit's
@@ -75,30 +88,17 @@ commit_with_gate_capture() {
   # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
   # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
   local dur_start; dur_start=$(date +%s)
-  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
-    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" \
-    "$(json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","ts":"%s"}\n' \
+    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "${DEVKIT_SHIP_MODE:-ship}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
-  local rc=0
-  DEVKIT_GATE_ARCHIVE_LOG="$ship_log" run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
-    git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
-
-  # Did OUR outer `git commit` die on its own HEAD finalize, or did a GATE merely PRINT the same git
-  # error? The captured log is a COMBINED stream (`2>&1 | tee` above folds hook output in), so the two
-  # are textually indistinguishable — and devkit's own suite emits this string deliberately, so a gate
-  # running it would forge the phrase. Decide on EVIDENCE instead: the ship worktree's HEAD must
-  # actually have moved off the commit we cut it from. A gate that prints the error and exits non-zero
-  # leaves HEAD at the base, so it stays attributed to that gate. No commit exists on the failure path,
-  # so HEAD==base is the only honest "nothing moved" state. DEVKIT_SHIP_BASE_SHA is exported by BOTH
-  # callers (ship-branch.sh / reship.sh); with it unset we can prove nothing, so we deliberately fall
-  # through to the gate greps rather than claim every gate passed.
-  local head_now="" head_clobbered=0
-  if [ "$rc" -ne 0 ] && [ -n "${DEVKIT_SHIP_BASE_SHA:-}" ] \
-     && grep -qF "cannot lock ref 'HEAD'" "$log" 2>/dev/null; then
-    head_now=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
-    if [ -n "$head_now" ] && [ "$head_now" != "$DEVKIT_SHIP_BASE_SHA" ]; then head_clobbered=1; fi
-  fi
+  set +e
+  # ${to[@]+"${to[@]}"}: set -u-safe empty-array expansion (a bare "${to[@]}" aborts under stock-macOS
+  # bash 3.2). Empty → bare git (degrade); non-empty → `timeout -k 10 <secs> git …`. PIPESTATUS[0] is the
+  # timeout/git exit (124 on timeout) through both forms — never tee's. hookcfg expands the same way.
+  ${to[@]+"${to[@]}"} git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" 2>&1 | tee "$log" >&2
+  local rc=${PIPESTATUS[0]}
+  set -e
 
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
@@ -107,23 +107,37 @@ commit_with_gate_capture() {
   local blocked_json timed_out
   if [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
-  # NOT a blocked gate: every gate PASSED and `git commit` then died on its finalize ref-update
-  # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
-  # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
-  # can sit in the same log, and the review arm would otherwise claim a failure it did not cause.
-  elif [ "$head_clobbered" -eq 1 ]; then blocked_json='"worktree_head_clobbered"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
-  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" "$rc" "$timed_out" "$blocked_json" \
-    "$(( $(date +%s) - dur_start ))" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"ts":"%s"}\n' \
+    "$DEVKIT_SHIP_ID" "$repo_name" "$br" "$rc" "$timed_out" "$blocked_json" \
+    "$(( $(date +%s) - dur_start ))" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    : # run_gates_with_capture already emitted the attributed timeout + retry guidance
+    # Attribute the kill: the last stage banner in the log names the phase that was mid-flight; if the
+    # reviewer gate was running, `progress.mjs unfinished` reads the {running,completed} progress JSON
+    # guard-review wrote and names the reviewers a kill interrupted — a structured contract, no more
+    # parsing stderr prose (which drifted whenever a heartbeat's wording changed on either side).
+    # `|| true` on every substitution: this runs under the caller's `set -euo pipefail`, and a missing
+    # log / progress file must degrade silently, never abort the banner.
+    local last_stage unfinished
+    last_stage=$(grep -E '^(🎨|📏|🗂|🔁|🧭|🔍|⚡|✗)|^guard-prefix:|[Gg]ate\.\.\.[[:space:]]*$' "$log" 2>/dev/null | tail -1 || true)
+    {
+      echo "⏱  ship: gate chain hit the ${secs}s ceiling (exit $rc) DURING: ${last_stage:-unknown stage}"
+      unfinished=$(node "$progress_reader" unfinished "$progress" 2>/dev/null || true)
+      if [ -n "$unfinished" ]; then
+        echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
+      fi
+      echo "   This is usually BUDGET, not a hang — completed reviewer verdicts, cleared decisions"
+      echo "   judgements and the deterministic prefix are all CACHED."
+      echo "   Re-run the same devkit ship command to converge (only unfinished work re-runs)."
+      echo "   More room per attempt: export SHIP_COMMIT_TIMEOUT (it must be EXPORTED — inline"
+      echo "   env prefixes can be stripped by command-rewriting shell hooks). Full log: $log"
+    } >&2
   elif [ "$rc" -eq 0 ]; then
     # Honest banner: a zero-exit commit is NOT proof the gates ran. In overlay mode the chain can
     # silently no-op (see the core.hooksPath forcing above); if that ever happens the log holds no
@@ -148,27 +162,6 @@ commit_with_gate_capture() {
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
-    } >&2
-  elif [ "$head_clobbered" -eq 1 ]; then
-    # Reuses the SAME evidence-checked verdict as the telemetry above — never a second independent
-    # grep, which could drift from it and let this banner claim "every gate PASSED" for a run the
-    # telemetry attributed to a gate.
-    # Every gate passed and the commit still died — another process moved this worktree's HEAD while
-    # the gate chain was running (it runs for MINUTES, so the window is wide). Without this banner the
-    # failure reads as a push problem: the git fatal is the log's last line, long after the PASS lines.
-    # Known cause: fallow < 3.4.2 registered its audit base-snapshot as a git worktree and its cleanup
-    # was not scoped to the entry it owned. devkit pins fallow >= 3.6.0 (see install-fallow.mts); a
-    # consumer on an older global fallow still hits it. If this ever fires on a current fallow, the
-    # upgrade path is re-pointing HEAD at the ship base and retrying the commit here — cheap, because
-    # every earned verdict is already cached.
-    {
-      echo "🔀 ship: the ship worktree's HEAD was moved by ANOTHER process mid-commit, so git refused"
-      echo "   to finalise (\"cannot lock ref 'HEAD'\"). Every gate PASSED — this is not a gate block,"
-      echo "   and NOTHING was pushed. Re-running the same devkit ship command is safe and fast"
-      echo "   (cleared judgements + reviewer verdicts are cached)."
-      echo "   Most likely an outdated fallow: its audit base-snapshot cleanup could reach outside its"
-      echo "   own worktree before 3.4.2. Check with: fallow --version  (devkit pins >= 3.6.0)."
-      echo "   Full log: $log"
     } >&2
   else
     # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log

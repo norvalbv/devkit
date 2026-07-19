@@ -7,8 +7,8 @@
  */
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { git, loadManifest, reconcileBranch } from '../lib/reconcile.mjs';
+import { detectGitRoot } from "../lib/detect-git-root.mjs";
+import { git, loadManifest, reconcileBranch } from "../lib/reconcile.mjs";
 /** Same git top-level on both sides, comparing REALPATHS (git resolves /var→/private/var on macOS). */
 function sameRoot(a, b) {
     try {
