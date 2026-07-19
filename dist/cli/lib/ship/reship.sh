@@ -32,14 +32,10 @@ done
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && {
-    echo "directory path not allowed (pass individual files): $p" >&2
-    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
-    exit 1
-  }
+  [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
 done
 
-LINK_DIRS=()
+LINK_DIRS=(.husky/_ node_modules)
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
 ROOT=$(git rev-parse --show-toplevel)
@@ -75,6 +71,40 @@ trap cleanup EXIT
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
 
+# Same gate-dep symlinks + fail-closed husky guard as new-ship (the gates must actually run).
+# Overlay mode keeps the gate chain in .devkit/hooks/pre-commit (git-excluded → absent from the
+# worktree → husky shim no-ops). Link it + fail CLOSED if declared-overlay but the hook is missing;
+# the commit forces core.hooksPath=.devkit/hooks so it fires. (See ship-branch.sh for the full why.)
+if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$ROOT/.devkit/config.json" 2>/dev/null; then
+  [ -x "$ROOT/.devkit/hooks/pre-commit" ] || {
+    echo "overlay mode but $ROOT/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
+    exit 1
+  }
+  LINK_DIRS+=(.devkit)
+fi
+if [ ! -e "$ROOT/.husky/_" ]; then
+  echo "missing $ROOT/.husky/_ — run dependency setup before shipping (gates must not fail open)" >&2
+  exit 1
+fi
+for d in "${LINK_DIRS[@]}"; do
+  [ -e "$ROOT/$d" ] && ln -s "$ROOT/$d" "$WT/$d"
+done
+
+# Link the devkit-synced reviewer briefs + judge checklists so guard-review runs in the worktree.
+# .claude/{agents,skills} are git-ignored in an overlay consumer → absent from a fresh worktree →
+# every reviewer INCONCLUSIVEs → strict ship fails CLOSED. Link the two SUBDIRS (not the whole .claude:
+# the checklist writes per-run state to .claude/.<skill>-review.json in cwd, which must stay in the
+# ephemeral worktree). Skip a subdir already checked out (repos that TRACK .claude — no bogus nesting).
+# (See ship-branch.sh for the full why.)
+if [ -d "$ROOT/.claude/agents" ] || [ -d "$ROOT/.claude/skills" ]; then
+  mkdir -p "$WT/.claude"
+  for sub in agents skills; do
+    if [ -e "$ROOT/.claude/$sub" ] && [ ! -e "$WT/.claude/$sub" ]; then
+      ln -s "$ROOT/.claude/$sub" "$WT/.claude/$sub"
+    fi
+  done
+fi
+
 # Copy the CURRENT content of each path over the fetched tip (add/modify), or delete it. The commit
 # diff is therefore (origin/<branch> tip → your current files) = exactly the new delta, with no
 # HEAD-relative patch that could clash with the first ship's content.
@@ -91,10 +121,6 @@ done
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothing to re-push" >&2; exit 1; }
 
-# Only after caller content is staged: runtime symlinks must never enter the shipped diff.
-. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
-prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
-
 # Link gate configs present in the repo but absent from this fresh checkout (an untracked config, a
 # gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
 . "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
@@ -103,11 +129,7 @@ link_untracked_gate_configs "$WT" "$ROOT"
 # Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
 # the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
-# The fetched PR-branch tip the worktree was cut from — lets in-chain gates (fallow) diff against IT,
-# not their own main-autodetect (DK-5).
-export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
-export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
