@@ -14,7 +14,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir, readJson } from "../lib/fs-helpers.mjs";
+import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 // The current eslint.config source for a stack (mirrors init's STRUCTURE_TEMPLATE_FILES): every
 // structure stack EXCEPT electron uses the shared universal shim; electron keeps its preset.
 function eslintSrc(stack) {

@@ -21,7 +21,18 @@ link_untracked_gate_configs() {
   local wt=$1 root=$2 self_dir emitter resolved rel line
   local linked=()
   # devkit's own fixed gate artifacts (guard.config.json is CONFIG_FILENAME — never configurable).
-  local candidates=(guard.config.json .fallowrc.jsonc .fallowrc.json .fallow fallow-baselines .decisions)
+  # Overlay lint configs are local/gitignored by design; projecting them keeps ship/review parity
+  # with a normal overlay commit, while callers stage their snapshot before this helper runs.
+  # eslint/baselines: the ratchet freezes (fanout/size/size-lines). OVERLAY hides the whole dir via
+  # .git/info/exclude (overlay.mts) yet init freezes into it, so it is untracked → absent here. Without
+  # it the fanout gate does NOT fail open (that needs guard.config.json absent too, and we just linked
+  # it) — it enforces against an EMPTY freeze and every grandfathered folder reads as new growth.
+  # ship-gates-converge-not-restart (2026-07-07) already records this link as a dependency: the
+  # prefix-cache fingerprint folds in "whole eslint/baselines contents" and needs real state here.
+  # ponytail: dir-granular, matching overlay's exclude. A PARTIALLY tracked baselines dir (some frozen
+  # files committed, others excluded) is skipped whole by the -e guard below — same ceiling as
+  # fallow-baselines/.decisions; per-file merge is the upgrade path if it ever bites.
+  local candidates=(guard.config.json .fallowrc.jsonc .fallowrc.json fallow.toml .fallow.toml .fallow fallow-baselines .decisions eslint/baselines eslint.config.devkit.mjs biome.devkit.jsonc)
 
   # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
   # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable

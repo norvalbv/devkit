@@ -23,7 +23,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Node, Project, SyntaxKind } from 'ts-morph';
-import { resolveBaselineRoots } from "../lib/generate/generate-structure-baseline.mjs";
+import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mjs';
 const TEST_SUFFIXES = ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx'];
 const MOCK_CALLEES = new Set(['vi.mock', 'vi.doMock', 'jest.mock', 'require', 'import']);
 const EXT_RE = /\.(ts|tsx|js|jsx)$/;

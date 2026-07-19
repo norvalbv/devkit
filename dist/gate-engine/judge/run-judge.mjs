@@ -16,6 +16,8 @@
 // diverges: a warn-by-default gate fails open (commit proceeds) while a deterministic-floor gate's
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
+import { emitGateEvent } from './gate-events.mjs';
+import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
 function judgeErr(e) {
@@ -57,7 +59,40 @@ function isJudgeTimeout(e) {
     const err = judgeErr(e);
     return err.killed === true || err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT';
 }
-export function execJudge({ label, args, input, timeout, cwd, onOutage, }) {
+/** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
+function modelFromArgs(args) {
+    const i = args.indexOf('--model');
+    return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+/**
+ * One `judge_exec` telemetry line per `claude -p` invocation — the SPEND/OUTAGE ledger every judge
+ * shares, complementing (never replacing) the richer gate-level verdict events the review/decisions
+ * gates emit themselves. This is what makes every judge visible to the usage tracker: the gate-level
+ * emitters only cover the gates that thought to call them (the factory/sentry judges recorded
+ * nothing at all before this). Best-effort by construction — emitGateEvent/saveTranscript never
+ * throw and no-op without a sink, so the judge's own contract is untouched.
+ */
+function emitJudgeExec(opts, outcome, startedAt, output) {
+    // Exclusive-create store: the durable event line's transcript_ref must keep resolving to THIS
+    // invocation's output — never silently rewritten by a later sample OR a later process (a
+    // retried/amended commit shares the same run id). Uniqueness is the filesystem's, not ours.
+    const ref = outcome === 'ok' && opts.transcript !== false && output
+        ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', output))
+        : null;
+    emitGateEvent({
+        type: 'judge_exec',
+        judge: opts.label,
+        model: modelFromArgs(opts.args),
+        outcome,
+        duration_ms: Date.now() - startedAt,
+        input_chars: opts.input?.length ?? 0,
+        output_chars: output?.length ?? 0,
+        ...(ref ? { transcript_ref: ref } : {}),
+    });
+}
+export function execJudge(opts) {
+    const { label, args, input, timeout, cwd, onOutage } = opts;
+    const startedAt = Date.now();
     try {
         const out = execFileSync('claude', args, {
             cwd,
@@ -68,14 +103,18 @@ export function execJudge({ label, args, input, timeout, cwd, onOutage, }) {
         });
         if (!out || !String(out).trim()) {
             warnNoOutput(label);
+            emitJudgeExec(opts, 'empty', startedAt);
             onOutage?.('empty');
             return null;
         }
+        emitJudgeExec(opts, 'ok', startedAt, out);
         return out;
     }
     catch (e) {
         warnUnavailable(label, e, timeout);
-        onOutage?.(isJudgeTimeout(e) ? 'timeout' : 'transient');
+        const kind = isJudgeTimeout(e) ? 'timeout' : 'transient';
+        emitJudgeExec(opts, kind, startedAt);
+        onOutage?.(kind);
         return null;
     }
 }
@@ -90,21 +129,27 @@ export function execJudge({ label, args, input, timeout, cwd, onOutage, }) {
  * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
  * @returns {Promise<string|null>}
  */
-export function execJudgeAsync({ label, args, input, timeout, cwd, onOutage, }) {
+export function execJudgeAsync(opts) {
+    const { label, args, input, timeout, cwd, onOutage } = opts;
+    const startedAt = Date.now();
     return new Promise((resolve) => {
         const child = execFile('claude', args, { cwd, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
             if (err) {
                 warnUnavailable(label, err, timeout);
-                onOutage?.(isJudgeTimeout(err) ? 'timeout' : 'transient');
+                const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
+                emitJudgeExec(opts, kind, startedAt);
+                onOutage?.(kind);
                 resolve(null);
                 return;
             }
             if (!stdout || !String(stdout).trim()) {
                 warnNoOutput(label);
+                emitJudgeExec(opts, 'empty', startedAt);
                 onOutage?.('empty');
                 resolve(null);
                 return;
             }
+            emitJudgeExec(opts, 'ok', startedAt, stdout);
             resolve(stdout);
         });
         // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
