@@ -10,6 +10,159 @@ const { tmpRepo, devkit, cleanup } = tmpRepos('init-');
 afterEach(cleanup);
 
 describe('init --yes (all recommended)', () => {
+  it('persists an explicit review profile from CLI flags', () => {
+    const root = tmpRepo();
+    const r = devkit(
+      root,
+      'init',
+      '--yes',
+      '--guards',
+      'size,decisions,review',
+      '--review',
+      '--review-guards',
+      'decisions,review',
+      '--review-decisions-dir',
+      'architecture/decisions',
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: ['decisions', 'review'],
+      decisionsDir: 'architecture/decisions',
+    });
+  });
+
+  it('accepts an explicitly empty review guard allowlist', () => {
+    const root = tmpRepo();
+    const result = devkit(root, 'init', '--yes', '--review', '--review-guards', '');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(config(root).review).toEqual({
+      enabled: true,
+      guards: [],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
+  it('requires explicit --review before accepting review-profile modifiers', () => {
+    const guardsOnly = tmpRepo();
+    const guardsResult = devkit(guardsOnly, 'init', '--yes', '--review-guards', 'size');
+    expect(guardsResult.status).toBe(1);
+    expect(guardsResult.stderr).toMatch(/--review-guards require --review/);
+
+    const directoryOnly = tmpRepo();
+    const directoryResult = devkit(
+      directoryOnly,
+      'init',
+      '--yes',
+      '--review-decisions-dir',
+      'architecture/decisions',
+    );
+    expect(directoryResult.status).toBe(1);
+    expect(directoryResult.stderr).toMatch(/--review-decisions-dir require --review/);
+
+    const disabledWithModifier = tmpRepo();
+    const disabledResult = devkit(
+      disabledWithModifier,
+      'init',
+      '--yes',
+      '--no-review',
+      '--review-guards',
+      'size',
+    );
+    expect(disabledResult.status).toBe(1);
+    expect(disabledResult.stderr).toMatch(/--review-guards require --review/);
+  });
+
+  it('rejects typoed and uninstalled review guard selections', () => {
+    const typo = tmpRepo();
+    const typoResult = devkit(typo, 'init', '--yes', '--review', '--review-guards', 'decision');
+    expect(typoResult.status).toBe(1);
+    expect(typoResult.stderr).toMatch(/invalid --review-guards.*unknown: decision/);
+
+    const uninstalled = tmpRepo();
+    const uninstalledResult = devkit(
+      uninstalled,
+      'init',
+      '--yes',
+      '--review',
+      '--review-guards',
+      'review',
+    );
+    expect(uninstalledResult.status).toBe(1);
+    expect(uninstalledResult.stderr).toMatch(/not selected by --guards: review/);
+
+    const noHook = tmpRepo();
+    const noHookResult = devkit(
+      noHook,
+      'init',
+      '--yes',
+      '--no-husky',
+      '--review',
+      '--review-guards',
+      'size',
+    );
+    expect(noHookResult.status).toBe(1);
+    expect(noHookResult.stderr).toMatch(/--review requires the husky pre-commit component/);
+  });
+
+  it('validates review flags against overlay-effective components', () => {
+    const root = tmpRepo();
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    const result = devkit(
+      root,
+      'init',
+      '--overlay',
+      '--yes',
+      '--no-husky',
+      '--review',
+      '--review-guards',
+      'size',
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    const recorded = config(root);
+    expect(recorded.overlay).toBe(true);
+    expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
+    expect(recorded.review).toEqual({
+      enabled: true,
+      guards: ['size'],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
+  it('keeps the virtual review profile out of physical component removals', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--yes', '--review', '--review-guards', 'size').status).toBe(0);
+
+    const result = devkit(
+      root,
+      'init',
+      '--yes',
+      '--remove-deselected',
+      '--review',
+      '--review-guards',
+      'size',
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).not.toMatch(/Removing deselected component\(s\):.*devkit-review/);
+    expect(config(root).review.enabled).toBe(true);
+  });
+
+  it('disables a persisted review profile when the effective hook is removed', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--yes', '--review', '--review-guards', 'size').status).toBe(0);
+
+    const result = devkit(root, 'init', '--yes', '--no-husky', '--remove-deselected');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(config(root).components.husky).toBe(false);
+    expect(config(root).review.enabled).toBe(false);
+    expect(readFileSync(join(root, '.husky', 'pre-commit'), 'utf8')).not.toContain('guard-review');
+  });
+
   it('emits the full generic config set + husky hook + .devkit/config.json', () => {
     const root = tmpRepo();
     const r = devkit(root, 'init', '--stack', 'generic', '--yes');
