@@ -43,6 +43,9 @@
   "//testCommand": "Test command the testing agents run (e.g. 'bun run test:run'). Default: null => agents fall back to the package.json test script. Env override: GUARD_TEST_COMMAND.",
   "testCommand": null,
 
+  "//coverage": "The `coverage` guard (opt-in — add it to your devkit guards). Reads coverage/coverage-final.json (produced by `test:run:coverage`) and enforces the threshold KEYS you set here (statements/functions/lines/branches — any subset). FAIL-CLOSED: when the guard is selected and coverage data is ABSENT, the commit fails hard (run test:run:coverage first). Set `false` to bypass entirely. Default (omit): {} = enforce no % floor but still fail hard on absent data.",
+  "coverage": { "statements": 60, "functions": 55 },
+
   "//review": "Topology the 5 reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer (frontend reviewers exit early when frontendRoots is empty). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
   "review": {
     "backendRoots": ["src/main", "socket-server", "vercel-serverless"],

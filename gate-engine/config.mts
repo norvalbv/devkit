@@ -40,6 +40,15 @@ export interface Thresholds {
   minTokens: number;
 }
 
+/**
+ * Coverage-gate config. `false` = the consumer explicitly opts out (bypass). An object enforces the
+ * threshold KEYS present in it and ignores the rest — `{}` (the default) enforces no percentage floor
+ * but still fails hard when coverage data is absent (the anti-fail-open contract). See coverage/run.mts.
+ */
+export type CoverageConfig =
+  | false
+  | { statements?: number; functions?: number; lines?: number; branches?: number };
+
 /** Review-agent topology block of a resolved config (the reviewer subagents read this). */
 export interface ReviewConfig {
   backendRoots: string[];
@@ -70,6 +79,7 @@ export interface GuardConfig {
   searchTool: string;
   graphTool: string;
   testCommand: string | null;
+  coverage: CoverageConfig;
   review: ReviewConfig;
   noLog: boolean;
   noLlm: boolean;
@@ -94,6 +104,7 @@ interface RawGuardConfigFile {
   searchTool?: string;
   graphTool?: string;
   testCommand?: string | null;
+  coverage?: CoverageConfig;
   review?: {
     backendRoots?: string[];
     frontendRoots?: string[];
@@ -162,6 +173,11 @@ export const DEFAULTS = Object.freeze({
   // Test command the testing agents run (markdown-prompt agents READ this). null =>
   // agents fall back to the consumer's documented package.json `test` script.
   testCommand: null,
+  // Coverage-gate config (the `coverage` guard READs this; only runs when selected). `{}` =
+  // active-strict: no percentage floor, but absent coverage/coverage-final.json FAILS HARD (a
+  // selected coverage gate must never silently pass unverified). `false` = explicit opt-out;
+  // `{ statements, functions, lines?, branches? }` enforces the keys present. See coverage/run.mts.
+  coverage: Object.freeze({}) as CoverageConfig,
   // Review-agent topology (the 5 reviewer subagents READ these). Frink-agnostic defaults:
   // a generic repo treats `src` as its only backend root, has no configured frontend
   // topology (frontend reviewers exit early), and enforces WCAG touch targets + skips the
@@ -281,6 +297,15 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
     // Testing-agent command: env > file > null (agents fall back to package.json test).
     testCommand: testCommandEnv ?? file.testCommand ?? DEFAULTS.testCommand,
+    // Coverage: explicit `false` = opt-out; any plain object = thresholds; anything else (absent,
+    // array, non-object) falls back to the active-strict `{}` default. A malformed value never
+    // silently disables the gate — only a literal `false` does.
+    coverage:
+      file.coverage === false
+        ? false
+        : file.coverage && typeof file.coverage === 'object' && !Array.isArray(file.coverage)
+          ? file.coverage
+          : DEFAULTS.coverage,
     // Review-agent topology. Shallow-merge so a consumer can set one key (and nested
     // accessibility) without restating the whole block.
     review: {

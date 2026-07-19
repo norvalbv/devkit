@@ -19,12 +19,13 @@ export const RECOMMENDED_GUARD_IDS = [
 ];
 
 /**
- * Every selectable sub-gate inside the husky `# devkit-guards` block. Two are selectable-but-OFF
+ * Every selectable sub-gate inside the husky `# devkit-guards` block. Three are selectable-but-OFF
  * by default: `review` (the in-chain headless reviewer judges) spends real model budget on every
- * commit, and `sentry` (the commit-msg Sentry-capture judge) only makes sense in a repo whose
- * product actually uses Sentry — a consumer opts in with `--guards …,review,sentry` or the wizard.
+ * commit, `sentry` (the commit-msg Sentry-capture judge) only makes sense in a repo whose product
+ * actually uses Sentry, and `coverage` needs a `test:run:coverage` provider the repo may not have —
+ * a consumer opts in with `--guards …,review,sentry,coverage` or the wizard.
  */
-export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
+export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
 
 /**
  * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
@@ -99,6 +100,11 @@ export const GUARD_OPTIONS = [
     id: 'qavis-advisory',
     label: 'qavis-advisory',
     hint: 'nudge to run qavis QA on UI diffs (needs qavis on PATH + .qavis/recipe.json)',
+  },
+  {
+    id: 'coverage',
+    label: 'coverage',
+    hint: 'coverage floor from guard.config.json (needs test:run:coverage + a coverage provider)',
   },
 ];
 

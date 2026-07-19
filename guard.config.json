@@ -49,6 +49,7 @@
         "libDomains": {
           "@root": [
             "co-occurrence",
+            "coverage",
             "decisions",
             "deterministic",
             "edge-cases",
