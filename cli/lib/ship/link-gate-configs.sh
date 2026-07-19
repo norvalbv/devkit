@@ -32,7 +32,14 @@ link_untracked_gate_configs() {
   # ponytail: dir-granular, matching overlay's exclude. A PARTIALLY tracked baselines dir (some frozen
   # files committed, others excluded) is skipped whole by the -e guard below — same ceiling as
   # fallow-baselines/.decisions; per-file merge is the upgrade path if it ever bites.
-  local candidates=(guard.config.json .fallowrc.jsonc .fallowrc.json fallow.toml .fallow.toml .fallow fallow-baselines .decisions eslint/baselines eslint.config.devkit.mjs biome.devkit.jsonc)
+  # .qavis/receipt.json — the untracked, content-addressed cache qavis writes on a `qavis qa` pass. The
+  # ship-time qavis-advisory gate shells `qavis route --repo $WT`, which reads it to clear the block; the
+  # receipt is the one gate input never carried into $WT (untracked, not in the pathspec), so a genuine
+  # pass otherwise blocks the ship. File-level, NOT `.qavis/` — a dir-level link would clobber the tracked
+  # recipe.json. Content-addressed → a mismatched staged set can't false-clear (route re-ADVISEs).
+  # ponytail: clears on the changed BLOBS, not the base — on ship $BASE can be newer than qavis's QA base;
+  # accepted (the change itself was QA'd). Re-QA is the upgrade path if base drift ever matters.
+  local candidates=(guard.config.json .fallowrc.jsonc .fallowrc.json fallow.toml .fallow.toml .fallow fallow-baselines .decisions eslint/baselines eslint.config.devkit.mjs biome.devkit.jsonc .qavis/receipt.json)
 
   # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
   # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable
