@@ -46,6 +46,7 @@
     "guard-clone": "./dist/gate-engine/co-occurrence/clone-detector.mjs",
     "guard-fanout": "./dist/gate-engine/ratchets/folder-fanout.mjs",
     "guard-size": "./dist/gate-engine/ratchets/size-disable.mjs",
+    "guard-coverage": "./dist/gate-engine/coverage/run.mjs",
     "guard-structure": "./dist/gate-engine/structure/run.mjs",
     "guard-fallow-staged": "./dist/gate-engine/fallow/staged-filter.mjs",
     "guard-sentry": "./dist/gate-engine/sentry/check-sentry.mjs"

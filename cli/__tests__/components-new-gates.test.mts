@@ -18,6 +18,11 @@ describe('gate registry', () => {
     expect(GUARD_IDS).toContain('sentry');
     expect(RECOMMENDED_GUARD_IDS).not.toContain('sentry');
   });
+
+  it('coverage is offerable but NOT recommended (needs a test:run:coverage provider)', () => {
+    expect(GUARD_IDS).toContain('coverage');
+    expect(RECOMMENDED_GUARD_IDS).not.toContain('coverage');
+  });
 });
 
 describe('newBundledGates', () => {
@@ -25,7 +30,7 @@ describe('newBundledGates', () => {
     const recorded = ['size', 'fanout', 'dup', 'clone', 'decisions']; // a pre-qavis selection
     const { recommended, optIn } = newBundledGates(recorded);
     expect(recommended).toEqual(['qavis-advisory']); // newly recommended, absent
-    expect(optIn).toEqual(['review', 'sentry']); // bundled but never selected
+    expect(optIn).toEqual(['review', 'sentry', 'coverage']); // bundled but never selected
   });
 
   it('returns empty buckets when the recorded set already has every bundled gate', () => {
@@ -37,6 +42,6 @@ describe('newBundledGates', () => {
   it('a fully-recommended selection leaves only the opt-in gates outstanding', () => {
     const { recommended, optIn } = newBundledGates([...RECOMMENDED_GUARD_IDS]);
     expect(recommended).toEqual([]);
-    expect(optIn).toEqual(['review', 'sentry']);
+    expect(optIn).toEqual(['review', 'sentry', 'coverage']);
   });
 });

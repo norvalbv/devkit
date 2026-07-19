@@ -199,4 +199,29 @@ describe('selectedIds', () => {
     const d = repo(['clone', 'size', 'review', 'decisions']); // review/decisions are AI (fail-fast)
     expect(selectedIds(d)).toEqual(['size', 'clone']);
   });
+
+  it('runs an explicitly-selected opt-in guard (coverage)', () => {
+    expect(selectedIds(repo(['size', 'coverage']))).toEqual(['size', 'coverage']);
+  });
+
+  it('EXCLUDES opt-in coverage from the missing-config fallback (unadopted repo never wedged)', () => {
+    expect(selectedIds(repo(null))).toEqual(['size', 'fanout', 'dup', 'clone']);
+  });
+});
+
+describe('coverage — opt-in wiring through runDeterministic', () => {
+  it('spawns the coverage module when selected', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(['size', 'coverage']), { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls.some(([, argv]) => argv[0].includes('coverage/run'))).toBe(true);
+  });
+
+  it('does NOT spawn coverage on the missing-config fallback', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec({});
+    expect(runDeterministic(repo(null), { exec })).toBe(0);
+    expect(exec.mock.calls.some(([, argv]) => argv[0].includes('coverage/run'))).toBe(false);
+  });
 });
