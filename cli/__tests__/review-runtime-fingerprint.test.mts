@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  pinReviewRuntimeFile,
   reviewRuntimeFileFingerprint,
   reviewRuntimeFingerprint,
 } from '../lib/ship/review/runtime-fingerprint.mts';
@@ -126,5 +127,19 @@ describe('review runtime fingerprints', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(file);
+  });
+
+  it('keeps the descriptor-pinned file when the source is overwritten', () => {
+    const root = mkTmp('devkit-review-runtime-pin-');
+    const source = join(root, 'source.json');
+    const pinned = join(root, 'pinned.json');
+    writeFileSync(source, '{"version":"A"}\n');
+
+    const fingerprint = pinReviewRuntimeFile(source, pinned);
+    writeFileSync(source, '{"version":"B"}\n');
+
+    expect(readFileSync(pinned, 'utf8')).toBe('{"version":"A"}\n');
+    expect(reviewRuntimeFingerprint(pinned)).toBe(fingerprint);
+    expect(reviewRuntimeFingerprint(source)).not.toBe(fingerprint);
   });
 });
