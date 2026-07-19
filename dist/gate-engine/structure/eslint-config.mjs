@@ -9,9 +9,9 @@
  * (returns a plain config object); the plugin wrapping happens here.
  */
 import { createFolderStructure, projectStructureParser, projectStructurePlugin, } from 'eslint-plugin-project-structure';
-import { resolveGuardConfig, resolveTreeExtensions } from "../config.mjs";
-import { compileToEslint } from "./compile.mjs";
-import { makeBaselineLoaders } from "./load-baseline.mjs";
+import { resolveGuardConfig, resolveTreeExtensions } from '../config.mjs';
+import { compileToEslint } from './compile.mjs';
+import { makeBaselineLoaders } from './load-baseline.mjs';
 /**
  * Build the eslint flat-config array governing a repo's declared structure trees (one
  * folder-structure rule per grammar tree). `root` is the repo root (holds guard.config.json +

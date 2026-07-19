@@ -31,16 +31,17 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { envFlag, resolveGuardConfig } from "../config.mjs";
-import { emitGateEvent } from "../judge/gate-events.mjs";
-import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
-import { execJudgeAsync } from "../judge/run-judge.mjs";
-import { loadCache, savePasses } from "./cache.mjs";
-import { renderGoverningClaudeMd } from "./claude-md.mjs";
-import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
-import { blockingNote, reconcile } from "./overrides.mjs";
-import { clearProgress, writeProgress } from "./progress.mjs";
-import { allowedToolsFor, cacheKey, escalatePrompt, hasChecklist, parseConventionFindings, parseReviewVerdict, selectReviewers, verifyChecklist, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
+import { envFlag, resolveGuardConfig } from '../config.mjs';
+import { emitGateEvent } from '../judge/gate-events.mjs';
+import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
+import { execJudgeAsync } from '../judge/run-judge.mjs';
+import { composeTranscript, saveTranscript } from '../judge/transcript-store.mjs';
+import { loadCache, savePasses } from './cache.mjs';
+import { renderGoverningClaudeMd } from './claude-md.mjs';
+import { buildCappedDiffEvidence } from './diff-evidence.mjs';
+import { blockingNote, reconcile } from './overrides.mjs';
+import { clearProgress, writeProgress } from './progress.mjs';
+import { allowedToolsFor, cacheKey, escalatePrompt, hasChecklist, parseConventionFindings, parseReviewVerdict, selectReviewers, verifyChecklist, wrapConventionsPrompt, wrapPrompt, } from './reviewers.mjs';
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
 // (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
@@ -54,25 +55,28 @@ function skippedReviewers() {
         .filter(Boolean));
 }
 // Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
-// diff investigation. Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this
-// gate alone: deterministic prefix ~240s (≈0 on a guard-prefix hit) + decisions ≤60s (≈0 on a
-// verdict-cache hit) + this cascade gate. Under strict (ship) the first pass gets the longer
-// STRICT_FIRST_TIMEOUT_MS so a judge merely CONTENDED — not workload-slow — finishes on its one pass
-// instead of a SIGTERM → spurious exit-3. PER-CASCADE worst ≈ 2×420 (strict retry on a TRANSIENT/
-// empty first pass only — a TIMEOUT first pass is NOT re-run, capping a timed-out strict judge at
-// 1×420) + 420 escalate = 1260s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY, default 2) the
-// gate runs cascades in ceil(N/K) WAVES, so its worst wall-clock ≈ ceil(N/K)×1260s — e.g. 5 reviewers
-// at K=2 = 3×1260 = 3780s, which CAN exceed SHIP_COMMIT_TIMEOUT (1800s default). That is by design: a
-// killed ship CONVERGES on re-run because PASSes checkpoint per-completion and the caches skip
-// everything already earned (docs/decisions/ship-gates-converge-not-restart.md). A SINGLE attempt
-// stays ≤420s, under the 600s foreground tool cap. The cap trades a possible extra ship attempt for
-// each judge getting the CPU + subscription slots to finish under its timeout — the self-saturation
-// this gate used to suffer when it fanned out ALL N judges at once.
-const FIRST_TIMEOUT_MS = 300000; // normal developer commits
-// ship/strict first pass gets the escalate-length cap: a judge merely CONTENDED (parallel `claude`
-// CPU/subscription pressure), not workload-slow, finishes instead of a SIGTERM → false exit-3.
-const STRICT_FIRST_TIMEOUT_MS = 420000;
-const ESCALATE_TIMEOUT_MS = 420000; // only fires pre-block; never retried (see cascadeVerdict)
+// diff investigation. The per-pass caps are GENEROUS (30 min): the correctness reviewer's deep
+// four-lens investigation legitimately runs past the old 420s cap and got SIGKILLed mid-verdict —
+// measured on the usage-tracker as repeated 421s inconclusive timeouts while the median run is
+// ~60-250s. The cap is sized for the slow-but-working judge, not the median. A judge that TIMES OUT
+// is never re-run (see cascadeVerdict), so a stuck judge still costs at most one cap, not two.
+//
+// Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
+// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate. PER-CASCADE worst ≈
+// 1×1800 (first pass) + 1800 (escalate) = 3600s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY,
+// default 2) cascades run in ceil(N/K) WAVES, so the theoretical worst wall-clock far exceeds
+// SHIP_COMMIT_TIMEOUT (now 3600s default) — by design: a killed ship CONVERGES on re-run because
+// PASSes checkpoint per-completion and the caches skip everything already earned
+// (docs/decisions/ship-gates-converge-not-restart.md). In practice only correctness approaches the
+// cap; the rest finish <300s, so a real ship is one slow wave + fast waves, comfortably under 3600s.
+//
+// NOTE: a single pass can now exceed the 600s foreground tool cap — an AGENT-driven commit (the gate
+// run inside a Bash tool) is still killed at 600s, so the generous caps take FULL effect only for a
+// commit run in a real terminal (or a detached ship), where SHIP_COMMIT_TIMEOUT is the outer bound.
+const FIRST_TIMEOUT_MS = 1800000; // 30 min — the slow-but-working reviewer (correctness) needs the room
+// ship/strict first pass shares the same generous cap; the outer SHIP_COMMIT_TIMEOUT is the safety net.
+const STRICT_FIRST_TIMEOUT_MS = 1800000;
+const ESCALATE_TIMEOUT_MS = 1800000; // opus re-investigation; only fires pre-block, never retried
 // Bounded-concurrency map: at most `limit` fn calls in flight, input order preserved.
 // LOAD-BEARING: fn must never reject — the caller pre-wraps the cascade body in .catch. A worker
 // rejection here would reject Promise.all and abandon siblings' pending per-completion checkpoints.
@@ -287,19 +291,18 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         input,
         timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
         cwd,
+        transcript: false, // this gate persists its own review-<name> transcript — don't store twice
         onOutage: (kind) => {
             firstOutage = kind;
         },
     };
     let first = await exec(firstOpts);
     if (first === null && retryFirst && firstOutage !== 'timeout') {
-        // Strict (ship) runs get ONE first-pass retry — a TRANSIENT API failure or empty output must not
-        // fail a ship closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
-        // STRICT_FIRST_TIMEOUT_MS, so a re-run would burn that same budget again and push the cascade past
-        // the ship ceiling for no gain (a contended judge got its extra time UP FRONT). The escalation
-        // pass is never retried either: its outage stays inconclusive (blocked under strict).
-        // Colon (not " — ") on purpose: the ship timeout banner's awk treats `guard-review: <name> — `
-        // lines as COMPLETIONS when naming unfinished reviewers — a mid-retry reviewer is not done.
+        // Strict (ship) runs get ONE first-pass retry — a TRANSIENT/empty failure must not fail a ship
+        // closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
+        // STRICT_FIRST_TIMEOUT_MS (a contended judge got its extra time UP FRONT), so a re-run burns the
+        // same budget past the ship ceiling. The escalation pass never retries: outage stays inconclusive.
+        // Colon (not " — ") on purpose: the ship timeout banner's awk reads `<name> — ` as COMPLETED.
         console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
         first = await exec(firstOpts);
@@ -310,16 +313,28 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'inconclusive',
             reason: 'judge outage',
             escalated: false,
+            model: passModel,
         };
     const firstVerdict = parseReviewVerdict(first);
     if (firstVerdict.verdict === 'PASS')
-        return { name: reviewer.name, status: 'pass', reason: '', escalated: false };
+        // Keep the judge's one-line PASS reason (the tail of its VERDICT line) instead of dropping it —
+        // it flows to the telemetry event + the terminal line, and `first` is persisted as a transcript.
+        return {
+            name: reviewer.name,
+            status: 'pass',
+            reason: firstVerdict.reason,
+            escalated: false,
+            model: passModel,
+            transcript: first,
+        };
     if (firstVerdict.verdict === null)
         return {
             name: reviewer.name,
             status: 'inconclusive',
             reason: 'no VERDICT line',
             escalated: false,
+            model: passModel,
+            transcript: first,
         };
     // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
     if (reviewer.model)
@@ -328,6 +343,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'fail',
             reason: firstVerdict.reason,
             escalated: false,
+            model: passModel,
             transcript: first,
         };
     const second = await exec({
@@ -336,6 +352,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         input: stat,
         timeout: ESCALATE_TIMEOUT_MS,
         cwd,
+        transcript: false, // this gate persists its own review-<name> transcript — don't store twice
     });
     if (second === null)
         return {
@@ -343,6 +360,8 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'inconclusive',
             reason: 'escalation outage',
             escalated: true,
+            model: passModel,
+            transcript: first, // the first-pass FAIL evidence survives even when opus was dark
         };
     const finalVerdict = parseReviewVerdict(second);
     if (finalVerdict.verdict === 'FAIL')
@@ -351,15 +370,25 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'fail',
             reason: finalVerdict.reason,
             escalated: true,
+            model: passModel,
             transcript: second,
         };
     if (finalVerdict.verdict === 'PASS')
-        return { name: reviewer.name, status: 'pass', reason: '', escalated: true };
+        return {
+            name: reviewer.name,
+            status: 'pass',
+            reason: finalVerdict.reason,
+            escalated: true,
+            model: passModel,
+            transcript: second,
+        };
     return {
         name: reviewer.name,
         status: 'inconclusive',
         reason: 'no VERDICT line',
         escalated: true,
+        model: passModel,
+        transcript: second,
     };
 }
 /**
@@ -437,12 +466,22 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         }))
             .then((res) => {
             if (res.status === 'pass')
-                savePasses(cwd, { [t.key]: { at: new Date().toISOString(), model: firstModel } });
+                // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
+                // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
+                savePasses(cwd, {
+                    [t.key]: { at: new Date().toISOString(), model: res.model ?? firstModel },
+                });
             if (progressFile) {
                 completed.push(res.name);
                 writeProgress(progressFile, { running, completed });
             }
             const secs = Math.round((Date.now() - t0) / 1000);
+            // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
+            // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
+            // the ref + one-liner. No-op off-run (see run-context.mts).
+            const transcriptRef = res.transcript
+                ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
+                : null;
             // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
             // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
             emitGateEvent({
@@ -450,11 +489,17 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
                 reviewer: res.name,
                 status: res.status,
                 escalated: res.escalated,
-                model: firstModel,
+                // First-pass model that actually ran (pin-aware); firstModel only when no judge ran at
+                // all (missing brief / engine error), keeping the field always present for consumers.
+                model: res.model ?? firstModel,
                 reason: res.reason,
                 secs,
+                ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
             });
-            console.error(`guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}`);
+            // Surface the one-line verdict reason on the completion line too (fails get theirs in the
+            // dedicated block below, with the full transcript — don't double-print it here).
+            const tail = res.status !== 'fail' && res.reason ? ` — ${res.reason}` : '';
+            console.error(`guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`);
             return res;
         });
     });

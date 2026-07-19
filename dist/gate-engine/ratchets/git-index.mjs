@@ -13,7 +13,14 @@ export function stageBaseline(root, rel) {
         execFileSync('git', ['add', '--', rel], { cwd: root, stdio: 'pipe' });
     }
     catch {
-        // not a git repo / git absent — the change is still on disk; picked up on the next commit
+        // not a git repo / git absent — the change is still on disk; picked up on the next commit.
+        // ponytail: also swallows the ship worktree's `fatal: pathspec ... is beyond a symbolic link`
+        // (exit 128) when eslint/baselines is symlinked in for an OVERLAY repo. Load-bearing: the write
+        // itself lands on the real root file (the source of truth there, since overlay never commits
+        // baselines) and staying unstaged is what keeps overlay git-invisible. So the recorded
+        // "self-deletes & stages" contract (overlay-self-heal Ruling 2) degrades to "self-deletes" only
+        // in that context. Do NOT realpath-resolve to force the add — that commits baselines into a repo
+        // that deliberately never adopted them.
     }
 }
 // True iff a commit is in progress (anything staged, ANY status incl. deletions/renames). Used to

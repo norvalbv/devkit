@@ -33,11 +33,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
-import { ALLOWLIST_CLI, loadAllowlist } from "./allowlist-io.mjs";
-import { loadChangedSet } from "./changed-files.mjs";
-import { isExpired } from "./decay.mjs";
-import { JSCPD_OWN_ROOT, resolveJscpdBin } from "./jscpd-bin.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mjs';
+import { loadChangedSet } from './changed-files.mjs';
+import { isExpired } from './decay.mjs';
+import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mjs';
 // Resolve config against the consumer cwd (W-3). Scan roots, allowlist, jscpd cwd all key off it.
 const cfg = resolveGuardConfig(process.cwd());
 const repoRoot = cfg.cwd;
