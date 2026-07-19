@@ -1,13 +1,27 @@
 #!/usr/bin/env node
 
 /**
- * Decision-log smell gate: a deterministic tripwire with an optional LLM downgrade.
- * The judge may clear a regex false positive but never escalate a clean diff.
+ * Decision-log smell gate (deterministic tripwire + optional LLM downgrade).
  *
- * `--gate`: 0 pass, 1 block, 2 could-not-run (fail-open).
- * `scan [--working]`: print smell labels for staged or whole-tree changes.
- * GUARD_NO_LOG bypasses; GUARD_DECISION_NO_LLM keeps the pure-regex verdict.
- * All config and git data resolve from the consumer cwd (W-3 portability invariant).
+ * Reads a diff and flags changes that *smell* like an architectural decision (the
+ * road-not-taken criterion's cheap proxy). The regex tripwire is the deterministic floor;
+ * at gate time an LLM (`claude -p`) may DOWNGRADE a false positive to a pass — it can only
+ * relax the regex block, never escalate, so the worst case is the regex verdict.
+ *
+ * Contract:
+ *   --gate : exit 1 = block (smell, no decision staged, not bypassed, LLM didn't clear it)
+ *            exit 0 = clean / decision staged / noLog bypass / LLM judged ROUTINE
+ *            exit 2 = could-not-run (no git / error) → fail-open
+ *   scan [--working] : print smell labels, exit 0. --working scans the whole working tree
+ *            (staged + unstaged vs HEAD) — used by a Stop-hook reminder.
+ *
+ * Bypass: GUARD_NO_LOG=1 (FRINK_NO_LOG=1 back-compat) skips the gate.
+ *         GUARD_DECISION_NO_LLM=1 (FRINK_DECISION_NO_LLM=1 back-compat) forces pure-regex.
+ *
+ * ── W-3 (portability invariant) ──────────────────────────────────────────────────
+ * Boundaries, the decisions dir, and the noLog/noLlm knobs come from
+ * resolveGuardConfig(cwd); git runs in the CONSUMER cwd. Nothing is anchored to the
+ * package dir (__dirname). Run from a consumer's node_modules, this gate reads THAT repo.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -251,11 +265,26 @@ function segmentMatches(segment: string, smellPaths: Set<string>): boolean {
 }
 
 /**
- * Build focused judge evidence rather than truncating the full diff. The header preserves the
- * commit's shape; only smell-contributing segments consume the evidence budget. Separate routine
- * and smell-drop accounting makes cap loss explicit so incomplete evidence fails safe to DECISION.
- * The exported pure function is shared by tests and the evaluation bench. Quoted paths that cannot
- * be matched remain visible in the header and therefore also take the insufficient-evidence path.
+ * Judge stdin — deterministic EVIDENCE EXTRACTION, not truncation. A naive `git diff` prefix on a
+ * big commit is all routine churn while the decision decider sits past any slice point (a false
+ * ROUTINE downgrade), and length itself degrades judgment: accuracy falls from ~3k tokens even
+ * with benign filler, with binary-label bias and instruction drift ("Same Task, More Tokens"
+ * arXiv:2402.14848; Context Rot; irrelevant context hurts + removing it restores accuracy,
+ * arXiv:2302.00093). The smell detector already KNOWS which files fired — a decision in a
+ * non-smelled file would not have triggered the gate at all — so the filter has perfect recall
+ * by construction (the one case where full context beats focused context, retrieval misses,
+ * cannot occur — arXiv:2407.16833).
+ *
+ * Input = (a) the changed-file list from entries (line-capped at HEADER_MAX_FILES with an explicit
+ * "+N more" line — the judge always knows the commit's whole shape), then (b) ONLY the
+ * smell-contributing files' diff segments (per-segment + hard total caps), then (c) explicit
+ * omission accounting that DISTINGUISHES routine-file omissions from cap-dropped SMELL evidence —
+ * the judge must never believe the evidence is complete when a smelled segment was dropped (that
+ * case names itself INCOMPLETE, engaging the prompt's insufficient-evidence → DECISION fail-safe).
+ * Routine churn never reaches the model. Pure (exported for eval/bench.mjs + tests);
+ * runDetectJudge's 12000 slice stays as belt-and-braces and can no longer bite by construction.
+ * A git-quoted path (spaces/unicode) the header-line match misses just isn't extracted — it stays
+ * visible in the file list and the same fail-safe covers it.
  */
 export function buildDetectJudgeInput(
   fullDiff: string,
