@@ -1,5 +1,13 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,7 +39,9 @@ const ENV_KEYS = [
   'FRINK_DECISION_NO_LLM',
   'DEVKIT_REVIEW_PROGRESS',
   'DEVKIT_RUN_MODE',
+  'DEVKIT_REVIEW_ID',
   'DEVKIT_REVIEW_ASSET_ROOT',
+  'DEVKIT_REVIEW_DATA_ROOT',
   'DEVKIT_REVIEW_BACKEND_ROOTS',
   'DEVKIT_REVIEW_FRONTEND_ROOTS',
   // Cleared so a real ship's pre-push (which exports these) can't steer the telemetry assertions
@@ -183,7 +193,11 @@ describe('runReviewGate — cascade + exit contract', () => {
   it('review mode uses current packaged briefs instead of target-controlled .claude copies', async () => {
     const repo = consumerRepo({ backend: true });
     const assets = reviewAssets();
+    const dataRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guard-managed-review-data-')));
+    dirs.push(dataRoot);
     process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ID = 'managed-review';
+    process.env.DEVKIT_REVIEW_DATA_ROOT = dataRoot;
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
     writeFileSync(
       join(repo, '.claude', 'agents', 'api-security-reviewer.md'),
