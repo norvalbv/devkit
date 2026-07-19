@@ -198,6 +198,8 @@ export function validatePlanCritiqueStatus(
       invalid('$.feasibility.evidence', 'reviewed responses require feasibility evidence');
     if (response.edgeCases.length === 0)
       invalid('$.edgeCases', 'reviewed responses require at least one edge case');
+    if (response.actions.length === 0)
+      invalid('$.actions', 'reviewed responses require at least one recommendation action');
     if (response.strengths.length === 0)
       invalid('$.strengths', 'reviewed responses require at least one strength');
     const criticalCount = response.findings.filter(
