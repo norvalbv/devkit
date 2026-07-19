@@ -14,6 +14,14 @@ import {
 
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 
+/** Entrypoint selected by the generated hook from a frozen review package runtime. */
+export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-gate';
+
+/** Entrypoint plus every package-local module it imports, without source/build extensions. */
+export const PACKAGED_REVIEW_RUNTIME_MODULE_STEMS: readonly string[] = Object.freeze(
+  ['gate-engine/review/baseline-fallow-paths', PACKAGED_REVIEW_RUNTIME_ENTRYPOINT].sort(),
+);
+
 function reviewerAssetPaths(reviewer: Reviewer): string[] {
   const paths = [`agents/${reviewer.name}.md`];
   if (hasChecklist(reviewer)) {
@@ -26,7 +34,7 @@ function reviewerAssetPaths(reviewer: Reviewer): string[] {
   return paths;
 }
 
-/** The complete package-relative reviewer asset contract, independent of consumer agent surfaces. */
+/** The package-relative agent-facing asset contract, independent of consumer agent surfaces. */
 export const PACKAGED_REVIEW_ASSET_PATHS: readonly string[] = Object.freeze(
   [...new Set([REVIEW_ROOTS_HELPER, ...REVIEWERS.flatMap(reviewerAssetPaths)])].sort(),
 );
