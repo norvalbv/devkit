@@ -1315,6 +1315,39 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     ).toMatch(/FREEZE_SEEN/);
   });
 
+  // The qavis pass-receipt is the untracked, gitignored cache `qavis qa` writes on a pass. The ship-time
+  // qavis-advisory gate shells `qavis route --repo $WT` which reads it to clear the block — but it never
+  // reached $WT (untracked, not in the pathspec), so a genuine pass blocked the ship. Link it in, and
+  // label it a cache (never "commit it" — committing a content-addressed receipt makes it stale at once).
+  const receiptHook =
+    '[ -e .qavis/receipt.json ] && echo RECEIPT_SEEN || echo RECEIPT_MISSING\nexit 0';
+
+  it('links an untracked qavis receipt in + labels it a cache (ship gate can clear on a real pass)', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: receiptHook });
+    // A qavis repo tracks .qavis/recipe.json, so $WT/.qavis pre-exists after checkout; the receipt is the
+    // untracked cache alongside it. Seed the ignore so the notice labels it a cache, not a commit-it nudge.
+    mkdirSync(join(dir, '.qavis'), { recursive: true });
+    writeFileSync(join(dir, '.qavis/recipe.json'), '{"from":"acme/qavis"}\n');
+    writeFileSync(join(dir, '.gitignore'), '.qavis/receipt.json\n');
+    git(['add', '.qavis/recipe.json', '.gitignore'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'track recipe + ignore receipt'], { stdio: 'ignore' });
+    writeFileSync(join(dir, '.qavis/receipt.json'), '{"sha":"deadbeef"}\n'); // untracked cache
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/qavis-receipt', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/\.qavis\/receipt\.json .*gitignored cache/); // cache, not a nudge
+    expect(r.stderr).not.toMatch(/\.qavis\/receipt\.json .*commit it/);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-qavis-receipt.log'), 'utf8');
+    expect(log).toMatch(/RECEIPT_SEEN/); // reached the worktree = `qavis route` can read + clear
+    expect(log).not.toMatch(/RECEIPT_MISSING/);
+  });
+
   // The candidates array is the whole gate-parity contract, and dropping an entry breaks it SILENTLY
   // (the gate falls to defaults and still reports a pass). Pin the set so a deletion fails loudly.
   it('pins the fixed gate-artifact candidate set (a dropped entry silently weakens every ship)', () => {
@@ -1336,6 +1369,7 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       'eslint/baselines',
       'eslint.config.devkit.mjs',
       'biome.devkit.jsonc',
+      '.qavis/receipt.json',
     ]);
   });
 
