@@ -774,6 +774,31 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.stdout).not.toMatch(/GATE_MARKER_XYZ/); // gate output never pollutes stdout (PR-URL stream)
   });
 
+  it('keeps an unwritable telemetry archive best-effort while persisting the gate log', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: 'echo "ARCHIVE_MARKER_XYZ"\nexit 0' });
+    const archiveParent = join(dir, 'archive-parent-is-a-file');
+    writeFileSync(archiveParent, 'not a directory\n');
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/archive-log', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: {
+        ...env,
+        SHIP_DRY_RUN: '1',
+        DEVKIT_GATE_EVENTS: join(archiveParent, 'gate-events.jsonl'),
+      },
+    });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-archive-log.log'), 'utf8')).toMatch(
+      /ARCHIVE_MARKER_XYZ/,
+    );
+    expect(r.stderr).toMatch(/ARCHIVE_MARKER_XYZ/);
+    expect(r.stderr).toMatch(/could not archive gate output .* continuing/);
+  });
+
   it('captures the gate output to the log even when a gate blocks the commit', () => {
     const { dir, env, git } = seedShipRepo({ hookBody: 'echo "BLOCK_REASON_XYZ"\nexit 1' });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');

@@ -8,13 +8,12 @@ run_gates_with_capture() {
   shift 5
   [ "${1:-}" = "--" ] && shift
   local cmd=("$@")
-  local logs=("$log")
-  [ -n "${DEVKIT_GATE_ARCHIVE_LOG:-}" ] && logs+=("$DEVKIT_GATE_ARCHIVE_LOG")
+  local archive_log=${DEVKIT_GATE_ARCHIVE_LOG:-}
 
-  local progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mts"
+  local progress_reader
+  progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mts"
   [ -f "$progress_reader" ] || progress_reader="$(dirname "${BASH_SOURCE[0]}")/../../../gate-engine/review/progress.mjs"
   mkdir -p "$(dirname "$log")" "$(dirname "$progress")"
-  [ -n "${DEVKIT_GATE_ARCHIVE_LOG:-}" ] && mkdir -p "$(dirname "$DEVKIT_GATE_ARCHIVE_LOG")"
   rm -f "$progress"
 
   # DEVKIT_SHIP arms the deterministic-prefix cache and overlay sentinel. The invariant it names is
@@ -31,13 +30,24 @@ run_gates_with_capture() {
     echo "$label: no timeout/gtimeout on PATH — gate-hang protection disabled (brew install coreutils to enable)" >&2
   fi
 
+  local statuses=() archive_rc=0
   set +e
-  ${to[@]+"${to[@]}"} "${cmd[@]}" 2>&1 | tee "${logs[@]}" >&2
-  local statuses=("${PIPESTATUS[@]}")
+  if [ -n "$archive_log" ]; then
+    mkdir -p "$(dirname "$archive_log")" 2>/dev/null || archive_rc=$?
+    ${to[@]+"${to[@]}"} "${cmd[@]}" 2>&1 | tee "$log" | tee "$archive_log" >&2
+    statuses=("${PIPESTATUS[@]}")
+    [ "${statuses[2]:-1}" -eq 0 ] || archive_rc=${statuses[2]:-1}
+  else
+    ${to[@]+"${to[@]}"} "${cmd[@]}" 2>&1 | tee "$log" >&2
+    statuses=("${PIPESTATUS[@]}")
+  fi
   local rc=${statuses[0]}
   if [ "$rc" -eq 0 ] && [ "${statuses[1]:-1}" -ne 0 ]; then
     echo "$label: could not persist gate output to $log" >&2
     rc=1
+  fi
+  if [ "$archive_rc" -ne 0 ]; then
+    echo "$label: could not archive gate output to $archive_log; continuing" >&2
   fi
   set -e
 
