@@ -83,11 +83,6 @@ export const DEFAULTS = Object.freeze({
     // Test command the testing agents run (markdown-prompt agents READ this). null =>
     // agents fall back to the consumer's documented package.json `test` script.
     testCommand: null,
-    // Coverage-gate config (the `coverage` guard READs this; only runs when selected). `{}` =
-    // active-strict: no percentage floor, but absent coverage/coverage-final.json FAILS HARD (a
-    // selected coverage gate must never silently pass unverified). `false` = explicit opt-out;
-    // `{ statements, functions, lines?, branches? }` enforces the keys present. See coverage/run.mts.
-    coverage: Object.freeze({}),
     // Review-agent topology (the 5 reviewer subagents READ these). Frink-agnostic defaults:
     // a generic repo treats `src` as its only backend root, has no configured frontend
     // topology (frontend reviewers exit early), and enforces WCAG touch targets + skips the
@@ -116,9 +111,7 @@ function envVar(name) {
 }
 // Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
 // as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-// Exported for hard-by-default gates that must distinguish unset (→ default) from an
-// explicit `=0` soften (envFlag can't — it folds unset and `=0` both to false).
-export function envBool(name) {
+function envBool(name) {
     const v = envVar(name);
     if (v === undefined)
         return undefined;
@@ -200,14 +193,6 @@ export function resolveGuardConfig(cwd = process.cwd()) {
         graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
         // Testing-agent command: env > file > null (agents fall back to package.json test).
         testCommand: testCommandEnv ?? file.testCommand ?? DEFAULTS.testCommand,
-        // Coverage: explicit `false` = opt-out; any plain object = thresholds; anything else (absent,
-        // array, non-object) falls back to the active-strict `{}` default. A malformed value never
-        // silently disables the gate — only a literal `false` does.
-        coverage: file.coverage === false
-            ? false
-            : file.coverage && typeof file.coverage === 'object' && !Array.isArray(file.coverage)
-                ? file.coverage
-                : DEFAULTS.coverage,
         // Review-agent topology. Shallow-merge so a consumer can set one key (and nested
         // accessibility) without restating the whole block.
         review: {

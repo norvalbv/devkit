@@ -31,16 +31,6 @@ const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
 const RE_DEPS = /\b(from\s+['"][^'"]+['"])/i;
-// Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
-// reads that force reflow, and animation of layout-affecting properties.
-const RE_LAYOUT_READ =
-  /\b(getBoundingClientRect|offsetWidth|offsetHeight|offsetTop|offsetLeft|clientWidth|clientHeight|scrollWidth|scrollHeight|getComputedStyle)\b/;
-const RE_ANIMATION =
-  /\b(transition|animation|animate|keyframes)\b[^;\n]{0,80}\b(top|left|right|bottom|width|height|margin|padding)\b|\b(top|left|width|height)\b[^;\n]{0,40}\b(transition|animation)\b/i;
-
-// Prose files under a root ride along with source commits; their text trips the item
-// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
-const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
@@ -81,8 +71,7 @@ function getStagedFiles() {
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
-      .filter((f) => !RE_PROSE_FILE.test(f));
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'));
   } catch {
     return [];
   }
@@ -132,17 +121,6 @@ function detectPerformancePatterns(files, diffs) {
   }
   if (RE_IFRAME.test(fullDiff)) {
     items.push({ name: 'iframe-usage', category: 'High Priority', status: 'pending', issues: [] });
-  }
-  if (RE_LAYOUT_READ.test(fullDiff)) {
-    items.push({ name: 'layout-thrash', category: 'High Priority', status: 'pending', issues: [] });
-  }
-  if (RE_ANIMATION.test(fullDiff)) {
-    items.push({
-      name: 'animation-performance',
-      category: 'Medium Priority',
-      status: 'pending',
-      issues: [],
-    });
   }
   if (RE_COMPONENT.test(fullDiff)) {
     items.push({

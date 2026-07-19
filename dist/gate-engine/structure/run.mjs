@@ -18,8 +18,8 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
-import { resolveGuardConfig } from '../config.mjs';
-import { buildStructureConfigs } from './eslint-config.mjs';
+import { resolveGuardConfig } from "../config.mjs";
+import { buildStructureConfigs } from "./eslint-config.mjs";
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;

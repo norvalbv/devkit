@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { structureCmdFor } from '../../commands/init.mts';
-import { normalizeSelection, type Selection } from '../components.mts';
+import { normalizeSelection, type Selection, structureCmdFor } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { readJson } from '../fs-helpers.mts';
 import { syncOverlayHook } from '../overlay.mts';

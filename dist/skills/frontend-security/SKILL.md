@@ -107,27 +107,6 @@ if (!result.success) {
 
 **Note:** Client-side validation is for UX only. Always validate on server.
 
-## Cross-Origin Messaging (`postmessage-origin`)
-
-```typescript
-// FAIL: any window can send this handler instructions
-window.addEventListener('message', (e) => applySettings(e.data))
-
-// PASS: exact origin check + explicit target origin
-window.addEventListener('message', (e) => {
-  if (e.origin !== 'https://trusted.example.com') return
-  applySettings(e.data)
-})
-frame.contentWindow.postMessage(payload, 'https://trusted.example.com')
-```
-
-- FAIL a `message` handler that reads `event.data` without an exact `event.origin` check —
-  wildcard-substring checks (`origin.includes('example.com')`) also FAIL (subdomain/lookalike
-  bypass).
-- FAIL `postMessage(data, '*')` when the payload carries anything sensitive.
-- Treat `event.data` as untrusted input: FAIL if it flows into `innerHTML`, `eval`, or state
-  that gates privileged behavior without validation.
-
 ## Security Headers
 
 Essential headers to configure:
@@ -147,13 +126,4 @@ Essential headers to configure:
 - CSP headers configured
 - No sensitive data in URL parameters
 - External links use `rel="noopener noreferrer"`
-- `message` handlers verify `event.origin` exactly; `postMessage` names its target origin
 - Form inputs validated client-side (with server validation)
-
-## Provenance
-
-Rule text is written for this repo (OWASP-derived guidance; no roadmap.sh frontend-security
-list exists). `postmessage-origin` was added from the OWASP ASVS v5.0 (CC-BY-SA) chapter V3 Web
-Frontend Security coverage diff. Rejected V3 topics: browser-feature policy headers and cookie
-attributes are covered by existing items (`cookie-security`, security-header guidance);
-WebRTC (V17) is out of scope for this catalog.

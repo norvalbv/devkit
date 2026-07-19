@@ -91,6 +91,25 @@ describe('wizard agent-surface selection', () => {
     });
   });
 
+  it('keeps an enabled review profile empty when no installed guard is available', async () => {
+    setAnswers('claude');
+    Object.assign(answers, {
+      'Select components to install': ['skills', 'agents', 'husky'],
+      'Select gate guards': [],
+      'Enable devkit review?': true,
+      // If the wizard incorrectly opens an optionless picker, this impossible answer leaks through.
+      'Select guards for devkit review': ['size'],
+    });
+
+    const r = await runWizard(WIZ_OPTS);
+
+    expect(r.review).toEqual({
+      enabled: true,
+      guards: [],
+      decisionsDir: 'docs/decisions',
+    });
+  });
+
   it('preserves a custom decisions directory that the wizard does not expose', async () => {
     setAnswers('claude');
     Object.assign(answers, {

@@ -17,9 +17,9 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
-import { loadScopedTargets, matchScope } from './check-alignment.mjs';
-import { currentTarget, parseDecision, rankAxes } from './decisions.mjs';
+import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { loadScopedTargets, matchScope } from "./check-alignment.mjs";
+import { currentTarget, parseDecision, rankAxes } from "./decisions.mjs";
 // The current Target's full ruling + scope for an axis, read from its file (not the clamped INDEX row).
 function rulingFor(slug, decisionsDir) {
     const file = path.join(decisionsDir, `${slug}.md`);

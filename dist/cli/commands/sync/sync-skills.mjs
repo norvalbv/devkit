@@ -9,10 +9,10 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AGENT_TARGETS } from '../../lib/components.mjs';
-import { detectGitRoot } from '../../lib/detect-git-root.mjs';
-import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
-import { findConflicts } from '../../lib/sync-manifest.mjs';
+import { AGENT_TARGETS } from "../../lib/components.mjs";
+import { detectGitRoot } from "../../lib/detect-git-root.mjs";
+import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
+import { findConflicts } from "../../lib/sync-manifest.mjs";
 // Recursively list every file under `dir`, returned as paths relative to `dir`.
 function walk(dir, base = dir) {
     const out = [];

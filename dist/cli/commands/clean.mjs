@@ -12,17 +12,16 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
-import { detectGitRoot } from '../lib/detect-git-root.mjs';
-import { packageDir, readJson } from '../lib/fs-helpers.mjs';
-import { isTracked } from '../lib/git-tracked.mjs';
-import { removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mjs';
-import { removeGuardBlock } from '../lib/husky/husky-block.mjs';
-import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mjs';
-import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mjs';
-import { removeSearchCode } from '../lib/install/install-search-code.mjs';
-import { removeHealAlias } from '../lib/overlay.mjs';
-import { removeGlobalHook } from '../lib/overlay-global-hook.mjs';
-import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
+import { detectGitRoot } from "../lib/detect-git-root.mjs";
+import { packageDir, readJson } from "../lib/fs-helpers.mjs";
+import { isTracked } from "../lib/git-tracked.mjs";
+import { removeGuardBlock } from "../lib/husky/husky-block.mjs";
+import { pruneDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
+import { removeHookRegistrations, removeHookScripts } from "../lib/install/install-hooks.mjs";
+import { removeSearchCode } from "../lib/install/install-search-code.mjs";
+import { removeHealAlias } from "../lib/overlay.mjs";
+import { removeGlobalHook } from "../lib/overlay-global-hook.mjs";
+import { removeAgents, removeSkills } from "../lib/sync-manifest.mjs";
 function rm(path, label, dryRun) {
     if (!existsSync(path))
         return;
@@ -244,8 +243,6 @@ function cleanPackage(cwd, cfg, dryRun) {
                 writeFileSync(hookPath, content);
         }
     }
-    // The managed commit-msg block (review/sentry judges) — silent no-op when never installed.
-    removeCommitMsgBlock(gitRoot, cfg.pkgRel ?? '', dryRun);
     // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
     // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
     removeSkills(gitRoot, dryRun);

@@ -103,6 +103,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Testing reviewer agent | agent | shipped | none | — |
 | devkit CLI | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
+| Coverage gate | bin | shipped | none | — |
 | Decisions gate | bin | shipped | evidence-only | decisions |
 | Deterministic orchestrator | bin | shipped | none | — |
 | Semantic duplication gate | bin | shipped | evidence-only | co-occurrence |

@@ -13,14 +13,9 @@ export const meta = {
     help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--body "<text>"] [--link <d>]... [--] <path...>
                           bare positional paths (no --) are accepted.
 
-  --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
-                      HEAD / current branch. <path...> content is still read from your working tree,
-                      so this ships even when the branch you're on has ALREADY committed those files
-                      (that case otherwise stages nothing). Must be a branch on origin — a PR base
-                      can't be a sha or a tag. "origin/x" and "x" are equivalent.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
                       body from stdin (a pipe or here-doc) or to leave the body empty.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
