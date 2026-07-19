@@ -23,9 +23,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveGuardConfig } from "../config.mjs";
-import { isPrimarySearchCommand, normalize } from "./search-tool-lib.mjs";
-import { resolveSearchTools } from "./tools.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { isPrimarySearchCommand, normalize } from './search-tool-lib.mjs';
+import { resolveSearchTools } from './tools.mjs';
 const THRESHOLD = Number(process.env.SEARCH_STREAK_THRESHOLD ?? 3);
 let payload;
 try {

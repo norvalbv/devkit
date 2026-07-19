@@ -156,9 +156,9 @@ export function selectedIds(cwd: string): string[] {
   }
 }
 
-export function prefixCacheScope(scope?: string): string | undefined {
-  return process.env.DEVKIT_RUN_MODE === 'review'
-    ? `${scope ?? 'devkit-guards'}:review:${process.env.DEVKIT_REVIEW_GUARDS ?? ''}`
+export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
+  return process.env.DEVKIT_RUN_MODE === 'review' && effectiveIds
+    ? `${scope ?? 'devkit-guards'}:review:${effectiveIds.join(',')}`
     : scope;
 }
 
@@ -201,9 +201,30 @@ function commandGate(label: string, cmd?: string): Gate {
  */
 export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts = {}) {
   const { exec = execFileSync } = opts;
+  // In review mode, the allowlist is authoritative: constrain/reject opts.only to prevent cache
+  // collision. Compute the effective guard set BEFORE checkPrefix so the scope reflects what runs.
+  const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+  let effectiveIds: string[];
+  if (reviewMode) {
+    const allowlist = selectedIds(cwd);
+    if (opts.only) {
+      const disallowed = opts.only.filter((id) => !allowlist.includes(id));
+      if (disallowed.length > 0) {
+        console.error(
+          `✗ guard-deterministic --only: disallowed in review mode (not in allowlist): ${disallowed.join(', ')} (allowed: ${allowlist.join(', ')})`,
+        );
+        return 1;
+      }
+      effectiveIds = opts.only.filter((id) => allowlist.includes(id));
+    } else {
+      effectiveIds = allowlist;
+    }
+  } else {
+    effectiveIds = opts.only ?? selectedIds(cwd);
+  }
   // A review may intentionally run a strict subset. Salt the prefix scope so that subset can never
-  // authorize a later full ship/commit against the same staged tree.
-  const cacheScope = prefixCacheScope(opts.scope);
+  // authorize a later full ship/commit against the same staged tree. Compute scope from effectiveIds.
+  const cacheScope = prefixCacheScope(opts.scope, reviewMode ? effectiveIds : undefined);
   // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
   // every gate. checkPrefix returns true = skip, false = run.
   const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
@@ -212,7 +233,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     // `--only`, when provided, must name known guard ids. A typo (`--only siz,fanout`) or an empty
     // spec (`--only ,,`) would otherwise filter DETERMINISTIC down to nothing and silently drop a
     // required gate — the exact fail-open this orchestrator exists to prevent. Fail CLOSED, loudly.
-    if (opts.only) {
+    if (opts.only && !reviewMode) {
       const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
       if (unknown.length || opts.only.length === 0) {
         const why = unknown.length
@@ -224,7 +245,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
         return 1;
       }
     }
-    const ids = new Set(opts.only ?? selectedIds(cwd));
+    const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],

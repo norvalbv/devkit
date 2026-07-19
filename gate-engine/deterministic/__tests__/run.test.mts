@@ -240,13 +240,59 @@ describe('coverage — opt-in wiring through runDeterministic', () => {
   });
 });
 
+describe('review mode — allowlist authoritative, --only constrained', () => {
+  it('rejects --only with guards not in the review allowlist', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const exec = mkExec({});
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,clone';
+    // --only requests fanout, which is NOT in the review allowlist
+    expect(runDeterministic(d, { exec, only: ['fanout'] })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('disallowed in review mode');
+    expect(err.mock.calls.flat().join('\n')).toContain('fanout');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('allows --only with a subset of the review allowlist', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const exec = mkExec({});
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,clone,fanout';
+    // --only requests only size, which IS in the allowlist
+    expect(runDeterministic(d, { exec, only: ['size'] })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec.mock.calls[0][1][0]).toContain('size-disable');
+  });
+
+  it('computes distinct cache scopes for different --only selections in review mode', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size,clone,fanout';
+    // First run with only size
+    const exec1 = mkExec({});
+    expect(runDeterministic(d, { exec: exec1, only: ['size'], scope: 'test' })).toBe(0);
+    const scope1 = prefixCacheScope('test', ['size']);
+    expect(scope1).toBe('test:review:size');
+    // Second run with only clone — different scope
+    const exec2 = mkExec({});
+    expect(runDeterministic(d, { exec: exec2, only: ['clone'], scope: 'test' })).toBe(0);
+    const scope2 = prefixCacheScope('test', ['clone']);
+    expect(scope2).toBe('test:review:clone');
+    expect(scope1).not.toBe(scope2);
+  });
+});
+
 describe('prefixCacheScope', () => {
-  it('salts review entries with mode and allowlist while leaving commit/ship scopes unchanged', () => {
+  it('salts review entries with effective ids while leaving commit/ship scopes unchanged', () => {
     expect(prefixCacheScope()).toBeUndefined();
     expect(prefixCacheScope('custom')).toBe('custom');
     process.env.DEVKIT_RUN_MODE = 'review';
-    process.env.DEVKIT_REVIEW_GUARDS = 'size,decisions';
-    expect(prefixCacheScope()).toBe('devkit-guards:review:size,decisions');
-    expect(prefixCacheScope('custom')).toBe('custom:review:size,decisions');
+    expect(prefixCacheScope(undefined, ['size', 'clone'])).toBe('devkit-guards:review:size,clone');
+    expect(prefixCacheScope('custom', ['size', 'clone'])).toBe('custom:review:size,clone');
+    delete process.env.DEVKIT_RUN_MODE;
+    expect(prefixCacheScope(undefined, ['size', 'clone'])).toBeUndefined();
   });
 });

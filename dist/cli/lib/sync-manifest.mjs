@@ -10,9 +10,9 @@
  */
 import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "./components.mjs";
-import { packageDir, readJson, sha256 } from "./fs-helpers.mjs";
-import { isTracked } from "./git-tracked.mjs";
+import { AGENT_TARGETS } from './components.mjs';
+import { packageDir, readJson, sha256 } from './fs-helpers.mjs';
+import { isTracked } from './git-tracked.mjs';
 // ── ownership inference (forward: sync-time conflict detection) ───────────────────────────────
 // A consumer may author their OWN skill/agent/hook under a name devkit bundles. These tell the sync
 // step which on-disk asset is the user's (preserve) vs devkit's own (overwrite), via two signals:
