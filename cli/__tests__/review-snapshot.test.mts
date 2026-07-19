@@ -1,139 +1,33 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   symlinkSync,
-  utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rootRegistry } from './_helpers.mts';
-
-const SNAPSHOT_SCRIPT = fileURLToPath(new URL('../lib/ship/review/snapshot.sh', import.meta.url));
-const { mkTmp, cleanup } = rootRegistry();
-
-const GIT_ENV = {
-  ...process.env,
-  GIT_CONFIG_NOSYSTEM: '1',
-  GIT_AUTHOR_NAME: 'Snapshot Test',
-  GIT_AUTHOR_EMAIL: 'snapshot@test.invalid',
-  GIT_COMMITTER_NAME: 'Snapshot Test',
-  GIT_COMMITTER_EMAIL: 'snapshot@test.invalid',
-};
+import {
+  cleanup,
+  failNullEmitterEnvironment,
+  failUpdateIndexEnvironment,
+  GIT_ENV,
+  indexBytes,
+  initializeSnapshotRepo,
+  mkTmp,
+  postFirstCaptureMutation,
+  readTree,
+  runSnapshot,
+  runSnapshotTrees,
+  signalBeforeTempEnvironment,
+  snapshotFixture,
+  snapshotMatches,
+} from './review-snapshot-fixture.mts';
 
 afterEach(cleanup);
-
-function snapshotFixture() {
-  const root = mkTmp('devkit review snapshot-');
-  const home = join(root, '.home');
-  mkdirSync(home);
-  const env = { ...GIT_ENV, HOME: home, XDG_CONFIG_HOME: join(home, '.config') };
-  const git = initializeSnapshotRepo(root, env);
-  return { root, env, git };
-}
-
-function initializeSnapshotRepo(root: string, env: NodeJS.ProcessEnv) {
-  const git = (args: string[]) =>
-    execFileSync('git', args, {
-      cwd: root,
-      env,
-      encoding: 'utf8',
-    });
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.name', 'Snapshot Test']);
-  git(['config', 'user.email', 'snapshot@test.invalid']);
-  writeFileSync(join(root, 'tracked.txt'), 'tracked base\n');
-  writeFileSync(join(root, 'partial.txt'), 'partial base\n');
-  writeFileSync(join(root, 'delete-staged.txt'), 'delete staged\n');
-  writeFileSync(join(root, 'delete-unstaged.txt'), 'delete unstaged\n');
-  writeFileSync(join(root, 'replace.txt'), 'replace me\n');
-  git(['add', '.']);
-  git(['commit', '-q', '-m', 'base']);
-  return git;
-}
-
-function runSnapshot(root: string, targetHead: string, env: NodeJS.ProcessEnv, cwd = root) {
-  return spawnSync(
-    '/bin/bash',
-    [
-      '-c',
-      'source "$1"; shift; review_snapshot_capture_tree "$@"',
-      'snapshot-test',
-      SNAPSHOT_SCRIPT,
-      root,
-      targetHead,
-    ],
-    { cwd, env, encoding: 'utf8' },
-  );
-}
-
-function snapshotMatches(root: string, targetHead: string, tree: string, env: NodeJS.ProcessEnv) {
-  return spawnSync(
-    '/bin/bash',
-    [
-      '-c',
-      'source "$1"; shift; review_snapshot_tree_matches "$@"',
-      'snapshot-test',
-      SNAPSHOT_SCRIPT,
-      root,
-      targetHead,
-      tree,
-    ],
-    { env, encoding: 'utf8' },
-  );
-}
-
-type TreeEntry = { mode: string; oid: string; content: Buffer };
-
-function readTree(root: string, tree: string, env: NodeJS.ProcessEnv) {
-  const raw = execFileSync('git', ['ls-tree', '-rz', '-r', tree], { cwd: root, env });
-  const entries = new Map<string, TreeEntry>();
-  for (const record of raw.toString('utf8').split('\0').filter(Boolean)) {
-    const tab = record.indexOf('\t');
-    const [mode, , oid] = record.slice(0, tab).split(' ');
-    const path = record.slice(tab + 1);
-    const content = execFileSync('git', ['cat-file', 'blob', oid], { cwd: root, env });
-    entries.set(path, { mode, oid, content });
-  }
-  return entries;
-}
-
-function indexBytes(root: string, git: (args: string[]) => string) {
-  const path = git(['rev-parse', '--git-path', 'index']).trim();
-  return readFileSync(isAbsolute(path) ? path : resolve(root, path));
-}
-
-function postFirstCaptureMutation(root: string) {
-  const bin = join(root, 'capture-mutation-bin');
-  const state = mkTmp('devkit capture input mutation-');
-  const realGit = execFileSync('/bin/bash', ['-c', 'command -v git'], {
-    encoding: 'utf8',
-  }).trim();
-  const mutator = join(state, 'mutate.mjs');
-  mkdirSync(bin);
-  writeFileSync(
-    mutator,
-    "import { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.MUTATION_PATH, process.env.MUTATION_CONTENT);\n",
-  );
-  writeFileSync(
-    join(bin, 'git'),
-    '#!/bin/sh\nis_write=\nfor arg in "$@"; do [ "$arg" = write-tree ] && is_write=1; done\nif [ -n "$is_write" ] && [ -n "$GIT_INDEX_FILE" ]; then\n  output=$("$REAL_GIT" "$@") || exit $?\n  n=$(cat "$WRITE_TREE_COUNT" 2>/dev/null || printf 0)\n  n=$((n + 1))\n  printf "%s\\n" "$n" > "$WRITE_TREE_COUNT"\n  [ "$n" -eq 2 ] && "$REAL_NODE" "$MUTATOR_SCRIPT"\n  printf "%s\\n" "$output"\n  exit 0\nfi\nexec "$REAL_GIT" "$@"\n',
-  );
-  chmodSync(join(bin, 'git'), 0o755);
-  return {
-    PATH: `${bin}:${process.env.PATH}`,
-    REAL_GIT: realGit,
-    REAL_NODE: process.execPath,
-    MUTATOR_SCRIPT: mutator,
-    WRITE_TREE_COUNT: join(state, 'write-tree-count'),
-  };
-}
 
 describe('review snapshot capture', () => {
   it('preserves a target root whose final pathname byte is a newline', () => {
@@ -175,7 +69,7 @@ describe('review snapshot capture', () => {
     git(['add', '-u', 'delete-staged.txt']);
     rmSync(join(root, 'delete-unstaged.txt'));
     rmSync(join(root, 'replace.txt'));
-    symlinkSync('tracked.txt', join(root, 'replace.txt'));
+    symlinkSync('tracked.txt\n\n', join(root, 'replace.txt'));
     writeFileSync(join(root, 'binary.bin'), Buffer.from([0, 255, 1, 254]));
     writeFileSync(join(root, 'run.sh'), '#!/bin/sh\nexit 0\n');
     chmodSync(join(root, 'run.sh'), 0o755);
@@ -204,7 +98,7 @@ describe('review snapshot capture', () => {
     expect(entries.has('delete-unstaged.txt')).toBe(false);
     expect(entries.get('binary.bin')?.content).toEqual(Buffer.from([0, 255, 1, 254]));
     expect(entries.get('replace.txt')).toMatchObject({ mode: '120000' });
-    expect(entries.get('replace.txt')?.content.toString()).toBe('tracked.txt');
+    expect(entries.get('replace.txt')?.content.toString()).toBe('tracked.txt\n\n');
     expect(entries.get('run.sh')).toMatchObject({ mode: '100755' });
     expect(entries.get('line\nbreak.txt')?.content.toString()).toBe('newline path\n');
     expect(entries.has('secret.txt')).toBe(false);
@@ -213,6 +107,68 @@ describe('review snapshot capture', () => {
     expect(indexBytes(root, git)).toEqual(before.index);
     expect(git(['show-ref'])).toBe(before.refs);
     expect(git(['status', '--porcelain=v1'])).toBe(before.status);
+  });
+
+  it('captures a 0644 to 0755 change when core.fileMode=false hides it from Git', () => {
+    const { root, env, git } = snapshotFixture();
+    const targetHead = git(['rev-parse', 'HEAD']).trim();
+    git(['config', 'core.fileMode', 'false']);
+    chmodSync(join(root, 'tracked.txt'), 0o755);
+    expect(git(['status', '--porcelain=v1', '--', 'tracked.txt'])).toBe('');
+
+    const result = runSnapshotTrees(root, targetHead, env);
+
+    expect(result.status, result.stderr).toBe(0);
+    const [stagedTree, rawTree] = result.stdout.trim().split(' ');
+    expect(readTree(root, stagedTree, env).get('tracked.txt')?.mode).toBe('100755');
+    expect(readTree(root, rawTree, env).get('tracked.txt')?.mode).toBe('100755');
+  });
+
+  it('captures a 0755 to 0644 change when core.fileMode=false hides it from Git', () => {
+    const { root, env, git } = snapshotFixture();
+    chmodSync(join(root, 'tracked.txt'), 0o755);
+    git(['add', 'tracked.txt']);
+    git(['commit', '-q', '-m', 'make tracked executable']);
+    const targetHead = git(['rev-parse', 'HEAD']).trim();
+    git(['config', 'core.fileMode', 'false']);
+    chmodSync(join(root, 'tracked.txt'), 0o644);
+    expect(git(['status', '--porcelain=v1', '--', 'tracked.txt'])).toBe('');
+
+    const result = runSnapshotTrees(root, targetHead, env);
+
+    expect(result.status, result.stderr).toBe(0);
+    const [stagedTree, rawTree] = result.stdout.trim().split(' ');
+    expect(readTree(root, stagedTree, env).get('tracked.txt')?.mode).toBe('100644');
+    expect(readTree(root, rawTree, env).get('tracked.txt')?.mode).toBe('100644');
+  });
+
+  it('hashes working-tree bytes without configured clean filters', () => {
+    const { root, env, git } = snapshotFixture();
+    writeFileSync(join(root, '.gitattributes'), 'filtered.txt filter=snapshot-rewrite\n');
+    writeFileSync(join(root, 'filtered.txt'), 'committed bytes\n');
+    git(['add', '.gitattributes', 'filtered.txt']);
+    git(['commit', '-q', '-m', 'add filtered file']);
+    const targetHead = git(['rev-parse', 'HEAD']).trim();
+    git(['config', 'filter.snapshot-rewrite.clean', "sed 's/^/cleaned: /'"]);
+    git(['config', 'filter.snapshot-rewrite.smudge', 'cat']);
+    git(['config', 'filter.snapshot-rewrite.required', 'true']);
+    writeFileSync(join(root, 'filtered.txt'), 'raw final bytes\n');
+    expect(git(['hash-object', '--', 'filtered.txt']).trim()).not.toBe(
+      git(['hash-object', '--no-filters', '--', 'filtered.txt']).trim(),
+    );
+    const beforeIndex = indexBytes(root, git);
+
+    const result = runSnapshotTrees(root, targetHead, env);
+
+    expect(result.status, result.stderr).toBe(0);
+    const [stagedTree, rawTree] = result.stdout.trim().split(' ');
+    expect(readTree(root, stagedTree, env).get('filtered.txt')?.content.toString()).toBe(
+      'cleaned: raw final bytes\n',
+    );
+    expect(readTree(root, rawTree, env).get('filtered.txt')?.content.toString()).toBe(
+      'raw final bytes\n',
+    );
+    expect(indexBytes(root, git)).toEqual(beforeIndex);
   });
 
   it('preserves repository, info, and target-relative global ignore semantics', () => {
@@ -306,6 +262,69 @@ describe('review snapshot capture', () => {
     expect(entries.get('cache/neighbor.txt')?.content.toString()).toBe('surrounding cache\n');
   });
 
+  it('captures a nested consumer as a whole-repository snapshot with target-scoped exclusions', () => {
+    const { root, env, git } = snapshotFixture();
+    const targetHead = git(['rev-parse', 'HEAD']).trim();
+    const target = join(root, 'packages', 'consumer');
+    const sibling = join(root, 'packages', 'sibling');
+    const projection = mkTmp('devkit nested snapshot projection-');
+    mkdirSync(target, { recursive: true });
+    mkdirSync(join(sibling, '.devkit/review-runs'), { recursive: true });
+    mkdirSync(join(root, '.husky'));
+    mkdirSync(join(target, '.devkit/review-runs'), { recursive: true });
+    mkdirSync(join(target, 'cache'));
+    mkdirSync(join(projection, 'hook-runner'));
+    writeFileSync(join(root, '.husky/team.txt'), 'root husky neighbor\n');
+    writeFileSync(join(projection, 'hook-runner/pre-commit'), 'generated runner\n');
+    symlinkSync(join(projection, 'hook-runner'), join(root, '.husky/_'));
+    writeFileSync(join(target, '.devkit/review-runs/run.log'), 'generated review log\n');
+    writeFileSync(join(target, 'target.txt'), 'nested consumer change\n');
+    writeFileSync(join(sibling, 'sibling.txt'), 'sibling repository change\n');
+    writeFileSync(
+      join(sibling, '.devkit/review-runs/keep.log'),
+      'different consumer review state\n',
+    );
+    writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["packages"]}\n');
+    writeFileSync(join(projection, 'guard.json'), '{"indexPath":"cache/index.db"}\n');
+    writeFileSync(join(projection, 'index.db'), 'generated target index\n');
+    symlinkSync(join(projection, 'guard.json'), join(target, 'guard.config.json'));
+    symlinkSync(join(projection, 'index.db'), join(target, 'cache/index.db'));
+    writeFileSync(
+      join(root, '.gitignore'),
+      '!/.husky/_\n!/packages/consumer/.devkit/review-runs/**\n',
+    );
+    const before = {
+      index: indexBytes(root, git),
+      status: git(['status', '--porcelain=v1']),
+    };
+
+    const result = runSnapshot(target, targetHead, env);
+
+    expect(result.status, result.stderr).toBe(0);
+    const tree = result.stdout.trim();
+    const entries = readTree(root, tree, env);
+    expect(entries.has('.husky/_')).toBe(false);
+    expect(entries.has('packages/consumer/.devkit/review-runs/run.log')).toBe(false);
+    expect(entries.has('packages/consumer/guard.config.json')).toBe(false);
+    expect(entries.has('packages/consumer/cache/index.db')).toBe(false);
+    expect(entries.get('.husky/team.txt')?.content.toString()).toBe('root husky neighbor\n');
+    expect(entries.get('guard.config.json')?.content.toString()).toBe(
+      '{"scanRoots":["packages"]}\n',
+    );
+    expect(entries.get('packages/consumer/target.txt')?.content.toString()).toBe(
+      'nested consumer change\n',
+    );
+    expect(entries.get('packages/sibling/sibling.txt')?.content.toString()).toBe(
+      'sibling repository change\n',
+    );
+    expect(entries.get('packages/sibling/.devkit/review-runs/keep.log')?.content.toString()).toBe(
+      'different consumer review state\n',
+    );
+    expect(snapshotMatches(target, targetHead, tree, env).status).toBe(0);
+    expect(indexBytes(root, git)).toEqual(before.index);
+    expect(git(['status', '--porcelain=v1'])).toBe(before.status);
+  });
+
   it('matches only the same target HEAD and final tree', () => {
     const { root, env, git } = snapshotFixture();
     const targetHead = git(['rev-parse', 'HEAD']).trim();
@@ -353,31 +372,14 @@ describe('review snapshot capture', () => {
   it('rejects files that mutate between its two filesystem captures', () => {
     const { root, env, git } = snapshotFixture();
     const targetHead = git(['rev-parse', 'HEAD']).trim();
-    const bin = join(root, 'mutation-bin');
-    const state = mkTmp('devkit snapshot mutation state-');
-    const realGit = execFileSync('/bin/bash', ['-c', 'command -v git'], {
-      encoding: 'utf8',
-    }).trim();
-    mkdirSync(bin);
-    git(['config', 'core.trustctime', 'false']);
     writeFileSync(join(root, 'tracked.txt'), 'first bytes\n');
-    const timestamp = statSync(join(root, 'tracked.txt'));
-    const reference = join(state, 'timestamp-reference');
-    writeFileSync(reference, 'reference\n');
-    utimesSync(reference, timestamp.atime, timestamp.mtime);
-    writeFileSync(
-      join(bin, 'git'),
-      '#!/bin/sh\nis_add=\nfor arg in "$@"; do [ "$arg" = add ] && is_add=1; done\nif [ -n "$is_add" ]; then\n  "$REAL_GIT" "$@" || exit $?\n  if [ ! -e "$MUTATION_MARKER" ]; then\n    : > "$MUTATION_MARKER"\n    printf "other bytes\\n" > "$MUTATION_TARGET"\n    touch -r "$MUTATION_REFERENCE" "$MUTATION_TARGET"\n  fi\n  exit 0\nfi\nexec "$REAL_GIT" "$@"\n',
-    );
-    chmodSync(join(bin, 'git'), 0o755);
+    const mutationEnv = postFirstCaptureMutation(root);
 
     const result = runSnapshot(root, targetHead, {
       ...env,
-      PATH: `${bin}:${env.PATH}`,
-      REAL_GIT: realGit,
-      MUTATION_MARKER: join(state, 'mutated'),
-      MUTATION_TARGET: join(root, 'tracked.txt'),
-      MUTATION_REFERENCE: reference,
+      ...mutationEnv,
+      MUTATION_PATH: join(root, 'tracked.txt'),
+      MUTATION_CONTENT: 'other bytes\n',
     });
 
     expect(result.status).toBe(1);
@@ -449,37 +451,18 @@ describe('review snapshot capture', () => {
     expect(readFileSync(callerIndex)).toEqual(beforeIndex);
     expect(readdirSync(temp)).toEqual([]);
 
-    const bin = join(root, 'fake-bin');
-    mkdirSync(bin);
-    const realGit = execFileSync('/bin/bash', ['-c', 'command -v git'], {
-      encoding: 'utf8',
-    }).trim();
-    writeFileSync(
-      join(bin, 'git'),
-      '#!/bin/sh\nfor arg in "$@"; do [ "$arg" = add ] && exit 9; done\nexec "$REAL_GIT" "$@"\n',
-    );
-    chmodSync(join(bin, 'git'), 0o755);
     const failure = runSnapshot(root, targetHead, {
       ...env,
       TMPDIR: temp,
-      PATH: `${bin}:${env.PATH}`,
-      REAL_GIT: realGit,
+      ...failUpdateIndexEnvironment(root, env.PATH),
     });
     expect(failure.status).toBe(1);
     expect(readdirSync(temp)).toEqual([]);
 
-    const nodeBin = join(root, 'fake-node-bin');
-    mkdirSync(nodeBin);
-    writeFileSync(
-      join(nodeBin, 'node'),
-      '#!/bin/sh\nfor arg in "$@"; do [ "$arg" = --null ] && exit 9; done\nexec "$REAL_NODE" "$@"\n',
-    );
-    chmodSync(join(nodeBin, 'node'), 0o755);
     const emitterFailure = runSnapshot(root, targetHead, {
       ...env,
       TMPDIR: temp,
-      PATH: `${nodeBin}:${env.PATH}`,
-      REAL_NODE: process.execPath,
+      ...failNullEmitterEnvironment(root, env.PATH),
     });
     expect(emitterFailure.status).toBe(1);
     expect(readdirSync(temp)).toEqual([]);
@@ -488,21 +471,9 @@ describe('review snapshot capture', () => {
   it('preserves the promised signal status before temporary state is allocated', () => {
     const { root, env, git } = snapshotFixture();
     const targetHead = git(['rev-parse', 'HEAD']).trim();
-    const bin = join(root, 'signal-bin');
-    mkdirSync(bin);
-    const realGit = execFileSync('/bin/bash', ['-c', 'command -v git'], {
-      encoding: 'utf8',
-    }).trim();
-    writeFileSync(
-      join(bin, 'git'),
-      '#!/bin/sh\ncase "$*" in *"rev-parse HEAD"*) ps -o ppid= -p "$PPID" | xargs kill -TERM; sleep 0.1; exit 0;; esac\nexec "$REAL_GIT" "$@"\n',
-    );
-    chmodSync(join(bin, 'git'), 0o755);
-
     const result = runSnapshot(root, targetHead, {
       ...env,
-      PATH: `${bin}:${env.PATH}`,
-      REAL_GIT: realGit,
+      ...signalBeforeTempEnvironment(root, env.PATH),
     });
 
     expect(result.status, result.stderr).toBe(143);
