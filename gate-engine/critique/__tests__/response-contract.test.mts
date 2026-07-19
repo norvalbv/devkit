@@ -400,6 +400,7 @@ describe('parsePlanCritiqueResponse', () => {
         '$.frameMeta',
       ],
       [{ ...REVIEWED_RESPONSE, edgeCases: [] }, 'INVALID_STATUS_COMBINATION', '$.edgeCases'],
+      [{ ...REVIEWED_RESPONSE, actions: [] }, 'INVALID_STATUS_COMBINATION', '$.actions'],
       [
         {
           ...REVIEWED_RESPONSE,
