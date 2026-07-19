@@ -9,10 +9,10 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "../../lib/components.mjs";
-import { detectGitRoot } from "../../lib/detect-git-root.mjs";
-import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
-import { findConflicts } from "../../lib/sync-manifest.mjs";
+import { AGENT_TARGETS } from '../../lib/components.mjs';
+import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
+import { findConflicts } from '../../lib/sync-manifest.mjs';
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
 function listAgents(dir) {
     return readdirSync(dir, { withFileTypes: true })
