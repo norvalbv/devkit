@@ -1330,7 +1330,9 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     writeFileSync(join(dir, '.qavis/recipe.json'), '{"from":"acme/qavis"}\n');
     writeFileSync(join(dir, '.gitignore'), '.qavis/receipt.json\n');
     git(['add', '.qavis/recipe.json', '.gitignore'], { stdio: 'ignore' });
-    git(['commit', '-q', '--no-verify', '-m', 'track recipe + ignore receipt'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'track recipe + ignore receipt'], {
+      stdio: 'ignore',
+    });
     writeFileSync(join(dir, '.qavis/receipt.json'), '{"sha":"deadbeef"}\n'); // untracked cache
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/qavis-receipt', 't', 'note.txt'], {
