@@ -63,6 +63,9 @@ describe('buildGuardBlock', () => {
     // AI guards keep their own fail-fast fragments.
     expect(block).toContain('bunx guard-decisions');
     expect(block).toContain('bunx guard-review');
+    expect(block).toContain('__dk_gate_selected decisions');
+    expect(block).toContain('__dk_gate_selected review');
+    expect(block).toContain('DEVKIT_REVIEW_GUARDS');
   });
 
   it('omits the biome step when biome is deselected', () => {
@@ -325,6 +328,17 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     );
     expect(withStruct).not.toContain('--structure');
   });
+
+  it('uses merge-base ESLint/Fallow baselines only in review mode and preserves commit behavior', () => {
+    const withFallow = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit', '', {
+      fallow: true,
+    });
+    expect(withFallow).toContain('__dk_review_baseline_gate eslint');
+    expect(withFallow).toContain('__dk_review_baseline_gate fallow');
+    expect(withFallow).toContain('node_modules/.bin/eslint -c eslint.config.devkit.mjs');
+    expect(withFallow).toContain('command -v fallow');
+    expect(withFallow).toContain('baseline-gate.mjs');
+  });
 });
 
 // DK-5: overlay's fallow gate BLOCKS on new findings (unlike the self-host advisory twin), and it
@@ -349,7 +363,7 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
 
   it('passes the ship base through to a stubbed fallow (no real binary needed)', () => {
     const fragment = hook.match(
-      /# devkit fallow gate \(overlay\)[\s\S]*?fallow audit \$FALLOW_BASE_ARGS \|\| exit 1; \}/,
+      /# devkit fallow gate \(overlay\)[\s\S]*?fallow audit \$FALLOW_BASE_ARGS \|\| exit 1; \}\nfi/,
     )?.[0];
     expect(fragment).toBeDefined();
     const script = `fallow() { echo "FALLOW_ARGS:$*"; }\n${fragment}`;
