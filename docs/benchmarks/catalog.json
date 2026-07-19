@@ -17,6 +17,7 @@
 
     { "id": "bin-devkit", "label": "devkit CLI", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:devkit" },
     { "id": "bin-guard-clone", "label": "Clone gate", "kind": "bin", "lifecycle": "shipped", "evidence": "evidence-only", "suiteIds": ["co-occurrence"], "canonical": "package.json#bin:guard-clone" },
+    { "id": "bin-guard-coverage", "label": "Coverage gate", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-coverage" },
     { "id": "bin-guard-decisions", "label": "Decisions gate", "kind": "bin", "lifecycle": "shipped", "evidence": "evidence-only", "suiteIds": ["decisions"], "canonical": "package.json#bin:guard-decisions" },
     { "id": "bin-guard-deterministic", "label": "Deterministic orchestrator", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-deterministic" },
     { "id": "bin-guard-dup", "label": "Semantic duplication gate", "kind": "bin", "lifecycle": "shipped", "evidence": "evidence-only", "suiteIds": ["co-occurrence"], "canonical": "package.json#bin:guard-dup" },

@@ -74,6 +74,19 @@ const ALL_IDS = DETERMINISTIC.map((g) => g.id);
 // and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
 const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
 
+function canonicalIds(ids: string[]): string[] {
+  const selected = new Set(ids);
+  return ALL_IDS.filter((id) => selected.has(id));
+}
+
+function reviewIds(): string[] {
+  const configured = (process.env.DEVKIT_REVIEW_GUARDS ?? '')
+    .split(',')
+    .map((guard) => guard.trim())
+    .filter(Boolean);
+  return canonicalIds(configured);
+}
+
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
 const WHITESPACE_RE = /\s+/;
@@ -138,6 +151,7 @@ export function parseOpts(argv: string[]): ParsedOpts {
 // never silently skip a gate the hook expected to run — but opt-in guards (coverage) run ONLY when
 // explicitly selected, so an unadopted/CI repo is never wedged by a gate it never asked for.
 export function selectedIds(cwd: string): string[] {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return reviewIds();
   const cfgPath = path.join(cwd, '.devkit', 'config.json');
   if (!existsSync(cfgPath)) return DEFAULT_IDS;
   try {
@@ -147,6 +161,12 @@ export function selectedIds(cwd: string): string[] {
   } catch {
     return DEFAULT_IDS;
   }
+}
+
+export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
+  return process.env.DEVKIT_RUN_MODE === 'review'
+    ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}`
+    : scope;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
@@ -188,27 +208,41 @@ function commandGate(label: string, cmd?: string): Gate {
  */
 export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts = {}) {
   const { exec = execFileSync } = opts;
+  // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
+  // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
+  // guard excluded by local review policy.
+  if (opts.only) {
+    const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
+    if (unknown.length || opts.only.length === 0) {
+      const why = unknown.length ? `unknown gate id(s): ${unknown.join(', ')}` : 'empty selection';
+      console.error(
+        `✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`,
+      );
+      return 1;
+    }
+  }
+  const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+  const allowed = reviewMode ? reviewIds() : selectedIds(cwd);
+  if (reviewMode && opts.only) {
+    const allowlist = new Set(allowed);
+    const disallowed = opts.only.filter((id) => !allowlist.has(id));
+    if (disallowed.length > 0) {
+      console.error(
+        `✗ guard-deterministic --only: gate id(s) not enabled for review: ${[...new Set(disallowed)].join(', ')} — refusing to run.`,
+      );
+      return 1;
+    }
+  }
+  const effectiveIds = canonicalIds(opts.only ?? allowed);
+  // A review may intentionally run a strict subset. Salt the prefix scope so that subset can never
+  // authorize a later full ship/commit against the same staged tree.
+  const cacheScope = prefixCacheScope(opts.scope, effectiveIds);
   // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
   // every gate. checkPrefix returns true = skip, false = run.
-  const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+  const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
   const fails = [];
   if (!skip) {
-    // `--only`, when provided, must name known guard ids. A typo (`--only siz,fanout`) or an empty
-    // spec (`--only ,,`) would otherwise filter DETERMINISTIC down to nothing and silently drop a
-    // required gate — the exact fail-open this orchestrator exists to prevent. Fail CLOSED, loudly.
-    if (opts.only) {
-      const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
-      if (unknown.length || opts.only.length === 0) {
-        const why = unknown.length
-          ? `unknown gate id(s): ${unknown.join(', ')}`
-          : 'empty selection';
-        console.error(
-          `✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`,
-        );
-        return 1;
-      }
-    }
-    const ids = new Set(opts.only ?? selectedIds(cwd));
+    const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
       label: `guard-${g.id}`,
       argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
@@ -246,7 +280,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   }
   // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
   // next time (ship only — recordPrefix is a no-op otherwise).
-  if (!skip) recordPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+  if (!skip) recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
   return 0;
 }
 

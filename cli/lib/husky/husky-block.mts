@@ -11,6 +11,11 @@
  */
 
 import { markEnd, markStart } from './husky.mts';
+import {
+  DK_GATE_SELECTED_HELPER,
+  DK_REVIEW_BASELINE_HELPER,
+  selectedFragment,
+} from './review-fragments.mts';
 
 /**
  * The block-builder's view of a component selection: whether the biome format step is wanted,
@@ -89,11 +94,8 @@ fi
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
 const AI_GUARD_IDS = ['decisions', 'review'] as const;
 
-// The qavis-advisory gate runs LAST — it's advisory, not a blocker, and cheapest to skip past. It is
-// NOT an AI_GUARD (different exit contract: 0 = continue, 3 = strict-ship block, never exit 1), so it
-// gets its own fragment + its own remedy line rather than the shared "judge unavailable" copy. All
-// the "deserves QA?" logic + the pass-receipt live in qavis; this just shells `qavis route` and maps
-// its verdict to an exit code (fail-open when qavis/the bin is absent — the fallow precedent).
+// qavis-advisory runs last with its own 0/3 exit contract; routing and pass receipts live in qavis.
+// This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
 const QAVIS_ADVISORY_ID = 'qavis-advisory';
 const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
 qarc=0
@@ -107,16 +109,9 @@ const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1
     [ "$qarc" -eq 3 ] && exit 1
 fi`;
 
-// Terminal marker for the every-commit telemetry run (run-context.mts contract). A ship's
-// ship_result is its terminal, but a plain commit's gates have no wrapper process — so the HOOK
-// emits `commit_result` when it exits, and the usage dashboard settles the run immediately
-// instead of waiting out a 35-minute quiet window (its fallback for hooks without this fragment).
-// The tree hash is computed AT EMIT TIME, not when the trap is armed: the biome fragment restages
-// formatted files, and the gates correlate under the POST-format `git write-tree`. Fail-open
-// everywhere; same opt-outs as the capture itself (any DEVKIT_NO_TELEMETRY value disables; inside
-// a ship DEVKIT_SHIP_ID is set and this stays silent — ship_result is that run's terminal).
-// Caveat: claims the shell's single EXIT trap — a consumer hook defining its own EXIT trap after
-// this block would replace it (none of devkit's fragments do).
+// Plain commits lack ship's wrapper terminal, so the hook emits `commit_result` on EXIT. Compute the
+// tree at emit time because biome may restage files; ships stay silent and emit `ship_result` instead.
+// This claims the shell's EXIT trap (no other devkit fragment defines one).
 const COMMIT_TERMINAL_FRAGMENT = `# devkit:commit-terminal
 if [ -z "\${DEVKIT_SHIP_ID:-}" ] && [ -z "\${DEVKIT_NO_TELEMETRY:-}" ]; then
     __dk_t0="$(date +%s)"
@@ -158,9 +153,7 @@ if [ -n "$STAGED_FMT" ]; then
 fi
 # /devkit:biome-format`;
 
-// The PATH-setup snippet (GUI git clients launch with a minimal PATH that omits user bin dirs, so
-// `bun`/`bunx` go missing). devkit's gates need it to have run BEFORE them — it's part of a fresh hook's
-// preamble, and is INJECTED just ahead of an inserted block when an existing hook has no PATH setup.
+// Inject user bins before gates when a GUI client's minimal PATH omits bun/bunx.
 export const PATH_SETUP = `# GUI git clients launch with a minimal PATH that omits user bin dirs, so \`bun\`/\`bunx\`
 # can go missing → the hook fails. Prepend the standard user install locations.
 for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
@@ -206,26 +199,20 @@ function wantsDeterministic(selection: HookSelection): boolean {
  * aggregated report → prefix record, all inside the bin) → AI guards (fail-fast).
  * biome runs BEFORE the orchestrator on purpose: the cache key hashes the post-format index.
  *
- * `pkgRel` (monorepo): when set, the markers are package-scoped and the gates run inside a
- * `( cd "<pkgRel>" … ) || exit 1` subshell so the hook (at the git root) governs that package.
- * biome's staged-file format is REPO-WIDE → emitted only at the root (pkgRel ''), never inside
- * a package subshell (where `git add` paths would resolve wrong).
- *
- * `selection.structureCmd` is the stack-resolved structure-lint command (`guard-structure gate` /
- * `bunx eslint src`), absent when structure is off. `pkgRel` is the package path relative to the
- * git root ('' = root install).
+ * In a monorepo `pkgRel` scopes markers and gates to a failing subshell. Biome remains root-only
+ * because package-relative `git add` paths would be wrong. `structureCmd` is stack-resolved.
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
-  const pieces = [];
+  const pieces = [COMMIT_TERMINAL_FRAGMENT, DK_GATE_SELECTED_HELPER, DK_REVIEW_BASELINE_HELPER];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
-  pieces.push(COMMIT_TERMINAL_FRAGMENT);
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   if (wantsDeterministic(selection))
     pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
   for (const id of AI_GUARD_IDS) {
-    if (selection.guards?.includes(id)) pieces.push(GUARD_FRAGMENTS[id]);
+    if (selection.guards?.includes(id)) pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
   }
-  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) pieces.push(QAVIS_FRAGMENT);
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID))
+    pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
   const body = pieces.join('\n\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
@@ -265,15 +252,14 @@ const DK_GATE_AI_HELPER =
   '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 
 /**
- * Build the standalone (no-package) `# devkit-guards` block — global `guard-*` bins, fail-open,
- * NO `bunx`/node_modules. biome-format is omitted (needs project-local tooling); structure-lint
- * joins the orchestrator via `--structure` when `selection.structureCmd` (config-driven stacks —
- * devkit's own eslint/plugin do the work, so no consumer dep). pkgRel cd-wraps for a monorepo.
+ * Build standalone gates from global fail-open bins. Biome needs local tooling and is omitted;
+ * structure joins via `--structure`, and `pkgRel` scopes monorepos.
  */
 export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): string {
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     COMMIT_TERMINAL_FRAGMENT,
+    DK_GATE_SELECTED_HELPER,
     DK_GATE_AI_HELPER,
   ];
   if (wantsDeterministic(selection)) {
@@ -281,9 +267,12 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   }
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))
-      pieces.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
+      pieces.push(
+        `if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`,
+      );
   }
-  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) pieces.push(standaloneQavisLines);
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID))
+    pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
   const body = pieces.join('\n');
   const start = markStart(pkgRel);
   const end = markEnd(pkgRel);
@@ -304,10 +293,14 @@ export function buildStandaloneHook(selection: HookSelection, pkgRel = ''): stri
 // the hook runs at the repo root or cd'd into a monorepo package (eslint/biome + their configs
 // are then resolved package-locally).
 const OVERLAY_LINT_STEPS = `# devkit lint overlay — STAGED files only, against configs that EXTEND the repo's (git-ignored).
-DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
-if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
-    echo "🧱 devkit eslint overlay (staged)..."
-    echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
+    __dk_review_baseline_gate eslint || exit 1
+else
+    DK_TS=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?)$' || true)
+    if [ -n "$DK_TS" ] && [ -f eslint.config.devkit.mjs ] && [ -x node_modules/.bin/eslint ]; then
+        echo "🧱 devkit eslint overlay (staged)..."
+        echo "$DK_TS" | xargs node_modules/.bin/eslint -c eslint.config.devkit.mjs || exit 1
+    fi
 fi
 DK_FMT=$(git diff --cached --name-only --relative --diff-filter=ACM | grep -E '\\.(tsx?|jsx?|css|jsonc?)$' || true)
 if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome ]; then
@@ -315,16 +308,16 @@ if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome
     echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
 fi`;
 
-// The optional fallow gate (overlay). fail-open — only runs if fallow is on PATH; overlay's
-// core.hooksPath takeover SHADOWS .git/hooks, so fallow's own installed hook would never fire, and
-// chaining the gate inline here is the only way the audit runs. `fallow audit` exits non-zero on
-// NEW issues (pre-existing debt is grandfathered by the saved fallow-baselines/).
-const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — fail-open; skipped if fallow isn't installed.
-# DEVKIT_SHIP_BASE_SHA (set by devkit ship) narrows the audit to the exact ship base rather than
-# fallow's own main-autodetect — see self-host.mts's FALLOW_FRAGMENT for the full rationale (DK-5).
-FALLOW_BASE_ARGS=""
-[ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1; }`;
+// Overlay shadows fallow's installed hook, so its optional audit must run inline here.
+const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — normal commits fail-open if fallow isn't installed.
+if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
+    __dk_review_baseline_gate fallow || exit 1
+else
+    # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
+    FALLOW_BASE_ARGS=""
+    [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
+    command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1; }
+fi`;
 
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
@@ -332,10 +325,8 @@ command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1;
  * gates + lint overlay (cd'd into the package for a monorepo), then `exec`s the repo's OWN
  * committed hook unchanged (so its exit propagates).
  *
- * `chainTarget` is the repo's existing hook to chain to (git-root-relative). `pkgRel` is the
- * package dir (monorepo) to cd into before the gates ('' = repo root). `opts.fallow` appends the
- * fail-open fallow gate (overlay wires it inline because core.hooksPath shadows fallow's own
- * .git/hooks hook).
+ * `chainTarget` is the existing hook, `pkgRel` scopes monorepos, and `opts.fallow` adds the inline
+ * audit that the overlay hooksPath would otherwise shadow.
  */
 export function buildOverlayHook(
   selection: HookSelection,
@@ -343,13 +334,21 @@ export function buildOverlayHook(
   pkgRel = '',
   { fallow = false }: { fallow?: boolean } = {},
 ): string {
-  const gates = [COMMIT_TERMINAL_FRAGMENT, DK_GATE_AI_HELPER];
+  const gates = [
+    COMMIT_TERMINAL_FRAGMENT,
+    DK_GATE_SELECTED_HELPER,
+    DK_GATE_AI_HELPER,
+    DK_REVIEW_BASELINE_HELPER,
+  ];
   if (wantsDeterministic(selection)) gates.push(standaloneDeterministicLines());
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))
-      gates.push(`__dk_gate_ai ${STANDALONE_GATES[id].join(' ')}`);
+      gates.push(
+        `if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`,
+      );
   }
-  if (selection.guards?.includes(QAVIS_ADVISORY_ID)) gates.push(standaloneQavisLines);
+  if (selection.guards?.includes(QAVIS_ADVISORY_ID))
+    gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
   const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
   const scoped = pkgRel
     ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
