@@ -29,6 +29,16 @@ const RE_TIMEOUT = /\b(timeout|retry|backoff|AbortController)/i;
 const RE_RESPONSE = /\b(json\(|send\(|Response|gzip|brotli|compress)/i;
 const RE_NETWORK = /\b(cdn|cloudfront|cloudflare|edge|prefetch|preload)/i;
 const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|debug|pino|winston)/i;
+// Event-loop + memory-lifetime items (coverage refresh — see SKILL.md Provenance). existsSync is
+// excluded from the sync-IO trigger: it is cheap and ubiquitous in startup/config code.
+const RE_SYNC_IO =
+  /\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync|execFileSync)\b/;
+const RE_UNBOUNDED =
+  /\b\w*(cache|memo|registry|store|buffer|queue)\w*\s*[:=]\s*(new\s+(Map|Set)\b|\{\}|\[\])/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
@@ -69,7 +79,8 @@ function getStagedFiles() {
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0);
+      .filter((f) => f.length > 0)
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -110,6 +121,9 @@ function detectPerformancePatterns(_files, diffs) {
   if (RE_CACHING.test(fullDiff)) {
     items.push({ name: 'caching-strategy', category: 'Caching', status: 'pending', issues: [] });
   }
+  if (RE_UNBOUNDED.test(fullDiff)) {
+    items.push({ name: 'unbounded-cache', category: 'Caching', status: 'pending', issues: [] });
+  }
   if (RE_POOL.test(fullDiff)) {
     items.push({ name: 'connection-pooling', category: 'Database', status: 'pending', issues: [] });
   }
@@ -121,6 +135,9 @@ function detectPerformancePatterns(_files, diffs) {
   }
   if (RE_BATCH.test(fullDiff)) {
     items.push({ name: 'batching', category: 'Code Optimization', status: 'pending', issues: [] });
+  }
+  if (RE_SYNC_IO.test(fullDiff)) {
+    items.push({ name: 'sync-io', category: 'Code Optimization', status: 'pending', issues: [] });
   }
   if (RE_TIMEOUT.test(fullDiff)) {
     items.push({
