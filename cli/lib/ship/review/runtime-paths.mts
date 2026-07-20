@@ -1,6 +1,6 @@
 /** Shared physical-path invariants for review runtimes and their private manifests. */
 
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 
 /** True for one normalized package/repository-relative POSIX path with no traversal syntax. */
@@ -50,4 +50,46 @@ export function canonicalReviewLeaf(path: string, parentLabel: string): string {
   const requested = resolve(path);
   const parent = canonicalReviewDirectory(dirname(requested), parentLabel);
   return join(parent, basename(requested));
+}
+
+/** Reject links and special entries anywhere below an authenticated runtime source. */
+export function assertSymlinkFreeReviewTree(
+  path: string,
+  label: string,
+  unsupportedEntry = 'unsupported special file',
+): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`devkit review: ${label} contains a nested symlink: ${path}`);
+  }
+  if (stat.isFile()) return;
+  if (!stat.isDirectory()) {
+    throw new Error(`devkit review: ${label} contains an ${unsupportedEntry}: ${path}`);
+  }
+  for (const name of readdirSync(path).sort()) {
+    assertSymlinkFreeReviewTree(join(path, name), label, unsupportedEntry);
+  }
+}
+
+/** Resolve a private destination without traversing a snapshot-controlled parent link. */
+export function safeReviewDestination(
+  root: string,
+  path: string,
+  escapeMessage: string,
+  unsafeParentMessage: string,
+): string {
+  const absolute = resolve(root, ...path.split('/'));
+  if (!reviewPathWithin(root, absolute)) {
+    throw new Error(`devkit review: ${escapeMessage}: ${path}`);
+  }
+  let parent = root;
+  for (const segment of path.split('/').slice(0, -1)) {
+    parent = join(parent, segment);
+    const stat = lstatSync(parent, { throwIfNoEntry: false });
+    if (stat === undefined) break;
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`devkit review: ${unsafeParentMessage}: ${path}`);
+    }
+  }
+  return absolute;
 }
