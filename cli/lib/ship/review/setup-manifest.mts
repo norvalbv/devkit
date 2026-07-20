@@ -1,7 +1,7 @@
 /** Stable, typed capture of the target-controlled setup that `devkit review` will execute. */
 
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
 import type { ReviewProfile } from '../../components.mts';
@@ -26,10 +26,11 @@ import {
   parseReviewSetupProfile,
   type RawReviewConfig,
 } from './setup-profile.mts';
+import { type ReviewSourceResolution, resolveReviewSource } from './source-projection.mts';
 
 const HUSKY_RUNNER_PATHS = [
-  ['runner-source', '.husky/_', false, true],
-  ['runner-pre-commit', '.husky/_/pre-commit', true, false],
+  ['runner-source', '.husky/_', false],
+  ['runner-pre-commit', '.husky/_/pre-commit', true],
 ] as const;
 const OPTIONAL_PATHS = [
   ['correctness-overrides', '.devkit/correctness-overrides.json'],
@@ -163,34 +164,19 @@ function safeRelativePath(root: string, path: string, label: string): string {
   return normalized;
 }
 
-function validateTree(path: string, relativePath: string, allowRootDirectoryLink = false): void {
+function validateTree(path: string, relativePath: string): void {
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat === undefined) return;
-  if (stat.isSymbolicLink()) {
-    if (!allowRootDirectoryLink) fail(`unsafe symlink in review setup path: ${relativePath}`);
-    let physical: string;
-    try {
-      physical = realpathSync(path);
-    } catch {
-      fail(`broken symlink in review setup path: ${relativePath}`);
-    }
-    if (!lstatSync(physical).isDirectory())
-      fail(`review setup link is not a directory: ${relativePath}`);
-    validateTree(physical, relativePath);
-    return;
-  }
+  if (stat.isSymbolicLink()) fail(`unsafe nested symlink in review setup path: ${relativePath}`);
   if (stat.isFile()) return;
   if (!stat.isDirectory()) fail(`unsupported review setup path type: ${relativePath}`);
   for (const name of readdirSync(path).sort())
     validateTree(join(path, name), `${relativePath}/${name}`);
 }
 
-function setupPathFingerprint(path: string): string {
-  const runtime = reviewRuntimeFingerprint(path);
-  const stat = lstatSync(path);
-  return stat.isSymbolicLink()
-    ? reviewSetupHash({ linkTarget: readlinkSync(path), runtime })
-    : runtime;
+function setupPathFingerprint(source: ReviewSourceResolution): string {
+  const runtime = reviewRuntimeFingerprint(source.physicalPath);
+  return source.projection ? reviewSetupHash({ projection: source.projection, runtime }) : runtime;
 }
 
 function pathState(
@@ -200,12 +186,11 @@ function pathState(
   relativePath: string,
   required: boolean,
   executable: boolean,
-  allowRootDirectoryLink = false,
 ): ReviewSetupPath {
   const safe = safeRelativePath(root, relativePath, `${id} path`);
-  const absolute = resolve(root, safe);
-  validateTree(absolute, safe, allowRootDirectoryLink);
-  const stat = lstatSync(absolute, { throwIfNoEntry: false });
+  const source = resolveReviewSource(root, safe);
+  validateTree(source.physicalPath, safe);
+  const stat = lstatSync(source.physicalPath, { throwIfNoEntry: false });
   if (stat === undefined) {
     if (required) fail(`missing ${safe} — ${DOCTOR}`);
     return {
@@ -224,7 +209,7 @@ function pathState(
     id,
     root: rootKind,
     relativePath: safe,
-    fingerprint: setupPathFingerprint(absolute),
+    fingerprint: setupPathFingerprint(source),
     required,
     executable,
   };
@@ -269,8 +254,8 @@ function captureSetupPaths(
     pathState('target', targetRoot, 'config', '.devkit/config.json', true, false),
     ...(overlay
       ? []
-      : HUSKY_RUNNER_PATHS.map(([id, path, executable, allowRootDirectoryLink]) =>
-          pathState('git', gitRoot, id, path, true, executable, allowRootDirectoryLink),
+      : HUSKY_RUNNER_PATHS.map(([id, path, executable]) =>
+          pathState('git', gitRoot, id, path, true, executable),
         )),
     pathState('git', gitRoot, 'effective-hook', hookPath, true, true),
     ...OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
