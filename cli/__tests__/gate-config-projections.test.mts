@@ -1,12 +1,20 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  materializeProjectionRuntime,
+  mutableProjectionRoots,
+  verifyProjectionRuntime,
+} from '../lib/ship/review/projection/runtime.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const linkScript = fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url));
 const pathScript = fileURLToPath(new URL('../lib/ship/gate-config-paths.mts', import.meta.url));
+const projectionRuntime = fileURLToPath(
+  new URL('../lib/ship/review/projection/runtime.mts', import.meta.url),
+);
 const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(cleanup);
@@ -27,18 +35,28 @@ function project(
   purpose = 'review',
   extraEnv: NodeJS.ProcessEnv = {},
 ) {
+  const manifest = join(root, '..', 'projection-runtime.json');
   return spawnSync(
     '/bin/bash',
     [
       '-c',
-      'source "$1"; link_untracked_gate_configs "$2" "$3" "$4"',
+      'set -u; source "$1"; link_untracked_gate_configs "$2" "$3" "$4"',
       'test',
       linkScript,
       worktree,
       root,
       purpose,
     ],
-    { encoding: 'utf8', env: { ...process.env, ...extraEnv } },
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...(purpose === 'review' || purpose === 'review-baseline'
+          ? { DEVKIT_REVIEW_PROJECTION_MANIFEST: manifest }
+          : {}),
+        ...extraEnv,
+      },
+    },
   );
 }
 
@@ -97,6 +115,19 @@ describe('gate config projections', () => {
     expect(project(review.root, review.worktree, 'typo').status).toBe(2);
   });
 
+  it('leaves a gate-config symlink already present in the review snapshot untouched', () => {
+    const { root, worktree } = fixture();
+    writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["src"]}\n');
+    writeFileSync(join(worktree, 'tracked-config.json'), '{"scanRoots":["tracked"]}\n');
+    symlinkSync('tracked-config.json', join(worktree, 'guard.config.json'));
+
+    const result = project(root, worktree);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(lstatSync(join(worktree, 'guard.config.json')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(worktree, 'guard.config.json'), 'utf8')).toContain('tracked');
+  });
+
   it('fails review projection closed when configured paths cannot be resolved', () => {
     const { root, worktree } = fixture();
     writeFileSync(join(root, 'guard.config.json'), '{ not: valid json');
@@ -138,33 +169,158 @@ describe('gate config projections', () => {
     expect(readFileSync(`${source}-wal`, 'utf8')).toBe('wal');
   });
 
-  it('rejects a SQLite family that changes between the capture hashes', () => {
+  it('rejects a SQLite family that changes during one coherent capture', () => {
     const { root, worktree } = fixture();
     const source = join(root, '.search-code', 'index.db');
+    const manifest = join(root, '..', 'projection-runtime.json');
     mkdirSync(join(root, '.search-code'));
     writeFileSync(join(root, 'guard.config.json'), '{"indexPath":".search-code/index.db"}\n');
     for (const suffix of ['', '-wal', '-shm', '-journal'])
       writeFileSync(`${source}${suffix}`, suffix);
 
-    const bin = join(root, 'fake-bin');
-    const count = join(root, 'git-count');
-    const realGit = execFileSync('/bin/bash', ['-c', 'command -v git'], {
-      encoding: 'utf8',
-    }).trim();
-    mkdirSync(bin);
+    expect(() =>
+      materializeProjectionRuntime(
+        root,
+        worktree,
+        manifest,
+        ['guard.config.json', '.search-code/index.db'],
+        '.search-code/index.db',
+        { beforeSourceVerification: () => writeFileSync(`${source}-wal`, 'mutation') },
+      ),
+    ).toThrow(/gate projections changed during capture/);
+  });
+
+  it('removes a partially copied projection when the source changes mid-tree', () => {
+    const { root, worktree } = fixture();
+    const source = join(root, '.fallow');
+    const manifest = join(root, '..', 'projection-runtime.json');
+    mkdirSync(source);
+    writeFileSync(join(source, 'a.txt'), 'copied first\n');
+    writeFileSync(join(source, 'z.txt'), 'captured regular file\n');
+
+    expect(() =>
+      materializeProjectionRuntime(root, worktree, manifest, ['.fallow'], '', {
+        beforePrivateCopy: () => {
+          rmSync(join(source, 'z.txt'));
+          symlinkSync(join(source, 'a.txt'), join(source, 'z.txt'));
+        },
+      }),
+    ).toThrow(/nested symlink/);
+    expect(() => lstatSync(join(worktree, '.fallow'))).toThrow();
+    expect(() => lstatSync(manifest)).toThrow();
+  });
+
+  it('propagates a coherent SQLite capture failure through the shell projection path', () => {
+    const { root, worktree } = fixture();
+    const source = join(root, '.search-code', 'index.db');
+    const mutationTool = join(root, '..', 'mutating-projection-tool.mjs');
+    mkdirSync(join(root, '.search-code'));
+    writeFileSync(join(root, 'guard.config.json'), '{"indexPath":".search-code/index.db"}\n');
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
+      writeFileSync(`${source}${suffix}`, suffix);
+    }
     writeFileSync(
-      join(bin, 'git'),
-      '#!/bin/sh\nn=$(cat "$FAKE_GIT_COUNT" 2>/dev/null || echo 0)\nn=$((n + 1))\nprintf "%s\\n" "$n" > "$FAKE_GIT_COUNT"\n[ "$n" -eq 5 ] && printf mutation >> "$3"\nexec "$REAL_GIT" "$@"\n',
+      mutationTool,
+      [
+        "import { readFileSync, writeFileSync } from 'node:fs';",
+        `import { materializeProjectionRuntime } from ${JSON.stringify(pathToFileURL(projectionRuntime).href)};`,
+        "const [command, sourceRoot, destinationRoot, manifestPath, indexPath = ''] = process.argv.slice(2);",
+        "if (command !== 'materialize') throw new Error('unexpected projection command');",
+        "const candidates = readFileSync(0).toString('utf8').split('\\0').filter(Boolean);",
+        'const mutationPath = process.env.MUTATE_PROJECTION_PATH;',
+        "if (!mutationPath) throw new Error('mutation path is unavailable');",
+        'try {',
+        '  materializeProjectionRuntime(sourceRoot, destinationRoot, manifestPath, candidates, indexPath, {',
+        "    beforeSourceVerification: () => writeFileSync(mutationPath, 'mutation'),",
+        '  });',
+        '} catch (error) {',
+        '  console.error(error instanceof Error ? error.message : String(error));',
+        '  process.exitCode = 1;',
+        '}',
+      ].join('\n'),
     );
-    chmodSync(join(bin, 'git'), 0o755);
 
     const result = project(root, worktree, 'review', {
-      PATH: `${bin}:${process.env.PATH}`,
-      FAKE_GIT_COUNT: count,
-      REAL_GIT: realGit,
+      DEVKIT_REVIEW_PROJECTION_TOOL: mutationTool,
+      MUTATE_PROJECTION_PATH: `${source}-wal`,
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('SQLite gate index changed during capture; retry.');
+    expect(result.stderr).toContain('gate projections changed during capture; retry');
+  });
+
+  it('authenticates immutable projections while allowing only declared private cache changes', () => {
+    const { root, worktree } = fixture();
+    const manifest = join(root, '..', 'projection-runtime.json');
+    writeFileSync(join(root, 'guard.config.json'), '{"scanRoots":["src"]}\n');
+    mkdirSync(join(root, '.fallow'));
+    writeFileSync(join(root, '.fallow', 'cache.json'), '{}\n');
+
+    materializeProjectionRuntime(root, worktree, manifest, ['guard.config.json', '.fallow']);
+    expect(mutableProjectionRoots(manifest)).toEqual(['.fallow']);
+    writeFileSync(join(worktree, '.fallow', 'cache.json'), '{"updated":true}\n');
+    expect(() => verifyProjectionRuntime(root, worktree, manifest)).not.toThrow();
+
+    writeFileSync(join(worktree, 'guard.config.json'), '{"scanRoots":[]}\n');
+    expect(() => verifyProjectionRuntime(root, worktree, manifest)).toThrow(
+      /private immutable gate projection changed/,
+    );
+  });
+
+  it('freezes external materializer links and rejects post-capture or nested-link changes', () => {
+    const projected = fixture();
+    const external = join(projected.root, '..', 'external.json');
+    writeFileSync(external, '{}\n');
+    symlinkSync(external, join(projected.root, 'guard.config.json'));
+    const projectedManifest = join(projected.root, '..', 'projected-runtime.json');
+    materializeProjectionRuntime(projected.root, projected.worktree, projectedManifest, [
+      'guard.config.json',
+    ]);
+    expect(lstatSync(join(projected.worktree, 'guard.config.json')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(projected.worktree, 'guard.config.json'), 'utf8')).toBe('{}\n');
+    expect(() =>
+      verifyProjectionRuntime(projected.root, projected.worktree, projectedManifest),
+    ).not.toThrow();
+    writeFileSync(external, '{"changed":true}\n');
+    expect(() =>
+      verifyProjectionRuntime(projected.root, projected.worktree, projectedManifest),
+    ).toThrow(/target gate projection changed/);
+
+    const nested = fixture();
+    const externalTree = join(nested.root, '..', 'external-tree');
+    const externalLeaf = join(nested.root, '..', 'external-leaf.json');
+    mkdirSync(externalTree);
+    writeFileSync(externalLeaf, '{}\n');
+    symlinkSync(externalLeaf, join(externalTree, 'nested-link.json'));
+    symlinkSync(externalTree, join(nested.root, '.fallow'));
+    expect(() =>
+      materializeProjectionRuntime(
+        nested.root,
+        nested.worktree,
+        join(nested.root, '..', 'nested-runtime.json'),
+        ['.fallow'],
+      ),
+    ).toThrow(/nested symlink/);
+
+    const captured = fixture();
+    const manifest = join(captured.root, '..', 'projection-runtime.json');
+    writeFileSync(join(captured.root, 'guard.config.json'), '{}\n');
+    mkdirSync(join(captured.root, '.fallow'));
+    writeFileSync(join(captured.root, '.fallow', 'cache.json'), '{}\n');
+    materializeProjectionRuntime(captured.root, captured.worktree, manifest, [
+      'guard.config.json',
+      '.fallow',
+    ]);
+    writeFileSync(join(captured.root, 'guard.config.json'), '{"changed":true}\n');
+    expect(() => verifyProjectionRuntime(captured.root, captured.worktree, manifest)).toThrow(
+      /target gate projection changed/,
+    );
+    writeFileSync(join(captured.root, 'guard.config.json'), '{}\n');
+    const outside = join(captured.root, '..', 'outside-cache');
+    mkdirSync(outside);
+    symlinkSync(outside, join(captured.worktree, '.fallow', 'unsafe'));
+    expect(() => verifyProjectionRuntime(captured.root, captured.worktree, manifest)).toThrow(
+      /nested symlink/,
+    );
   });
 });
