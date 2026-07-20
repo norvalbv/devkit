@@ -12,6 +12,16 @@ import { fileURLToPath } from 'node:url';
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
 
+/** Whether at least one command is available on PATH, without interpolating names into shell code. */
+export function hasAnyCommand(...commands) {
+  return commands.some(
+    (command) =>
+      spawnSync('bash', ['-c', 'command -v "$1"', 'devkit-test', command], {
+        stdio: 'ignore',
+      }).status === 0,
+  );
+}
+
 const FIXTURE_PKG = { name: 'fx', version: '0.0.0', type: 'module' };
 
 /**

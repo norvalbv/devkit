@@ -16,7 +16,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { repoKey, rootRegistry, seedSessionLedger } from './_helpers.mts';
+import { hasAnyCommand, repoKey, rootRegistry, seedSessionLedger } from './_helpers.mts';
 
 const AGENTS_HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks');
 const LIB = join(AGENTS_HOOKS, 'session-edits-lib.sh');
@@ -24,7 +24,7 @@ const FORMAT_HOOK = join(AGENTS_HOOKS, 'format-after-edit.sh');
 const LINT_HOOK = join(AGENTS_HOOKS, 'lint-check.sh');
 const DECISION_HOOK = join(AGENTS_HOOKS, 'decision-stop-check.sh');
 
-const HAS_BUN = spawnSync('bash', ['-c', 'command -v bun'], { encoding: 'utf8' }).status === 0;
+const HAS_BUN = hasAnyCommand('bun');
 
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
