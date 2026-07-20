@@ -56,37 +56,6 @@ emit_gate_projection_candidates() {
   node "$emitter" "$root" --null
 }
 
-sqlite_family_state() {
-  local database=$1 suffix path
-  for suffix in '' -wal -shm -journal; do
-    path="$database$suffix"
-    if [ -e "$path" ]; then
-      printf '%s=%s\n' "$suffix" "$(git hash-object --no-filters "$path")"
-    else
-      printf '%s=absent\n' "$suffix"
-    fi
-  done
-}
-
-copy_stable_sqlite_family() {
-  local source=$1 destination=$2 before after copied suffix
-  before=$(sqlite_family_state "$source") || return 1
-  mkdir -p "$(dirname "$destination")"
-  for suffix in '' -wal -shm -journal; do
-    if [ -e "$source$suffix" ]; then
-      cp -pL "$source$suffix" "$destination$suffix"
-    else
-      rm -f "$destination$suffix"
-    fi
-  done
-  after=$(sqlite_family_state "$source") || return 1
-  copied=$(sqlite_family_state "$destination") || return 1
-  [ "$before" = "$after" ] && [ "$before" = "$copied" ] || {
-    echo "devkit review: SQLite gate index changed during capture; retry." >&2
-    return 1
-  }
-}
-
 is_review_projection_purpose() {
   [ "$1" = review ] || [ "$1" = review-baseline ]
 }
@@ -94,6 +63,7 @@ is_review_projection_purpose() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
+  local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
   local linked=() candidates=()
   case "$purpose" in
     ship | review | review-baseline) ;;
@@ -121,7 +91,7 @@ link_untracked_gate_configs() {
   emitter=$(gate_config_path_emitter)
   if is_review_projection_purpose "$purpose"; then
     candidates=("${GATE_PROJECTION_FIXED_CANDIDATES[@]}")
-    candidate_manifest=$(mktemp /tmp/devkit-review-gate-candidates.XXXXXX) || return 1
+    candidate_manifest=$(mktemp "${DEVKIT_REVIEW_TEMP_ROOT:-${TMPDIR:-/tmp}}/devkit-review-gate-candidates.XXXXXX") || return 1
     if node "$emitter" "$root" --null > "$candidate_manifest" 2>/dev/null; then
       while IFS= read -r -d '' line; do
         [ -n "$line" ] && candidates+=("$line")
@@ -143,27 +113,39 @@ link_untracked_gate_configs() {
   fi
   if is_review_projection_purpose "$purpose"; then
     IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
-  fi
-
-  for rel in "${candidates[@]}"; do
-    # Present in the repo but absent from the committed worktree = the gate would fail open. The -L guard
-    # also skips a pre-existing symlink (a --linked dep, or a broken link) so `ln` never aborts on it.
-    [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
-    mkdir -p "$wt/$(dirname "$rel")"
-    if is_review_projection_purpose "$purpose"; then
-      # Ratchet gates may legitimately update ignored baseline/cache state. A review promises the
-      # target checkout stays unchanged, so its projections must be private rather than write-through
-      # symlinks. -L follows materializer symlinks; -p preserves file modes.
-      if [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ]; then
-        copy_stable_sqlite_family "$root/$rel" "$wt/$rel" || return 1
-      else
-        cp -RpL "$root/$rel" "$wt/$rel"
-      fi
-    else
-      ln -s "$root/$rel" "$wt/$rel"
+    [ -n "$projection_manifest" ] || {
+      echo "devkit review: private gate projection manifest path is unavailable" >&2
+      return 1
+    }
+    projection_tool=${DEVKIT_REVIEW_PROJECTION_TOOL:-}
+    if [ -z "$projection_tool" ]; then
+      projection_tool="$(dirname "${BASH_SOURCE[0]}")/review/projection/runtime.mts"
+      [ -f "$projection_tool" ] || projection_tool="$(dirname "${BASH_SOURCE[0]}")/review/projection/runtime.mjs"
     fi
-    linked+=("$rel")
-  done
+    [ -f "$projection_tool" ] || {
+      echo "devkit review: private gate projection helper is unavailable" >&2
+      return 1
+    }
+
+    for rel in "${candidates[@]}"; do
+      [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+      linked+=("$rel")
+    done
+    {
+      if [ "${#linked[@]}" -gt 0 ]; then
+        for rel in "${linked[@]}"; do printf '%s\0' "$rel"; done
+      fi
+    } | node "$projection_tool" materialize "$root" "$wt" "$projection_manifest" "$index_rel" || return 1
+  else
+    for rel in "${candidates[@]}"; do
+      # Present in the repo but absent from the committed worktree = the gate would fail open. The
+      # -L guard also skips a pre-existing symlink so `ln` never aborts on it.
+      [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+      mkdir -p "$wt/$(dirname "$rel")"
+      ln -s "$root/$rel" "$wt/$rel"
+      linked+=("$rel")
+    done
+  fi
 
   # Guard the empty array BEFORE expanding it (stock-macOS bash 3.2 aborts on "${arr[@]}" when empty
   # under `set -u`; cf. commit-with-gate-capture.sh).
