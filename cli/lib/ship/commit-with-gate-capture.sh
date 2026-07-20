@@ -34,6 +34,7 @@ commit_with_gate_capture() {
   local log="$root/.devkit/last-ship-gates-${br//\//-}.log"
   local progress="$root/.devkit/review-progress-${br//\//-}.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
+  . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
   # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the
@@ -59,10 +60,6 @@ commit_with_gate_capture() {
   local ship_log="$ship_logs_dir/${ship_id_safe}.log"
   mkdir -p "$ship_logs_dir" 2>/dev/null || true
 
-  # Minimal JSON string-escaper for the shell-built telemetry lines below (the node gates already use
-  # JSON.stringify): a repo/branch/path containing `"` or `\` must not produce a line the collector's
-  # json.loads drops. These fields can't contain control chars, so escaping the two metacharacters is enough.
-  json_escape() { local s=${1//\\/\\\\}; printf '%s' "${s//\"/\\\"}"; }
   # Overlay mode: force core.hooksPath at the .devkit overlay hook so the FULL gate chain runs in the
   # ship worktree in EVERY state. A plain `git commit` otherwise honours the husky-reclaimed
   # core.hooksPath=.husky/_ and runs only the team's committed hook — the overlay chain (devkit's
@@ -76,8 +73,8 @@ commit_with_gate_capture() {
   # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
   local dur_start; dur_start=$(date +%s)
   printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
-    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" \
-    "$(json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
+    "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   local rc=0
@@ -118,8 +115,8 @@ commit_with_gate_capture() {
   else blocked_json='"unknown"'; timed_out=false
   fi
   printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-    "$(json_escape "$DEVKIT_SHIP_ID")" "$(json_escape "$repo_name")" "$(json_escape "$br")" "$rc" "$timed_out" "$blocked_json" \
-    "$(( $(date +%s) - dur_start ))" "$(json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" "$rc" "$timed_out" "$blocked_json" \
+    "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then

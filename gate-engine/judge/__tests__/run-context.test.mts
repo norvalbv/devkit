@@ -16,6 +16,9 @@ import {
 // regardless of the runner's own env (the test process itself runs under Claude Code = CLAUDECODE=1).
 const ENV = [
   'DEVKIT_SHIP_ID',
+  'DEVKIT_REVIEW_ID',
+  'DEVKIT_REVIEW_REPO',
+  'DEVKIT_REVIEW_BRANCH',
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_NO_TELEMETRY',
   'CLAUDECODE',
@@ -64,6 +67,20 @@ describe('run-context', () => {
     expect(telemetrySink()).toBe('/tmp/x/gate-events.jsonl');
   });
 
+  it('a review has an explicit review envelope and never masquerades as commit/ship', () => {
+    process.env.DEVKIT_REVIEW_ID = 'review-9';
+    process.env.DEVKIT_REVIEW_REPO = 'owners-web';
+    process.env.DEVKIT_REVIEW_BRANCH = 'feature/pr';
+    expect(runId()).toBe('review-9');
+    expect(runEnvelope()).toEqual({
+      ship_id: 'review-9',
+      run_mode: 'review',
+      repo: 'owners-web',
+      branch: 'feature/pr',
+      source: 'unknown',
+    });
+  });
+
   it('off-ship, capture ON by default: runId = commit-<write-tree>, envelope has run_mode/repo/branch', () => {
     const repo = gitRepo();
     process.chdir(repo);
@@ -102,6 +119,13 @@ describe('run-context', () => {
     process.chdir(repo);
     process.env.DEVKIT_SHIP_ID = 'ship-1';
     _resetRunContextForTests();
+    expect(runId()).toBe('ship-1');
+    expect(runEnvelope()).toEqual({ ship_id: 'ship-1', source: 'unknown' });
+  });
+
+  it('a ship id wins over a review id', () => {
+    process.env.DEVKIT_SHIP_ID = 'ship-1';
+    process.env.DEVKIT_REVIEW_ID = 'review-1';
     expect(runId()).toBe('ship-1');
     expect(runEnvelope()).toEqual({ ship_id: 'ship-1', source: 'unknown' });
   });

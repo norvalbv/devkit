@@ -5,8 +5,7 @@
  * propagates the exit code. A consuming repo shells out to this command (never imports it); the
  * manual lane runs the identical command in a plain terminal.
  */
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { runPackagedScript } from '../lib/ship/run-packaged-script.mts';
 
 export const meta = {
   name: 'ship',
@@ -48,14 +47,8 @@ export default function ship(args: string[], cwd: string): number {
   const sep = args.indexOf('--');
   const flagArgs = sep === -1 ? args : args.slice(0, sep);
   const mode = flagArgs.includes('--pr') ? 'reship' : 'ship-branch';
-  const script = fileURLToPath(new URL(`../lib/ship/${mode}.sh`, import.meta.url));
   // `bash <script>` (not a direct exec of the file) so a lost +x bit through packaging can't break
   // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
   // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
-  const r = spawnSync('bash', [script, ...args], { cwd, stdio: 'inherit' });
-  if (r.error) {
-    console.error(`devkit ship: ${r.error.message}`);
-    return 1;
-  }
-  return r.status ?? 1;
+  return runPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd });
 }

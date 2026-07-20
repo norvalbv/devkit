@@ -113,7 +113,7 @@ fi`;
 // tree at emit time because biome may restage files; ships stay silent and emit `ship_result` instead.
 // This claims the shell's EXIT trap (no other devkit fragment defines one).
 const COMMIT_TERMINAL_FRAGMENT = `# devkit:commit-terminal
-if [ -z "\${DEVKIT_SHIP_ID:-}" ] && [ -z "\${DEVKIT_NO_TELEMETRY:-}" ]; then
+if [ -z "\${DEVKIT_SHIP_ID:-}" ] && [ -z "\${DEVKIT_REVIEW_ID:-}" ] && [ -z "\${DEVKIT_NO_TELEMETRY:-}" ]; then
     __dk_t0="$(date +%s)"
     __dk_esc() { printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
     __dk_commit_result() {
