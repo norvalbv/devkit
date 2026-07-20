@@ -14,8 +14,13 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { writeFileAtomic } from '../../atomic-write.mts';
+import { runDirectReviewCli } from './run-direct.mts';
+import {
+  canonicalReviewDirectory,
+  canonicalReviewLeaf,
+  reviewPathWithin,
+} from './runtime-paths.mts';
 
 const MANIFEST_VERSION = 1;
 const NODE_MODULES = 'node_modules';
@@ -50,36 +55,18 @@ function fail(message: string): never {
   throw new Error(`devkit review: ${message}`);
 }
 
-function canonicalDirectory(path: string, label: string): string {
-  let canonical: string;
-  try {
-    canonical = realpathSync(resolve(path));
-  } catch {
-    return fail(`${label} is not an available directory: ${path}`);
-  }
-  if (!lstatSync(canonical).isDirectory()) return fail(`${label} is not a directory: ${path}`);
-  return canonical;
-}
-
-function within(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
-}
-
 function validateRoots(sourceRoot: string, destinationRoot: string): [string, string] {
-  const source = canonicalDirectory(sourceRoot, 'dependency source root');
-  const destination = canonicalDirectory(destinationRoot, 'dependency destination root');
-  if (within(source, destination) || within(destination, source)) {
+  const source = canonicalReviewDirectory(sourceRoot, 'dependency source root');
+  const destination = canonicalReviewDirectory(destinationRoot, 'dependency destination root');
+  if (reviewPathWithin(source, destination) || reviewPathWithin(destination, source)) {
     return fail('dependency source and destination roots must be separate, non-nested directories');
   }
   return [source, destination];
 }
 
 function validateManifestPath(path: string, sourceRoot: string, destinationRoot: string): string {
-  const requested = resolve(path);
-  const parent = canonicalDirectory(dirname(requested), 'dependency manifest parent');
-  const manifest = join(parent, basename(requested));
-  if (within(sourceRoot, manifest) || within(destinationRoot, manifest)) {
+  const manifest = canonicalReviewLeaf(path, 'dependency manifest parent');
+  if (reviewPathWithin(sourceRoot, manifest) || reviewPathWithin(destinationRoot, manifest)) {
     return fail('dependency manifest must live outside the source and destination roots');
   }
   return manifest;
@@ -99,7 +86,7 @@ function absoluteRepoPath(root: string, path: string): string {
     return fail(`unsafe dependency manifest path: ${JSON.stringify(path)}`);
   }
   const absolute = resolve(root, ...path.split('/'));
-  if (!within(root, absolute)) return fail(`dependency path escapes its root: ${path}`);
+  if (!reviewPathWithin(root, absolute)) return fail(`dependency path escapes its root: ${path}`);
   return absolute;
 }
 
@@ -152,7 +139,7 @@ function validateLinkGraph(root: string, linkPath: string, seen = new Set<string
 
 /** Find every repository node_modules surface without entering one, .git, or a symlink. */
 export function discoverDependencySurfaces(sourceRoot: string): string[] {
-  const root = canonicalDirectory(sourceRoot, 'dependency source root');
+  const root = canonicalReviewDirectory(sourceRoot, 'dependency source root');
   const surfaces: string[] = [];
   const visit = (directory: string): void => {
     for (const name of readdirSync(directory).sort()) {
@@ -379,7 +366,7 @@ export function verifyDependencyRuntime(
   sourceRoot: string,
   manifestPath: string,
 ): DependencyRuntimeManifest {
-  const source = canonicalDirectory(sourceRoot, 'dependency source root');
+  const source = canonicalReviewDirectory(sourceRoot, 'dependency source root');
   const manifest = readManifest(manifestPath);
   if (source !== manifest.sourceRoot)
     return fail('dependency runtime manifest belongs to another root');
@@ -403,12 +390,4 @@ function runCli(args: string[]): void {
   } else usage();
 }
 
-const invokedPath = process.argv[1];
-if (invokedPath && realpathSync(invokedPath) === realpathSync(fileURLToPath(import.meta.url))) {
-  try {
-    runCli(process.argv.slice(2));
-  } catch (cause) {
-    console.error(cause instanceof Error ? cause.message : String(cause));
-    process.exitCode = 1;
-  }
-}
+runDirectReviewCli(import.meta.url, runCli);

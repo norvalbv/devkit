@@ -1,8 +1,18 @@
 /** Stable content + executable-mode fingerprints for paths frozen into a review runtime. */
 import { createHash, type Hash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { runDirectReviewCli } from './run-direct.mts';
 
 const ABSENT_FINGERPRINT = 'absent';
 
@@ -21,6 +31,18 @@ function updateFile(hash: Hash, relativePath: string, content: Uint8Array, mode:
   updateField(hash, relativePath);
   updateField(hash, executableMode(mode));
   updateField(hash, content);
+}
+
+/** Read bytes and executable mode from one open descriptor, immune to pathname replacement. */
+export function readPinnedReviewFile(path: string): { content: Buffer; mode: number } {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error(`unsupported review runtime path type: ${path}`);
+    return { content: readFileSync(descriptor), mode: stat.mode };
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function visitDirectory(
@@ -49,7 +71,8 @@ function visitPath(
 ): void {
   const stat = statSync(absolutePath);
   if (stat.isFile()) {
-    updateFile(hash, relativePath, readFileSync(absolutePath), stat.mode);
+    const file = readPinnedReviewFile(absolutePath);
+    updateFile(hash, relativePath, file.content, file.mode);
     return;
   }
   if (stat.isDirectory()) {
@@ -102,7 +125,4 @@ function runCli(args: string[]): void {
   process.stdout.write(reviewRuntimeFingerprint(target));
 }
 
-const invokedPath = process.argv[1];
-if (invokedPath && realpathSync(invokedPath) === realpathSync(fileURLToPath(import.meta.url))) {
-  runCli(process.argv.slice(2));
-}
+runDirectReviewCli(import.meta.url, runCli);
