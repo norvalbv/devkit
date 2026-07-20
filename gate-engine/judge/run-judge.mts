@@ -102,6 +102,7 @@ interface ExecJudgeOpts {
   input?: string;
   timeout?: number;
   cwd?: string;
+  env?: NodeJS.ProcessEnv;
   onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
   transcript?: boolean;
 }
@@ -146,11 +147,12 @@ function emitJudgeExec(
 }
 
 export function execJudge(opts: ExecJudgeOpts): string | null {
-  const { label, args, input, timeout, cwd, onOutage } = opts;
+  const { label, args, input, timeout, cwd, env, onOutage } = opts;
   const startedAt = Date.now();
   try {
     const out = execFileSync('claude', args, {
       cwd,
+      env,
       input,
       encoding: 'utf8',
       timeout,
@@ -185,13 +187,13 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
  * @returns {Promise<string|null>}
  */
 export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
-  const { label, args, input, timeout, cwd, onOutage } = opts;
+  const { label, args, input, timeout, cwd, env, onOutage } = opts;
   const startedAt = Date.now();
   return new Promise((resolve) => {
     const child = execFile(
       'claude',
       args,
-      { cwd, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
+      { cwd, env, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {
           warnUnavailable(label, err, timeout);

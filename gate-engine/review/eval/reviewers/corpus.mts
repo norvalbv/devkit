@@ -16,6 +16,7 @@ import { checklistScript } from '../../reviewers.mts';
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
 const repoRoot = path.resolve(here, '../../../..');
+const reviewRootsHelper = path.join(repoRoot, 'skills', '_devkit', 'review-roots.mjs');
 
 const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
@@ -91,6 +92,7 @@ export function buildAssets(reviewer) {
   const assets = {
     'guard.config.json': `${JSON.stringify(FIXTURE_CONFIG, null, 2)}\n`,
     [`.claude/agents/${reviewer.name}.md`]: brief,
+    '.claude/skills/_devkit/review-roots.mjs': readFileSync(reviewRootsHelper, 'utf8'),
     [checklistScript(reviewer)]: script,
   };
   if (existsSync(skillMd))
@@ -107,6 +109,8 @@ export function benchGateHash(reviewer) {
     [
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
+      readFileSync(path.join(repoRoot, 'gate-engine/review/runtime.mts'), 'utf8'),
+      readFileSync(reviewRootsHelper, 'utf8'),
       // This module IS the fixture layer (FIXTURE_CONFIG, buildAssets) — hash its own source so a
       // fixture-behavior edit can never be compared against an incompatible baseline.
       readFileSync(fileURLToPath(import.meta.url), 'utf8'),
