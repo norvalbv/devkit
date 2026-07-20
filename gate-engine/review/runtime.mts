@@ -4,14 +4,36 @@ import path from 'node:path';
 import type { GuardConfig } from '../config.mts';
 import {
   type ChecklistState,
-  checklistScriptAt,
+  checklistAssetPath,
   hasChecklist,
+  REVIEWERS,
   type Reviewer,
   type ReviewerSelection,
   verifyChecklist,
 } from './reviewers.mts';
 
-const REVIEW_ROOTS_HELPER = ['skills', '_devkit', 'review-roots.mjs'] as const;
+const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
+
+function reviewerAssetPaths(reviewer: Reviewer): string[] {
+  const paths = [`agents/${reviewer.name}.md`];
+  if (hasChecklist(reviewer)) {
+    paths.push(
+      `skills/${reviewer.skill}/SKILL.md`,
+      checklistAssetPath(reviewer),
+      REVIEW_ROOTS_HELPER,
+    );
+  }
+  return paths;
+}
+
+/** The complete package-relative reviewer asset contract, independent of consumer agent surfaces. */
+export const PACKAGED_REVIEW_ASSET_PATHS: readonly string[] = Object.freeze(
+  [...new Set([REVIEW_ROOTS_HELPER, ...REVIEWERS.flatMap(reviewerAssetPaths)])].sort(),
+);
+
+function readPackagedReviewAsset(assetRoot: string, relativePath: string): Buffer {
+  return readFileSync(path.join(assetRoot, relativePath));
+}
 
 export interface ReviewOutcome {
   name: string;
@@ -49,17 +71,18 @@ export function preflightReviewAssets(
 ): Map<string, string> {
   if (!assetRoot || !path.isAbsolute(assetRoot))
     throw new Error('DEVKIT_REVIEW_ASSET_ROOT is missing or not absolute');
-  const reviewRootsHelper = readFileSync(path.join(assetRoot, ...REVIEW_ROOTS_HELPER));
+  const reviewRootsHelper = readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
   const identities = new Map<string, string>();
   for (const { reviewer } of selected) {
+    const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
     const hash = createHash('sha256')
-      .update(readFileSync(path.join(assetRoot, 'agents', `${reviewer.name}.md`)))
+      .update(readPackagedReviewAsset(assetRoot, brief as string))
       .update(JSON.stringify(reviewer));
     if (hasChecklist(reviewer)) {
       if (!reviewer.stateFile.startsWith('.claude/') || !reviewer.cmds.gen || !reviewer.cmds.check)
         throw new Error(`${reviewer.name} has an invalid checklist registry binding`);
-      hash.update(readFileSync(path.join(assetRoot, 'skills', reviewer.skill, 'SKILL.md')));
-      hash.update(readFileSync(checklistScriptAt(reviewer, assetRoot)));
+      hash.update(readPackagedReviewAsset(assetRoot, skill as string));
+      hash.update(readPackagedReviewAsset(assetRoot, checklist as string));
       hash.update(reviewRootsHelper);
     }
     hash.update(
@@ -74,6 +97,45 @@ export function preflightReviewAssets(
     identities.set(reviewer.name, hash.digest('hex'));
   }
   return identities;
+}
+
+/** Recheck one completed reviewer's exact execution inputs before its PASS becomes durable. */
+export function verifyReviewAssetIdentity(
+  assetRoot: string | undefined,
+  selected: ReviewerSelection,
+  cfg: GuardConfig,
+  expected: string,
+): void {
+  const actual = preflightReviewAssets(assetRoot, [selected], cfg).get(selected.reviewer.name);
+  if (actual !== expected)
+    throw new Error(`${selected.reviewer.name} assets changed while the reviewer was running`);
+}
+
+/** Build the PASS checkpoint guard once from the immutable review-run context. */
+export function passAssetVerifier(
+  reviewMode: boolean,
+  assetRoot: string | undefined,
+  cfg: GuardConfig,
+  expectedByReviewer: ReadonlyMap<string, string>,
+): (outcome: ReviewOutcome, selected: ReviewerSelection) => ReviewOutcome {
+  return (outcome, selected) => {
+    if (!reviewMode || outcome.status !== 'pass') return outcome;
+    try {
+      verifyReviewAssetIdentity(
+        assetRoot,
+        selected,
+        cfg,
+        expectedByReviewer.get(selected.reviewer.name) ?? '',
+      );
+      return outcome;
+    } catch (cause) {
+      return {
+        ...outcome,
+        status: 'error',
+        reason: `asset integrity failure: ${cause instanceof Error ? cause.message : String(cause)}`,
+      };
+    }
+  };
 }
 
 export function reviewJudgeEnv(cfg: GuardConfig): NodeJS.ProcessEnv {
