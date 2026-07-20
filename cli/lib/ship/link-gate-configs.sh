@@ -16,13 +16,12 @@
 # hardcode — decision synced-assets-layout-agnostic mandates resolving roots from guard.config.json.
 # The rest are devkit's own fixed artifact names.
 
-# .qavis/receipt.json (last entry below) — the untracked, content-addressed cache qavis writes on a
-# `qavis qa` pass. The ship-time qavis-advisory gate shells `qavis route --repo $WT`, which reads it to
-# clear the block; the receipt is the one gate input never carried into $WT (untracked, not in the
-# pathspec), so a genuine pass otherwise blocks the ship. File-level, NOT `.qavis/` — a dir-level link
-# would clobber the tracked recipe.json. Content-addressed → a mismatched staged set can't false-clear
-# (route re-ADVISEs). ponytail: clears on the changed BLOBS, not the base — on ship $BASE can be newer
-# than qavis's QA base; accepted (the change itself was QA'd). Re-QA is the upgrade path if it matters.
+# Devkit config/artifact files the gates read; linked into the throwaway ship/review worktree ($WT)
+# because a fresh checkout lacks the untracked/gitignored ones. All bare names (a test pins the exact
+# list — no inline comments). The last, .qavis/receipt.json, is the non-obvious one: it's the gitignored
+# cache qavis writes on a QA pass, read by the ship qavis-advisory gate to clear its block, and the only
+# gate input NOT already carried in by the staged pathspec — so without this link a real QA pass still
+# blocks the ship. Linked file-level, not the `.qavis/` dir (which holds the tracked recipe.json).
 GATE_PROJECTION_FIXED_CANDIDATES=(
   guard.config.json
   .fallowrc.jsonc
