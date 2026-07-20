@@ -97,6 +97,17 @@ describe('gate config projections', () => {
     expect(project(review.root, review.worktree, 'typo').status).toBe(2);
   });
 
+  it('fails review projection closed when configured paths cannot be resolved', () => {
+    const { root, worktree } = fixture();
+    writeFileSync(join(root, 'guard.config.json'), '{ not: valid json');
+
+    const result = project(root, worktree);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('could not resolve gate config paths');
+    expect(() => lstatSync(join(worktree, 'guard.config.json'))).toThrow();
+  });
+
   it('copies the complete SQLite family and isolates runtime writes from the target', () => {
     const { root, worktree } = fixture();
     const indexPath = '.search-code/index\nreview.db';
