@@ -6,11 +6,12 @@ node_modules
 .search-code/
 # qavis pass-receipt: content-addressed cache written by `qavis qa` (specific file — .qavis/recipe.json stays tracked)
 .qavis/receipt.json
-# ship/gate caches under .devkit/ (regenerated, per-branch/-tree keyed; tracked manifests stay tracked)
+# ship/review/gate caches under .devkit/ (regenerated, per-run/-branch/-tree keyed; tracked manifests stay tracked)
 .devkit/prefix-cache.json
 .devkit/decisions-verdict-cache.json
 .devkit/review-cache.json
 .devkit/review-progress-*.json
+.devkit/review-runs/
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
