@@ -9,7 +9,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { PACKAGED_REVIEW_ASSET_PATHS } from '../../../../gate-engine/review/runtime.mts';
+import {
+  PACKAGED_REVIEW_ASSET_PATHS,
+  PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
+  PACKAGED_REVIEW_RUNTIME_MODULE_STEMS,
+} from '../../../../gate-engine/review/runtime.mts';
 import { runDirectReviewCli } from './run-direct.mts';
 import {
   readPinnedReviewFile,
@@ -24,6 +28,8 @@ import {
 } from './runtime-paths.mts';
 
 const SAFE_RUNTIME_PATH = /^[A-Za-z0-9_./-]+$/;
+const RUNTIME_MODULE_EXTENSIONS = ['.mjs', '.mts'] as const;
+type RuntimeModuleExtension = (typeof RUNTIME_MODULE_EXTENSIONS)[number];
 
 interface CapturedAsset {
   content: Buffer;
@@ -51,10 +57,10 @@ function validateAssetPath(path: string): void {
   }
 }
 
-function validateAssetPaths(): void {
+function validateAssetPaths(paths: readonly string[]): void {
   const collisions = new Set<string>();
   let previous = '';
-  for (const path of PACKAGED_REVIEW_ASSET_PATHS) {
+  for (const path of paths) {
     validateAssetPath(path);
     if (previous && previous >= path)
       fail('packaged reviewer asset registry must be sorted and unique');
@@ -64,6 +70,37 @@ function validateAssetPaths(): void {
       fail(`colliding packaged reviewer asset path: ${JSON.stringify(path)}`);
     collisions.add(collisionKey);
   }
+}
+
+function runtimeEntrypointExists(sourceRoot: string, extension: RuntimeModuleExtension): boolean {
+  const candidate = resolve(sourceRoot, `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension}`);
+  if (!reviewPathWithin(sourceRoot, candidate)) {
+    return fail('packaged review runtime entrypoint escapes its package root');
+  }
+  return lstatSync(candidate, { throwIfNoEntry: false }) !== undefined;
+}
+
+/** Resolve exactly the extension the generated hook will select: built `.mjs`, then source `.mts`. */
+function packageRuntimePaths(sourceRoot: string): readonly string[] {
+  if (!PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.includes(PACKAGED_REVIEW_RUNTIME_ENTRYPOINT)) {
+    return fail('packaged review runtime registry does not contain its entrypoint');
+  }
+  const extension = RUNTIME_MODULE_EXTENSIONS.find((candidate) =>
+    runtimeEntrypointExists(sourceRoot, candidate),
+  );
+  if (!extension) {
+    return fail(
+      `packaged reviewer asset is missing: ${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}.{mjs,mts}`,
+    );
+  }
+  const paths = Object.freeze(
+    [
+      ...PACKAGED_REVIEW_ASSET_PATHS,
+      ...PACKAGED_REVIEW_RUNTIME_MODULE_STEMS.map((stem) => `${stem}${extension}`),
+    ].sort(),
+  );
+  validateAssetPaths(paths);
+  return paths;
 }
 
 function captureFile(path: string, label: string): CapturedAsset {
@@ -135,10 +172,10 @@ export function materializeReviewAssetRuntime(
   destinationRoot: string,
   hooks: ReviewAssetRuntimeHooks = {},
 ): ReviewAssetRuntime {
-  validateAssetPaths();
   const sourceRoot = canonicalReviewDirectory(packageRoot, 'reviewer package root');
+  const assetPaths = packageRuntimePaths(sourceRoot);
   const before = new Map<string, CapturedAsset>();
-  for (const assetPath of PACKAGED_REVIEW_ASSET_PATHS) {
+  for (const assetPath of assetPaths) {
     before.set(
       assetPath,
       captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset'),
@@ -148,23 +185,26 @@ export function materializeReviewAssetRuntime(
   let runtime: string | undefined;
   try {
     runtime = runtimeRoot(sourceRoot, destinationRoot);
-    for (const assetPath of PACKAGED_REVIEW_ASSET_PATHS) {
+    for (const assetPath of assetPaths) {
       writeCapturedAsset(runtime, assetPath, before.get(assetPath) as CapturedAsset);
     }
     hooks.beforeSourceVerification?.();
-    for (const assetPath of PACKAGED_REVIEW_ASSET_PATHS) {
+    if (JSON.stringify(packageRuntimePaths(sourceRoot)) !== JSON.stringify(assetPaths)) {
+      fail('packaged reviewer assets changed during private runtime capture; retry');
+    }
+    for (const assetPath of assetPaths) {
       const expected = (before.get(assetPath) as CapturedAsset).fingerprint;
       const source = captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset');
       const copied = captureFile(join(runtime, ...assetPath.split('/')), 'copied reviewer asset');
       if (source.fingerprint !== expected || copied.fingerprint !== expected)
         fail('packaged reviewer assets changed during private runtime capture; retry');
     }
-    if (JSON.stringify(runtimeFiles(runtime)) !== JSON.stringify(PACKAGED_REVIEW_ASSET_PATHS))
+    if (JSON.stringify(runtimeFiles(runtime)) !== JSON.stringify(assetPaths))
       fail('private reviewer asset runtime does not match the registered asset set');
     return {
       root: runtime,
       fingerprint: reviewRuntimeFingerprint(runtime),
-      paths: PACKAGED_REVIEW_ASSET_PATHS,
+      paths: assetPaths,
     };
   } catch (cause) {
     if (runtime) rmSync(runtime, { recursive: true, force: true });
@@ -172,10 +212,52 @@ export function materializeReviewAssetRuntime(
   }
 }
 
+/** Recheck both the packaged source and its immutable private copy after target hooks run. */
+export function verifyReviewAssetRuntime(
+  packageRoot: string,
+  runtimeRootPath: string,
+  expectedFingerprint: string,
+): void {
+  const sourceRoot = canonicalReviewDirectory(packageRoot, 'reviewer package root');
+  const assetPaths = packageRuntimePaths(sourceRoot);
+  const runtime = canonicalReviewDirectory(runtimeRootPath, 'reviewer asset runtime');
+  if (reviewPathWithin(sourceRoot, runtime) || reviewPathWithin(runtime, sourceRoot)) {
+    fail('reviewer package and asset runtime must be separate, non-nested directories');
+  }
+  if (JSON.stringify(runtimeFiles(runtime)) !== JSON.stringify(assetPaths)) {
+    fail('private reviewer asset runtime does not match the registered asset set');
+  }
+  if (reviewRuntimeFingerprint(runtime) !== expectedFingerprint) {
+    fail('private reviewer asset runtime changed while review was running');
+  }
+  for (const assetPath of assetPaths) {
+    const source = captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset');
+    const copied = captureFile(join(runtime, ...assetPath.split('/')), 'copied reviewer asset');
+    if (source.fingerprint !== copied.fingerprint) {
+      fail(`packaged reviewer asset changed while review was running: ${assetPath}`);
+    }
+  }
+}
+
 function runCli(args: string[]): void {
-  if (args.length !== 2) fail('usage: asset-runtime <package-root> <destination-root>');
-  const result = materializeReviewAssetRuntime(args[0] as string, args[1] as string);
-  process.stdout.write(result.fingerprint);
+  if (args[0] === 'materialize' && args.length === 3) {
+    const result = materializeReviewAssetRuntime(args[1] as string, args[2] as string);
+    process.stdout.write(result.fingerprint);
+    return;
+  }
+  if (args[0] === 'verify' && args.length === 4) {
+    verifyReviewAssetRuntime(args[1] as string, args[2] as string, args[3] as string);
+    return;
+  }
+  // Backward-compatible private CLI used by the runtime-safety slice's focused tests.
+  if (args.length === 2) {
+    const result = materializeReviewAssetRuntime(args[0] as string, args[1] as string);
+    process.stdout.write(result.fingerprint);
+    return;
+  }
+  fail(
+    'usage: asset-runtime materialize <package-root> <destination-root> | verify <package-root> <runtime-root> <fingerprint>',
+  );
 }
 
 runDirectReviewCli(import.meta.url, runCli);
