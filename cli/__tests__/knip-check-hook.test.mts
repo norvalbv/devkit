@@ -13,13 +13,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rootRegistry, seedSessionLedger } from './_helpers.mts';
+import { hasAnyCommand, rootRegistry, seedSessionLedger } from './_helpers.mts';
 
 const AGENTS_HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks');
 const KNIP_HOOK = join(AGENTS_HOOKS, 'knip-check.sh');
 const LINT_HOOK = join(AGENTS_HOOKS, 'lint-check.sh');
 
-const HAS_BUN = spawnSync('bash', ['-c', 'command -v bun'], { encoding: 'utf8' }).status === 0;
+const HAS_BUN = hasAnyCommand('bun');
 
 // A `knip` script that announces itself then fails: exit 2 + this marker in the hook's stderr proves
 // the degrade-skip gates OPENED and knip actually ran; the marker's ABSENCE proves the hook skipped.
