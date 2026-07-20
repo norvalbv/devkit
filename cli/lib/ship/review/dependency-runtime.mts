@@ -22,8 +22,10 @@ import {
   reviewPathWithin,
 } from './runtime-paths.mts';
 
-const MANIFEST_VERSION = 1;
+const MANIFEST_VERSION = 2;
 const NODE_MODULES = 'node_modules';
+
+export type DependencyRuntimeMode = 'strict' | 'baseline';
 
 type RuntimeEntry =
   | { path: string; type: 'directory' }
@@ -36,6 +38,7 @@ export interface DependencyRuntimeManifest {
   destinationRoot: string;
   surfaces: string[];
   entries: RuntimeEntry[];
+  sourceFingerprint: string;
   fingerprint: string;
   destinationFingerprint: string;
 }
@@ -103,6 +106,27 @@ function safeDestinationPath(root: string, path: string): string {
     }
   }
   return absolute;
+}
+
+function destinationDirectoryChainExists(root: string, parts: string[], path: string): boolean {
+  let current = root;
+  for (const part of parts) {
+    current = join(current, part);
+    const stat = lstatSync(current, { throwIfNoEntry: false });
+    if (stat === undefined) return false;
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      return fail(`dependency runtime has an unsafe parent: ${path}`);
+    }
+  }
+  return true;
+}
+
+function destinationEntryExists(root: string, path: string): boolean {
+  absoluteRepoPath(root, path);
+  const parts = path === '.' ? [] : path.split('/');
+  if (!destinationDirectoryChainExists(root, parts.slice(0, -1), path)) return false;
+  if (parts.length === 0) return true;
+  return lstatSync(join(root, ...parts), { throwIfNoEntry: false }) !== undefined;
 }
 
 function isGitPath(path: string): boolean {
@@ -195,6 +219,36 @@ function captureSource(root: string): Topology {
   const entries: RuntimeEntry[] = [];
   for (const surface of surfaces) captureEntry(root, absoluteRepoPath(root, surface), entries);
   entries.sort((left, right) => (left.path === right.path ? 0 : left.path < right.path ? -1 : 1));
+  return { surfaces, entries, fingerprint: topologyFingerprint(surfaces, entries) };
+}
+
+function entryWithinSurface(path: string, surface: string): boolean {
+  return path === surface || path.startsWith(`${surface}/`);
+}
+
+function baselineTopology(source: Topology, destinationRoot: string): Topology {
+  const surfaces = source.surfaces.filter((surface) =>
+    destinationDirectoryChainExists(destinationRoot, surface.split('/').slice(0, -1), surface),
+  );
+  let entries = source.entries.filter((entry) =>
+    surfaces.some((surface) => entryWithinSurface(entry.path, surface)),
+  );
+
+  // A root dependency surface can link to a workspace whose repository parent is absent at the
+  // merge-base. Do not recreate that source-only workspace (or a dangling link to it) in the
+  // baseline. Link cycles wholly inside the selected dependency topology remain valid.
+  while (true) {
+    const selectedPaths = new Set(entries.map((entry) => entry.path));
+    const filtered = entries.filter(
+      (entry) =>
+        entry.type !== 'symlink' ||
+        selectedPaths.has(entry.target) ||
+        destinationEntryExists(destinationRoot, entry.target),
+    );
+    if (filtered.length === entries.length) break;
+    entries = filtered;
+  }
+
   return { surfaces, entries, fingerprint: topologyFingerprint(surfaces, entries) };
 }
 
@@ -306,17 +360,19 @@ export function materializeDependencyRuntime(
   destinationRoot: string,
   manifestPath: string,
   hooks: DependencyRuntimeHooks = {},
+  mode: DependencyRuntimeMode = 'strict',
 ): DependencyRuntimeManifest {
   const [source, destination] = validateRoots(sourceRoot, destinationRoot);
   const manifestDestination = validateManifestPath(manifestPath, source, destination);
-  const before = captureSource(source);
+  const sourceBefore = captureSource(source);
   hooks.afterSourceCapture?.();
   const created: string[] = [];
   try {
+    const before = mode === 'baseline' ? baselineTopology(sourceBefore, destination) : sourceBefore;
     mergeTopology(source, destination, before, created);
     hooks.beforeSourceVerification?.();
     const after = captureSource(source);
-    if (after.fingerprint !== before.fingerprint)
+    if (after.fingerprint !== sourceBefore.fingerprint)
       fail('dependencies changed during capture; retry');
     const destinationTopology = captureDestination(destination, before);
     if (destinationTopology.fingerprint !== before.fingerprint) {
@@ -328,6 +384,7 @@ export function materializeDependencyRuntime(
       destinationRoot: destination,
       surfaces: before.surfaces,
       entries: before.entries,
+      sourceFingerprint: sourceBefore.fingerprint,
       fingerprint: before.fingerprint,
       destinationFingerprint: destinationTopology.fingerprint,
     };
@@ -349,13 +406,17 @@ function readManifest(path: string): DependencyRuntimeManifest {
     typeof manifest.destinationRoot === 'string',
     Array.isArray(manifest.surfaces),
     Array.isArray(manifest.entries),
+    typeof manifest.sourceFingerprint === 'string',
     typeof manifest.fingerprint === 'string',
     typeof manifest.destinationFingerprint === 'string',
   ].every(Boolean);
   if (!validShape) {
     return fail('dependency runtime manifest is invalid');
   }
-  if (topologyFingerprint(manifest.surfaces, manifest.entries) !== manifest.fingerprint) {
+  if (
+    topologyFingerprint(manifest.surfaces, manifest.entries) !== manifest.fingerprint ||
+    manifest.destinationFingerprint !== manifest.fingerprint
+  ) {
     return fail('dependency runtime manifest fingerprint is invalid');
   }
   return manifest;
@@ -370,21 +431,42 @@ export function verifyDependencyRuntime(
   const manifest = readManifest(manifestPath);
   if (source !== manifest.sourceRoot)
     return fail('dependency runtime manifest belongs to another root');
-  if (captureSource(source).fingerprint !== manifest.fingerprint) {
+  if (captureSource(source).fingerprint !== manifest.sourceFingerprint) {
     return fail('target dependencies changed while review was running; retry');
+  }
+  const [, destination] = validateRoots(source, manifest.destinationRoot);
+  if (destination !== manifest.destinationRoot) {
+    return fail('private dependency runtime root changed while review was running; retry');
+  }
+  const expected: Topology = {
+    surfaces: manifest.surfaces,
+    entries: manifest.entries,
+    fingerprint: manifest.destinationFingerprint,
+  };
+  if (captureDestination(destination, expected).fingerprint !== manifest.destinationFingerprint) {
+    return fail('private dependency runtime changed while review was running; retry');
   }
   return manifest;
 }
 
 function usage(): never {
   return fail(
-    'usage: dependency-runtime materialize <source-root> <destination-root> <manifest-path> | verify <source-root> <manifest-path>',
+    'usage: dependency-runtime materialize <source-root> <destination-root> <manifest-path> [baseline] | verify <source-root> <manifest-path>',
   );
 }
 
 function runCli(args: string[]): void {
-  if (args[0] === 'materialize' && args.length === 4) {
-    materializeDependencyRuntime(args[1] as string, args[2] as string, args[3] as string);
+  if (
+    args[0] === 'materialize' &&
+    (args.length === 4 || (args.length === 5 && args[4] === 'baseline'))
+  ) {
+    materializeDependencyRuntime(
+      args[1] as string,
+      args[2] as string,
+      args[3] as string,
+      {},
+      args[4] === 'baseline' ? 'baseline' : 'strict',
+    );
   } else if (args[0] === 'verify' && args.length === 3) {
     verifyDependencyRuntime(args[1] as string, args[2] as string);
   } else usage();

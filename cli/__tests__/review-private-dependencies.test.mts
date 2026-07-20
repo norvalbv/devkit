@@ -134,6 +134,47 @@ describe('private review dependency runtime', () => {
     expect(existsSync(join(source, 'node_modules/.cache/state'))).toBe(false);
   });
 
+  it.each([
+    [
+      'file bytes',
+      (destination: string) =>
+        writeFileSync(join(destination, 'node_modules/pkg/index.js'), 'changed\n'),
+    ],
+    [
+      'file executable mode',
+      (destination: string) => chmodSync(join(destination, 'node_modules/pkg/index.js'), 0o755),
+    ],
+    [
+      'entry topology',
+      (destination: string) => rmSync(join(destination, 'node_modules/pkg/index.js')),
+    ],
+  ])('rejects persistent private dependency %s mutation', (_kind, mutate) => {
+    const { source, destination, manifest } = fixture('private-file-mutation');
+    write(source, 'node_modules/pkg/index.js', 'captured\n');
+    materializeDependencyRuntime(source, destination, manifest);
+
+    mutate(destination);
+
+    expect(() => verifyDependencyRuntime(source, manifest)).toThrow(
+      /private dependency runtime|entry disappeared/,
+    );
+  });
+
+  it('rejects a persistent private dependency link-target mutation', () => {
+    const { source, destination, manifest } = fixture('private-link-mutation');
+    write(source, 'packages/a/index.js', 'a\n');
+    write(source, 'packages/b/index.js', 'b\n');
+    write(destination, 'packages/a/index.js', 'a\n');
+    write(destination, 'packages/b/index.js', 'b\n');
+    mkdirSync(join(source, 'node_modules'), { recursive: true });
+    symlinkSync(join(source, 'packages/a'), join(source, 'node_modules/workspace'));
+    materializeDependencyRuntime(source, destination, manifest);
+    rmSync(join(destination, 'node_modules/workspace'));
+    symlinkSync('../packages/b', join(destination, 'node_modules/workspace'));
+
+    expect(() => verifyDependencyRuntime(source, manifest)).toThrow(/private dependency runtime/);
+  });
+
   it('merges identical snapshot entries, fills missing bytes, and preserves snapshot-only files', () => {
     const { source, destination, manifest } = fixture('merge');
     write(source, 'node_modules/pkg/existing.js', 'same\n');
@@ -288,6 +329,42 @@ describe('private review dependency runtime', () => {
     expect(existsSync(manifest)).toBe(true);
     write(destination, 'node_modules/.cache/state', 'private\n');
     expect(existsSync(join(source, 'node_modules/.cache/state'))).toBe(false);
+  });
+
+  it('omits source-only workspace dependencies from the baseline while final review stays strict', () => {
+    const { parent, source, destination } = fixture('prepare-new-workspace');
+    const baselineManifest = join(parent, 'baseline.json');
+    write(source, 'node_modules/tool/index.js', 'tool\n');
+    write(source, 'packages/new/package.json', '{}\n');
+    write(source, 'packages/new/node_modules/pkg/index.js', 'workspace dependency\n');
+    symlinkSync('../packages/new', join(source, 'node_modules/new'));
+    write(destination, 'packages/existing/source.ts', 'baseline workspace\n');
+
+    const baseline = prepare(source, destination, 'review-baseline', baselineManifest);
+
+    expect(baseline.status, baseline.stderr).toBe(0);
+    expect(readFileSync(join(destination, 'node_modules/tool/index.js'), 'utf8')).toBe('tool\n');
+    expect(existsSync(join(destination, 'node_modules/new'))).toBe(false);
+    expect(existsSync(join(destination, 'packages/new'))).toBe(false);
+    const captured = JSON.parse(readFileSync(baselineManifest, 'utf8')) as {
+      surfaces: string[];
+      sourceFingerprint: string;
+      fingerprint: string;
+    };
+    expect(captured.surfaces).toEqual(['node_modules']);
+    expect(captured.sourceFingerprint).not.toBe(captured.fingerprint);
+    expect(() => verifyDependencyRuntime(source, baselineManifest)).not.toThrow();
+
+    const strictDestination = join(parent, 'strict-destination');
+    const strictManifest = join(parent, 'strict.json');
+    mkdirSync(strictDestination);
+    write(strictDestination, 'packages/existing/source.ts', 'baseline workspace\n');
+    const strict = prepare(source, strictDestination, 'review', strictManifest);
+
+    expect(strict.status).toBe(1);
+    expect(strict.stderr).toContain('dependency runtime parent is missing');
+    expect(existsSync(join(strictDestination, 'node_modules'))).toBe(false);
+    expect(existsSync(strictManifest)).toBe(false);
   });
 
   it.each([
