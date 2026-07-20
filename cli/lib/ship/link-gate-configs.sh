@@ -16,10 +16,52 @@
 # hardcode — decision synced-assets-layout-agnostic mandates resolving roots from guard.config.json.
 # The rest are devkit's own fixed artifact names.
 
-# link_untracked_gate_configs <worktree> <root>
+sqlite_family_state() {
+  local database=$1 suffix path
+  for suffix in '' -wal -shm -journal; do
+    path="$database$suffix"
+    if [ -e "$path" ]; then
+      printf '%s=%s\n' "$suffix" "$(git hash-object --no-filters "$path")"
+    else
+      printf '%s=absent\n' "$suffix"
+    fi
+  done
+}
+
+copy_stable_sqlite_family() {
+  local source=$1 destination=$2 before after copied suffix
+  before=$(sqlite_family_state "$source") || return 1
+  mkdir -p "$(dirname "$destination")"
+  for suffix in '' -wal -shm -journal; do
+    if [ -e "$source$suffix" ]; then
+      cp -pL "$source$suffix" "$destination$suffix"
+    else
+      rm -f "$destination$suffix"
+    fi
+  done
+  after=$(sqlite_family_state "$source") || return 1
+  copied=$(sqlite_family_state "$destination") || return 1
+  [ "$before" = "$after" ] && [ "$before" = "$copied" ] || {
+    echo "devkit review: SQLite gate index changed during capture; retry." >&2
+    return 1
+  }
+}
+
+is_review_projection_purpose() {
+  [ "$1" = review ] || [ "$1" = review-baseline ]
+}
+
+# link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
-  local wt=$1 root=$2 self_dir emitter resolved rel line
+  local wt=$1 root=$2 purpose=${3:-ship} self_dir emitter resolved rel line index_rel=
   local linked=()
+  case "$purpose" in
+    ship | review | review-baseline) ;;
+    *)
+      echo "devkit: unknown gate-config projection purpose: $purpose" >&2
+      return 2
+      ;;
+  esac
   # devkit's own fixed gate artifacts (guard.config.json is CONFIG_FILENAME — never configurable).
   # Overlay lint configs are local/gitignored by design; projecting them keeps ship/review parity
   # with a normal overlay commit, while callers stage their snapshot before this helper runs.
@@ -47,10 +89,21 @@ link_untracked_gate_configs() {
   # the worktree gate fail loud on the same bad config.
   self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   emitter="$self_dir/gate-config-paths.mts"; [ -f "$emitter" ] || emitter="$self_dir/gate-config-paths.mjs"
-  if resolved=$(node "$emitter" "$root" 2>/dev/null); then
+  if is_review_projection_purpose "$purpose"; then
+    if node "$emitter" "$root" >/dev/null 2>&1; then
+      while IFS= read -r -d '' line; do
+        [ -n "$line" ] && candidates+=("$line")
+      done < <(node "$emitter" "$root" --null)
+    else
+      echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
+    fi
+  elif resolved=$(node "$emitter" "$root" 2>/dev/null); then
     while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
   else
     echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
+  fi
+  if is_review_projection_purpose "$purpose"; then
+    IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
   fi
 
   for rel in "${candidates[@]}"; do
@@ -58,7 +111,18 @@ link_untracked_gate_configs() {
     # also skips a pre-existing symlink (a --linked dep, or a broken link) so `ln` never aborts on it.
     [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
     mkdir -p "$wt/$(dirname "$rel")"
-    ln -s "$root/$rel" "$wt/$rel"
+    if is_review_projection_purpose "$purpose"; then
+      # Ratchet gates may legitimately update ignored baseline/cache state. A review promises the
+      # target checkout stays unchanged, so its projections must be private rather than write-through
+      # symlinks. -L follows materializer symlinks; -p preserves file modes.
+      if [ -n "$index_rel" ] && [ "$rel" = "$index_rel" ]; then
+        copy_stable_sqlite_family "$root/$rel" "$wt/$rel" || return 1
+      else
+        cp -RpL "$root/$rel" "$wt/$rel"
+      fi
+    else
+      ln -s "$root/$rel" "$wt/$rel"
+    fi
     linked+=("$rel")
   done
 
@@ -67,7 +131,11 @@ link_untracked_gate_configs() {
   [ "${#linked[@]}" -eq 0 ] && return 0
   {
     echo "⚠️  ship: ${#linked[@]} gate config(s) present in the repo but absent from the committed tree —"
-    echo "   linked into the gate worktree so gates match a normal commit (not defaults):"
+    if is_review_projection_purpose "$purpose"; then
+      echo "   copied into the isolated review worktree so gates match the target (not defaults):"
+    else
+      echo "   linked into the gate worktree so gates match a normal commit (not defaults):"
+    fi
     for rel in "${linked[@]}"; do
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
       if git -C "$root" check-ignore -q "$rel"; then
