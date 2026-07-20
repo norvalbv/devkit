@@ -1,11 +1,12 @@
 /** Manifest-only materialization of target-controlled setup into a private review worktree. */
 
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { rmSync, writeFileSync } from 'node:fs';
+import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from './run-direct.mts';
 import { reviewRuntimeFingerprint } from './runtime-fingerprint.mts';
 import {
+  assertSymlinkFreeReviewTree,
   canonicalReviewDirectory,
   canonicalReviewLeaf,
   isSafeReviewRelativePath,
@@ -92,16 +93,6 @@ function setupContext(manifest: ReviewSetupManifest): SetupContext {
   };
 }
 
-function inspectSymlinkFreeTree(path: string, label: string): void {
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink()) fail(`${label} contains a nested symlink: ${path}`);
-  if (stat.isFile()) return;
-  if (!stat.isDirectory()) fail(`${label} contains an unsupported special file: ${path}`);
-  for (const name of readdirSync(path).sort()) {
-    inspectSymlinkFreeTree(join(path, name), label);
-  }
-}
-
 function authenticatedFingerprint(
   projection: ReviewSourceProjection | null,
   runtime: string,
@@ -120,7 +111,7 @@ function inspectSource(context: SetupContext, entry: ReviewSetupPath): VerifiedS
       fingerprint: REVIEW_SETUP_ABSENT,
     };
   }
-  inspectSymlinkFreeTree(source.physicalPath, 'frozen setup');
+  assertSymlinkFreeReviewTree(source.physicalPath, 'frozen setup');
   if (entry.executable && (!stat.isFile() || (stat.mode & 0o111) === 0)) {
     fail(`frozen executable setup path is no longer executable: ${entry.relativePath}`);
   }
@@ -242,7 +233,7 @@ function privateFingerprint(root: string, path: string, expectedAbsent: boolean)
   const stat = reviewSetupStat(destination);
   if (stat === undefined) return REVIEW_SETUP_ABSENT;
   if (expectedAbsent) fail(`private setup conflicts with snapshot entry: ${path}`);
-  inspectSymlinkFreeTree(destination, 'private setup');
+  assertSymlinkFreeReviewTree(destination, 'private setup');
   return reviewRuntimeFingerprint(destination);
 }
 
