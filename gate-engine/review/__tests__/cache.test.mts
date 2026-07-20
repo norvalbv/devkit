@@ -66,7 +66,7 @@ describe('loadCache / savePasses / clearCache', () => {
     mkdirSync(join(repo, '.devkit'), { recursive: true });
     writeFileSync(
       join(repo, '.devkit', 'review-cache.json'),
-      JSON.stringify({ version: 2, entries: { k: {} } }),
+      JSON.stringify({ version: 999, entries: { k: {} } }),
     );
     expect(loadCache(repo)).toEqual({});
   });
@@ -87,6 +87,12 @@ describe('loadCache / savePasses / clearCache', () => {
     savePasses(repo, { k: { at: '2026-01-01T00:00:00Z', model: 's' } });
     clearCache(repo);
     expect(loadCache(repo)).toEqual({});
-    expect(readFileSync(cachePath(repo), 'utf8')).toContain('"version":1');
+    const persisted = JSON.parse(readFileSync(cachePath(repo), 'utf8')) as {
+      version: number;
+      generation: string;
+      entries: Record<string, unknown>;
+    };
+    expect(persisted).toEqual({ version: 2, generation: persisted.generation, entries: {} });
+    expect(readFileSync(`${cachePath(repo)}.generation`, 'utf8')).toBe(`${persisted.generation}\n`);
   });
 });
