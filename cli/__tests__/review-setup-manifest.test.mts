@@ -1,16 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { normalizeSelection } from '../lib/components.mts';
 import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
 import {
@@ -18,37 +9,9 @@ import {
   type ReviewSetupManifest,
   verifyReviewSetup,
 } from '../lib/ship/review/setup-manifest.mts';
-import { rootRegistry } from './_helpers.mts';
+import { reviewSetupFixtures } from './review-setup-fixture.mts';
 
-const { mkTmp, cleanup } = rootRegistry();
-afterEach(cleanup);
-
-const selection = normalizeSelection({
-  biome: false,
-  tsconfig: false,
-  skills: false,
-  agents: false,
-  searchSteering: false,
-  agentHooks: false,
-  husky: true,
-  structure: false,
-  fallow: false,
-  searchCode: false,
-  lineGrowth: false,
-  guards: ['size', 'decisions'],
-});
-
-function write(root: string, relativePath: string, contents: string, executable = false): string {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, contents);
-  chmodSync(path, executable ? 0o755 : 0o644);
-  return path;
-}
-
-function git(root: string, ...args: string[]): string {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
-}
+const { git, mkTmp, selection, write } = reviewSetupFixtures();
 
 function config(overlay: boolean, overrides: Record<string, unknown> = {}) {
   return {
