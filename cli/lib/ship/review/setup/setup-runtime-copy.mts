@@ -1,9 +1,9 @@
 /** Conflict-safe copying of frozen setup inputs into the private review worktree. */
 
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, type Stats } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mts';
-import { reviewPathWithin } from '../runtime-paths.mts';
+import { safeReviewDestination } from '../runtime-paths.mts';
 
 function fail(message: string): never {
   throw new Error(`devkit review: ${message}`);
@@ -26,16 +26,12 @@ function verifyDirectory(stat: Stats, message: string): void {
 
 /** Resolve a private destination without traversing a snapshot-controlled parent link. */
 export function safeReviewSetupDestination(root: string, path: string): string {
-  const absolute = resolve(root, ...path.split('/'));
-  if (!reviewPathWithin(root, absolute)) fail(`private setup path escapes its worktree: ${path}`);
-  let parent = root;
-  for (const segment of path.split('/').slice(0, -1)) {
-    parent = join(parent, segment);
-    const stat = reviewSetupStat(parent);
-    if (stat === undefined) break;
-    verifyDirectory(stat, `private setup has an unsafe destination parent: ${path}`);
-  }
-  return absolute;
+  return safeReviewDestination(
+    root,
+    path,
+    'private setup path escapes its worktree',
+    'private setup has an unsafe destination parent',
+  );
 }
 
 function ensureDirectory(root: string, path: string, created: string[]): void {
