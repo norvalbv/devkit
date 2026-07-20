@@ -30,6 +30,10 @@ const ENV_KEYS = [
   'GUARD_DECISION_NO_LLM',
   'FRINK_DECISION_NO_LLM',
   'DEVKIT_REVIEW_PROGRESS',
+  'DEVKIT_RUN_MODE',
+  'DEVKIT_REVIEW_ASSET_ROOT',
+  'DEVKIT_REVIEW_BACKEND_ROOTS',
+  'DEVKIT_REVIEW_FRONTEND_ROOTS',
   // Cleared so a real ship's pre-push (which exports these) can't steer the telemetry assertions
   // below, and so ordinary tests don't emit to the developer's live telemetry sink. Every-commit
   // capture stays disabled via the suite-wide DEVKIT_NO_TELEMETRY='1' (vitest.setup) — NOT cleared
@@ -94,6 +98,28 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
   return repo;
 }
 
+function reviewAssets(): string {
+  const root = mkdtempSync(join(tmpdir(), 'guard-review-assets-'));
+  dirs.push(root);
+  mkdirSync(join(root, 'agents'), { recursive: true });
+  mkdirSync(join(root, 'skills', '_devkit'), { recursive: true });
+  writeFileSync(join(root, 'skills', '_devkit', 'review-roots.mjs'), '// shared support\n');
+  for (const reviewer of REVIEWERS) {
+    writeFileSync(
+      join(root, 'agents', `${reviewer.name}.md`),
+      `---\nname: ${reviewer.name}\n---\nPACKAGED brief for ${reviewer.name}.`,
+    );
+    if (!reviewer.skill) continue;
+    mkdirSync(join(root, 'skills', reviewer.skill, 'scripts'), { recursive: true });
+    writeFileSync(join(root, 'skills', reviewer.skill, 'SKILL.md'), `# ${reviewer.skill}\n`);
+    writeFileSync(
+      join(root, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
+      '#!/usr/bin/env node\n',
+    );
+  }
+  return root;
+}
+
 // Fake judge runners. Each returns a Promise<string|null> like execJudgeAsync.
 const mkExec = (impl) => vi.fn(impl);
 
@@ -154,6 +180,131 @@ function concurrencyProbe(repo, { failFirst = false } = {}) {
 }
 
 describe('runReviewGate — cascade + exit contract', () => {
+  it('review mode uses current packaged briefs instead of target-controlled .claude copies', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    writeFileSync(
+      join(repo, '.claude', 'agents', 'api-security-reviewer.md'),
+      'MALICIOUS target brief',
+    );
+    const prompts: string[] = [];
+    const exec = mkExec(async ({ label, args }) => {
+      prompts.push(args[1]);
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(prompts.join('\n')).toContain('PACKAGED brief for api-security-reviewer');
+    expect(prompts.join('\n')).not.toContain('MALICIOUS target brief');
+  });
+
+  it('review-mode asset preflight fails setup before consulting a cached PASS', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    rmSync(join(assets, 'skills', 'api-security', 'scripts', 'checklist.mjs'));
+    const exec = passWithArtifact(repo);
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('review-mode cache invalidates only the reviewer whose packaged brief changed', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    writeFileSync(
+      join(assets, 'agents', 'api-security-reviewer.md'),
+      '---\nname: api-security-reviewer\n---\nPACKAGED brief v2.',
+    );
+    const exec = passWithArtifact(repo);
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([opts]) => opts.label)).toEqual(['review:api-security-reviewer']);
+  });
+
+  it('review-mode cache invalidates checklist reviewers when shared support changes', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    writeFileSync(join(assets, 'skills', '_devkit', 'review-roots.mjs'), '// shared support v2\n');
+    const exec = passWithArtifact(repo);
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([opts]) => opts.label)).toEqual([
+      'review:api-security-reviewer',
+      'review:backend-performance-reviewer',
+      'review:commit-guard',
+      'review:correctness-reviewer',
+    ]);
+  });
+
+  it('review mode injects scanRoots for an empty frontend topology into selector and judges', async () => {
+    const repo = consumerRepo({ frontend: true });
+    const config = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
+    config.review.frontendRoots = [];
+    writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(config));
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    const exec = passWithArtifact(repo);
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const frontend = exec.mock.calls.find(([o]) => o.label === 'review:frontend-security-reviewer');
+    expect(frontend).toBeTruthy();
+    expect(frontend?.[0].env.DEVKIT_REVIEW_FRONTEND_ROOTS).toBe(JSON.stringify(['src']));
+    expect(frontend?.[0].args[1]).toContain('Treat that staged-file list as authoritative');
+  });
+
+  it('review mode retries a skipped checklist workflow once and caches only the verified retry', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label, args }) => {
+      const attempt = (attempts.get(label) ?? 0) + 1;
+      attempts.set(label, attempt);
+      if (label === 'review:api-security-reviewer' && attempt === 1) return 'VERDICT: PASS';
+      writeArtifact(repo, label);
+      if (label === 'review:api-security-reviewer')
+        expect(args[1]).toContain('CHECKLIST-CONTRACT RETRY');
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(attempts.get('review:api-security-reviewer')).toBe(2);
+    expect(Object.keys(loadCache(repo))).toHaveLength(5);
+  });
+
+  it('review mode reports a repeated checklist-contract violation as an error, never inconclusive', async () => {
+    const repo = consumerRepo({ backend: true });
+    const assets = reviewAssets();
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      if (label === 'review:api-security-reviewer') return 'VERDICT: PASS';
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('api-security-reviewer REVIEW ERROR');
+    expect(out).not.toContain('api-security-reviewer INCONCLUSIVE');
+    expect(Object.keys(loadCache(repo))).toHaveLength(4);
+  });
+
   it('all reviewers PASS on first pass → exit 0, verdicts cached, no escalation', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = passWithArtifact(repo);
@@ -457,7 +608,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     const prompt = captured.args[1];
     expect(prompt).toContain('Brief for api-security-reviewer.');
     expect(prompt).toContain('HEADLESS COMMIT GATE');
-    expect(prompt).toContain('.claude/skills/api-security/scripts/checklist.mjs generate');
+    expect(prompt).toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(prompt).not.toContain('name: api-security-reviewer'); // frontmatter stripped
     expect(captured.input).toContain('db.ts');
     expect(captured.args).toContain('--no-session-persistence'); // isolated
