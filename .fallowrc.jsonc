@@ -5,6 +5,7 @@
   "entry": [
     "cli/index.mts", // CLI root
     "cli/commands/*.mts", // each command's default export is invoked via DYNAMIC import() in index.mjs
+    "cli/lib/ship/gate-config-paths.mts", // sourced shell resolves gate paths by executing this helper
     "gate-engine/co-occurrence/matcher.mts", // guard-dup bin — invoked by PATH (orchestrator/hook), never imported
     "gate-engine/co-occurrence/clone-detector.mts", // guard-clone bin — same
     "gate-engine/review/cli.mts", // guard-review bin
