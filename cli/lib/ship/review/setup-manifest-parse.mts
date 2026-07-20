@@ -1,9 +1,13 @@
 /** Fail-closed parser for the private setup manifest consumed by the review runner. */
 
 import { readFileSync } from 'node:fs';
-import { isAbsolute, posix } from 'node:path';
+import { posix } from 'node:path';
 import { REVIEWABLE_GUARD_IDS, type ReviewProfile } from '../../components.mts';
-import { isSafeReviewRelativePath, reviewPathWithin } from './runtime-paths.mts';
+import {
+  hasExactManifestKeys as exactKeys,
+  hasValidManifestRoots,
+} from './manifest/validation.mts';
+import { isSafeReviewRelativePath } from './runtime-paths.mts';
 import type { ReviewSetupManifest, ReviewSetupPath, ReviewSetupState } from './setup-manifest.mts';
 import {
   isReviewSetupHash,
@@ -20,10 +24,6 @@ function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return fail(`${label} must be a JSON object.`);
   return value as Record<string, unknown>;
-}
-
-function exactKeys(value: Record<string, unknown>, expected: string[]): boolean {
-  return Object.keys(value).sort().join('\0') === [...expected].sort().join('\0');
 }
 
 function manifestString(value: unknown, label: string): string {
@@ -134,15 +134,11 @@ export function parseReviewSetupManifest(path: string): ReviewSetupManifest {
   }
   const manifest = objectValue(value, 'review setup manifest');
   if (
-    !exactKeys(manifest, ['version', 'targetRoot', 'gitRoot', 'setup', 'selfHash']) ||
-    manifest.version !== REVIEW_SETUP_VERSION ||
-    typeof manifest.targetRoot !== 'string' ||
-    !isAbsolute(manifest.targetRoot) ||
-    manifest.targetRoot.includes('\0') ||
-    typeof manifest.gitRoot !== 'string' ||
-    !isAbsolute(manifest.gitRoot) ||
-    manifest.gitRoot.includes('\0') ||
-    !reviewPathWithin(manifest.gitRoot, manifest.targetRoot) ||
+    !hasValidManifestRoots(
+      manifest,
+      ['version', 'targetRoot', 'gitRoot', 'setup', 'selfHash'],
+      REVIEW_SETUP_VERSION,
+    ) ||
     !isReviewSetupHash(manifest.selfHash)
   ) {
     return fail('review setup manifest has an invalid shape.');
