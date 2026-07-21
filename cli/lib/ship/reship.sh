@@ -11,8 +11,18 @@
 # fallow-ignore-next-line code-duplication
 #
 # Usage:  ship --pr <branch> "<title>" [--link <d>]... [--] <path...>
+#         ship <branch> "<title>" --pr [--link <d>]... [--] <path...>   # equivalent
 #         # body via stdin. The <branch> is the existing PR's head branch.
 set -euo pipefail
+
+# `--pr` is the MODE flag: ship.mts routes on it, then forwards argv VERBATIM — so it still arrives
+# here, and wherever the caller put it. Strip a LEADING one before reading positionals; the parse loop
+# below drops a trailing one. Without this, the spelling the help text itself documents
+# (`ship --pr <branch> "<title>"`) bound BR="--pr" and TITLE=<branch>, and the run died at the remote
+# check with `no remote branch origin/--pr to re-push to` — a message that names the flag as if it
+# were a branch and sends you looking at the wrong thing entirely. The existing tests all passed
+# because they exercise the trailing form exclusively.
+[ "${1:-}" = "--pr" ] && shift
 
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
