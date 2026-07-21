@@ -7,16 +7,27 @@
  * enforces the thresholds configured in guard.config.json `coverage`.
  *
  * The whole point is to be FAIL-CLOSED: a selected coverage gate must never silently pass unverified.
- *   - `coverage: false`      → explicit opt-out, exit 0.
+ *   - `GUARD_COVERAGE_OK=1`  → explicit per-RUN operator bypass, exit 0 (loudly bannered).
+ *                              (`GUARD_NO_COVERAGE=1` is an accepted alias — see coverageBypassed.)
+ *   - `coverage: false`      → explicit repo-wide opt-out, exit 0.
  *   - artifact ABSENT        → exit 1 (run test:run:coverage first). NOT a fail-open (2).
  *   - artifact malformed     → exit 1 (corrupt data isn't verification).
  *   - artifact present       → enforce the threshold KEYS present in the config; a shortfall exits 1.
  * Exit contract for the orchestrator: 0 = pass/bypass, 1 = real failure. There is no `2` path.
+ *
+ * The per-run bypass is NOT the "ship auto-bypasses coverage" that docs/decisions/coverage-gate.md
+ * rejected — that was an IMPLICIT always-on skip, which is the fail-open this gate exists to kill.
+ * This is an explicit operator assertion in the same class as GUARD_NO_LOG (decisions) and
+ * GUARD_QAVIS_OK (qavis): the default path stays fail-CLOSED, the bypass is bannered + telemetered,
+ * and guard-deterministic salts its prefix-cache scope so a bypassed run can never authorise a later
+ * un-bypassed one against the same tree. It exists because a base branch whose coverage is ALREADY
+ * red otherwise corners an agent shipping unrelated work into fixing out-of-scope debt.
  */
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { type CoverageConfig, resolveGuardConfig } from '../config.mts';
+import { type CoverageConfig, coverageBypassed, resolveGuardConfig } from '../config.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 
 const COVERAGE_FILE = 'coverage/coverage-final.json';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
@@ -87,8 +98,35 @@ export function computePercentages(cov: unknown): Record<Metric, number> {
   };
 }
 
+// Printed by EVERY failure arm. A gate that blocks without naming its own escape hatch is the bug
+// this fixes: agents met a hard block, found no knob (unlike decisions/review/qavis, which all print
+// theirs), and either fixed out-of-scope coverage or gave up. `export` on its own line, NOT an inline
+// `GUARD_COVERAGE_OK=1 devkit ship …` prefix — skills/using-devkit/SKILL.md documents that inline env
+// prefixes on a ship can be silently stripped by command-rewriting shell hooks (the
+// SHIP_COMMIT_TIMEOUT lesson), which would make the bypass look broken.
+const BYPASS_REMEDY = [
+  '   Not your debt? If the BASE branch already fails this and your diff did not cause it,',
+  '   ship without coverage for this run:  export GUARD_COVERAGE_OK=1',
+];
+
 /** Run the coverage gate against `cwd`. Returns the exit code (0 pass/bypass, 1 fail). */
 export function runCoverage(cwd = process.cwd()): number {
+  // BEFORE resolveGuardConfig — it THROWS on a malformed guard.config.json, and an explicit operator
+  // bypass must not be defeated by an unrelated config typo it isn't being asked to care about.
+  if (coverageBypassed()) {
+    // Deliberately worded apart from the `coverage: false` line below (⚠️/BYPASSED vs ⏭️/bypassed):
+    // a ship log or a human skimming must be able to tell a one-off run bypass from a repo-wide opt-out.
+    console.log('⚠️  Coverage gate BYPASSED for this run (GUARD_COVERAGE_OK=1).');
+    console.log('   Coverage was NOT verified for this commit.');
+    emitGateEvent({
+      type: 'gate_result',
+      gate: 'coverage',
+      status: 'bypassed',
+      detail: 'GUARD_COVERAGE_OK',
+    });
+    return 0;
+  }
+
   const coverage: CoverageConfig = resolveGuardConfig(cwd).coverage;
   if (coverage === false) {
     console.log('⏭️  Coverage gate bypassed (coverage: false in guard.config.json).');
@@ -98,9 +136,25 @@ export function runCoverage(cwd = process.cwd()): number {
   const file = resolve(cwd, COVERAGE_FILE);
   if (!existsSync(file)) {
     console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
-    console.error('   Coverage was NOT verified for this commit. Run `bun run test:run:coverage`');
-    console.error('   first, then commit. To opt out entirely, set "coverage": false in');
-    console.error('   guard.config.json.');
+    console.error('   Coverage was NOT verified for this commit. Generate it with');
+    console.error(
+      '   `bun run test:run:coverage`, then re-run. Under `devkit ship` the artifact is',
+    );
+    console.error(
+      '   SYMLINKED IN from your checkout — so it must exist THERE; the ephemeral ship',
+    );
+    console.error('   worktree cannot produce one.');
+    for (const line of BYPASS_REMEDY) console.error(line);
+    // The old text said only "set coverage: false in guard.config.json" — which SILENTLY NO-OPS under
+    // ship, because the ship worktree reads that file from the committed base, not your working tree.
+    // Field transcripts show an agent burning a user-APPROVED bypass on exactly this, then having to
+    // go back and re-ask. Advice that cannot work must not be offered without its condition.
+    console.error(
+      '   Repo-wide opt-out: "coverage": false in guard.config.json — but `devkit ship`',
+    );
+    console.error(
+      '   reads that file from the COMMITTED tree, so a local-only edit changes nothing.',
+    );
     return 1;
   }
 
@@ -117,6 +171,7 @@ export function runCoverage(cwd = process.cwd()): number {
     console.error(
       '   Unparseable or malformed coverage data is not verification. Re-run `bun run test:run:coverage`.',
     );
+    for (const line of BYPASS_REMEDY) console.error(line);
     return 1;
   }
   const shortfalls = METRICS.filter(
@@ -128,6 +183,7 @@ export function runCoverage(cwd = process.cwd()): number {
       console.error(`   ${m}: ${computed[m]}% (min ${coverage[m] as number}%)`);
     }
     console.error('   Add tests to raise coverage, then run `bun run test:run:coverage`.');
+    for (const line of BYPASS_REMEDY) console.error(line);
     return 1;
   }
   const enforced = METRICS.filter((m) => typeof coverage[m] === 'number');
