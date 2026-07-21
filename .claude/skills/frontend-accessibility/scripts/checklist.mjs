@@ -19,7 +19,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { resolveReviewRoots, toGitPathspecs } from '../../_devkit/review-roots.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.frontend-accessibility-review.json';
 
@@ -210,6 +214,9 @@ function getStagedFiles() {
       ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'frontend-accessibility');
     return output
       .trim()
       .split('\n')

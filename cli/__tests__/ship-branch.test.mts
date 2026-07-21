@@ -1510,3 +1510,133 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     expect(r.stderr).toMatch(/\.fallowrc\.jsonc .*commit it/); // both listed
   });
 });
+
+// The index-clobber incident: git EXPORTS an absolute GIT_INDEX_FILE into a hook it runs in a LINKED
+// worktree — which is exactly how ship commits — so everything the gate chain spawns inherits a
+// writable handle on the ship worktree's index. A tool that ran git against ANOTHER repository wrote
+// that repo's index over the staged diff; the pending commit silently became a whole-repo deletion,
+// and only a reviewer's judgement stopped it from being pushed. assert-staged-set.sh is the invariant
+// that turns that into an abort. The hooks below clobber the index the way the real leak did.
+describe('ship-branch.sh — staged-set invariants (index clobber)', () => {
+  // A foreign index whose objects the ship repo does NOT have makes `git commit` itself fail at
+  // "Error building trees" — loud, and nothing is pushed. The dangerous variant is the one git can
+  // still build: an index that no longer holds the briefed work, so the commit is a bulk DELETION of
+  // everything the base had. That is the ~5,976-file deletion the incident produced, and it is what
+  // these hooks reproduce. `read-tree --empty` is the leak's effect on the index, minus the objects
+  // git would refuse to write.
+  const emptyIndexHook = 'git read-tree --empty\nexit 0';
+
+  it('aborts before the push when the gate chain empties the staged index', () => {
+    const { dir, env, git } = seedShipRepo({ hookBody: emptyIndexHook });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/clobber', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toMatch(/ABORTED/);
+    expect(r.stderr).toMatch(/missing work that was staged/);
+    expect(r.stderr).toMatch(/note\.txt/); // names the path that vanished
+    expect(r.stderr).not.toMatch(/DRY: committed locally/); // never reported as a success
+    // The clobbered worktree is the only evidence of what happened — it must survive the abort.
+    expect(r.stderr).toMatch(/Worktree KEPT for diagnosis/);
+    const kept = /Worktree KEPT for diagnosis: (.+?) \(branch/.exec(r.stderr)?.[1];
+    expect(kept && existsSync(kept)).toBe(true);
+    git(['worktree', 'remove', '--force', kept], { stdio: 'ignore' });
+    git(['branch', '-D', 'feat/clobber'], { stdio: 'ignore' });
+  });
+
+  it('aborts on a bulk deletion of paths the ship was never asked to touch', () => {
+    // Briefed work survives (invariant 1 passes), but the commit now deletes five files nobody
+    // briefed. A ratchet gate heal-deleting its own baseline is one file; this is the other shape.
+    const { dir, env, git } = seedShipRepo();
+    const extras = Array.from({ length: 5 }, (_, i) => `extra-${i}.txt`);
+    for (const f of extras) writeFileSync(join(dir, f), 'x\n');
+    git(['add', ...extras], { stdio: 'ignore' });
+    git(['commit', '-qm', 'extras'], { stdio: 'ignore' });
+    // Only NOW arm the clobber — seeding the extras must not fire it (the seed commits run the hook).
+    const hook = join(dir, '.husky/_/pre-commit');
+    writeFileSync(hook, '#!/bin/sh\ngit rm -q --cached -- extra-*.txt\nexit 0\n');
+    chmodSync(hook, 0o755);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/bulkdel', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toMatch(/deletes 5 path\(s\) it was never asked to touch/);
+    expect(r.stderr).not.toMatch(/DRY: committed locally/);
+    const kept = /Worktree KEPT for diagnosis: (.+?) \(branch/.exec(r.stderr)?.[1];
+    git(['worktree', 'remove', '--force', kept], { stdio: 'ignore' });
+    git(['branch', '-D', 'feat/bulkdel'], { stdio: 'ignore' });
+  });
+
+  it('an honest ship passes the preflight — the invariant must never flap', () => {
+    // The regression this guards is a FALSE abort. The preflight compares the index against the tree
+    // staging produced, and prepare-gate-worktree/link-gate-configs run in that window: if either
+    // ever starts staging something, every ship in every repo breaks here first.
+    const { dir, env, git } = seedShipRepo({ hookBody: 'echo GATE_RAN >&2\nexit 0' });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // linked, untracked
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/preflight', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(GATE_RAN_RE); // the chain ran — the preflight let it through
+    expect(r.stderr).not.toMatch(/ABORTED/);
+  });
+
+  it('a legitimate deletion-only ship still passes both invariants', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'doomed.txt'), 'bye\n');
+    git(['add', 'doomed.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'add doomed'], { stdio: 'ignore' });
+    rmSync(join(dir, 'doomed.txt'));
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/del', 't', 'doomed.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/ABORTED/);
+    expect(git(['diff', '--name-only', 'HEAD', 'feat/del']).trim()).toBe('doomed.txt');
+  });
+
+  it('a gate that stages an EXTRA file (a lowered ratchet baseline) is not an abort', () => {
+    // gate-engine/ratchets/git-index.mts stages a baseline it auto-lowered so the change rides the
+    // same commit. The invariant must tolerate additions — it only forbids briefed work vanishing.
+    const { dir, env, git } = seedShipRepo({
+      hookBody: 'printf "lowered\\n" > .baseline.json\ngit add .baseline.json\nexit 0',
+    });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/ratchet', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toMatch(/ABORTED/);
+    expect(git(['diff', '--name-only', 'HEAD', 'feat/ratchet']).trim().split('\n').sort()).toEqual([
+      '.baseline.json',
+      'note.txt',
+    ]);
+  });
+});

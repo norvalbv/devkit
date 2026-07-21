@@ -42,6 +42,28 @@ __dk_gate_selected() {
     esac
 }
 
+__dk_no_git_env() {
+    env -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+        -u GIT_CONFIG \
+        -u GIT_CONFIG_PARAMETERS \
+        -u GIT_CONFIG_COUNT \
+        -u GIT_OBJECT_DIRECTORY \
+        -u GIT_DIR \
+        -u GIT_WORK_TREE \
+        -u GIT_IMPLICIT_WORK_TREE \
+        -u GIT_GRAFT_FILE \
+        -u GIT_INDEX_FILE \
+        -u GIT_NO_REPLACE_OBJECTS \
+        -u GIT_REPLACE_REF_BASE \
+        -u GIT_PREFIX \
+        -u GIT_SHALLOW_FILE \
+        -u GIT_COMMON_DIR \
+        -u GIT_GLOB_PATHSPECS \
+        -u GIT_NOGLOB_PATHSPECS \
+        -u GIT_LITERAL_PATHSPECS \
+        -u GIT_ICASE_PATHSPECS "$@"
+}
+
 __dk_review_baseline_gate() {
     [ -n "${DEVKIT_REVIEW_BASELINE_DIR:-}" ] || {
         echo "devkit review: merge-base baseline runtime is missing — reinstall/rebuild Devkit." >&2
@@ -78,14 +100,14 @@ fi
 
 # devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
+__dk_no_git_env node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
 # /devkit:deterministic
 
 if __dk_gate_selected decisions; then
 # devkit:guard-decisions
 echo "🧭 Decision-log gate..."
 ddrc=0
-node gate-engine/decisions/cli.mts detect --gate || ddrc=$?
+__dk_no_git_env node gate-engine/decisions/cli.mts detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
@@ -105,7 +127,7 @@ if __dk_gate_selected review; then
 # devkit:guard-review
 echo "🔍 Reviewer gate (headless domain judges)..."
 rrc=0
-node gate-engine/review/cli.mts --gate || rrc=$?
+__dk_no_git_env node gate-engine/review/cli.mts --gate || rrc=$?
 if [ "$rrc" -eq 1 ]; then
     echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
     exit 1
@@ -124,7 +146,7 @@ fi
 if __dk_gate_selected qavis-advisory; then
 # devkit:guard-qavis-advisory
 qarc=0
-node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
+__dk_no_git_env node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
 [ "$qarc" -eq 3 ] && exit 1
 # qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
 # (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
@@ -139,7 +161,9 @@ else
     # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
     FALLOW_BASE_ARGS=""
     [ -n "${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-    command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true
+    # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has clobbered a
+    # ship worktree before (see commit-with-gate-capture.sh's worktree_head_clobbered banner).
+    command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
 fi
 # /devkit:fallow-advisory
 # <<< devkit-guards <<<
