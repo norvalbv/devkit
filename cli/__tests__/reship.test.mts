@@ -54,9 +54,46 @@ describe('reship — resolve + arg guards', () => {
     expect(BR_RE.exec(r.stdout)?.[1]).toBe('feat/open');
     expect(REPO_RE.exec(r.stdout)?.[1]).toBe('acme/app');
   });
+  // Regression: every other test here spells it `<branch> <title> --pr`, so the form the help text
+  // and this script's own header actually DOCUMENT — `ship --pr <branch> "<title>"` — was never
+  // exercised. It bound BR="--pr" and TITLE=<branch>, then died at the remote check with
+  // `no remote branch origin/--pr to re-push to`, which reads as a branch problem rather than an
+  // arg-order one. ship.mts forwards argv verbatim, so the flag arrives wherever the caller put it.
+  it('resolve seam accepts the DOCUMENTED leading --pr form (BR is the branch, not the flag)', () => {
+    const { dir } = repo();
+    const r = run(['--pr', 'feat/open', 'title', '--', 'a.ts'], dir, { SHIP_RESOLVE_ONLY: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(BR_RE.exec(r.stdout)?.[1]).toBe('feat/open');
+    expect(r.stderr).not.toMatch(/origin\/--pr/);
+  });
+
+  it('leading and trailing --pr resolve identically', () => {
+    const { dir } = repo();
+    const opts = { SHIP_RESOLVE_ONLY: '1' };
+    const leading = run(['--pr', 'feat/open', 'title', '--', 'a.ts'], dir, opts);
+    const trailing = run(['feat/open', 'title', '--pr', '--', 'a.ts'], dir, opts);
+    expect(leading.status, leading.stderr).toBe(0);
+    expect(trailing.status, trailing.stderr).toBe(0);
+    expect(leading.stdout).toBe(trailing.stdout);
+  });
+
+  // Only the FIRST positional is stripped. A trailing `--pr` is dropped by the parse loop, so a
+  // second one must not silently eat the title.
+  it('a leading --pr does not consume the title', () => {
+    const { dir } = repo();
+    const r = run(['--pr', 'feat/open', 'my title', '--', 'a.ts'], dir, { SHIP_RESOLVE_ONLY: '1' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(BR_RE.exec(r.stdout)?.[1]).toBe('feat/open');
+  });
+
   it('rejects no paths', () => {
     const { dir } = repo();
     expect(run(['feat/open', 't', '--pr', '--'], dir).status).not.toBe(0);
+  });
+
+  it('rejects a bare --pr with no branch', () => {
+    const { dir } = repo();
+    expect(run(['--pr'], dir).status).not.toBe(0);
   });
   it('rejects a directory path', () => {
     const { dir } = repo();
