@@ -1,31 +1,32 @@
 {
   "devkitRef": "v0.37.2",
-  "generatedAt": "2026-07-21T16:21:29.234Z",
+  "generatedAt": "2026-07-21T18:41:36.429Z",
   "targets": [
     "claude",
     "cursor"
   ],
   "files": {
+    "_devkit/checklist-store.mjs": "9a5c9c6e4d8bba21b3a422b24f2dfdad2405c16f550200100b1b1e41ccda2511",
     "_devkit/review-roots.d.mts": "3c2cdf231cd93a60c1ff0e7ef0eaf17a01f873398917e32fe4e092f947b47bc4",
     "_devkit/review-roots.mjs": "24b7d948fb60d0daaf317a65f24e748676cebd73633fa89e0f2d9c923c6605da",
     "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
-    "api-security/scripts/checklist.mjs": "c7ffb9cf19373a03212bb0b250ded0d8be211cbf2037500c9cdaa6ce4b9ea7c0",
+    "api-security/scripts/checklist.mjs": "02b035437153f7ccc1924244085aa6f2771cb01f32260b3f9ff41bb8166a97d0",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
-    "backend-performance/scripts/checklist.mjs": "1f578c98a1507d2e78fdd80e5bd11c43908eb043cb9969212c0cb79bf9d6b2f7",
+    "backend-performance/scripts/checklist.mjs": "698047578ab96f74dacf99c562fe289fb1103a4bc6b16191528345116e28f19d",
     "brainstorming/SKILL.md": "faa2fd9ea4ac99b0e92934c931701c25a85767935526810baa9c462b632855e0",
     "commit-guard/SKILL.md": "69fe86ef83dd22006fec3b1b7990747c69455b6368699c86a579977603e4bdbb",
     "commit-guard/scripts/checklist.mjs": "b6591489d06c81af4ac79ed4db70e06ec99456426bcf494b277e41a4c12564c2",
     "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
-    "correctness/scripts/checklist.mjs": "9a66ce479039b73f2ec4b30cb307870395930522d8f9c4d0493306689f3eeb8d",
+    "correctness/scripts/checklist.mjs": "d6b175501bba83d537faba3ff2920efb00f5a5b6e31d622a6db60abfb2e5a016",
     "decisions/SKILL.md": "c85736e2b4ff81af0b299c2a7455e7ef6d5c8e81b47200c7f1d65833d5ecef4a",
     "dup-detection/SKILL.md": "fdc2e37d8a278f82931818807b4d5ee91907e379131be7a07532e79e3822cbda",
     "feature-critique/SKILL.md": "f40fae2d934d851c3ba9847a924c0d43bf4661d640d0a83e9bf3f9121b42429f",
     "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
-    "frontend-accessibility/scripts/checklist.mjs": "0d94d9d8abc94c8a579ea9d3b5d99c2af70115fb40bf8a6608ded43c84fa3eef",
+    "frontend-accessibility/scripts/checklist.mjs": "85f49db81af09c26d57986e8a6aaf277360cd0c16394947b565f1c54f16c729f",
     "frontend-performance/SKILL.md": "6697c6583485c5eea8168437c2faee3f81f9051a0c9f85e739278d13c1c6b628",
-    "frontend-performance/scripts/checklist.mjs": "5933b5866706b9871c7fe55392fc35ccfb71f645f7337181e75255c5061c52dc",
+    "frontend-performance/scripts/checklist.mjs": "1dd206c81e2b4d907d4724c31a0ce70cf71bd7a79d9f9be3f2615b1f2844a395",
     "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
-    "frontend-security/scripts/checklist.mjs": "58a86c7a4b6b808223f92a67483f533eef41c874a2c34ff02e4746e53f553150",
+    "frontend-security/scripts/checklist.mjs": "56fe2ec11cb986d8692310f1ced24fb2d0cc652a60b5f10209245df7951c53d5",
     "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
     "structure-governance/SKILL.md": "21fb605d1b6fadd81358da7dbe078c634b60115234b427dae4ae47ce8df30f04",
     "structure-governance/references/fixing-lint-errors.md": "44ad9ba30d747bac4fac27d2d2a8f2ef788b5894db77df70d6c4f3359c7a1fc8",
@@ -34,6 +35,6 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "65a1e81491f3843e445376a38dc7cfb4e4dacbe151efd0547f03e97d17500e04"
+    "using-devkit/SKILL.md": "d678d168cc7c9b1a0a9dec9d9c5ebfe01a1fbf6617c79d1765e75921178a0813"
   }
 }
