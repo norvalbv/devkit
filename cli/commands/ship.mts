@@ -16,6 +16,11 @@ Usage:
   devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>
                           bare positional paths (no --) are accepted.
 
+  <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
+  below are optional, NOT free-floating: \`ship --base main <branch> "<title>"\` binds the branch
+  name to --base and is rejected. Ship CREATES <branch> — it must not already exist (on origin, use
+  --pr to append to that branch's open PR instead).
+
   --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
                       HEAD / current branch. <path...> content is still read from your working tree,
                       so this ships even when the branch you're on has ALREADY committed those files
