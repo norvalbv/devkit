@@ -1,8 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, win32 } from 'node:path';
 
+// `length > 0` is load-bearing, not belt-and-braces: `[].every(...)` is vacuously TRUE, so without it
+// this predicate accepts `[]` — contradicting its own name. The correctness checklist then takes
+// `sourceExtensions: []` as valid, `exts.some(...)` is false for every path, and the reviewer passes
+// having examined ZERO files. A gate that silently verifies nothing is the one failure mode devkit
+// refuses to ship; an empty list must fall through to the caller's default.
 export const isNonEmptyStringArray = (value) =>
-  Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry.length > 0);
+  Array.isArray(value) &&
+  value.length > 0 &&
+  value.every((entry) => typeof entry === 'string' && entry.length > 0);
 
 /** Normalize trusted repository-relative roots so selector and Git pathspec readers agree. */
 export function normalizeReviewRoots(value, name) {
