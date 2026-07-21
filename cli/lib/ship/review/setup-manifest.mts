@@ -8,6 +8,7 @@ import type { ReviewProfile } from '../../components.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
 import { reviewHookDrift } from '../../husky/review-drift.mts';
 import { captureOrigHooksPath, overlayHookScriptDir } from '../../overlay.mts';
+import { runDirectReviewCli } from './run-direct.mts';
 import { reviewRuntimeFingerprint } from './runtime-fingerprint.mts';
 import {
   canonicalReviewDirectory,
@@ -366,3 +367,17 @@ export function verifyReviewSetup(targetRoot: string, manifestPath: string): Rev
     fail('target devkit setup changed after capture; retry.');
   return manifest;
 }
+
+function runCli(args: string[]): void {
+  if (args[0] === 'capture' && args.length === 3) {
+    captureReviewSetup(args[1] as string, args[2] as string);
+    return;
+  }
+  if (args[0] === 'verify' && args.length === 3) {
+    verifyReviewSetup(args[1] as string, args[2] as string);
+    return;
+  }
+  fail('usage: setup-manifest capture <target-root> <manifest> | verify <target-root> <manifest>');
+}
+
+runDirectReviewCli(import.meta.url, runCli);
