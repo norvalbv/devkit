@@ -18,6 +18,7 @@
 
 import { execFile, execFileSync } from 'node:child_process';
 import { emitGateEvent } from './gate-events.mts';
+import { withoutGitEnv } from './judge-isolation.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
 // The error thrown/handed back by a `claude` spawn — a Node exec error augmented with these fields.
@@ -152,7 +153,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   try {
     const out = execFileSync('claude', args, {
       cwd,
-      env,
+      // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
+      // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
+      // another repo would write ITS index over the ship's staged diff. See withoutGitEnv.
+      env: withoutGitEnv(env),
       input,
       encoding: 'utf8',
       timeout,
@@ -193,7 +197,8 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     const child = execFile(
       'claude',
       args,
-      { cwd, env, encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
+      // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
+      { cwd, env: withoutGitEnv(env), encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout) => {
         if (err) {
           warnUnavailable(label, err, timeout);

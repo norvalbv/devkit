@@ -5,11 +5,13 @@
  * repo, or `devkit doctor --fix`) and re-commit.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
+import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
   buildSelfHostBlock,
   buildSelfHostHook,
@@ -78,7 +80,7 @@ describe('buildSelfHostHook', () => {
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain(
-      'command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true',
+      'command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true',
     );
     // Inside the devkit-guards block: after the start marker, before the end marker — so
     // replaceGuardBlock preserves it on a re-run and the parity/doctor check covers it.
@@ -100,19 +102,25 @@ describe('buildSelfHostHook', () => {
       /# devkit:fallow-advisory[\s\S]*?# \/devkit:fallow-advisory/,
     )?.[0];
     expect(fragment).toBeDefined();
-    const script = `fallow() { echo "FALLOW_ARGS:$*"; }\n${fragment}`;
+    // A REAL stub on PATH, not a shell function: the gate runs through `env` (the git-env scrub),
+    // which execs a binary and cannot see shell functions.
+    const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
+    const stub = join(binDir, 'fallow');
+    writeFileSync(stub, '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset}"\n');
+    chmodSync(stub, 0o755);
+    const script = `${DK_NO_GIT_ENV_HELPER}\n${fragment}`;
+    const run = (extra) =>
+      execFileSync('sh', ['-c', script], {
+        encoding: 'utf8',
+        env: { PATH: `${binDir}:${process.env.PATH}`, ...extra },
+      });
 
-    const unset = execFileSync('sh', ['-c', script], {
-      encoding: 'utf8',
-      env: { PATH: process.env.PATH },
-    });
-    expect(unset.trim()).toBe('FALLOW_ARGS:audit');
-
-    const based = execFileSync('sh', ['-c', script], {
-      encoding: 'utf8',
-      env: { PATH: process.env.PATH, DEVKIT_SHIP_BASE_SHA: 'deadbeef' },
-    });
-    expect(based.trim()).toBe('FALLOW_ARGS:audit --base deadbeef');
+    expect(run({}).split('\n')[0]).toBe('FALLOW_ARGS:audit');
+    expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).split('\n')[0]).toBe(
+      'FALLOW_ARGS:audit --base deadbeef',
+    );
+    // The scrub itself: git's linked-worktree hook env must not reach fallow's worktree machinery.
+    expect(run({ GIT_DIR: '/repo/.git/worktrees/devkit-ship-x' })).toContain('GIT_DIR:unset');
   });
 
   it('is idempotent through replaceGuardBlock — re-applying the block keeps the fallow fragment intact', () => {
