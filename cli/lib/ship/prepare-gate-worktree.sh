@@ -27,6 +27,31 @@ materialize_private_review_dependencies() {
   fi
 }
 
+# The repo's MAIN worktree — `git worktree list` reports it first, by definition.
+gate_main_worktree() {
+  local root=$1 main
+  main=$(git -C "$root" worktree list --porcelain 2>/dev/null |
+    awk '/^worktree /{print substr($0, 10); exit}')
+  printf '%s\n' "${main:-$root}"
+}
+
+# Where a gate dependency actually lives: this checkout first, then the main worktree.
+#
+# WHY the fallback: every dir we link is GITIGNORED, so `git worktree add` never brings it across —
+# and the consumer root can itself be a linked worktree. That is not an edge case, it is devkit's
+# stated premise (ship-branch.sh: "parallel agents share one working tree"), and it is what any tool
+# that spawns per-task worktrees produces. Without this, shipping from such a worktree fails closed
+# on `.husky/_` even when the repo is perfectly set up, and silently drops node_modules/coverage —
+# turning a correct repo into "run dependency setup", which is not the user's bug to fix.
+#
+# Resolving `$root` first keeps a worktree that HAS its own copy (or a deliberate override) winning.
+gate_link_source() {
+  local root=$1 main_root=$2 rel=$3
+  [ -e "$root/$rel" ] && { printf '%s\n' "$root/$rel"; return 0; }
+  [ -e "$main_root/$rel" ] && { printf '%s\n' "$main_root/$rel"; return 0; }
+  return 1
+}
+
 # prepare_gate_worktree <worktree> <consumer-root> <purpose> [extra-link-dir...]
 prepare_gate_worktree() {
   local wt=$1 root=$2 purpose=$3
@@ -59,19 +84,22 @@ prepare_gate_worktree() {
     link_dirs+=(.devkit)
   fi
 
+  local main_root
+  main_root=$(gate_main_worktree "$root")
+
   # Every devkit install uses Husky's generated runner, including overlay installs (their own hook
   # chains to the repo hook). Missing runner = `git hook run`/commit silently has no real chain.
-  if [ ! -e "$root/.husky/_" ]; then
-    echo "missing $root/.husky/_ — run dependency setup before $purpose (gates must not fail open)" >&2
+  if ! gate_link_source "$root" "$main_root" .husky/_ >/dev/null; then
+    echo "missing .husky/_ in $root or $main_root — run dependency setup before $purpose (gates must not fail open)" >&2
     return 1
   fi
 
-  local d
+  local d source
   for d in "${link_dirs[@]}"; do
-    [ -e "$root/$d" ] || continue
+    source=$(gate_link_source "$root" "$main_root" "$d") || continue
     [ ! -e "$wt/$d" ] && [ ! -L "$wt/$d" ] || continue
     mkdir -p "$wt/$(dirname "$d")"
-    ln -s "$root/$d" "$wt/$d"
+    ln -s "$source" "$wt/$d"
   done
 
   # Reviewer briefs/checklists may be ignored projection artifacts. Link only their subdirectories:
