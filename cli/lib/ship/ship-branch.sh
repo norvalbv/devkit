@@ -24,6 +24,11 @@ set -euo pipefail
 
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
+# Reject a flag sitting in a positional slot, before anything treats BR/TITLE as real values.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-positional-args.sh"
+ship_assert_positional_args "$BR" "$TITLE" \
+  'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>'
+
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
 # repeatable --link flags and file paths; `--` forces everything after it to be a
 # path (so a file literally named like a flag, or starting with `-`, ships safely). A bare arg
@@ -77,7 +82,9 @@ if [ -z "${SHIP_DRY_RUN:-}" ]; then
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
   # is a safe "branch absent"; any other failure must fail closed, or push -u could append to a PR.
   case "$remote_check" in
-    0) echo "remote branch already exists: origin/$BR" >&2; exit 1 ;;
+    0) echo "remote branch already exists: origin/$BR" >&2
+       echo "  to add these changes to that branch's existing PR, re-run with --pr" >&2
+       exit 1 ;;
     2) ;; # no matching remote branch → safe to create it
     *) echo "could not verify remote branch (ls-remote exit $remote_check) — refusing to push" >&2; exit 1 ;;
   esac
