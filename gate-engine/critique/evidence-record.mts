@@ -26,7 +26,7 @@ export const PLAN_CRITIQUE_INELIGIBLE_REASONS = [
   'retry_limit_exceeded',
 ] as const;
 
-type Provider = (typeof PLAN_CRITIQUE_PROVIDERS)[number];
+export type PlanCritiqueProvider = (typeof PLAN_CRITIQUE_PROVIDERS)[number];
 type Status = (typeof PLAN_CRITIQUE_STATUSES)[number] | null;
 type Verdict = (typeof PLAN_CRITIQUE_VERDICTS)[number] | null;
 type IneligibleReason = (typeof PLAN_CRITIQUE_INELIGIBLE_REASONS)[number];
@@ -38,7 +38,7 @@ export interface PlanCritiqueRecordV1 {
   workId: string;
   lineage: { pass: number; parentCritiqueId: PlanCritiqueId | null };
   execution: {
-    provider: Provider;
+    provider: PlanCritiqueProvider;
     callbackHash: Sha256;
     model: string | null;
     modelHash: Sha256 | null;
