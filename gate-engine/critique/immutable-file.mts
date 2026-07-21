@@ -23,6 +23,9 @@ const failure = (message: string): Error => new Error(`immutable evidence: ${mes
 const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException).code;
 const SEPARATOR = /[/\\]/;
 const PENDING_DIRECTORY = '.pending';
+const DIRECTORY_SETTLE_ATTEMPTS = 50;
+const DIRECTORY_SETTLE_DELAY_MS = 2;
+const DIRECTORY_SETTLE_SIGNAL = new Int32Array(new SharedArrayBuffer(4));
 type DirectoryIdentity = { device: bigint; inode: bigint; realPath: string };
 
 function assertDirectoryStat(directory: string, stat: BigIntStats): void {
@@ -92,6 +95,34 @@ function childPath(parent: string, segment: string, create: boolean): string {
     mkdirSync(child, { mode: 0o700 });
   } catch (error) {
     if (codeOf(error) !== 'EEXIST') throw error;
+    // mkdir publishes the pathname before the creator can repair a restrictive umask through its
+    // descriptor. Give that owner-only intermediate mode a bounded chance to settle at 0700;
+    // never chmod a directory this caller did not create.
+    for (let attempt = 0; attempt < DIRECTORY_SETTLE_ATTEMPTS; attempt += 1) {
+      const observed = lstatSync(child, { bigint: true });
+      assertDirectoryStat(child, observed);
+      const mode = observed.mode & 0o777n;
+      if (mode === 0o700n || (mode & 0o077n) !== 0n) break;
+      Atomics.wait(DIRECTORY_SETTLE_SIGNAL, 0, 0, DIRECTORY_SETTLE_DELAY_MS);
+    }
+    return child;
+  }
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(child, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const created = fstatSync(descriptor, { bigint: true });
+    assertDirectoryStat(child, created);
+    fchmodSync(descriptor, 0o700);
+    const secured = fstatSync(descriptor, { bigint: true });
+    assertDirectoryStat(child, secured);
+    assertSameInode(child, created, secured);
+    if ((secured.mode & 0o777n) !== 0o700n)
+      throw failure(`managed directory is not private: ${child}`);
+    const current = lstatSync(child, { bigint: true });
+    assertDirectoryStat(child, current);
+    assertSameInode(child, secured, current);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
   return child;
 }
@@ -208,12 +239,7 @@ export function readPrivateFile(directory: string, name: string): Buffer | null 
 function assertSameFile(file: string, left: BigIntStats, right: BigIntStats): void {
   if (left.dev !== right.dev || left.ino !== right.ino)
     throw failure(`managed file changed during operation: ${file}`);
-  if (
-    left.size !== right.size ||
-    left.mode !== right.mode ||
-    left.ctimeNs !== right.ctimeNs ||
-    left.mtimeNs !== right.mtimeNs
-  )
+  if (left.size !== right.size || left.mode !== right.mode || left.mtimeNs !== right.mtimeNs)
     throw failure(`managed file changed during operation: ${file}`);
 }
 
@@ -229,16 +255,22 @@ function readBounded(
   maxBytes: number,
 ): Buffer {
   const expected = Number(expectedBytes);
-  const buffer = Buffer.allocUnsafe(expected + 1);
+  const buffer = Buffer.allocUnsafe(expected);
   let total = 0;
-  while (total < buffer.length) {
-    const bytesRead = readSync(descriptor, buffer, total, buffer.length - total, null);
+  while (total < expected) {
+    const bytesRead = readSync(descriptor, buffer, total, expected - total, null);
     if (bytesRead === 0) break;
     total += bytesRead;
   }
-  if (total > maxBytes) throw failure(`managed file exceeds ${maxBytes} bytes: ${file}`);
   if (total !== expected) throw failure(`managed file changed during operation: ${file}`);
-  return Buffer.from(buffer.subarray(0, total));
+  const sentinel = Buffer.allocUnsafe(1);
+  if (readSync(descriptor, sentinel, 0, 1, null) !== 0)
+    throw failure(
+      expected >= maxBytes
+        ? `managed file exceeds ${maxBytes} bytes: ${file}`
+        : `managed file changed during operation: ${file}`,
+    );
+  return buffer;
 }
 
 /** Read a stable private regular file without consuming more than maxBytes plus one sentinel byte. */
@@ -247,7 +279,7 @@ export function readPrivateFileBounded(
   name: string,
   maxBytes: number,
 ): Buffer | null {
-  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes >= bufferConstants.MAX_LENGTH)
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > bufferConstants.MAX_LENGTH)
     throw failure(`invalid maximum read size: ${maxBytes}`);
 
   const managed = filePath(directory, name);
@@ -297,7 +329,7 @@ export function publishImmutable(
 ): 'created' | 'existing' {
   const managed = filePath(directory, name);
   const destination = managed.file;
-  const existing = readPrivateFile(directory, name);
+  const existing = readPrivateFileBounded(directory, name, content.byteLength);
   if (existing) {
     if (!existing.equals(content)) throw failure(`immutable conflict: ${name}`);
     assertSameDirectory(directory, managed.directory);
@@ -335,7 +367,7 @@ export function publishImmutable(
       return 'created';
     } catch (error) {
       if (codeOf(error) !== 'EEXIST') throw error;
-      const raced = readPrivateFile(directory, name);
+      const raced = readPrivateFileBounded(directory, name, content.byteLength);
       if (raced?.equals(content)) {
         if ((lstatSync(destination).mode & 0o777) !== 0o600)
           throw failure(`managed file is not private: ${name}`);
