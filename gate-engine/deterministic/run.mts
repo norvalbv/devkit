@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { coverageBypassed } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
 import { checkPrefix, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 
@@ -164,9 +165,18 @@ export function selectedIds(cwd: string): string[] {
 }
 
 export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
-  return process.env.DEVKIT_RUN_MODE === 'review'
-    ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}`
-    : scope;
+  const base =
+    process.env.DEVKIT_RUN_MODE === 'review'
+      ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}`
+      : scope;
+  // Same hazard the review salt above exists for, one gate down: a run with the coverage gate
+  // bypassed records an all-green key that a LATER un-bypassed run of the identical staged tree
+  // would hit — skipping the whole set, so coverage never runs and the one-off bypass has laundered
+  // itself into a permanent false green. Salting keeps the two runs on different keys. (Cost: a
+  // bypassed run cannot reuse a clean run's key either, so it re-runs the other gates. Same trade
+  // the review salt makes — correctness over a cache hit.) `?? 'devkit-guards'` materialises the
+  // default scope checkPrefix would otherwise supply internally, or the salt would be lost.
+  return coverageBypassed() ? `${base ?? 'devkit-guards'}:coverage-bypassed` : base;
 }
 
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's

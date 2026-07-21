@@ -64,6 +64,14 @@ devkit command.
 - **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
   SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can
   be silently stripped by command-rewriting shell hooks — verify with `env | grep SHIP` if in doubt.
+- **A coverage block you didn't cause is not yours to fix — `export GUARD_COVERAGE_OK=1` and re-ship.**
+  If `devkit ship` fails on `guard-coverage` because the artifact is absent, or for a shortfall your
+  diff didn't cause, that is the BASE branch's debt. Export the flag (`GUARD_NO_COVERAGE=1` also
+  works), re-run the same ship, and note the bypass in the PR body. A shortfall your own change *did*
+  cause, you fix. Two dead ends to skip: editing `"coverage": false` in `guard.config.json` **silently
+  does nothing** under ship (it reads that file from the committed tree, not your working tree), and
+  re-running the full coverage suite to manufacture the artifact can take tens of minutes and still
+  produce nothing if the base's tests are already failing — don't idle on it.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 
