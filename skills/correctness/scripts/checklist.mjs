@@ -58,16 +58,25 @@ const log = console.log;
 // never silently no-ops). A PRESENT but invalid value warns loudly and is ignored (the other
 // roots still count), rather than crashing the git call into an empty pass-through.
 function unionRoots() {
+  // Injected roots are read BEFORE the config, and the config's failure paths fall through to `{}`
+  // rather than returning early. A review run carries its effective topology in the environment; the
+  // old order returned `['.']` the moment guard.config.json was missing or malformed, discarding an
+  // explicit injected scope and silently widening the reviewer to every staged file. The env is the
+  // more authoritative source here, so it must not be gated behind the less authoritative one.
+  // (resolveReviewRoots in _devkit/review-roots.mjs already orders it this way — this is the local
+  // union catching up to the shared helper.)
+  const injectedBackend = parseInjectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS');
+  const injectedFrontend = parseInjectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS');
   let c;
   try {
     c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
   } catch {
-    return ['.'];
+    c = {};
   }
-  if (!c || typeof c !== 'object') return ['.'];
+  if (!c || typeof c !== 'object') c = {};
   const review = typeof c.review === 'object' && c.review !== null ? c.review : {};
-  const backend = parseInjectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS') ?? review.backendRoots;
-  const frontend = parseInjectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS') ?? review.frontendRoots;
+  const backend = injectedBackend ?? review.backendRoots;
+  const frontend = injectedFrontend ?? review.frontendRoots;
   const roots = new Set();
   for (const [label, value] of [
     ['scanRoots', c.scanRoots],
