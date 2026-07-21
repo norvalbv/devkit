@@ -472,7 +472,7 @@ describe('plan critique evidence store', () => {
     expect(readPlanCritiqueRecord(record.critiqueId, { root })).toBeNull();
     unlinkSync(blob);
     expect(persistPlanCritiqueRecord(record, { exactResponse: exact }, { root }).state).toBe(
-      'existing',
+      'created',
     );
     expect(readPlanCritiqueRecord(record.critiqueId, { root })).toEqual(record);
     expect(readFileSync(outside, 'utf8')).toBe('do not replace');

@@ -390,11 +390,12 @@ export function persistPlanCritiqueRecord(
   ): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } => {
     validatePersistedParent(record, { root: canonicalRoot });
     const records = managedPath(canonicalRoot, ['records'], true) as string;
-    const state = publishImmutable(
-      records,
-      `${record.critiqueId}.json`,
-      Buffer.from(canonicalPlanCritiqueRecordJson(record)),
-    );
+    const recordName = `${record.critiqueId}.json`;
+    const recordContent = Buffer.from(canonicalPlanCritiqueRecordJson(record));
+    let state =
+      readPrivateFile(records, recordName) === null
+        ? undefined
+        : publishImmutable(records, recordName, recordContent);
     const blobs = managedPath(canonicalRoot, ['blobs', 'sha256'], true) as string;
     for (const payload of [
       snapshots.exactResponse,
@@ -402,6 +403,7 @@ export function persistPlanCritiqueRecord(
       snapshots.opaqueTranscript,
     ])
       if (payload) publishImmutable(blobs, sha256Bytes(payload), payload);
+    state ??= publishImmutable(records, recordName, recordContent);
     return { state, record };
   };
   return withPlanCritiquePersistenceLock(options, publish);
