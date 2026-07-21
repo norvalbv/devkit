@@ -224,6 +224,26 @@ export function envFlag(name: string): boolean {
   return envBool(name) ?? false;
 }
 
+/**
+ * Is the coverage gate bypassed for THIS run? Lives here — beside envFlag, not in coverage/run.mts —
+ * because guard-deterministic must ask the same question to salt its prefix-cache scope, and a
+ * second copy of the predicate is exactly what the dup/clone gates exist to stop.
+ *
+ * Two spellings, deliberately. `GUARD_COVERAGE_OK` is canonical: the GUARD_QAVIS_OK analogue ("ship
+ * this change without the verification"), and the ONLY one any remedy line prints. `GUARD_NO_COVERAGE`
+ * is an accepted alias because it is the name agents actually guess — blocked ship attempts in the
+ * field grepped devkit's dist for `GUARD_NO_COVERAGE|SKIP_COVERAGE|NO_COVERAGE|COVERAGE_SKIP` and
+ * found nothing, then routed around the tool entirely. A bypass nobody can guess the name of is the
+ * same dead end as no bypass at all.
+ *
+ * NOT a way to disable the gate for a repo — that is `"coverage": false` in guard.config.json. This
+ * is a per-invocation operator assertion, and guard-deterministic salts the prefix cache so it can
+ * never authorise a later un-bypassed run against the same tree.
+ */
+export function coverageBypassed(): boolean {
+  return envFlag('COVERAGE_OK') || envFlag('NO_COVERAGE');
+}
+
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
 // unparseable / not an object => throw: a typo'd config must fail loudly, never silently
 // degrade to defaults and quietly weaken a gate.
