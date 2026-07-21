@@ -26,6 +26,7 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
+import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 
 const ALL = { biome: true, guards: [...GUARD_IDS] };
 
@@ -361,24 +362,40 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
     expect(withoutFallow).not.toContain('fallow audit');
   });
 
-  it('passes the ship base through to a stubbed fallow (no real binary needed)', () => {
+  it('passes the ship base through to a stubbed fallow, with the git env stripped', () => {
     const fragment = hook.match(
       /# devkit fallow gate \(overlay\)[\s\S]*?fallow audit \$FALLOW_BASE_ARGS \|\| exit 1; \}\nfi/,
     )?.[0];
     expect(fragment).toBeDefined();
-    const script = `fallow() { echo "FALLOW_ARGS:$*"; }\n${fragment}`;
+    // A REAL stub on PATH, not a shell function: the gate runs through `env`, which execs a binary
+    // and cannot see functions or aliases. Every wrapped target in the generated hooks is a binary
+    // (bunx, guard-*, fallow, node) — this test is what keeps that true for the fallow arm.
+    const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
+    const stub = join(binDir, 'fallow');
+    writeFileSync(
+      stub,
+      '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset} GIT_INDEX_FILE:${GIT_INDEX_FILE:-unset}"\n',
+    );
+    chmodSync(stub, 0o755);
+    const script = `${DK_NO_GIT_ENV_HELPER}\n${fragment}`;
+    const run = (extra) =>
+      execFileSync('sh', ['-c', script], {
+        encoding: 'utf8',
+        env: { PATH: `${binDir}:${process.env.PATH}`, ...extra },
+      });
 
-    const unset = execFileSync('sh', ['-c', script], {
-      encoding: 'utf8',
-      env: { PATH: process.env.PATH },
-    });
-    expect(unset.trim()).toBe('FALLOW_ARGS:audit');
+    expect(run({}).split('\n')[0]).toBe('FALLOW_ARGS:audit');
+    expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).split('\n')[0]).toBe(
+      'FALLOW_ARGS:audit --base deadbeef',
+    );
 
-    const based = execFileSync('sh', ['-c', script], {
-      encoding: 'utf8',
-      env: { PATH: process.env.PATH, DEVKIT_SHIP_BASE_SHA: 'deadbeef' },
+    // The point of the wrapper: git's linked-worktree hook env must not reach the gate, or fallow's
+    // own worktree machinery writes the SHIP worktree's index/HEAD instead of its own.
+    const leaked = run({
+      GIT_DIR: '/repo/.git/worktrees/devkit-ship-x',
+      GIT_INDEX_FILE: '/repo/.git/worktrees/devkit-ship-x/index',
     });
-    expect(based.trim()).toBe('FALLOW_ARGS:audit --base deadbeef');
+    expect(leaked).toContain('GIT_DIR:unset GIT_INDEX_FILE:unset');
   });
 });
 
