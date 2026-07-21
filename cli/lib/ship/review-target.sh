@@ -45,6 +45,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# An invoking ship has ALREADY resolved the commit it cut from. Capture it before the scrub below
+# unsets it (same read-then-unset shape as MANAGED_SIGNAL_ROOT): it is a topology hint used only to
+# pick this run's base, never forwarded to a child, so the scrub's authority guarantee is unchanged.
+SHIP_BASE_SHA=${DEVKIT_SHIP_BASE_SHA:-}
+
 # Never inherit another ship/review's authority, private paths, or telemetry destination. The two
 # topology hints and SHIP_COMMIT_TIMEOUT are intentional invocation inputs and remain untouched.
 for name in \
@@ -127,7 +132,17 @@ git_line_into TARGET_HEAD "$GIT_ROOT" rev-parse --verify --end-of-options 'HEAD^
   exit 1
 }
 if [ -z "$BASE_REF" ]; then
-  if git -c core.hooksPath=/dev/null -C "$GIT_ROOT" rev-parse --verify --quiet \
+  # A ship has ALREADY resolved the commit it cut from and exported it; prefer that over guessing.
+  # The in-chain hook calls `guard-review --gate` with no --base, so without this the reviewers fall
+  # through to origin/HEAD — which is only the right base when the integration branch happens to be
+  # the default branch. Where it is not (a repo shipping onto a release branch well ahead of main),
+  # every reviewer diffs the entire release instead of the commit, and blames that range's
+  # deletions on it. Observed: a 3-file modification-only commit failed review for "deleting" two
+  # files, out of 211 deletions in the 161 commits between the default and integration branches.
+  if [ -n "$SHIP_BASE_SHA" ] && git -c core.hooksPath=/dev/null -C "$GIT_ROOT" \
+    rev-parse --verify --quiet --end-of-options "${SHIP_BASE_SHA}^{commit}" >/dev/null 2>&1; then
+    BASE_REF=$SHIP_BASE_SHA
+  elif git -c core.hooksPath=/dev/null -C "$GIT_ROOT" rev-parse --verify --quiet \
     --end-of-options 'origin/HEAD^{commit}' >/dev/null 2>&1; then
     BASE_REF=origin/HEAD
   elif git -c core.hooksPath=/dev/null -C "$GIT_ROOT" rev-parse --verify --quiet \
@@ -149,6 +164,14 @@ git_line_into MERGE_BASE "$GIT_ROOT" merge-base "$BASE_COMMIT" "$TARGET_HEAD" ||
   printf "devkit review: base %q and target HEAD have no merge base.\n" "$BASE_REF" >&2
   exit 1
 }
+# Test seam: print the resolved base, then exit before any side effect (no snapshot, no state root,
+# no judges). Mirrors ship-branch.sh's SHIP_RESOLVE_ONLY so base inference is testable hermetically.
+# Never set in normal use.
+[ -n "${DEVKIT_REVIEW_RESOLVE_ONLY:-}" ] && {
+  printf 'BASE_REF=%s\nMERGE_BASE=%s\n' "$BASE_REF" "$MERGE_BASE"
+  exit 0
+}
+
 git_line_into BASE_TREE "$GIT_ROOT" rev-parse --verify --end-of-options "$MERGE_BASE^{tree}" || exit 1
 
 BRANCH=
