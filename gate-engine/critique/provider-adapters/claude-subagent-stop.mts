@@ -1,9 +1,14 @@
-import { types as utilTypes } from 'node:util';
 import {
   PLAN_CRITIQUE_CALLBACK_IDENTITY_MAX_BYTES,
   type PlanCritiqueCompletedCallbackV1,
 } from '../capture-normalizer.mts';
-import { PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, sha256Bytes } from '../evidence-record.mts';
+import { PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES } from '../evidence-record.mts';
+import {
+  boundedOpaqueIdentifier,
+  ownHookValue,
+  plainHookPayload,
+  versionedTupleHash,
+} from './input-boundary.mts';
 
 export const CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES = 1024;
 
@@ -30,54 +35,15 @@ export interface ClaudePlanCritiqueAdapterContextV1 {
   repository: PlanCritiqueCompletedCallbackV1['repository'];
 }
 
-function plainRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null || typeof value !== 'object') return null;
-  try {
-    if (utilTypes.isProxy(value) || Array.isArray(value)) return null;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return null;
-    return value as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function ownDataValue(record: Record<string, unknown>, key: string): unknown {
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(record, key);
-    return descriptor?.enumerable && Object.hasOwn(descriptor, 'value')
-      ? descriptor.value
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function opaqueIdentifier(value: unknown): value is string {
-  if (
-    typeof value !== 'string' ||
-    value.length === 0 ||
-    value.length > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
-    Buffer.byteLength(value, 'utf8') > CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES ||
-    value.trim().length === 0
-  )
-    return false;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return false;
-  }
-  return true;
-}
-
-function tupleHash(domain: string, values: readonly string[]): string {
-  return sha256Bytes(Buffer.from(JSON.stringify([domain, 1, ...values]), 'utf8'));
+  return boundedOpaqueIdentifier(value, CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES);
 }
 
 /** Stable turn identity shared by Claude SubagentStop capture and future Stop observation. */
 export function deriveClaudePlanCritiqueWorkId(sessionId: string, promptId: string): string {
   if (!opaqueIdentifier(sessionId) || !opaqueIdentifier(promptId))
     throw new Error('invalid Claude plan critique work identity');
-  return `pcw1_${tupleHash('claude_plan_critique_work', [sessionId, promptId])}`;
+  return `pcw1_${versionedTupleHash('claude_plan_critique_work', [sessionId, promptId])}`;
 }
 
 function callbackIdentity(sessionId: string, promptId: string, agentId: string): string {
@@ -97,24 +63,24 @@ export function adaptClaudeFeatureCritiqueSubagentStop(
   payload: unknown,
   context: ClaudePlanCritiqueAdapterContextV1,
 ): ClaudePlanCritiqueSubagentStopResultV1 {
-  const record = plainRecord(payload);
+  const record = plainHookPayload(payload);
   if (!record) return skipped('invalid_payload');
-  if (ownDataValue(record, 'hook_event_name') !== 'SubagentStop')
+  if (ownHookValue(record, 'hook_event_name') !== 'SubagentStop')
     return skipped('unsupported_event');
-  if (ownDataValue(record, 'agent_type') !== 'feature-critique')
+  if (ownHookValue(record, 'agent_type') !== 'feature-critique')
     return skipped('unsupported_agent_type');
 
-  const sessionId = ownDataValue(record, 'session_id');
-  const promptId = ownDataValue(record, 'prompt_id');
+  const sessionId = ownHookValue(record, 'session_id');
+  const promptId = ownHookValue(record, 'prompt_id');
   if (!opaqueIdentifier(sessionId) || !opaqueIdentifier(promptId))
     return skipped('work_identity_unavailable');
   const workId = deriveClaudePlanCritiqueWorkId(sessionId, promptId);
 
-  const stopHookActive = ownDataValue(record, 'stop_hook_active');
+  const stopHookActive = ownHookValue(record, 'stop_hook_active');
   if (typeof stopHookActive !== 'boolean') return skipped('continuation_state_unavailable');
   if (stopHookActive) return { kind: 'work_unbindable', reason: 'hook_continuation', workId };
 
-  const agentId = ownDataValue(record, 'agent_id');
+  const agentId = ownHookValue(record, 'agent_id');
   if (!opaqueIdentifier(agentId)) return skipped('callback_identity_unavailable');
   const derivedCallbackIdentity = callbackIdentity(sessionId, promptId, agentId);
   if (
@@ -122,7 +88,7 @@ export function adaptClaudeFeatureCritiqueSubagentStop(
   )
     return skipped('callback_identity_unavailable');
 
-  const finalMessage = ownDataValue(record, 'last_assistant_message');
+  const finalMessage = ownHookValue(record, 'last_assistant_message');
   if (typeof finalMessage !== 'string') return skipped('final_message_unavailable');
   if (
     finalMessage.length > PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES ||
