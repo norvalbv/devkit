@@ -1,15 +1,20 @@
 import { spawn } from 'node:child_process';
-import {
+import fs, {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
+  truncateSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -63,7 +68,7 @@ describe('review feedback regressions', () => {
       ).toThrow(/^action failed$/);
       expect(existsSync(lockPath)).toBe(false);
 
-      writeFileSync(lockPath, 'occupied');
+      writeFileSync(lockPath, 'occupied', { mode: 0o600 });
       expect(() => withFileLock(lockPath, 'evidence write', () => undefined)).toThrow(
         /^Another evidence write is in progress or left an unreadable lock$/,
       );
@@ -73,6 +78,101 @@ describe('review feedback regressions', () => {
         expect(() => withPublishFileLock(lockPath, () => undefined)).toThrow(
           /^Another benchmark publish is in progress$/,
         );
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsafe primary locks without replacing or consuming their owner bytes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'unsafe-file-locks-'));
+    const deadOwner = JSON.stringify({ pid: 2_147_483_647 });
+    let actions = 0;
+    const attempt = (lockPath: string) =>
+      withFileLock(lockPath, 'evidence write', () => {
+        actions += 1;
+      });
+    try {
+      const target = join(root, 'symlink-target');
+      const linked = join(root, 'linked.lock');
+      writeFileSync(target, deadOwner, { mode: 0o600 });
+      symlinkSync(target, linked);
+      expect(() => attempt(linked)).toThrow(
+        /^Another evidence write is in progress or left an unreadable lock$/,
+      );
+      expect(lstatSync(linked).isSymbolicLink()).toBe(true);
+      expect(readFileSync(target, 'utf8')).toBe(deadOwner);
+
+      const visible = join(root, 'visible.lock');
+      writeFileSync(visible, deadOwner, { mode: 0o600 });
+      chmodSync(visible, 0o644);
+      expect(() => attempt(visible)).toThrow(
+        /^Another evidence write is in progress or left an unreadable lock$/,
+      );
+      expect(readFileSync(visible, 'utf8')).toBe(deadOwner);
+      expect(statSync(visible).mode & 0o777).toBe(0o644);
+
+      const oversized = join(root, 'oversized.lock');
+      writeFileSync(oversized, '', { mode: 0o600 });
+      truncateSync(oversized, 64 * 1024 * 1024);
+      expect(() => attempt(oversized)).toThrow(
+        /^Another evidence write is in progress or left an unreadable lock$/,
+      );
+      expect(statSync(oversized).size).toBe(64 * 1024 * 1024);
+      expect(actions).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts mode 0400 owners and enforces mode 0600 under a restrictive umask', () => {
+    const root = mkdtempSync(join(tmpdir(), 'private-file-locks-'));
+    try {
+      const readOnly = join(root, 'read-only.lock');
+      writeFileSync(readOnly, JSON.stringify({ pid: 2_147_483_647 }));
+      chmodSync(readOnly, 0o400);
+      expect(withFileLock(readOnly, 'evidence write', () => 'reclaimed')).toBe('reclaimed');
+      expect(existsSync(readOnly)).toBe(false);
+
+      const restricted = join(root, 'restricted-umask.lock');
+      const previousUmask = process.umask(0o200);
+      try {
+        withFileLock(restricted, 'evidence write', () => {
+          expect(statSync(restricted).mode & 0o777).toBe(0o600);
+        });
+      } finally {
+        process.umask(previousUmask);
+      }
+      expect(existsSync(restricted)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('treats repeated ownership changes as contention rather than an unsafe lock', () => {
+    const root = mkdtempSync(join(tmpdir(), 'contended-file-lock-'));
+    const lockPath = join(root, 'operation.lock');
+    try {
+      withFileLock(lockPath, 'probe', () => {
+        const originalOpen = fs.openSync;
+        let injectedChanges = 0;
+        fs.openSync = ((...args: Parameters<typeof fs.openSync>) => {
+          if (args[0] === lockPath && injectedChanges < 2) {
+            injectedChanges += 1;
+            throw Object.assign(new Error('injected ownership change'), { code: 'ENOENT' });
+          }
+          return originalOpen(...args);
+        }) as typeof fs.openSync;
+        syncBuiltinESMExports();
+        try {
+          expect(() => withFileLock(lockPath, 'probe', () => undefined)).toThrow(
+            /^Another probe is in progress$/,
+          );
+          expect(injectedChanges).toBe(2);
+        } finally {
+          fs.openSync = originalOpen;
+          syncBuiltinESMExports();
+        }
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -149,10 +249,12 @@ describe('review feedback regressions', () => {
       writeFileSync(
         join(root, 'docs/benchmarks/.publish.lock'),
         JSON.stringify({ pid: 2_147_483_647 }),
+        { mode: 0o600 },
       );
       writeFileSync(
         join(root, 'docs/benchmarks/.publish.lock.takeover'),
         JSON.stringify({ pid: 2_147_483_647, createdAt: Date.now(), token: 'orphaned' }),
+        { mode: 0o600 },
       );
       const { artifact, event } = fixture();
       const publisher = join(root, 'publisher.mts');
@@ -200,9 +302,11 @@ describe('review feedback regressions', () => {
     try {
       const benchmarkRoot = join(root, 'docs/benchmarks');
       mkdirSync(benchmarkRoot, { recursive: true });
-      writeFileSync(join(benchmarkRoot, '.publish.lock'), JSON.stringify({ pid: 2_147_483_647 }));
+      writeFileSync(join(benchmarkRoot, '.publish.lock'), JSON.stringify({ pid: 2_147_483_647 }), {
+        mode: 0o600,
+      });
       const takeover = join(benchmarkRoot, '.publish.lock.takeover');
-      writeFileSync(takeover, '');
+      writeFileSync(takeover, '', { mode: 0o600 });
       utimesSync(takeover, new Date(0), new Date(0));
       const { artifact, event } = fixture();
       appendPublishedEvent(root, event, artifact);
@@ -218,11 +322,32 @@ describe('review feedback regressions', () => {
       const benchmarkRoot = join(root, 'docs/benchmarks');
       mkdirSync(benchmarkRoot, { recursive: true });
       const primary = join(benchmarkRoot, '.publish.lock');
-      writeFileSync(primary, '');
+      writeFileSync(primary, '', { mode: 0o600 });
       utimesSync(primary, new Date(0), new Date(0));
       const { artifact, event } = fixture();
       appendPublishedEvent(root, event, artifact);
       expect(readFileSync(join(benchmarkRoot, 'history.jsonl'), 'utf8')).toContain(event.id);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reclaims an oversized private takeover after the incomplete-owner timeout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'benchmark-publish-oversized-takeover-'));
+    try {
+      const benchmarkRoot = join(root, 'docs/benchmarks');
+      mkdirSync(benchmarkRoot, { recursive: true });
+      const primary = join(benchmarkRoot, '.publish.lock');
+      writeFileSync(primary, JSON.stringify({ pid: 2_147_483_647 }), { mode: 0o600 });
+      const takeover = `${primary}.takeover`;
+      writeFileSync(takeover, '', { mode: 0o600 });
+      truncateSync(takeover, 64 * 1024 * 1024);
+      const stale = new Date(Date.now() - 1_100);
+      utimesSync(takeover, stale, stale);
+
+      expect(withFileLock(primary, 'evidence write', () => 'reclaimed')).toBe('reclaimed');
+      expect(existsSync(primary)).toBe(false);
+      expect(existsSync(takeover)).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
