@@ -47,6 +47,7 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 // get the bare gate name (module-level per biome's useTopLevelRegex).
 const GUARD_PREFIX_RE = /^guard-/;
 const GATE_SUFFIX_RE = /\(.*\)$/;
+const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
@@ -165,10 +166,18 @@ export function selectedIds(cwd: string): string[] {
 }
 
 export function prefixCacheScope(scope?: string, effectiveIds?: string[]): string | undefined {
-  const base =
-    process.env.DEVKIT_RUN_MODE === 'review'
-      ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}`
-      : scope;
+  const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+  const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
+  const runtime = process.env.DEVKIT_REVIEW_RUNTIME_FINGERPRINT;
+  // `git write-tree` identifies only the final snapshot. Deterministic gates inspect the DIFF from
+  // HEAD and execute ignored dependency/runtime bytes, so another merge-base or runtime is another
+  // gate input. The public runner supplies both fingerprints. Lower-level callers stay isolated in
+  // an explicit unmanaged scope instead of sharing ship keys.
+  const reviewBase = mergeBase && OBJECT_ID.test(mergeBase) ? mergeBase : 'unmanaged';
+  const reviewRuntime = runtime && OBJECT_ID.test(runtime) ? runtime : 'unmanaged';
+  const base = reviewMode
+    ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}:base:${reviewBase}:runtime:${reviewRuntime}`
+    : scope;
   // Same hazard the review salt above exists for, one gate down: a run with the coverage gate
   // bypassed records an all-green key that a LATER un-bypassed run of the identical staged tree
   // would hit — skipping the whole set, so coverage never runs and the one-off bypass has laundered

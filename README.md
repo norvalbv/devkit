@@ -65,10 +65,43 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | `devkit sync-skills` / `sync-agents` | Refresh only the selected agent surfaces |
 | `devkit move` | Move source files and rewrite imports safely |
 | `devkit ship` | Commit from an isolated worktree and run the configured gate chain |
+| `devkit review` | Run the configured gate chain against a trusted checkout without committing |
 | `devkit reconcile` | Refresh a shared checkout after shipped work merges |
 | `devkit clean` | Remove the recorded installation |
 
 Run `devkit help` for the command index and `devkit help <command>` for authoritative options.
+
+### Review a trusted checkout
+
+```bash
+devkit review [--target <path>] [--base <ref>]
+```
+
+The target defaults to the current repository. The base defaults to `origin/HEAD`, then local
+`main`, then local `master`. Review includes committed branch changes and staged, unstaged, deleted,
+and non-ignored untracked files. It never fetches, calls GitHub, creates a commit, pushes, or copies
+temporary gate changes back to the target.
+
+Target-controlled hooks and package scripts execute, so review trusted targets only. The target
+checkout remains unchanged; Git's shared worktree metadata is touched temporarily while isolated
+review worktrees exist. Output streams live and each invocation writes a unique
+`.devkit/review-runs/<run-id>.log`. Exit `0` means green or nothing to review, exit `1` means an
+argument, setup, gate, or formatting failure, and timeout statuses such as `124` are preserved.
+
+`devkit init --review` records only execution policy in `.devkit/config.json`:
+
+```json
+{
+  "review": {
+    "enabled": true,
+    "guards": ["size", "fanout", "dup", "clone", "decisions", "review"],
+    "decisionsDir": "docs/decisions"
+  }
+}
+```
+
+`guards` is a positive allowlist of installed pre-commit gates. Architectural decision records do
+not accumulate in this config; they remain Markdown under `decisionsDir`.
 
 ## Governance capabilities
 

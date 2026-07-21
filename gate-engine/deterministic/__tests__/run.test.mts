@@ -9,6 +9,8 @@ afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
   delete process.env.DEVKIT_RUN_MODE;
   delete process.env.DEVKIT_REVIEW_GUARDS;
+  delete process.env.DEVKIT_REVIEW_MERGE_BASE;
+  delete process.env.DEVKIT_REVIEW_RUNTIME_FINGERPRINT;
   delete process.env.DEVKIT_SHIP;
   delete process.env.GUARD_COVERAGE_OK;
   delete process.env.GUARD_NO_COVERAGE;
@@ -270,18 +272,44 @@ describe('prefixCacheScope', () => {
     expect(prefixCacheScope('custom')).toBe('custom');
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_GUARDS = 'size,decisions';
-    expect(prefixCacheScope()).toBe('devkit-guards:review:size');
-    expect(prefixCacheScope('custom')).toBe('custom:review:size');
+    expect(prefixCacheScope()).toBe('devkit-guards:review:size:base:unmanaged:runtime:unmanaged');
+    expect(prefixCacheScope('custom')).toBe('custom:review:size:base:unmanaged:runtime:unmanaged');
   });
 
   it('canonicalizes the effective guard set so order and duplicates share one cache key', () => {
     process.env.DEVKIT_RUN_MODE = 'review';
     expect(prefixCacheScope(undefined, ['fanout', 'size', 'fanout'])).toBe(
-      'devkit-guards:review:size,fanout',
+      'devkit-guards:review:size,fanout:base:unmanaged:runtime:unmanaged',
     );
     expect(prefixCacheScope(undefined, ['size', 'fanout'])).toBe(
-      'devkit-guards:review:size,fanout',
+      'devkit-guards:review:size,fanout:base:unmanaged:runtime:unmanaged',
     );
+  });
+
+  it('keeps identical final trees on different resolved merge-bases in separate review entries', () => {
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size';
+    process.env.DEVKIT_REVIEW_MERGE_BASE = 'a'.repeat(40);
+    const firstBase = prefixCacheScope();
+    process.env.DEVKIT_REVIEW_MERGE_BASE = 'b'.repeat(40);
+    const secondBase = prefixCacheScope();
+
+    expect(firstBase).toBe(`devkit-guards:review:size:base:${'a'.repeat(40)}:runtime:unmanaged`);
+    expect(secondBase).toBe(`devkit-guards:review:size:base:${'b'.repeat(40)}:runtime:unmanaged`);
+    expect(secondBase).not.toBe(firstBase);
+  });
+
+  it('keeps identical trees under different dependency/asset runtimes in separate entries', () => {
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size';
+    process.env.DEVKIT_REVIEW_RUNTIME_FINGERPRINT = 'a'.repeat(40);
+    const firstRuntime = prefixCacheScope();
+    process.env.DEVKIT_REVIEW_RUNTIME_FINGERPRINT = 'b'.repeat(40);
+    const secondRuntime = prefixCacheScope();
+
+    expect(firstRuntime).not.toBe(secondRuntime);
+    expect(firstRuntime).toContain(`:runtime:${'a'.repeat(40)}`);
+    expect(secondRuntime).toContain(`:runtime:${'b'.repeat(40)}`);
   });
 
   // THE anti-laundering property. Without the salt a GUARD_COVERAGE_OK ship records an all-green key
@@ -304,7 +332,9 @@ describe('prefixCacheScope', () => {
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_GUARDS = 'size';
     process.env.GUARD_COVERAGE_OK = '1';
-    expect(prefixCacheScope()).toBe('devkit-guards:review:size:coverage-bypassed');
+    expect(prefixCacheScope()).toBe(
+      'devkit-guards:review:size:base:unmanaged:runtime:unmanaged:coverage-bypassed',
+    );
   });
 
   it('a falsey value leaves the scope unsalted (envFlag semantics)', () => {
