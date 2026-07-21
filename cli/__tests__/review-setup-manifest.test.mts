@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { normalizeSelection } from '../lib/components.mts';
 import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
@@ -12,6 +14,13 @@ import {
 import { reviewSetupFixtures } from './review-setup-fixture.mts';
 
 const { git, mkTmp, selection, write } = reviewSetupFixtures();
+const SETUP_MANIFEST_CLI = fileURLToPath(
+  new URL('../lib/ship/review/setup-manifest.mts', import.meta.url),
+);
+
+function runCli(...args: string[]) {
+  return spawnSync(process.execPath, [SETUP_MANIFEST_CLI, ...args], { encoding: 'utf8' });
+}
 
 function config(overlay: boolean, overrides: Record<string, unknown> = {}) {
   return {
@@ -59,6 +68,31 @@ function resignManifest(value: Record<string, unknown>): void {
 }
 
 describe('review setup manifest', () => {
+  it('exposes capture and verify through the direct CLI', () => {
+    const { root, manifest } = setup('direct-cli');
+
+    const captured = runCli('capture', root, manifest);
+    expect(captured.status, captured.stderr).toBe(0);
+    expect(readFileSync(manifest, 'utf8')).toContain('"version"');
+
+    const verified = runCli('verify', root, manifest);
+    expect(verified.status, verified.stderr).toBe(0);
+
+    writeFileSync(join(root, '.devkit/config.json'), '{}\n');
+    const changed = runCli('verify', root, manifest);
+    expect(changed.status).toBe(1);
+    expect(changed.stderr).toContain('devkit review:');
+  });
+
+  it('rejects malformed direct CLI invocations with usage guidance', () => {
+    const result = runCli('capture');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'usage: setup-manifest capture <target-root> <manifest> | verify <target-root> <manifest>',
+    );
+  });
+
   it('captures and verifies a clean standalone setup without requiring a diff', () => {
     const { root, manifest } = setup('standalone');
     write(root, '.devkit/correctness-overrides.json', '{"allow":[]}\n');
