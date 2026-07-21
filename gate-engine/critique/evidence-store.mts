@@ -12,6 +12,7 @@ import {
   PLAN_CRITIQUE_VERDICTS,
   type PlanCritiqueBlobPayloadsV1,
   type PlanCritiqueBlobSnapshotsV1,
+  type PlanCritiqueCaptureInputV1,
   type PlanCritiqueRecordV1,
   assertPlanCritiqueRecordValue as requireValue,
   type Sha256,
@@ -20,18 +21,10 @@ import {
 } from './evidence-record.mts';
 import {
   hasDurableRecordBlobs,
-  matchingStoredPayload,
-  publishBlobSnapshots,
+  persistPlanCritiqueRecordAtRoot,
   readStoredBlob,
-  selectExistingCallback,
-  validatePersistedParent,
 } from './evidence-store-internal.mts';
-import {
-  listPrivateFiles,
-  managedPath,
-  publishImmutable,
-  readPrivateFile,
-} from './immutable-file.mts';
+import { listPrivateFiles, managedPath, readPrivateFile } from './immutable-file.mts';
 import {
   resolvePlanCritiqueEvidenceRoot,
   withPlanCritiquePersistenceLock,
@@ -60,6 +53,7 @@ function exactObject(
   value: unknown,
   fields: readonly string[],
   at: string,
+  optionalFields: readonly string[] = [],
 ): Record<string, unknown> {
   requireValue(isObject(value), at);
   const object = value as Record<string, unknown>;
@@ -67,14 +61,16 @@ function exactObject(
   requireValue(prototype === Object.prototype || prototype === null, at);
   requireValue(!('toJSON' in object), at);
   const keys = Reflect.ownKeys(object);
+  const allowed = [...fields, ...optionalFields];
   requireValue(
-    keys.length === fields.length &&
-      keys.every((key) => typeof key === 'string' && fields.includes(key)),
+    fields.every((field) => Object.hasOwn(object, field)) &&
+      keys.every((key) => typeof key === 'string' && allowed.includes(key)),
     at,
   );
-  for (const field of fields) {
-    const descriptor = Object.getOwnPropertyDescriptor(object, field);
-    requireValue(descriptor?.enumerable && Object.hasOwn(descriptor, 'value'), `${at}.${field}`);
+  for (const key of keys) {
+    requireValue(typeof key === 'string', at);
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    requireValue(descriptor?.enumerable && Object.hasOwn(descriptor, 'value'), `${at}.${key}`);
   }
   return object;
 }
@@ -331,7 +327,34 @@ function validateEvidenceRefs(root: Record<string, unknown>, capturedAt: string)
   requireValue(Date.parse(expiresAt) > Date.parse(capturedAt), '$.opaqueTranscript.expiresAt');
 }
 
-function validateRecord(value: unknown): asserts value is PlanCritiqueRecordV1 {
+/** @internal Rejects hostile or extended capture inputs before deriving a record. */
+export function validatePlanCritiqueCaptureInput(
+  value: unknown,
+): asserts value is PlanCritiqueCaptureInputV1 {
+  const root = exactObject(
+    value,
+    ['workId', 'execution', 'repository', 'providerCompletedAt', 'contract', 'exactResponse'],
+    '$',
+    ['sanitizedProjection', 'opaqueTranscript'],
+  );
+  exactObject(root.execution, ['provider', 'callbackHash', 'model', 'promptHash'], '$.execution');
+  exactObject(
+    root.repository,
+    ['fingerprint', 'fingerprintSource', 'branch', 'head'],
+    '$.repository',
+  );
+  const contract = exactObject(
+    root.contract,
+    ['state', 'error', 'status', 'verdict', 'criticalCount'],
+    '$.contract',
+  );
+  if (contract.error !== null) exactObject(contract.error, ['code', 'path'], '$.contract.error');
+  if (root.opaqueTranscript !== undefined)
+    exactObject(root.opaqueTranscript, ['bytes', 'expiresAt'], '$.opaqueTranscript');
+}
+
+/** @internal Shared with the capture transaction; callers should use the public store APIs. */
+export function validatePlanCritiqueRecord(value: unknown): asserts value is PlanCritiqueRecordV1 {
   const root = exactObject(
     value,
     [
@@ -373,48 +396,19 @@ export function persistPlanCritiqueRecord(
   options: { root?: string } = {},
 ): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } {
   const snapshots: PlanCritiqueBlobSnapshotsV1 = snapshotPlanCritiquePayloads(payloads);
-  validateRecord(record);
+  validatePlanCritiqueRecord(record);
   assertPlanCritiquePayloadRefs(record, snapshots);
   const publish = (
     canonicalRoot: string,
   ): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } => {
-    const existing = selectExistingCallback(
+    const rootOptions = { root: canonicalRoot };
+    return persistPlanCritiqueRecordAtRoot(
       record,
-      listPlanCritiqueRecordMetadata({ root: canonicalRoot }),
+      snapshots,
+      canonicalRoot,
+      listPlanCritiqueRecordMetadata(rootOptions),
+      (critiqueId) => readPlanCritiqueRecord(critiqueId, rootOptions),
     );
-    if (existing) {
-      publishBlobSnapshots(canonicalRoot, {
-        exactResponse: snapshots.exactResponse,
-        sanitizedProjection: matchingStoredPayload(
-          existing.sanitizedProjection,
-          snapshots.sanitizedProjection,
-        ),
-        opaqueTranscript: matchingStoredPayload(
-          existing.opaqueTranscript,
-          snapshots.opaqueTranscript,
-        ),
-      });
-      if (!hasDurableRecordBlobs(existing, { root: canonicalRoot }))
-        throw new Error('plan critique callback evidence is incomplete');
-      return { state: 'existing', record: existing };
-    }
-    const parent =
-      record.lineage.pass === 1
-        ? null
-        : readPlanCritiqueRecord(record.lineage.parentCritiqueId as string, {
-            root: canonicalRoot,
-          });
-    validatePersistedParent(record, parent);
-    const records = managedPath(canonicalRoot, ['records'], true) as string;
-    const recordName = `${record.critiqueId}.json`;
-    const recordContent = Buffer.from(canonicalPlanCritiqueRecordJson(record));
-    let state =
-      readPrivateFile(records, recordName) === null
-        ? undefined
-        : publishImmutable(records, recordName, recordContent);
-    publishBlobSnapshots(canonicalRoot, snapshots);
-    state ??= publishImmutable(records, recordName, recordContent);
-    return { state, record };
   };
   return withPlanCritiquePersistenceLock(options, publish);
 }
@@ -440,7 +434,7 @@ function readPlanCritiqueRecordMetadata(
   if (!raw) return null;
   try {
     const record: unknown = JSON.parse(raw.toString('utf8'));
-    validateRecord(record);
+    validatePlanCritiqueRecord(record);
     const canonical = Buffer.from(canonicalPlanCritiqueRecordJson(record));
     if (record.critiqueId !== critiqueId || !raw.equals(canonical)) return null;
     return record;
@@ -449,7 +443,10 @@ function readPlanCritiqueRecordMetadata(
   }
 }
 
-function listPlanCritiqueRecordMetadata(options: { root?: string } = {}): PlanCritiqueRecordV1[] {
+/** @internal Includes valid metadata whose durable blobs may be missing. */
+export function listPlanCritiqueRecordMetadata(
+  options: { root?: string } = {},
+): PlanCritiqueRecordV1[] {
   const base = resolvePlanCritiqueEvidenceRoot(options, false);
   const records = base && managedPath(base, ['records'], false);
   if (!records) return [];

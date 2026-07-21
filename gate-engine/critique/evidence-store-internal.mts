@@ -1,5 +1,6 @@
 import {
   type BlobRefV1,
+  canonicalPlanCritiqueRecordJson,
   type PlanCritiqueBlobSnapshotsV1,
   type PlanCritiqueRecordV1,
   assertPlanCritiqueRecordValue as requireValue,
@@ -32,7 +33,9 @@ export function validatePersistedParent(
 }
 
 export function selectExistingCallback(
-  candidate: PlanCritiqueRecordV1,
+  candidate: Pick<PlanCritiqueRecordV1, 'workId' | 'repository' | 'exactResponse'> & {
+    execution: Pick<PlanCritiqueRecordV1['execution'], 'provider' | 'callbackHash'>;
+  },
   records: readonly PlanCritiqueRecordV1[],
 ): PlanCritiqueRecordV1 | null {
   const matches = records.filter(
@@ -98,4 +101,44 @@ export function hasDurableRecordBlobs(
   } catch {
     return false;
   }
+}
+
+/** Persist an already validated record while the canonical-root lock is held. */
+export function persistPlanCritiqueRecordAtRoot(
+  record: PlanCritiqueRecordV1,
+  snapshots: PlanCritiqueBlobSnapshotsV1,
+  canonicalRoot: string,
+  records: readonly PlanCritiqueRecordV1[],
+  readRecord: (critiqueId: string) => PlanCritiqueRecordV1 | null,
+): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } {
+  const existing = selectExistingCallback(record, records);
+  if (existing) {
+    publishBlobSnapshots(canonicalRoot, {
+      exactResponse: snapshots.exactResponse,
+      sanitizedProjection: matchingStoredPayload(
+        existing.sanitizedProjection,
+        snapshots.sanitizedProjection,
+      ),
+      opaqueTranscript: matchingStoredPayload(
+        existing.opaqueTranscript,
+        snapshots.opaqueTranscript,
+      ),
+    });
+    if (!hasDurableRecordBlobs(existing, { root: canonicalRoot }))
+      throw new Error('plan critique callback evidence is incomplete');
+    return { state: 'existing', record: existing };
+  }
+  const parent =
+    record.lineage.pass === 1 ? null : readRecord(record.lineage.parentCritiqueId as string);
+  validatePersistedParent(record, parent);
+  const recordDirectory = managedPath(canonicalRoot, ['records'], true) as string;
+  const recordName = `${record.critiqueId}.json`;
+  const recordContent = Buffer.from(canonicalPlanCritiqueRecordJson(record));
+  let state =
+    readPrivateFile(recordDirectory, recordName) === null
+      ? undefined
+      : publishImmutable(recordDirectory, recordName, recordContent);
+  publishBlobSnapshots(canonicalRoot, snapshots);
+  state ??= publishImmutable(recordDirectory, recordName, recordContent);
+  return { state, record };
 }

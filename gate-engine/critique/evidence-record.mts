@@ -78,6 +78,22 @@ export interface PlanCritiqueBlobSnapshotsV1 {
   opaqueTranscript?: Buffer;
 }
 
+export type PlanCritiqueContractFactsV1 = Omit<PlanCritiqueRecordV1['contract'], 'eligibility'>;
+
+export interface PlanCritiqueCaptureInputV1 {
+  workId: string;
+  execution: Pick<
+    PlanCritiqueRecordV1['execution'],
+    'provider' | 'callbackHash' | 'model' | 'promptHash'
+  >;
+  repository: PlanCritiqueRecordV1['repository'];
+  providerCompletedAt: string | null;
+  contract: PlanCritiqueContractFactsV1;
+  exactResponse: Uint8Array;
+  sanitizedProjection?: Uint8Array;
+  opaqueTranscript?: { bytes: Uint8Array; expiresAt: string };
+}
+
 export const sha256Bytes = (value: Uint8Array): Sha256 =>
   createHash('sha256').update(value).digest('hex');
 
