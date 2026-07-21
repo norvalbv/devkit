@@ -26,7 +26,17 @@ function supervisor(...args: string[]) {
   return spawnSync(process.execPath, [SUPERVISOR, ...args], { encoding: 'utf8' });
 }
 
-function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | null> {
+// 30s, not 5s. These are CEILINGS, not delays — every wait resolves on its event, so a healthy run
+// is exactly as fast as before and only a load-starved one spends the extra budget. vitest.config.mjs
+// already raised testTimeout to 120s for this repo for precisely this reason ("on a box at load
+// ~50-70 … clipped 2-4 DIFFERENT tests each run … always a timeout, never an assertion, and every one
+// passes in isolation"), but these test-local budgets were left at 5s and so became the new binding
+// constraint — reintroducing the same false redness one layer down. This file already had the
+// workaround applied piecemeal: several call sites below pass an explicit 15_000. One budget in one
+// place replaces that. A genuine hang still fails here, with a specific message, well inside the 120s.
+const WAIT_MS = 30_000;
+
+function waitForExit(child: ChildProcess, timeoutMs = WAIT_MS): Promise<number | null> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error('supervisor test process did not exit')),
@@ -40,7 +50,7 @@ function waitForExit(child: ChildProcess, timeoutMs = 5_000): Promise<number | n
   });
 }
 
-function waitForPath(path: string, timeoutMs = 5_000): Promise<void> {
+function waitForPath(path: string, timeoutMs = WAIT_MS): Promise<void> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const check = (): void => {
@@ -563,6 +573,13 @@ describe('review gate supervisor', () => {
       await waitForPath(fixture.leaderReady);
       child.kill(signal);
       expect(await waitForExit(child)).toBe(status);
+      // The supervisor exiting does NOT mean the signalled processes have finished writing: it
+      // signals the group and reaps, while each child's handler runs and writes independently.
+      // Reading straight after the exit is a race whose loser is a bare ENOENT from readFileSync —
+      // a confusing failure that looks nothing like the ordering bug it actually is. Wait for the
+      // artefacts, then assert on them.
+      await waitForPath(fixture.leaderSignal);
+      await waitForPath(fixture.descendantSignal);
       expect(readFileSync(fixture.leaderSignal, 'utf8')).toBe('SIGTERM');
       expect(readFileSync(fixture.descendantSignal, 'utf8')).toBe('SIGTERM');
     } finally {
@@ -584,8 +601,8 @@ describe('review gate supervisor', () => {
     const wrapped = outerReviewWrapper(root, command);
 
     try {
-      await waitForPath(fixture.leaderReady, 15_000);
-      await waitForPath(wrapped.identityFile, 15_000);
+      await waitForPath(fixture.leaderReady);
+      await waitForPath(wrapped.identityFile);
       const [wrapperPid, supervisorParent, supervisorPid] = readFileSync(
         wrapped.identityFile,
         'utf8',
@@ -594,7 +611,7 @@ describe('review gate supervisor', () => {
         .split(' ');
       expect(supervisorParent).toBe(wrapperPid);
       wrapped.child.kill('SIGTERM');
-      expect(await waitForExit(wrapped.child, 15_000)).toBe(143);
+      expect(await waitForExit(wrapped.child)).toBe(143);
       expect(readFileSync(fixture.leaderSignal, 'utf8')).toBe('SIGTERM');
       expect(readFileSync(fixture.descendantSignal, 'utf8')).toBe('SIGTERM');
       expect(() => process.kill(Number(supervisorPid), 0)).toThrow();
@@ -602,7 +619,7 @@ describe('review gate supervisor', () => {
       if (wrapped.child.exitCode === null) {
         wrapped.child.kill('SIGTERM');
         try {
-          await waitForExit(wrapped.child, 15_000);
+          await waitForExit(wrapped.child);
         } catch {
           wrapped.child.kill('SIGKILL');
         }
@@ -627,14 +644,14 @@ describe('review gate supervisor', () => {
     let childPid = 0;
 
     try {
-      await waitForPath(fixture.leaderReady, 15_000);
-      await waitForPath(wrapped.identityFile, 15_000);
+      await waitForPath(fixture.leaderReady);
+      await waitForPath(wrapped.identityFile);
       leaderPid = Number(readFileSync(fixture.leaderPid, 'utf8'));
       childPid = Number(readFileSync(fixture.childPid, 'utf8'));
       const supervisorPid = Number(readFileSync(wrapped.identityFile, 'utf8').trim().split(' ')[2]);
       process.kill(supervisorPid, 'SIGKILL');
 
-      expect(await waitForExit(wrapped.child, 15_000)).toBe(137);
+      expect(await waitForExit(wrapped.child)).toBe(137);
       expect(readFileSync(fixture.leaderSignal, 'utf8')).toBe('SIGTERM');
       expect(readFileSync(fixture.childSignal, 'utf8')).toBe('SIGTERM');
       expect(processAlive(leaderPid)).toBe(false);
