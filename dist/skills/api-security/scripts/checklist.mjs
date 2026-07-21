@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolveReviewRoots, toGitPathspecs } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.api-security-review.json';
 
@@ -28,11 +29,25 @@ const RE_HEADERS = /\b(header|X-Content-Type|X-Frame|Content-Security-Policy|HST
 const RE_ERROR = /\b(catch|error|throw|exception|stack)/i;
 const RE_PROCESSING = /\b(debug|DEBUG|NODE_ENV|upload|multer|stream|file)/i;
 const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|audit|monitor)/i;
+// Injection/authz surfaces beyond SQL (coverage from OWASP ASVS v5 V1/V2/V4/V8 — see SKILL.md
+// Provenance). Two-regex items AND a sink pattern with a request-input marker so the item only
+// fires when both halves are present in the staged diff.
+const RE_MASS_ASSIGN =
+  /\.\.\.\s*(req\.(body|query|params)|body|payload)\b|Object\.assign\([^)]*\breq\./;
+const RE_COMMAND = /\b(exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\(|child_process/;
+const RE_FS_SINK =
+  /\b(sendFile|createReadStream|createWriteStream|readFile|writeFile|appendFile|unlink|rmSync|rm|mkdir|readdir|stat)\w*\s*\(/;
+const RE_REQ_INPUT = /\breq\.(params|query|body)\b|\bparams\.\w+/;
+const RE_OBJECT_LOOKUP =
+  /\b(findUnique|findFirst|findById|getById|updateMany|deleteMany|update|delete)\s*\(/;
+const RE_REDIRECT = /\bredirect\s*\(/i;
+const RE_OUTBOUND_DYNAMIC = /\b(fetch|axios[.\w]*|got)\s*\(\s*(`[^`\n]*\$\{|[^'"`\s)])/;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
-
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
 
 // Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -40,35 +55,26 @@ const isStringArray = (v) =>
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function backendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.backendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  api-security: ignoring invalid `review.backendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_BACKEND_ROOTS',
+    configKey: 'backendRoots',
+    reviewerName: 'api-security',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(backendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...backendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0);
+      .filter((f) => f.length > 0)
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -109,6 +115,18 @@ function detectSecurityPatterns(_files, diffs) {
   if (RE_XXE.test(fullDiff)) {
     items.push({ name: 'xxe-prevention', category: 'Input', status: 'pending', issues: [] });
   }
+  if (RE_MASS_ASSIGN.test(fullDiff)) {
+    items.push({ name: 'mass-assignment', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_COMMAND.test(fullDiff)) {
+    items.push({ name: 'command-injection', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_FS_SINK.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
+    items.push({ name: 'path-traversal', category: 'Input', status: 'pending', issues: [] });
+  }
+  if (RE_OUTBOUND_DYNAMIC.test(fullDiff)) {
+    items.push({ name: 'ssrf-prevention', category: 'Input', status: 'pending', issues: [] });
+  }
   if (RE_ENDPOINT.test(fullDiff)) {
     items.push({
       name: 'endpoint-auth',
@@ -124,6 +142,17 @@ function detectSecurityPatterns(_files, diffs) {
       status: 'pending',
       issues: [],
     });
+  }
+  if (RE_OBJECT_LOOKUP.test(fullDiff) && RE_REQ_INPUT.test(fullDiff)) {
+    items.push({
+      name: 'object-level-authz',
+      category: 'Access Control',
+      status: 'pending',
+      issues: [],
+    });
+  }
+  if (RE_REDIRECT.test(fullDiff)) {
+    items.push({ name: 'open-redirect', category: 'Output', status: 'pending', issues: [] });
   }
   if (RE_RESPONSE.test(fullDiff)) {
     items.push({ name: 'output-security', category: 'Output', status: 'pending', issues: [] });
@@ -236,6 +265,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed API security checklist');
