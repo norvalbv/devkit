@@ -19,8 +19,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   assertStagedSetSane,
   isNonEmptyStringArray,
@@ -162,15 +162,12 @@ function detectCorrectnessItems(lens) {
 // Set once at dispatch from --lens; every command reads/writes this path.
 let ACTIVE_PATH = CHECKLIST_PATH;
 
-function loadChecklist() {
-  if (!existsSync(ACTIVE_PATH)) return null;
-  return JSON.parse(readFileSync(ACTIVE_PATH, 'utf-8'));
-}
-
-function saveChecklist(data) {
-  mkdirSync(dirname(ACTIVE_PATH), { recursive: true });
-  writeFileSync(ACTIVE_PATH, JSON.stringify(data, null, 2));
-}
+const store = createChecklistStore({
+  path: () => ACTIVE_PATH,
+  label: 'Correctness',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
 
 function generate(lens) {
   const stagedFiles = getStagedFiles();
@@ -187,70 +184,6 @@ function generate(lens) {
   log('');
   log('Items to review:');
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
-}
-
-function status() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist. Run: generate');
-    process.exit(1);
-  }
-  const done = data.items.filter((i) => i.status !== 'pending').length;
-  const failed = data.items.filter((i) => i.status === 'fail');
-  log(`📋 Correctness: ${done}/${data.items.length} | Failed: ${failed.length}`);
-  if (failed.length > 0) {
-    log('Issues:');
-    for (const item of failed) for (const issue of item.issues) log(`  - [${item.name}] ${issue}`);
-  }
-}
-
-function checkItem(name, pass, failReason) {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const item = data.items.find((i) => i.name === name);
-  if (!item) {
-    log(`❌ Item not found: ${name}`);
-    log('Available:', data.items.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  item.status = pass ? 'pass' : 'fail';
-  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-  if (!pass && failReason) item.issues.push(failReason);
-  saveChecklist(data);
-  log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
-}
-
-function finalize() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const pending = data.items.filter((i) => i.status === 'pending');
-  const failed = data.items.filter((i) => i.status === 'fail');
-  const allIssues = data.items.flatMap((i) => i.issues);
-  if (pending.length > 0) {
-    log(`❌ Incomplete: ${pending.length} items pending`);
-    log('Pending:', pending.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  if (failed.length > 0 || allIssues.length > 0) {
-    log(`❌ Failed: ${allIssues.length} issues`);
-    for (const issue of allIssues) log(`  - ${issue}`);
-    process.exit(1);
-  }
-  log('✅ Correctness: All checks passed');
-}
-
-function cleanup() {
-  if (process.env.DEVKIT_RUN_MODE === 'review') return;
-  if (existsSync(ACTIVE_PATH)) {
-    unlinkSync(ACTIVE_PATH);
-    log('🗑️  Removed correctness checklist');
-  }
 }
 
 const { lens, rest } = extractLens(process.argv.slice(2));
