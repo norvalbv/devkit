@@ -23,7 +23,10 @@ import {
   publishImmutable,
   readPrivateFile,
 } from './immutable-file.mts';
-import { resolvePlanCritiqueEvidenceRoot } from './persistence-lock.mts';
+import {
+  resolvePlanCritiqueEvidenceRoot,
+  withPlanCritiquePersistenceLock,
+} from './persistence-lock.mts';
 
 export {
   type BlobRefV1,
@@ -382,22 +385,26 @@ export function persistPlanCritiqueRecord(
   const snapshots: PlanCritiqueBlobSnapshotsV1 = snapshotPlanCritiquePayloads(payloads);
   validateRecord(record);
   assertPlanCritiquePayloadRefs(record, snapshots);
-  validatePersistedParent(record, options);
-  const base = resolvePlanCritiqueEvidenceRoot(options, true) as string;
-  const records = managedPath(base, ['records'], true) as string;
-  const state = publishImmutable(
-    records,
-    `${record.critiqueId}.json`,
-    Buffer.from(canonicalPlanCritiqueRecordJson(record)),
-  );
-  const blobs = managedPath(base, ['blobs', 'sha256'], true) as string;
-  for (const payload of [
-    snapshots.exactResponse,
-    snapshots.sanitizedProjection,
-    snapshots.opaqueTranscript,
-  ])
-    if (payload) publishImmutable(blobs, sha256Bytes(payload), payload);
-  return { state, record };
+  const publish = (
+    canonicalRoot: string,
+  ): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } => {
+    validatePersistedParent(record, { root: canonicalRoot });
+    const records = managedPath(canonicalRoot, ['records'], true) as string;
+    const state = publishImmutable(
+      records,
+      `${record.critiqueId}.json`,
+      Buffer.from(canonicalPlanCritiqueRecordJson(record)),
+    );
+    const blobs = managedPath(canonicalRoot, ['blobs', 'sha256'], true) as string;
+    for (const payload of [
+      snapshots.exactResponse,
+      snapshots.sanitizedProjection,
+      snapshots.opaqueTranscript,
+    ])
+      if (payload) publishImmutable(blobs, sha256Bytes(payload), payload);
+    return { state, record };
+  };
+  return withPlanCritiquePersistenceLock(options, publish);
 }
 
 function readStoredBlob(ref: BlobRefV1, options: { root?: string }): Buffer | null {

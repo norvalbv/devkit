@@ -11,6 +11,10 @@ import {
   readPrivateFile,
 } from './immutable-file.mts';
 import {
+  resolvePlanCritiqueEvidenceRoot,
+  withPlanCritiquePersistenceLock,
+} from './persistence-lock.mts';
+import {
   getPlanCritiqueRepositoryContext,
   isPlanCritiqueAncestor,
   type PlanCritiqueRepositoryContext,
@@ -190,33 +194,43 @@ export function persistPlanCritiqueBinding(
 ): PersistPlanCritiqueBindingResult {
   const repository = getPlanCritiqueRepositoryContext(options.cwd);
   if (repository.status === 'unavailable') return repository;
-  let record: PlanCritiqueRecordV1 | null;
+  let evidenceRoot: string | null;
   try {
-    record = readPlanCritiqueRecord(critiqueId, evidenceOptions(options.evidenceRoot));
+    evidenceRoot = resolvePlanCritiqueEvidenceRoot(evidenceOptions(options.evidenceRoot), false);
   } catch {
-    record = null;
+    evidenceRoot = null;
   }
-  if (!record) return { status: 'unavailable', reason: 'malformed_record' };
-  const { context } = repository;
-  if (
-    record.repository.fingerprint !== context.fingerprint ||
-    record.repository.fingerprintSource !== context.fingerprintSource
-  )
-    return { status: 'unavailable', reason: 'repository_mismatch' };
-  if (record.repository.branch !== context.branch)
-    return { status: 'unavailable', reason: 'branch_mismatch' };
-  if (record.repository.head !== context.head)
-    return { status: 'unavailable', reason: 'ancestry_mismatch' };
-  if (!record.contract.eligibility.eligible)
-    return { status: 'unavailable', reason: 'ineligible_record' };
-  const binding = bindingFor(record, context);
-  const directory = bindingDirectory(context, true) as string;
-  const state = publishImmutable(
-    directory,
-    `${bindingKey(binding.workId)}.json`,
-    canonicalBindingJson(binding),
-  );
-  return { status: 'bound', state, binding };
+  if (!evidenceRoot) return { status: 'unavailable', reason: 'malformed_record' };
+  const publish = (canonicalRoot: string): PersistPlanCritiqueBindingResult => {
+    let record: PlanCritiqueRecordV1 | null;
+    try {
+      record = readPlanCritiqueRecord(critiqueId, { root: canonicalRoot });
+    } catch {
+      record = null;
+    }
+    if (!record) return { status: 'unavailable', reason: 'malformed_record' };
+    const { context } = repository;
+    if (
+      record.repository.fingerprint !== context.fingerprint ||
+      record.repository.fingerprintSource !== context.fingerprintSource
+    )
+      return { status: 'unavailable', reason: 'repository_mismatch' };
+    if (record.repository.branch !== context.branch)
+      return { status: 'unavailable', reason: 'branch_mismatch' };
+    if (record.repository.head !== context.head)
+      return { status: 'unavailable', reason: 'ancestry_mismatch' };
+    if (!record.contract.eligibility.eligible)
+      return { status: 'unavailable', reason: 'ineligible_record' };
+    const binding = bindingFor(record, context);
+    const directory = bindingDirectory(context, true) as string;
+    const state = publishImmutable(
+      directory,
+      `${bindingKey(binding.workId)}.json`,
+      canonicalBindingJson(binding),
+    );
+    return { status: 'bound', state, binding };
+  };
+  return withPlanCritiquePersistenceLock({ root: evidenceRoot }, publish);
 }
 
 function loadBindings(

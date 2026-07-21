@@ -20,6 +20,7 @@ import {
   readPlanCritiqueProjection,
   readPlanCritiqueRecord,
 } from '../evidence-store.mts';
+import { withPlanCritiquePersistenceLock } from '../persistence-lock.mts';
 import { bytes, recordFor, sha256Bytes, temporaryRoot } from './evidence-store-fixture.mts';
 
 describe('plan critique evidence store', () => {
@@ -59,6 +60,23 @@ describe('plan critique evidence store', () => {
     );
     writeFileSync(path.join(root, record.exactResponse.ref), 'corrupt');
     expect(readPlanCritiqueExactResponse(record.critiqueId, { root })).toBeNull();
+  });
+
+  it('publishes nothing when another evidence operation owns the persistence lock', () => {
+    const root = temporaryRoot();
+    const exact = bytes('serialized response');
+    const record = recordFor(exact);
+
+    withPlanCritiquePersistenceLock({ root }, () => {
+      expect(() => persistPlanCritiqueRecord(record, { exactResponse: exact }, { root })).toThrow(
+        /^Another plan critique evidence persistence is in progress$/,
+      );
+      expect(readPlanCritiqueRecord(record.critiqueId, { root })).toBeNull();
+    });
+
+    expect(persistPlanCritiqueRecord(record, { exactResponse: exact }, { root }).state).toBe(
+      'created',
+    );
   });
 
   it('stores response, projection, and optional transcript as independent addressed blobs', () => {

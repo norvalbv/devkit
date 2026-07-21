@@ -1,6 +1,9 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -9,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   getPlanCritiqueRepositoryContext,
@@ -20,6 +24,7 @@ import {
   derivePlanCritiqueId,
   type PlanCritiqueRecordV1,
   persistPlanCritiqueRecord,
+  readPlanCritiqueRecord,
 } from '../evidence-store.mts';
 import { bytes, recordFor, sha256Bytes } from './evidence-store-fixture.mts';
 import {
@@ -93,6 +98,16 @@ describe('plan critique evidence bindings', () => {
       status: 'available',
       context: { branch: '(detached)' },
     });
+
+    const missingRoot = evidenceRoot();
+    const missingId = `pc1_${'0'.repeat(64)}`;
+    expect(
+      persistPlanCritiqueBinding(missingId, { cwd: repository, evidenceRoot: missingRoot }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_record' });
+    expect(existsSync(missingRoot)).toBe(false);
+    expect(
+      persistPlanCritiqueBinding(missingId, { cwd: repository, evidenceRoot: 'relative' }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_record' });
   });
 
   it('publishes one canonical file idempotently and conflicts without ambiguity', () => {
@@ -130,6 +145,132 @@ describe('plan critique evidence bindings', () => {
       status: 'resolved',
       binding: { critiqueId: first.critiqueId },
     });
+  });
+
+  it('waits for store publication to finish before binding a readable record', async () => {
+    const repository = createRepository();
+    const scratch = temporaryDirectory('critique-binding-lock-');
+    const root = path.join(scratch, 'evidence');
+    const exact = bytes('response with delayed transcript');
+    const projection = bytes('{"safe":true}');
+    const transcript = bytes('opaque transcript');
+    const record = recordFor(exact, { projection, transcript });
+    const repositoryContext = context(repository);
+    record.workId = 'serialized-binding';
+    record.repository = {
+      fingerprint: repositoryContext.fingerprint,
+      fingerprintSource: repositoryContext.fingerprintSource,
+      branch: repositoryContext.branch,
+      head: repositoryContext.head,
+    };
+    record.critiqueId = derivePlanCritiqueId(record);
+
+    const recordSource = path.join(scratch, 'record.json');
+    const exactSource = path.join(scratch, 'exact');
+    const projectionSource = path.join(scratch, 'projection');
+    const transcriptSource = path.join(scratch, 'transcript');
+    writeFileSync(recordSource, canonicalPlanCritiqueRecordJson(record), { mode: 0o600 });
+    writeFileSync(exactSource, exact, { mode: 0o600 });
+    writeFileSync(projectionSource, projection, { mode: 0o600 });
+    writeFileSync(transcriptSource, transcript, { mode: 0o600 });
+
+    const holderScript = path.join(scratch, 'holder.mts');
+    const contenderScript = path.join(scratch, 'contender.mts');
+    const lockModule = pathToFileURL(
+      path.join(import.meta.dirname, '..', 'persistence-lock.mts'),
+    ).href;
+    const bindingModule = pathToFileURL(
+      path.join(import.meta.dirname, '..', 'evidence-bindings.mts'),
+    ).href;
+    writeFileSync(
+      holderScript,
+      `import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';\n` +
+        `import path from 'node:path';\n` +
+        `import { withPlanCritiquePersistenceLock } from ${JSON.stringify(lockModule)};\n` +
+        `const [root, recordSource, critiqueId, exactSource, exactHash, projectionSource, projectionHash, transcriptSource, transcriptHash, release] = process.argv.slice(2);\n` +
+        `const wait = new Int32Array(new SharedArrayBuffer(4));\n` +
+        `withPlanCritiquePersistenceLock({ root }, (canonicalRoot) => {\n` +
+        `  const records = path.join(canonicalRoot, 'records');\n` +
+        `  const blobs = path.join(canonicalRoot, 'blobs', 'sha256');\n` +
+        `  mkdirSync(records, { recursive: true, mode: 0o700 });\n` +
+        `  mkdirSync(blobs, { recursive: true, mode: 0o700 });\n` +
+        `  chmodSync(records, 0o700); chmodSync(path.dirname(blobs), 0o700); chmodSync(blobs, 0o700);\n` +
+        `  copyFileSync(recordSource, path.join(records, critiqueId + '.json'));\n` +
+        `  copyFileSync(exactSource, path.join(blobs, exactHash));\n` +
+        `  copyFileSync(projectionSource, path.join(blobs, projectionHash));\n` +
+        `  for (const file of [path.join(records, critiqueId + '.json'), path.join(blobs, exactHash), path.join(blobs, projectionHash)]) chmodSync(file, 0o600);\n` +
+        `  process.stdout.write('staged\\n');\n` +
+        `  while (!existsSync(release)) Atomics.wait(wait, 0, 0, 2);\n` +
+        `  const target = path.join(blobs, transcriptHash); copyFileSync(transcriptSource, target); chmodSync(target, 0o600);\n` +
+        `});\n`,
+    );
+    writeFileSync(
+      contenderScript,
+      `import { writeFileSync } from 'node:fs';\n` +
+        `import { persistPlanCritiqueBinding } from ${JSON.stringify(bindingModule)};\n` +
+        `const [root, repository, critiqueId, result] = process.argv.slice(2);\n` +
+        `process.stdout.write('started\\n');\n` +
+        `writeFileSync(result, JSON.stringify(persistPlanCritiqueBinding(critiqueId, { cwd: repository, evidenceRoot: root })));\n`,
+    );
+
+    if (!record.sanitizedProjection || !record.opaqueTranscript)
+      throw new Error('fixture is incomplete');
+    const release = path.join(scratch, 'release');
+    const result = path.join(scratch, 'contender-result');
+    const holder = spawn(
+      process.execPath,
+      [
+        holderScript,
+        root,
+        recordSource,
+        record.critiqueId,
+        exactSource,
+        record.exactResponse.sha256,
+        projectionSource,
+        record.sanitizedProjection.sha256,
+        transcriptSource,
+        record.opaqueTranscript.sha256,
+        release,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const holderClosed = once(holder, 'close');
+    if (!holder.stdout) throw new Error('holder stdout unavailable');
+    const holderStaged = Promise.race([
+      once(holder.stdout, 'data').then(([chunk]) => String(chunk)),
+      holderClosed.then(([code]) => {
+        throw new Error(`holder exited before staging: ${String(code)}`);
+      }),
+    ]);
+    let contender: ReturnType<typeof spawn> | undefined;
+    let contenderClosed: ReturnType<typeof once> | undefined;
+    try {
+      await expect(holderStaged).resolves.toBe('staged\n');
+      expect(readPlanCritiqueRecord(record.critiqueId, { root })).toEqual(record);
+      contender = spawn(
+        process.execPath,
+        [contenderScript, root, repository, record.critiqueId, result],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      contenderClosed = once(contender, 'close');
+      if (!contender.stdout) throw new Error('contender stdout unavailable');
+      const contenderStarted = Promise.race([
+        once(contender.stdout, 'data').then(([chunk]) => String(chunk)),
+        contenderClosed.then(([code]) => {
+          throw new Error(`contender exited before binding: ${String(code)}`);
+        }),
+      ]);
+      await expect(contenderStarted).resolves.toBe('started\n');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(existsSync(result)).toBe(false);
+      expect(existsSync(bindingFile(repository, record.workId))).toBe(false);
+    } finally {
+      writeFileSync(release, 'release');
+    }
+    expect((await holderClosed)[0]).toBe(0);
+    expect((await (contenderClosed as ReturnType<typeof once>))[0]).toBe(0);
+    expect(JSON.parse(readFileSync(result, 'utf8'))).toMatchObject({ status: 'bound' });
+    expect(existsSync(bindingFile(repository, record.workId))).toBe(true);
   });
 
   it('requires a scope when multiple work chains are bound', () => {
