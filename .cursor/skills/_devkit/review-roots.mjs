@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, win32 } from 'node:path';
 
@@ -74,6 +75,42 @@ export function resolveConfigRoots({ configKey, reviewerName }) {
     );
     return ['.'];
   }
+}
+
+/**
+ * Every checklist selects its files with `--diff-filter=ACM`, which drops deletions. So a staged set
+ * that is ENTIRELY deletions renders as "nothing to review" and the reviewer waves the commit
+ * through — the exact blind spot that let a clobbered ship index (a foreign tree staged as a
+ * ~5,976-file deletion of the whole repo) reach the review gate reporting "no items".
+ *
+ * Call this on the empty-ACM path, BEFORE reporting zero items. It re-asks git WITHOUT the filter:
+ * if the index does hold staged paths after all, they are deletions the checklist cannot see, and
+ * that must be loud rather than silent. This is the same rule the correctness checklist already
+ * applies to a git FAILURE ("must never masquerade as nothing staged"), extended to a successful
+ * query with an answer the filter made meaningless.
+ *
+ * Exits non-zero on detection; returns normally when there is genuinely nothing staged.
+ */
+export function assertStagedSetSane(pathspecs, reviewerName) {
+  let unfiltered;
+  try {
+    unfiltered = execFileSync('git', ['diff', '--cached', '--name-only', '--', ...pathspecs], {
+      encoding: 'utf-8',
+    });
+  } catch {
+    // The ACM query already succeeded, so git works here; a failure now is not evidence of anything.
+    // Stay silent and let the caller report its honest "nothing staged".
+    return;
+  }
+  const staged = unfiltered.split('\n').filter((line) => line.trim().length > 0);
+  if (staged.length === 0) return;
+  console.error(
+    `❌ ${reviewerName}: ${staged.length} path(s) are staged but NONE are additions/copies/modifications — ` +
+      'the staged set is pure deletions. Refusing to report "no items": a reviewer that examines ' +
+      'nothing must not read as a pass. If this is a deliberate deletion-only commit, review it by ' +
+      'hand; if it is not, your index has been overwritten — check `git diff --cached --stat`.',
+  );
+  process.exit(1);
 }
 
 /** Resolve one domain reviewer's injected roots, falling back to guard.config.json topology. */

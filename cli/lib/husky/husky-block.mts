@@ -12,7 +12,7 @@
 
 import { markEnd, markStart } from './husky.mts';
 import {
-  DK_GATE_SELECTED_HELPER,
+  DK_HOOK_HELPERS,
   DK_REVIEW_BASELINE_HELPER,
   selectedFragment,
 } from './review-fragments.mts';
@@ -45,7 +45,7 @@ const deterministicFragment = (
   extras: Array<{ label: string; cmd: string }> = [],
 ) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1
+__dk_no_git_env bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1
 # /devkit:deterministic`;
 
 // The AI-guard fragments, keyed by guard id (GUARD_IDS in components.mjs). AI gates (decisions,
@@ -56,7 +56,7 @@ const GUARD_FRAGMENTS = {
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
 ddrc=0
-bunx guard-decisions detect --gate || ddrc=$?
+__dk_no_git_env bunx guard-decisions detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
@@ -73,7 +73,7 @@ fi
   review: `# devkit:guard-review
 echo "🔍 Reviewer gate (headless domain judges)..."
 rrc=0
-bunx guard-review --gate || rrc=$?
+__dk_no_git_env bunx guard-review --gate || rrc=$?
 if [ "$rrc" -eq 1 ]; then
     echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
     exit 1
@@ -99,13 +99,13 @@ const AI_GUARD_IDS = ['decisions', 'review'] as const;
 const QAVIS_ADVISORY_ID = 'qavis-advisory';
 const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
 qarc=0
-bunx guard-qavis-advisory --gate || qarc=$?
+__dk_no_git_env bunx guard-qavis-advisory --gate || qarc=$?
 [ "$qarc" -eq 3 ] && exit 1
 # qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
 # (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
 # /devkit:guard-qavis-advisory`;
 const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1; then
-    qarc=0; guard-qavis-advisory --gate || qarc=$?
+    qarc=0; __dk_no_git_env guard-qavis-advisory --gate || qarc=$?
     [ "$qarc" -eq 3 ] && exit 1
 fi`;
 
@@ -203,7 +203,7 @@ function wantsDeterministic(selection: HookSelection): boolean {
  * because package-relative `git add` paths would be wrong. `structureCmd` is stack-resolved.
  */
 export function buildGuardBlock(selection: HookSelection, pkgRel = ''): string {
-  const pieces = [COMMIT_TERMINAL_FRAGMENT, DK_GATE_SELECTED_HELPER, DK_REVIEW_BASELINE_HELPER];
+  const pieces = [COMMIT_TERMINAL_FRAGMENT, ...DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER];
   // First so a first-gate block still records the run's terminal (the trap covers every exit path).
   if (!pkgRel && selection.biome) pieces.push(BIOME_FRAGMENT);
   if (wantsDeterministic(selection))
@@ -242,14 +242,14 @@ const STANDALONE_GATES = {
 const standaloneDeterministicLines = (
   structureCmd?: string,
 ) => `if command -v guard-deterministic >/dev/null 2>&1; then
-    guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''} || exit 1
+    __dk_no_git_env guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''} || exit 1
 fi`;
 
 // AI-gate helper: FAIL-FAST (never aggregated — findings surface one at a time), with exit 3
 // (strict ship mode failing closed on a judge outage) given its own remedy so it is never
 // rendered as a code violation.
 const DK_GATE_AI_HELPER =
-  '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; "$@" || rc=$?; if [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
+  '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; __dk_no_git_env "$@" || rc=$?; if [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 
 /**
  * Build standalone gates from global fail-open bins. Biome needs local tooling and is omitted;
@@ -259,12 +259,11 @@ export function buildStandaloneBlock(selection: HookSelection, pkgRel = ''): str
   const pieces = [
     '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
     COMMIT_TERMINAL_FRAGMENT,
-    DK_GATE_SELECTED_HELPER,
+    ...DK_HOOK_HELPERS,
     DK_GATE_AI_HELPER,
   ];
-  if (wantsDeterministic(selection)) {
+  if (wantsDeterministic(selection))
     pieces.push(standaloneDeterministicLines(selection.structureCmd));
-  }
   for (const id of AI_GUARD_IDS) {
     if (selection.guards?.includes(id))
       pieces.push(
@@ -316,7 +315,8 @@ else
     # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
     FALLOW_BASE_ARGS=""
     [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-    command -v fallow >/dev/null 2>&1 && { fallow audit $FALLOW_BASE_ARGS || exit 1; }
+    # __dk_no_git_env: fallow's base-snapshot is a git worktree, and it has clobbered a ship one before.
+    command -v fallow >/dev/null 2>&1 && { __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || exit 1; }
 fi`;
 
 /**
@@ -336,7 +336,7 @@ export function buildOverlayHook(
 ): string {
   const gates = [
     COMMIT_TERMINAL_FRAGMENT,
-    DK_GATE_SELECTED_HELPER,
+    ...DK_HOOK_HELPERS,
     DK_GATE_AI_HELPER,
     DK_REVIEW_BASELINE_HELPER,
   ];
