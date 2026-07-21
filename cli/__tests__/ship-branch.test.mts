@@ -59,7 +59,17 @@ afterAll(() => {
 function buildAndRun(
   branch,
   origin,
-  { detached = false, mkdir, pathArg = 'dummy-path', extraArgs = [] } = {},
+  // `argv` overrides the whole argument vector (default: the usual <branch> <title> … <path> form) so
+  // a test can drive a MALFORMED invocation — e.g. flags before the positionals. `script` swaps in
+  // reship.sh, which shares the positional guard.
+  {
+    detached = false,
+    mkdir,
+    pathArg = 'dummy-path',
+    extraArgs = [],
+    argv,
+    script = scriptPath,
+  } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'shipres-'));
   dirs.push(dir);
@@ -75,7 +85,7 @@ function buildAndRun(
 
   return spawnSync(
     '/bin/bash',
-    [scriptPath, 'feat/__resolve_test__', 'title', ...extraArgs, pathArg],
+    [script, ...(argv ?? ['feat/__resolve_test__', 'title', ...extraArgs, pathArg])],
     {
       cwd: dir,
       input: '',
@@ -433,6 +443,47 @@ describe('ship-branch.sh — isolation + arg guards', () => {
     const r = buildAndRun('main', 'git@github.com:acme/app.git', { pathArg: '--bogus' });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(FLAG_RE);
+  });
+});
+
+// `<branch>` and `<title>` are read positionally before the flag loop, so flags-first bound
+// BR="--base" and the run died ~180 lines later inside `git branch` with `unknown option 'base'` —
+// an error naming neither the ordering rule nor the two arguments at fault. Five of six recorded
+// agent sessions wrote this form, all AFTER reading the help text; reship.sh hit the same class via
+// `--pr` (its :18-25). Assert the guard fires EARLY, by its own message.
+describe('ship — <branch>/<title> must precede the flags', () => {
+  const ORDER_RE = /must come FIRST, before any flag/;
+  const GIT_UNKNOWN_OPT_RE = /unknown option/;
+
+  for (const flag of ['--base', '--link', '--body', '--pr']) {
+    it(`rejects ${flag} in a positional slot, naming the ordering rule`, () => {
+      const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+        argv: [flag, 'somevalue', 'feat/x', 'title', '--', 'dummy-path'],
+      });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toMatch(ORDER_RE);
+      expect(r.stderr).toMatch(new RegExp(`'\\${flag}'`));
+      // The whole point: it must NOT reach the internal git call it used to die in.
+      expect(r.stderr).not.toMatch(GIT_UNKNOWN_OPT_RE);
+    });
+  }
+
+  it('rejects a positional-slot flag in reship.sh too (shared guard)', () => {
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      script: reshipScript,
+      argv: ['--link', 'somedir', 'feat/x', 'title', '--', 'dummy-path'],
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(ORDER_RE);
+  });
+
+  it('still accepts a dash-leading TITLE (guard matches known flags, not every dash)', () => {
+    // Matching a blanket `-*` would trade the flags-first footgun for a title one. A title is free
+    // text; only the four real flag spellings are rejected.
+    const r = buildAndRun('main', 'git@github.com:acme/app.git', {
+      argv: ['feat/x', '-- rebuild the parser --', '--', 'dummy-path'],
+    });
+    expect(r.status, `guard must not reject a dash-leading title (stderr: ${r.stderr})`).toBe(0);
   });
 });
 
