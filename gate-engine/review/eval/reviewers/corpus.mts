@@ -16,7 +16,13 @@ import { checklistScript } from '../../reviewers.mts';
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
 const repoRoot = path.resolve(here, '../../../..');
-const reviewRootsHelper = path.join(repoRoot, 'skills', '_devkit', 'review-roots.mjs');
+// Every shared module under skills/_devkit that a reviewer checklist imports. A fixture stages the
+// checklist script alone, so each helper it pulls in must be staged beside it or the script dies at
+// import with ERR_MODULE_NOT_FOUND before a single row is evaluated. A LIST rather than one constant
+// per file: this broke once when checklist-store.mjs was extracted and only review-roots.mjs was
+// staged — the next extraction should be an entry here, not another silent breakage.
+const SHARED_HELPERS = ['review-roots.mjs', 'checklist-store.mjs'];
+const sharedHelperPath = (file) => path.join(repoRoot, 'skills', '_devkit', file);
 
 const sha12 = (text) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
@@ -92,7 +98,12 @@ export function buildAssets(reviewer) {
   const assets = {
     'guard.config.json': `${JSON.stringify(FIXTURE_CONFIG, null, 2)}\n`,
     [`.claude/agents/${reviewer.name}.md`]: brief,
-    '.claude/skills/_devkit/review-roots.mjs': readFileSync(reviewRootsHelper, 'utf8'),
+    ...Object.fromEntries(
+      SHARED_HELPERS.map((file) => [
+        `.claude/skills/_devkit/${file}`,
+        readFileSync(sharedHelperPath(file), 'utf8'),
+      ]),
+    ),
     [checklistScript(reviewer)]: script,
   };
   if (existsSync(skillMd))
@@ -110,7 +121,10 @@ export function benchGateHash(reviewer) {
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/runtime.mts'), 'utf8'),
-      readFileSync(reviewRootsHelper, 'utf8'),
+      // Every shared helper, for the same reason the checklist itself is hashed: it ships into the
+      // fixture and its edits change what the gate does, so a baseline earned under the old one is
+      // not comparable.
+      ...SHARED_HELPERS.map((file) => readFileSync(sharedHelperPath(file), 'utf8')),
       // This module IS the fixture layer (FIXTURE_CONFIG, buildAssets) — hash its own source so a
       // fixture-behavior edit can never be compared against an incompatible baseline.
       readFileSync(fileURLToPath(import.meta.url), 'utf8'),
