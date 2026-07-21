@@ -15,6 +15,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  dependencyRuntimeSourceFingerprint,
   discoverDependencySurfaces,
   materializeDependencyRuntime,
   verifyDependencyRuntime,
@@ -129,8 +130,13 @@ describe('private review dependency runtime', () => {
     const verified = spawnSync(process.execPath, [CLI, 'verify', source, manifest], {
       encoding: 'utf8',
     });
+    const fingerprint = spawnSync(process.execPath, [CLI, 'fingerprint', manifest], {
+      encoding: 'utf8',
+    });
 
     expect(verified.status, verified.stderr).toBe(0);
+    expect(fingerprint.status, fingerprint.stderr).toBe(0);
+    expect(fingerprint.stdout).toBe(dependencyRuntimeSourceFingerprint(manifest));
     expect(existsSync(join(source, 'node_modules/.cache/state'))).toBe(false);
   });
 
