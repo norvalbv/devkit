@@ -22,6 +22,7 @@ export const PLAN_CRITIQUE_INELIGIBLE_REASONS = [
   'aborted',
   'blocking_verdict',
   'critical_findings',
+  'unnecessary_recheck',
   'retry_limit_exceeded',
 ] as const;
 

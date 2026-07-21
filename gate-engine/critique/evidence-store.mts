@@ -172,7 +172,11 @@ function validateReviewedContract(record: PlanCritiqueRecordV1): void {
         ? { eligible: false as const, reason: 'critical_findings' as const }
         : record.lineage.pass > 2
           ? { eligible: false as const, reason: 'retry_limit_exceeded' as const }
-          : { eligible: true as const, reason: 'eligible' as const };
+          : record.lineage.pass === 2 &&
+              !contract.eligibility.eligible &&
+              contract.eligibility.reason === 'unnecessary_recheck'
+            ? { eligible: false as const, reason: 'unnecessary_recheck' as const }
+            : { eligible: true as const, reason: 'eligible' as const };
   requireValue(
     contract.eligibility.eligible === expectedEligibility.eligible &&
       contract.eligibility.reason === expectedEligibility.reason,
@@ -374,7 +378,9 @@ function validatePersistedParent(record: PlanCritiqueRecordV1, options: { root?:
     (parent.contract.verdict === 'RETHINK' ||
       parent.contract.verdict === 'REJECT' ||
       Number(parent.contract.criticalCount) > 0);
-  requireValue(recheckRequired, '$.lineage.parentCritiqueId');
+  if (record.contract.eligibility.eligible) requireValue(recheckRequired, '$.contract.eligibility');
+  if (record.contract.eligibility.reason === 'unnecessary_recheck')
+    requireValue(!recheckRequired, '$.contract.eligibility');
 }
 
 export function persistPlanCritiqueRecord(
