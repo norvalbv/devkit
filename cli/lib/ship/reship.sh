@@ -26,6 +26,13 @@ set -euo pipefail
 
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
+# The leading `--pr` above is the one flag-first spelling this script accepts. Any OTHER flag in a
+# positional slot is the same mistake wearing a different hat, so reject it here rather than let it
+# reach the remote check as a branch name.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-positional-args.sh"
+ship_assert_positional_args "$BR" "$TITLE" \
+  'ship --pr <branch> "<title>" [--body "<text>"] [--link <d>]... [--] <path...>'
+
 LINK_EXTRA=()
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
