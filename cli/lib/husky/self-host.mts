@@ -58,7 +58,9 @@ else
     # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
     FALLOW_BASE_ARGS=""
     [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-    command -v fallow >/dev/null 2>&1 && fallow audit $FALLOW_BASE_ARGS || true
+    # __dk_no_git_env: fallow's audit base-snapshot is itself a git worktree, and it has clobbered a
+    # ship worktree before (see commit-with-gate-capture.sh's worktree_head_clobbered banner).
+    command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
 fi
 # /devkit:fallow-advisory`;
 

@@ -23,3 +23,48 @@ export const JUDGE_ISOLATION = [
   '--no-session-persistence',
 ];
 export const JUDGE_READ_ONLY = ['--disallowedTools', '*'];
+
+// Git's per-repository environment. Git EXPORTS these into a hook's environment, and for a hook run
+// in a LINKED WORKTREE (which is exactly how `devkit ship` commits) the values are ABSOLUTE:
+//   GIT_DIR=<repo>/.git/worktrees/<name>   GIT_INDEX_FILE=<repo>/.git/worktrees/<name>/index
+// Every descendant inherits them — the gate chain, and the `claude` judges it spawns. A judge is an
+// agent with Bash + file tools that touches OTHER repositories (Claude Code refreshes its plugin
+// marketplace clones with git), and any git command it runs then reads/writes the SHIP WORKTREE's
+// index instead of its own. That is not hypothetical: it replaced a ship's staged diff with a
+// foreign 216-entry index, turning the pending commit into a whole-repo deletion.
+//
+// So a judge is spawned with these stripped. Nothing is lost: judges run with `cwd` inside the
+// worktree, where ordinary git discovery resolves the same repository and the same index through the
+// worktree's `.git` file — the env vars only ever override that resolution WRONGLY once the judge
+// steps outside.
+//
+// MUST stay identical to `_review_worktree_clear_git_env` in cli/lib/ship/review/worktrees.sh (the
+// same scrub, applied to `devkit review`'s worktree primitives). A test asserts the two lists match.
+export const GIT_ENV_VARS = [
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CONFIG',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE',
+  'GIT_GRAFT_FILE',
+  'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_PREFIX',
+  'GIT_SHALLOW_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_GLOB_PATHSPECS',
+  'GIT_NOGLOB_PATHSPECS',
+  'GIT_LITERAL_PATHSPECS',
+  'GIT_ICASE_PATHSPECS',
+] as const;
+
+/** A copy of `env` with every GIT_ENV_VARS name removed. Everything else is preserved verbatim. */
+export function withoutGitEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = { ...env };
+  for (const name of GIT_ENV_VARS) delete clean[name];
+  return clean;
+}
