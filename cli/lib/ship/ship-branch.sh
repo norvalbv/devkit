@@ -156,6 +156,7 @@ fi
 
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat — a piped/here-doc
 # body still works). Guard the TTY case: invoked interactively with no piped body, a bare `cat` would
 # block on terminal input. (Empty stdin already yields ""; no `|| true`, so a genuine read error
@@ -164,8 +165,17 @@ if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
 else BODY=$(cat); fi
 
+KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
-  rm -f "$PATCH"
+  rm -f "$PATCH" "$STAGED_STATE"
+  # A staged-set invariant fired. Removing the worktree would destroy the only copy of the bad index
+  # and leave nothing to diagnose from, so hand it to the operator instead (worktree AND branch).
+  if [ -n "$KEEP_WT" ]; then
+    echo "   Worktree KEPT for diagnosis: $WT (branch $BR)" >&2
+    echo "   Inspect: git --git-dir='$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null || echo "$WT/.git")' ls-files | head" >&2
+    echo "   Then:    git worktree remove --force '$WT' && git branch -D '$BR'" >&2
+    return
+  fi
   # Reclaim the ephemeral worktree + branch whenever no commit landed beyond BASE — the commit
   # failed, never ran, or was reset by the honest-banner abort in commit-with-gate-capture.sh,
   # leaving an empty branch + throwaway worktree with nothing to inspect or recover. This fires on
@@ -206,6 +216,11 @@ git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read
   git -C "$WT" add -- "$f"
 done
 
+# Snapshot the index the instant staging finishes — the two assertions below hold the gate chain to
+# it. See assert-staged-set.sh for the clobber this defends against.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
+ship_record_staged_state "$WT" "$STAGED_STATE"
+
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
 . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
 prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
@@ -224,7 +239,14 @@ link_untracked_gate_configs "$WT" "$ROOT"
 export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
 export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
+# Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
+# the operator pays for a multi-minute gate chain.
+ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
+# Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
+# GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before
+# anything leaves the machine — dry runs included, so the check is exercised on every ship path.
+ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
