@@ -422,6 +422,11 @@ function readManifest(path: string): DependencyRuntimeManifest {
   return manifest;
 }
 
+/** Stable source-topology salt for review caches; validates the complete private manifest first. */
+export function dependencyRuntimeSourceFingerprint(manifestPath: string): string {
+  return readManifest(manifestPath).sourceFingerprint;
+}
+
 /** Verify after hooks that the target checkout's dependency topology stayed frozen. */
 export function verifyDependencyRuntime(
   sourceRoot: string,
@@ -451,7 +456,7 @@ export function verifyDependencyRuntime(
 
 function usage(): never {
   return fail(
-    'usage: dependency-runtime materialize <source-root> <destination-root> <manifest-path> [baseline] | verify <source-root> <manifest-path>',
+    'usage: dependency-runtime materialize <source-root> <destination-root> <manifest-path> [baseline] | verify <source-root> <manifest-path> | fingerprint <manifest-path>',
   );
 }
 
@@ -469,6 +474,8 @@ function runCli(args: string[]): void {
     );
   } else if (args[0] === 'verify' && args.length === 3) {
     verifyDependencyRuntime(args[1] as string, args[2] as string);
+  } else if (args[0] === 'fingerprint' && args.length === 2) {
+    process.stdout.write(dependencyRuntimeSourceFingerprint(args[1] as string));
   } else usage();
 }
 
