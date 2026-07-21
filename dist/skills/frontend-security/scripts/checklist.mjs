@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolveReviewRoots, toGitPathspecs } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.frontend-security-review.json';
 
@@ -32,11 +33,15 @@ const RE_JWT = /\b(jwt|jsonwebtoken|expiresIn|decode|verify|sign)\b/i;
 const RE_OAUTH = /\b(oauth|authorize|redirect_uri|state|scope|grant_type)\b/i;
 const RE_HARDCODED = /\b(users|pass|key|secret|token)\s*[:=]\s*["'][^"']{8,}["']/i;
 const RE_DEBUG_LOG = /\bconsole\.(log|debug|info|warn|error)\s*\(/i;
+// Cross-origin messaging (coverage from OWASP ASVS v5 V3 — see SKILL.md Provenance).
+const RE_POSTMESSAGE =
+  /\bpostMessage\s*\(|addEventListener\s*\(\s*['"]message['"]|\bonmessage\s*=/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
-
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
 
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -44,35 +49,26 @@ const isStringArray = (v) =>
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function frontendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.frontendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  frontend-security: ignoring invalid `review.frontendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_FRONTEND_ROOTS',
+    configKey: 'frontendRoots',
+    reviewerName: 'frontend-security',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(frontendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...frontendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0 && !f.endsWith('.pen'));
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -159,6 +155,14 @@ function detectSecurityPatterns(_files, diffs) {
   }
   if (RE_WINDOW_OPEN.test(fullDiff)) {
     items.push({ name: 'window-open', category: 'XSS Prevention', status: 'pending', issues: [] });
+  }
+  if (RE_POSTMESSAGE.test(fullDiff)) {
+    items.push({
+      name: 'postmessage-origin',
+      category: 'Cross-Origin',
+      status: 'pending',
+      issues: [],
+    });
   }
   if (RE_EVAL.test(fullDiff)) {
     items.push({
@@ -315,6 +319,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed frontend security checklist');

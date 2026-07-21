@@ -21,6 +21,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import {
+  isNonEmptyStringArray,
+  normalizeReviewRoots,
+  parseInjectedReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
 
@@ -47,36 +53,47 @@ const lensPath = (lens) => (lens ? `.claude/.correctness-review-${lens}.json` : 
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
-
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
 // ANY repo's layout. No/unreadable config or no declared roots → all staged files (the gate
 // never silently no-ops). A PRESENT but invalid value warns loudly and is ignored (the other
 // roots still count), rather than crashing the git call into an empty pass-through.
 function unionRoots() {
+  // Injected roots are read BEFORE the config, and the config's failure paths fall through to `{}`
+  // rather than returning early. A review run carries its effective topology in the environment; the
+  // old order returned `['.']` the moment guard.config.json was missing or malformed, discarding an
+  // explicit injected scope and silently widening the reviewer to every staged file. The env is the
+  // more authoritative source here, so it must not be gated behind the less authoritative one.
+  // (resolveReviewRoots in _devkit/review-roots.mjs already orders it this way — this is the local
+  // union catching up to the shared helper.)
+  const injectedBackend = parseInjectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS');
+  const injectedFrontend = parseInjectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS');
   let c;
   try {
     c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
   } catch {
-    return ['.'];
+    c = {};
   }
-  if (!c || typeof c !== 'object') return ['.'];
+  if (!c || typeof c !== 'object') c = {};
   const review = typeof c.review === 'object' && c.review !== null ? c.review : {};
+  const backend = injectedBackend ?? review.backendRoots;
+  const frontend = injectedFrontend ?? review.frontendRoots;
   const roots = new Set();
   for (const [label, value] of [
     ['scanRoots', c.scanRoots],
-    ['review.backendRoots', review.backendRoots],
-    ['review.frontendRoots', review.frontendRoots],
+    ['review.backendRoots', backend],
+    ['review.frontendRoots', frontend],
   ]) {
     if (value === undefined) continue;
-    if (!isStringArray(value)) {
+    let normalized;
+    try {
+      normalized = normalizeReviewRoots(value, label);
+    } catch {
       console.error(
         `⚠️  correctness: ignoring invalid \`${label}\` in guard.config.json (expected an array of non-empty strings).`,
       );
       continue;
     }
-    for (const r of value) roots.add(r);
+    for (const root of normalized) roots.add(root);
   }
   return roots.size > 0 ? [...roots] : ['.'];
 }
@@ -85,7 +102,7 @@ function unionRoots() {
 function sourceExtensions() {
   try {
     const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-    if (isStringArray(c?.sourceExtensions)) return c.sourceExtensions;
+    if (isNonEmptyStringArray(c?.sourceExtensions)) return c.sourceExtensions;
   } catch {
     /* defaults stand */
   }
@@ -93,10 +110,11 @@ function sourceExtensions() {
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(unionRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...unionRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
     const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
@@ -224,6 +242,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(ACTIVE_PATH)) {
     unlinkSync(ACTIVE_PATH);
     log('🗑️  Removed correctness checklist');

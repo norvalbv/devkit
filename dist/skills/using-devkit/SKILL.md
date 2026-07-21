@@ -37,6 +37,7 @@ devkit command.
 | You observe (trigger) | Run | Why not the raw-git move |
 |---|---|---|
 | A commit was **denied on a protected branch**, or you're on `main`/`master` and need to land a change | `devkit ship <branch> "<title>" -- <paths>` | `git switch -c` + commit + push **moves the shared checkout's HEAD**, disturbing parallel agents; `ship` commits in an ephemeral worktree and opens a PR without moving HEAD |
+| The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship --base <base-branch> <branch> "<title>" -- <paths>` | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
 | You must **relocate or rename source files** and imports must follow | `devkit move <src...> <dest-dir>` | `git mv` leaves every `import`/`vi.mock`/dynamic-import pointing at the old path; `move` rewrites them all in the repo's alias style |
@@ -63,6 +64,14 @@ devkit command.
 - **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
   SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can
   be silently stripped by command-rewriting shell hooks — verify with `env | grep SHIP` if in doubt.
+- **A coverage block you didn't cause is not yours to fix — `export GUARD_COVERAGE_OK=1` and re-ship.**
+  If `devkit ship` fails on `guard-coverage` because the artifact is absent, or for a shortfall your
+  diff didn't cause, that is the BASE branch's debt. Export the flag (`GUARD_NO_COVERAGE=1` also
+  works), re-run the same ship, and note the bypass in the PR body. A shortfall your own change *did*
+  cause, you fix. Two dead ends to skip: editing `"coverage": false` in `guard.config.json` **silently
+  does nothing** under ship (it reads that file from the committed tree, not your working tree), and
+  re-running the full coverage suite to manufacture the artifact can take tens of minutes and still
+  produce nothing if the base's tests are already failing — don't idle on it.
 - **`devkit help <command>` is the source of truth for flags.** This skill routes you to the command;
   it deliberately does not restate usage.
 
