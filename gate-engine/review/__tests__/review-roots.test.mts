@@ -17,9 +17,12 @@ import {
   toGitPathspecs,
 } from '../../../skills/_devkit/review-roots.mjs';
 
-const ENV_KEYS = ['DEVKIT_RUN_MODE', 'DEVKIT_REVIEW_BACKEND_ROOTS'];
+// Save exactly the keys THIS call mutates, derived from the argument — not a hardcoded list. With a
+// fixed list, the first test to pass a key outside it (DEVKIT_REVIEW_FRONTEND_ROOTS, say) would set
+// that var and never restore it, leaking into every later test in the file. Deriving the set makes
+// the helper correct by construction for any key a future test reaches for.
 const withEnv = <T,>(env: Record<string, string | undefined>, fn: () => T): T => {
-  const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
   try {
     for (const [k, v] of Object.entries(env)) {
       if (v === undefined) delete process.env[k];
