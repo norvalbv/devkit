@@ -296,3 +296,77 @@ describe('skill checklist script (spawned source)', () => {
     expect(item.issues).toEqual([]); // the old fail reason must not survive the recovery pass
   });
 });
+
+// Every checklist selects files with `--diff-filter=ACM`, which drops deletions. A staged set that is
+// ENTIRELY deletions therefore renders as "nothing to review", and the reviewer waves the commit
+// through. That is how a clobbered ship index — a foreign tree staged as a whole-repo deletion —
+// reached the review gate reporting "no items" instead of blocking.
+describe('checklist scripts — a pure-deletion staged set is never reported as "no items"', () => {
+  // commit-guard names its build step `init`; every other checklist calls it `generate`.
+  const CASES = [
+    ['api-security', 'src', 'generate'],
+    ['backend-performance', 'src', 'generate'],
+    ['correctness', 'src', 'generate'],
+    ['frontend-security', 'src', 'generate'],
+    ['frontend-performance', 'src', 'generate'],
+    ['frontend-accessibility', 'src', 'generate'],
+    ['commit-guard', 'src', 'init'],
+  ];
+
+  /** A repo whose index stages ONLY deletions under `root` — the shape of a clobbered ship index. */
+  function repoWithDeletionOnlyIndex(root) {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-deletion-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    git(['config', 'user.email', 'a@b.c']);
+    git(['config', 'user.name', 'a']);
+    git(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: [root],
+        review: { backendRoots: [root], frontendRoots: [root] },
+      }),
+    );
+    mkdirSync(join(repo, root), { recursive: true });
+    writeFileSync(join(repo, root, 'doomed.tsx'), 'export const x = 1;\n');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'base']);
+    git(['rm', '-q', '--cached', '--', `${root}/doomed.tsx`]);
+    return repo;
+  }
+
+  it.each(CASES)('%s fails loudly rather than reporting zero items', (skill, root, cmd) => {
+    const repo = repoWithDeletionOnlyIndex(root);
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+    const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).not.toBe(0);
+    expect(r.stderr).toMatch(/pure deletions/);
+    expect(r.stderr).toMatch(/Refusing to report "no items"/);
+  });
+
+  it.each(CASES)('%s stays silent when the index is genuinely empty', (skill, root, cmd) => {
+    // The counterpart regression: nothing staged at all must remain an ordinary clean skip, or every
+    // commit with no in-scope changes starts failing.
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-empty-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        scanRoots: [root],
+        review: { backendRoots: [root], frontendRoots: [root] },
+      }),
+    );
+    const script = fileURLToPath(
+      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+    );
+    const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).toBe(0);
+    expect(r.stderr).not.toMatch(/pure deletions/);
+  });
+});
