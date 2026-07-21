@@ -11,7 +11,7 @@ describe('devkit help surface', () => {
   it('`--help` lists every command (derived from meta)', () => {
     const r = run(['--help']);
     expect(r.status).toBe(0);
-    for (const name of ['init', 'doctor', 'ship', 'reconcile', 'guard-branch']) {
+    for (const name of ['init', 'doctor', 'ship', 'review', 'reconcile', 'guard-branch']) {
       expect(r.stdout).toContain(`devkit ${name}`);
     }
   });
@@ -27,6 +27,15 @@ describe('devkit help surface', () => {
     const r = run(['reconcile', '--help']);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/devkit reconcile —/);
+  });
+
+  it('documents the review trust boundary and target/base options', () => {
+    const r = run(['review', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/devkit review —/);
+    expect(r.stdout).toContain('--target <path>');
+    expect(r.stdout).toContain('--base <ref>');
+    expect(r.stdout).toMatch(/trusted targets only/i);
   });
 
   it('`help <unknown>` errors and falls back to the top-level help (EC8)', () => {

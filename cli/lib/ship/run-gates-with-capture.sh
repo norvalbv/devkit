@@ -68,6 +68,12 @@ run_gates_with_capture() {
       echo "$label: could not hide private gate output capture" >&2
       return 1
     fi
+    # Let a review caller defer signal cleanup until the supervisor PID is publishable. Without
+    # this pre-arm, a signal between background spawn and review_gate_started can make the outer
+    # shell exit while the supervisor is still cleaning its detached gate group.
+    if declare -F review_gate_launching >/dev/null 2>&1; then
+      review_gate_launching
+    fi
     DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN="$ownership_token" \
       node "$supervisor" "$secs" -- "${cmd[@]}" >&8 2>&1 &
     supervisor_pid=$!
