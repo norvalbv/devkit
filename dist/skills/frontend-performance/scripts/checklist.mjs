@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { resolveReviewRoots, toGitPathspecs } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.frontend-performance-review.json';
 
@@ -31,11 +32,18 @@ const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
 const RE_DEPS = /\b(from\s+['"][^'"]+['"])/i;
+// Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
+// reads that force reflow, and animation of layout-affecting properties.
+const RE_LAYOUT_READ =
+  /\b(getBoundingClientRect|offsetWidth|offsetHeight|offsetTop|offsetLeft|clientWidth|clientHeight|scrollWidth|scrollHeight|getComputedStyle)\b/;
+const RE_ANIMATION =
+  /\b(transition|animation|animate|keyframes)\b[^;\n]{0,80}\b(top|left|right|bottom|width|height|margin|padding)\b|\b(top|left|width|height)\b[^;\n]{0,40}\b(transition|animation)\b/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
-
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
 
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -43,35 +51,26 @@ const isStringArray = (v) =>
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function frontendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.frontendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  frontend-performance: ignoring invalid `review.frontendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_FRONTEND_ROOTS',
+    configKey: 'frontendRoots',
+    reviewerName: 'frontend-performance',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(frontendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...frontendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0 && !f.endsWith('.pen'));
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -121,6 +120,17 @@ function detectPerformancePatterns(files, diffs) {
   }
   if (RE_IFRAME.test(fullDiff)) {
     items.push({ name: 'iframe-usage', category: 'High Priority', status: 'pending', issues: [] });
+  }
+  if (RE_LAYOUT_READ.test(fullDiff)) {
+    items.push({ name: 'layout-thrash', category: 'High Priority', status: 'pending', issues: [] });
+  }
+  if (RE_ANIMATION.test(fullDiff)) {
+    items.push({
+      name: 'animation-performance',
+      category: 'Medium Priority',
+      status: 'pending',
+      issues: [],
+    });
   }
   if (RE_COMPONENT.test(fullDiff)) {
     items.push({
@@ -288,6 +298,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed frontend performance checklist');
