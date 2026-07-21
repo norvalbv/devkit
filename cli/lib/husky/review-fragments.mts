@@ -1,5 +1,21 @@
 /** Shell fragments shared by package, standalone, overlay, and self-host review hooks. */
 
+import { GIT_ENV_VARS } from '../../../gate-engine/judge/judge-isolation.mts';
+
+// Run a gate with git's per-repository environment stripped. Git EXPORTS GIT_DIR/GIT_INDEX_FILE into
+// every hook, and for a hook run in a LINKED WORKTREE — how `devkit ship` commits — those values are
+// ABSOLUTE paths into the ship worktree's admin dir. They are inherited by every descendant, so any
+// gate (or tool a gate spawns) that runs git against a DIFFERENT repository writes that repository's
+// index over the ship's staged diff. See GIT_ENV_VARS for the incident this prevents.
+//
+// Scrubbed per-invocation with `env -u` rather than a block-level `unset`: the overlay hook `exec`s
+// the consumer's own pre-commit afterwards, and that hook must still receive git's stock environment.
+// Gates themselves lose nothing — they run at the worktree root, where ordinary git discovery
+// resolves the same repository through the worktree's `.git` file.
+export const DK_NO_GIT_ENV_HELPER = `__dk_no_git_env() {
+    env ${GIT_ENV_VARS.map((name) => `-u ${name}`).join(' \\\n        ')} "$@"
+}`;
+
 // Review mode has its own positive guard allowlist. Normal commit/ship runs select everything in
 // the generated hook; review runs only ids named by DEVKIT_REVIEW_GUARDS.
 export const DK_GATE_SELECTED_HELPER = `__dk_gate_selected() {
@@ -13,6 +29,11 @@ export const DK_GATE_SELECTED_HELPER = `__dk_gate_selected() {
         *) return 1 ;;
     esac
 }`;
+
+// The helper pair every hook flavour (package, standalone, overlay, self-host) opens its gate region
+// with, in emit order. Spread as one unit so a new shared helper reaches all four builders at once —
+// and so none of them can drift into emitting a gate whose helper was never defined.
+export const DK_HOOK_HELPERS = [DK_GATE_SELECTED_HELPER, DK_NO_GIT_ENV_HELPER];
 
 export function selectedFragment(id: string, fragment: string): string {
   return `if __dk_gate_selected ${id}; then

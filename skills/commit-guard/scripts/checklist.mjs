@@ -17,7 +17,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { resolveConfigRoots, toGitPathspecs } from '../../_devkit/review-roots.mjs';
+import {
+  assertStagedSetSane,
+  resolveConfigRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.pre-commit-review.json';
 
@@ -31,19 +35,16 @@ function scanRoots() {
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(scanRoots());
   try {
     const output = execFileSync(
       'git',
-      [
-        'diff',
-        '--cached',
-        '--name-only',
-        '--diff-filter=ACM',
-        '--',
-        ...toGitPathspecs(scanRoots()),
-      ],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'commit-guard');
     return output
       .trim()
       .split('\n')
