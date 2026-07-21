@@ -85,6 +85,10 @@ const invalid = (at: string): never => {
   throw new Error(`invalid plan critique record: ${at}`);
 };
 
+export function assertPlanCritiqueRecordValue(condition: unknown, at: string): asserts condition {
+  if (!condition) invalid(at);
+}
+
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
 const typedArrayByteLength = Object.getOwnPropertyDescriptor(
   typedArrayPrototype,

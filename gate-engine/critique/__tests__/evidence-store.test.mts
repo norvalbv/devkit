@@ -10,6 +10,7 @@ import {
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
+import { canonicalPlanCritiqueRecordJson } from '../evidence-record.mts';
 import {
   derivePlanCritiqueId,
   listPlanCritiqueRecords,
@@ -175,19 +176,104 @@ describe('plan critique evidence store', () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
-  it('rejects a changed record that maps to the same deterministic callback id', () => {
+  it('returns the first stored record when one callback is replayed with new capture metadata', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const record = recordFor(exact);
+    persistPlanCritiqueRecord(record, { exactResponse: exact }, { root });
+    const replay = structuredClone(record);
+    replay.timestamps.capturedAt = '2026-07-19T01:02:04.000Z';
+    replay.lineage = { pass: 2, parentCritiqueId: record.critiqueId };
+    replay.contract.eligibility = { eligible: false, reason: 'unnecessary_recheck' };
+    replay.critiqueId = derivePlanCritiqueId(replay);
+
+    expect(replay.critiqueId).not.toBe(record.critiqueId);
+    expect(persistPlanCritiqueRecord(replay, { exactResponse: exact }, { root })).toEqual({
+      state: 'existing',
+      record,
+    });
+    expect(listPlanCritiqueRecords({ root })).toEqual([record]);
+  });
+
+  it('rejects callback replays that change work identity', () => {
     const root = temporaryRoot();
     const exact = bytes('{}');
     const record = recordFor(exact);
     persistPlanCritiqueRecord(record, { exactResponse: exact }, { root });
     const conflict = structuredClone(record);
-    conflict.timestamps.capturedAt = '2026-07-19T01:02:04.000Z';
+    conflict.workId = 'other-work';
+    conflict.critiqueId = derivePlanCritiqueId(conflict);
+
     expect(() => persistPlanCritiqueRecord(conflict, { exactResponse: exact }, { root })).toThrow(
-      /immutable conflict/,
+      /callback identity conflict/,
+    );
+    expect(listPlanCritiqueRecords({ root })).toEqual([record]);
+  });
+
+  it('keeps callback identity authoritative when a durable blob is missing', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const record = recordFor(exact);
+    persistPlanCritiqueRecord(record, { exactResponse: exact }, { root });
+    unlinkSync(path.join(root, record.exactResponse.ref));
+    expect(readPlanCritiqueRecord(record.critiqueId, { root })).toBeNull();
+
+    const conflict = structuredClone(record);
+    conflict.workId = 'other-work';
+    conflict.critiqueId = derivePlanCritiqueId(conflict);
+    expect(() => persistPlanCritiqueRecord(conflict, { exactResponse: exact }, { root })).toThrow(
+      /callback identity conflict/,
+    );
+    expect(readdirSync(path.join(root, 'blobs', 'sha256'))).not.toContain(
+      record.exactResponse.sha256,
+    );
+    expect(listPlanCritiqueRecords({ root })).toEqual([]);
+  });
+
+  it('repairs matching missing blobs on an identical callback replay', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const projection = bytes('{"safe":true}');
+    const record = recordFor(exact, { projection });
+    persistPlanCritiqueRecord(
+      record,
+      { exactResponse: exact, sanitizedProjection: projection },
+      { root },
+    );
+    if (!record.sanitizedProjection) throw new Error('fixture is incomplete');
+    unlinkSync(path.join(root, record.exactResponse.ref));
+    unlinkSync(path.join(root, record.sanitizedProjection.ref));
+
+    expect(readPlanCritiqueRecord(record.critiqueId, { root })).toBeNull();
+    expect(
+      persistPlanCritiqueRecord(
+        record,
+        { exactResponse: exact, sanitizedProjection: projection },
+        { root },
+      ).state,
+    ).toBe('existing');
+    expect(readPlanCritiqueRecord(record.critiqueId, { root })).toEqual(record);
+    expect(readPlanCritiqueProjection(record.critiqueId, { root })).toEqual(
+      Buffer.from(projection),
     );
   });
 
-  it('does not publish a new blob before rejecting a deterministic-id conflict', () => {
+  it('treats malformed durable blob entries as unreadable', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const record = recordFor(exact);
+    persistPlanCritiqueRecord(record, { exactResponse: exact }, { root });
+    const blob = path.join(root, record.exactResponse.ref);
+    const outside = path.join(path.dirname(root), 'outside-blob');
+    writeFileSync(outside, exact, { mode: 0o600 });
+    unlinkSync(blob);
+    symlinkSync(outside, blob);
+
+    expect(readPlanCritiqueRecord(record.critiqueId, { root })).toBeNull();
+    expect(listPlanCritiqueRecords({ root })).toEqual([]);
+  });
+
+  it('does not publish a new blob before rejecting a callback response conflict', () => {
     const root = temporaryRoot();
     const original = bytes('original');
     const record = recordFor(original);
@@ -200,12 +286,55 @@ describe('plan critique evidence store', () => {
     expect(conflict.critiqueId).toBe(record.critiqueId);
     expect(() =>
       persistPlanCritiqueRecord(conflict, { exactResponse: replacement }, { root }),
-    ).toThrow(/immutable conflict/);
+    ).toThrow(/callback identity conflict/);
 
     expect(readdirSync(path.join(root, 'blobs', 'sha256')).sort()).toEqual(before);
     expect(readPlanCritiqueExactResponse(conflict.critiqueId, { root })).toEqual(
       Buffer.from(original),
     );
+  });
+
+  it('keeps callback identities isolated by provider and repository', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const first = recordFor(exact);
+    persistPlanCritiqueRecord(first, { exactResponse: exact }, { root });
+
+    const otherProvider = structuredClone(first);
+    otherProvider.execution.provider = 'claude';
+    otherProvider.critiqueId = derivePlanCritiqueId(otherProvider);
+    expect(persistPlanCritiqueRecord(otherProvider, { exactResponse: exact }, { root }).state).toBe(
+      'created',
+    );
+
+    const otherRepository = structuredClone(first);
+    otherRepository.repository.fingerprint = sha256Bytes(bytes('other-repository'));
+    otherRepository.critiqueId = derivePlanCritiqueId(otherRepository);
+    expect(
+      persistPlanCritiqueRecord(otherRepository, { exactResponse: exact }, { root }).state,
+    ).toBe('created');
+    expect(listPlanCritiqueRecords({ root })).toHaveLength(3);
+  });
+
+  it('fails closed when historical records make one callback identity ambiguous', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const first = recordFor(exact);
+    persistPlanCritiqueRecord(first, { exactResponse: exact }, { root });
+
+    const historicalDuplicate = structuredClone(first);
+    historicalDuplicate.workId = 'historical-work';
+    historicalDuplicate.critiqueId = derivePlanCritiqueId(historicalDuplicate);
+    writeFileSync(
+      path.join(root, 'records', `${historicalDuplicate.critiqueId}.json`),
+      canonicalPlanCritiqueRecordJson(historicalDuplicate),
+      { mode: 0o600 },
+    );
+
+    expect(() => persistPlanCritiqueRecord(first, { exactResponse: exact }, { root })).toThrow(
+      /ambiguous plan critique callback identity/,
+    );
+    expect(listPlanCritiqueRecords({ root })).toHaveLength(2);
   });
 
   it('rejects mismatched ids, hashes, refs, and optional payload presence', () => {

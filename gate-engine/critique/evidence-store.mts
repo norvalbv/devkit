@@ -13,10 +13,19 @@ import {
   type PlanCritiqueBlobPayloadsV1,
   type PlanCritiqueBlobSnapshotsV1,
   type PlanCritiqueRecordV1,
+  assertPlanCritiqueRecordValue as requireValue,
   type Sha256,
   sha256Bytes,
   snapshotPlanCritiquePayloads,
 } from './evidence-record.mts';
+import {
+  hasDurableRecordBlobs,
+  matchingStoredPayload,
+  publishBlobSnapshots,
+  readStoredBlob,
+  selectExistingCallback,
+  validatePersistedParent,
+} from './evidence-store-internal.mts';
 import {
   listPrivateFiles,
   managedPath,
@@ -47,9 +56,6 @@ const MAX_METADATA_BYTES = 4 * 1024;
 const MAX_CRITICAL_FINDINGS = 50;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
-function requireValue(condition: unknown, at: string): asserts condition {
-  if (!condition) throw new Error(`invalid plan critique record: ${at}`);
-}
 function exactObject(
   value: unknown,
   fields: readonly string[],
@@ -361,28 +367,6 @@ function validateRecord(value: unknown): asserts value is PlanCritiqueRecordV1 {
   validateContract(record);
 }
 
-function validatePersistedParent(record: PlanCritiqueRecordV1, options: { root?: string }): void {
-  if (record.lineage.pass === 1) return;
-  const parentId = record.lineage.parentCritiqueId as string;
-  const parent = readPlanCritiqueRecord(parentId, options);
-  requireValue(parent !== null, '$.lineage.parentCritiqueId');
-  requireValue(parent.lineage.pass + 1 === record.lineage.pass, '$.lineage.pass');
-  requireValue(parent.workId === record.workId, '$.lineage.parentCritiqueId');
-  requireValue(
-    parent.repository.fingerprint === record.repository.fingerprint,
-    '$.lineage.parentCritiqueId',
-  );
-  const recheckRequired =
-    parent.contract.state === 'valid' &&
-    parent.contract.status === 'reviewed' &&
-    (parent.contract.verdict === 'RETHINK' ||
-      parent.contract.verdict === 'REJECT' ||
-      Number(parent.contract.criticalCount) > 0);
-  if (record.contract.eligibility.eligible) requireValue(recheckRequired, '$.contract.eligibility');
-  if (record.contract.eligibility.reason === 'unnecessary_recheck')
-    requireValue(!recheckRequired, '$.contract.eligibility');
-}
-
 export function persistPlanCritiqueRecord(
   record: PlanCritiqueRecordV1,
   payloads: PlanCritiqueBlobPayloadsV1,
@@ -394,7 +378,33 @@ export function persistPlanCritiqueRecord(
   const publish = (
     canonicalRoot: string,
   ): { state: 'created' | 'existing'; record: PlanCritiqueRecordV1 } => {
-    validatePersistedParent(record, { root: canonicalRoot });
+    const existing = selectExistingCallback(
+      record,
+      listPlanCritiqueRecordMetadata({ root: canonicalRoot }),
+    );
+    if (existing) {
+      publishBlobSnapshots(canonicalRoot, {
+        exactResponse: snapshots.exactResponse,
+        sanitizedProjection: matchingStoredPayload(
+          existing.sanitizedProjection,
+          snapshots.sanitizedProjection,
+        ),
+        opaqueTranscript: matchingStoredPayload(
+          existing.opaqueTranscript,
+          snapshots.opaqueTranscript,
+        ),
+      });
+      if (!hasDurableRecordBlobs(existing, { root: canonicalRoot }))
+        throw new Error('plan critique callback evidence is incomplete');
+      return { state: 'existing', record: existing };
+    }
+    const parent =
+      record.lineage.pass === 1
+        ? null
+        : readPlanCritiqueRecord(record.lineage.parentCritiqueId as string, {
+            root: canonicalRoot,
+          });
+    validatePersistedParent(record, parent);
     const records = managedPath(canonicalRoot, ['records'], true) as string;
     const recordName = `${record.critiqueId}.json`;
     const recordContent = Buffer.from(canonicalPlanCritiqueRecordJson(record));
@@ -402,31 +412,23 @@ export function persistPlanCritiqueRecord(
       readPrivateFile(records, recordName) === null
         ? undefined
         : publishImmutable(records, recordName, recordContent);
-    const blobs = managedPath(canonicalRoot, ['blobs', 'sha256'], true) as string;
-    for (const payload of [
-      snapshots.exactResponse,
-      snapshots.sanitizedProjection,
-      snapshots.opaqueTranscript,
-    ])
-      if (payload) publishImmutable(blobs, sha256Bytes(payload), payload);
+    publishBlobSnapshots(canonicalRoot, snapshots);
     state ??= publishImmutable(records, recordName, recordContent);
     return { state, record };
   };
   return withPlanCritiquePersistenceLock(options, publish);
 }
 
-function readStoredBlob(ref: BlobRefV1, options: { root?: string }): Buffer | null {
-  validateRef({ sha256: ref.sha256, byteLength: ref.byteLength, ref: ref.ref }, '$.blob');
-  const base = resolvePlanCritiqueEvidenceRoot(options, false);
-  const blobs = base && managedPath(base, ['blobs', 'sha256'], false);
-  if (!blobs) return null;
-  const value = readPrivateFile(blobs, ref.sha256);
-  return value && value.byteLength === ref.byteLength && sha256Bytes(value) === ref.sha256
-    ? value
-    : null;
+export function readPlanCritiqueRecord(
+  critiqueId: string,
+  options: { root?: string } = {},
+): PlanCritiqueRecordV1 | null {
+  const record = readPlanCritiqueRecordMetadata(critiqueId, options);
+  if (!record) return null;
+  return hasDurableRecordBlobs(record, options) ? record : null;
 }
 
-export function readPlanCritiqueRecord(
+function readPlanCritiqueRecordMetadata(
   critiqueId: string,
   options: { root?: string } = {},
 ): PlanCritiqueRecordV1 | null {
@@ -441,13 +443,20 @@ export function readPlanCritiqueRecord(
     validateRecord(record);
     const canonical = Buffer.from(canonicalPlanCritiqueRecordJson(record));
     if (record.critiqueId !== critiqueId || !raw.equals(canonical)) return null;
-    const durableRefs = [record.exactResponse, record.sanitizedProjection];
-    return durableRefs.every((ref) => ref === null || readStoredBlob(ref, options) !== null)
-      ? record
-      : null;
+    return record;
   } catch {
     return null;
   }
+}
+
+function listPlanCritiqueRecordMetadata(options: { root?: string } = {}): PlanCritiqueRecordV1[] {
+  const base = resolvePlanCritiqueEvidenceRoot(options, false);
+  const records = base && managedPath(base, ['records'], false);
+  if (!records) return [];
+  return listPrivateFiles(records)
+    .filter((name) => RECORD_FILE.test(name))
+    .map((name) => readPlanCritiqueRecordMetadata(name.slice(0, -5), options))
+    .filter((record): record is PlanCritiqueRecordV1 => record !== null);
 }
 
 export function readPlanCritiqueExactResponse(
@@ -479,11 +488,7 @@ export function readPlanCritiqueTranscript(
 }
 
 export function listPlanCritiqueRecords(options: { root?: string } = {}): PlanCritiqueRecordV1[] {
-  const base = resolvePlanCritiqueEvidenceRoot(options, false);
-  const records = base && managedPath(base, ['records'], false);
-  if (!records) return [];
-  return listPrivateFiles(records)
-    .filter((name) => RECORD_FILE.test(name))
-    .map((name) => readPlanCritiqueRecord(name.slice(0, -5), options))
-    .filter((record): record is PlanCritiqueRecordV1 => record !== null);
+  return listPlanCritiqueRecordMetadata(options).filter((record) =>
+    hasDurableRecordBlobs(record, options),
+  );
 }
