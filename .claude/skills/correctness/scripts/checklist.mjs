@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
+  assertStagedSetSane,
   isNonEmptyStringArray,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
@@ -117,6 +118,9 @@ function getStagedFiles() {
       ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'correctness');
     const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
     return output
       .trim()

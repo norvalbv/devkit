@@ -72,12 +72,20 @@ git fetch origin "$BR" 2>/dev/null || {
 BASE=$(git rev-parse FETCH_HEAD)
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
 else BODY=$(cat); fi
 
+KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
+  rm -f "$STAGED_STATE"
+  if [ -n "$KEEP_WT" ]; then
+    echo "   Worktree KEPT for diagnosis: $WT" >&2
+    echo "   Then: git worktree remove --force '$WT'" >&2
+    return
+  fi
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -101,6 +109,11 @@ done
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothing to re-push" >&2; exit 1; }
 
+# Snapshot the index the instant staging finishes — the assertions around the commit hold the gate
+# chain to it. See assert-staged-set.sh for the clobber this defends against.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
+ship_record_staged_state "$WT" "$STAGED_STATE"
+
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
 . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
 prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
@@ -118,7 +131,11 @@ link_untracked_gate_configs "$WT" "$ROOT"
 export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
+# Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
+# anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
+ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
+ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally onto $BR (worktree $WT), skipped push." >&2
