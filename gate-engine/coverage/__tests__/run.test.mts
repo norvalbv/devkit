@@ -1,13 +1,14 @@
 /**
  * The coverage gate (gate-engine/coverage/run.mts). Two load-bearing properties: it is FAIL-CLOSED
  * (a selected gate with no coverage artifact exits 1 — never a silent pass), and it enforces only the
- * threshold KEYS a consumer configured. `coverage: false` is the sole bypass. Also covers the
+ * threshold KEYS a consumer configured. Two bypasses, both explicit: `coverage: false` (repo-wide)
+ * and GUARD_COVERAGE_OK / GUARD_NO_COVERAGE (per-run operator assertion). Also covers the
  * istanbul/V8 aggregation math (statements/functions/branches/lines) in computePercentages.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { computePercentages, runCoverage } from '../run.mts';
 
@@ -17,7 +18,26 @@ const makeRoot = () => {
   roots.push(root);
   return root;
 };
+
+// Every spelling the bypass answers to, incl. the FRINK_* back-compat aliases envVar() falls back to.
+// Snapshot + restore around each test: a leaked GUARD_COVERAGE_OK would turn every fail-closed
+// assertion in this file into a false green — the exact defect the gate exists to prevent.
+const ENV_KEYS = [
+  'GUARD_COVERAGE_OK',
+  'GUARD_NO_COVERAGE',
+  'FRINK_COVERAGE_OK',
+  'FRINK_NO_COVERAGE',
+];
+let savedEnv: Record<string, string | undefined> = {};
+beforeEach(() => {
+  savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of ENV_KEYS) delete process.env[k];
+});
 afterEach(() => {
+  for (const [k, v] of Object.entries(savedEnv)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots = [];
   vi.restoreAllMocks();
@@ -163,6 +183,85 @@ describe('runCoverage — fail-closed gate', () => {
       join(root, 'coverage', 'coverage-final.json'),
       JSON.stringify({ '/x/a.ts': null }),
     );
+    expect(runCoverage(root)).toBe(1);
+  });
+
+  // Every blocking arm must NAME the per-run escape. A gate that blocks without printing its own
+  // knob is what cornered six field ship attempts into fixing out-of-scope debt or leaving devkit.
+  it.each([
+    ['absent artifact', (root: string) => writeConfig(root, {})],
+    [
+      'malformed artifact',
+      (root: string) => {
+        mkdirSync(join(root, 'coverage'), { recursive: true });
+        writeFileSync(join(root, 'coverage', 'coverage-final.json'), '{ not json');
+      },
+    ],
+    [
+      'threshold shortfall',
+      (root: string) => {
+        writeConfig(root, { coverage: { statements: 60 } });
+        writeCoverage(root, COV);
+      },
+    ],
+  ])('the %s failure prints the GUARD_COVERAGE_OK remedy', (_label, setup) => {
+    const root = makeRoot();
+    setup(root);
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toMatch(/export GUARD_COVERAGE_OK=1/);
+  });
+
+  it('the absent-artifact arm warns that a local "coverage": false is ignored by ship', () => {
+    // The pre-fix text advised `coverage: false` unconditionally; under ship that silently no-ops
+    // (the worktree reads the COMMITTED config), which burned a user-approved bypass in the field.
+    const root = makeRoot();
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).toMatch(/reads that file from the COMMITTED tree/);
+  });
+});
+
+describe('runCoverage — GUARD_COVERAGE_OK per-run bypass', () => {
+  it.each([
+    'GUARD_COVERAGE_OK',
+    'GUARD_NO_COVERAGE',
+  ])('%s=1 + NO artifact → exit 0 (the field case: base debt, absent coverage data)', (key) => {
+    const root = makeRoot();
+    process.env[key] = '1';
+    const s = spy();
+    expect(runCoverage(root)).toBe(0);
+    expect(text(s.log)).toMatch(/BYPASSED/);
+    // Must NOT read as the repo-wide opt-out — a log reader has to tell the two apart.
+    expect(text(s.log)).not.toMatch(/guard\.config\.json/);
+  });
+
+  it('bypasses a real threshold shortfall too', () => {
+    const root = makeRoot();
+    writeConfig(root, { coverage: { statements: 99 } });
+    writeCoverage(root, COV);
+    process.env.GUARD_COVERAGE_OK = '1';
+    expect(runCoverage(root)).toBe(0);
+  });
+
+  it('is read BEFORE resolveGuardConfig — a malformed guard.config.json cannot defeat it', () => {
+    const root = makeRoot();
+    writeFileSync(join(root, 'guard.config.json'), '{ not json');
+    expect(() => runCoverage(root)).toThrow(); // control: without the flag the bad config throws
+    process.env.GUARD_COVERAGE_OK = '1';
+    expect(runCoverage(root)).toBe(0);
+  });
+
+  // envFlag's falsey set. `=0` must NOT bypass, or a habitual `GUARD_COVERAGE_OK=0` reads as "off"
+  // to a human while silently disabling the gate.
+  it.each(['0', 'false', 'no', ''])('=%s does NOT bypass — the gate still blocks', (v) => {
+    const root = makeRoot();
+    process.env.GUARD_COVERAGE_OK = v;
+    expect(runCoverage(root)).toBe(1);
+  });
+
+  it('unset → the fail-closed contract is untouched', () => {
+    const root = makeRoot();
     expect(runCoverage(root)).toBe(1);
   });
 });
