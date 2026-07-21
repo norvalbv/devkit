@@ -10,6 +10,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,7 @@ import {
   managedPath,
   publishImmutable,
   readPrivateFile,
+  readPrivateFileBounded,
 } from '../immutable-file.mts';
 
 const scratchRoots: string[] = [];
@@ -115,6 +117,55 @@ describe('immutable private files', () => {
     expect(before.mode & 0o777).toBe(0o600);
     expect(publishImmutable(directory, 'record', content)).toBe('existing');
     expect(lstatSync(path.join(directory, 'record')).ino).toBe(before.ino);
+  });
+
+  it('bounds private reads before consuming oversized files', () => {
+    const anchor = temporaryRoot();
+    const directory = managedPath(anchor, ['records'], true) as string;
+    const exact = Buffer.from('four');
+    publishImmutable(directory, 'exact', exact);
+    publishImmutable(directory, 'empty', Buffer.alloc(0));
+
+    expect(readPrivateFileBounded(directory, 'exact', exact.length)).toEqual(exact);
+    expect(readPrivateFileBounded(directory, 'empty', 0)).toEqual(Buffer.alloc(0));
+    expect(readPrivateFileBounded(directory, 'missing', exact.length)).toBeNull();
+    expect(() => readPrivateFileBounded(directory, 'exact', exact.length - 1)).toThrow(
+      /exceeds 3 bytes/,
+    );
+
+    const oversized = path.join(directory, 'oversized');
+    writeFileSync(oversized, '', { mode: 0o600 });
+    truncateSync(oversized, 64 * 1024 * 1024);
+    expect(() => readPrivateFileBounded(directory, 'oversized', 8)).toThrow(/exceeds 8 bytes/);
+
+    const visible = path.join(directory, 'visible');
+    writeFileSync(visible, 'visible', { mode: 0o600 });
+    chmodSync(visible, 0o644);
+    expect(() => readPrivateFileBounded(directory, 'visible', 8)).toThrow(/not private/);
+
+    symlinkSync(path.join(directory, 'exact'), path.join(directory, 'linked'));
+    mkdirSync(path.join(directory, 'nested'));
+    expect(() => readPrivateFileBounded(directory, 'linked', 8)).toThrow(/symlink/);
+    expect(() => readPrivateFileBounded(directory, 'nested', 8)).toThrow(/not a file/);
+    for (const invalid of [-1, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => readPrivateFileBounded(directory, 'exact', invalid)).toThrow(
+        /invalid maximum read size/,
+      );
+    }
+  });
+
+  it('publishes mode 0600 files under a restrictive process umask', () => {
+    const anchor = temporaryRoot();
+    const directory = managedPath(anchor, ['records'], true) as string;
+    managedPath(directory, ['.pending'], true);
+    const previousUmask = process.umask(0o200);
+    try {
+      expect(publishImmutable(directory, 'record', Buffer.from('private'))).toBe('created');
+      expect(lstatSync(path.join(directory, 'record')).mode & 0o777).toBe(0o600);
+      expect(publishImmutable(directory, 'record', Buffer.from('private'))).toBe('existing');
+    } finally {
+      process.umask(previousUmask);
+    }
   });
 
   it('rejects conflicts and non-private existing destinations without replacing bytes', () => {
