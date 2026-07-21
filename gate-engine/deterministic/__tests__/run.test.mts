@@ -10,6 +10,8 @@ afterEach(() => {
   delete process.env.DEVKIT_RUN_MODE;
   delete process.env.DEVKIT_REVIEW_GUARDS;
   delete process.env.DEVKIT_SHIP;
+  delete process.env.GUARD_COVERAGE_OK;
+  delete process.env.GUARD_NO_COVERAGE;
   vi.restoreAllMocks();
 });
 
@@ -280,5 +282,34 @@ describe('prefixCacheScope', () => {
     expect(prefixCacheScope(undefined, ['size', 'fanout'])).toBe(
       'devkit-guards:review:size,fanout',
     );
+  });
+
+  // THE anti-laundering property. Without the salt a GUARD_COVERAGE_OK ship records an all-green key
+  // that a later un-bypassed ship of the identical tree would HIT — skipping every gate, so coverage
+  // never runs again. The two runs must never share a key.
+  it.each([
+    'GUARD_COVERAGE_OK',
+    'GUARD_NO_COVERAGE',
+  ])('%s salts the scope away from a clean run', (key) => {
+    const cleanDefault = prefixCacheScope();
+    const cleanCustom = prefixCacheScope('custom');
+    process.env[key] = '1';
+    expect(prefixCacheScope()).toBe('devkit-guards:coverage-bypassed');
+    expect(prefixCacheScope('custom')).toBe('custom:coverage-bypassed');
+    expect(prefixCacheScope()).not.toBe(cleanDefault);
+    expect(prefixCacheScope('custom')).not.toBe(cleanCustom);
+  });
+
+  it('composes with the review salt rather than replacing it', () => {
+    process.env.DEVKIT_RUN_MODE = 'review';
+    process.env.DEVKIT_REVIEW_GUARDS = 'size';
+    process.env.GUARD_COVERAGE_OK = '1';
+    expect(prefixCacheScope()).toBe('devkit-guards:review:size:coverage-bypassed');
+  });
+
+  it('a falsey value leaves the scope unsalted (envFlag semantics)', () => {
+    process.env.GUARD_COVERAGE_OK = '0';
+    expect(prefixCacheScope()).toBeUndefined();
+    expect(prefixCacheScope('custom')).toBe('custom');
   });
 });

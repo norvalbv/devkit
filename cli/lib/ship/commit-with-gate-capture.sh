@@ -144,7 +144,10 @@ commit_with_gate_capture() {
     fi
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
-      echo "  Review it for any SKIP / ⚠️ lines (e.g. coverage is NOT gated in the ship worktree)."
+      # Was: "(e.g. coverage is NOT gated in the ship worktree)" — false since prepare-gate-worktree.sh
+      # started linking coverage/ in, and it taught agents the exact opposite of the gate they were
+      # fighting. Point at the real thing a reader must not miss: a gate that PASSED by bypass.
+      echo "  Review it for any SKIP / BYPASSED / ⚠️ lines — a bypassed gate verified nothing."
     } >&2
   elif [ "$head_clobbered" -eq 1 ]; then
     # Reuses the SAME evidence-checked verdict as the telemetry above — never a second independent

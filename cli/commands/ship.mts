@@ -31,6 +31,15 @@ Usage:
 
 Env:
   SHIP_DRY_RUN=1      Commit locally in the worktree; skip push + PR (preview).
+  GUARD_COVERAGE_OK=1 Ship without verified coverage, for THIS run only (alias: GUARD_NO_COVERAGE=1).
+                      For when the BASE branch already fails the coverage gate and your diff didn't
+                      cause it — the gate logs a loud BYPASSED line instead of blocking, and the
+                      bypass is recorded in telemetry. A shortfall your own change caused, fix.
+                      Prefer \`export GUARD_COVERAGE_OK=1\` on its own line: an inline
+                      \`GUARD_COVERAGE_OK=1 devkit ship …\` prefix can be stripped by
+                      command-rewriting shell hooks (same caveat as SHIP_COMMIT_TIMEOUT).
+                      Editing "coverage": false in guard.config.json does NOT work here — ship reads
+                      that file from the committed tree, so a local-only edit is silently ignored.
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
 that lands but fails to push KEEPS the branch (recovery line on stderr); a commit that never lands
