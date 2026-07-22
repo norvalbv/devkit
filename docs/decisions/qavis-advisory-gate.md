@@ -26,3 +26,4 @@ created: 2026-07-07
 **Scope:** gate-engine/qavis-advisory/**,cli/lib/husky/husky-block.mts,cli/lib/components.mts
 
 **Source:** collab · qavis-advisory
+- 2026-07-22 — Fail-open stays exit 0 but is now LOUD: when the advisory cannot run, the gate prints one stderr line naming WHY (qavis not on PATH / route failed / unparseable verdict) instead of returning a bare null that read exactly like SILENT. defaultRoute now returns a RouteResult whose null arm carries the reason, so there is one printer and no detail is discarded; ENOENT is discriminated from a qavis that ran and failed. Silent fail-open made a dead gate indistinguishable from 'nothing to QA'.
