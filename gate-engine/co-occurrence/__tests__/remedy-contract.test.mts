@@ -43,7 +43,16 @@ describe('gate remedy ↔ shipped CLI contract', () => {
     expect(MODES).toContain('add'); // matcher gate remedy
     expect(MODES).toContain('add-clone'); // clone gate remedy
     // The full documented CRUD surface (skill + decay.mts) is present too.
-    for (const m of ['remove', 'remove-clone', 'check', 'check-clone', 'list', 'prune']) {
+    const documented = [
+      'remove',
+      'remove-clone',
+      'check',
+      'check-clone',
+      'list',
+      'prune',
+      'baseline-clones',
+    ];
+    for (const m of documented) {
       expect(MODES).toContain(m);
     }
   });

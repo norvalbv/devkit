@@ -219,6 +219,11 @@ export const DEFAULTS = Object.freeze({
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
 // original frink gates. Returns undefined when neither is set.
+/** A millisecond duration, or undefined for anything that is not a usable positive number. */
+function positiveMs(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+}
+
 function envVar(name: string): string | undefined {
   const guard = process.env[`GUARD_${name}`];
   if (guard !== undefined) return guard;
@@ -304,6 +309,7 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
   const noLlmEnv = envBool('DECISION_NO_LLM');
   const indexEnv = envVar('INDEX_PATH');
   const indexCommandEnv = envVar('INDEX_COMMAND');
+  const indexTimeoutEnv = Number(envVar('INDEX_COMMAND_TIMEOUT_MS'));
   const allowlistEnv = envVar('ALLOWLIST_PATH');
   const decisionsEnv = envVar('DECISIONS_DIR');
   const searchToolEnv = envVar('SEARCH_TOOL');
@@ -338,10 +344,14 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     indexPath: indexEnv ?? file.indexPath ?? DEFAULTS.indexPath,
     // indexCommand: env > file > null (null = never refresh the index before scanning).
     indexCommand: indexCommandEnv ?? file.indexCommand ?? DEFAULTS.indexCommand,
+    // env > file > default, like every other key — CI needs to shorten/extend the refresh
+    // deadline without editing a committed guard.config.json. Must be POSITIVE: node reads a 0
+    // timeout as "no timeout", so accepting 0 (which is what `Number('')` yields for an
+    // empty env var) would silently remove the wall-clock bound this exists to enforce.
     indexCommandTimeoutMs:
-      typeof file.indexCommandTimeoutMs === 'number' && Number.isFinite(file.indexCommandTimeoutMs)
-        ? file.indexCommandTimeoutMs
-        : DEFAULTS.indexCommandTimeoutMs,
+      positiveMs(indexTimeoutEnv) ??
+      positiveMs(file.indexCommandTimeoutMs) ??
+      DEFAULTS.indexCommandTimeoutMs,
     // Search-tool steering NAMES: env > file > generic default.
     searchTool: searchToolEnv ?? file.searchTool ?? DEFAULTS.searchTool,
     graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
