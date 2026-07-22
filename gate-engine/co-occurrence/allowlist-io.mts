@@ -26,8 +26,10 @@ export const MODES = [
   'remove',
   'remove-clone',
   'check',
+  'check-clone',
   'list',
   'prune',
+  'baseline-clones',
 ] as const;
 export type Mode = (typeof MODES)[number];
 

@@ -30,12 +30,13 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import { ALLOWLIST_CLI, loadAllowlist } from './allowlist-io.mts';
+import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { isExpired } from './decay.mts';
 import { JSCPD_OWN_ROOT, resolveJscpdBin } from './jscpd-bin.mts';
@@ -55,7 +56,9 @@ const DEFAULTS = {
   // Token-clone floor + scan roots seed from the resolved config (consumer-tunable);
   // CLI --flags override per run.
   minTokens: cfg.thresholds.minTokens,
-  paths: cfg.scanRoots,
+  // cloneRoots, not scanRoots: verbatim-clone scope is often deliberately narrower than the
+  // matcher's. Unset, it resolves back to scanRoots (see config.mts).
+  paths: cfg.cloneRoots,
   // Test boilerplate duplication is out of scope (dominates clone counts).
   ignore: ['**/*.test.*', '**/*.spec.*', '**/__tests__/**', '**/__mocks__/**'],
 };
@@ -183,14 +186,21 @@ export function detectClones({
   }
 }
 
-const SRC_PREFIX_RE = /^.*\/src\//;
 const BACKSLASH_RE = /\\/g;
 const WHITESPACE_RE = /\s+/g;
+/**
+ * Repo-root-relative, forward-slash allowlist key. Repo-root-relative is the ONLY normalisation:
+ * it is what git reports, so `--changed` scoping and the allowlist agree with the paths a human
+ * sees. An earlier `/^.*\/src\//` → `src/` rewrite collapsed every scan root containing `/src/`
+ * onto a phantom top-level `src/`, which (a) fused two real files onto one allowlist key, so
+ * approving one silently approved the other, and (b) made `--changed` compare a path that does
+ * not exist against git's real one, dropping every non-first-root clone out of the scoped gate.
+ */
 export function relPath(f: string): string {
-  // Normalize '\'→'/' FIRST so the repo-root strip + SRC_PREFIX_RE (both '/'-based) match a
-  // Windows-style path jscpd might report; keeps allowlist keys forward-slash + OS-agnostic.
-  // Strip against the CONSUMER cwd (repoRoot = cfg.cwd), not the package dir.
-  return f.replace(BACKSLASH_RE, '/').replace(`${repoRoot}/`, '').replace(SRC_PREFIX_RE, 'src/');
+  // Normalize '\'→'/' FIRST so the repo-root strip matches a Windows-style path jscpd might
+  // report; keeps allowlist keys forward-slash + OS-agnostic. Strip against the CONSUMER cwd
+  // (repoRoot = cfg.cwd), not the package dir.
+  return f.replace(BACKSLASH_RE, '/').replace(`${repoRoot}/`, '');
 }
 
 /** Stable key: hash the fragment with whitespace collapsed so reformatting
@@ -220,12 +230,14 @@ const loc = (c: Clone, side: CloneLocSide): number => {
 // ── CLI ───────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
-const flag = <T,>(name: string, def: T): string | T => {
-  const i = argv.indexOf(name);
-  return i !== -1 ? argv[i + 1] : def;
-};
+const flag = flagReader(argv);
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Run-as-main guard, in the form every other gate module uses: realpath BOTH sides. A raw
+// `argv[1] === fileURLToPath(import.meta.url)` compares the BIN SHIM path (node_modules/.bin or a
+// global install's bin dir, both symlinks) against the real module path, so it is false whenever
+// the gate is invoked by its published name — `guard-clone scan --gate` printed nothing and exited
+// 0, a silently dead gate. Only `node <real path>` (how guard-deterministic spawns it) worked.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const minTokens = Number(flag('--min-tokens', DEFAULTS.minTokens));
   const pathsArg = flag('--paths', null);
   const paths = pathsArg ? pathsArg.split(/\s+/) : DEFAULTS.paths;
