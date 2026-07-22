@@ -15,7 +15,7 @@ import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
 import {
   assertLegacyAssetWriterCompatible,
-  manifestFilesEqual,
+  nextLegacyManifestGeneratedAt,
 } from '../../lib/install/agent-asset-manifest/compatibility.mts';
 import { readAgentAssetManifest } from '../../lib/install/agent-asset-manifest/reader.mts';
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
@@ -112,12 +112,7 @@ export function syncAgents(
   // Idempotency: keep generatedAt STABLE when nothing about the synced set changed, so a re-run
   // produces no spurious git diff (same contract as the skills manifest). (manifestPath + prev were
   // read above — reused here, also the provenance source for findConflicts.)
-  const generatedAt =
-    prev?.devkitRef === devkitRef &&
-    typeof prev.generatedAt === 'string' &&
-    manifestFilesEqual(prev.files, files)
-      ? prev.generatedAt
-      : new Date().toISOString();
+  const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
   // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
   const manifest = { devkitRef, generatedAt, targets: [...targets], files };
 

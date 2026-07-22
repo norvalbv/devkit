@@ -26,7 +26,7 @@ import {
 } from '../sync-manifest.mts';
 import {
   assertLegacyAssetWriterCompatible,
-  manifestFilesEqual,
+  nextLegacyManifestGeneratedAt,
 } from './agent-asset-manifest/compatibility.mts';
 import { readAgentAssetManifest } from './agent-asset-manifest/reader.mts';
 import { registrationsFor } from './hook-registrations.mts';
@@ -130,12 +130,7 @@ export function syncHookScripts(
   }
   const devkitPkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
-  const generatedAt =
-    prev?.devkitRef === devkitRef &&
-    typeof prev.generatedAt === 'string' &&
-    manifestFilesEqual(prev.files, files)
-      ? prev.generatedAt
-      : new Date().toISOString();
+  const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
   const manifest: AgentHooksManifest = {
     devkitRef,
     generatedAt,
