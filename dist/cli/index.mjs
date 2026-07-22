@@ -5,6 +5,7 @@
  *
  *   devkit init [--stack <x>] [--standalone | --overlay] [--scan-root <a,b>] [--fallow] [--yes]
  *   devkit doctor [--fix]
+ *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
  *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
@@ -36,11 +37,13 @@ const COMMANDS = {
     move: () => import("./commands/move.mjs"),
     reconcile: () => import("./commands/reconcile.mjs"),
     ship: () => import("./commands/ship.mjs"),
+    review: () => import("./commands/review.mjs"),
     'guard-branch': () => import("./commands/guard-branch.mjs"),
 };
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
     'ship',
+    'review',
     'move',
     'release',
     'update',
