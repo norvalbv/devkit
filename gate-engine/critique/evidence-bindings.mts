@@ -8,10 +8,12 @@ import {
   listPrivateFiles,
   managedPath,
   publishImmutable,
-  readPrivateFile,
+  readPrivateFileBounded,
 } from './immutable-file.mts';
+import { getPlanCritiqueWorkQuarantine } from './lifecycle/work-quarantine.mts';
 import {
   resolvePlanCritiqueEvidenceRoot,
+  withExistingPlanCritiquePersistenceLock,
   withPlanCritiquePersistenceLock,
 } from './persistence-lock.mts';
 import {
@@ -46,7 +48,10 @@ export type PlanCritiqueBindingUnavailableReason =
   | 'ancestry_mismatch'
   | 'malformed_binding'
   | 'malformed_record'
-  | 'ineligible_record';
+  | 'ineligible_record'
+  | 'work_quarantined'
+  | 'malformed_quarantine'
+  | 'evidence_lock_unavailable';
 
 export interface PlanCritiqueBindingV1 {
   schemaVersion: 1;
@@ -165,6 +170,18 @@ function unavailable(
   return { status: 'unavailable', reason, candidates };
 }
 
+function differentRepository(
+  left: PlanCritiqueRepositoryContext,
+  right: PlanCritiqueRepositoryContext,
+): boolean {
+  return (
+    left.fingerprint !== right.fingerprint ||
+    left.fingerprintSource !== right.fingerprintSource ||
+    left.gitDir !== right.gitDir ||
+    left.gitCommonDir !== right.gitCommonDir
+  );
+}
+
 function evidenceOptions(evidenceRoot: string | undefined): { root?: string } {
   return evidenceRoot === undefined ? {} : { root: evidenceRoot };
 }
@@ -186,6 +203,22 @@ function bindingFor(
       head: context.head,
     },
   };
+}
+
+function quarantineReason(
+  record: PlanCritiqueRecordV1,
+  evidenceRoot: string,
+): 'work_quarantined' | 'malformed_quarantine' | null {
+  const state = getPlanCritiqueWorkQuarantine(
+    {
+      provider: record.execution.provider,
+      repositoryFingerprint: record.repository.fingerprint,
+      workId: record.workId,
+    },
+    { root: evidenceRoot },
+  );
+  if (state.status === 'clear') return null;
+  return state.status === 'quarantined' ? 'work_quarantined' : 'malformed_quarantine';
 }
 
 export function persistPlanCritiqueBinding(
@@ -221,6 +254,8 @@ export function persistPlanCritiqueBinding(
       return { status: 'unavailable', reason: 'ancestry_mismatch' };
     if (!record.contract.eligibility.eligible)
       return { status: 'unavailable', reason: 'ineligible_record' };
+    const quarantine = quarantineReason(record, canonicalRoot);
+    if (quarantine) return { status: 'unavailable', reason: quarantine };
     const binding = bindingFor(record, context);
     const directory = bindingDirectory(context, true) as string;
     const state = publishImmutable(
@@ -247,7 +282,12 @@ function loadBindings(
   const bindings: PlanCritiqueBindingV1[] = [];
   let candidates = 0;
   for (const name of names) {
-    const raw = readPrivateFile(directory, name);
+    let raw: Buffer | null;
+    try {
+      raw = readPrivateFileBounded(directory, name, MAX_BINDING_BYTES);
+    } catch {
+      return { bindings: [], candidates: candidates + 1, malformed: true };
+    }
     if (!raw) continue;
     candidates += 1;
     const binding = parseBinding(raw, name);
@@ -258,62 +298,120 @@ function loadBindings(
   return { bindings, candidates, malformed: false };
 }
 
+type BindingSelection =
+  | { status: 'selected'; binding: PlanCritiqueBindingV1; candidates: 1 }
+  | {
+      status: 'unavailable';
+      reason: 'malformed_binding' | 'no_matching_binding' | 'ambiguous_matching_bindings';
+      candidates: number;
+    };
+
+function selectBinding(
+  context: PlanCritiqueRepositoryContext,
+  workId: string | undefined,
+): BindingSelection {
+  let loaded: ReturnType<typeof loadBindings>;
+  try {
+    loaded = loadBindings(context, workId);
+  } catch {
+    return { status: 'unavailable', reason: 'malformed_binding', candidates: 0 };
+  }
+  const { bindings, candidates, malformed } = loaded;
+  if (malformed) return { status: 'unavailable', reason: 'malformed_binding', candidates };
+  if (bindings.length === 0)
+    return { status: 'unavailable', reason: 'no_matching_binding', candidates: 0 };
+  if (bindings.length !== 1)
+    return { status: 'unavailable', reason: 'ambiguous_matching_bindings', candidates };
+  return { status: 'selected', binding: bindings[0] as PlanCritiqueBindingV1, candidates: 1 };
+}
+
 export function resolvePlanCritiqueBinding(
   options: { cwd?: string; evidenceRoot?: string; workId?: string } = {},
 ): ResolvePlanCritiqueBindingResult {
-  const repository = getPlanCritiqueRepositoryContext(options.cwd);
-  if (repository.status === 'unavailable') return { ...repository, candidates: 0 };
-  let loaded: ReturnType<typeof loadBindings>;
+  const workId = options.workId;
+  if (workId !== undefined && !validText(workId)) return unavailable('malformed_binding', 0);
+  const preflightRepository = getPlanCritiqueRepositoryContext(options.cwd);
+  if (preflightRepository.status === 'unavailable')
+    return { ...preflightRepository, candidates: 0 };
+  const preflight = selectBinding(preflightRepository.context, workId);
+  if (preflight.status === 'unavailable') return preflight;
+  let evidenceRoot: string | null;
   try {
-    loaded = loadBindings(repository.context, options.workId);
+    evidenceRoot = resolvePlanCritiqueEvidenceRoot(evidenceOptions(options.evidenceRoot), false);
   } catch {
-    return unavailable('malformed_binding', 0);
+    evidenceRoot = null;
   }
-  const { bindings, candidates, malformed } = loaded;
-  if (malformed) return unavailable('malformed_binding', candidates);
-  if (bindings.length === 0) return unavailable('no_matching_binding', 0);
-  if (bindings.length !== 1) return unavailable('ambiguous_matching_bindings', candidates);
-  const [binding] = bindings;
-  const { context } = repository;
-  if (
-    binding.repository.fingerprint !== context.fingerprint ||
-    binding.repository.fingerprintSource !== context.fingerprintSource
-  )
-    return unavailable('repository_mismatch', candidates);
-  if (binding.repository.branch !== context.branch)
-    return unavailable('branch_mismatch', candidates);
-  if (!isPlanCritiqueAncestor(options.cwd ?? process.cwd(), binding.repository.head, context.head))
-    return unavailable('ancestry_mismatch', candidates);
-  let record: PlanCritiqueRecordV1 | null;
+  if (!evidenceRoot) return unavailable('malformed_record', 1);
+  const resolution = {
+    state: 'not_started' as 'not_started' | 'running' | 'completed',
+    result: undefined as ResolvePlanCritiqueBindingResult | undefined,
+  };
+  const resolveLocked = (evidenceRoot: string): ResolvePlanCritiqueBindingResult => {
+    const repository = getPlanCritiqueRepositoryContext(options.cwd);
+    if (repository.status === 'unavailable') return { ...repository, candidates: 1 };
+    if (differentRepository(preflightRepository.context, repository.context))
+      return unavailable('repository_mismatch', 1);
+    if (preflightRepository.context.branch !== repository.context.branch)
+      return unavailable('branch_mismatch', 1);
+    const selected = selectBinding(repository.context, workId);
+    if (selected.status === 'unavailable') return selected;
+    const { binding, candidates } = selected;
+    const { context } = repository;
+    if (
+      binding.repository.fingerprint !== context.fingerprint ||
+      binding.repository.fingerprintSource !== context.fingerprintSource
+    )
+      return unavailable('repository_mismatch', candidates);
+    if (binding.repository.branch !== context.branch)
+      return unavailable('branch_mismatch', candidates);
+    if (
+      !isPlanCritiqueAncestor(options.cwd ?? process.cwd(), binding.repository.head, context.head)
+    )
+      return unavailable('ancestry_mismatch', candidates);
+    let record: PlanCritiqueRecordV1 | null;
+    try {
+      record = readPlanCritiqueRecord(binding.critiqueId, { root: evidenceRoot });
+    } catch {
+      record = null;
+    }
+    if (
+      !record ||
+      record.critiqueId !== binding.critiqueId ||
+      record.workId !== binding.workId ||
+      record.timestamps.capturedAt !== binding.recordCapturedAt ||
+      record.repository.fingerprint !== binding.repository.fingerprint ||
+      record.repository.fingerprintSource !== binding.repository.fingerprintSource ||
+      record.repository.branch !== binding.repository.branch ||
+      record.repository.head !== binding.repository.head
+    )
+      return unavailable('malformed_record', candidates);
+    if (!record.contract.eligibility.eligible) return unavailable('ineligible_record', candidates);
+    const revalidated = getPlanCritiqueRepositoryContext(options.cwd);
+    if (revalidated.status === 'unavailable') return { ...revalidated, candidates };
+    if (differentRepository(context, revalidated.context))
+      return unavailable('repository_mismatch', candidates);
+    if (revalidated.context.branch !== context.branch)
+      return unavailable('branch_mismatch', candidates);
+    if (revalidated.context.head !== context.head)
+      return unavailable('ancestry_mismatch', candidates);
+    const quarantine = quarantineReason(record, evidenceRoot);
+    if (quarantine) return unavailable(quarantine, candidates);
+    return { status: 'resolved', binding, record };
+  };
+  const resolve = (evidenceRoot: string): ResolvePlanCritiqueBindingResult => {
+    resolution.state = 'running';
+    const result = resolveLocked(evidenceRoot);
+    resolution.result = result;
+    resolution.state = 'completed';
+    return result;
+  };
   try {
-    record = readPlanCritiqueRecord(binding.critiqueId, evidenceOptions(options.evidenceRoot));
-  } catch {
-    record = null;
+    const transaction = withExistingPlanCritiquePersistenceLock({ root: evidenceRoot }, resolve);
+    if (transaction.status === 'absent') return unavailable('malformed_record', 1);
+    return transaction.value;
+  } catch (error) {
+    if (resolution.state === 'running') throw error;
+    if (resolution.state === 'completed' && resolution.result) return resolution.result;
+    return unavailable('evidence_lock_unavailable', 1);
   }
-  if (
-    !record ||
-    record.critiqueId !== binding.critiqueId ||
-    record.workId !== binding.workId ||
-    record.timestamps.capturedAt !== binding.recordCapturedAt ||
-    record.repository.fingerprint !== binding.repository.fingerprint ||
-    record.repository.fingerprintSource !== binding.repository.fingerprintSource ||
-    record.repository.branch !== binding.repository.branch ||
-    record.repository.head !== binding.repository.head
-  )
-    return unavailable('malformed_record', candidates);
-  if (!record.contract.eligibility.eligible) return unavailable('ineligible_record', candidates);
-  const revalidated = getPlanCritiqueRepositoryContext(options.cwd);
-  if (revalidated.status === 'unavailable') return { ...revalidated, candidates };
-  if (
-    revalidated.context.fingerprint !== context.fingerprint ||
-    revalidated.context.fingerprintSource !== context.fingerprintSource ||
-    revalidated.context.gitDir !== context.gitDir ||
-    revalidated.context.gitCommonDir !== context.gitCommonDir
-  )
-    return unavailable('repository_mismatch', candidates);
-  if (revalidated.context.branch !== context.branch)
-    return unavailable('branch_mismatch', candidates);
-  if (revalidated.context.head !== context.head)
-    return unavailable('ancestry_mismatch', candidates);
-  return { status: 'resolved', binding, record };
 }

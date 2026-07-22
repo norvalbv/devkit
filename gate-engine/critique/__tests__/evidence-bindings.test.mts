@@ -1,16 +1,19 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import {
+import fs, {
   chmodSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,6 +29,8 @@ import {
   persistPlanCritiqueRecord,
   readPlanCritiqueRecord,
 } from '../evidence-store.mts';
+import { persistPlanCritiqueWorkQuarantine } from '../lifecycle/work-quarantine.mts';
+import { withPlanCritiquePersistenceLock } from '../persistence-lock.mts';
 import { bytes, recordFor, sha256Bytes } from './evidence-store-fixture.mts';
 import {
   commit,
@@ -68,6 +73,56 @@ function bindingFile(repository: string, workId: string): string {
   return path.join(context(repository).gitDir, 'devkit', 'plan-critique-bindings', 'v1', filename);
 }
 
+function quarantine(record: PlanCritiqueRecordV1, root: string): void {
+  persistPlanCritiqueWorkQuarantine(
+    {
+      provider: record.execution.provider,
+      repositoryFingerprint: record.repository.fingerprint,
+      workId: record.workId,
+    },
+    { root },
+  );
+}
+
+function quarantineFiles(root: string, expectedCount = 1): string[] {
+  const directory = path.join(root, 'work-quarantines');
+  const files = readdirSync(directory)
+    .filter((name) => name.endsWith('.json'))
+    .map((name) => path.join(directory, name));
+  expect(files).toHaveLength(expectedCount);
+  return files;
+}
+
+function lockAttemptInstrumentation(): string {
+  return (
+    `import fs from 'node:fs';\n` +
+    `import { syncBuiltinESMExports } from 'node:module';\n` +
+    `import path from 'node:path';\n` +
+    `const originalOpen = fs.openSync; let lockAttemptSignaled = false;\n` +
+    `fs.openSync = ((...args) => {\n` +
+    `  if (!lockAttemptSignaled && /^\\.plan-critique-[0-9a-f]{64}\\.lock\\.\\d+\\.[0-9a-f-]+\\.candidate$/.test(path.basename(String(args[0])))) { lockAttemptSignaled = true; process.stdout.write('waiting\\n'); }\n` +
+    `  return originalOpen(...args);\n` +
+    `});\n` +
+    `syncBuiltinESMExports();\n`
+  );
+}
+
+function withFailedPrimaryLockRelease<Value>(action: () => Value): Value {
+  const originalUnlink = fs.unlinkSync;
+  fs.unlinkSync = ((...args: Parameters<typeof fs.unlinkSync>) => {
+    if (/^\.plan-critique-[0-9a-f]{64}\.lock$/.test(path.basename(String(args[0]))))
+      throw Object.assign(new Error('injected release failure'), { code: 'EIO' });
+    return originalUnlink(...args);
+  }) as typeof fs.unlinkSync;
+  syncBuiltinESMExports();
+  try {
+    return action();
+  } finally {
+    fs.unlinkSync = originalUnlink;
+    syncBuiltinESMExports();
+  }
+}
+
 describe('plan critique evidence bindings', () => {
   it('fails open outside a repository and in a detached worktree', () => {
     const outside = temporaryDirectory('critique-binding-outside-');
@@ -104,6 +159,12 @@ describe('plan critique evidence bindings', () => {
     expect(
       persistPlanCritiqueBinding(missingId, { cwd: repository, evidenceRoot: missingRoot }),
     ).toEqual({ status: 'unavailable', reason: 'malformed_record' });
+    expect(existsSync(missingRoot)).toBe(false);
+    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: missingRoot })).toEqual({
+      status: 'unavailable',
+      reason: 'no_matching_binding',
+      candidates: 0,
+    });
     expect(existsSync(missingRoot)).toBe(false);
     expect(
       persistPlanCritiqueBinding(missingId, { cwd: repository, evidenceRoot: 'relative' }),
@@ -147,7 +208,86 @@ describe('plan critique evidence bindings', () => {
     });
   });
 
-  it('waits for store publication to finish before binding a readable record', async () => {
+  it('blocks only the quarantined work while preserving binding cardinality', () => {
+    const repository = createRepository();
+    const root = evidenceRoot();
+    const blocked = storedRecord(repository, root, 'quarantined-before-binding');
+    const available = storedRecord(repository, root, 'available-work');
+    const laterQuarantined = storedRecord(repository, root, 'quarantined-after-binding');
+
+    quarantine(blocked, root);
+    expect(
+      persistPlanCritiqueBinding(blocked.critiqueId, { cwd: repository, evidenceRoot: root }),
+    ).toEqual({ status: 'unavailable', reason: 'work_quarantined' });
+    expect(existsSync(bindingFile(repository, blocked.workId))).toBe(false);
+
+    expect(
+      persistPlanCritiqueBinding(available.critiqueId, { cwd: repository, evidenceRoot: root }),
+    ).toMatchObject({ status: 'bound' });
+    expect(
+      resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: available.workId }),
+    ).toMatchObject({ status: 'resolved', binding: { critiqueId: available.critiqueId } });
+
+    persistPlanCritiqueBinding(laterQuarantined.critiqueId, {
+      cwd: repository,
+      evidenceRoot: root,
+    });
+    quarantine(laterQuarantined, root);
+    expect(
+      resolvePlanCritiqueBinding({
+        cwd: repository,
+        evidenceRoot: root,
+        workId: laterQuarantined.workId,
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'work_quarantined', candidates: 1 });
+    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toEqual({
+      status: 'unavailable',
+      reason: 'ambiguous_matching_bindings',
+      candidates: 2,
+    });
+  });
+
+  it('fails closed only for work with a corrupt matching quarantine', () => {
+    const repository = createRepository();
+    const root = evidenceRoot();
+    const creationBlocked = storedRecord(repository, root, 'corrupt-before-binding');
+    const resolutionBlocked = storedRecord(repository, root, 'corrupt-after-binding');
+    const available = storedRecord(repository, root, 'corrupt-isolated-work');
+
+    persistPlanCritiqueBinding(resolutionBlocked.critiqueId, {
+      cwd: repository,
+      evidenceRoot: root,
+    });
+    quarantine(creationBlocked, root);
+    quarantine(resolutionBlocked, root);
+    for (const file of quarantineFiles(root, 2)) writeFileSync(file, '{');
+
+    expect(
+      persistPlanCritiqueBinding(creationBlocked.critiqueId, {
+        cwd: repository,
+        evidenceRoot: root,
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_quarantine' });
+    expect(existsSync(bindingFile(repository, creationBlocked.workId))).toBe(false);
+    expect(
+      persistPlanCritiqueBinding(available.critiqueId, { cwd: repository, evidenceRoot: root }),
+    ).toMatchObject({ status: 'bound' });
+    expect(
+      resolvePlanCritiqueBinding({
+        cwd: repository,
+        evidenceRoot: root,
+        workId: resolutionBlocked.workId,
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_quarantine', candidates: 1 });
+    expect(
+      resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: available.workId }),
+    ).toMatchObject({ status: 'resolved', binding: { critiqueId: available.critiqueId } });
+  });
+
+  it.each([
+    { state: 'clear', quarantined: false },
+    { state: 'quarantined', quarantined: true },
+  ])('waits for store publication before binding $state work', async ({ state, quarantined }) => {
     const repository = createRepository();
     const scratch = temporaryDirectory('critique-binding-lock-');
     const root = path.join(scratch, 'evidence');
@@ -156,7 +296,7 @@ describe('plan critique evidence bindings', () => {
     const transcript = bytes('opaque transcript');
     const record = recordFor(exact, { projection, transcript });
     const repositoryContext = context(repository);
-    record.workId = 'serialized-binding';
+    record.workId = `serialized-binding-${state}`;
     record.repository = {
       fingerprint: repositoryContext.fingerprint,
       fingerprintSource: repositoryContext.fingerprintSource,
@@ -173,6 +313,13 @@ describe('plan critique evidence bindings', () => {
     writeFileSync(exactSource, exact, { mode: 0o600 });
     writeFileSync(projectionSource, projection, { mode: 0o600 });
     writeFileSync(transcriptSource, transcript, { mode: 0o600 });
+    let quarantineSource = 'none';
+    if (quarantined) {
+      const quarantineSourceRoot = path.join(scratch, 'quarantine-source');
+      quarantine(record, quarantineSourceRoot);
+      [quarantineSource] = quarantineFiles(quarantineSourceRoot);
+      if (!quarantineSource) throw new Error('quarantine fixture is incomplete');
+    }
 
     const holderScript = path.join(scratch, 'holder.mts');
     const contenderScript = path.join(scratch, 'contender.mts');
@@ -187,7 +334,7 @@ describe('plan critique evidence bindings', () => {
       `import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';\n` +
         `import path from 'node:path';\n` +
         `import { withPlanCritiquePersistenceLock } from ${JSON.stringify(lockModule)};\n` +
-        `const [root, recordSource, critiqueId, exactSource, exactHash, projectionSource, projectionHash, transcriptSource, transcriptHash, release] = process.argv.slice(2);\n` +
+        `const [root, recordSource, critiqueId, exactSource, exactHash, projectionSource, projectionHash, transcriptSource, transcriptHash, quarantineSource, release] = process.argv.slice(2);\n` +
         `const wait = new Int32Array(new SharedArrayBuffer(4));\n` +
         `withPlanCritiquePersistenceLock({ root }, (canonicalRoot) => {\n` +
         `  const records = path.join(canonicalRoot, 'records');\n` +
@@ -202,15 +349,18 @@ describe('plan critique evidence bindings', () => {
         `  process.stdout.write('staged\\n');\n` +
         `  while (!existsSync(release)) Atomics.wait(wait, 0, 0, 2);\n` +
         `  const target = path.join(blobs, transcriptHash); copyFileSync(transcriptSource, target); chmodSync(target, 0o600);\n` +
+        `  if (quarantineSource !== 'none') { const quarantines = path.join(canonicalRoot, 'work-quarantines'); mkdirSync(quarantines, { mode: 0o700 }); chmodSync(quarantines, 0o700); const quarantineTarget = path.join(quarantines, path.basename(quarantineSource)); copyFileSync(quarantineSource, quarantineTarget); chmodSync(quarantineTarget, 0o600); }\n` +
         `});\n`,
     );
     writeFileSync(
       contenderScript,
       `import { writeFileSync } from 'node:fs';\n` +
+        lockAttemptInstrumentation() +
         `import { persistPlanCritiqueBinding } from ${JSON.stringify(bindingModule)};\n` +
         `const [root, repository, critiqueId, result] = process.argv.slice(2);\n` +
-        `process.stdout.write('started\\n');\n` +
-        `writeFileSync(result, JSON.stringify(persistPlanCritiqueBinding(critiqueId, { cwd: repository, evidenceRoot: root })));\n`,
+        `try {\n` +
+        `writeFileSync(result, JSON.stringify(persistPlanCritiqueBinding(critiqueId, { cwd: repository, evidenceRoot: root })));\n` +
+        `} finally { fs.openSync = originalOpen; syncBuiltinESMExports(); }\n`,
     );
 
     if (!record.sanitizedProjection || !record.opaqueTranscript)
@@ -230,6 +380,7 @@ describe('plan critique evidence bindings', () => {
         record.sanitizedProjection.sha256,
         transcriptSource,
         record.opaqueTranscript.sha256,
+        quarantineSource,
         release,
       ],
       { stdio: ['ignore', 'pipe', 'pipe'] },
@@ -260,8 +411,7 @@ describe('plan critique evidence bindings', () => {
           throw new Error(`contender exited before binding: ${String(code)}`);
         }),
       ]);
-      await expect(contenderStarted).resolves.toBe('started\n');
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await expect(contenderStarted).resolves.toBe('waiting\n');
       expect(existsSync(result)).toBe(false);
       expect(existsSync(bindingFile(repository, record.workId))).toBe(false);
     } finally {
@@ -269,8 +419,113 @@ describe('plan critique evidence bindings', () => {
     }
     expect((await holderClosed)[0]).toBe(0);
     expect((await (contenderClosed as ReturnType<typeof once>))[0]).toBe(0);
-    expect(JSON.parse(readFileSync(result, 'utf8'))).toMatchObject({ status: 'bound' });
-    expect(existsSync(bindingFile(repository, record.workId))).toBe(true);
+    const actual = JSON.parse(readFileSync(result, 'utf8')) as Record<string, unknown>;
+    if (quarantined) {
+      expect(actual).toEqual({ status: 'unavailable', reason: 'work_quarantined' });
+      expect(existsSync(bindingFile(repository, record.workId))).toBe(false);
+    } else {
+      expect(actual).toMatchObject({ status: 'bound', binding: { critiqueId: record.critiqueId } });
+      expect(existsSync(bindingFile(repository, record.workId))).toBe(true);
+    }
+  });
+
+  it('re-evaluates quarantine after a one-candidate resolver waits for the lock', async () => {
+    const repository = createRepository();
+    const scratch = temporaryDirectory('critique-binding-resolver-lock-');
+    const root = path.join(scratch, 'evidence');
+    const record = storedRecord(repository, root, 'serialized-resolution');
+    persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+    const quarantineSourceRoot = path.join(scratch, 'quarantine-source');
+    quarantine(record, quarantineSourceRoot);
+    const [quarantineSource] = quarantineFiles(quarantineSourceRoot);
+    if (!quarantineSource) throw new Error('quarantine fixture is incomplete');
+
+    const holderScript = path.join(scratch, 'holder.mts');
+    const resolverScript = path.join(scratch, 'resolver.mts');
+    const lockModule = pathToFileURL(
+      path.join(import.meta.dirname, '..', 'persistence-lock.mts'),
+    ).href;
+    const bindingModule = pathToFileURL(
+      path.join(import.meta.dirname, '..', 'evidence-bindings.mts'),
+    ).href;
+    writeFileSync(
+      holderScript,
+      `import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';\n` +
+        `import path from 'node:path';\n` +
+        `import { withPlanCritiquePersistenceLock } from ${JSON.stringify(lockModule)};\n` +
+        `const [root, quarantineSource, publish, release] = process.argv.slice(2);\n` +
+        `const wait = new Int32Array(new SharedArrayBuffer(4));\n` +
+        `withPlanCritiquePersistenceLock({ root }, (canonicalRoot) => {\n` +
+        `  process.stdout.write('held\\n');\n` +
+        `  while (!existsSync(publish)) Atomics.wait(wait, 0, 0, 2);\n` +
+        `  const directory = path.join(canonicalRoot, 'work-quarantines'); mkdirSync(directory, { recursive: true, mode: 0o700 }); chmodSync(directory, 0o700);\n` +
+        `  const target = path.join(directory, path.basename(quarantineSource)); copyFileSync(quarantineSource, target); chmodSync(target, 0o600);\n` +
+        `  process.stdout.write('published\\n');\n` +
+        `  while (!existsSync(release)) Atomics.wait(wait, 0, 0, 2);\n` +
+        `});\n`,
+    );
+    writeFileSync(
+      resolverScript,
+      `import { writeFileSync } from 'node:fs';\n` +
+        lockAttemptInstrumentation() +
+        `import { resolvePlanCritiqueBinding } from ${JSON.stringify(bindingModule)};\n` +
+        `const [root, repository, workId, result] = process.argv.slice(2);\n` +
+        `try {\n` +
+        `writeFileSync(result, JSON.stringify(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId })));\n` +
+        `} finally { fs.openSync = originalOpen; syncBuiltinESMExports(); }\n`,
+    );
+
+    const publish = path.join(scratch, 'publish');
+    const release = path.join(scratch, 'release');
+    const result = path.join(scratch, 'resolver-result');
+    const holder = spawn(
+      process.execPath,
+      [holderScript, root, quarantineSource, publish, release],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const holderClosed = once(holder, 'close');
+    if (!holder.stdout) throw new Error('holder stdout unavailable');
+    await expect(
+      Promise.race([
+        once(holder.stdout, 'data').then(([chunk]) => String(chunk)),
+        holderClosed.then(([code]) => {
+          throw new Error(`holder exited before locking: ${String(code)}`);
+        }),
+      ]),
+    ).resolves.toBe('held\n');
+
+    const resolver = spawn(
+      process.execPath,
+      [resolverScript, root, repository, record.workId, result],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const resolverClosed = once(resolver, 'close');
+    if (!resolver.stdout) throw new Error('resolver stdout unavailable');
+    try {
+      await expect(
+        Promise.race([
+          once(resolver.stdout, 'data').then(([chunk]) => String(chunk)),
+          resolverClosed.then(([code]) => {
+            throw new Error(`resolver exited before starting: ${String(code)}`);
+          }),
+        ]),
+      ).resolves.toBe('waiting\n');
+      expect(existsSync(result)).toBe(false);
+      const published = once(holder.stdout, 'data').then(([chunk]) => String(chunk));
+      writeFileSync(publish, 'publish');
+      await expect(published).resolves.toBe('published\n');
+      expect(existsSync(result)).toBe(false);
+    } finally {
+      writeFileSync(publish, 'publish');
+      writeFileSync(release, 'release');
+    }
+    expect((await holderClosed)[0]).toBe(0);
+    expect((await resolverClosed)[0]).toBe(0);
+    expect(JSON.parse(readFileSync(result, 'utf8'))).toEqual({
+      status: 'unavailable',
+      reason: 'work_quarantined',
+      candidates: 1,
+    });
   });
 
   it('requires a scope when multiple work chains are bound', () => {
@@ -292,6 +547,80 @@ describe('plan critique evidence bindings', () => {
     expect(
       resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: 'missing' }),
     ).toEqual({ status: 'unavailable', reason: 'no_matching_binding', candidates: 0 });
+    rmSync(root, { recursive: true });
+    expect(
+      resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: first.workId }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_record', candidates: 1 });
+    expect(existsSync(root)).toBe(false);
+    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toEqual({
+      status: 'unavailable',
+      reason: 'ambiguous_matching_bindings',
+      candidates: 2,
+    });
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it('rejects hostile runtime work scopes before hashing them', () => {
+    const repository = createRepository();
+    for (const workId of [42, 'x'.repeat(4 * 1024 + 1)])
+      expect(
+        resolvePlanCritiqueBinding({
+          cwd: repository,
+          workId: workId as unknown as string,
+        }),
+      ).toEqual({ status: 'unavailable', reason: 'malformed_binding', candidates: 0 });
+    let reads = 0;
+    const changingScope: { cwd: string; workId?: string } = { cwd: repository };
+    Object.defineProperty(changingScope, 'workId', {
+      get: () => {
+        reads += 1;
+        return reads === 1 ? 'missing' : 'x'.repeat(4 * 1024 + 1);
+      },
+    });
+    expect(resolvePlanCritiqueBinding(changingScope)).toEqual({
+      status: 'unavailable',
+      reason: 'no_matching_binding',
+      candidates: 0,
+    });
+    expect(reads).toBe(1);
+  });
+
+  it('distinguishes an invalid evidence root from lock acquisition failure', () => {
+    const repository = createRepository();
+    const root = evidenceRoot();
+    const record = storedRecord(repository, root, 'busy-evidence-lock');
+    persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+
+    expect(
+      resolvePlanCritiqueBinding({
+        cwd: repository,
+        evidenceRoot: 'relative',
+        workId: record.workId,
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'malformed_record', candidates: 1 });
+
+    expect(
+      withPlanCritiquePersistenceLock({ root }, () =>
+        resolvePlanCritiqueBinding({
+          cwd: repository,
+          evidenceRoot: root,
+          workId: record.workId,
+        }),
+      ),
+    ).toEqual({ status: 'unavailable', reason: 'evidence_lock_unavailable', candidates: 1 });
+  });
+
+  it('keeps a completed resolution when lock release fails afterward', () => {
+    const repository = createRepository();
+    const root = evidenceRoot();
+    const record = storedRecord(repository, root, 'release-failure');
+    persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+
+    expect(
+      withFailedPrimaryLockRelease(() =>
+        resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: record.workId }),
+      ),
+    ).toMatchObject({ status: 'resolved', binding: { critiqueId: record.critiqueId } });
   });
 
   it('accepts a descendant HEAD', () => {
@@ -304,6 +633,35 @@ describe('plan critique evidence bindings', () => {
     expect(
       resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: record.workId }),
     ).toMatchObject({ status: 'resolved', binding: { critiqueId: record.critiqueId } });
+  });
+
+  it('pins the preflight repository identity through lock acquisition', () => {
+    const firstRepository = createRepository();
+    const secondRepository = createRepository();
+    const root = evidenceRoot();
+    const workId = 'repository-switch';
+    const first = storedRecord(firstRepository, root, workId, 'first-repository');
+    const second = storedRecord(secondRepository, root, workId, 'second-repository');
+    persistPlanCritiqueBinding(first.critiqueId, { cwd: firstRepository, evidenceRoot: root });
+    persistPlanCritiqueBinding(second.critiqueId, { cwd: secondRepository, evidenceRoot: root });
+    let reads = 0;
+    const options: { cwd?: string; evidenceRoot: string; workId: string } = {
+      evidenceRoot: root,
+      workId,
+    };
+    Object.defineProperty(options, 'cwd', {
+      get: () => {
+        reads += 1;
+        return reads === 1 ? firstRepository : secondRepository;
+      },
+    });
+
+    expect(resolvePlanCritiqueBinding(options)).toEqual({
+      status: 'unavailable',
+      reason: 'repository_mismatch',
+      candidates: 1,
+    });
+    expect(reads).toBe(2);
   });
 
   it('revalidates repository context before returning a resolved record', () => {
@@ -381,6 +739,8 @@ describe('plan critique evidence bindings', () => {
   it.each([
     'corrupt_json',
     'open_schema',
+    'oversized',
+    'public_mode',
     'wrong_filename',
   ] as const)('fails open on a %s binding', (corruption) => {
     const repository = createRepository();
@@ -394,12 +754,15 @@ describe('plan critique evidence bindings', () => {
       binding.unexpected = true;
       writeFileSync(file, canonicalPlanCritiqueRecordJson(binding));
     }
+    if (corruption === 'oversized') writeFileSync(file, Buffer.alloc(16 * 1024 + 1));
+    if (corruption === 'public_mode') chmodSync(file, 0o644);
     if (corruption === 'wrong_filename')
       renameSync(file, path.join(path.dirname(file), `${'0'.repeat(64)}.json`));
 
-    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toMatchObject({
+    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toEqual({
       status: 'unavailable',
       reason: 'malformed_binding',
+      candidates: 1,
     });
   });
 
