@@ -22,8 +22,10 @@ export const MODES = [
     'remove',
     'remove-clone',
     'check',
+    'check-clone',
     'list',
     'prune',
+    'baseline-clones',
 ];
 /** Order-insensitive pair key: `"symbol file"` per side, the two sides sorted, so A/B
  * order never matters. Line ranges + similarity are metadata, NOT part of the key. */

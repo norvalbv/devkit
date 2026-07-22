@@ -26,3 +26,11 @@ function startOfToday() {
 export function isExpired(entry) {
     return expiresAt(entry) <= startOfToday();
 }
+/**
+ * Whole days until this entry expires; 0 once it has. The burn-down signal `list` prints —
+ * "live" alone hides whether an approval lapses tomorrow or in nine years, which is the
+ * difference between a temporary waiver and a frozen baseline entry.
+ */
+export function daysRemaining(entry) {
+    return Math.max(0, Math.round((expiresAt(entry) - startOfToday()) / DAY_MS));
+}
