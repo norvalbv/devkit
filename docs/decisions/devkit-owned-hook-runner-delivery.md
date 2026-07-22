@@ -1,0 +1,17 @@
+---
+slug: devkit-owned-hook-runner-delivery
+created: 2026-07-22
+---
+
+# devkit-owned-hook-runner-delivery
+
+## Target · 2026-07-22 — devkit owns closing this permanently for every FUTURE consumer repo via a new 'devkit sync-hook-runn
+
+**Context:** The husky-generated .husky/_ runner is gitignored by husky's own install (.husky/_/.gitignore = '*'), and husky pins core.hooksPath as a RELATIVE path. A fresh git worktree add therefore checks out with hooksPath resolving to a directory absent from that checkout, and git silently runs zero hooks there — every commit made in an ad-hoc worktree is ungated with no error. Hit live in three consumer repos on one machine (frink, and two others whose hook was installed but never wired at all), including devkit's own repo. The 2026-07-01 hooks-as-synced-category precedent already applies this pattern to AGENT hooks (.claude/hooks via sync-hooks); the git hook RUNNER itself had no equivalent.
+**Ruling:** devkit owns closing this permanently for every FUTURE consumer repo via a new 'devkit sync-hook-runner' command (git add -f the untracked-and-gitignored runner files, matched against real git hook names) chained into a fresh package-mode devkit init's generated package.json prepare script: 'husky && (command -v devkit >/dev/null 2>&1 && devkit sync-hook-runner || true)'. Every bun/npm install then re-stages the runner past husky's own ignore, so no NEW repo ever needs a manual git add -f. Kept as an explicit, separate, user-invoked command rather than folded into 'devkit doctor --fix' — fix only ever regenerates FILE content from the recorded selection, it never mutates the git INDEX; staging is something the caller must ask for. The existing checkHookRunner doctor check stays the detection layer for repos that predate this; its remedy now names sync-hook-runner as the fix.
+**Consequences:**
+- Positive: Positive: permanently closes the untracked-runner class for every repo created via devkit init from this version forward, with zero new git-config writes and zero devkit devDependency requirement beyond what init already adds for package mode. Negative: existing repos (frink, devkit itself, qavis) do not retroactively get the chained prepare script — they were already fixed by the doctor check's manual git add -f remedy, and only pick up the chained self-heal if they re-run devkit init or hand-edit their own prepare script.
+- Negative: Rejected: rewriting core.hooksPath to an absolute main-worktree path — verified to break devkit review's setup-manifest.mts (exact string equality against the relative literal '.husky/_'), silently no-op under --worktree config scope shadowing, and requires a package.json devkit devDependency bump a separate Target rules against. Rejected: pointing core.hooksPath at the tracked .husky dir directly — .husky/pre-commit has no 'set -e' and ends 'exit 0', fail-closed ONLY because husky's _/h invokes it via 'sh -e'; under its own #!/bin/bash shebang every gate would fail OPEN. Rejected: folding the git-add-f staging into 'devkit doctor --fix' — --fix is file-content-only; mutating a consumer's git index from an advisory command is a bigger blast radius than the existing doctor-check-plus-manual-remedy path.
+**Vision-fit:** n/a — internal devkit tooling (the solo dev's cross-repo guardrail distribution), not a Frink product surface.
+**Scope:** cli/commands/init.mts,cli/commands/sync/sync-hook-runner.mts,cli/lib/doctor/hook-checks.mts,cli/index.mts
+**Source:** manual
