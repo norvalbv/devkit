@@ -1,0 +1,26 @@
+{
+  "//mode": "Describes run through the Claude Code login (`claude -p`) — zero API spend, and it keeps the pre-commit dup gate off this machine's GPU. Local describes were measured at ~78s/chunk on a 24GB M4 in the sibling frink repo and blocked a ship for 40+ minutes; remote removes that dependency entirely. Embeddings stay on-device (Claude has no embeddings endpoint), so the index and its embedder provenance stamp are unchanged and no `index --reembed-only` is needed. `models.describer` below is the LOCAL-mode fallback only, kept small so flipping back to local does not land on the oversized shipped default (gemma4:26b).",
+  "mode": "remote",
+  "models": {
+    "describer": "gemma4:e2b",
+    "embedder": "embeddinggemma"
+  },
+  "ollama": {
+    "host": "http://localhost:11434"
+  },
+  "//indexing": "sourceRoots mirrors guard.config.json `scanRoots` — the authored surface the dup gate scans. skills/ and templates/ are vendored assets projected into consumer repos, not devkit's own code, so indexing them would surface a consumer's copy as a duplicate of the source it was projected from.",
+  "indexing": {
+    "sourceRoots": ["cli", "gate-engine"],
+    "excludePatterns": [
+      "**/*.d.ts",
+      "**/node_modules/**",
+      "**/.search-code/**",
+      "**/dist/**",
+      "**/__tests__/**",
+      "**/*.test.mts",
+      "**/eval/**"
+    ],
+    "minChunkLines": 5,
+    "maxChunkLines": 300
+  }
+}
