@@ -43,14 +43,30 @@ describe('hashFragment', () => {
   });
 });
 
-// relPath must collapse to forward-slash `src/...` keys regardless of the OS separator jscpd
-// reports — else a Windows `\` path produces a key that never matches the `/`-style allowlist.
+// relPath produces the allowlist key + the path `--changed` matches against git's output, so it
+// must be forward-slash and repo-root-relative regardless of the OS separator jscpd reports —
+// and must apply NO other rewriting.
 describe('relPath', () => {
-  it('normalizes a backslash path and collapses to src/ (Windows index)', () => {
-    expect(relPath('anything\\src\\renderer\\a.tsx')).toBe('src/renderer/a.tsx');
+  const root = process.cwd();
+
+  it('normalizes backslashes to forward slashes (Windows index)', () => {
+    expect(relPath(`${root}\\src\\renderer\\a.tsx`)).toBe('src/renderer/a.tsx');
   });
-  it('leaves a forward-slash src path collapsed the same way', () => {
-    expect(relPath('/abs/proj/src/main/b.ts')).toBe('src/main/b.ts');
+
+  it('strips the repo root from a forward-slash path', () => {
+    expect(relPath(`${root}/src/main/b.ts`)).toBe('src/main/b.ts');
+  });
+
+  it('keeps a nested scan root intact instead of collapsing it onto top-level src/', () => {
+    // Regression: a `/^.*\/src\//` → `src/` rewrite turned this into `src/lib/x.ts`, a path that
+    // does not exist. That fused two real files onto one allowlist key (approving one approved
+    // the other) and made `--changed` compare a phantom path against git's real one, silently
+    // dropping every clone outside the first scan root from the scoped gate.
+    expect(relPath(`${root}/socket-server/src/lib/x.ts`)).toBe('socket-server/src/lib/x.ts');
+  });
+
+  it('leaves a path outside the repo root untouched', () => {
+    expect(relPath('/elsewhere/src/main/b.ts')).toBe('/elsewhere/src/main/b.ts');
   });
 });
 
