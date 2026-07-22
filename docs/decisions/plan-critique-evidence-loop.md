@@ -16,7 +16,7 @@ created: 2026-07-19
 **Researched:** Self-Refine arXiv:2303.17651; CRITIC arXiv:2305.11738; Huang et al. arXiv:2310.01798; CriticBench arXiv:2402.14809; official Claude, Codex, and Cursor hook contracts; existing benchmark-evidence-append-only and bench-gates-on-flips-not-deltas Targets.
 **Rejected:** Runtime .cursor or .codex evidence files; flowId or EDGE_CASES_ID; periodic critique of unstable drafts; repeated self-review loops; a fourth repo-graph layer; raw transcripts in SQLite; last-writer-wins evidence selection; default-on broad agent hooks; commit reviewer injection without paired controls.
 **Revisit-when:** A preregistered plan-uplift study supports a different retry policy, provider APIs expose stronger stable work identity, or paired commit-reviewer experiments show context injection improves quality without harmful flips.
-**Scope:** agents/feature-critique.md,skills/feature-critique/**,gate-engine/critique/**,agents-hooks/**,cli/lib/components.mts,cli/lib/install/**,cli/lib/sync-manifest.mts,cli/commands/init.mts,cli/commands/doctor.mts,cli/commands/clean.mts,cli/commands/upgrade.mts,cli/commands/sync/**,cli/lib/overlay.mts
+**Scope:** README.md,agents/feature-critique.md,skills/feature-critique/**,skills/brainstorming/**,gate-engine/critique/**,agents-hooks/**,cli/lib/components.mts,cli/lib/install/**,cli/lib/sync-manifest.mts,cli/lib/wizard.mts,cli/commands/init.mts,cli/commands/doctor.mts,cli/commands/clean.mts,cli/commands/upgrade.mts,cli/commands/sync/**,cli/lib/overlay.mts
 **Source:** manual
 
 ## Implementation note · 2026-07-22 — Provider defaults are capability-gated
