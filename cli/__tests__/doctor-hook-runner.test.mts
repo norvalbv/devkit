@@ -55,7 +55,7 @@ describe('doctor — hook runner survives `git worktree add`', () => {
 
     expect(result.status).toBe('DRIFT');
     expect(result.detail).toMatch(/gitignored/);
-    expect(result.remediation).toMatch(/^git add -f /);
+    expect(result.remediation).toMatch(/^devkit sync-hook-runner /);
     // Both the per-hook stub and husky's shared dispatcher are unreachable, so both must be named.
     expect(result.remediation).toContain('.husky/_/pre-commit');
     expect(result.remediation).toContain('.husky/_/h');
