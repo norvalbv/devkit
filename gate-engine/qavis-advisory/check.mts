@@ -28,6 +28,17 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mts';
 
+/**
+ * Is the qavis CLI resolvable on PATH? `devkit doctor` asks this to report a dead advisory gate
+ * OUTSIDE commit time — a plain filesystem scan, never a `route` call, so it costs no model spend.
+ * `env` is a parameter purely so tests can drive a synthetic PATH.
+ */
+export function qavisOnPath(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.PATH ?? '')
+    .split(path.delimiter)
+    .some((dir) => dir && existsSync(path.join(dir, 'qavis')));
+}
+
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
 
