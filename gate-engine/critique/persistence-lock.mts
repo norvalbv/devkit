@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { withFileLock } from '../eval/publish-lock.mts';
@@ -14,6 +15,11 @@ interface EvidenceRootLocation {
   root: string;
 }
 
+interface EvidenceRootIdentity {
+  device: bigint;
+  inode: bigint;
+}
+
 type PersistenceAction = (canonicalRoot: string) => unknown;
 type Synchronous<Action extends PersistenceAction> = Action &
   (unknown extends ReturnType<Action>
@@ -22,8 +28,16 @@ type Synchronous<Action extends PersistenceAction> = Action &
       ? unknown
       : never);
 
+export type ExistingPlanCritiquePersistenceLockResult<Value> =
+  | { status: 'absent' }
+  | { status: 'locked'; value: Value };
+
 function invalidRoot(): never {
   throw new Error('invalid plan critique record: $.root');
+}
+
+function missing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function rootLocation(
@@ -57,6 +71,49 @@ function deferredAction(action: PersistenceAction): boolean {
   );
 }
 
+function assertSynchronousAction(action: PersistenceAction): void {
+  if (deferredAction(action))
+    throw new TypeError('plan critique evidence persistence action must be synchronous');
+}
+
+function runSynchronousAction<Action extends PersistenceAction>(
+  action: Action,
+  canonicalRoot: string,
+): ReturnType<Action> {
+  const result = action(canonicalRoot);
+  if (promiseLike(result))
+    throw new TypeError('plan critique evidence persistence action must be synchronous');
+  return result as ReturnType<Action>;
+}
+
+function persistenceLockPath(location: EvidenceRootLocation, canonicalRoot: string): string {
+  const digest = createHash('sha256').update(canonicalRoot).digest('hex');
+  return path.join(location.parent, `.plan-critique-${digest}.lock`);
+}
+
+function rootIdentity(root: string): EvidenceRootIdentity | null {
+  try {
+    const stat = lstatSync(root, { bigint: true });
+    return { device: stat.dev, inode: stat.ino };
+  } catch (error) {
+    if (missing(error)) return null;
+    throw error;
+  }
+}
+
+function sameRootIdentity(left: EvidenceRootIdentity, right: EvidenceRootIdentity): boolean {
+  return left.device === right.device && left.inode === right.inode;
+}
+
+function existingRoot(location: EvidenceRootLocation): string | null {
+  try {
+    return managedPath(location.parent, [location.basename], false);
+  } catch (error) {
+    if (missing(error)) return null;
+    throw error;
+  }
+}
+
 /** Resolve the evidence root through the private managed-path boundary. */
 export function resolvePlanCritiqueEvidenceRoot(
   options: { root?: string },
@@ -71,20 +128,61 @@ export function withPlanCritiquePersistenceLock<Action extends PersistenceAction
   options: { root?: string },
   action: Synchronous<Action>,
 ): ReturnType<Action> {
-  if (deferredAction(action))
-    throw new TypeError('plan critique evidence persistence action must be synchronous');
+  assertSynchronousAction(action);
   const location = rootLocation(options, true) as EvidenceRootLocation;
   const existing = managedPath(location.parent, [location.basename], false);
   const canonicalRoot = existing ?? location.root;
-  const digest = createHash('sha256').update(canonicalRoot).digest('hex');
-  const lockPath = path.join(location.parent, `.plan-critique-${digest}.lock`);
+  const lockPath = persistenceLockPath(location, canonicalRoot);
   return withFileLock(lockPath, OPERATION, () => {
     const lockedRoot = managedPath(location.parent, [location.basename], true) as string;
     if (lockedRoot !== canonicalRoot)
       throw new Error('plan critique evidence root changed while acquiring persistence lock');
-    const result = action(lockedRoot);
-    if (promiseLike(result))
-      throw new TypeError('plan critique evidence persistence action must be synchronous');
-    return result as ReturnType<Action>;
+    return runSynchronousAction(action, lockedRoot);
   });
+}
+
+/** Lock an existing evidence root without creating any missing evidence directories. */
+export function withExistingPlanCritiquePersistenceLock<Action extends PersistenceAction>(
+  options: { root?: string },
+  action: Synchronous<Action>,
+): ExistingPlanCritiquePersistenceLockResult<ReturnType<Action>> {
+  assertSynchronousAction(action);
+  let location: EvidenceRootLocation | null;
+  try {
+    location = rootLocation(options, false);
+  } catch (error) {
+    if (missing(error)) return { status: 'absent' };
+    throw error;
+  }
+  if (!location) return { status: 'absent' };
+  const canonicalRoot = existingRoot(location);
+  if (!canonicalRoot) return { status: 'absent' };
+  const identity = rootIdentity(canonicalRoot);
+  if (!identity) return { status: 'absent' };
+  const lockPath = persistenceLockPath(location, canonicalRoot);
+  let lockActionEntered = false;
+  try {
+    return withFileLock(
+      lockPath,
+      OPERATION,
+      () => {
+        lockActionEntered = true;
+        const lockedRoot = existingRoot(location);
+        if (!lockedRoot) return { status: 'absent' };
+        const lockedIdentity = rootIdentity(lockedRoot);
+        if (!lockedIdentity) return { status: 'absent' };
+        if (lockedRoot !== canonicalRoot || !sameRootIdentity(identity, lockedIdentity))
+          throw new Error('plan critique evidence root changed while acquiring persistence lock');
+        return { status: 'locked', value: runSynchronousAction(action, lockedRoot) };
+      },
+      { createParent: false },
+    );
+  } catch (error) {
+    if (!lockActionEntered) {
+      try {
+        if (!existingRoot(location)) return { status: 'absent' };
+      } catch {}
+    }
+    throw error;
+  }
 }

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import {
+import fs, {
   chmodSync,
   existsSync,
   mkdirSync,
@@ -12,12 +12,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   resolvePlanCritiqueEvidenceRoot,
+  withExistingPlanCritiquePersistenceLock,
   withPlanCritiquePersistenceLock,
 } from '../persistence-lock.mts';
 
@@ -75,6 +77,64 @@ function aliasRoots(scratch: string): { alias: string; real: string } {
   };
 }
 
+function rootMutationHolderScript(scratch: string): string {
+  const script = path.join(scratch, 'root-mutation-holder.mts');
+  const moduleUrl = pathToFileURL(
+    path.join(import.meta.dirname, '..', 'persistence-lock.mts'),
+  ).href;
+  writeFileSync(
+    script,
+    `import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';\n` +
+      `import path from 'node:path';\n` +
+      `import { withPlanCritiquePersistenceLock } from ${JSON.stringify(moduleUrl)};\n` +
+      `const [root, entered, contenderWaiting, mutationComplete, mutation] = process.argv.slice(2);\n` +
+      `const wait = new Int32Array(new SharedArrayBuffer(4));\n` +
+      `withPlanCritiquePersistenceLock({ root }, (canonicalRoot) => {\n` +
+      `  writeFileSync(entered, 'entered');\n` +
+      `  while (!existsSync(contenderWaiting)) Atomics.wait(wait, 0, 0, 2);\n` +
+      `  rmSync(mutation === 'remove_parent' ? path.dirname(canonicalRoot) : canonicalRoot, { recursive: true, force: true });\n` +
+      `  if (mutation === 'replace') mkdirSync(canonicalRoot, { mode: 0o700 });\n` +
+      `  writeFileSync(mutationComplete, 'complete');\n` +
+      `});\n`,
+  );
+  return script;
+}
+
+function signalMainLockAttempt<Value>(
+  signal: string,
+  mutationComplete: string,
+  action: () => Value,
+  failRelease = false,
+): Value {
+  const originalOpen = fs.openSync;
+  const originalUnlink = fs.unlinkSync;
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  fs.openSync = ((...args: Parameters<typeof fs.openSync>) => {
+    if (
+      /^\.plan-critique-[0-9a-f]{64}\.lock\.\d+\.[0-9a-f-]+\.candidate$/.test(
+        path.basename(String(args[0])),
+      )
+    ) {
+      writeFileSync(signal, 'waiting');
+      while (!existsSync(mutationComplete)) Atomics.wait(wait, 0, 0, 2);
+    }
+    return originalOpen(...args);
+  }) as typeof fs.openSync;
+  fs.unlinkSync = ((...args: Parameters<typeof fs.unlinkSync>) => {
+    if (failRelease && /^\.plan-critique-[0-9a-f]{64}\.lock$/.test(path.basename(String(args[0]))))
+      throw Object.assign(new Error('injected release failure'), { code: 'EIO' });
+    return originalUnlink(...args);
+  }) as typeof fs.unlinkSync;
+  syncBuiltinESMExports();
+  try {
+    return action();
+  } finally {
+    fs.openSync = originalOpen;
+    fs.unlinkSync = originalUnlink;
+    syncBuiltinESMExports();
+  }
+}
+
 describe('plan critique persistence lock', () => {
   it('keeps asynchronous callbacks outside the type contract', () => {
     const compileOnly = () =>
@@ -88,9 +148,54 @@ describe('plan critique persistence lock', () => {
     const compileOnlyOpaque = () =>
       // @ts-expect-error unknown return types cannot prove synchronous completion
       withPlanCritiquePersistenceLock({ root: '/unused' }, opaqueAsync);
+    const compileOnlyExisting = () =>
+      // @ts-expect-error existing-root callbacks must finish before the file lock is released
+      withExistingPlanCritiquePersistenceLock({ root: '/unused' }, async () => undefined);
     expect(compileOnly).toBeTypeOf('function');
     expect(compileOnlyUnion).toBeTypeOf('function');
     expect(compileOnlyOpaque).toBeTypeOf('function');
+    expect(compileOnlyExisting).toBeTypeOf('function');
+  });
+
+  it('does not create missing default or custom roots', () => {
+    const scratch = temporaryDirectory();
+    const home = path.join(scratch, 'home');
+    const customParent = path.join(scratch, 'custom-parent');
+    const missingCustomParent = path.join(scratch, 'missing-custom-parent');
+    mkdirSync(home, { mode: 0o700 });
+    mkdirSync(customParent, { mode: 0o700 });
+    let actions = 0;
+    const action = () => {
+      actions += 1;
+      return 'called';
+    };
+    const defaultResult = (() => {
+      const previousHome = process.env.HOME;
+      try {
+        process.env.HOME = home;
+        return withExistingPlanCritiquePersistenceLock({}, action);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+    })();
+
+    const customResult = withExistingPlanCritiquePersistenceLock(
+      { root: path.join(customParent, 'evidence') },
+      action,
+    );
+    const missingParentResult = withExistingPlanCritiquePersistenceLock(
+      { root: path.join(missingCustomParent, 'evidence') },
+      action,
+    );
+
+    expect(defaultResult).toEqual({ status: 'absent' });
+    expect(customResult).toEqual({ status: 'absent' });
+    expect(missingParentResult).toEqual({ status: 'absent' });
+    expect(actions).toBe(0);
+    expect(readdirSync(home)).toEqual([]);
+    expect(readdirSync(customParent)).toEqual([]);
+    expect(existsSync(missingCustomParent)).toBe(false);
   });
 
   it('resolves a private home root and rejects unsafe custom roots', () => {
@@ -188,6 +293,76 @@ describe('plan critique persistence lock', () => {
       /must be synchronous/,
     );
     expect(invoked).toBe(false);
+  });
+
+  it('locks an existing root with the writer identity', () => {
+    const { alias, real } = aliasRoots(temporaryDirectory());
+    const canonical = resolvePlanCritiqueEvidenceRoot({ root: real }, true) as string;
+    const parent = path.dirname(canonical);
+
+    const result = withExistingPlanCritiquePersistenceLock({ root: alias }, (lockedRoot) => {
+      expect(lockedRoot).toBe(canonical);
+      expect(() => withPlanCritiquePersistenceLock({ root: real }, () => undefined)).toThrow(
+        /^Another plan critique evidence persistence is in progress$/,
+      );
+      return 'complete' as const;
+    });
+    expect(result).toEqual({ status: 'locked', value: 'complete' });
+    expect(lockFiles(parent)).toEqual([]);
+  });
+
+  it.each([
+    'remove',
+    'remove_parent',
+    'remove_release_failure',
+    'replace',
+  ] as const)('does not authorize a root %s while waiting', async (mutation) => {
+    const scratch = temporaryDirectory(`critique-existing-root-${mutation}-`);
+    const { alias, real } = aliasRoots(scratch);
+    const canonical = resolvePlanCritiqueEvidenceRoot({ root: real }, true) as string;
+    const parent = path.dirname(canonical);
+    const entered = path.join(scratch, 'holder-entered');
+    const contenderWaiting = path.join(scratch, 'contender-waiting');
+    const mutationComplete = path.join(scratch, 'mutation-complete');
+    const holder = runChild(rootMutationHolderScript(scratch), [
+      real,
+      entered,
+      contenderWaiting,
+      mutationComplete,
+      mutation,
+    ]);
+    await waitForFile(entered);
+
+    let actionCalled = false;
+    const contend = () =>
+      signalMainLockAttempt(
+        contenderWaiting,
+        mutationComplete,
+        () =>
+          withExistingPlanCritiquePersistenceLock({ root: alias }, () => {
+            actionCalled = true;
+            return 'called';
+          }),
+        mutation === 'remove_release_failure',
+      );
+    if (mutation === 'replace')
+      expect(contend).toThrow(
+        /^plan critique evidence root changed while acquiring persistence lock$/,
+      );
+    else if (mutation === 'remove_release_failure')
+      expect(contend).toThrow(/^injected release failure$/);
+    else expect(contend()).toEqual({ status: 'absent' });
+
+    expect(await holder).toEqual({ code: 0, stderr: '' });
+    expect(actionCalled).toBe(false);
+    expect(existsSync(canonical)).toBe(mutation === 'replace');
+    expect(existsSync(parent)).toBe(mutation !== 'remove_parent');
+    if (existsSync(parent)) {
+      const remainingLocks = readdirSync(parent).filter((name) =>
+        name.startsWith('.plan-critique-'),
+      );
+      expect(remainingLocks).toHaveLength(mutation === 'remove_release_failure' ? 1 : 0);
+    }
   });
 
   it('serializes child processes that use real and alias roots', async () => {

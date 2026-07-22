@@ -300,8 +300,13 @@ function acquireFileLock(lockPath: string, operation: string): string {
   throw new Error(`Could not acquire ${operation} lock`);
 }
 
-export function withFileLock<T>(lockPath: string, operation: string, action: () => T): T {
-  mkdirSync(dirname(lockPath), { recursive: true });
+export function withFileLock<T>(
+  lockPath: string,
+  operation: string,
+  action: () => T,
+  options: { createParent?: boolean } = {},
+): T {
+  if (options.createParent !== false) mkdirSync(dirname(lockPath), { recursive: true });
   const lock = acquireFileLock(lockPath, operation);
   try {
     return action();
