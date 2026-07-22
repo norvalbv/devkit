@@ -183,7 +183,8 @@ function parseAgentFrontmatter(markdown: string): AgentFrontmatter {
   };
 }
 
-function assertValidUnicode(value: string, field: string): void {
+/** Whether a string can round-trip through filesystem/TOML UTF-8 without replacement collisions. */
+export function isWellFormedUnicode(value: string): boolean {
   for (let index = 0; index < value.length; index++) {
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
@@ -192,11 +193,16 @@ function assertValidUnicode(value: string, field: string): void {
         index++;
         continue;
       }
-      throw new Error(`Agent ${field} contains an unpaired Unicode surrogate`);
+      return false;
     }
-    if (unit >= 0xdc00 && unit <= 0xdfff)
-      throw new Error(`Agent ${field} contains an unpaired Unicode surrogate`);
+    if (unit >= 0xdc00 && unit <= 0xdfff) return false;
   }
+  return true;
+}
+
+function assertValidUnicode(value: string, field: string): void {
+  if (!isWellFormedUnicode(value))
+    throw new Error(`Agent ${field} contains an unpaired Unicode surrogate`);
 }
 
 // JSON string syntax is a strict subset of TOML basic-string syntax for the escapes JSON emits.

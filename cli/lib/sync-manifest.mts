@@ -14,8 +14,16 @@ import { AGENT_TARGETS } from './components.mts';
 import { packageDir, readJson, sha256 } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
 
+export {
+  decodeSyncManifest,
+  encodeSyncManifestV2,
+  type SyncManifestV2,
+} from './install/agent-asset-manifest/codec.mts';
+
 /** A `<kind>-manifest.json`: per-file shas devkit RECORDED writing, plus the surfaces it wrote to. */
 export interface SyncManifest {
+  /** Keep provider-scoped v2 records out of legacy broad-ownership helpers at compile time. */
+  schemaVersion?: never;
   /** `"<name>/<file>" → sha256` — every synced file devkit wrote (top-level key ⇒ owned name). */
   files: Record<string, string>;
   /** Surface names devkit recorded writing to (e.g. `['claude', 'cursor']`); absent ⇒ legacy, all-surface. */
