@@ -17,6 +17,13 @@ node_modules
 # ...and the `.generation` sidecars those caches write. Untracked-but-not-ignored, they were enough
 # to make `devkit release` refuse ("working tree not clean") in the repo that ships devkit itself.
 .devkit/*.generation
+# Codex projections of devkit's own agents/skills, written by external codex tooling. Deliberately
+# NOT tracked, unlike .claude/ and .cursor/: those are emitted by devkit's own sync-agents/
+# sync-skills and drift-checked by `devkit doctor` against a manifest, whereas nothing here can
+# regenerate or verify these — committing them would guarantee silent staleness the moment an agent
+# or skill changes. Track them once `codex` is a real AGENT_TARGETS entry and devkit emits them.
+.agents/
+.codex/
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
 # decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
