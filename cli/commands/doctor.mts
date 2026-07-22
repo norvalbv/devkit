@@ -21,16 +21,10 @@ import {
 } from '../lib/doctor/asset-checks.mts';
 import { type CheckResult, check } from '../lib/doctor/check-result.mts';
 import { checkHookRunner, checkHusky } from '../lib/doctor/hook-checks.mts';
+import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mts';
-import {
-  buildSelfHostBlock,
-  installSelfHostHook,
-  SELF_HOST_EXTRAS,
-  SELF_HOST_STRUCTURE_CMD,
-  selfHostSelection,
-} from '../lib/husky/self-host.mts';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
@@ -367,8 +361,11 @@ function applyFix(
   // The guard blocks (pre-commit + commit-msg) AND the structure-lint `--structure` arg are all
   // rebuilt by init from the recorded selection — so a drifted result on any of them takes the
   // same init repair path (each flags itself fixable, else --fix would no-op it).
+  // `r.fixable` is part of the condition, not just the name: a hook check can now report a problem
+  // init CANNOT repair (a hand-written gate call OUTSIDE the managed block — regenerating the block
+  // leaves it untouched). Without this, --fix re-inits on every run and the warning never clears.
   const HOOK_CHECKS = new Set(['.husky/pre-commit', '.husky/commit-msg', 'structure-lint']);
-  const huskyDrift = results.some((r) => HOOK_CHECKS.has(r.name) && r.status !== 'OK');
+  const huskyDrift = results.some((r) => HOOK_CHECKS.has(r.name) && r.status !== 'OK' && r.fixable);
   if (needsInit || huskyDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];
     // Preserve the recorded install mode: a standalone repo re-inits standalone (no package dep).
@@ -407,7 +404,7 @@ function applyFix(
  * git ROOT because that's the cwd the husky fragment shells the gate from — doctor should report
  * what the hook would actually see, not what this cwd sees.
  */
-function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
+export function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
   if (!guards.includes(QAVIS_ADVISORY_ID)) return;
   const { gitRoot } = detectGitRoot(cwd);
   if (!existsSync(join(gitRoot, QAVIS_RECIPE))) {
@@ -544,55 +541,6 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
 // generator changed without a regen, or the hook was hand-edited. `--fix` regenerates it. Skills/
 // agents are advisory (a re-sync heals them). Pin/extends/structure/version checks don't apply —
 // the configs are hand-owned local files, not `@norvalbv/devkit/*` extends, and there is no dep.
-async function runSelfHostDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): Promise<number> {
-  const { gitRoot, pkgRel } = detectGitRoot(cwd);
-  const hookPath = join(gitRoot, '.husky', 'pre-commit');
-  console.log('devkit doctor — self-host (source-mode dogfood)\n');
-
-  let hookOk = false;
-  if (!existsSync(hookPath)) {
-    console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
-  } else {
-    const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
-    const expectedBlock = buildSelfHostBlock(
-      { ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS },
-      pkgRel,
-      cwd,
-    );
-    if (currentBlock !== null && currentBlock.trim() === expectedBlock.trim()) {
-      hookOk = true;
-      console.log('  ✓ .husky/pre-commit in sync with the generator');
-    } else if (fix) {
-      installSelfHostHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
-      hookOk = true;
-      console.log(
-        '  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)',
-      );
-    } else {
-      console.log(
-        '  ⚠ .husky/pre-commit is STALE (generator changed or the hook was hand-edited) — run `devkit doctor --fix`',
-      );
-    }
-  }
-
-  // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
-  const sel: Partial<Selection> = cfg.components ?? {};
-  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
-  const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
-  const advise = (r: CheckResult) =>
-    console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-  if (sel.skills && primary) advise(await checkSkills(cwd, primary));
-  if (sel.agents && primary) advise(await checkAgents(cwd, primary));
-  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
-
-  // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
-  // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
-  const runner = checkHookRunner(cwd);
-  console.log(`  ${runner.status === 'OK' ? '✓' : '⚠'} ${runner.name}: ${runner.detail}`);
-  if (runner.status !== 'OK') console.log(`      → ${runner.remediation}`);
-
-  return hookOk && runner.status === 'OK' ? 0 : 1;
-}
 
 /**
  * Build the doctor result list for a package/standalone install from its recorded config — a pure
