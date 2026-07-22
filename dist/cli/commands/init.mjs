@@ -356,7 +356,14 @@ function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
     };
     const scripts = {
         ...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),
-        ...(sel.husky ? { prepare: 'husky' } : {}),
+        // Chained so every `bun install` re-stages the husky runner past its own gitignore — permanently
+        // closing the class of bug where a fresh `git worktree add` finds no runner and gates nothing.
+        // Guarded (`command -v` + `|| true`): devkit is an ordinary devDependency here, resolved onto
+        // PATH for lifecycle scripts same as husky, but a production/partial install must never fail
+        // over a missing gate tool.
+        ...(sel.husky
+            ? { prepare: 'husky && (command -v devkit >/dev/null 2>&1 && devkit sync-hook-runner || true)' }
+            : {}),
         ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
             ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
             : {}),
