@@ -44,9 +44,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from "./allowlist-io.mjs";
+import { flagReader } from "./argv.mjs";
 import { loadChangedSet } from "./changed-files.mjs";
 import { classifyPair } from "./classify.mjs";
 import { isExpired } from "./decay.mjs";
+import { missingIndexMessage, refreshIndex } from "./index-refresh.mjs";
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
 // Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every
@@ -68,10 +70,7 @@ const allowlistPathRaw = process.env.CO_OCCURRENCE_ALLOWLIST ?? resolveFromCwd(c
 const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
-const flag = (name, def) => {
-    const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : def;
-};
+const flag = flagReader(argv);
 // Knob defaults come from the resolved config thresholds (consumer-tunable), with
 // per-run --flag overrides on top.
 const KNOBS = {
@@ -107,9 +106,11 @@ function cannotRun(msg) {
 if (dbPath == null) {
     cannotRun('co-occurrence matcher: no search-code index configured (guard.config.json `indexPath` / GUARD_INDEX_PATH / SEARCH_CODE_DB). Matcher opted out (fail-open).');
 }
-if (!existsSync(dbPath)) {
-    cannotRun(`No index at ${dbPath}. Run the search-code indexer first.`);
-}
+if (!existsSync(dbPath))
+    cannotRun(missingIndexMessage(dbPath, cfg));
+// Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
+// is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
+refreshIndex(dbPath, cfg);
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
 // the index) so every downstream read/write sees a definite string.
