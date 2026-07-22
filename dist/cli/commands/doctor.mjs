@@ -18,13 +18,13 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { QAVIS_RECIPE, qavisOnPath } from "../../gate-engine/qavis-advisory/check.mjs";
-import { RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, structureCmdFor, } from "../lib/components.mjs";
+import { RECOMMENDED_GUARD_IDS, structureCmdFor } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { checkAgentHookScripts, checkAgents, checkRegistrations, checkSkills, } from "../lib/doctor/asset-checks.mjs";
 import { check } from "../lib/doctor/check-result.mjs";
+import { checkHookRunner, checkHusky } from "../lib/doctor/hook-checks.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { checkCommitMsgHook, commitMsgGuards } from "../lib/husky/commit-msg-block.mjs";
-import { markEnd, markStart } from "../lib/husky/husky.mjs";
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../lib/husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../lib/husky/self-host.mjs";
 import { checkHookRegistrations } from "../lib/install/install-hooks.mjs";
@@ -42,40 +42,6 @@ function checkConfig(cwd) {
         return check('.devkit/config.json', 'MISSING', 'not initialized', 'run `devkit init`');
     }
     return check('.devkit/config.json', 'OK', 'present');
-}
-// Selection-aware: only the SELECTED guards must be present in the block (a deselected
-// guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
-// block is package-scoped — resolve both from cwd.
-function checkHusky(cwd, selectedGuards) {
-    const { gitRoot, pkgRel } = detectGitRoot(cwd);
-    const hookPath = join(gitRoot, '.husky', 'pre-commit');
-    if (!existsSync(hookPath)) {
-        return check('.husky/pre-commit', 'MISSING', 'no hook', 'run `devkit init`', true);
-    }
-    const content = readFileSync(hookPath, 'utf8');
-    if (!content.includes(markStart(pkgRel)) || !content.includes(markEnd(pkgRel))) {
-        return check('.husky/pre-commit', 'DRIFT', pkgRel ? `no devkit-guards block for "${pkgRel}"` : 'no devkit-guards marker block', 'run `devkit init` (appends the block)', true);
-    }
-    const block = extractGuardBlock(content, pkgRel) ?? '';
-    // Deterministic guards (size/fanout/dup/clone) run through the SINGLE `guard-deterministic`
-    // orchestrator; decisions/review/qavis-advisory keep their own per-id `guard-<id>` fragment.
-    // Verify one orchestrator call when any deterministic guard is selected, plus each selected
-    // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
-    // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
-    const OWN_FRAGMENT = new Set(['decisions', 'review', QAVIS_ADVISORY_ID]);
-    const gates = selectedGuards.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
-    const missing = [];
-    if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
-        missing.push('deterministic gates');
-    }
-    for (const g of gates) {
-        if (OWN_FRAGMENT.has(g) && !block.includes(`guard-${g}`))
-            missing.push(g);
-    }
-    if (missing.length) {
-        return check('.husky/pre-commit', 'DRIFT', `block missing gate(s): ${missing.join(', ')}`, 'run `devkit init --force` (or `devkit upgrade`) to regenerate the block', true);
-    }
-    return check('.husky/pre-commit', 'OK', gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)');
 }
 // Structure-lint check (only when `structure` is selected). `structure` is NOT a guard, so
 // checkHusky never verifies it. Structure joins the deterministic orchestrator via a `--structure
@@ -493,7 +459,13 @@ async function runSelfHostDoctor(cwd, cfg, fix) {
     if (sel.agents && primary)
         advise(await checkAgents(cwd, primary));
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
-    return hookOk ? 0 : 1;
+    // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
+    // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
+    const runner = checkHookRunner(cwd);
+    console.log(`  ${runner.status === 'OK' ? '✓' : '⚠'} ${runner.name}: ${runner.detail}`);
+    if (runner.status !== 'OK')
+        console.log(`      → ${runner.remediation}`);
+    return hookOk && runner.status === 'OK' ? 0 : 1;
 }
 /**
  * Build the doctor result list for a package/standalone install from its recorded config — a pure
@@ -514,7 +486,7 @@ async function collectResults(cwd, cfg, configResult) {
     const overrides = new Set(cfg.configOverrides ?? []);
     const results = [configResult];
     if (sel.husky)
-        results.push(checkHusky(cwd, sel.guards ?? []));
+        results.push(checkHusky(cwd, sel.guards ?? []), checkHookRunner(cwd));
     if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
         results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
     if (sel.biome)
