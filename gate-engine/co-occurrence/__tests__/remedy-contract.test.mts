@@ -1,7 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { ALLOWLIST_CLI, MODES } from '../allowlist-io.mts';
 
 // Ticket 7 regression guard. The dup/clone gates print a ready-to-paste approval remedy
@@ -33,9 +43,54 @@ describe('gate remedy ↔ shipped CLI contract', () => {
     expect(MODES).toContain('add'); // matcher gate remedy
     expect(MODES).toContain('add-clone'); // clone gate remedy
     // The full documented CRUD surface (skill + decay.mts) is present too.
-    for (const m of ['remove', 'remove-clone', 'check', 'list', 'prune']) {
+    for (const m of ['remove', 'remove-clone', 'check', 'check-clone', 'list', 'prune']) {
       expect(MODES).toContain(m);
     }
+  });
+
+  // A bin is ALWAYS reached through a symlink — node_modules/.bin, or a global install's bin dir.
+  // Both CLI-dispatching modules gate their dispatch on a run-as-main check, and a check that does
+  // not realpath argv[1] compares the SHIM path against the real module path: false, so the bin
+  // parses its args, dispatches nothing, and exits 0. That is a silently dead gate — `guard-clone
+  // scan --gate` printed nothing and passed, and the approval remedy the gates print did nothing.
+  // Only an invocation THROUGH a symlink reproduces it, so spawn one.
+  describe('a bin invoked through its symlink shim actually dispatches', () => {
+    const shimDir = mkdtempSync(join(tmpdir(), 'devkit-shim-'));
+    afterAll(() => rmSync(shimDir, { recursive: true, force: true }));
+
+    // Sibling suites stub JSCPD_BIN / CO_OCCURRENCE_ALLOWLIST on process.env and share this
+    // worker, so hand the child an env with those cleared — this test is about dispatch, and an
+    // inherited fixture path would fail it for an unrelated reason.
+    const cleanEnv = (): NodeJS.ProcessEnv => {
+      const env = { ...process.env };
+      for (const k of ['JSCPD_BIN', 'CO_OCCURRENCE_ALLOWLIST', 'GUARD_ALLOWLIST_PATH'])
+        delete env[k];
+      return env;
+    };
+
+    const viaShim = (module: string, args: string[]): string => {
+      const shim = join(shimDir, module.replace('.mts', ''));
+      if (!existsSync(shim)) symlinkSync(resolve(here, '..', module), shim);
+      return execFileSync(process.execPath, [shim, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: cleanEnv(),
+        cwd: root,
+      });
+    };
+
+    it('allowlist-cli lists through the shim', () => {
+      expect(viaShim('allowlist-cli.mts', ['list'])).toMatch(/pair\(s\), .*clone\(s\)/);
+    });
+
+    it('clone-detector scans through the shim', () => {
+      // `json` over a clone-free scratch dir: dispatch proves itself by emitting the (empty) JSON
+      // array. If the run-as-main guard is wrong, stdout is empty and this fails.
+      const scanDir = join(shimDir, 'scan');
+      mkdirSync(scanDir, { recursive: true });
+      writeFileSync(join(scanDir, 'a.ts'), 'export const a = 1;\n');
+      expect(viaShim('clone-detector.mts', ['json', '--paths', scanDir])).toMatch(/\[/);
+    });
   });
 
   it('both detectors build their remedy from ALLOWLIST_CLI — no orphaned bunx literal', () => {

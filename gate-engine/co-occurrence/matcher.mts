@@ -51,9 +51,11 @@ import {
   saveAllowlist,
   symFileKey,
 } from './allowlist-io.mts';
+import { flagReader } from './argv.mts';
 import { loadChangedSet } from './changed-files.mts';
 import { classifyPair } from './classify.mts';
 import { isExpired } from './decay.mts';
+import { missingIndexMessage, refreshIndex } from './index-refresh.mts';
 
 // ── Types (hoisted from JSDoc + inferred from usage / call sites) ─────────────
 // One sqlite output column. Mirrors node:sqlite's (non-exported) SQLOutputValue so a
@@ -132,10 +134,7 @@ const CO_SCRIPT = process.env.GUARD_ALLOWLIST_CLI || ALLOWLIST_CLI;
 
 const argv = process.argv.slice(2);
 const mode = argv[0] ?? 'scan';
-const flag = <T,>(name: string, def: T): string | T => {
-  const i = argv.indexOf(name);
-  return i !== -1 ? argv[i + 1] : def;
-};
+const flag = flagReader(argv);
 // Knob defaults come from the resolved config thresholds (consumer-tunable), with
 // per-run --flag overrides on top.
 const KNOBS = {
@@ -176,9 +175,10 @@ if (dbPath == null) {
   );
 }
 
-if (!existsSync(dbPath)) {
-  cannotRun(`No index at ${dbPath}. Run the search-code indexer first.`);
-}
+if (!existsSync(dbPath)) cannotRun(missingIndexMessage(dbPath, cfg));
+// Judge the code being COMMITTED, not the last indexed state. Silently no-ops unless refreshing
+// is safe here — index-refresh.mts documents the two ways an unconditional refresh goes wrong.
+refreshIndex(dbPath, cfg);
 
 // allowlistPath resolves from DEFAULTS (a non-null string) so this never fires at
 // runtime, but resolveFromCwd's contract is string|null — guard it (fail-open, like
