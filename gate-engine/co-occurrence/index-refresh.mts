@@ -17,7 +17,7 @@
 
 import { execFileSync, execSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, relative } from 'node:path';
 
 /**
  * Absolute working root of the PRIMARY checkout — the one holding the real `.git`. Every linked
@@ -45,7 +45,11 @@ export function primaryCheckout(cwd: string): string | null {
  */
 export function indexIsInThisCheckout(indexPath: string, cwd: string): boolean {
   try {
-    return realpathSync(indexPath).startsWith(`${realpathSync(cwd)}/`);
+    // path.relative, not a string prefix: a `${cwd}/` prefix test never matches on Windows
+    // (native separators are '\'), which would decline every safe refresh there. Inside means a
+    // non-empty relative path that neither escapes upward nor re-anchors as absolute.
+    const rel = relative(realpathSync(cwd), realpathSync(indexPath));
+    return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
   } catch {
     return false;
   }
