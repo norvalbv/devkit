@@ -42,6 +42,7 @@ import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowGate, } from "../lib/install/install-fallow.mjs";
 import { detectHookConflicts, installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "../lib/install/install-hooks.mjs";
 import { installSearchCode } from "../lib/install/install-search-code.mjs";
+import { patchPackageJson } from "../lib/install/package-json.mjs";
 import { parseReviewFlags, reviewPlanFromFlags, } from "../lib/install/review-profile.mjs";
 import { installOverlay } from "../lib/overlay.mjs";
 import { installGlobalHook } from "../lib/overlay-global-hook.mjs";
@@ -327,73 +328,6 @@ function applyMaxLines(cwd, on, dryRun) {
     if (setMaxLines(cwd)) {
         console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
     }
-}
-// Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
-// fallow-ignore-next-line complexity
-function patchPackageJson(cwd, devkitRef, sel, isStructure, dryRun, stack) {
-    const pkgPath = join(cwd, 'package.json');
-    const pkg = readJson(pkgPath);
-    if (!pkg) {
-        console.log('  ! no package.json — skipping devDeps/scripts wiring');
-        return;
-    }
-    // Zero-consumer-dependency model: devkit bundles the gate tools. jscpd is no longer a consumer dep
-    // (the clone gate resolves devkit's OWN bundled jscpd), and the config-driven structure gate runs via
-    // the `guard-structure` bin (devkit's own eslint + plugin). Only ELECTRON keeps consumer-side
-    // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
-    const electronPreset = isStructure && stack === 'electron';
-    const devDeps = {
-        '@norvalbv/devkit': `${repoUrl()}#${devkitRef}`,
-        ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
-        ...(sel.husky ? { husky: '^9.1.7' } : {}),
-        ...(electronPreset
-            ? {
-                eslint: '^10.0.0',
-                'eslint-plugin-project-structure': '^3.14.3',
-                '@typescript-eslint/parser': '^8.0.0',
-            }
-            : {}),
-    };
-    const scripts = {
-        ...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),
-        // Chained so every `bun install` re-stages the husky runner past its own gitignore — permanently
-        // closing the class of bug where a fresh `git worktree add` finds no runner and gates nothing.
-        // Guarded (`command -v` + `|| true`): devkit is an ordinary devDependency here, resolved onto
-        // PATH for lifecycle scripts same as husky, but a production/partial install must never fail
-        // over a missing gate tool.
-        ...(sel.husky
-            ? { prepare: 'husky && (command -v devkit >/dev/null 2>&1 && devkit sync-hook-runner || true)' }
-            : {}),
-        ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
-            ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
-            : {}),
-        ...(electronPreset ? { 'lint:structure': 'eslint src' } : {}),
-    };
-    pkg.devDependencies = pkg.devDependencies ?? {};
-    pkg.scripts = pkg.scripts ?? {};
-    const added = [];
-    for (const [k, v] of Object.entries(devDeps)) {
-        if (!pkg.devDependencies[k]) {
-            pkg.devDependencies[k] = v;
-            added.push(`devDep ${k}`);
-        }
-    }
-    for (const [k, v] of Object.entries(scripts)) {
-        if (!pkg.scripts[k]) {
-            pkg.scripts[k] = v;
-            added.push(`script ${k}`);
-        }
-    }
-    if (added.length === 0) {
-        console.log('  • package.json already wired (devDeps + scripts)');
-        return;
-    }
-    if (dryRun) {
-        console.log(`  [dry-run] patch package.json: ${added.join(', ')}`);
-        return;
-    }
-    writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-    console.log(`  ✓ package.json: ${added.join(', ')}`);
 }
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
 // `cwd` for a single-package repo, else the monorepo root). `pkgRel` scopes the block + `cd`s
@@ -1008,7 +942,7 @@ export async function applyInit(cwd, plan) {
     // `devkit init` can't run here).
     if (!standalone && !selfHost) {
         console.log('2. package.json');
-        patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun, stack);
+        patchPackageJson(cwd, devkitRef, repoUrl(), selection, isStructure, dryRun, stack);
     }
     if (selection.husky) {
         console.log('3. husky pre-commit');
