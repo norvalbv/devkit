@@ -136,6 +136,29 @@ function isUnreachable(gitRoot: string, relPath: string): boolean {
   return gitSucceeds(gitRoot, ['check-ignore', '-q', relPath]);
 }
 
+/**
+ * The runner files this repo needs that are untracked AND gitignored — reachable by nothing an
+ * ordinary `git add` can do, so `git worktree add` will never carry them. Empty when
+ * core.hooksPath is unset/absolute (no in-repo runner to stage) or nothing declared is unreachable.
+ *
+ * `sync-hook-runner` is the only caller that stages files (an explicit, user-invoked command, never
+ * `--fix`); kept separate from `checkHookRunner` rather than sharing its internals, so an
+ * already-reviewed check's shape stays untouched.
+ */
+export function unreachableRunnerFiles(gitRoot: string): string[] {
+  const shared = hooksPathAt(gitRoot, '--local');
+  if (!shared || isAbsolute(shared) || !existsSync(join(gitRoot, shared))) return [];
+  const huskyDir = join(gitRoot, '.husky');
+  const runnerDir = join(gitRoot, shared);
+  const declared = readdirSync(existsSync(huskyDir) ? huskyDir : runnerDir).filter((n) =>
+    GIT_HOOKS.has(n),
+  );
+  const present = [...declared, 'h']
+    .map((n) => `${shared}/${n}`)
+    .filter((rel) => existsSync(join(gitRoot, rel)));
+  return present.filter((rel) => isUnreachable(gitRoot, rel));
+}
+
 // Gate DELIVERY into fresh worktrees. Husky pins a RELATIVE core.hooksPath (`.husky/_`) and
 // gitignores the runner it points at (`.husky/_/.gitignore` = `*`). A linked worktree therefore
 // checks out with hooksPath resolving to a MISSING directory, and git treats "no runner" as "no
@@ -240,7 +263,7 @@ export function checkHookRunner(cwd: string): CheckResult {
       RUNNER,
       'DRIFT',
       `runner is gitignored (${unreachable.join(', ')}) — it can never reach a new checkout, so a fresh \`git worktree add\` runs ZERO gates, silently`,
-      `git add -f ${unreachable.join(' ')}`,
+      `devkit sync-hook-runner (or: git add -f ${unreachable.join(' ')})`,
     );
   }
   return check(

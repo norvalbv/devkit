@@ -8,6 +8,7 @@
  *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
  *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hook-runner [--dry-run]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version
  *   devkit --help
@@ -48,6 +49,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   'sync-skills': () => import('./commands/sync/sync-skills.mts'),
   'sync-agents': () => import('./commands/sync/sync-agents.mts'),
   'sync-hooks': () => import('./commands/sync/sync-hooks.mts'),
+  'sync-hook-runner': () => import('./commands/sync/sync-hook-runner.mts'),
   release: () => import('./commands/release.mts'),
   update: () => import('./commands/update.mts'),
   upgrade: () => import('./commands/upgrade.mts'),
@@ -69,6 +71,7 @@ const GIT_COMMANDS = new Set([
   'clean',
   'doctor',
   'init',
+  'sync-hook-runner',
 ]);
 
 /**
