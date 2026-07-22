@@ -10,6 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { QAVIS_RECIPE, qavisOnPath } from '../../gate-engine/qavis-advisory/check.mts';
 import {
   RECOMMENDED_GUARD_IDS,
   REVIEWABLE_GUARD_IDS,
@@ -17,10 +18,17 @@ import {
   structureCmdFor,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
-import { packageDir, readJson, sha256 } from '../lib/fs-helpers.mts';
+import {
+  checkAgentHookScripts,
+  checkAgents,
+  checkRegistrations,
+  checkSkills,
+} from '../lib/doctor/asset-checks.mts';
+import { type CheckResult, check } from '../lib/doctor/check-result.mts';
+import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { markEnd, markStart } from '../lib/husky/husky.mts';
-import { extractGuardBlock } from '../lib/husky/husky-block.mts';
+import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mts';
 import {
   buildSelfHostBlock,
   installSelfHostHook,
@@ -31,7 +39,6 @@ import {
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
-import { bundledNames } from '../lib/sync-manifest.mts';
 import { cmpSemver } from './update.mts';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
@@ -41,17 +48,6 @@ const PINNED_TAG = /#v\d/;
 // installed consumer (dist). Derive the extension from THIS module so packageDir()-relative refs to
 // devkit's own gate/CLI files resolve in both — these are runtime string paths tsc emit won't rewrite.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-
-// One check result. status ∈ OK | DRIFT | MISSING. `fixable` flags whether --fix can touch it.
-type CheckStatus = 'OK' | 'DRIFT' | 'MISSING';
-
-interface CheckResult {
-  name: string;
-  status: CheckStatus;
-  detail: string;
-  remediation: string;
-  fixable: boolean;
-}
 
 // A jsonc/json config carrying an `extends` base pointer; the index signature lets checkExtends read
 // an arbitrary `key` (defaults to "extends") out of the parsed object.
@@ -64,11 +60,6 @@ interface ConfigWithExtends {
 interface ExpectedExtends {
   biome: string;
   tsconfig: string;
-}
-
-// A skills / agents / agent-hooks manifest: repo-relative path → recorded sha256.
-interface Manifest {
-  files: Record<string, string>;
 }
 
 // The recorded .devkit/config.json shape doctor reads (only the fields it consults).
@@ -86,16 +77,6 @@ interface DevkitConfig {
 // The gate-engine config module, imported via a runtime path (so it's typed here, not resolved).
 interface GateConfigModule {
   resolveGuardConfig(cwd: string): unknown;
-}
-
-function check(
-  name: string,
-  status: CheckStatus,
-  detail: string,
-  remediation = '',
-  fixable = false,
-): CheckResult {
-  return { name, status, detail, remediation, fixable };
 }
 
 function checkConfig(cwd: string): CheckResult {
@@ -130,7 +111,7 @@ function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
   // Verify one orchestrator call when any deterministic guard is selected, plus each selected
   // own-fragment sentinel. A pre-collapse block (per-guard lines) fails + is flagged for regen.
   // `sentry` runs at commit-msg (checkCommitMsgHook) — never expected in the pre-commit block.
-  const OWN_FRAGMENT = new Set(['decisions', 'review', 'qavis-advisory']);
+  const OWN_FRAGMENT = new Set(['decisions', 'review', QAVIS_ADVISORY_ID]);
   const gates = selectedGuards.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
   const missing: string[] = [];
   if (gates.some((g) => !OWN_FRAGMENT.has(g)) && !block.includes('guard-deterministic')) {
@@ -272,136 +253,6 @@ async function checkGuardConfig(cwd: string): Promise<CheckResult> {
     const msg = e instanceof Error ? e.message : String(e);
     return check('guard.config.json', 'DRIFT', msg, 'fix the config JSON');
   }
-}
-
-// Reason: the branches ARE the manifest-drift algorithm — per file, two independent SHA comparisons
-// (devkit source vs manifest, consumer copy vs manifest) feed two drift buckets, then a
-// missing-manifest short-circuit and a source/consumer DRIFT split. Each branch is a distinct drift
-// verdict; extracting them hides which side drifted.
-// fallow-ignore-next-line complexity
-async function checkSkills(cwd: string, surface = 'claude'): Promise<CheckResult> {
-  // Skills are repo-wide → manifest + the agent-surface dir live at the git root (cwd for a
-  // single-package repo). Verify against the selected surface (.claude or .cursor — same content).
-  const { gitRoot } = detectGitRoot(cwd);
-  const manifestPath = join(gitRoot, '.devkit', 'skills-manifest.json');
-  const manifest = readJson(manifestPath) as Manifest | null;
-  if (!manifest) {
-    return check('skills', 'MISSING', 'no skills-manifest.json', 'run `devkit sync-skills`', true);
-  }
-  const skillsSrc = join(packageDir(), 'skills');
-  const consumerDrift: string[] = [];
-  const sourceDrift: string[] = [];
-  for (const [rel, recordedSha] of Object.entries(manifest.files)) {
-    const srcPath = join(skillsSrc, rel);
-    if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, `.${surface}`, 'skills', rel);
-    if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
-  }
-  // Bundle-completeness: a NEW bundled skill the (stale) manifest doesn't list — and that was never
-  // synced under .<surface>/skills — is drift the per-file loop above can't see (it iterates manifest
-  // keys only, so a just-added skill is invisible). A consumer-authored same-named skill (present on
-  // disk, deliberately off-manifest) is NOT drift, so require absent-on-disk too — see the
-  // non-devkit-asset-collision-preserve decision.
-  const manifestSkillDirs = new Set(Object.keys(manifest.files).map((k) => k.split('/')[0]));
-  const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter(
-    (dir) =>
-      !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)),
-  );
-  if (sourceDrift.length || consumerDrift.length || unsynced.length) {
-    const parts: string[] = [];
-    if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
-    if (consumerDrift.length) parts.push(`consumer copy drifted (${consumerDrift.length})`);
-    if (unsynced.length)
-      parts.push(
-        `bundle has ${unsynced.length} skill(s) the manifest lacks (${unsynced.join(', ')})`,
-      );
-    return check('skills', 'DRIFT', parts.join('; '), 'run `devkit sync-skills`', true);
-  }
-  return check('skills', 'OK', `${Object.keys(manifest.files).length} file(s) in sync`);
-}
-
-// Agents are repo-wide → manifest + the agent-surface dir live at the git root (same contract as skills).
-// Reason: the branches ARE the manifest-drift algorithm (same contract as checkSkills): per file, two independent SHA comparisons (devkit source vs manifest, consumer copy vs manifest) feed two drift buckets, then a missing-manifest short-circuit and a source/consumer DRIFT split. Each branch is a distinct drift verdict; extracting them hides which side drifted.
-// fallow-ignore-next-line complexity
-async function checkAgents(cwd: string, surface = 'claude'): Promise<CheckResult> {
-  const { gitRoot } = detectGitRoot(cwd);
-  const manifest = readJson(join(gitRoot, '.devkit', 'agents-manifest.json')) as Manifest | null;
-  if (!manifest) {
-    return check('agents', 'MISSING', 'no agents-manifest.json', 'run `devkit sync-agents`', true);
-  }
-  const agentsSrc = join(packageDir(), 'agents');
-  const consumerDrift: string[] = [];
-  const sourceDrift: string[] = [];
-  for (const [rel, recordedSha] of Object.entries(manifest.files)) {
-    const srcPath = join(agentsSrc, rel);
-    if (existsSync(srcPath) && sha256(srcPath) !== recordedSha) sourceDrift.push(rel);
-    const consumerPath = join(gitRoot, `.${surface}`, 'agents', rel);
-    if (!existsSync(consumerPath) || sha256(consumerPath) !== recordedSha) consumerDrift.push(rel);
-  }
-  // Bundle-completeness: a NEW bundled agent the (stale) manifest doesn't list — and that was never
-  // synced under .<surface>/agents — is drift the per-file loop above can't see (it iterates manifest
-  // keys only). A consumer-authored same-named agent (present on disk, deliberately off-manifest) is
-  // NOT drift, so require absent-on-disk too — see the non-devkit-asset-collision-preserve decision.
-  const unsynced = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md')).filter(
-    (name) =>
-      !(name in manifest.files) && !existsSync(join(gitRoot, `.${surface}`, 'agents', name)),
-  );
-  if (sourceDrift.length || consumerDrift.length || unsynced.length) {
-    const parts: string[] = [];
-    if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
-    if (consumerDrift.length) parts.push(`consumer copy drifted (${consumerDrift.length})`);
-    if (unsynced.length)
-      parts.push(
-        `bundle has ${unsynced.length} agent(s) the manifest lacks (${unsynced.join(', ')})`,
-      );
-    return check('agents', 'DRIFT', parts.join('; '), 'run `devkit sync-agents`', true);
-  }
-  return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
-}
-
-// agentHooks: the six synced scripts (under <surface>/hooks) match the manifest, and are present.
-function checkAgentHookScripts(cwd: string, surface = 'claude'): CheckResult {
-  const { gitRoot } = detectGitRoot(cwd);
-  const manifest = readJson(
-    join(gitRoot, '.devkit', 'agent-hooks-manifest.json'),
-  ) as Manifest | null;
-  if (!manifest) {
-    return check(
-      'agent-hooks',
-      'MISSING',
-      'no agent-hooks-manifest.json',
-      'run `devkit init`',
-      true,
-    );
-  }
-  const drift = Object.keys(manifest.files).filter((rel) => {
-    const p = join(gitRoot, `.${surface}`, 'hooks', rel);
-    return !existsSync(p) || sha256(p) !== manifest.files[rel];
-  });
-  if (drift.length) {
-    return check(
-      'agent-hooks',
-      'DRIFT',
-      `${drift.length} script(s) drifted/absent`,
-      'run `devkit init`',
-      true,
-    );
-  }
-  return check('agent-hooks', 'OK', `${Object.keys(manifest.files).length} hook script(s) in sync`);
-}
-
-// Hook registrations present in .claude/settings.json for the selected hook-owning components.
-function checkRegistrations(cwd: string, hookComponents: string[]): CheckResult {
-  const { gitRoot } = detectGitRoot(cwd);
-  const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents);
-  if (ok) return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
-  return check(
-    'hook registrations',
-    'DRIFT',
-    `${missing.length} command(s) not in .claude/settings.json`,
-    'run `devkit init` to re-register',
-    true,
-  );
 }
 
 // searchSteering: the guard + counter engine bins are present in the installed package.
@@ -601,6 +452,30 @@ function applyFix(
   // freeze`, never doctor --fix.
 }
 
+/**
+ * qavis-advisory health — ADVISORY, printed by every doctor mode, never a CheckResult and never a
+ * `--fix` target. Deliberately outside the exit code: a repo that keeps the guard selected but has
+ * no qavis installed is a choice, not drift.
+ *
+ * What it catches is the gate's one blind spot: it fails OPEN when qavis can't be reached, so a
+ * missing binary looks exactly like a healthy "nothing to QA" at commit time. Resolved against the
+ * git ROOT because that's the cwd the husky fragment shells the gate from — doctor should report
+ * what the hook would actually see, not what this cwd sees.
+ */
+function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
+  if (!guards.includes(QAVIS_ADVISORY_ID)) return;
+  const { gitRoot } = detectGitRoot(cwd);
+  if (!existsSync(join(gitRoot, QAVIS_RECIPE))) {
+    console.log(`  · ${QAVIS_ADVISORY_ID}: no ${QAVIS_RECIPE} — gate inert (nothing to QA)`);
+  } else if (!qavisOnPath()) {
+    console.log(
+      `  · ${QAVIS_ADVISORY_ID}: ${QAVIS_RECIPE} present but qavis is NOT on PATH — the QA advisory is skipped on every commit (install qavis, or drop the guard)`,
+    );
+  } else {
+    console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present)`);
+  }
+}
+
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
 const DEFAULT_DOCTOR_SEL: Partial<Selection> = {
   biome: true,
@@ -704,6 +579,7 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
       `  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks in .claude/settings.local.json' : 'not in settings.local.json (re-run init)'}`,
     );
   }
+  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   if (sel.fallow) {
     const wired =
       hookOk &&
@@ -762,6 +638,7 @@ async function runSelfHostDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): 
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
   if (sel.skills && primary) advise(await checkSkills(cwd, primary));
   if (sel.agents && primary) advise(await checkAgents(cwd, primary));
+  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
   return hookOk ? 0 : 1;
 }
@@ -876,6 +753,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
     if (r.status !== 'OK' && r.remediation) line += `\n      → ${r.remediation}`;
     console.log(line);
   }
+  printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
   const drifted = results.some((r) => r.status !== 'OK');
   if (fix && drifted) {
