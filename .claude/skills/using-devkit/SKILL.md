@@ -37,7 +37,9 @@ devkit command.
 | You observe (trigger) | Run | Why not the raw-git move |
 |---|---|---|
 | A commit was **denied on a protected branch**, or you're on `main`/`master` and need to land a change | `devkit ship <branch> "<title>" -- <paths>` | `git switch -c` + commit + push **moves the shared checkout's HEAD**, disturbing parallel agents; `ship` commits in an ephemeral worktree and opens a PR without moving HEAD |
-| The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship --base <base-branch> <branch> "<title>" -- <paths>` | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
+| The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
+| You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself, and a branch that already exists is the one state it cannot recover from |
+| Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
 | You must **relocate or rename source files** and imports must follow | `devkit move <src...> <dest-dir>` | `git mv` leaves every `import`/`vi.mock`/dynamic-import pointing at the old path; `move` rewrites them all in the repo's alias style |
@@ -49,6 +51,20 @@ devkit command.
 
 ## Rules
 
+- **`<branch>` and `"<title>"` are positional and come BEFORE every flag.** `ship --base X <branch>
+  "<title>"` binds the branch name to `--base`. A guard now rejects that outright; before it existed,
+  the run died ~180 lines later inside an internal git call with `error: unknown option 'base'` —
+  naming neither the ordering rule nor the arguments at fault. Five of six recorded agent sessions
+  wrote the flags-first form *after* reading `devkit help ship`, so do not trust your recall here.
+- **Ship CREATES the positional `<branch>` — it must not already exist** locally or on origin. Never
+  `git switch -c` the branch you intend to ship to. Already sitting on some *other* branch is fine
+  and normal: ship reads file **content** from your working tree, so uncommitted work ships
+  correctly without a single commit of your own.
+- **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
+  delete the branch, or switch to the base branch to free the name. In a linked worktree all three
+  fail (`already used by worktree at …`) and none of them is necessary.
+- **Detached HEAD only matters when `--base` is absent.** With `--base <b>` the PR target comes from
+  the flag and HEAD is never consulted — so detaching to "free" something fixes nothing.
 - **Never hand-roll a `git commit` on a protected branch.** If the branch guard is wired, it blocks it
   and returns the exact `devkit ship …` to run — run that.
 - **On a shared checkout, never move HEAD** (`switch`/`checkout`/`pull`/`reset`). Use `ship` to commit
