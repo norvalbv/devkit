@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type AdvisoryDeps, type RouteResult, runQavisAdvisory } from '../check.mts';
+import { type AdvisoryDeps, qavisOnPath, type RouteResult, runQavisAdvisory } from '../check.mts';
 
 const ENV_KEYS = ['GUARD_AI_STRICT', 'GUARD_QAVIS_OK', 'GUARD_NO_QAVIS_ADVISORY'];
 const saved: Record<string, string | undefined> = {};
@@ -98,5 +101,17 @@ describe('runQavisAdvisory reports a fail-open skip', () => {
   it.each([['SILENT'], ['ADVISE']] as const)('%s does not print a skip line', (verdict) => {
     runQavisAdvisory('/r', deps({ verdict }));
     expect(stderr()).not.toContain('skipped —');
+  });
+});
+
+describe('qavisOnPath', () => {
+  it('finds qavis in a PATH entry, and reports false when no entry has it', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'qavis-path-'));
+    const empty = mkdtempSync(path.join(tmpdir(), 'qavis-empty-'));
+    writeFileSync(path.join(dir, 'qavis'), '');
+
+    expect(qavisOnPath({ PATH: [empty, dir].join(path.delimiter) })).toBe(true);
+    expect(qavisOnPath({ PATH: empty })).toBe(false);
+    expect(qavisOnPath({})).toBe(false);
   });
 });
