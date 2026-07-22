@@ -197,10 +197,13 @@ const WHITESPACE_RE = /\s+/g;
  * not exist against git's real one, dropping every non-first-root clone out of the scoped gate.
  */
 export function relPath(f: string): string {
-  // Normalize '\'→'/' FIRST so the repo-root strip matches a Windows-style path jscpd might
-  // report; keeps allowlist keys forward-slash + OS-agnostic. Strip against the CONSUMER cwd
-  // (repoRoot = cfg.cwd), not the package dir.
-  return f.replace(BACKSLASH_RE, '/').replace(`${repoRoot}/`, '');
+  // Normalize BOTH sides to '/' before stripping: on Windows the reported path and repoRoot can
+  // disagree on separator, and a one-sided normalisation simply never matches, leaving every key
+  // absolute. Strip against the CONSUMER cwd (repoRoot = cfg.cwd), not the package dir — and only
+  // as a PREFIX, so a repo path that happens to recur mid-string is left alone.
+  const path = f.replace(BACKSLASH_RE, '/');
+  const root = repoRoot.replace(BACKSLASH_RE, '/');
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
 }
 
 /** Stable key: hash the fragment with whitespace collapsed so reformatting
