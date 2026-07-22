@@ -370,12 +370,15 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
         console.log('  • no gates selected');
       }
     } else {
-      // Non-TTY: heal recommended, notice opt-in (never auto-add opt-in).
-      sel.guards = [...sel.guards, ...recommended];
-      console.log(`  ✓ added recommended gate(s): ${recommended.join(', ')}`);
-      for (const id of optIn) {
+      // Non-TTY: REPORT, never auto-add. The recorded selection is authoritative — a consumer who
+      // removed a gate had a reason devkit cannot see (frink hand-places `decisions` after its free
+      // gates, so the managed copy is a second LLM call on every commit), and healing it back made
+      // .devkit/config.json say one thing while the hook did another, with no way to express the
+      // refusal. Falling behind a genuinely-new gate is now a loud notice instead of a silent edit.
+      for (const id of [...recommended, ...optIn]) {
+        const kind = recommended.includes(id) ? 'recommended' : 'opt-in';
         console.log(
-          `  • devkit also bundles ${id} (opt-in) — enable with 'devkit init --guards …,${id}'`,
+          `  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with 'devkit init --guards …,${id}'`,
         );
       }
     }
