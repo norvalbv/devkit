@@ -19,8 +19,15 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  isNonEmptyStringArray,
+  normalizeReviewRoots,
+  parseInjectedReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
 
@@ -47,36 +54,47 @@ const lensPath = (lens) => (lens ? `.claude/.correctness-review-${lens}.json` : 
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
-
 // Union of declared roots — from guard.config.json (NOT hardcoded), so the checklist scopes to
 // ANY repo's layout. No/unreadable config or no declared roots → all staged files (the gate
 // never silently no-ops). A PRESENT but invalid value warns loudly and is ignored (the other
 // roots still count), rather than crashing the git call into an empty pass-through.
 function unionRoots() {
+  // Injected roots are read BEFORE the config, and the config's failure paths fall through to `{}`
+  // rather than returning early. A review run carries its effective topology in the environment; the
+  // old order returned `['.']` the moment guard.config.json was missing or malformed, discarding an
+  // explicit injected scope and silently widening the reviewer to every staged file. The env is the
+  // more authoritative source here, so it must not be gated behind the less authoritative one.
+  // (resolveReviewRoots in _devkit/review-roots.mjs already orders it this way — this is the local
+  // union catching up to the shared helper.)
+  const injectedBackend = parseInjectedReviewRoots('DEVKIT_REVIEW_BACKEND_ROOTS');
+  const injectedFrontend = parseInjectedReviewRoots('DEVKIT_REVIEW_FRONTEND_ROOTS');
   let c;
   try {
     c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
   } catch {
-    return ['.'];
+    c = {};
   }
-  if (!c || typeof c !== 'object') return ['.'];
+  if (!c || typeof c !== 'object') c = {};
   const review = typeof c.review === 'object' && c.review !== null ? c.review : {};
+  const backend = injectedBackend ?? review.backendRoots;
+  const frontend = injectedFrontend ?? review.frontendRoots;
   const roots = new Set();
   for (const [label, value] of [
     ['scanRoots', c.scanRoots],
-    ['review.backendRoots', review.backendRoots],
-    ['review.frontendRoots', review.frontendRoots],
+    ['review.backendRoots', backend],
+    ['review.frontendRoots', frontend],
   ]) {
     if (value === undefined) continue;
-    if (!isStringArray(value)) {
+    let normalized;
+    try {
+      normalized = normalizeReviewRoots(value, label);
+    } catch {
       console.error(
         `⚠️  correctness: ignoring invalid \`${label}\` in guard.config.json (expected an array of non-empty strings).`,
       );
       continue;
     }
-    for (const r of value) roots.add(r);
+    for (const root of normalized) roots.add(root);
   }
   return roots.size > 0 ? [...roots] : ['.'];
 }
@@ -85,7 +103,7 @@ function unionRoots() {
 function sourceExtensions() {
   try {
     const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-    if (isStringArray(c?.sourceExtensions)) return c.sourceExtensions;
+    if (isNonEmptyStringArray(c?.sourceExtensions)) return c.sourceExtensions;
   } catch {
     /* defaults stand */
   }
@@ -93,12 +111,16 @@ function sourceExtensions() {
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(unionRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...unionRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'correctness');
     const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
     return output
       .trim()
@@ -140,15 +162,12 @@ function detectCorrectnessItems(lens) {
 // Set once at dispatch from --lens; every command reads/writes this path.
 let ACTIVE_PATH = CHECKLIST_PATH;
 
-function loadChecklist() {
-  if (!existsSync(ACTIVE_PATH)) return null;
-  return JSON.parse(readFileSync(ACTIVE_PATH, 'utf-8'));
-}
-
-function saveChecklist(data) {
-  mkdirSync(dirname(ACTIVE_PATH), { recursive: true });
-  writeFileSync(ACTIVE_PATH, JSON.stringify(data, null, 2));
-}
+const store = createChecklistStore({
+  path: () => ACTIVE_PATH,
+  label: 'Correctness',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
 
 function generate(lens) {
   const stagedFiles = getStagedFiles();
@@ -165,69 +184,6 @@ function generate(lens) {
   log('');
   log('Items to review:');
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
-}
-
-function status() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist. Run: generate');
-    process.exit(1);
-  }
-  const done = data.items.filter((i) => i.status !== 'pending').length;
-  const failed = data.items.filter((i) => i.status === 'fail');
-  log(`📋 Correctness: ${done}/${data.items.length} | Failed: ${failed.length}`);
-  if (failed.length > 0) {
-    log('Issues:');
-    for (const item of failed) for (const issue of item.issues) log(`  - [${item.name}] ${issue}`);
-  }
-}
-
-function checkItem(name, pass, failReason) {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const item = data.items.find((i) => i.name === name);
-  if (!item) {
-    log(`❌ Item not found: ${name}`);
-    log('Available:', data.items.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  item.status = pass ? 'pass' : 'fail';
-  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-  if (!pass && failReason) item.issues.push(failReason);
-  saveChecklist(data);
-  log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
-}
-
-function finalize() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const pending = data.items.filter((i) => i.status === 'pending');
-  const failed = data.items.filter((i) => i.status === 'fail');
-  const allIssues = data.items.flatMap((i) => i.issues);
-  if (pending.length > 0) {
-    log(`❌ Incomplete: ${pending.length} items pending`);
-    log('Pending:', pending.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  if (failed.length > 0 || allIssues.length > 0) {
-    log(`❌ Failed: ${allIssues.length} issues`);
-    for (const issue of allIssues) log(`  - ${issue}`);
-    process.exit(1);
-  }
-  log('✅ Correctness: All checks passed');
-}
-
-function cleanup() {
-  if (existsSync(ACTIVE_PATH)) {
-    unlinkSync(ACTIVE_PATH);
-    log('🗑️  Removed correctness checklist');
-  }
 }
 
 const { lens, rest } = extractLens(process.argv.slice(2));

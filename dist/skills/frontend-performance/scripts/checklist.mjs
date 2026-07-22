@@ -8,8 +8,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.frontend-performance-review.json';
 
@@ -31,11 +35,25 @@ const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
 const RE_DEPS = /\b(from\s+['"][^'"]+['"])/i;
+// Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
+// reads that force reflow, and animation of layout-affecting properties.
+const RE_LAYOUT_READ =
+  /\b(getBoundingClientRect|offsetWidth|offsetHeight|offsetTop|offsetLeft|clientWidth|clientHeight|scrollWidth|scrollHeight|getComputedStyle)\b/;
+const RE_ANIMATION =
+  /\b(transition|animation|animate|keyframes)\b[^;\n]{0,80}\b(top|left|right|bottom|width|height|margin|padding)\b|\b(top|left|width|height)\b[^;\n]{0,40}\b(transition|animation)\b/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'Frontend Performance',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
 
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -43,35 +61,29 @@ const isStringArray = (v) =>
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function frontendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.frontendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  frontend-performance: ignoring invalid `review.frontendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_FRONTEND_ROOTS',
+    configKey: 'frontendRoots',
+    reviewerName: 'frontend-performance',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(frontendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...frontendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'frontend-performance');
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0 && !f.endsWith('.pen'));
+      .filter((f) => f.length > 0 && !f.endsWith('.pen'))
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -121,6 +133,17 @@ function detectPerformancePatterns(files, diffs) {
   }
   if (RE_IFRAME.test(fullDiff)) {
     items.push({ name: 'iframe-usage', category: 'High Priority', status: 'pending', issues: [] });
+  }
+  if (RE_LAYOUT_READ.test(fullDiff)) {
+    items.push({ name: 'layout-thrash', category: 'High Priority', status: 'pending', issues: [] });
+  }
+  if (RE_ANIMATION.test(fullDiff)) {
+    items.push({
+      name: 'animation-performance',
+      category: 'Medium Priority',
+      status: 'pending',
+      issues: [],
+    });
   }
   if (RE_COMPONENT.test(fullDiff)) {
     items.push({
@@ -203,16 +226,6 @@ function detectPerformancePatterns(files, diffs) {
   return items;
 }
 
-function loadChecklist() {
-  if (!existsSync(CHECKLIST_PATH)) return null;
-  return JSON.parse(readFileSync(CHECKLIST_PATH, 'utf-8'));
-}
-
-function saveChecklist(data) {
-  mkdirSync(dirname(CHECKLIST_PATH), { recursive: true });
-  writeFileSync(CHECKLIST_PATH, JSON.stringify(data, null, 2));
-}
-
 function generate() {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
@@ -229,69 +242,6 @@ function generate() {
   log('');
   log('Items to review:');
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
-}
-
-function status() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist. Run: generate');
-    process.exit(1);
-  }
-  const done = data.items.filter((i) => i.status !== 'pending').length;
-  const failed = data.items.filter((i) => i.status === 'fail');
-  log(`📋 Frontend Performance: ${done}/${data.items.length} | Failed: ${failed.length}`);
-  if (failed.length > 0) {
-    log('Issues:');
-    for (const item of failed) for (const issue of item.issues) log(`  - [${item.name}] ${issue}`);
-  }
-}
-
-function checkItem(name, pass, failReason) {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const item = data.items.find((i) => i.name === name);
-  if (!item) {
-    log(`❌ Item not found: ${name}`);
-    log('Available:', data.items.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  item.status = pass ? 'pass' : 'fail';
-  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-  if (!pass && failReason) item.issues.push(failReason);
-  saveChecklist(data);
-  log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
-}
-
-function finalize() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const pending = data.items.filter((i) => i.status === 'pending');
-  const failed = data.items.filter((i) => i.status === 'fail');
-  const allIssues = data.items.flatMap((i) => i.issues);
-  if (pending.length > 0) {
-    log(`❌ Incomplete: ${pending.length} items pending`);
-    log('Pending:', pending.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  if (failed.length > 0 || allIssues.length > 0) {
-    log(`❌ Failed: ${allIssues.length} issues`);
-    for (const issue of allIssues) log(`  - ${issue}`);
-    process.exit(1);
-  }
-  log('✅ Frontend Performance: All checks passed');
-}
-
-function cleanup() {
-  if (existsSync(CHECKLIST_PATH)) {
-    unlinkSync(CHECKLIST_PATH);
-    log('🗑️  Removed frontend performance checklist');
-  }
 }
 
 const args = process.argv.slice(2);
