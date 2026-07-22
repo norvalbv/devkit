@@ -16,7 +16,7 @@
         "sourceExtensions": ["mts"],
         "entryAllowlist": ["index.mts"],
         "libDomains": {
-          "lib": ["generate", "guard", "help", "husky", "install", "ship"]
+          "lib": ["doctor", "generate", "guard", "help", "husky", "install", "ship"]
         },
         "grammar": {
           "files": ["index.mts"],
@@ -49,6 +49,7 @@
         "libDomains": {
           "@root": [
             "co-occurrence",
+            "coverage",
             "critique",
             "decisions",
             "deterministic",
