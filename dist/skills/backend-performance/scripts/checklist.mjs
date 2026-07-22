@@ -8,8 +8,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.backend-performance-review.json';
 
@@ -29,11 +33,25 @@ const RE_TIMEOUT = /\b(timeout|retry|backoff|AbortController)/i;
 const RE_RESPONSE = /\b(json\(|send\(|Response|gzip|brotli|compress)/i;
 const RE_NETWORK = /\b(cdn|cloudfront|cloudflare|edge|prefetch|preload)/i;
 const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|debug|pino|winston)/i;
+// Event-loop + memory-lifetime items (coverage refresh — see SKILL.md Provenance). existsSync is
+// excluded from the sync-IO trigger: it is cheap and ubiquitous in startup/config code.
+const RE_SYNC_IO =
+  /\b(readFileSync|writeFileSync|appendFileSync|execSync|spawnSync|readdirSync|statSync|execFileSync)\b/;
+const RE_UNBOUNDED =
+  /\b\w*(cache|memo|registry|store|buffer|queue)\w*\s*[:=]\s*(new\s+(Map|Set)\b|\{\}|\[\])/i;
+
+// Prose files under a root ride along with source commits; their text trips the item
+// regexes (a README mentioning "password") and hands the judge prose to hallucinate on.
+const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'Backend Performance',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
 
 // Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -41,35 +59,29 @@ const isStringArray = (v) =>
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function backendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.backendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  backend-performance: ignoring invalid `review.backendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_BACKEND_ROOTS',
+    configKey: 'backendRoots',
+    reviewerName: 'backend-performance',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(backendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...backendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'backend-performance');
     return output
       .trim()
       .split('\n')
-      .filter((f) => f.length > 0);
+      .filter((f) => f.length > 0)
+      .filter((f) => !RE_PROSE_FILE.test(f));
   } catch {
     return [];
   }
@@ -110,6 +122,9 @@ function detectPerformancePatterns(_files, diffs) {
   if (RE_CACHING.test(fullDiff)) {
     items.push({ name: 'caching-strategy', category: 'Caching', status: 'pending', issues: [] });
   }
+  if (RE_UNBOUNDED.test(fullDiff)) {
+    items.push({ name: 'unbounded-cache', category: 'Caching', status: 'pending', issues: [] });
+  }
   if (RE_POOL.test(fullDiff)) {
     items.push({ name: 'connection-pooling', category: 'Database', status: 'pending', issues: [] });
   }
@@ -121,6 +136,9 @@ function detectPerformancePatterns(_files, diffs) {
   }
   if (RE_BATCH.test(fullDiff)) {
     items.push({ name: 'batching', category: 'Code Optimization', status: 'pending', issues: [] });
+  }
+  if (RE_SYNC_IO.test(fullDiff)) {
+    items.push({ name: 'sync-io', category: 'Code Optimization', status: 'pending', issues: [] });
   }
   if (RE_TIMEOUT.test(fullDiff)) {
     items.push({
@@ -155,16 +173,6 @@ function detectPerformancePatterns(_files, diffs) {
   return items;
 }
 
-function loadChecklist() {
-  if (!existsSync(CHECKLIST_PATH)) return null;
-  return JSON.parse(readFileSync(CHECKLIST_PATH, 'utf-8'));
-}
-
-function saveChecklist(data) {
-  mkdirSync(dirname(CHECKLIST_PATH), { recursive: true });
-  writeFileSync(CHECKLIST_PATH, JSON.stringify(data, null, 2));
-}
-
 function generate() {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
@@ -181,69 +189,6 @@ function generate() {
   log('');
   log('Items to review:');
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
-}
-
-function status() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist. Run: generate');
-    process.exit(1);
-  }
-  const done = data.items.filter((i) => i.status !== 'pending').length;
-  const failed = data.items.filter((i) => i.status === 'fail');
-  log(`📋 Backend Performance: ${done}/${data.items.length} | Failed: ${failed.length}`);
-  if (failed.length > 0) {
-    log('Issues:');
-    for (const item of failed) for (const issue of item.issues) log(`  - [${item.name}] ${issue}`);
-  }
-}
-
-function checkItem(name, pass, failReason) {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const item = data.items.find((i) => i.name === name);
-  if (!item) {
-    log(`❌ Item not found: ${name}`);
-    log('Available:', data.items.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  item.status = pass ? 'pass' : 'fail';
-  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-  if (!pass && failReason) item.issues.push(failReason);
-  saveChecklist(data);
-  log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
-}
-
-function finalize() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const pending = data.items.filter((i) => i.status === 'pending');
-  const failed = data.items.filter((i) => i.status === 'fail');
-  const allIssues = data.items.flatMap((i) => i.issues);
-  if (pending.length > 0) {
-    log(`❌ Incomplete: ${pending.length} items pending`);
-    log('Pending:', pending.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  if (failed.length > 0 || allIssues.length > 0) {
-    log(`❌ Failed: ${allIssues.length} issues`);
-    for (const issue of allIssues) log(`  - ${issue}`);
-    process.exit(1);
-  }
-  log('✅ Backend Performance: All checks passed');
-}
-
-function cleanup() {
-  if (existsSync(CHECKLIST_PATH)) {
-    unlinkSync(CHECKLIST_PATH);
-    log('🗑️  Removed backend performance checklist');
-  }
 }
 
 const args = process.argv.slice(2);
