@@ -15,6 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
+import type { CheckResult } from '../doctor/check-result.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   extractGuardBlock,
@@ -214,19 +215,10 @@ export function removeCommitMsgBlock(hookRoot: string, pkgRel: string, dryRun = 
 
 /**
  * Doctor check for the managed commit-msg hook — only meaningful when a commit-msg guard is
- * selected (the caller gates on `commitMsgGuards(...).length`). Shape matches doctor's
- * CheckResult; MISSING/DRIFT heal via `devkit init`/`upgrade` (fixable).
+ * selected (the caller gates on `commitMsgGuards(...).length`). MISSING/DRIFT heal via
+ * `devkit init`/`upgrade` (fixable).
  */
-export function checkCommitMsgHook(
-  cwd: string,
-  selectedGuards: string[],
-): {
-  name: string;
-  status: 'OK' | 'DRIFT' | 'MISSING';
-  detail: string;
-  remediation: string;
-  fixable: boolean;
-} {
+export function checkCommitMsgHook(cwd: string, selectedGuards: string[]): CheckResult {
   const name = '.husky/commit-msg';
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const wanted = commitMsgGuards(selectedGuards).map((id) => FRAGMENT_ID[id]);

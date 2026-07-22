@@ -96,7 +96,7 @@ const AI_GUARD_IDS = ['decisions', 'review'] as const;
 
 // qavis-advisory runs last with its own 0/3 exit contract; routing and pass receipts live in qavis.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
-const QAVIS_ADVISORY_ID = 'qavis-advisory';
+export const QAVIS_ADVISORY_ID = 'qavis-advisory';
 const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
 qarc=0
 __dk_no_git_env bunx guard-qavis-advisory --gate || qarc=$?
