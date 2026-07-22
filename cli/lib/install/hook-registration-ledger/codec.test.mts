@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { HOOK_REGISTRATIONS } from '../hook-registrations.mts';
 import {
   decodeHookRegistrationLedger,
+  encodeHookRegistrationLedger,
   HOOK_REGISTRATION_LEDGER_REL,
   type HookRegistrationOwnershipV1,
+  hookRegistrationDestination,
 } from './codec.mts';
 
 function entry(overrides: Partial<HookRegistrationOwnershipV1> = {}): HookRegistrationOwnershipV1 {
@@ -61,6 +63,29 @@ describe('hook registration ownership ledger decoding', () => {
     });
     const decoded = decodeHookRegistrationLedger(ledger([cursor, codex, overlay, entry()]));
     expect(decoded.entries).toEqual([entry(), overlay, codex, cursor]);
+  });
+
+  it('encodes the same canonical, newline-terminated document regardless of entry order', () => {
+    const cursor = entry({
+      provider: 'cursor',
+      destinationRel: '.cursor/hooks.json',
+      native: { event: 'stop', matcher: null, command: '.cursor/hooks/decision-stop-check.sh' },
+    });
+    const encoded = encodeHookRegistrationLedger({
+      schemaVersion: 1,
+      kind: 'agent_hook_registration_ownership',
+      entries: [cursor, entry()],
+    });
+    expect(encoded.endsWith('\n')).toBe(true);
+    expect(JSON.parse(encoded).entries).toEqual([entry(), cursor]);
+    expect(encodeHookRegistrationLedger(JSON.parse(encoded))).toBe(encoded);
+  });
+
+  it('resolves only the closed provider/scope destination table', () => {
+    expect(hookRegistrationDestination('claude', 'overlay')).toBe('.claude/settings.local.json');
+    expect(hookRegistrationDestination('codex', 'shared')).toBe('.codex/hooks.json');
+    expect(() => hookRegistrationDestination('other' as 'claude', 'shared')).toThrow(/provider/);
+    expect(() => hookRegistrationDestination('claude', 'other' as 'shared')).toThrow(/scope/);
   });
 });
 

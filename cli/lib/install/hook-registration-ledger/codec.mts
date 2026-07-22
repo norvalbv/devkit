@@ -1,6 +1,10 @@
+import { lstatSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mts';
+import { writeFileAtomic } from '../../atomic-write.mts';
 import { isWellFormedUnicode } from '../agent-assets.mts';
 import { type AgentProvider, isAgentProvider } from '../agent-providers.mts';
+import { readBoundedRegularFile } from '../strict-bounded-file-read.mts';
 
 export const HOOK_REGISTRATION_LEDGER_REL =
   '.devkit/agent-hook-registrations-manifest.json' as const;
@@ -32,6 +36,7 @@ export interface HookRegistrationLedgerV1 {
 }
 
 const MAX_JSON_BYTES = 1024 * 1024;
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const MAX_ENTRIES = 4096;
 const MAX_ID_BYTES = 128;
 const MAX_EVENT_BYTES = 128;
@@ -58,6 +63,16 @@ const DESTINATION: Record<AgentProvider, Record<HookInstallScope, string>> = {
     overlay: '.cursor/hooks.json',
   },
 };
+
+/** The only provider-native configuration file one ownership record may describe. */
+export function hookRegistrationDestination(
+  provider: AgentProvider,
+  installScope: HookInstallScope,
+): string {
+  if (!isAgentProvider(provider)) throw new Error('hook registration provider is invalid');
+  if (!INSTALL_SCOPES.has(installScope)) throw new Error('hook registration scope is invalid');
+  return DESTINATION[provider][installScope];
+}
 
 function exactObject(
   value: unknown,
@@ -115,7 +130,7 @@ function decodeEntry(value: unknown, index: number): HookRegistrationOwnershipV1
     throw new Error(`${label}.installScope is invalid`);
   const installScope = entry.installScope as HookInstallScope;
   const destinationRel = boundedText(entry.destinationRel, `${label}.destinationRel`, MAX_ID_BYTES);
-  if (destinationRel !== DESTINATION[provider][installScope])
+  if (destinationRel !== hookRegistrationDestination(provider, installScope))
     throw new Error(`${label}.destinationRel does not match its provider and scope`);
 
   const native = exactObject(entry.native, `${label}.native`, ['event', 'matcher', 'command']);
@@ -201,4 +216,60 @@ export function decodeHookRegistrationLedger(json: string): HookRegistrationLedg
     kind: 'agent_hook_registration_ownership',
     entries: entries.map(({ entry }) => entry),
   };
+}
+
+/** Validate, canonicalize, and serialize one ownership ledger without granting it authority. */
+export function encodeHookRegistrationLedger(ledger: HookRegistrationLedgerV1): string {
+  let json: string;
+  try {
+    json = JSON.stringify(ledger);
+  } catch {
+    throw new Error('hook registration ledger cannot be serialized');
+  }
+  const canonical = decodeHookRegistrationLedger(json);
+  return `${JSON.stringify(canonical, null, 2)}\n`;
+}
+
+function codeOf(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+/** Strictly read the optional ownership ledger without following its leaf path. */
+export function readHookRegistrationLedger(root: string): HookRegistrationLedgerV1 | null {
+  const path = join(root, HOOK_REGISTRATION_LEDGER_REL);
+  const bytes = readBoundedRegularFile(path, {
+    label: 'hook registration ledger',
+    maxBytes: MAX_JSON_BYTES,
+    limitLabel: '1 MiB',
+  });
+  if (bytes === null) return null;
+  let raw: string;
+  try {
+    raw = UTF8.decode(bytes);
+  } catch {
+    throw new Error('hook registration ledger is not valid UTF-8');
+  }
+  return decodeHookRegistrationLedger(raw);
+}
+
+/**
+ * Atomically replace the canonical ledger. The caller serializes the surrounding read/config
+ * writes/publish transaction with `withAgentAssetLifecycleLock`; this function executes no command.
+ */
+export function writeHookRegistrationLedger(root: string, ledger: HookRegistrationLedgerV1): void {
+  const encoded = encodeHookRegistrationLedger(ledger);
+  const destination = join(root, HOOK_REGISTRATION_LEDGER_REL);
+  const directory = dirname(destination);
+  mkdirSync(directory, { recursive: true });
+  const directoryStat = lstatSync(directory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink())
+    throw new Error('hook registration ledger directory must not be a symlink');
+  try {
+    const destinationStat = lstatSync(destination);
+    if (!destinationStat.isFile() || destinationStat.isSymbolicLink())
+      throw new Error('hook registration ledger destination must be a regular file');
+  } catch (error) {
+    if (codeOf(error) !== 'ENOENT') throw error;
+  }
+  writeFileAtomic(destination, encoded);
 }
