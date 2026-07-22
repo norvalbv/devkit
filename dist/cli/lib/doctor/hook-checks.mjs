@@ -14,6 +14,7 @@ import { detectGitRoot } from "../detect-git-root.mjs";
 import { markEnd, markStart } from "../husky/husky.mjs";
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../husky/husky-block.mjs";
 import { check } from "./check-result.mjs";
+import { strayGateCalls } from "./stray-gate-calls.mjs";
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
 // block is package-scoped — resolve both from cwd.
@@ -45,6 +46,18 @@ export function checkHusky(cwd, selectedGuards) {
     }
     if (missing.length) {
         return check('.husky/pre-commit', 'DRIFT', `block missing gate(s): ${missing.join(', ')}`, 'run `devkit init --force` (or `devkit upgrade`) to regenerate the block', true);
+    }
+    // A gate devkit emits, ALSO invoked outside the block, runs twice per commit — and for the LLM
+    // judges that is a second model bill on every single commit, while .devkit/config.json still
+    // describes one run. Report it; never rewrite the consumer's own lines (see strayGateCalls).
+    const stray = strayGateCalls(content, pkgRel, gitRoot);
+    if (stray.length) {
+        const where = stray.map((s) => `${s.bin} (line ${s.line})`).join(', ');
+        return check('.husky/pre-commit', 'DRIFT', `${stray.length} devkit gate call(s) OUTSIDE the managed block — these run a second time every commit: ${where}`, 'each is a hand-written copy of a gate devkit now owns. Review, then delete the block around it so only the devkit-guards block runs it — or keep it deliberately if it differs (different flags/ordering)', 
+        // NOT fixable: `--fix` re-runs `devkit init`, which regenerates the managed block and cannot
+        // touch a hand-written line outside it. Claiming fixable would loop with no effect, and this
+        // check is report-only by design (see strayGateCalls) — the consumer decides.
+        false);
     }
     return check('.husky/pre-commit', 'OK', gates.length ? `block calls: ${gates.join(', ')}` : 'block present (no guards selected)');
 }
