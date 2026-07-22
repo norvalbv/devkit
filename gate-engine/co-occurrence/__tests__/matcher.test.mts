@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -102,6 +102,47 @@ describe('matcher --gate exit-code contract', () => {
     expect(stdout).toMatch(SIMILARITY_1_RE);
     expect(stdout).toContain('--range-a 1-10');
     expect(stdout).toContain('--range-b 1-10');
+  });
+});
+
+// indexCommand refreshes the index so the gate judges the code being COMMITTED rather than the
+// last indexed state — but it is heavily conditioned, because both ways it can misfire are severe:
+// cold-building a corpus inside a commit hook reads as a hang, and refreshing through a worktree's
+// linked index overwrites the PRIMARY checkout's rows with this checkout's code.
+describe('matcher index refresh', () => {
+  // Run the gate with an explicit cwd; report whether the indexer ran (it touches `marker`).
+  function refreshRan(cwd: string, indexDb: string, tag: string): boolean {
+    const marker = join(tmp, `ran-${tag}.flag`);
+    rmSync(marker, { force: true });
+    try {
+      execFileSync('node', [MATCHER, 'scan', '--new', '--changed', '--gate'], {
+        cwd,
+        env: {
+          ...process.env,
+          SEARCH_CODE_DB: indexDb,
+          MATCHER_CHANGED_FILES: '',
+          GUARD_INDEX_COMMAND: `touch "${marker}"`,
+        },
+        stdio: 'pipe',
+      });
+    } catch {
+      // Exit code is irrelevant here — only whether the refresh fired.
+    }
+    return existsSync(marker);
+  }
+
+  it('refreshes when the index lives inside this checkout', () => {
+    expect(refreshRan(tmp, dbPath, 'inside')).toBe(true);
+  });
+
+  it('does NOT refresh an index that resolves outside this checkout', () => {
+    // The linked-worktree shape: cwd is one checkout, the index really lives in another. Running
+    // the indexer here would rewrite that other checkout's chunk rows with this one's code.
+    expect(refreshRan(process.cwd(), dbPath, 'outside')).toBe(false);
+  });
+
+  it('does NOT refresh when no index exists — never cold-builds inside a gate', () => {
+    expect(refreshRan(tmp, join(tmp, 'nonexistent.db'), 'absent')).toBe(false);
   });
 });
 
