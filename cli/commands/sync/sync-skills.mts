@@ -13,6 +13,11 @@ import { join, relative } from 'node:path';
 import { AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mts';
+import {
+  assertLegacyAssetWriterCompatible,
+  manifestFilesEqual,
+} from '../../lib/install/agent-asset-manifest/compatibility.mts';
+import { readAgentAssetManifest } from '../../lib/install/agent-asset-manifest/reader.mts';
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
 
 // The manifest devkit writes for a synced asset set: the SyncManifest ownership shape (files +
@@ -73,7 +78,9 @@ export function syncSkills(
   // The prior manifest (also reused for the idempotency check below) — its keys tell findConflicts
   // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
   const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
-  const prev: AssetManifest | null = readJson(manifestPath);
+  const decoded = readAgentAssetManifest(manifestPath, 'skills');
+  assertLegacyAssetWriterCompatible(decoded, targets, 'skills');
+  const prev = decoded?.manifest ?? null;
 
   // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's
   // `.<surface>/skills/<name>` is git-tracked, the whole skill is left untouched.
@@ -127,9 +134,12 @@ export function syncSkills(
   // Idempotency: keep generatedAt STABLE when nothing about the synced set changed
   // (same devkitRef + same file shas), so a re-run produces no spurious git diff. (manifestPath +
   // prev were read above — reused here, also the provenance source for findConflicts.)
-  const unchanged =
-    prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
-  const generatedAt = unchanged && prev ? prev.generatedAt : new Date().toISOString();
+  const generatedAt =
+    prev?.devkitRef === devkitRef &&
+    typeof prev.generatedAt === 'string' &&
+    manifestFilesEqual(prev.files, files)
+      ? prev.generatedAt
+      : new Date().toISOString();
   // `targets` records WHICH surfaces devkit wrote to, so findConflicts can tell a name it owns on
   // one surface from a same-named divergent asset on another (surface-aware ownership).
   const manifest = { devkitRef, generatedAt, targets: [...targets], files };
@@ -153,14 +163,9 @@ export function syncSkills(
 export function detectSkillConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
   const skillsSrc = join(packageDir(), 'skills');
   const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
-  return findConflicts(
-    root,
-    skillsSrc,
-    names,
-    targets,
-    'skills',
-    readJson(join(root, '.devkit', 'skills-manifest.json')),
-  );
+  const decoded = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
+  assertLegacyAssetWriterCompatible(decoded, targets, 'skills');
+  return findConflicts(root, skillsSrc, names, targets, 'skills', decoded?.manifest ?? null);
 }
 
 export const meta = {

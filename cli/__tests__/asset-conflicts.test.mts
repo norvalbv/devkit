@@ -8,8 +8,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyInit } from '../commands/init.mts';
-import { detectAgentConflicts } from '../commands/sync/sync-agents.mts';
-import { detectSkillConflicts } from '../commands/sync/sync-skills.mts';
+import { detectAgentConflicts, syncAgents } from '../commands/sync/sync-agents.mts';
+import { detectSkillConflicts, syncSkills } from '../commands/sync/sync-skills.mts';
 import { defaultSelection } from '../lib/components.mts';
 import { detectHookConflicts, syncHookScripts } from '../lib/install/install-hooks.mts';
 import { matchesBundle, removeSkills } from '../lib/sync-manifest.mts';
@@ -53,6 +53,85 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   cleanup();
+});
+
+const legacyWriters = [
+  {
+    label: 'skills',
+    kind: 'skills',
+    manifest: 'skills-manifest.json',
+    outputDir: 'skills',
+    run: (root, targets) => syncSkills([], root, targets),
+  },
+  {
+    label: 'agents',
+    kind: 'agents',
+    manifest: 'agents-manifest.json',
+    outputDir: 'agents',
+    run: (root, targets) => syncAgents([], root, targets),
+  },
+  {
+    label: 'agent hooks',
+    kind: 'hooks',
+    manifest: 'agent-hooks-manifest.json',
+    outputDir: 'hooks',
+    run: (root, targets) => syncHookScripts(root, { targets }),
+  },
+];
+
+describe.each(legacyWriters)('$label writer compatibility preflight', (writer) => {
+  it.each([
+    ['invalid manifest', '{', ['claude'], /valid JSON/],
+    [
+      'v2 manifest',
+      JSON.stringify({
+        schemaVersion: 2,
+        kind: writer.kind,
+        devkitRef: null,
+        generatedAt: '2026-07-22T00:00:00.000Z',
+        files: {},
+        providers: {},
+      }),
+      ['claude'],
+      /schema v2/,
+    ],
+    ['Codex target', null, ['codex'], /cannot target .*codex/],
+    ['path-like target', null, ['/../../tmp/quarantine-pwn'], /cannot target/],
+    ['empty target', null, [''], /cannot target/],
+  ])('refuses %s before mutation', (_name, manifest, targets, error) => {
+    const root = tmpRepo();
+    const manifestPath = join(root, '.devkit', writer.manifest);
+    if (manifest !== null) {
+      mkdirSync(join(root, '.devkit'), { recursive: true });
+      writeFileSync(manifestPath, manifest);
+    }
+
+    expect(() => writer.run(root, targets)).toThrow(error);
+    expect(existsSync(join(root, '.claude', writer.outputDir))).toBe(false);
+    expect(existsSync(join(root, '.codex', writer.outputDir))).toBe(false);
+    if (manifest === null) expect(existsSync(manifestPath)).toBe(false);
+    else expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
+  });
+});
+
+it('refuses legacy teardown of a v2 manifest before deleting its files', () => {
+  const root = tmpRepo();
+  seedSkill(root, '# keep me\n');
+  const manifestPath = join(root, '.devkit', 'skills-manifest.json');
+  const manifest = JSON.stringify({
+    schemaVersion: 2,
+    kind: 'skills',
+    devkitRef: null,
+    generatedAt: '2026-07-22T00:00:00.000Z',
+    files: {},
+    providers: {},
+  });
+  mkdirSync(join(root, '.devkit'), { recursive: true });
+  writeFileSync(manifestPath, manifest);
+
+  expect(() => removeSkills(root, false, ['claude'])).toThrow(/schema v2/);
+  expect(readFileSync(SKILL(root), 'utf8')).toBe('# keep me\n');
+  expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
 });
 
 describe('install preserves a non-devkit collision by default', () => {

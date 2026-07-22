@@ -24,6 +24,11 @@ import {
   removeManifested,
   type SyncManifest,
 } from '../sync-manifest.mts';
+import {
+  assertLegacyAssetWriterCompatible,
+  manifestFilesEqual,
+} from './agent-asset-manifest/compatibility.mts';
+import { readAgentAssetManifest } from './agent-asset-manifest/reader.mts';
 import { registrationsFor } from './hook-registrations.mts';
 
 // Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
@@ -89,7 +94,9 @@ export function syncHookScripts(
     .filter((e) => e.isFile())
     .map((e) => e.name);
   const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
-  const prev = readJson(manifestPath) as AgentHooksManifest | null;
+  const decoded = readAgentAssetManifest(manifestPath, 'hooks');
+  assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
+  const prev = decoded?.manifest ?? null;
   if (only?.length) {
     const unknown = only.filter((n) => !rels.includes(n));
     if (unknown.length)
@@ -123,11 +130,15 @@ export function syncHookScripts(
   }
   const devkitPkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
-  const unchanged =
-    prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
+  const generatedAt =
+    prev?.devkitRef === devkitRef &&
+    typeof prev.generatedAt === 'string' &&
+    manifestFilesEqual(prev.files, files)
+      ? prev.generatedAt
+      : new Date().toISOString();
   const manifest: AgentHooksManifest = {
     devkitRef,
-    generatedAt: unchanged && prev ? prev.generatedAt : new Date().toISOString(),
+    generatedAt,
     // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
     targets: [...targets],
     files,
@@ -153,14 +164,12 @@ export function detectHookConflicts(root: string, targets: string[] = AGENT_TARG
   const rels = readdirSync(src, { withFileTypes: true })
     .filter((e) => e.isFile())
     .map((e) => e.name);
-  return findConflicts(
-    root,
-    src,
-    rels,
-    targets,
+  const decoded = readAgentAssetManifest(
+    join(root, '.devkit', 'agent-hooks-manifest.json'),
     'hooks',
-    readJson(join(root, '.devkit', 'agent-hooks-manifest.json')) as SyncManifest | null,
   );
+  assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
+  return findConflicts(root, src, rels, targets, 'hooks', decoded?.manifest ?? null);
 }
 
 /**

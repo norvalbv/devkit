@@ -11,8 +11,13 @@
 import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from './components.mts';
-import { packageDir, readJson, sha256 } from './fs-helpers.mts';
+import { packageDir, sha256 } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
+import {
+  AGENT_ASSET_MANIFESTS,
+  assertLegacyAssetWriterCompatible,
+} from './install/agent-asset-manifest/compatibility.mts';
+import { readAgentAssetManifest } from './install/agent-asset-manifest/reader.mts';
 
 export {
   decodeSyncManifest,
@@ -156,7 +161,15 @@ export function removeManifested(
   srcDir: string | null = null,
 ): void {
   const manifestPath = join(root, '.devkit', manifestRel);
-  const manifest = readJson(manifestPath) as SyncManifest | null;
+  const assetKind = AGENT_ASSET_MANIFESTS.find(({ filename }) => filename === manifestRel)?.kind;
+  if (!assetKind) throw new Error(`Unsupported agent asset manifest: ${manifestRel}`);
+  const decoded = readAgentAssetManifest(manifestPath, assetKind);
+  const targets = dirs.map((dir) => {
+    const surface = dir.split('/')[0] ?? '';
+    return surface.startsWith('.') ? surface.slice(1) : surface;
+  });
+  assertLegacyAssetWriterCompatible(decoded, targets, assetKind);
+  const manifest: SyncManifest | null = decoded?.version === 1 ? decoded.manifest : null;
   // Names from the manifest (exactly what devkit wrote) or, when it's gone, the package's bundled
   // set — so an orphaned/partial clean can still find + remove strays.
   const names = manifest
