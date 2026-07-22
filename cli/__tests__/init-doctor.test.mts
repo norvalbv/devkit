@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
@@ -514,6 +514,29 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/block calls: fanout, size/);
+  });
+
+  // The qavis-advisory gate fails OPEN when qavis can't be reached, so at commit time a missing
+  // binary is indistinguishable from a healthy "nothing to QA". Doctor names the state — advisorily,
+  // because a repo that keeps the guard but skips installing qavis is a choice, not drift.
+  it('reports qavis-advisory health without ever gating the exit code', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,qavis-advisory');
+
+    const inert = devkit(root, 'doctor');
+    expect(inert.status, inert.stderr).toBe(0);
+    expect(inert.stdout).toMatch(/qavis-advisory: no .*recipe\.json — gate inert/);
+
+    // A recipe with no qavis on PATH — the silently-dead gate this check exists to surface.
+    mkdirSync(join(root, '.qavis'), { recursive: true });
+    writeFileSync(join(root, '.qavis', 'recipe.json'), '{}');
+    const dead = spawnSync(process.execPath, [CLI, 'doctor'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '/usr/bin:/bin' }, // scrub qavis off PATH, keep git
+    });
+    expect(dead.stdout).toMatch(/qavis-advisory: .*present but qavis is NOT on PATH/);
+    expect(dead.status, dead.stderr).toBe(0);
   });
 
   it('reports invalid JSON in a managed config as drift (not a silent pass)', () => {
