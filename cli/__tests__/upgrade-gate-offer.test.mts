@@ -53,20 +53,43 @@ function preQavisFixture() {
 }
 
 describe('devkit upgrade — gate reconcile', () => {
-  it('heals a now-recommended gate (qavis) into config + hook and notices opt-in review', () => {
+  it('REPORTS a newly-bundled gate without adding it — the recorded selection is authoritative', () => {
+    // The recorded `guards` array is the consumer's answer, and a gate absent from it may be absent
+    // ON PURPOSE: frink hand-places `decisions` after its free deterministic gates, so devkit
+    // re-adding it to the managed block meant a second LLM judge on every commit. Silently healing
+    // also left .devkit/config.json saying one thing while the hook did another.
     const root = preQavisFixture();
-    expect(guards(root)).not.toContain('qavis-advisory');
+    const before = guards(root);
+    expect(before).not.toContain('qavis-advisory');
     expect(hook(root)).not.toContain('guard-qavis-advisory');
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
 
-    // qavis healed into the recorded selection AND re-emitted in the husky block.
-    expect(guards(root)).toContain('qavis-advisory');
-    expect(hook(root)).toContain('guard-qavis-advisory');
-    // review surfaced as an opt-in notice, but NOT added.
-    expect(up.stdout).toMatch(/review.*opt-in|opt-in.*review/i);
-    expect(guards(root)).not.toContain('review');
+    // Surfaced loudly...
+    expect(up.stdout).toMatch(/qavis-advisory.*recommended/i);
+    expect(up.stdout).toMatch(/review.*opt-in/i);
+    // ...but neither the config nor the hook was mutated behind the consumer's back.
+    expect(guards(root)).toEqual(before);
+    expect(hook(root)).not.toContain('guard-qavis-advisory');
+  });
+
+  it('a gate deliberately removed from guards STAYS removed across repeated upgrades', () => {
+    // The regression this exists for: remove a recommended gate, upgrade twice, and it must not
+    // reappear. The non-TTY path used to heal it back on the very next run.
+    const root = preQavisFixture();
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    cfg.components.guards = (cfg.components.guards as string[]).filter(
+      (g: string) => g !== 'decisions',
+    );
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+
+    expect(run(root, 'upgrade').status).toBe(0);
+    expect(run(root, 'upgrade').status).toBe(0);
+
+    expect(guards(root)).not.toContain('decisions');
+    expect(hook(root)).not.toContain('bunx guard-decisions detect');
   });
 
   it('does NOT re-nag about opt-in review when the repo is already current on recommended gates', () => {
