@@ -21,7 +21,8 @@
  * `loadAllowlist` refuse (exit 2) without writing, so no verb can wipe baselined entries.
  */
 
-import { fileURLToPath } from 'node:url';
+import { readFileSync, realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from '../config.mts';
 import {
   type AllowlistPair,
@@ -31,7 +32,7 @@ import {
   saveAllowlist,
   symFileKey,
 } from './allowlist-io.mts';
-import { isExpired } from './decay.mts';
+import { daysRemaining, isExpired } from './decay.mts';
 
 const LABEL = 'guard-dup-allowlist';
 // The freeze threshold baseline entries use (matcher runBaseline --decay-days default). A
@@ -232,6 +233,76 @@ function runCheck({ positionals }: Parsed): void {
   process.exit(covered ? 0 : 1);
 }
 
+// Clone-side twin of runCheck: the per-clone triage loop a reviewing agent runs over the gate's
+// output, deciding "already approved?" before proposing a refactor. Keyed on fragmentHash, the
+// only stable clone identity (paths and line ranges drift as files are edited).
+function runCheckClone({ positionals }: Parsed): void {
+  if (positionals.length !== 1) usageError('check-clone: expected <hash>.');
+  const { clones } = loadAllowlist(allowlistPath(), LABEL);
+  const covered = clones.some((c) => !isExpired(c) && c.fragmentHash === positionals[0]);
+  console.log(covered ? 'covered (live)' : 'not covered');
+  process.exit(covered ? 0 : 1);
+}
+
+/** One clone as `guard-clone json` emits it — line positions are either a number or {line}. */
+interface ScannedClone {
+  fragmentHash?: string;
+  fileA?: string;
+  fileB?: string;
+  lines?: number;
+  startA?: number | { line: number };
+  endA?: number | { line: number };
+  startB?: number | { line: number };
+  endB?: number | { line: number };
+}
+
+const rangeOf = (s: ScannedClone[keyof ScannedClone], e: ScannedClone[keyof ScannedClone]) => {
+  const line = (v: typeof s) => (typeof v === 'object' && v !== null ? v.line : v);
+  const [sl, el] = [line(s), line(e)];
+  return sl != null && el != null ? `${sl}-${el}` : '';
+};
+
+// Bulk-freeze every clone a scan reports (piped in as `guard-clone json`), so an adopting repo —
+// or one re-keying after a path-normalisation change — starts from "no NEW clones" instead of a
+// gate that blocks on its entire pre-existing debt. Prior baseline entries are replaced; entries
+// a human wrote are kept, so a re-freeze never silently discards a reasoned approval.
+function runBaselineClones({ flags }: Parsed): void {
+  let scanned: ScannedClone[];
+  try {
+    scanned = JSON.parse(readFileSync(0, 'utf8')) as ScannedClone[];
+  } catch {
+    usageError('baseline-clones: expects the clone JSON array on stdin (`guard-clone json`).');
+  }
+  if (!Array.isArray(scanned)) usageError('baseline-clones: stdin was not a JSON array.');
+
+  const path = allowlistPath();
+  const { pairs, clones } = loadAllowlist(path, LABEL);
+  const date = today();
+  const kept = clones.filter((c) => !String(c.description ?? '').startsWith('baseline '));
+  const seen = new Set(kept.map((c) => c.fragmentHash));
+  const decayDays = numFlag(flags['decay-days']) ?? BASELINE_DECAY;
+
+  let added = 0;
+  for (const c of scanned) {
+    if (!c.fragmentHash || seen.has(c.fragmentHash)) continue;
+    seen.add(c.fragmentHash);
+    kept.push({
+      fragmentHash: c.fragmentHash,
+      fileA: c.fileA,
+      fileB: c.fileB,
+      lines: c.lines ?? 0,
+      rangeA: rangeOf(c.startA, c.endA),
+      rangeB: rangeOf(c.startB, c.endB),
+      description: `baseline ${date} — pre-existing clone, frozen by guard-clone`,
+      date,
+      decayDays,
+    });
+    added++;
+  }
+  saveAllowlist(path, { pairs, clones: kept });
+  console.log(`Baseline: +${added} clone(s) (${kept.length} total) → ${path}`);
+}
+
 function runList({ flags }: Parsed): void {
   const path = allowlistPath();
   const { pairs, clones } = loadAllowlist(path, LABEL);
@@ -240,7 +311,10 @@ function runList({ flags }: Parsed): void {
     return;
   }
   console.log(`${pairs.length} pair(s), ${clones.length} clone(s) — ${path}`);
-  const tag = (e: AllowlistPair | CloneAllowlistEntry) => (isExpired(e) ? 'EXPIRED' : 'live   ');
+  // Day count, not just live/expired: it's what makes the burn-down actionable (a 6-day waiver
+  // reads very differently from a 3650-day frozen baseline entry).
+  const tag = (e: AllowlistPair | CloneAllowlistEntry) =>
+    isExpired(e) ? 'EXPIRED    ' : `live ${String(daysRemaining(e)).padStart(4)}d`;
   for (const p of pairs)
     console.log(`  ${tag(p)}  ${p.symbolA} <> ${p.symbolB}  (${p.fileA} / ${p.fileB})`);
   for (const c of clones)
@@ -273,15 +347,20 @@ Modes:
   remove <symA> <fileA> <symB> <fileB>
   remove-clone <hash>
   check <symA> <fileA> <symB> <fileB>     exit 0 if a live entry covers it, 1 if not
+  check-clone <hash>                      same, for a clone fragment hash
   list [--json]
   prune                                   drop entries past date + decayDays
+  baseline-clones [--decay-days N]        freeze every clone on stdin (\`guard-clone json\`)
 
 Allowlist path: $CO_OCCURRENCE_ALLOWLIST or guard.config.json allowlistPath (default .co-occurrence-allowlist.json).`);
 }
 
 // Guard dispatch behind the direct-invocation check (like clone-detector.mts) so importing
-// this module — e.g. a test reading MODES from allowlist-io — never runs the CLI.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// this module — e.g. a test reading MODES from allowlist-io — never runs the CLI. realpath BOTH
+// sides: a raw `argv[1] === fileURLToPath(import.meta.url)` compares the BIN SHIM path (always a
+// symlink) against the real module path, so `guard-dup-allowlist <verb>` — the exact command both
+// gates print as their approval remedy — silently did nothing and exited 0.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const argv = process.argv.slice(2);
   const mode = argv[0];
   if (!mode || mode === '--help' || mode === '-h') {
@@ -305,11 +384,17 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     case 'check':
       runCheck(rest);
       break;
+    case 'check-clone':
+      runCheckClone(rest);
+      break;
     case 'list':
       runList(rest);
       break;
     case 'prune':
       runPrune();
+      break;
+    case 'baseline-clones':
+      runBaselineClones(rest);
       break;
     default:
       console.error(`${LABEL}: unknown mode "${mode}". Use: ${MODES.join(' | ')}`);
