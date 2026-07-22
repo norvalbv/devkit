@@ -70,6 +70,7 @@ import {
   syncHookScripts,
 } from '../lib/install/install-hooks.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
+import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
 import {
   parseReviewFlags,
   type ReviewFlagValues,
@@ -159,13 +160,6 @@ interface DevkitConfig {
   configOverrides?: Record<string, unknown>;
   components?: RecordedComponents;
   review?: Partial<ReviewProfile>;
-}
-
-// The consumer's package.json — only the maps init adds/removes entries in.
-interface PackageJson {
-  devDependencies?: Record<string, string>;
-  scripts?: Record<string, string>;
-  [key: string]: unknown;
 }
 
 // A consumer tsconfig.json for the safe devkit-extends strip (removeTsconfig).
@@ -449,75 +443,6 @@ function applyMaxLines(cwd: string, on: boolean, dryRun: boolean) {
   if (setMaxLines(cwd)) {
     console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
   }
-}
-
-// Reason: the branches ARE the per-component devDep/script manifest: each `...(sel.x ? {...} : {})` spread names exactly which deps+scripts a component owns; flattening scatters this single source-of-truth table that remove() mirrors
-// fallow-ignore-next-line complexity
-function patchPackageJson(
-  cwd: string,
-  devkitRef: string,
-  sel: Selection,
-  isStructure: boolean,
-  dryRun: boolean,
-  stack: string,
-) {
-  const pkgPath = join(cwd, 'package.json');
-  const pkg = readJson(pkgPath) as PackageJson | null;
-  if (!pkg) {
-    console.log('  ! no package.json — skipping devDeps/scripts wiring');
-    return;
-  }
-  // Zero-consumer-dependency model: devkit bundles the gate tools. jscpd is no longer a consumer dep
-  // (the clone gate resolves devkit's OWN bundled jscpd), and the config-driven structure gate runs via
-  // the `guard-structure` bin (devkit's own eslint + plugin). Only ELECTRON keeps consumer-side
-  // eslint/parser/plugin — its preset imports them directly in a consumer eslint.config.mjs + domains.
-  const electronPreset = isStructure && stack === 'electron';
-  const devDeps = {
-    '@norvalbv/devkit': `${repoUrl()}#${devkitRef}`,
-    ...(sel.biome ? { '@biomejs/biome': '^2.5.0' } : {}),
-    ...(sel.husky ? { husky: '^9.1.7' } : {}),
-    ...(electronPreset
-      ? {
-          eslint: '^10.0.0',
-          'eslint-plugin-project-structure': '^3.14.3',
-          '@typescript-eslint/parser': '^8.0.0',
-        }
-      : {}),
-  };
-  const scripts = {
-    ...(sel.biome ? { lint: 'biome check .', format: 'biome check --write .' } : {}),
-    ...(sel.husky ? { prepare: 'husky' } : {}),
-    ...(sel.guards?.includes('fanout') || sel.guards?.includes('size')
-      ? { 'guard:freeze': 'guard-fanout freeze && guard-size freeze' }
-      : {}),
-    ...(electronPreset ? { 'lint:structure': 'eslint src' } : {}),
-  };
-
-  pkg.devDependencies = pkg.devDependencies ?? {};
-  pkg.scripts = pkg.scripts ?? {};
-  const added: string[] = [];
-  for (const [k, v] of Object.entries(devDeps)) {
-    if (!pkg.devDependencies[k]) {
-      pkg.devDependencies[k] = v;
-      added.push(`devDep ${k}`);
-    }
-  }
-  for (const [k, v] of Object.entries(scripts)) {
-    if (!pkg.scripts[k]) {
-      pkg.scripts[k] = v;
-      added.push(`script ${k}`);
-    }
-  }
-  if (added.length === 0) {
-    console.log('  • package.json already wired (devDeps + scripts)');
-    return;
-  }
-  if (dryRun) {
-    console.log(`  [dry-run] patch package.json: ${added.join(', ')}`);
-    return;
-  }
-  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
-  console.log(`  ✓ package.json: ${added.join(', ')}`);
 }
 
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
@@ -1206,7 +1131,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   // `devkit init` can't run here).
   if (!standalone && !selfHost) {
     console.log('2. package.json');
-    patchPackageJson(cwd, devkitRef, selection, isStructure, dryRun, stack);
+    patchPackageJson(cwd, devkitRef, repoUrl(), selection, isStructure, dryRun, stack);
   }
 
   if (selection.husky) {
