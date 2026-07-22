@@ -14,6 +14,9 @@ node_modules
 .devkit/review-runs/
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
+# ...and the `.generation` sidecars those caches write. Untracked-but-not-ignored, they were enough
+# to make `devkit release` refuse ("working tree not clean") in the repo that ships devkit itself.
+.devkit/*.generation
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
 # decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
