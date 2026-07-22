@@ -1,0 +1,297 @@
+/** Stable, typed capture of the target-controlled setup that `devkit review` will execute. */
+import { spawnSync } from 'node:child_process';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { writeFileAtomic } from "../../atomic-write.mjs";
+import { detectGitRoot } from "../../detect-git-root.mjs";
+import { reviewHookDrift } from "../../husky/review-drift.mjs";
+import { captureOrigHooksPath, overlayHookScriptDir } from "../../overlay.mjs";
+import { runDirectReviewCli } from "./run-direct.mjs";
+import { reviewRuntimeFingerprint } from "./runtime-fingerprint.mjs";
+import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
+import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from "./setup-manifest-format.mjs";
+import { parseReviewSetupManifest } from "./setup-manifest-parse.mjs";
+import { REVIEW_SETUP_DOCTOR as DOCTOR, parseReviewSetupProfile, } from "./setup-profile.mjs";
+import { resolveReviewSource } from "./source-projection.mjs";
+const HUSKY_RUNNER_PATHS = [
+    ['runner-source', '.husky/_', false],
+    ['runner-pre-commit', '.husky/_/pre-commit', true],
+];
+const OPTIONAL_PATHS = [
+    ['correctness-overrides', '.devkit/correctness-overrides.json'],
+    ['biome-runtime', '.devkit/biome'],
+    ['tsconfig-runtime', '.devkit/tsconfig'],
+];
+const LOCAL_GIT_ENVIRONMENT = [
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_CONFIG',
+    'GIT_CONFIG_PARAMETERS',
+    'GIT_CONFIG_COUNT',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_IMPLICIT_WORK_TREE',
+    'GIT_GRAFT_FILE',
+    'GIT_INDEX_FILE',
+    'GIT_NO_REPLACE_OBJECTS',
+    'GIT_REPLACE_REF_BASE',
+    'GIT_PREFIX',
+    'GIT_SHALLOW_FILE',
+    'GIT_COMMON_DIR',
+    'GIT_GLOB_PATHSPECS',
+    'GIT_NOGLOB_PATHSPECS',
+    'GIT_LITERAL_PATHSPECS',
+    'GIT_ICASE_PATHSPECS',
+];
+function fail(message) {
+    throw new Error(`devkit review: ${message}`);
+}
+function errorMessage(cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+}
+function manifestDestination(path, gitRoot) {
+    const destination = canonicalReviewLeaf(path, 'setup manifest parent');
+    if (reviewPathWithin(gitRoot, destination))
+        fail('setup manifest must live outside the target checkout.');
+    return destination;
+}
+function validateManifestSourceSeparation(destination, targetRoot, gitRoot, setup) {
+    for (const entry of setup.paths) {
+        if (entry.fingerprint === REVIEW_SETUP_ABSENT)
+            continue;
+        const root = entry.root === 'target' ? targetRoot : gitRoot;
+        const lexical = resolve(root, ...entry.relativePath.split('/'));
+        let physical;
+        try {
+            physical = realpathSync(lexical);
+        }
+        catch {
+            fail(`could not resolve frozen setup source: ${entry.relativePath}`);
+        }
+        if (reviewPathWithin(physical, destination)) {
+            fail('setup manifest must live outside every frozen setup source.');
+        }
+    }
+}
+function withoutLocalGitEnvironment(operation) {
+    const saved = new Map();
+    for (const name of LOCAL_GIT_ENVIRONMENT) {
+        const value = process.env[name];
+        if (value !== undefined)
+            saved.set(name, value);
+        delete process.env[name];
+    }
+    try {
+        return operation();
+    }
+    finally {
+        for (const name of LOCAL_GIT_ENVIRONMENT) {
+            const value = saved.get(name);
+            if (value === undefined)
+                delete process.env[name];
+            else
+                process.env[name] = value;
+        }
+    }
+}
+function targetGitRoot(targetRoot) {
+    const detected = withoutLocalGitEnvironment(() => detectGitRoot(targetRoot).gitRoot);
+    const gitRoot = canonicalReviewDirectory(detected, 'target Git root');
+    if (!reviewPathWithin(gitRoot, targetRoot))
+        fail('target checkout is not contained by its detected Git root.');
+    return gitRoot;
+}
+function safeRelativePath(root, path, label) {
+    if (!path || path.includes('\0'))
+        fail(`${label} is invalid — ${DOCTOR}`);
+    const candidate = resolve(root, path);
+    const rel = relative(root, candidate);
+    if (!rel || !reviewPathWithin(root, candidate))
+        fail(`${label} escapes the target repository: ${JSON.stringify(path)}.`);
+    const normalized = rel.split(sep).join('/');
+    if (!isSafeReviewRelativePath(normalized))
+        fail(`${label} is not a safe repository-relative path: ${JSON.stringify(path)}.`);
+    return normalized;
+}
+function validateTree(path, relativePath) {
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    if (stat === undefined)
+        return;
+    if (stat.isSymbolicLink())
+        fail(`unsafe nested symlink in review setup path: ${relativePath}`);
+    if (stat.isFile())
+        return;
+    if (!stat.isDirectory())
+        fail(`unsupported review setup path type: ${relativePath}`);
+    for (const name of readdirSync(path).sort())
+        validateTree(join(path, name), `${relativePath}/${name}`);
+}
+function setupPathFingerprint(source) {
+    const runtime = reviewRuntimeFingerprint(source.physicalPath);
+    return source.projection ? reviewSetupHash({ projection: source.projection, runtime }) : runtime;
+}
+function pathState(rootKind, root, id, relativePath, required, executable) {
+    const safe = safeRelativePath(root, relativePath, `${id} path`);
+    const source = resolveReviewSource(root, safe);
+    validateTree(source.physicalPath, safe);
+    const stat = lstatSync(source.physicalPath, { throwIfNoEntry: false });
+    if (stat === undefined) {
+        if (required)
+            fail(`missing ${safe} — ${DOCTOR}`);
+        return {
+            id,
+            root: rootKind,
+            relativePath: safe,
+            fingerprint: REVIEW_SETUP_ABSENT,
+            required,
+            executable,
+        };
+    }
+    if (executable && (!stat.isFile() || (stat.mode & 0o111) === 0)) {
+        fail(`${safe} is missing or non-executable — ${DOCTOR}`);
+    }
+    return {
+        id,
+        root: rootKind,
+        relativePath: safe,
+        fingerprint: setupPathFingerprint(source),
+        required,
+        executable,
+    };
+}
+function decodeHooksPath(status, raw) {
+    if (status === 1 && raw.length === 0)
+        fail(`core.hooksPath is ${JSON.stringify('(unset)')} — ${DOCTOR}`);
+    if (status !== 0)
+        fail(`could not read core.hooksPath (git exited ${String(status)}) — ${DOCTOR}`);
+    if (raw.length === 0 || raw[raw.length - 1] !== 0)
+        fail(`core.hooksPath returned malformed output — ${DOCTOR}`);
+    return raw.subarray(0, raw.length - 1).toString();
+}
+function readHooksPath(root) {
+    const result = withoutLocalGitEnvironment(() => spawnSync('git', ['-C', root, 'config', '--null', '--get', 'core.hooksPath']));
+    if (result.error)
+        fail(`could not read core.hooksPath (${errorMessage(result.error)}) — ${DOCTOR}`);
+    return decodeHooksPath(result.status, result.stdout);
+}
+function effectiveHooksPath(root, overlay) {
+    const value = readHooksPath(root);
+    const expected = overlay ? '.devkit/hooks' : '.husky/_';
+    if (value !== expected)
+        fail(`core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected ${expected} — ${DOCTOR}`);
+    return value;
+}
+function captureSetupPaths(targetRoot, gitRoot, overlay) {
+    const hookPath = overlay ? '.devkit/hooks/pre-commit' : '.husky/pre-commit';
+    return [
+        pathState('target', targetRoot, 'config', '.devkit/config.json', true, false),
+        ...(overlay
+            ? []
+            : HUSKY_RUNNER_PATHS.map(([id, path, executable]) => pathState('git', gitRoot, id, path, true, executable))),
+        pathState('git', gitRoot, 'effective-hook', hookPath, true, true),
+        ...OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
+    ];
+}
+function captureOverlayChain(gitRoot, targetRoot, config) {
+    const origHooksPath = typeof config.origHooksPath === 'string'
+        ? config.origHooksPath
+        : captureOrigHooksPath(gitRoot, targetRoot);
+    const configured = join(overlayHookScriptDir(origHooksPath), 'pre-commit');
+    const path = safeRelativePath(gitRoot, configured, 'overlay pre-commit chain');
+    const sourcePath = dirname(path);
+    if (sourcePath === '.')
+        fail('root-level overlay pre-commit chains are not supported by devkit review.');
+    const chainState = pathState('git', gitRoot, 'overlay-chain', path, false, true);
+    const paths = [chainState];
+    if (chainState.fingerprint !== REVIEW_SETUP_ABSENT)
+        paths.push(pathState('git', gitRoot, 'overlay-chain-source', sourcePath, false, false));
+    return { chain: { path, sourcePath }, paths };
+}
+function captureState(targetRoot, gitRoot) {
+    const configPath = resolve(targetRoot, '.devkit/config.json');
+    let parsed;
+    try {
+        parsed = parseReviewSetupProfile(readFileSync(configPath));
+    }
+    catch (cause) {
+        if (cause instanceof Error && cause.message.startsWith('devkit review:'))
+            throw cause;
+        return fail(`could not read .devkit/config.json (${errorMessage(cause)}) — ${DOCTOR}`);
+    }
+    const hooksPath = effectiveHooksPath(gitRoot, parsed.overlay);
+    const paths = captureSetupPaths(targetRoot, gitRoot, parsed.overlay);
+    const overlay = parsed.overlay ? captureOverlayChain(gitRoot, targetRoot, parsed.raw) : null;
+    return {
+        overlay: parsed.overlay,
+        hooksPath,
+        profile: parsed.profile,
+        chain: overlay?.chain ?? null,
+        paths: [...paths, ...(overlay?.paths ?? [])],
+    };
+}
+function validateGenerator(root) {
+    try {
+        const drift = withoutLocalGitEnvironment(() => reviewHookDrift(root));
+        if (drift)
+            fail(`${drift} — ${DOCTOR}`);
+    }
+    catch (cause) {
+        if (cause instanceof Error && cause.message.startsWith('devkit review:'))
+            throw cause;
+        fail(`could not validate devkit setup (${errorMessage(cause)}) — ${DOCTOR}`);
+    }
+}
+function stableState(targetRoot, gitRoot, options = {}) {
+    const before = captureState(targetRoot, gitRoot);
+    options.afterFirstCapture?.();
+    validateGenerator(targetRoot);
+    const after = captureState(targetRoot, gitRoot);
+    if (JSON.stringify(before) !== JSON.stringify(after))
+        fail('target devkit setup changed during validation; retry.');
+    return after;
+}
+/** Validate and atomically record a stable target setup before any no-diff success is possible. */
+export function captureReviewSetup(targetRoot, manifestPath, options = {}) {
+    const root = canonicalReviewDirectory(targetRoot, 'target checkout');
+    const gitRoot = targetGitRoot(root);
+    const destination = manifestDestination(manifestPath, gitRoot);
+    const setup = stableState(root, gitRoot, options);
+    validateManifestSourceSeparation(destination, root, gitRoot, setup);
+    const unsigned = {
+        version: REVIEW_SETUP_VERSION,
+        targetRoot: root,
+        gitRoot,
+        setup,
+    };
+    const manifest = { ...unsigned, selfHash: reviewSetupHash(unsigned) };
+    writeFileAtomic(destination, `${JSON.stringify(manifest, null, 2)}\n`);
+    return manifest;
+}
+/** Revalidate the manifest and require the target's current setup to be byte-identical. */
+export function verifyReviewSetup(targetRoot, manifestPath) {
+    const root = canonicalReviewDirectory(targetRoot, 'target checkout');
+    const gitRoot = targetGitRoot(root);
+    const destination = manifestDestination(manifestPath, gitRoot);
+    const manifest = parseReviewSetupManifest(destination);
+    if (manifest.targetRoot !== root)
+        fail('review setup manifest belongs to a different target checkout.');
+    if (manifest.gitRoot !== gitRoot)
+        fail('review setup manifest belongs to a different target Git root.');
+    const current = stableState(root, gitRoot);
+    validateManifestSourceSeparation(destination, root, gitRoot, current);
+    if (JSON.stringify(current) !== JSON.stringify(manifest.setup))
+        fail('target devkit setup changed after capture; retry.');
+    return manifest;
+}
+function runCli(args) {
+    if (args[0] === 'capture' && args.length === 3) {
+        captureReviewSetup(args[1], args[2]);
+        return;
+    }
+    if (args[0] === 'verify' && args.length === 3) {
+        verifyReviewSetup(args[1], args[2]);
+        return;
+    }
+    fail('usage: setup-manifest capture <target-root> <manifest> | verify <target-root> <manifest>');
+}
+runDirectReviewCli(import.meta.url, runCli);

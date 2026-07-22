@@ -83,6 +83,11 @@ export const DEFAULTS = Object.freeze({
     // Test command the testing agents run (markdown-prompt agents READ this). null =>
     // agents fall back to the consumer's documented package.json `test` script.
     testCommand: null,
+    // Coverage-gate config (the `coverage` guard READs this; only runs when selected). `{}` =
+    // active-strict: no percentage floor, but absent coverage/coverage-final.json FAILS HARD (a
+    // selected coverage gate must never silently pass unverified). `false` = explicit opt-out;
+    // `{ statements, functions, lines?, branches? }` enforces the keys present. See coverage/run.mts.
+    coverage: Object.freeze({}),
     // Review-agent topology (the 5 reviewer subagents READ these). Frink-agnostic defaults:
     // a generic repo treats `src` as its only backend root, has no configured frontend
     // topology (frontend reviewers exit early), and enforces WCAG touch targets + skips the
@@ -111,7 +116,9 @@ function envVar(name) {
 }
 // Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
 // as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-function envBool(name) {
+// Exported for hard-by-default gates that must distinguish unset (→ default) from an
+// explicit `=0` soften (envFlag can't — it folds unset and `=0` both to false).
+export function envBool(name) {
     const v = envVar(name);
     if (v === undefined)
         return undefined;
@@ -125,6 +132,25 @@ function envBool(name) {
 // file/DEFAULT via ??). Exported so the review/decisions gates share one truthy-env predicate.
 export function envFlag(name) {
     return envBool(name) ?? false;
+}
+/**
+ * Is the coverage gate bypassed for THIS run? Lives here — beside envFlag, not in coverage/run.mts —
+ * because guard-deterministic must ask the same question to salt its prefix-cache scope, and a
+ * second copy of the predicate is exactly what the dup/clone gates exist to stop.
+ *
+ * Two spellings, deliberately. `GUARD_COVERAGE_OK` is canonical: the GUARD_QAVIS_OK analogue ("ship
+ * this change without the verification"), and the ONLY one any remedy line prints. `GUARD_NO_COVERAGE`
+ * is an accepted alias because it is the name agents actually guess — blocked ship attempts in the
+ * field grepped devkit's dist for `GUARD_NO_COVERAGE|SKIP_COVERAGE|NO_COVERAGE|COVERAGE_SKIP` and
+ * found nothing, then routed around the tool entirely. A bypass nobody can guess the name of is the
+ * same dead end as no bypass at all.
+ *
+ * NOT a way to disable the gate for a repo — that is `"coverage": false` in guard.config.json. This
+ * is a per-invocation operator assertion, and guard-deterministic salts the prefix cache so it can
+ * never authorise a later un-bypassed run against the same tree.
+ */
+export function coverageBypassed() {
+    return envFlag('COVERAGE_OK') || envFlag('NO_COVERAGE');
 }
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
 // unparseable / not an object => throw: a typo'd config must fail loudly, never silently
@@ -193,6 +219,14 @@ export function resolveGuardConfig(cwd = process.cwd()) {
         graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
         // Testing-agent command: env > file > null (agents fall back to package.json test).
         testCommand: testCommandEnv ?? file.testCommand ?? DEFAULTS.testCommand,
+        // Coverage: explicit `false` = opt-out; any plain object = thresholds; anything else (absent,
+        // array, non-object) falls back to the active-strict `{}` default. A malformed value never
+        // silently disables the gate — only a literal `false` does.
+        coverage: file.coverage === false
+            ? false
+            : file.coverage && typeof file.coverage === 'object' && !Array.isArray(file.coverage)
+                ? file.coverage
+                : DEFAULTS.coverage,
         // Review-agent topology. Shallow-merge so a consumer can set one key (and nested
         // accessibility) without restating the whole block.
         review: {
