@@ -9,7 +9,7 @@
  * Ctrl-C / Esc at any prompt aborts cleanly via clack's isCancel (nothing is written).
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS, } from "./components.mjs";
+import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
 // The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
@@ -73,7 +73,7 @@ const MODES = [
 ];
 // Reason: flat clack wizard orchestration: sequential numbered steps (mode→stack→components→guards→removal→summary→apply) each guarded by `if (bail(x)) return null`; the branch COUNT is high but every branch is near-flat, and the untested-complexity is acceptable because this is an interactive TTY prompt flow exercised end-to-end, not unit-tested
 // fallow-ignore-next-line complexity
-export async function runWizard({ detectedStack, detectedMode = 'package', structureAvailable, installed, }) {
+export async function runWizard({ detectedStack, detectedMode = 'package', structureAvailable, installed, existingReview, }) {
     intro('◆ devkit setup');
     // 1. Mode — package / standalone / overlay. Drives every later step.
     const mode = await select({
@@ -183,12 +183,47 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         selection.lineGrowth = guards.includes(LINE_GROWTH_ID);
         selection.guards = guards.filter((g) => g !== LINE_GROWTH_ID);
     }
+    // Review execution is a separate local policy from ordinary commit/ship guards. Opt-in here;
+    // when enabled, make the positive allowlist explicit so future gates never enter cron reviews.
+    const reviewEnabled = selection.husky
+        ? await confirm({
+            message: 'Enable devkit review?',
+            initialValue: installed.has('devkit-review'),
+        })
+        : false;
+    if (bail(reviewEnabled))
+        return null;
+    let reviewGuards = [];
+    if (reviewEnabled) {
+        const reviewableSelected = (selection.guards ?? []).filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
+        if (reviewableSelected.length > 0) {
+            const picked = await multiselect({
+                message: 'Select guards for devkit review',
+                options: GUARD_OPTIONS.filter((guard) => reviewableSelected.includes(guard.id)).map((g) => ({
+                    value: g.id,
+                    label: g.label,
+                    hint: g.hint,
+                })),
+                initialValues: reviewableSelected,
+                required: false,
+            });
+            if (bail(picked))
+                return null;
+            reviewGuards = picked.filter((guard) => REVIEWABLE_GUARD_IDS.includes(guard));
+        }
+    }
+    const review = {
+        enabled: Boolean(reviewEnabled),
+        guards: reviewGuards,
+        decisionsDir: existingReview?.decisionsDir?.trim() || DEFAULT_REVIEW_DECISIONS_DIR,
+    };
     // 5. Removal: package/standalone only (overlay is local-only — a re-run just overwrites).
     const remove = [];
     const deselected = mode === 'overlay'
         ? []
         : [...installed].filter((id) => {
-            const stillSelected = id === 'guards' ? (selection.guards ?? []).length > 0 : selection[id];
+            const stillSelected = id === 'devkit-review' ||
+                (id === 'guards' ? (selection.guards ?? []).length > 0 : selection[id]);
             return !stillSelected;
         });
     // 6. Summary — what will be installed + what (if anything) is up for removal.
@@ -210,7 +245,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         if (yes)
             remove.push(id);
     }
-    return { mode, stack, selection, remove };
+    return { mode, stack, selection, remove, review };
 }
 // Concise plan summary for the note(): a ✓/· line per component + a remove line.
 function summarize(mode, selection, structureAvailable, deselected) {

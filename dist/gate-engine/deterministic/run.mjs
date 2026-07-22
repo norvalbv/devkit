@@ -32,6 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { coverageBypassed } from "../config.mjs";
 import { emitGateEvent } from "../judge/gate-events.mjs";
 import { checkPrefix, recordPrefix } from "../prefix-cache/prefix-cache.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,7 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 // get the bare gate name (module-level per biome's useTopLevelRegex).
 const GUARD_PREFIX_RE = /^guard-/;
 const GATE_SUFFIX_RE = /\(.*\)$/;
+const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
 // the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
@@ -59,8 +61,27 @@ const DETERMINISTIC = [
         module: '../co-occurrence/clone-detector.mjs',
         args: ['scan', '--changed', '--gate'],
     },
+    // Coverage reads coverage/coverage-final.json and enforces guard.config.json `coverage` thresholds.
+    // `optIn`: never swept in by the missing-config fallback below — it runs ONLY when a repo explicitly
+    // selects it (an unadopted/CI repo must not fail hard on a coverage artifact it never asked for).
+    // Fail-CLOSED once selected: no 2 (fail-open) path — absent data exits 1.
+    { id: 'coverage', module: '../coverage/run.mjs', args: ['gate'], optIn: true },
 ];
 const ALL_IDS = DETERMINISTIC.map((g) => g.id);
+// The set the missing/unreadable-config fallback runs: every guard EXCEPT the opt-in ones. `--only`
+// and an explicit components.guards selection can still run opt-in guards (they're in ALL_IDS).
+const DEFAULT_IDS = DETERMINISTIC.filter((g) => !('optIn' in g && g.optIn)).map((g) => g.id);
+function canonicalIds(ids) {
+    const selected = new Set(ids);
+    return ALL_IDS.filter((id) => selected.has(id));
+}
+function reviewIds() {
+    const configured = (process.env.DEVKIT_REVIEW_GUARDS ?? '')
+        .split(',')
+        .map((guard) => guard.trim())
+        .filter(Boolean);
+    return canonicalIds(configured);
+}
 // Split a `--structure` / `--extra` command string into argv tokens. Hoisted (perf: no per-call
 // regex compile).
 const WHITESPACE_RE = /\s+/;
@@ -93,21 +114,46 @@ export function parseOpts(argv) {
     return opts;
 }
 // Which deterministic guards this repo selected. Source of truth = .devkit/config.json
-// components.guards (written by `devkit init`). A missing/unreadable config runs the WHOLE set —
-// never silently skip a gate the hook expected to run.
+// components.guards (written by `devkit init`). A missing/unreadable config runs the DEFAULT set —
+// never silently skip a gate the hook expected to run — but opt-in guards (coverage) run ONLY when
+// explicitly selected, so an unadopted/CI repo is never wedged by a gate it never asked for.
 export function selectedIds(cwd) {
+    if (process.env.DEVKIT_RUN_MODE === 'review')
+        return reviewIds();
     const cfgPath = path.join(cwd, '.devkit', 'config.json');
     if (!existsSync(cfgPath))
-        return ALL_IDS;
+        return DEFAULT_IDS;
     try {
         const guards = JSON.parse(readFileSync(cfgPath, 'utf8'))?.components?.guards;
         if (!Array.isArray(guards))
-            return ALL_IDS;
+            return DEFAULT_IDS;
         return ALL_IDS.filter((id) => guards.includes(id));
     }
     catch {
-        return ALL_IDS;
+        return DEFAULT_IDS;
     }
+}
+export function prefixCacheScope(scope, effectiveIds) {
+    const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+    const mergeBase = process.env.DEVKIT_REVIEW_MERGE_BASE;
+    const runtime = process.env.DEVKIT_REVIEW_RUNTIME_FINGERPRINT;
+    // `git write-tree` identifies only the final snapshot. Deterministic gates inspect the DIFF from
+    // HEAD and execute ignored dependency/runtime bytes, so another merge-base or runtime is another
+    // gate input. The public runner supplies both fingerprints. Lower-level callers stay isolated in
+    // an explicit unmanaged scope instead of sharing ship keys.
+    const reviewBase = mergeBase && OBJECT_ID.test(mergeBase) ? mergeBase : 'unmanaged';
+    const reviewRuntime = runtime && OBJECT_ID.test(runtime) ? runtime : 'unmanaged';
+    const base = reviewMode
+        ? `${scope ?? 'devkit-guards'}:review:${canonicalIds(effectiveIds ?? reviewIds()).join(',')}:base:${reviewBase}:runtime:${reviewRuntime}`
+        : scope;
+    // Same hazard the review salt above exists for, one gate down: a run with the coverage gate
+    // bypassed records an all-green key that a LATER un-bypassed run of the identical staged tree
+    // would hit — skipping the whole set, so coverage never runs and the one-off bypass has laundered
+    // itself into a permanent false green. Salting keeps the two runs on different keys. (Cost: a
+    // bypassed run cannot reuse a clean run's key either, so it re-runs the other gates. Same trade
+    // the review salt makes — correctness over a cache hit.) `?? 'devkit-guards'` materialises the
+    // default scope checkPrefix would otherwise supply internally, or the salt would be lost.
+    return coverageBypassed() ? `${base ?? 'devkit-guards'}:coverage-bypassed` : base;
 }
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
@@ -148,25 +194,37 @@ function commandGate(label, cmd) {
  */
 export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const { exec = execFileSync } = opts;
+    // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
+    // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
+    // guard excluded by local review policy.
+    if (opts.only) {
+        const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
+        if (unknown.length || opts.only.length === 0) {
+            const why = unknown.length ? `unknown gate id(s): ${unknown.join(', ')}` : 'empty selection';
+            console.error(`✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`);
+            return 1;
+        }
+    }
+    const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
+    const allowed = reviewMode ? reviewIds() : selectedIds(cwd);
+    if (reviewMode && opts.only) {
+        const allowlist = new Set(allowed);
+        const disallowed = opts.only.filter((id) => !allowlist.has(id));
+        if (disallowed.length > 0) {
+            console.error(`✗ guard-deterministic --only: gate id(s) not enabled for review: ${[...new Set(disallowed)].join(', ')} — refusing to run.`);
+            return 1;
+        }
+    }
+    const effectiveIds = canonicalIds(opts.only ?? allowed);
+    // A review may intentionally run a strict subset. Salt the prefix scope so that subset can never
+    // authorize a later full ship/commit against the same staged tree.
+    const cacheScope = prefixCacheScope(opts.scope, effectiveIds);
     // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
     // every gate. checkPrefix returns true = skip, false = run.
-    const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+    const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
     const fails = [];
     if (!skip) {
-        // `--only`, when provided, must name known guard ids. A typo (`--only siz,fanout`) or an empty
-        // spec (`--only ,,`) would otherwise filter DETERMINISTIC down to nothing and silently drop a
-        // required gate — the exact fail-open this orchestrator exists to prevent. Fail CLOSED, loudly.
-        if (opts.only) {
-            const unknown = opts.only.filter((id) => !ALL_IDS.includes(id));
-            if (unknown.length || opts.only.length === 0) {
-                const why = unknown.length
-                    ? `unknown gate id(s): ${unknown.join(', ')}`
-                    : 'empty selection';
-                console.error(`✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`);
-                return 1;
-            }
-        }
-        const ids = new Set(opts.only ?? selectedIds(cwd));
+        const ids = new Set(effectiveIds);
         const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
             label: `guard-${g.id}`,
             argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
@@ -206,7 +264,7 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
     // next time (ship only — recordPrefix is a no-op otherwise).
     if (!skip)
-        recordPrefix(cwd, { hookPath: opts.hookPath, scope: opts.scope });
+        recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
     return 0;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

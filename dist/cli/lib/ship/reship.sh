@@ -11,10 +11,27 @@
 # fallow-ignore-next-line code-duplication
 #
 # Usage:  ship --pr <branch> "<title>" [--link <d>]... [--] <path...>
+#         ship <branch> "<title>" --pr [--link <d>]... [--] <path...>   # equivalent
 #         # body via stdin. The <branch> is the existing PR's head branch.
 set -euo pipefail
 
+# `--pr` is the MODE flag: ship.mts routes on it, then forwards argv VERBATIM — so it still arrives
+# here, and wherever the caller put it. Strip a LEADING one before reading positionals; the parse loop
+# below drops a trailing one. Without this, the spelling the help text itself documents
+# (`ship --pr <branch> "<title>"`) bound BR="--pr" and TITLE=<branch>, and the run died at the remote
+# check with `no remote branch origin/--pr to re-push to` — a message that names the flag as if it
+# were a branch and sends you looking at the wrong thing entirely. The existing tests all passed
+# because they exercise the trailing form exclusively.
+[ "${1:-}" = "--pr" ] && shift
+
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
+
+# The leading `--pr` above is the one flag-first spelling this script accepts. Any OTHER flag in a
+# positional slot is the same mistake wearing a different hat, so reject it here rather than let it
+# reach the remote check as a branch name.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-positional-args.sh"
+ship_assert_positional_args "$BR" "$TITLE" \
+  'ship --pr <branch> "<title>" [--body "<text>"] [--link <d>]... [--] <path...>'
 
 LINK_EXTRA=()
 PATHS=()
@@ -32,10 +49,14 @@ done
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
 for p in "${PATHS[@]}"; do
-  [ -d "$p" ] && { echo "directory path not allowed (pass individual files): $p" >&2; exit 1; }
+  [ -d "$p" ] && {
+    echo "directory path not allowed (pass individual files): $p" >&2
+    echo "  list its tracked files: git ls-files -- \"$p\"" >&2
+    exit 1
+  }
 done
 
-LINK_DIRS=(.husky/_ node_modules)
+LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
 ROOT=$(git rev-parse --show-toplevel)
@@ -58,52 +79,26 @@ git fetch origin "$BR" 2>/dev/null || {
 BASE=$(git rev-parse FETCH_HEAD)
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
+STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
 else BODY=$(cat); fi
 
+KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
+  rm -f "$STAGED_STATE"
+  if [ -n "$KEEP_WT" ]; then
+    echo "   Worktree KEPT for diagnosis: $WT" >&2
+    echo "   Then: git worktree remove --force '$WT'" >&2
+    return
+  fi
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
-
-# Same gate-dep symlinks + fail-closed husky guard as new-ship (the gates must actually run).
-# Overlay mode keeps the gate chain in .devkit/hooks/pre-commit (git-excluded → absent from the
-# worktree → husky shim no-ops). Link it + fail CLOSED if declared-overlay but the hook is missing;
-# the commit forces core.hooksPath=.devkit/hooks so it fires. (See ship-branch.sh for the full why.)
-if grep -Eq '"overlay"[[:space:]]*:[[:space:]]*true' "$ROOT/.devkit/config.json" 2>/dev/null; then
-  [ -x "$ROOT/.devkit/hooks/pre-commit" ] || {
-    echo "overlay mode but $ROOT/.devkit/hooks/pre-commit missing/non-executable — run 'devkit init --overlay' (gates must not fail open)" >&2
-    exit 1
-  }
-  LINK_DIRS+=(.devkit)
-fi
-if [ ! -e "$ROOT/.husky/_" ]; then
-  echo "missing $ROOT/.husky/_ — run dependency setup before shipping (gates must not fail open)" >&2
-  exit 1
-fi
-for d in "${LINK_DIRS[@]}"; do
-  [ -e "$ROOT/$d" ] && ln -s "$ROOT/$d" "$WT/$d"
-done
-
-# Link the devkit-synced reviewer briefs + judge checklists so guard-review runs in the worktree.
-# .claude/{agents,skills} are git-ignored in an overlay consumer → absent from a fresh worktree →
-# every reviewer INCONCLUSIVEs → strict ship fails CLOSED. Link the two SUBDIRS (not the whole .claude:
-# the checklist writes per-run state to .claude/.<skill>-review.json in cwd, which must stay in the
-# ephemeral worktree). Skip a subdir already checked out (repos that TRACK .claude — no bogus nesting).
-# (See ship-branch.sh for the full why.)
-if [ -d "$ROOT/.claude/agents" ] || [ -d "$ROOT/.claude/skills" ]; then
-  mkdir -p "$WT/.claude"
-  for sub in agents skills; do
-    if [ -e "$ROOT/.claude/$sub" ] && [ ! -e "$WT/.claude/$sub" ]; then
-      ln -s "$ROOT/.claude/$sub" "$WT/.claude/$sub"
-    fi
-  done
-fi
 
 # Copy the CURRENT content of each path over the fetched tip (add/modify), or delete it. The commit
 # diff is therefore (origin/<branch> tip → your current files) = exactly the new delta, with no
@@ -121,6 +116,15 @@ done
 # Nothing to add? Abort before an empty commit (a re-push with no delta is a no-op, not a commit).
 git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothing to re-push" >&2; exit 1; }
 
+# Snapshot the index the instant staging finishes — the assertions around the commit hold the gate
+# chain to it. See assert-staged-set.sh for the clobber this defends against.
+. "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
+ship_record_staged_state "$WT" "$STAGED_STATE"
+
+# Only after caller content is staged: runtime symlinks must never enter the shipped diff.
+. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
+prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
+
 # Link gate configs present in the repo but absent from this fresh checkout (an untracked config, a
 # gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
 . "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
@@ -129,8 +133,16 @@ link_untracked_gate_configs "$WT" "$ROOT"
 # Commit (gates run HERE). Capture + surface the gate output for the shipping agent — git buries it on
 # the commit's stderr. Shared with new-ship. See commit-with-gate-capture.sh.
 . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+# The fetched PR-branch tip the worktree was cut from — lets in-chain gates (fallow) diff against IT,
+# not their own main-autodetect (DK-5).
+export DEVKIT_SHIP_BASE_SHA="$BASE"
 export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto an existing branch)
+export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
+# Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
+# anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
+ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
+ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally onto $BR (worktree $WT), skipped push." >&2

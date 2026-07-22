@@ -17,8 +17,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
+import {
+  assertStagedSetSane,
+  resolveReviewRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.frontend-accessibility-review.json';
 
@@ -135,6 +139,13 @@ const RE_LINK_NO_UNDERLINE = /no-underline|text-decoration\s*:\s*none/i;
 
 const log = console.log;
 
+const store = createChecklistStore({
+  path: CHECKLIST_PATH,
+  label: 'Frontend Accessibility',
+  log,
+});
+const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+
 // ============ COLOR CONTRAST UTILITY ============
 
 /**
@@ -188,40 +199,30 @@ function checkContrastRatio(hex1, hex2) {
 
 // ============ GIT HELPERS ============
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
-
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
 // review.frontendRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
 // value (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
 // letting a bad entry crash the git call into an empty result that would wave the commit through.
 function frontendRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const review = c && typeof c === 'object' ? c.review : undefined;
-  const roots = review && typeof review === 'object' ? review.frontendRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  frontend-accessibility: ignoring invalid `review.frontendRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots;
+  return resolveReviewRoots({
+    envName: 'DEVKIT_REVIEW_FRONTEND_ROOTS',
+    configKey: 'frontendRoots',
+    reviewerName: 'frontend-accessibility',
+  });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(frontendRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...frontendRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'frontend-accessibility');
     return output
       .trim()
       .split('\n')
@@ -652,16 +653,6 @@ function detectAccessibilityPatterns(_files, diffs) {
 
 // ============ CHECKLIST STATE ============
 
-function loadChecklist() {
-  if (!existsSync(CHECKLIST_PATH)) return null;
-  return JSON.parse(readFileSync(CHECKLIST_PATH, 'utf-8'));
-}
-
-function saveChecklist(data) {
-  mkdirSync(dirname(CHECKLIST_PATH), { recursive: true });
-  writeFileSync(CHECKLIST_PATH, JSON.stringify(data, null, 2));
-}
-
 // ============ COMMANDS ============
 
 function generate() {
@@ -680,69 +671,6 @@ function generate() {
   log('');
   log('Items to review:');
   for (const item of items) log(`  - [${item.category}] ${item.name}: ${item.description}`);
-}
-
-function status() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist. Run: generate');
-    process.exit(1);
-  }
-  const done = data.items.filter((i) => i.status !== 'pending').length;
-  const failed = data.items.filter((i) => i.status === 'fail');
-  log(`📋 Frontend Accessibility: ${done}/${data.items.length} | Failed: ${failed.length}`);
-  if (failed.length > 0) {
-    log('Issues:');
-    for (const item of failed) for (const issue of item.issues) log(`  - [${item.name}] ${issue}`);
-  }
-}
-
-function checkItem(name, pass, failReason) {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const item = data.items.find((i) => i.name === name);
-  if (!item) {
-    log(`❌ Item not found: ${name}`);
-    log('Available:', data.items.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  item.status = pass ? 'pass' : 'fail';
-  if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-  if (!pass && failReason) item.issues.push(failReason);
-  saveChecklist(data);
-  log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
-}
-
-function finalize() {
-  const data = loadChecklist();
-  if (!data) {
-    log('❌ No checklist');
-    process.exit(1);
-  }
-  const pending = data.items.filter((i) => i.status === 'pending');
-  const failed = data.items.filter((i) => i.status === 'fail');
-  const allIssues = data.items.flatMap((i) => i.issues);
-  if (pending.length > 0) {
-    log(`❌ Incomplete: ${pending.length} items pending`);
-    log('Pending:', pending.map((i) => i.name).join(', '));
-    process.exit(1);
-  }
-  if (failed.length > 0 || allIssues.length > 0) {
-    log(`❌ Failed: ${allIssues.length} issues`);
-    for (const issue of allIssues) log(`  - ${issue}`);
-    process.exit(1);
-  }
-  log('✅ Frontend Accessibility: All checks passed');
-}
-
-function cleanup() {
-  if (existsSync(CHECKLIST_PATH)) {
-    unlinkSync(CHECKLIST_PATH);
-    log('🗑️  Removed frontend accessibility checklist');
-  }
 }
 
 function contrast(fg, bg) {
