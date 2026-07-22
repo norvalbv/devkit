@@ -6,11 +6,14 @@
 
 /**
  * Bind a flag reader to one argv slice. `flag('--min-loc', 15)` returns the following token, or
- * the default when the flag is absent. Values stay strings; callers coerce.
+ * the default when the flag is absent OR is the last token with nothing after it. That second
+ * case matters: callers coerce with `Number(...)`, so returning `undefined` for a trailing
+ * `--min-loc` would silently set the threshold to NaN and let every comparison against it fail.
+ * Values stay strings; callers coerce.
  */
 export const flagReader =
   (argv: string[]) =>
   <T,>(name: string, def: T): string | T => {
     const i = argv.indexOf(name);
-    return i !== -1 ? argv[i + 1] : def;
+    return (i === -1 ? undefined : argv[i + 1]) ?? def;
   };
