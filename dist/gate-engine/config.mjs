@@ -39,6 +39,10 @@ export const DEFAULTS = Object.freeze({
     boundaries: [],
     // Where the ratchets / structure scans look for implementation files.
     scanRoots: ['src'],
+    // Where the CLONE gate (jscpd) looks. Empty => inherit scanRoots. Split from scanRoots because
+    // verbatim-clone scope is often deliberately narrower than semantic-dup scope: a repo can want
+    // the matcher over every backend root while the clone gate only polices its UI + main process.
+    cloneRoots: [],
     // Implementation-file extensions the ratchets count (fan-out + size). Default TS — a JS/MJS
     // codebase (devkit itself, a node CLI) sets `["mjs","js"]` so the gates actually SEE its files.
     // A file is a test when it matches `*.<ext>` AND `.test.`/`.spec.` (excluded from impl counts).
@@ -76,6 +80,16 @@ export const DEFAULTS = Object.freeze({
     // no index configured means the semantic matcher fails open / does nothing
     // (a consumer without search-code still gets the clone-detector + ratchets).
     indexPath: null,
+    // Optional indexer refresh run before the matcher scans, so the gate judges the code being
+    // committed rather than the last indexed state. null = never run one. It is ONLY run when an
+    // index already EXISTS in the PRIMARY checkout — never to cold-build one (a from-scratch index
+    // is minutes-to-hours and would read as a hung commit) and never through a worktree's linked
+    // index (the indexer keys chunks repo-relative, so it would overwrite the primary's rows with
+    // the worktree's code). See matcher.mts refreshIndex.
+    indexCommand: null,
+    // Hard wall-clock ceiling on indexCommand. Bounding ATTEMPTS is not enough — one attempt can
+    // itself run for hours when the describe cache misses (a model/prompt-version change).
+    indexCommandTimeoutMs: 60_000,
     // Semantic-search + graph tool NAMES the search-tool steering hooks point agents at.
     // Generic defaults — a consumer overrides per-repo via guard.config.json.
     searchTool: 'mcp__codebase__searchCode',
@@ -108,6 +122,10 @@ export const DEFAULTS = Object.freeze({
 });
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
 // original frink gates. Returns undefined when neither is set.
+/** A millisecond duration, or undefined for anything that is not a usable positive number. */
+function positiveMs(v) {
+    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+}
 function envVar(name) {
     const guard = process.env[`GUARD_${name}`];
     if (guard !== undefined)
@@ -188,6 +206,8 @@ export function resolveGuardConfig(cwd = process.cwd()) {
     const noLogEnv = envBool('NO_LOG');
     const noLlmEnv = envBool('DECISION_NO_LLM');
     const indexEnv = envVar('INDEX_PATH');
+    const indexCommandEnv = envVar('INDEX_COMMAND');
+    const indexTimeoutEnv = Number(envVar('INDEX_COMMAND_TIMEOUT_MS'));
     const allowlistEnv = envVar('ALLOWLIST_PATH');
     const decisionsEnv = envVar('DECISIONS_DIR');
     const searchToolEnv = envVar('SEARCH_TOOL');
@@ -196,6 +216,9 @@ export function resolveGuardConfig(cwd = process.cwd()) {
     return {
         boundaries: arr(file.boundaries, DEFAULTS.boundaries),
         scanRoots: arr(file.scanRoots, DEFAULTS.scanRoots),
+        // cloneRoots falls back to scanRoots, not to DEFAULTS.cloneRoots (`[]`) — an unset key must
+        // mean "same scope as the matcher", never "scan nothing" (which would silently kill the gate).
+        cloneRoots: arr(file.cloneRoots, arr(file.scanRoots, DEFAULTS.scanRoots)),
         sourceExtensions: arr(file.sourceExtensions, DEFAULTS.sourceExtensions),
         // Structure topology: { trees, walls }. Present-but-partial config still gets array defaults.
         structure: file.structure
@@ -214,6 +237,15 @@ export function resolveGuardConfig(cwd = process.cwd()) {
         thresholds: { ...DEFAULTS.thresholds, ...(file.thresholds ?? {}) },
         // indexPath: env > file > null (null = matcher opt-out / fail-open).
         indexPath: indexEnv ?? file.indexPath ?? DEFAULTS.indexPath,
+        // indexCommand: env > file > null (null = never refresh the index before scanning).
+        indexCommand: indexCommandEnv ?? file.indexCommand ?? DEFAULTS.indexCommand,
+        // env > file > default, like every other key — CI needs to shorten/extend the refresh
+        // deadline without editing a committed guard.config.json. Must be POSITIVE: node reads a 0
+        // timeout as "no timeout", so accepting 0 (which is what `Number('')` yields for an
+        // empty env var) would silently remove the wall-clock bound this exists to enforce.
+        indexCommandTimeoutMs: positiveMs(indexTimeoutEnv) ??
+            positiveMs(file.indexCommandTimeoutMs) ??
+            DEFAULTS.indexCommandTimeoutMs,
         // Search-tool steering NAMES: env > file > generic default.
         searchTool: searchToolEnv ?? file.searchTool ?? DEFAULTS.searchTool,
         graphTool: graphToolEnv ?? file.graphTool ?? DEFAULTS.graphTool,
