@@ -5,17 +5,26 @@
  * propagates the exit code. A consuming repo shells out to this command (never imports it); the
  * manual lane runs the identical command in a plain terminal.
  */
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { runPackagedScript } from "../lib/ship/run-packaged-script.mjs";
 export const meta = {
     name: 'ship',
     summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
     help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--body "<text>"] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>
                           bare positional paths (no --) are accepted.
 
+  <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
+  below are optional, NOT free-floating: \`ship --base main <branch> "<title>"\` binds the branch
+  name to --base and is rejected. Ship CREATES <branch> — it must not already exist (on origin, use
+  --pr to append to that branch's open PR instead).
+
+  --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
+                      HEAD / current branch. <path...> content is still read from your working tree,
+                      so this ships even when the branch you're on has ALREADY committed those files
+                      (that case otherwise stages nothing). Must be a branch on origin — a PR base
+                      can't be a sha or a tag. "origin/x" and "x" are equivalent.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
                       body from stdin (a pipe or here-doc) or to leave the body empty.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
@@ -26,6 +35,15 @@ Usage:
 
 Env:
   SHIP_DRY_RUN=1      Commit locally in the worktree; skip push + PR (preview).
+  GUARD_COVERAGE_OK=1 Ship without verified coverage, for THIS run only (alias: GUARD_NO_COVERAGE=1).
+                      For when the BASE branch already fails the coverage gate and your diff didn't
+                      cause it — the gate logs a loud BYPASSED line instead of blocking, and the
+                      bypass is recorded in telemetry. A shortfall your own change caused, fix.
+                      Prefer \`export GUARD_COVERAGE_OK=1\` on its own line: an inline
+                      \`GUARD_COVERAGE_OK=1 devkit ship …\` prefix can be stripped by
+                      command-rewriting shell hooks (same caveat as SHIP_COMMIT_TIMEOUT).
+                      Editing "coverage": false in guard.config.json does NOT work here — ship reads
+                      that file from the committed tree, so a local-only edit is silently ignored.
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
 that lands but fails to push KEEPS the branch (recovery line on stderr); a commit that never lands
@@ -41,14 +59,8 @@ export default function ship(args, cwd) {
     const sep = args.indexOf('--');
     const flagArgs = sep === -1 ? args : args.slice(0, sep);
     const mode = flagArgs.includes('--pr') ? 'reship' : 'ship-branch';
-    const script = fileURLToPath(new URL(`../lib/ship/${mode}.sh`, import.meta.url));
     // `bash <script>` (not a direct exec of the file) so a lost +x bit through packaging can't break
     // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
     // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
-    const r = spawnSync('bash', [script, ...args], { cwd, stdio: 'inherit' });
-    if (r.error) {
-        console.error(`devkit ship: ${r.error.message}`);
-        return 1;
-    }
-    return r.status ?? 1;
+    return runPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd });
 }

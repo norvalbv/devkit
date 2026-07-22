@@ -17,49 +17,34 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import {
+  assertStagedSetSane,
+  resolveConfigRoots,
+  toGitPathspecs,
+} from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.pre-commit-review.json';
 
 const log = console.log;
 
-const isStringArray = (v) =>
-  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0);
-
 // First-level source roots to review — from guard.config.json (NOT hardcoded), so the checklist
-// scopes to ANY repo's layout. No/unreadable config, a non-object config (e.g. a literal `null`), or
-// an absent scanRoots → all staged files (the gate never silently no-ops). A PRESENT but invalid
-// scanRoots (not an array of non-empty strings) warns loudly and falls back to scan-all, rather than
-// letting a bad entry crash the git call into an empty result that would wave the commit through.
-// Reason: a config-shape validator — parse guard + non-object guard + absent/invalid branches, each
-// trivial and individually covered (cli/__tests__/checklist-scanroots.test.mjs). High branch COUNT,
-// low real risk; the CRAP estimate is inflated only because fallow can't see coverage for a
-// non-exported function.
-// fallow-ignore-next-line complexity
+// scopes to ANY repo's layout. The shared resolver normalizes the same roots as review selection,
+// rejects Git pathspec magic, and conservatively scans all staged files for absent/invalid config.
 function scanRoots() {
-  let c;
-  try {
-    c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-  } catch {
-    return ['.'];
-  }
-  const roots = c && typeof c === 'object' ? c.scanRoots : undefined;
-  if (roots === undefined) return ['.'];
-  if (!isStringArray(roots)) {
-    console.error(
-      '⚠️  commit-guard: ignoring invalid `scanRoots` in guard.config.json (expected an array of non-empty strings) — scanning all staged files instead.',
-    );
-    return ['.'];
-  }
-  return roots; // an empty array is a deliberate "no scoping" → git lists all staged files
+  return resolveConfigRoots({ configKey: 'scanRoots', reviewerName: 'commit-guard' });
 }
 
 function getStagedFiles() {
+  const pathspecs = toGitPathspecs(scanRoots());
   try {
     const output = execFileSync(
       'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...scanRoots()],
+      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
       { encoding: 'utf-8' },
     );
+    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
+    // that as zero items — a reviewer that examined nothing must not read as a pass.
+    if (!output.trim()) assertStagedSetSane(pathspecs, 'commit-guard');
     return output
       .trim()
       .split('\n')
@@ -171,6 +156,7 @@ function finalize() {
 }
 
 function cleanup() {
+  if (process.env.DEVKIT_RUN_MODE === 'review') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed checklist');
