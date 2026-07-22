@@ -8,6 +8,7 @@
  *   devkit review [--target <path>] [--base <ref>]
  *   devkit sync-skills [--dry-run]
  *   devkit sync-hooks [--only <a.sh,b.mjs>] [--targets <claude,cursor>] [--dry-run] [--force]
+ *   devkit sync-hook-runner [--dry-run]
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]   (maintainer-only)
  *   devkit --version
  *   devkit --help
@@ -31,6 +32,7 @@ const COMMANDS = {
     'sync-skills': () => import("./commands/sync/sync-skills.mjs"),
     'sync-agents': () => import("./commands/sync/sync-agents.mjs"),
     'sync-hooks': () => import("./commands/sync/sync-hooks.mjs"),
+    'sync-hook-runner': () => import("./commands/sync/sync-hook-runner.mjs"),
     release: () => import("./commands/release.mjs"),
     update: () => import("./commands/update.mjs"),
     upgrade: () => import("./commands/upgrade.mjs"),
@@ -51,6 +53,7 @@ const GIT_COMMANDS = new Set([
     'clean',
     'doctor',
     'init',
+    'sync-hook-runner',
 ]);
 /**
  * Top-level help, derived from every command's `meta.summary` (single source of truth). Each meta
