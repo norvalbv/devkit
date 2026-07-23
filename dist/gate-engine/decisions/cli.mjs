@@ -6,6 +6,7 @@
  * resolveGuardConfig(process.cwd()) — i.e. against the CONSUMER repo, never the package dir (W-3):
  *
  *   guard-decisions add <slug> --target …| --note …   record a Target / append a note
+ *   guard-decisions amend <slug> --target …| --note … replace only the newest uncommitted entry
  *   guard-decisions query "<text>" [--top K]          rank axes (semantic → lexical floor)
  *   guard-decisions reindex | list | show <slug> | check <slug>
  *   guard-decisions detect --gate | scan [--working]  architectural-smell gate (capture B)

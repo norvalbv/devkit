@@ -21,7 +21,7 @@ import { check } from "./check-result.mjs";
 // missing-manifest short-circuit and a source/consumer DRIFT split. Each branch is a distinct drift
 // verdict; extracting them hides which side drifted.
 // fallow-ignore-next-line complexity
-export async function checkSkills(cwd, surface = 'claude') {
+export async function checkSkills(cwd, surface = 'claude', guards = []) {
     // Skills are repo-wide → manifest + the agent-surface dir live at the git root (cwd for a
     // single-package repo). Verify against the selected surface (.claude or .cursor — same content).
     const { gitRoot } = detectGitRoot(cwd);
@@ -47,8 +47,10 @@ export async function checkSkills(cwd, surface = 'claude') {
     // disk, deliberately off-manifest) is NOT drift, so require absent-on-disk too — see the
     // non-devkit-asset-collision-preserve decision.
     const manifestSkillDirs = new Set(Object.keys(manifest.files).map((k) => k.split('/')[0]));
-    const unsynced = bundledNames('skills', (e) => e.isDirectory()).filter((dir) => !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)));
-    if (sourceDrift.length || consumerDrift.length || unsynced.length) {
+    const expectedNames = bundledNames('skills', (e) => e.isDirectory()).filter((name) => name !== 'decisions' || guards.includes('decisions'));
+    const unexpected = [...manifestSkillDirs].filter((name) => !expectedNames.includes(name));
+    const unsynced = expectedNames.filter((dir) => !manifestSkillDirs.has(dir) && !existsSync(join(gitRoot, `.${surface}`, 'skills', dir)));
+    if (sourceDrift.length || consumerDrift.length || unsynced.length || unexpected.length) {
         const parts = [];
         if (sourceDrift.length)
             parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
@@ -56,6 +58,8 @@ export async function checkSkills(cwd, surface = 'claude') {
             parts.push(`consumer copy drifted (${consumerDrift.length})`);
         if (unsynced.length)
             parts.push(`bundle has ${unsynced.length} skill(s) the manifest lacks (${unsynced.join(', ')})`);
+        if (unexpected.length)
+            parts.push(`manifest contains disabled skill(s) (${unexpected.join(', ')})`);
         return check('skills', 'DRIFT', parts.join('; '), 'run `devkit sync-skills`', true);
     }
     return check('skills', 'OK', `${Object.keys(manifest.files).length} file(s) in sync`);
@@ -98,7 +102,7 @@ export async function checkAgents(cwd, surface = 'claude') {
     return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
 }
 // agentHooks: the six synced scripts (under <surface>/hooks) match the manifest, and are present.
-export function checkAgentHookScripts(cwd, surface = 'claude') {
+export function checkAgentHookScripts(cwd, surface = 'claude', expected = null) {
     const { gitRoot } = detectGitRoot(cwd);
     const manifest = readJson(join(gitRoot, '.devkit', 'agent-hooks-manifest.json'));
     if (!manifest) {
@@ -108,16 +112,26 @@ export function checkAgentHookScripts(cwd, surface = 'claude') {
         const p = join(gitRoot, `.${surface}`, 'hooks', rel);
         return !existsSync(p) || sha256(p) !== manifest.files[rel];
     });
-    if (drift.length) {
-        return check('agent-hooks', 'DRIFT', `${drift.length} script(s) drifted/absent`, 'run `devkit init`', true);
+    const manifested = new Set(Object.keys(manifest.files));
+    const missingExpected = expected?.filter((name) => !manifested.has(name)) ?? [];
+    const unexpected = expected ? [...manifested].filter((name) => !expected.includes(name)) : [];
+    if (drift.length || missingExpected.length || unexpected.length) {
+        const details = [];
+        if (drift.length)
+            details.push(`${drift.length} script(s) drifted/absent`);
+        if (missingExpected.length)
+            details.push(`missing selected script(s): ${missingExpected.join(', ')}`);
+        if (unexpected.length)
+            details.push(`manifest contains deselected script(s): ${unexpected.join(', ')}`);
+        return check('agent-hooks', 'DRIFT', details.join('; '), 'run `devkit init`', true);
     }
     return check('agent-hooks', 'OK', `${Object.keys(manifest.files).length} hook script(s) in sync`);
 }
 // Hook registrations present in .claude/settings.json for the selected hook-owning components.
-export function checkRegistrations(cwd, hookComponents) {
+export function checkRegistrations(cwd, hookComponents, targets) {
     const { gitRoot } = detectGitRoot(cwd);
-    const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents);
+    const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents, { targets });
     if (ok)
         return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
-    return check('hook registrations', 'DRIFT', `${missing.length} command(s) not in .claude/settings.json`, 'run `devkit init` to re-register', true);
+    return check('hook registrations', 'DRIFT', `${missing.length} command(s) not registered on selected agent surfaces`, 'run `devkit init` to re-register', true);
 }

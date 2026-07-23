@@ -33,7 +33,7 @@ import {
   replaceGuardBlock,
 } from './husky/husky-block.mts';
 
-const firstLine = (e: unknown): string => {
+export const firstLine = (e: unknown): string => {
   let raw: unknown = '';
   if (e && typeof e === 'object') {
     if ('stderr' in e && e.stderr) raw = e.stderr;

@@ -268,8 +268,163 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
       devkitRef: 'v0.3.0',
     });
     expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
     expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
     expect(config(root).components.agentTargets).toEqual(['claude']);
+  });
+
+  it('decisions installs its skill and edit hook without general agentHooks', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: false,
+        agentHooks: false,
+        husky: true,
+        structure: false,
+        agentTargets: ['claude', 'cursor'],
+        guards: ['decisions'],
+      },
+    });
+
+    expect(existsSync(join(root, '.claude/skills/decisions/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/hooks/decision-edit-guard.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.claude/hooks/lint-check.sh'))).toBe(false);
+    expect(readFileSync(join(root, '.claude/settings.json'), 'utf8')).toContain(
+      'decision-edit-guard.mjs',
+    );
+    expect(readFileSync(join(root, '.cursor/hooks.json'), 'utf8')).toContain(
+      'decision-edit-guard.mjs',
+    );
+  });
+
+  it('--no-skills semantics keep the decisions hook but install no decisions skill', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: false,
+        agents: false,
+        agentHooks: false,
+        husky: true,
+        structure: false,
+        agentTargets: ['claude'],
+        guards: ['decisions'],
+      },
+    });
+
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
+  });
+
+  it('switching to --no-skills prunes every previously manifested skill', async () => {
+    const root = tmpRepo();
+    const base = {
+      biome: false,
+      tsconfig: false,
+      agents: false,
+      agentHooks: false,
+      husky: true,
+      structure: false,
+      agentTargets: ['claude'],
+      guards: ['decisions'],
+    };
+    await applyInit(root, { stack: 'generic', selection: { ...base, skills: true } });
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(true);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(true);
+    const consumerSkill = join(root, '.cursor/skills/brainstorming/SKILL.md');
+    mkdirSync(join(root, '.cursor/skills/brainstorming'), { recursive: true });
+    writeFileSync(consumerSkill, '# consumer-owned on an unmanaged surface\n');
+
+    await applyInit(root, { stack: 'generic', selection: { ...base, skills: false } });
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(false);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(false);
+    expect(readFileSync(consumerSkill, 'utf8')).toBe('# consumer-owned on an unmanaged surface\n');
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
+  });
+
+  it('removing decisions prunes its Devkit-owned skill, hook, and registration', async () => {
+    const root = tmpRepo();
+    const base = {
+      biome: false,
+      tsconfig: false,
+      skills: true,
+      agents: false,
+      agentHooks: false,
+      husky: true,
+      structure: false,
+      agentTargets: ['claude'],
+    };
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['decisions'] },
+    });
+    await applyInit(root, { stack: 'generic', selection: { ...base, guards: [] } });
+
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(false);
+    expect(readFileSync(join(root, '.claude/settings.json'), 'utf8')).not.toContain(
+      'decision-edit-guard.mjs',
+    );
+  });
+
+  it('preserves a consumer-authored decisions skill while the guard is off', async () => {
+    const root = tmpRepo();
+    const skill = join(root, '.claude/skills/decisions/SKILL.md');
+    mkdirSync(join(root, '.claude/skills/decisions'), { recursive: true });
+    writeFileSync(skill, '# consumer decisions workflow\n');
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: false,
+        agentHooks: false,
+        husky: true,
+        structure: false,
+        agentTargets: ['claude'],
+        guards: [],
+      },
+    });
+
+    expect(readFileSync(skill, 'utf8')).toBe('# consumer decisions workflow\n');
+    const manifest = readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8');
+    expect(manifest).not.toContain('decisions/');
+  });
+
+  it('removing decisions keeps general agent hooks selected', async () => {
+    const root = tmpRepo();
+    const base = {
+      biome: false,
+      tsconfig: false,
+      skills: false,
+      agents: false,
+      agentHooks: true,
+      husky: true,
+      structure: false,
+      agentTargets: ['claude'],
+    };
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...base, guards: ['decisions'] },
+    });
+    await applyInit(root, { stack: 'generic', selection: { ...base, guards: [] } });
+
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(false);
+    expect(existsSync(join(root, '.claude/hooks/lint-check.sh'))).toBe(true);
+    const settings = readFileSync(join(root, '.claude/settings.json'), 'utf8');
+    expect(settings).not.toContain('decision-edit-guard.mjs');
+    expect(settings).toContain('lint-check.sh');
   });
 
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {

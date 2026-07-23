@@ -25,12 +25,10 @@ import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { selfHostSelection } from "../lib/husky/self-host.mjs";
-import { syncHookScripts } from "../lib/install/install-hooks.mjs";
+import { adoptAgentAssetCollisions } from "../lib/install/agent-surfaces.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
 import { computeMigration } from "./migrate-config.mjs";
-import { syncAgents } from "./sync/sync-agents.mjs";
-import { syncSkills } from "./sync/sync-skills.mjs";
 import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from "./update.mjs";
 export const meta = {
     name: 'upgrade',
@@ -195,7 +193,11 @@ export default async function upgrade(args, cwd) {
     // (legacy), infer from disk (a package-mode structure repo has an emitted eslint.config.mjs) — never
     // the normalized default. An explicit recorded `false` is preserved (false ?? x === false).
     const structure = cfg.components?.structure ?? existsSync(join(cwd, 'eslint.config.mjs'));
-    const sel = { ...normalizeSelection(cfg.components), agentTargets, structure };
+    const sel = {
+        ...normalizeSelection(cfg.components),
+        agentTargets,
+        structure,
+    };
     console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — stack=${stack}\n`);
     // ── 1. version / pin ───────────────────────────────────────────────────────
     // `current` = the version the REPO actually runs (its node_modules dep), not the CLI binary that
@@ -377,14 +379,7 @@ export default async function upgrade(args, cwd) {
     // surfaces adopting consumer-authored same-named collisions; tuned biome/tsconfig are untouched.
     if (force) {
         console.log('\n5. --force: adopt consumer-authored asset collisions');
-        const syncArgs = dryRun ? ['--dry-run'] : [];
-        const override = () => true;
-        if (sel.skills)
-            syncSkills(syncArgs, gitRoot, sel.agentTargets, { override });
-        if (sel.agents)
-            syncAgents(syncArgs, gitRoot, sel.agentTargets, { override });
-        if (sel.agentHooks)
-            syncHookScripts(gitRoot, { dryRun, targets: sel.agentTargets, override });
+        adoptAgentAssetCollisions(gitRoot, sel, dryRun);
     }
     // ── 6. verify ──────────────────────────────────────────────────────────────
     if (dryRun) {
