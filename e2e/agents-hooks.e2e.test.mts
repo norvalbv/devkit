@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { type Fixture, makeFixture } from './lib/harness.mts';
@@ -31,6 +31,14 @@ const runHook = (fx: Fixture, hook: string, payload: object) => {
     env: { ...fx.env, CLAUDE_PROJECT_DIR: fx.repoDir, TMPDIR: tmp },
   });
 };
+
+const runNodeHook = (fx: Fixture, hook: string, payload: object) =>
+  spawnSync('node', [join(fx.repoDir, '.claude', 'hooks', hook)], {
+    cwd: fx.repoDir,
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: { ...fx.env, CLAUDE_PROJECT_DIR: fx.repoDir },
+  });
 
 describe('e2e: session-scoped agent hooks', () => {
   it('blocks only the session that edited the failing file', async () => {
@@ -74,5 +82,66 @@ describe('e2e: session-scoped agent hooks', () => {
     expect(s1.status).toBe(2);
     expect(s1.stderr).toContain('MINE_ROW');
     expect(s1.stderr).not.toContain('OTHER_ROW');
+  });
+});
+
+describe('e2e: guard-owned decision records', () => {
+  it('denies native edits while CLI add/amend remains available', async () => {
+    const fx = await makeFixture();
+    created.push(fx);
+    const initialized = fx.run('devkit', [
+      'init',
+      '--stack',
+      'generic',
+      '--guards',
+      'decisions',
+      '--yes',
+      '--no-skills',
+      '--no-agents',
+    ]);
+    expect(initialized.status, initialized.stderr).toBe(0);
+    expect(existsSync(join(fx.repoDir, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
+    expect(existsSync(join(fx.repoDir, '.claude/hooks/lint-check.sh'))).toBe(false);
+
+    const denied = runNodeHook(fx, 'decision-edit-guard.mjs', {
+      tool_name: 'Write',
+      tool_input: { file_path: join(fx.repoDir, 'docs/decisions/axis.md') },
+    });
+    expect(denied.status).toBe(0);
+    expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+
+    const allowed = runNodeHook(fx, 'decision-edit-guard.mjs', {
+      tool_name: 'Write',
+      tool_input: { file_path: join(fx.repoDir, 'docs/notes.md') },
+    });
+    expect(allowed.status).toBe(0);
+    expect(allowed.stdout).toBe('');
+
+    const targetFlags = [
+      '--target',
+      '--context',
+      'native writes could rewrite append-only history',
+      '--ruling',
+      'author through the decisions CLI',
+      '--consequences',
+      'decision history stays trustworthy',
+      '--tradeoff',
+      'agents use a narrower authoring path',
+      '--vision-fit',
+      'n/a — internal tooling',
+    ];
+    expect(fx.run('guard-decisions', ['add', 'axis', ...targetFlags, '--new']).status).toBe(0);
+    expect(
+      fx.run('guard-decisions', [
+        'amend',
+        'axis',
+        ...targetFlags,
+        '--title',
+        'CLI-owned decision writes',
+      ]).status,
+    ).toBe(0);
+    expect(readFileSync(join(fx.repoDir, 'docs/decisions/axis.md'), 'utf8')).toContain(
+      'CLI-owned decision writes',
+    );
   });
 });

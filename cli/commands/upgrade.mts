@@ -38,12 +38,10 @@ import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { selfHostSelection } from '../lib/husky/self-host.mts';
-import { syncHookScripts } from '../lib/install/install-hooks.mts';
+import { adoptAgentAssetCollisions } from '../lib/install/agent-surfaces.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
 import { computeMigration } from './migrate-config.mts';
-import { syncAgents } from './sync/sync-agents.mts';
-import { syncSkills } from './sync/sync-skills.mts';
 import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mts';
 
 export const meta = {
@@ -253,7 +251,11 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   // (legacy), infer from disk (a package-mode structure repo has an emitted eslint.config.mjs) — never
   // the normalized default. An explicit recorded `false` is preserved (false ?? x === false).
   const structure = cfg.components?.structure ?? existsSync(join(cwd, 'eslint.config.mjs'));
-  const sel = { ...normalizeSelection(cfg.components), agentTargets, structure };
+  const sel = {
+    ...normalizeSelection(cfg.components),
+    agentTargets,
+    structure,
+  };
 
   console.log(`devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — stack=${stack}\n`);
 
@@ -442,11 +444,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   // surfaces adopting consumer-authored same-named collisions; tuned biome/tsconfig are untouched.
   if (force) {
     console.log('\n5. --force: adopt consumer-authored asset collisions');
-    const syncArgs = dryRun ? ['--dry-run'] : [];
-    const override = () => true;
-    if (sel.skills) syncSkills(syncArgs, gitRoot, sel.agentTargets, { override });
-    if (sel.agents) syncAgents(syncArgs, gitRoot, sel.agentTargets, { override });
-    if (sel.agentHooks) syncHookScripts(gitRoot, { dryRun, targets: sel.agentTargets, override });
+    adoptAgentAssetCollisions(gitRoot, sel, dryRun);
   }
 
   // ── 6. verify ──────────────────────────────────────────────────────────────

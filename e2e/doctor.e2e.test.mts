@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -34,6 +35,14 @@ describe('e2e: devkit doctor', () => {
   it('reports clean → exit 0', async () => {
     const fx = await fixture();
     expect(fx.run('devkit', INIT_ARGS).status).toBe(0);
+    // `init` deliberately never installs/runs dependencies. Model the consumer's next `bun install`
+    // so Husky sets core.hooksPath and the guarded prepare tail syncs the worktree-safe runner.
+    const prepared = spawnSync('bun', ['run', 'prepare'], {
+      cwd: fx.repoDir,
+      env: fx.env,
+      encoding: 'utf8',
+    });
+    expect(prepared.status, out(prepared)).toBe(0);
 
     const d = fx.run('devkit', ['doctor']);
     expect(d.status).toBe(0);

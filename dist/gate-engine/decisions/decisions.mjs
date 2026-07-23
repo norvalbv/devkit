@@ -33,6 +33,7 @@
  *               --anchored-bet "[BET]" --scope "glob,glob" --source ... --ref ... --new
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
+ *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
  *   query "<text>" [--top K]        rank axes — semantic (Ollama), lexical floor on fallback
  *   reindex                         cold-build the derived embedding cache
  *   list / show <slug> / check <slug>
@@ -46,26 +47,16 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { amendDecision } from "./amend.mjs";
 import { writeFileAtomic } from "./atomic-write.mjs";
+import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from "./decision-format.mjs";
+export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from "./decision-format.mjs";
 const EMBED_URL = 'http://localhost:11434/api/embed';
 const EMBED_MODEL = 'nomic-embed-text';
-const FM_ORDER = ['slug', 'created']; // append-only: two immutable fields, no current/updated/status
-const INDEX_HEADER = '# Decision Index\n\n' +
-    'Living architecture record — the current ruling per axis. Each row links to its full\n' +
-    'timeline. New rationale lives in the per-axis file.\n\n' +
-    '| Axis | Current ruling | Why (hook) | Updated |\n' +
-    '|------|----------------|------------|---------|\n';
 // Top-level regexes (these run in loops).
-const INDEX_SEPARATOR_RE = /^\|[\s:|-]+\|$/;
-const INDEX_SLUG_RE = /^\[([^\]]+)\]/;
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 const TRAILING_WS_RE = /\s*$/;
 const WS_RE = /\s+/g;
 const TOKEN_RE = /[a-z0-9]+/g;
-const TARGET_HEAD_RE = /^## Target · /; // distinguishes an epic Target block from a note / old entry
-const TARGET_FIELD_RE = /^\*\*([^:]+):\*\*\s*(.*)$/; // **Key:** value lines inside a Target block
-const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/; // a DATED `- <date> — …` note ends the Target block; plain `- ` bullets (Consequences) stay in it
-const TITLE_CUT_RE = /\. |\.$| — |; /; // first sentence/clause boundary for deriving a heading title
 function paths(cwd = process.cwd()) {
     const cfg = resolveGuardConfig(cwd);
     const decisionsDir = resolveFromCwd(cfg, 'decisionsDir');
@@ -83,150 +74,12 @@ function paths(cwd = process.cwd()) {
     };
 }
 // ─── Small pure helpers (kept top-level for ATS chunking) ───────────────────────
-function today() {
-    return process.env.DECISIONS_TODAY ?? new Date().toISOString().slice(0, 10);
-}
 function slugPath(p, slug) {
     return path.join(p.decisionsDir, `${slug}.md`);
 }
-// INDEX cells are pipe-delimited; strip pipes/newlines so a row always parses back.
-function sanitizeCell(s) {
-    return String(s ?? '')
-        .replace(/[|\n\r]+/g, ' ')
-        .trim();
-}
-function hook(why) {
-    const one = sanitizeCell(why);
-    return one.length > 70 ? `${one.slice(0, 67)}…` : one;
-}
 // ─── INDEX.md parse / render (the bounded axis spine) ───────────────────────────
-export function parseIndex(md) {
-    const rows = [];
-    for (const line of md.split('\n')) {
-        const t = line.trim();
-        if (!t.startsWith('|') || !t.endsWith('|'))
-            continue;
-        if (INDEX_SEPARATOR_RE.test(t))
-            continue; // separator row
-        const cells = t
-            .slice(1, -1)
-            .split('|')
-            .map((c) => c.trim());
-        if (cells.length < 4)
-            continue;
-        if (cells[0].toLowerCase() === 'axis')
-            continue; // header
-        const m = cells[0].match(INDEX_SLUG_RE);
-        rows.push({ slug: m ? m[1] : cells[0], ruling: cells[1], why: cells[2], updated: cells[3] });
-    }
-    return rows;
-}
-export function renderIndex(rows) {
-    const body = [...rows]
-        .sort((a, b) => a.slug.localeCompare(b.slug))
-        .map((r) => `| [${r.slug}](${r.slug}.md) | ${r.ruling} | ${r.why} | ${r.updated} |`)
-        .join('\n');
-    return INDEX_HEADER + (body ? `${body}\n` : '');
-}
-export function upsertRow(rows, row) {
-    const i = rows.findIndex((r) => r.slug === row.slug);
-    if (i === -1)
-        rows.push(row);
-    else
-        rows[i] = { ...rows[i], ...row };
-    return rows;
-}
 function readIndexRows(p) {
     return existsSync(p.indexPath) ? parseIndex(readFileSync(p.indexPath, 'utf8')) : [];
-}
-// ─── Per-axis file parse / render ───────────────────────────────────────────────
-export function parseDecision(md) {
-    const m = md.match(FRONTMATTER_RE);
-    if (!m)
-        return { fm: {}, body: md };
-    const fm = {};
-    for (const line of m[1].split('\n')) {
-        const i = line.indexOf(':');
-        if (i === -1)
-            continue;
-        fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-    }
-    return { fm, body: m[2] };
-}
-export function renderDecision(fm, body) {
-    const keys = [
-        ...FM_ORDER.filter((k) => fm[k]),
-        ...Object.keys(fm).filter((k) => !FM_ORDER.includes(k) && fm[k]),
-    ];
-    return `---\n${keys.map((k) => `${k}: ${fm[k]}`).join('\n')}\n---\n${body}`;
-}
-// An epic Target block (the PRD). ruling/context/consequences/tradeoff/visionFit are required by
-// the caller; the rest are optional but encouraged.
-// A short scannable heading from the ruling when no explicit --title is given (kills the old
-// heading==ruling duplication): the ruling's first sentence/clause, capped.
-function firstClause(s) {
-    const t = String(s).trim();
-    const cut = t.search(TITLE_CUT_RE);
-    return (cut > 0 ? t.slice(0, cut) : t).slice(0, 100);
-}
-// The Target schema = the Nygard/MADR ADR spine (Context -> Decision -> Consequences) plus the
-// vision/scope/anchored-bet extensions. Context = the forcing failure (WHY-now); Ruling = the
-// decision (WHAT); Consequences = value protected + cost paid (SO-THAT).
-export function renderTarget(date, o) {
-    const lines = [`## Target · ${date} — ${sanitizeCell(o.title || firstClause(o.ruling))}`, ''];
-    lines.push(`**Context:** ${o.context}`);
-    lines.push(`**Ruling:** ${o.ruling}`);
-    lines.push('**Consequences:**');
-    lines.push(`- Positive: ${o.consequences}`);
-    lines.push(`- Negative: ${o.tradeoff}`);
-    lines.push(`**Vision-fit:** ${o.visionFit}`);
-    if (o.researched)
-        lines.push(`**Researched:** ${o.researched}`);
-    if (o.rejected)
-        lines.push(`**Rejected:** ${o.rejected}`);
-    if (o.anchoredBet)
-        lines.push(`**Anchored-bet:** ${o.anchoredBet}`);
-    // The 100-year test: the condition under which this ruling becomes invalid / safe to reverse.
-    // Pairs with Anchored-bet (the bet's expiry condition); the depth judge's check 4 rewards it.
-    if (o.revisitWhen)
-        lines.push(`**Revisit-when:** ${o.revisitWhen}`);
-    if (o.scope)
-        lines.push(`**Scope:** ${o.scope}`);
-    lines.push(`**Source:** ${[o.source || 'manual', o.ref].filter(Boolean).join(' · ')}`);
-    if (o.evidenceChange)
-        lines.push(`**Evidence-change:** ${o.evidenceChange}`);
-    return lines.join('\n');
-}
-// A cheap convergence note (implementation step under the current Target). Not a ruling.
-export function renderNote(date, text) {
-    return `- ${date} — ${sanitizeCell(text)}`;
-}
-export function currentTarget(body) {
-    let last = null;
-    const parts = body.split('\n## ');
-    for (let i = 0; i < parts.length; i += 1) {
-        const head = i === 0 ? parts[i] : `## ${parts[i]}`;
-        if (TARGET_HEAD_RE.test(head))
-            last = head;
-    }
-    if (!last)
-        return null;
-    const fields = {};
-    const blockLines = [];
-    for (const line of last.split('\n')) {
-        if (NOTE_BULLET_RE.test(line))
-            break; // notes are appended after the fields → end of the Target
-        blockLines.push(line);
-        const m = line.match(TARGET_FIELD_RE);
-        if (m)
-            fields[m[1].trim().toLowerCase()] = m[2].trim();
-    }
-    return {
-        ruling: fields.ruling ?? '',
-        scope: fields.scope ?? '',
-        fields,
-        block: blockLines.join('\n').trim(),
-    };
 }
 // ─── Commands ───────────────────────────────────────────────────────────────────
 export function cmdAdd(slug, o, cwd = process.cwd()) {
@@ -236,11 +89,14 @@ export function cmdAdd(slug, o, cwd = process.cwd()) {
     }
     return o.isTarget ? addTarget(slug, o, paths(cwd)) : addNote(slug, o, paths(cwd));
 }
+export function cmdAmend(slug, o, cwd = process.cwd()) {
+    return amendDecision(slug, o, paths(cwd));
+}
 // Epic Target — the PRD. Requires context + ruling + consequences + tradeoff + vision-fit; updates INDEX.
 // Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, already-targeted re-target guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
 // fallow-ignore-next-line complexity
 function addTarget(slug, o, p) {
-    if (!o.ruling || !o.context || !o.consequences || !o.tradeoff || !o.visionFit) {
+    if (!hasTargetFields(o)) {
         console.error('Usage: guard-decisions add <slug> --target \\\n' +
             '  --context "<the forcing failure: what broke + the symptom + severity/blast-radius>" \\\n' +
             '  --ruling "<the decision / mechanism chosen>" \\\n' +
@@ -283,7 +139,7 @@ function addTarget(slug, o, p) {
     const rows = upsertRow(readIndexRows(p), {
         slug,
         ruling: sanitizeCell(o.ruling),
-        why: hook(o.context),
+        why: whyHook(o.context),
         updated: date,
     });
     writeFileAtomic(p.indexPath, renderIndex(rows));
@@ -533,30 +389,38 @@ function flag(rest, name) {
     const i = rest.indexOf(name);
     return i !== -1 ? rest[i + 1] : undefined;
 }
+function optionsFromFlags(rest) {
+    return {
+        isTarget: rest.includes('--target'),
+        note: flag(rest, '--note'),
+        title: flag(rest, '--title'),
+        context: flag(rest, '--context'),
+        ruling: flag(rest, '--ruling'),
+        consequences: flag(rest, '--consequences'),
+        tradeoff: flag(rest, '--tradeoff'),
+        visionFit: flag(rest, '--vision-fit'),
+        researched: flag(rest, '--researched'),
+        rejected: flag(rest, '--rejected'),
+        anchoredBet: flag(rest, '--anchored-bet'),
+        revisitWhen: flag(rest, '--revisit-when'),
+        scope: flag(rest, '--scope'),
+        source: flag(rest, '--source'),
+        ref: flag(rest, '--ref'),
+        evidenceChange: flag(rest, '--evidence-change'),
+        isNew: rest.includes('--new'),
+    };
+}
 export async function main(argv) {
     const [cmd, ...args] = argv;
     switch (cmd) {
         case 'add': {
             const [slug, ...rest] = args;
-            cmdAdd(slug, {
-                isTarget: rest.includes('--target'),
-                note: flag(rest, '--note'),
-                title: flag(rest, '--title'),
-                context: flag(rest, '--context'),
-                ruling: flag(rest, '--ruling'),
-                consequences: flag(rest, '--consequences'),
-                tradeoff: flag(rest, '--tradeoff'),
-                visionFit: flag(rest, '--vision-fit'),
-                researched: flag(rest, '--researched'),
-                rejected: flag(rest, '--rejected'),
-                anchoredBet: flag(rest, '--anchored-bet'),
-                revisitWhen: flag(rest, '--revisit-when'),
-                scope: flag(rest, '--scope'),
-                source: flag(rest, '--source'),
-                ref: flag(rest, '--ref'),
-                evidenceChange: flag(rest, '--evidence-change'),
-                isNew: rest.includes('--new'),
-            });
+            cmdAdd(slug, optionsFromFlags(rest));
+            break;
+        }
+        case 'amend': {
+            const [slug, ...rest] = args;
+            cmdAmend(slug, optionsFromFlags(rest));
             break;
         }
         case 'query': {
@@ -587,7 +451,7 @@ export async function main(argv) {
             process.exit(checkExists(args[0]) ? 0 : 1);
             break;
         default:
-            console.error('Commands: add | query | reindex | list | show | check');
+            console.error('Commands: add | amend | query | reindex | list | show | check');
             process.exit(1);
     }
 }

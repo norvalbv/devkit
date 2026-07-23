@@ -29,6 +29,10 @@ const skillsLine = (root: string) =>
   devkit(root, 'doctor')
     .stdout.split('\n')
     .find((l) => /\bskills:/.test(l)) ?? '';
+const hooksLine = (root: string) =>
+  devkit(root, 'doctor')
+    .stdout.split('\n')
+    .find((line) => /\bagent-hooks:/.test(line)) ?? '';
 
 describe('doctor bundle-completeness (agents)', () => {
   it('a freshly-synced consumer reports agents OK', () => {
@@ -128,5 +132,37 @@ describe('doctor bundle-completeness (skills, mirrored)', () => {
     expect(line).toMatch(/DRIFT/);
     expect(line).toContain('the manifest lacks');
     expect(line).toContain('decisions');
+  });
+
+  it('does not require the decisions skill when the guard is off', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size').status).toBe(0);
+    expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
+    expect(skillsLine(root)).toMatch(/OK/);
+  });
+
+  it('flags a stale manifest-owned decisions skill after the guard is disabled', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    const configPath = join(root, '.devkit/config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.components.guards = config.components.guards.filter((guard) => guard !== 'decisions');
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    const line = skillsLine(root);
+    expect(line).toMatch(/DRIFT/);
+    expect(line).toContain('disabled skill');
+    expect(line).toContain('decisions');
+  });
+});
+
+describe('doctor decisions hook completeness', () => {
+  it('flags drift when the decisions-owned edit hook is missing', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    rmSync(join(root, '.claude/hooks/decision-edit-guard.mjs'));
+    const line = hooksLine(root);
+    expect(line).toMatch(/DRIFT/);
+    expect(line).toContain('drifted/absent');
   });
 });
