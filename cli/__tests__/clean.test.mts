@@ -14,6 +14,7 @@ describe('clean (package mode)', () => {
     const sample = '.claude/skills/brainstorming';
     expect(existsSync(join(root, sample)), 'skills synced by init').toBe(true);
     expect(existsSync(join(root, '.cursor/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
 
     const c = devkit(root, 'clean', '--yes');
     expect(c.status).toBe(0);
@@ -24,6 +25,7 @@ describe('clean (package mode)', () => {
       false,
     );
     expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(false);
+    expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(false);
     expect(existsSync(join(root, '.devkit'))).toBe(false);
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
   });

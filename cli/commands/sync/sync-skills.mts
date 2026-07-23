@@ -8,7 +8,7 @@
  * side (consumer copy vs devkit source) drifted.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
@@ -24,7 +24,7 @@ interface AssetManifest extends SyncManifest {
 
 // The relevant slice of `.devkit/config.json` this command reads.
 interface DevkitConfig {
-  components?: { agentTargets?: string[] };
+  components?: { agentTargets?: string[]; guards?: string[] };
 }
 
 // Recursively list every file under `dir`, returned as paths relative to `dir`.
@@ -41,6 +41,11 @@ function walk(dir: string, base: string = dir): string[] {
 interface SyncOpts {
   skipTracked?: (relPath: string) => boolean;
   override?: (kind: string, name: string) => boolean;
+  guards?: string[];
+}
+
+export function skillNamesForGuards(allNames: string[], guards: string[] = []): string[] {
+  return allNames.filter((name) => name !== 'decisions' || guards.includes('decisions'));
 }
 
 /**
@@ -61,12 +66,16 @@ export function syncSkills(
   args: string[],
   cwd: string,
   targets: string[] = AGENT_TARGETS,
-  { skipTracked, override = () => false }: SyncOpts = {},
+  { skipTracked, override = () => false, guards = [] }: SyncOpts = {},
 ): AssetManifest {
   const dryRun = args.includes('--dry-run');
   const targetDirs = targets.map((t) => `.${t}/skills`);
   const skillsSrc = join(packageDir(), 'skills');
-  const rels = walk(skillsSrc);
+  const allRels = walk(skillsSrc);
+  const selectedNames = new Set(
+    skillNamesForGuards([...new Set(allRels.map((rel) => rel.split('/')[0]))], guards),
+  );
+  const rels = allRels.filter((rel) => selectedNames.has(rel.split('/')[0]));
 
   const devkitPkg: { version?: string } | null = readJson(join(packageDir(), 'package.json'));
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
@@ -74,6 +83,18 @@ export function syncSkills(
   // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
   const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
   const prev: AssetManifest | null = readJson(manifestPath);
+
+  // Guard-aware exact reconciliation: only remove skill dirs that the previous manifest proves
+  // Devkit owned. A consumer-authored, unmanifested `decisions` collision remains untouched.
+  const previousNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
+  const cleanupTargets = new Set([...(prev?.targets ?? []), ...targets]);
+  for (const name of previousNames) {
+    if (selectedNames.has(name)) continue;
+    for (const target of cleanupTargets) {
+      const dir = join(cwd, `.${target}`, 'skills', name);
+      if (!dryRun && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+  }
 
   // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's
   // `.<surface>/skills/<name>` is git-tracked, the whole skill is left untouched.
@@ -137,7 +158,9 @@ export function syncSkills(
   if (dryRun) {
     console.log(`  [dry-run] write .devkit/skills-manifest.json (${rels.length} files)`);
   } else {
-    writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
+    writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+      force: true,
+    });
     console.log(`  ✓ synced ${rels.length} skill file(s) → ${targetDirs.join(' + ')}`);
   }
 
@@ -150,9 +173,16 @@ export function syncSkills(
  * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
  * skill names.
  */
-export function detectSkillConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
+export function detectSkillConflicts(
+  root: string,
+  targets: string[] = AGENT_TARGETS,
+  guards: string[] = [],
+): string[] {
   const skillsSrc = join(packageDir(), 'skills');
-  const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
+  const names = skillNamesForGuards(
+    [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))],
+    guards,
+  );
   return findConflicts(
     root,
     skillsSrc,
@@ -184,6 +214,9 @@ export default function run(args: string[], cwd: string): number {
   // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
   // per-asset picker is `devkit init` interactive only).
   const override = args.includes('--force') ? () => true : undefined;
-  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+  syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, {
+    override,
+    guards: cfg?.components?.guards ?? [],
+  });
   return 0;
 }

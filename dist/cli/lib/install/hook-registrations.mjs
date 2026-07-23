@@ -23,6 +23,17 @@ const PKG = 'node_modules/@norvalbv/devkit';
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 /** Registrations grouped by the selectable component id (components.mjs) that owns them. */
 export const HOOK_REGISTRATIONS = {
+    // The decisions guard owns its authoring boundary. This is deliberately independent of the
+    // optional general agentHooks component: selecting the guard is sufficient to install it.
+    decisions: [
+        {
+            event: 'PreToolUse',
+            matcher: 'Edit|Write|MultiEdit|Delete',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
+            cursorEvent: 'preToolUse',
+            cursorMatcher: 'Write|Delete',
+        },
+    ],
     // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
     searchSteering: [
         {

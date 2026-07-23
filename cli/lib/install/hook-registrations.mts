@@ -28,10 +28,24 @@ interface HookRegistration {
   event: string;
   matcher: string;
   command: string;
+  /** Cursor can expose the same capability under a different native event/matcher pair. */
+  cursorEvent?: string;
+  cursorMatcher?: string;
 }
 
 /** Registrations grouped by the selectable component id (components.mjs) that owns them. */
 export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
+  // The decisions guard owns its authoring boundary. This is deliberately independent of the
+  // optional general agentHooks component: selecting the guard is sufficient to install it.
+  decisions: [
+    {
+      event: 'PreToolUse',
+      matcher: 'Edit|Write|MultiEdit|Delete',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
+      cursorEvent: 'preToolUse',
+      cursorMatcher: 'Write|Delete',
+    },
+  ],
   // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
   searchSteering: [
     {

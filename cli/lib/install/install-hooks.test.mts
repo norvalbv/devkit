@@ -40,6 +40,39 @@ afterEach(() => {
 });
 
 describe('installHookRegistrations', () => {
+  it('registers the decisions guard on native pre-edit events for both surfaces', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+
+    const preToolUse = claude(root).hooks.PreToolUse[0];
+    expect(preToolUse.matcher).toBe('Edit|Write|MultiEdit|Delete');
+    expect(preToolUse.hooks[0].command).toContain('decision-edit-guard.mjs');
+
+    expect(cursor(root).hooks.preToolUse).toEqual([
+      {
+        command: '.cursor/hooks/decision-edit-guard.mjs',
+        matcher: 'Write|Delete',
+        failClosed: false,
+      },
+    ]);
+  });
+
+  it('checks a Cursor-only decisions registration without requiring Claude settings', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
+    expect(existsSync(join(root, '.claude/settings.json'))).toBe(false);
+    expect(checkHookRegistrations(root, ['decisions'], { targets: ['cursor'] }).ok).toBe(true);
+  });
+
+  it('doctor check rejects a decisions command wired to the wrong Claude matcher', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse[0].matcher = 'Bash';
+    writeFileSync(join(root, '.claude/settings.json'), JSON.stringify(settings));
+    expect(checkHookRegistrations(root, ['decisions'], { targets: ['claude'] }).ok).toBe(false);
+  });
+
   it('writes both surfaces for searchSteering (PreToolUse guard + PostToolUse counter)', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['searchSteering']);
@@ -87,6 +120,35 @@ describe('installHookRegistrations', () => {
     installHookRegistrations(root, ['agentHooks']);
     expect(claudeCommands(root)).toContain('echo mine');
   });
+
+  it('preserves consumer-owned commands stored under conventional hook directories', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+    const claudeSettings = claude(root);
+    claudeSettings.hooks.PreToolUse[0].hooks.push({
+      type: 'command',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
+    const cursorSettings = cursor(root);
+    cursorSettings.hooks.preToolUse.push({
+      command: '.cursor/hooks/my-own-guard.mjs',
+      matcher: 'Write',
+      failClosed: true,
+    });
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
+
+    installHookRegistrations(root, ['decisions']);
+
+    expect(claudeCommands(root)).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    );
+    expect(cursor(root).hooks.preToolUse).toContainEqual({
+      command: '.cursor/hooks/my-own-guard.mjs',
+      matcher: 'Write',
+      failClosed: true,
+    });
+  });
 });
 
 describe('checkHookRegistrations', () => {
@@ -97,7 +159,7 @@ describe('checkHookRegistrations', () => {
     removeHookRegistrations(root);
     const after = checkHookRegistrations(root, ['searchSteering']);
     expect(after.ok).toBe(false);
-    expect(after.missing).toHaveLength(2);
+    expect(after.missing).toHaveLength(4);
   });
 });
 
@@ -111,6 +173,29 @@ describe('removeHookRegistrations', () => {
     removeHookRegistrations(root);
     const cmds = claudeCommands(root);
     expect(cmds).toEqual(['echo mine']);
+  });
+
+  it('does not strip consumer commands merely because they live in agent hook directories', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+    const claudeSettings = claude(root);
+    claudeSettings.hooks.PreToolUse[0].hooks.push({
+      type: 'command',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
+    const cursorSettings = cursor(root);
+    cursorSettings.hooks.preToolUse.push({ command: '.cursor/hooks/my-own-guard.mjs' });
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
+
+    removeHookRegistrations(root);
+
+    expect(claudeCommands(root)).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    );
+    expect(cursor(root).hooks.preToolUse).toContainEqual({
+      command: '.cursor/hooks/my-own-guard.mjs',
+    });
   });
 
   it('no-ops cleanly when no settings exist', () => {
@@ -177,5 +262,19 @@ describe('syncHookScripts --only / --targets', () => {
     const keys = Object.keys(manifest(root).files);
     expect(keys).toContain('decision-stop-check.sh');
     expect(keys.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('exact desired reconciliation prunes a previously Devkit-owned decisions hook', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, {
+      desired: ['decision-edit-guard.mjs'],
+      targets: ['claude'],
+    });
+    expect(hookExists(root, 'decision-edit-guard.mjs')).toBe(true);
+
+    syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
+    expect(hookExists(root, 'decision-edit-guard.mjs')).toBe(false);
+    expect(hookExists(root, 'lint-check.sh')).toBe(true);
+    expect(Object.keys(manifest(root).files)).toEqual(['lint-check.sh']);
   });
 });

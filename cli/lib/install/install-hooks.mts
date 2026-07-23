@@ -13,25 +13,22 @@
  * settings.json (their data) is merged, never clobbered.
  */
 
-import { chmodSync, readdirSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from '../components.mts';
 import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mts';
-import { isTracked } from '../git-tracked.mts';
 import {
   bundledNames,
   findConflicts,
   removeManifested,
   type SyncManifest,
 } from '../sync-manifest.mts';
-import { registrationsFor } from './hook-registrations.mts';
 
-// Claude's settings file by mode: overlay registers into the LOCAL-override `settings.local.json`
-// (gitignored by default, never tracked → invisible, never needs the tracked-skip), every other
-// mode into the shared `settings.json`. The Claude install/remove/check paths all resolve through
-// here so they target the SAME file.
-const claudeSettingsFile = (overlay: boolean) =>
-  overlay ? 'settings.local.json' : 'settings.json';
+export {
+  checkHookRegistrations,
+  installHookRegistrations,
+  removeHookRegistrations,
+} from './hook-settings.mts';
 
 // Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
 const hookDirs = (targets: string[]) => targets.map((t) => `.${t}/hooks`);
@@ -41,6 +38,8 @@ interface SyncHookScriptsOptions {
   dryRun?: boolean;
   targets?: string[];
   only?: string[];
+  /** Exact lifecycle reconciliation set. Unlike `only`, omitted prior entries are pruned. */
+  desired?: string[];
   skipTracked?: (relPath: string) => boolean;
   override?: (kind: string, name: string) => boolean;
 }
@@ -57,6 +56,31 @@ interface RemoveHookScriptsOptions {
 interface AgentHooksManifest extends SyncManifest {
   devkitRef: string | null;
   generatedAt: string;
+}
+
+export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+
+function bundledHookNames(): string[] {
+  return readdirSync(join(packageDir(), 'agents-hooks'), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+}
+
+/** The exact hook-script set implied by Devkit component selection. */
+export function hookScriptsFor({
+  agentHooks,
+  decisions,
+}: {
+  agentHooks: boolean;
+  decisions: boolean;
+}): string[] {
+  const all = bundledHookNames();
+  return all.filter(
+    (name) =>
+      (agentHooks && name !== DECISION_EDIT_HOOK) || (decisions && name === DECISION_EDIT_HOOK),
+  );
 }
 
 // Copy the bundled agent-hook scripts (agents-hooks/*.mjs|.sh) into the consumer's hook dirs and
@@ -79,26 +103,48 @@ export function syncHookScripts(
     dryRun = false,
     targets = AGENT_TARGETS,
     only,
+    desired,
     skipTracked,
     override = () => false,
   }: SyncHookScriptsOptions = {},
 ) {
   const src = join(packageDir(), 'agents-hooks');
   const dirs = hookDirs(targets);
-  let rels = readdirSync(src, { withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => e.name);
+  let rels = bundledHookNames();
   const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
   const prev = readJson(manifestPath) as AgentHooksManifest | null;
+  if (only?.length && desired)
+    throw new Error('syncHookScripts: only and desired are mutually exclusive');
   if (only?.length) {
     const unknown = only.filter((n) => !rels.includes(n));
     if (unknown.length)
       throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
     rels = rels.filter((r) => only.includes(r));
   }
+  if (desired) {
+    const unknown = desired.filter((name) => !rels.includes(name));
+    if (unknown.length)
+      throw new Error(`syncHookScripts: devkit ships no hook named ${unknown.join(', ')}`);
+    rels = rels.filter((name) => desired.includes(name));
+  }
   const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
   // `only` carries the prior manifest forward (add-to-owned-set); a full sync starts clean.
   const files: Record<string, string> = only?.length ? { ...(prev?.files ?? {}) } : {};
+
+  // Exact reconciliation removes only manifest-owned scripts that are no longer selected. Include
+  // prior surfaces so a claude+cursor → claude switch cannot strand the old Cursor copy.
+  if (desired) {
+    const kept = new Set(rels);
+    const oldNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
+    const cleanupTargets = new Set([...(prev?.targets ?? []), ...targets]);
+    for (const name of oldNames) {
+      if (kept.has(name)) continue;
+      for (const target of cleanupTargets) {
+        const dest = join(root, `.${target}`, 'hooks', name);
+        if (!dryRun && existsSync(dest)) rmSync(dest, { force: true });
+      }
+    }
+  }
   for (const rel of rels) {
     // Overlay: a hook script git already tracks can't be hidden by .git/info/exclude → skip it (C2).
     if (skipTracked && dirs.some((d) => skipTracked(`${d}/${rel}`))) {
@@ -121,7 +167,9 @@ export function syncHookScripts(
       chmodSync(dest, 0o755);
     }
   }
-  const devkitPkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
+  const devkitPkg = readJson(join(packageDir(), 'package.json')) as {
+    version?: string;
+  } | null;
   const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
   const unchanged =
     prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
@@ -136,7 +184,9 @@ export function syncHookScripts(
     console.log(`  [dry-run] sync ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
     return manifest;
   }
-  writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
+  writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+    force: true,
+  });
   console.log(`  ✓ synced ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
   return manifest;
 }
@@ -148,11 +198,13 @@ export function syncHookScripts(
  * @param {string[]} [targets] surfaces to check (default both)
  * @returns {string[]} colliding hook-script filenames
  */
-export function detectHookConflicts(root: string, targets: string[] = AGENT_TARGETS): string[] {
+export function detectHookConflicts(
+  root: string,
+  targets: string[] = AGENT_TARGETS,
+  desired?: string[],
+): string[] {
   const src = join(packageDir(), 'agents-hooks');
-  const rels = readdirSync(src, { withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => e.name);
+  const rels = bundledHookNames().filter((name) => !desired || desired.includes(name));
   return findConflicts(
     root,
     src,
@@ -187,270 +239,4 @@ export function removeHookScripts(
     bundledNames('agents-hooks', (e) => e.isFile()),
     join(packageDir(), 'agents-hooks'),
   );
-}
-
-// A command is devkit-owned iff it references one of these path fragments. Used to dedupe on
-// re-install and to strip on removal without touching the consumer's own hook commands. The hook-dir
-// markers carry NO leading slash so they match BOTH the Claude form (`$CLAUDE_PROJECT_DIR/.claude/
-// hooks/…`) and the Cursor form (`toCursorCommand` strips the `$CLAUDE_PROJECT_DIR/` prefix →
-// `.cursor/hooks/…`) — a leading-slash marker silently failed to strip the Cursor commands.
-const DEVKIT_MARKERS = ['@norvalbv/devkit/gate-engine', '.claude/hooks/', '.cursor/hooks/'];
-
-const isDevkit = (cmd: string) => DEVKIT_MARKERS.some((m) => cmd.includes(m));
-
-// One registry entry (hook-registrations.mts): a Claude event + matcher + the shell command it wires.
-interface HookRegistration {
-  event: string;
-  matcher: string;
-  command: string;
-}
-
-// Shared options for install/remove of the hook registrations across the agent surfaces.
-interface HookRegistrationOptions {
-  dryRun?: boolean;
-  targets?: string[];
-  overlay?: boolean;
-}
-
-// The consumer's Claude `settings.json` / `settings.local.json`: the `hooks` block devkit merges
-// into, plus arbitrary consumer-owned keys the merge must preserve (round-tripped through JSON).
-interface ClaudeSettings {
-  hooks?: ClaudeHooksBlock;
-  [key: string]: unknown;
-}
-
-// The consumer's Cursor `hooks.json`: a versioned wrapper around the `hooks` block, other keys kept.
-interface CursorSettings {
-  version?: number;
-  hooks?: CursorHooksBlock;
-  [key: string]: unknown;
-}
-
-// Claude `.claude/settings.json` hooks block: event → matcher-groups, each group holding commands.
-interface ClaudeHook {
-  type?: string;
-  command?: string;
-}
-interface ClaudeHookGroup {
-  matcher?: string;
-  hooks?: ClaudeHook[];
-}
-type ClaudeHooksBlock = Record<string, ClaudeHookGroup[]>;
-
-// Cursor `.cursor/hooks.json` hooks block: lowercase-event → flat command entries.
-interface CursorHook {
-  command?: string;
-}
-type CursorHooksBlock = Record<string, CursorHook[]>;
-
-// ── Claude (.claude/settings.json) — { hooks: { <Event>: [{ matcher, hooks: [{type,command}] }] } }
-// Strip every devkit-owned command from a Claude hooks block, dropping now-empty matcher/event groups.
-function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
-  const out: ClaudeHooksBlock = {};
-  for (const [event, groups] of Object.entries(hooks ?? {})) {
-    const kept: ClaudeHookGroup[] = [];
-    for (const group of groups) {
-      const cmds = (group.hooks ?? []).filter((h) => !(h.command && isDevkit(h.command)));
-      if (cmds.length) kept.push({ ...group, hooks: cmds });
-    }
-    if (kept.length) out[event] = kept;
-  }
-  return out;
-}
-
-// Merge one registration into a Claude hooks block (append to the matching event+matcher group,
-// or create it). Mutates + returns `hooks`.
-function addClaude(
-  hooks: ClaudeHooksBlock,
-  { event, matcher, command }: HookRegistration,
-): ClaudeHooksBlock {
-  if (!hooks[event]) hooks[event] = [];
-  const groups = hooks[event];
-  let group = groups.find((g) => (g.matcher ?? '') === matcher);
-  if (!group) {
-    group = { matcher, hooks: [] };
-    groups.push(group);
-  }
-  if (!group.hooks) group.hooks = [];
-  group.hooks.push({ type: 'command', command });
-  return hooks;
-}
-
-// ── Cursor (.cursor/hooks.json) — { version, hooks: { <lowercaseEvent>: [{ command, … }] } }
-// Cursor's event vocabulary differs from Claude's; map only the events that translate cleanly.
-const CURSOR_EVENT: Record<string, Record<string, string>> = {
-  PreToolUse: { Bash: 'beforeShellExecution' },
-  PostToolUse: { Bash: 'afterShellExecution', 'Edit|Write|MultiEdit': 'afterFileEdit' },
-  Stop: { '': 'stop' },
-  PreCompact: { '': 'preCompact' },
-  // UserPromptSubmit has no Cursor analogue → omitted from the Cursor mirror.
-};
-
-// Hoisted (perf: avoid recompiling per call) — the transforms toCursorCommand applies.
-const RUNNER_RE = /^(node|bash)\s+/;
-const PROJECT_DIR_RE = /"\$CLAUDE_PROJECT_DIR"?\/?/g;
-const CLAUDE_HOOKS_RE = /\.claude\/hooks\//g;
-const QUOTE_RE = /"/g;
-
-// Convert a $CLAUDE_PROJECT_DIR command to a repo-relative Cursor command (Cursor runs from the
-// repo root and uses no env prefix; .claude/hooks scripts are mirrored to .cursor/hooks).
-function toCursorCommand(command: string): string {
-  return command
-    .replace(RUNNER_RE, '')
-    .replace(PROJECT_DIR_RE, '')
-    .replace(CLAUDE_HOOKS_RE, '.cursor/hooks/')
-    .replace(QUOTE_RE, '')
-    .trim();
-}
-
-function stripCursor(hooks?: CursorHooksBlock): CursorHooksBlock {
-  const out: CursorHooksBlock = {};
-  for (const [event, list] of Object.entries(hooks ?? {})) {
-    const kept = (list ?? []).filter((h) => !(h.command && isDevkit(h.command)));
-    if (kept.length) out[event] = kept;
-  }
-  return out;
-}
-
-function addCursor(
-  hooks: CursorHooksBlock,
-  { event, matcher, command }: HookRegistration,
-): CursorHooksBlock {
-  const cursorEvent = CURSOR_EVENT[event]?.[matcher];
-  if (!cursorEvent) return hooks; // no clean Cursor mapping → skip
-  if (!hooks[cursorEvent]) hooks[cursorEvent] = [];
-  hooks[cursorEvent].push({ command: toCursorCommand(command) });
-  return hooks;
-}
-
-/**
- * Install (merge) the hook registrations for the selected components into the selected agent
- * surfaces (default both).
- *
- * @param {string} root the git root (hooks are repo-wide, like skills/agents)
- * @param {string[]} componentIds selected components that own hook registrations
- * @param {{ dryRun?: boolean, targets?: string[], overlay?: boolean }} [opts] overlay → Claude
- *   registers into the git-ignored `settings.local.json`, and a git-TRACKED `.cursor/hooks.json`
- *   is skipped+warned (its edit can't be hidden by .git/info/exclude).
- * @returns {{ wrote: string[] }} the git-root-relative files written (for overlay's exclude list)
- */
-export function installHookRegistrations(
-  root: string,
-  componentIds: string[],
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
-): { wrote: string[] } {
-  const regs = registrationsFor(componentIds);
-  if (!regs.length) return { wrote: [] };
-  const wrote: string[] = [];
-
-  // Claude — merge into a freshly devkit-stripped block so a re-run replaces, never duplicates.
-  // Overlay targets settings.local.json (local-override; Claude merges hooks additively across it
-  // and settings.json, so the team's own hooks still fire). It's gitignored-by-default → never
-  // tracked → no tracked-skip needed.
-  if (targets.includes('claude')) {
-    const claudeRel = `.claude/${claudeSettingsFile(overlay)}`;
-    const claudePath = join(root, claudeRel);
-    const claude: ClaudeSettings = (readJson(claudePath) as ClaudeSettings | null) ?? {};
-    let claudeHooks = stripClaude(claude.hooks);
-    for (const reg of regs) claudeHooks = addClaude(claudeHooks, reg);
-    claude.hooks = claudeHooks;
-    if (!dryRun) writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
-    wrote.push(claudeRel);
-  }
-
-  // Cursor — same idempotent strip-then-add into the differently-shaped hooks.json. Cursor has no
-  // `.local` variant, so in overlay a git-TRACKED hooks.json is left untouched (we can't hide the edit).
-  if (targets.includes('cursor')) {
-    const cursorRel = '.cursor/hooks.json';
-    if (overlay && isTracked(root, cursorRel)) {
-      console.log(
-        `  ! ${cursorRel} is git-tracked — skipping (can't hide a tracked edit). Add devkit Cursor hooks manually if wanted.`,
-      );
-    } else {
-      const cursorPath = join(root, cursorRel);
-      const cursor: CursorSettings = (readJson(cursorPath) as CursorSettings | null) ?? {
-        version: 1,
-        hooks: {},
-      };
-      let cursorHooks = stripCursor(cursor.hooks);
-      for (const reg of regs) cursorHooks = addCursor(cursorHooks, reg);
-      cursor.hooks = cursorHooks;
-      if (!dryRun)
-        writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
-      wrote.push(cursorRel);
-    }
-  }
-
-  if (dryRun) {
-    console.log(`  [dry-run] merge hook registrations → ${wrote.join(' + ')}`);
-    return { wrote };
-  }
-  console.log(`  ✓ registered ${regs.length} hook(s) → ${wrote.join(' + ')}`);
-  return { wrote };
-}
-
-/**
- * Remove every devkit-owned hook command from the given surfaces (consumer commands untouched).
- *
- * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], overlay?: boolean }} [opts] overlay → strip from
- *   the git-ignored `settings.local.json` (where overlay registered them), not the shared settings.json.
- */
-export function removeHookRegistrations(
-  root: string,
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
-): void {
-  const claudePath = join(root, '.claude', claudeSettingsFile(overlay));
-  const claude = targets.includes('claude')
-    ? (readJson(claudePath) as ClaudeSettings | null)
-    : null;
-  const cursorPath = join(root, '.cursor', 'hooks.json');
-  const cursor = targets.includes('cursor')
-    ? (readJson(cursorPath) as CursorSettings | null)
-    : null;
-  if (!claude && !cursor) {
-    console.log('  • no agent settings — no hook registrations to remove');
-    return;
-  }
-  if (dryRun) {
-    console.log('  [dry-run] strip devkit hook registrations from settings.json + hooks.json');
-    return;
-  }
-  if (claude) {
-    claude.hooks = stripClaude(claude.hooks);
-    writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
-  }
-  if (cursor) {
-    cursor.hooks = stripCursor(cursor.hooks);
-    writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
-  }
-  console.log('  ✓ removed devkit hook registrations');
-}
-
-/**
- * Doctor helper: are all expected devkit commands present in the Claude settings for the
- * selected hook-owning components? Returns { ok, missing } (read-only).
- *
- * @param {string} root the git root
- * @param {string[]} componentIds
- * @param {{ overlay?: boolean }} [opts] overlay → read the git-ignored `settings.local.json`.
- */
-export function checkHookRegistrations(
-  root: string,
-  componentIds: string[],
-  { overlay = false }: { overlay?: boolean } = {},
-) {
-  const regs = registrationsFor(componentIds);
-  if (!regs.length) return { ok: true, missing: [] };
-  const claude = readJson(join(root, '.claude', claudeSettingsFile(overlay))) as {
-    hooks?: ClaudeHooksBlock;
-  } | null;
-  const present = new Set<string>();
-  for (const groups of Object.values(claude?.hooks ?? {})) {
-    for (const group of groups) {
-      for (const h of group.hooks ?? []) if (h.command) present.add(h.command);
-    }
-  }
-  const missing = regs.filter((r) => !present.has(r.command)).map((r) => r.command);
-  return { ok: missing.length === 0, missing };
 }
