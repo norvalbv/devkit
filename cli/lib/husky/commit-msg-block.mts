@@ -161,9 +161,14 @@ export function installCommitMsgHook(
   hookRoot: string,
   pkgRel: string,
   selection: CommitMsgSelection,
-  { dryRun = false, standalone = false }: { dryRun?: boolean; standalone?: boolean } = {},
+  {
+    dryRun = false,
+    standalone = false,
+    rewrite = (text: string) => text,
+  }: { dryRun?: boolean; standalone?: boolean; rewrite?: (text: string) => string } = {},
 ): void {
-  const block = buildCommitMsgBlock(selection, pkgRel, { standalone });
+  const generatedBlock = buildCommitMsgBlock(selection, pkgRel, { standalone });
+  const block = generatedBlock === null ? null : rewrite(generatedBlock);
   if (block === null) {
     removeCommitMsgBlock(hookRoot, pkgRel, dryRun);
     return;
@@ -175,7 +180,7 @@ export function installCommitMsgHook(
       return;
     }
     mkdirSync(join(hookRoot, '.husky'), { recursive: true });
-    writeFileSync(hookPath, buildCommitMsgHook(selection, pkgRel, { standalone }));
+    writeFileSync(hookPath, rewrite(buildCommitMsgHook(selection, pkgRel, { standalone })));
     chmodSync(hookPath, 0o755);
     console.log('  ✓ created .husky/commit-msg (commit-msg judges)');
     return;

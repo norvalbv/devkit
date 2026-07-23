@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.35.2",
-  "generatedAt": "2026-07-16T21:52:24.326Z",
+  "devkitRef": "v0.41.0",
+  "generatedAt": "2026-07-23T22:40:39.587Z",
   "targets": [
     "claude",
     "cursor"

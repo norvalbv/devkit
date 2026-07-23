@@ -14,6 +14,7 @@ import { extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.m
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
   buildSelfHostBlock,
+  buildSelfHostCommitMsgBlock,
   buildSelfHostHook,
   isDevkitRepo,
   SELF_HOST_EXTRAS,
@@ -131,6 +132,14 @@ describe('buildSelfHostHook', () => {
   });
 });
 
+describe('buildSelfHostCommitMsgBlock', () => {
+  it('rewrites the shared commit-message completeness judge to the source bin', () => {
+    const block = buildSelfHostCommitMsgBlock(selfHostSelection(), '', ROOT);
+    expect(block).toContain('node gate-engine/review/cli.mts completeness --gate "$1"');
+    expect(block).not.toContain('bunx guard-');
+  });
+});
+
 describe('isDevkitRepo', () => {
   it('true for the devkit repo root', () => {
     expect(isDevkitRepo(ROOT)).toBe(true);
@@ -148,5 +157,15 @@ describe('committed hook parity', () => {
     const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), '');
     const expectedBlock = buildSelfHostBlock(HOOK_SEL, '', ROOT);
     expect(currentBlock?.trim()).toBe(expectedBlock.trim());
+  });
+
+  it('.husky/commit-msg guard block === the current source-mode generator output', () => {
+    const hookPath = join(ROOT, '.husky', 'commit-msg');
+    expect(existsSync(hookPath), '.husky/commit-msg must exist (self-host `devkit init`)').toBe(
+      true,
+    );
+    const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), '');
+    const expectedBlock = buildSelfHostCommitMsgBlock(selfHostSelection(), '', ROOT);
+    expect(currentBlock?.trim()).toBe(expectedBlock?.trim());
   });
 });

@@ -54,7 +54,7 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
-import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
+import { installSelfHostHooks, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
 import { installAgentSurfaces } from '../lib/install/agent-surfaces.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
@@ -1060,13 +1060,11 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   if (selection.husky) {
     console.log('3. husky pre-commit');
     // structureCmd threads into the selection; self-host rewrites bunx→`node …mts`.
-    if (selfHost) installSelfHostHook(gitRoot, pkgRel, selection, dryRun, cwd);
+    if (selfHost) installSelfHostHooks(gitRoot, pkgRel, selection, dryRun, cwd);
     else if (standalone)
       installStandaloneHook(gitRoot, pkgRel, { ...selection, structureCmd }, dryRun);
     else installHusky({ ...selection, structureCmd }, gitRoot, pkgRel, dryRun);
-    // Commit-msg judges (review→completeness, sentry): self-host opts out AND drops a stale block.
     if (!selfHost) installCommitMsgHook(gitRoot, pkgRel, selection, { dryRun, standalone });
-    else removeCommitMsgBlock(gitRoot, pkgRel, dryRun);
   }
 
   // Self-host skips the size/fanout freezes: devkit has 0 eslint-disable directives and no folder over

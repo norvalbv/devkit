@@ -12,6 +12,8 @@ import { detectGitRoot } from '../detect-git-root.mts';
 import { extractGuardBlock } from '../husky/husky-block.mts';
 import {
   buildSelfHostBlock,
+  buildSelfHostCommitMsgBlock,
+  installSelfHostCommitMsgHook,
   installSelfHostHook,
   SELF_HOST_EXTRAS,
   SELF_HOST_STRUCTURE_CMD,
@@ -34,6 +36,7 @@ export async function runSelfHostDoctor(
 ): Promise<number> {
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
+  const commitMsgPath = join(gitRoot, '.husky', 'commit-msg');
   console.log('devkit doctor — self-host (source-mode dogfood)\n');
 
   let hookOk = false;
@@ -65,6 +68,27 @@ export async function runSelfHostDoctor(
     printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
   }
 
+  let commitMsgOk = false;
+  const expectedCommitMsgBlock = buildSelfHostCommitMsgBlock(selfHostSelection(), pkgRel, cwd);
+  const currentCommitMsgBlock = existsSync(commitMsgPath)
+    ? extractGuardBlock(readFileSync(commitMsgPath, 'utf8'), pkgRel)
+    : null;
+  if (
+    expectedCommitMsgBlock !== null &&
+    currentCommitMsgBlock?.trim() === expectedCommitMsgBlock.trim()
+  ) {
+    commitMsgOk = true;
+    console.log('  ✓ .husky/commit-msg in sync with the generator');
+  } else if (fix) {
+    installSelfHostCommitMsgHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
+    commitMsgOk = true;
+    console.log(
+      '  ✓ .husky/commit-msg regenerated (was missing or stale — refreshed to the current generator)',
+    );
+  } else {
+    console.log('  ⚠ .husky/commit-msg is MISSING or STALE — run `devkit doctor --fix`');
+  }
+
   // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
   const sel: Partial<Selection> = cfg.components ?? {};
   const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
@@ -81,5 +105,5 @@ export async function runSelfHostDoctor(
   console.log(`  ${runner.status === 'OK' ? '✓' : '⚠'} ${runner.name}: ${runner.detail}`);
   if (runner.status !== 'OK') console.log(`      → ${runner.remediation}`);
 
-  return hookOk && runner.status === 'OK' ? 0 : 1;
+  return hookOk && commitMsgOk && runner.status === 'OK' ? 0 : 1;
 }
