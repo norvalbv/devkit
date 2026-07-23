@@ -29,32 +29,6 @@ export function skillNamesForGuards(allNames, guards = []) {
     return allNames.filter((name) => name !== 'decisions' || guards.includes('decisions'));
 }
 /**
- * Remove only a previously manifested decisions skill when skills are now disabled. This keeps
- * `--no-skills` authoritative without turning a normal re-init into removal of every other skill,
- * and never touches an unmanifested consumer-authored collision.
- */
-export function pruneManifestedDecisionsSkill(cwd, dryRun = false) {
-    const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
-    const prev = readJson(manifestPath);
-    if (!prev || !Object.keys(prev.files).some((rel) => rel.startsWith('decisions/')))
-        return;
-    for (const target of prev.targets ?? AGENT_TARGETS) {
-        const dir = join(cwd, `.${target}`, 'skills', 'decisions');
-        if (!dryRun && existsSync(dir))
-            rmSync(dir, { recursive: true, force: true });
-    }
-    const files = Object.fromEntries(Object.entries(prev.files).filter(([rel]) => !rel.startsWith('decisions/')));
-    if (!dryRun) {
-        if (Object.keys(files).length) {
-            writeIfAbsent(manifestPath, `${JSON.stringify({ ...prev, generatedAt: new Date().toISOString(), files }, null, 2)}\n`, { force: true });
-        }
-        else {
-            rmSync(manifestPath, { force: true });
-        }
-    }
-    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} decisions skill (skills disabled)`);
-}
-/**
  * Sync devkit's bundled skills into the consumer's agent surfaces + write the manifest.
  *
  * `cwd` is the consumer root. `targets` are the agent surfaces to write to (default both — see

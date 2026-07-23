@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from "./atomic-write.mjs";
-import { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, whyHook, } from "./decision-format.mjs";
+import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, whyHook, } from "./decision-format.mjs";
 const TRAILING_WS_RE = /\s*$/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
 const ENTRY_DATE_RE = /^(?:## Target · |- )(\d{4}-\d{2}-\d{2})\b/;
@@ -117,12 +117,7 @@ export function amendDecision(slug, options, paths) {
     if (!slug || Boolean(options.isTarget) === Boolean(options.note)) {
         throw new Error('Usage: guard-decisions amend <slug> --target … | --note "…"');
     }
-    if (options.isTarget &&
-        (!options.ruling ||
-            !options.context ||
-            !options.consequences ||
-            !options.tradeoff ||
-            !options.visionFit)) {
+    if (options.isTarget && !hasTargetFields(options)) {
         throw new Error('amend --target requires --context, --ruling, --consequences, --tradeoff, and --vision-fit');
     }
     const file = path.join(paths.decisionsDir, `${slug}.md`);
@@ -139,7 +134,7 @@ export function amendDecision(slug, options, paths) {
         !options.evidenceChange) {
         throw new Error('amending an appended Target requires --evidence-change "<what shifted>"');
     }
-    const replacement = options.isTarget
+    const replacement = options.isTarget && hasTargetFields(options)
         ? renderTarget(date, options)
         : renderNote(date, options.note ?? '');
     const before = workingParsed.body.slice(0, latest.start).replace(TRAILING_WS_RE, '');

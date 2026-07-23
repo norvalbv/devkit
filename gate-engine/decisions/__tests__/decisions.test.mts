@@ -83,6 +83,28 @@ describe('pure helpers', () => {
     expect(parseIndex(renderIndex(rows))).toEqual(rows);
   });
 
+  it('renderIndex sanitizes Markdown table delimiters and line breaks', () => {
+    const rendered = renderIndex([
+      {
+        slug: 'safe-axis',
+        ruling: 'first | second\nthird',
+        why: 'line one\r\nline two',
+        updated: '2026-05-29|later',
+      },
+    ]);
+    expect(rendered).toContain(
+      '| [safe-axis](safe-axis.md) | first second third | line one line two | 2026-05-29 later |',
+    );
+    expect(parseIndex(rendered)).toEqual([
+      {
+        slug: 'safe-axis',
+        ruling: 'first second third',
+        why: 'line one line two',
+        updated: '2026-05-29 later',
+      },
+    ]);
+  });
+
   it('upsertRow appends a new slug and updates an existing one', () => {
     const rows = [{ slug: 'a', ruling: 'x', why: 'h', updated: '1' }];
     upsertRow(rows, { slug: 'b', ruling: 'y', why: 'h2', updated: '2' });
@@ -383,6 +405,31 @@ describe('draft amendments', () => {
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain('replacement-ruling');
   });
 
+  it('rejects an incomplete Target amendment without changing the decision or INDEX', () => {
+    expect(run(target('axis')).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const index = join(dir, 'INDEX.md');
+    const beforeFile = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(index, 'utf8');
+    const blocked = run([
+      'amend',
+      'axis',
+      '--target',
+      '--ruling',
+      'replacement-ruling',
+      '--consequences',
+      'replacement value protected',
+      '--tradeoff',
+      'replacement cost',
+      '--vision-fit',
+      'friendly dev tool for everyone',
+    ]);
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('amend --target requires');
+    expect(readFileSync(file, 'utf8')).toBe(beforeFile);
+    expect(readFileSync(index, 'utf8')).toBe(beforeIndex);
+  });
+
   it('amends an appended Target while preserving committed history', () => {
     run(target('axis'));
     commitAll();
@@ -404,6 +451,26 @@ describe('draft amendments', () => {
     expect(md).toContain('**Ruling:** final-ruling');
     expect(md).not.toContain('**Ruling:** second-ruling');
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain('final-ruling');
+  });
+
+  it('rejects amending an appended Target without evidence change, atomically', () => {
+    run(target('axis'));
+    commitAll();
+    expect(
+      run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'new benchmark'])
+        .status,
+    ).toBe(0);
+    const file = join(dir, 'axis.md');
+    const index = join(dir, 'INDEX.md');
+    const beforeFile = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(index, 'utf8');
+
+    const blocked = run(['amend', 'axis', '--target', ...reqFlags('replacement')]);
+
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('requires --evidence-change');
+    expect(readFileSync(file, 'utf8')).toBe(beforeFile);
+    expect(readFileSync(index, 'utf8')).toBe(beforeIndex);
   });
 
   it('amends the newest uncommitted note without changing INDEX', () => {

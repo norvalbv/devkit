@@ -59,6 +59,10 @@ describe('decision-edit-guard path policy', () => {
     expect(decide(payload('Edit', 'docs/decisions/../../src/axis.ts'), root)).toBeNull();
   });
 
+  it('blocks in-directory basenames that begin with two dots', () => {
+    expect(decide(payload('Write', 'docs/decisions/..draft.md'), root)).not.toBeNull();
+  });
+
   it('finds a protected path inside Claude MultiEdit nested edits', () => {
     expect(
       decide(
