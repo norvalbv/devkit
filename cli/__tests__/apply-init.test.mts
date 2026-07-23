@@ -755,6 +755,10 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).not.toMatch(/bunx guard-/);
 
+    const commitMsg = readFileSync(join(root, '.husky', 'commit-msg'), 'utf8');
+    expect(commitMsg).toContain('node gate-engine/review/cli.mts completeness --gate "$1"');
+    expect(commitMsg).not.toContain('bunx guard-');
+
     expect(config(root).selfHost).toBe(true);
   });
 });

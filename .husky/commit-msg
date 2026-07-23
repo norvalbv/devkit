@@ -1,0 +1,37 @@
+#!/bin/sh
+# devkit generic commit-msg hook (POSIX sh). The commit-MESSAGE judges live here, not in
+# pre-commit: the message only exists once git has it (passed as the message-file path in $1).
+# The block between the two `# devkit-guards` markers is devkit-owned and is the only region
+# init / removal touches — everything outside it is the consumer's own hook.
+
+# GUI git clients launch with a minimal PATH that omits user bin dirs, so `bun`/`bunx`
+# can go missing → the hook fails. Prepend the standard user install locations.
+for dir in "$HOME/.bun/bin" "$HOME/.local/bin"; do
+    [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) ;; *) PATH="$dir:$PATH" ;; esac
+done
+export PATH
+
+# >>> devkit-guards >>>
+# `|| var=$?` makes each judge's exit a TESTED status — without it, husky's `sh -e` would
+# abort the hook the instant a bin exits non-zero (before the code is read), so an exit-2
+# fail-open would BLOCK the commit (inverting the fail-open invariant) and the exit-1 guidance
+# would never print. (Same guard the pre-commit AI fragments use: `rc=0; … || rc=$?`.)
+
+# devkit:guard-completeness
+echo "🧩 Completeness gate (commit-msg judge)..."
+crc=0
+node gate-engine/review/cli.mts completeness --gate "$1" || crc=$?
+if [ "$crc" -eq 1 ]; then
+    echo "   Confirmed completeness gap (hard-by-default; findings above)."
+    echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
+    exit 1
+elif [ "$crc" -eq 3 ]; then
+    echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
+    echo "   Check \`claude\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    exit 1
+fi
+# crc 0 = pass / warn-only / skipped, crc 2 = fail-open → continue.
+# /devkit:guard-completeness
+# <<< devkit-guards <<<
+
+exit 0

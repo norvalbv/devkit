@@ -2,7 +2,7 @@
   "maxLines": 500,
   "files": {
     "cli/commands/doctor.mts": 671,
-    "cli/commands/init.mts": 1319,
+    "cli/commands/init.mts": 1317,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
     "cli/lib/husky/husky-block.mts": 527,
     "cli/lib/overlay.mts": 561,

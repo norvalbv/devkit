@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.37.2",
-  "generatedAt": "2026-07-21T18:41:36.429Z",
+  "devkitRef": "v0.41.0",
+  "generatedAt": "2026-07-23T22:40:39.580Z",
   "targets": [
     "claude",
     "cursor"
@@ -13,12 +13,12 @@
     "api-security/scripts/checklist.mjs": "02b035437153f7ccc1924244085aa6f2771cb01f32260b3f9ff41bb8166a97d0",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "698047578ab96f74dacf99c562fe289fb1103a4bc6b16191528345116e28f19d",
-    "brainstorming/SKILL.md": "faa2fd9ea4ac99b0e92934c931701c25a85767935526810baa9c462b632855e0",
+    "brainstorming/SKILL.md": "876449df85971581ead2dc177b701b40afaef6048cfc87ceae0d4808739b6ff0",
     "commit-guard/SKILL.md": "69fe86ef83dd22006fec3b1b7990747c69455b6368699c86a579977603e4bdbb",
     "commit-guard/scripts/checklist.mjs": "b6591489d06c81af4ac79ed4db70e06ec99456426bcf494b277e41a4c12564c2",
     "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
     "correctness/scripts/checklist.mjs": "d6b175501bba83d537faba3ff2920efb00f5a5b6e31d622a6db60abfb2e5a016",
-    "decisions/SKILL.md": "c85736e2b4ff81af0b299c2a7455e7ef6d5c8e81b47200c7f1d65833d5ecef4a",
+    "decisions/SKILL.md": "0c7cb7129c815dfc0d8e8f5ac7a77ece87dc77e6bc87fc7edd29498e25671b09",
     "dup-detection/SKILL.md": "fdc2e37d8a278f82931818807b4d5ee91907e379131be7a07532e79e3822cbda",
     "feature-critique/SKILL.md": "f40fae2d934d851c3ba9847a924c0d43bf4661d640d0a83e9bf3f9121b42429f",
     "frontend-accessibility/SKILL.md": "d950e1ddc87ec9a090936f05447d2298b25fb5e12e315345d2d9c02912c513a9",
