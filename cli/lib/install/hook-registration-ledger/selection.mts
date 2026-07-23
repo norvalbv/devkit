@@ -1,5 +1,5 @@
-import type { Selection } from '../components.mts';
-import { hookScriptsFor } from './install-hooks.mts';
+import type { Selection } from '../../components.mts';
+import { hookScriptsFor } from '../install-hooks.mts';
 
 export interface SelectedHookAssets {
   components: string[];

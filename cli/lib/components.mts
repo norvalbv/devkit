@@ -8,6 +8,11 @@
  * (--yes / non-TTY), and the guard sub-gate set (the husky `# devkit-guards` lines).
  */
 
+import {
+  FRESH_DEFAULT_AGENT_PROVIDERS,
+  normalizeAgentProviders,
+} from './install/agent-providers.mts';
+
 /** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
 export const RECOMMENDED_GUARD_IDS = [
   'size',
@@ -70,12 +75,10 @@ export function structureCmdFor(stack: string): string {
 }
 
 /**
- * The agent surfaces devkit can sync skills/agents/agent-hooks into: Claude (`.claude/`) and
- * Cursor (`.cursor/`). `selection.agentTargets` picks the subset to write to (default both) so a
- * repo that only uses one tool doesn't get a redundant copy in the other's dir. Surface `<name>`
- * maps to the `.<name>/` dir (claude → .claude, cursor → .cursor).
+ * Compatibility name for the agent surfaces the current projection layer can sync into. Provider
+ * support/default policy now lives in agent-providers.mts.
  */
-export const AGENT_TARGETS = ['claude', 'cursor'];
+export const AGENT_TARGETS: string[] = [...FRESH_DEFAULT_AGENT_PROVIDERS];
 
 /**
  * The top-level components, in wizard order. `recommended` seeds the --yes / non-TTY
@@ -90,11 +93,16 @@ export const COMPONENTS = [
     hint: 'tsconfig extending the devkit base',
     recommended: true,
   },
-  { id: 'skills', label: 'Agent skills', hint: 'sync to .claude + .cursor', recommended: true },
+  {
+    id: 'skills',
+    label: 'Agent skills',
+    hint: 'sync to Claude, Codex, and Cursor',
+    recommended: true,
+  },
   {
     id: 'agents',
     label: 'Review agents',
-    hint: 'review/testing subagents → .claude/.cursor agents',
+    hint: 'review/testing subagents → Claude/Codex/Cursor agents',
     recommended: true,
   },
   {
@@ -105,7 +113,7 @@ export const COMPONENTS = [
   },
   {
     id: 'agentHooks',
-    label: 'Agent hooks (Claude/Cursor)',
+    label: 'Agent hooks (Claude/Codex/Cursor)',
     hint: 'Stop/PostToolUse/UserPromptSubmit/PreCompact: decision nudge, rule recall, format-after-edit, QA, compaction',
     recommended: false,
   },
@@ -198,7 +206,7 @@ export function defaultSelection(): Selection {
     // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
     // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
     lineGrowth: true,
-    agentTargets: [...AGENT_TARGETS],
+    agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
 }
@@ -231,8 +239,8 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
   return {
     ...base,
     ...partial,
-    agentTargets: partial.agentTargets
-      ? partial.agentTargets.filter((t) => AGENT_TARGETS.includes(t))
+    agentTargets: Array.isArray(partial.agentTargets)
+      ? normalizeAgentProviders(partial.agentTargets)
       : base.agentTargets,
     guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
   };

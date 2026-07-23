@@ -14,6 +14,10 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../fs-helpers.mts';
+import { isSafeAgentAssetPath } from '../install/agent-asset-manifest/lifecycle.mts';
+import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mts';
+import { agentAssetDir, projectedAssetRel } from '../install/agent-assets.mts';
+import type { AgentAssetKind, AgentProvider } from '../install/agent-providers.mts';
 import { checkHookRegistrations } from '../install/install-hooks.mts';
 import { bundledNames } from '../sync-manifest.mts';
 import { type CheckResult, check } from './check-result.mts';
@@ -21,6 +25,142 @@ import { type CheckResult, check } from './check-result.mts';
 /** A skills / agents / agent-hooks manifest: repo-relative path → recorded sha256. */
 export interface Manifest {
   files: Record<string, string>;
+}
+
+const AGENT_ASSET_CHECKS = {
+  skills: ['skills', 'skills-manifest.json', 'run `devkit sync-skills`', 'file(s)'],
+  agents: ['agents', 'agents-manifest.json', 'run `devkit sync-agents`', 'agent file(s)'],
+  hooks: ['agent-hooks', 'agent-hooks-manifest.json', 'run `devkit init`', 'hook script(s)'],
+} as const satisfies Record<AgentAssetKind, readonly [string, string, string, string]>;
+
+function assetExistsOnAnyProvider(
+  gitRoot: string,
+  providers: readonly AgentProvider[],
+  kind: AgentAssetKind,
+  logicalRel: string,
+): boolean {
+  return providers.some((provider) =>
+    existsSync(
+      join(gitRoot, agentAssetDir(provider, kind), projectedAssetRel(provider, kind, logicalRel)),
+    ),
+  );
+}
+
+/** Verify every selected provider projection, including Codex TOML agents and v2 manifests. */
+export function checkAgentAssets(
+  cwd: string,
+  kind: AgentAssetKind,
+  providers: readonly AgentProvider[],
+  { guards = [], expected }: { guards?: string[]; expected?: string[] } = {},
+): CheckResult {
+  const [name, manifestFilename, remediation, countLabel] = AGENT_ASSET_CHECKS[kind];
+  const { gitRoot } = detectGitRoot(cwd);
+  let decoded: ReturnType<typeof readAgentAssetManifest>;
+  try {
+    decoded = readAgentAssetManifest(join(gitRoot, '.devkit', manifestFilename), kind);
+  } catch (error) {
+    return check(
+      name,
+      'DRIFT',
+      `invalid ${manifestFilename}: ${error instanceof Error ? error.message : String(error)}`,
+      `inspect, repair, or remove ${manifestFilename}, then ${remediation}`,
+      false,
+    );
+  }
+  if (!decoded) return check(name, 'MISSING', `no ${manifestFilename}`, remediation, true);
+
+  const { files } = decoded.manifest;
+  const sourceRoot = join(packageDir(), kind === 'hooks' ? 'agents-hooks' : kind);
+  const sourceDrift = Object.entries(files)
+    .filter(([logicalRel, recordedSha]) => {
+      const sourcePath = join(sourceRoot, logicalRel);
+      return existsSync(sourcePath) && sha256(sourcePath) !== recordedSha;
+    })
+    .map(([logicalRel]) => logicalRel);
+  const consumerDrift: string[] = [];
+  const missingProviders: AgentProvider[] = [];
+  for (const provider of providers) {
+    const outputs =
+      decoded.version === 1
+        ? decoded.manifest.targets.includes(provider)
+          ? Object.fromEntries(
+              Object.entries(files).map(([logicalRel, digest]) => [
+                projectedAssetRel(provider, kind, logicalRel),
+                digest,
+              ]),
+            )
+          : null
+        : (decoded.manifest.providers[provider]?.files ?? null);
+    if (!outputs) {
+      missingProviders.push(provider);
+      continue;
+    }
+    for (const [outputRel, recordedSha] of Object.entries(outputs)) {
+      const outputRelPath = join(agentAssetDir(provider, kind), outputRel);
+      const outputPath = join(gitRoot, outputRelPath);
+      if (
+        !isSafeAgentAssetPath(gitRoot, outputRelPath, true) ||
+        !existsSync(outputPath) ||
+        sha256(outputPath) !== recordedSha
+      )
+        consumerDrift.push(`${provider}/${outputRel}`);
+    }
+  }
+
+  const expectedUnits =
+    expected ??
+    (kind === 'skills'
+      ? bundledNames('skills', (entry) => entry.isDirectory()).filter(
+          (unit) => unit !== 'decisions' || guards.includes('decisions'),
+        )
+      : kind === 'agents'
+        ? bundledNames('agents', (entry) => entry.isFile() && entry.name.endsWith('.md'))
+        : []);
+  const representedUnits = new Set(
+    Object.keys(files).map((logicalRel) =>
+      kind === 'skills' ? logicalRel.split('/')[0] : logicalRel,
+    ),
+  );
+  const unsynced = expectedUnits.filter(
+    (unit) =>
+      !representedUnits.has(unit) && !assetExistsOnAnyProvider(gitRoot, providers, kind, unit),
+  );
+  const unexpected = expected
+    ? [...representedUnits].filter((unit) => !expectedUnits.includes(unit))
+    : kind === 'skills'
+      ? [...representedUnits].filter((unit) => !expectedUnits.includes(unit))
+      : [];
+
+  if (
+    sourceDrift.length ||
+    consumerDrift.length ||
+    missingProviders.length ||
+    unsynced.length ||
+    unexpected.length
+  ) {
+    const parts: string[] = [];
+    if (sourceDrift.length) parts.push(`devkit source ahead of manifest (${sourceDrift.length})`);
+    if (consumerDrift.length)
+      parts.push(
+        kind === 'hooks'
+          ? `${consumerDrift.length} script(s) drifted/absent`
+          : `consumer copy drifted (${consumerDrift.length})`,
+      );
+    if (missingProviders.length)
+      parts.push(`manifest lacks selected provider(s): ${missingProviders.join(', ')}`);
+    if (unsynced.length)
+      parts.push(
+        `bundle has ${unsynced.length} ${kind === 'skills' ? 'skill(s)' : 'agent(s)'} the manifest lacks (${unsynced.join(', ')})`,
+      );
+    if (unexpected.length)
+      parts.push(
+        kind === 'skills'
+          ? `manifest contains disabled skill(s) (${unexpected.join(', ')})`
+          : `manifest contains deselected asset(s) (${unexpected.join(', ')})`,
+      );
+    return check(name, 'DRIFT', parts.join('; '), remediation, true);
+  }
+  return check(name, 'OK', `${Object.keys(files).length} ${countLabel} in sync`);
 }
 
 // Reason: the branches ARE the manifest-drift algorithm — per file, two independent SHA comparisons
@@ -161,14 +301,31 @@ export function checkRegistrations(
   cwd: string,
   hookComponents: string[],
   targets: string[],
+  overlay = false,
 ): CheckResult {
   const { gitRoot } = detectGitRoot(cwd);
-  const { ok, missing } = checkHookRegistrations(gitRoot, hookComponents, { targets });
+  let result: ReturnType<typeof checkHookRegistrations>;
+  try {
+    result = checkHookRegistrations(gitRoot, hookComponents, {
+      targets,
+      overlay,
+      legacyOwnedComponentIds: hookComponents,
+    });
+  } catch (error) {
+    return check(
+      'hook registrations',
+      'DRIFT',
+      error instanceof Error ? error.message : String(error),
+      'inspect or remove the invalid hook ownership ledger, then run `devkit init`',
+      false,
+    );
+  }
+  const { ok, missing } = result;
   if (ok) return check('hook registrations', 'OK', `${hookComponents.join(', ')} registered`);
   return check(
     'hook registrations',
     'DRIFT',
-    `${missing.length} command(s) not registered on selected agent surfaces`,
+    `${missing.length} provider registration issue(s)`,
     'run `devkit init` to re-register',
     true,
   );

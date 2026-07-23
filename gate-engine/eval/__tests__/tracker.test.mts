@@ -132,7 +132,7 @@ describe('immutable evidence', () => {
     const root = mkdtempSync(join(tmpdir(), 'benchmark-publish-'));
     try {
       mkdirSync(join(root, 'docs/benchmarks'), { recursive: true });
-      writeFileSync(join(root, 'docs/benchmarks/.publish.lock'), 'occupied');
+      writeFileSync(join(root, 'docs/benchmarks/.publish.lock'), 'occupied', { mode: 0o600 });
       const { artifact, event } = fixture();
       expect(() => appendPublishedEvent(root, event, artifact)).toThrow(/publish is in progress/);
       writeFileSync(

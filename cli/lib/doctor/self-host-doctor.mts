@@ -17,7 +17,8 @@ import {
   SELF_HOST_STRUCTURE_CMD,
   selfHostSelection,
 } from '../husky/self-host.mts';
-import { checkAgents, checkSkills } from './asset-checks.mts';
+import { resolveExistingAgentProviders } from '../install/agent-providers.mts';
+import { checkAgentAssets } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
 import { checkHookRunner } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
@@ -66,13 +67,14 @@ export async function runSelfHostDoctor(
   }
 
   // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
-  const sel: Partial<Selection> = cfg.components ?? {};
-  const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
-  const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
+  const recorded: Partial<Selection> = cfg.components ?? {};
+  const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
+  const sel: Partial<Selection> = { ...recorded, agentTargets: surfaces };
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-  if (sel.skills && primary) advise(await checkSkills(cwd, primary));
-  if (sel.agents && primary) advise(await checkAgents(cwd, primary));
+  if (sel.skills && surfaces.length)
+    advise(checkAgentAssets(cwd, 'skills', surfaces, { guards: sel.guards ?? [] }));
+  if (sel.agents && surfaces.length) advise(checkAgentAssets(cwd, 'agents', surfaces));
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
   // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the

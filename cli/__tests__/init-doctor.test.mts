@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
@@ -547,6 +547,43 @@ describe('doctor — selection-aware', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/biome\.jsonc.*invalid JSON/s);
   });
+
+  it('checks every selected provider-native agent projection', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+    const codexAgent = join(root, '.codex', 'agents', 'correctness-reviewer.toml');
+    writeFileSync(codexAgent, `${readFileSync(codexAgent, 'utf8')}# drift\n`);
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/agents: DRIFT .*consumer copy drifted/s);
+  });
+
+  it('checks both historical providers for a v1 Claude/Cursor manifest', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-codex').status).toBe(0);
+    writeFileSync(join(root, '.cursor', 'agents', 'correctness-reviewer.md'), '# drift\n');
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/agents: DRIFT .*consumer copy drifted/s);
+  });
+
+  it('reports a malformed strict agent manifest as drift instead of crashing', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--no-codex').status).toBe(0);
+    writeFileSync(join(root, '.devkit', 'agents-manifest.json'), '{not-json');
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/agents: DRIFT .*invalid agents-manifest\.json/s);
+  });
+
+  it('checks hook registrations across every selected provider', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes', '--agent-hooks').status).toBe(0);
+    rmSync(join(root, '.codex', 'hooks.json'));
+    const r = devkit(root, 'doctor');
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/hook registrations: DRIFT/);
+  });
 });
 
 // Unit-cover the doctor dispatch (extracted from run() so it's testable without the subprocess).
@@ -588,6 +625,17 @@ describe('doctor collectResults dispatch', () => {
     };
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     expect(names(results)).toContain('skills');
+  });
+
+  it('infers only historical on-disk providers when agentTargets is absent', async () => {
+    const root = tmpRepo();
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--no-codex', '--no-cursor').status,
+    ).toBe(0);
+    const cfg = config(root);
+    delete cfg.components.agentTargets;
+    const { sel } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+    expect(sel.agentTargets).toEqual(['claude']);
   });
 
   it('honours configOverrides: a hand-tuned no-extends tsconfig is OK, not drift (2b)', async () => {

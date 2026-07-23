@@ -1,18 +1,8 @@
 /**
- * `devkit init` — scaffold a consumer repo onto devkit's shared configs + gate-engine,
- * with an interactive SETUP WIZARD (clack) for component selection AND removal.
- *
- * Three resolution paths converge on one `selection` (see components.mjs):
- *   1. interactive  — TTY + no --yes → runWizard() asks per component + per guard.
- *   2. --yes        — all recommended defaults (EXACT pre-wizard behaviour), minus any --no-*.
- *   3. non-TTY      — same as --yes (never hangs waiting for stdin), minus any --no-*.
- *
- * Apply logic per component: selected+absent → install; selected+present → idempotent;
- * deselected+present → REMOVE (wizard confirms per component default-NO;
- * --remove-deselected removes without prompting). Removal is SAFE: it never deletes a file
- * devkit didn't create.
- *
- * The chosen set is recorded in .devkit/config.json.components so `doctor` is selection-aware.
+ * `devkit init` scaffolds shared configs and gates through interactive, `--yes`, or non-TTY
+ * selection. Selected components install idempotently; deselected components are removed only
+ * after confirmation or `--remove-deselected`, and removal never deletes user-owned files.
+ * The chosen set is recorded in `.devkit/config.json.components` for selection-aware doctor runs.
  */
 var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path, preserveJsx) {
     if (typeof path === "string" && /^\.\.?\//.test(path)) {
@@ -54,17 +44,10 @@ import { detectAgentConflicts } from "./sync/sync-agents.mjs";
 import { detectSkillConflicts } from "./sync/sync-skills.mjs";
 import { repoUrl } from "./update.mjs";
 const INIT_VERSION = 2;
-// Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs + baselines).
-// next/node-service are deliberately OUT until a template ships for them — listing one here
-// would make init read a non-existent templates/<stack> dir.
+// Stacks with structure-lint presets; omitted stacks have no shipped template yet.
 const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
-// Config-driven structure stacks — their topology lives in guard.config.json's `structure` block and
-// the folder-structure rule runs from DEVKIT's own eslint via the `guard-structure` bin (no consumer
-// eslint/plugin dep). These get structure-lint even in standalone mode. Electron is EXCLUDED: its
-// preset imports the plugin + @typescript-eslint/parser directly in a consumer eslint.config.mjs and
-// uses eslint/domains.mjs, so it stays package-mode with consumer-side deps.
-// The structure files each stack emits, [src-relative-to-template, dest-relative-to-cwd].
-// The full install set adds biome/tsconfig/guard.config on top (installStructureFiles).
+// Config-driven stacks keep topology in guard.config and use Devkit's own structure binary.
+// Electron remains package-mode because its preset imports consumer-side eslint dependencies.
 const STRUCTURE_TEMPLATE_FILES = {
     electron: [
         ['eslint.config.mjs', 'eslint.config.mjs'],
@@ -91,6 +74,14 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // Matches the scanRoots array value in guard.config.json for an in-place --scan-root patch
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
 const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
+function recordedHookComponentIds(config) {
+    const components = config?.components;
+    return [
+        components?.searchSteering && 'searchSteering',
+        components?.agentHooks && 'agentHooks',
+        components?.guards?.includes('decisions') && 'decisions',
+    ].filter((id) => Boolean(id));
+}
 function parseFlags(args) {
     const flags = {
         yes: false,
@@ -172,8 +163,7 @@ function selectionFromFlags(flags) {
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-    // Agent surfaces: both by default; --no-claude / --no-cursor drop one (don't double-install).
-    // ponytail: --no-claude --no-cursor leaves [] → skills/agents sync nowhere (explicit, allowed).
+    // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
     sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
     return sel;
 }
@@ -930,7 +920,7 @@ export async function applyInit(cwd, plan) {
         interactive,
         force,
     });
-    const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override);
+    const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override, recordedHookComponentIds(prevConfig));
     if (selection.fallow) {
         console.log('8. fallow (optional code-health layer)');
         await applyFallow(cwd, dryRun, interactive);

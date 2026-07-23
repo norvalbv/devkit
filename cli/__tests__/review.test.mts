@@ -178,7 +178,9 @@ function runReview(
     encoding: 'utf8',
     env: options.env ?? target.env,
     maxBuffer: 16 * 1024 * 1024,
-    timeout: options.timeout ?? 180_000,
+    // The review must still complete successfully; this is only the synchronous harness ceiling.
+    // Full-suite contention has reached ~190s after the success marker while cleanup is in flight.
+    timeout: options.timeout ?? 240_000,
   });
 }
 
@@ -343,7 +345,7 @@ printf 'REVIEW_SNAPSHOT_OK\\n'
         'utf8',
       ),
     ).toContain('REVIEW_SNAPSHOT_OK');
-  }, 240_000);
+  }, 300_000);
 
   it('validates setup before a clean success and never runs the hook for no changes', () => {
     const target = fixture("echo 'CLEAN_HOOK_MUST_NOT_RUN' >&2; exit 91");

@@ -3,6 +3,7 @@
  * the wizard funnels into. Calling applyInit with a chosen component map is preferable to
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +44,7 @@ describe('selection helpers', () => {
       structure: true,
     });
     expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
+    expect(s.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {
@@ -50,6 +52,11 @@ describe('selection helpers', () => {
     expect(s.biome).toBe(false);
     expect(s.tsconfig).toBe(true);
     expect(s.guards).toEqual(['size']);
+    expect(normalizeSelection({ agentTargets: null as never }).agentTargets).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+    ]);
   });
 
   it('parseFlags reads --no-* and --guards and --remove-deselected', () => {
@@ -75,12 +82,22 @@ describe('selection helpers', () => {
     expect(sel.guards).toEqual(['fanout']);
   });
 
-  it('agentTargets: both by default, narrowed by --no-claude / --no-cursor', () => {
-    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual(['claude', 'cursor']);
+  it('agentTargets: all providers by default, narrowed by --no-<provider>', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+    ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-cursor'])).agentTargets).toEqual([
       'claude',
+      'codex',
     ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
+      'codex',
+      'cursor',
+    ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-codex'])).agentTargets).toEqual([
+      'claude',
       'cursor',
     ]);
   });
@@ -212,6 +229,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
 
   it('preserves legacy-enabled review behavior when reapplying an overlay', async () => {
     const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
     const selection = {
       biome: false,
       tsconfig: false,
@@ -425,6 +443,31 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     const settings = readFileSync(join(root, '.claude/settings.json'), 'utf8');
     expect(settings).not.toContain('decision-edit-guard.mjs');
     expect(settings).toContain('lint-check.sh');
+  });
+
+  it('fresh defaults install provider-native assets for Claude, Codex, and Cursor', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: true,
+        husky: false,
+        structure: false,
+        guards: [],
+      },
+      devkitRef: 'v0.3.0',
+    });
+
+    expect(existsSync(join(root, '.claude/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.agents/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude/agents/testing-agent.md'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/testing-agent.toml'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/agents/testing-agent.md'))).toBe(true);
+    expect(config(root).components.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {

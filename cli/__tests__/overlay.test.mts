@@ -490,6 +490,8 @@ describe('overlay (local-only) install', () => {
 
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
     expect(existsSync(join(root, '.cursor', 'agents'))).toBe(true);
+    expect(existsSync(join(root, '.agents', 'skills', 'brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'agents', 'feature-critique.toml'))).toBe(true);
     expect(existsSync(join(root, '.devkit', 'skills-manifest.json'))).toBe(true);
     expect(existsSync(join(root, '.claude', 'skills', 'decisions', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(root, '.claude', 'hooks', 'decision-edit-guard.mjs'))).toBe(true);
@@ -497,6 +499,8 @@ describe('overlay (local-only) install', () => {
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.claude/skills/');
     expect(exclude).toContain('.cursor/agents/');
+    expect(exclude).toContain('.agents/skills/brainstorming/');
+    expect(exclude).toContain('.codex/agents/feature-critique.toml');
     // INVISIBLE: every synced file is excluded → status stays clean
     expect(
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
@@ -549,7 +553,7 @@ describe('overlay (local-only) install', () => {
     ).toBe('');
   });
 
-  it('merges into an existing settings.local.json (preserves the user’s keys + hooks)', async () => {
+  it('preserves user hooks and migrates exact pre-ledger registrations on re-init', async () => {
     const root = workRepo();
     seedLocalSettings(root, {
       model: 'opus',
@@ -558,21 +562,26 @@ describe('overlay (local-only) install', () => {
       },
     });
 
-    await applyInit(root, {
+    const opts = {
       stack: 'react-app',
-      selection: overlayAll(),
+      selection: { ...overlayAll(), agentTargets: ['claude', 'cursor'] },
       overlay: true,
       devkitRef: 'v0.21.0',
-    });
+    };
+    await applyInit(root, opts);
+    rmSync(join(root, '.devkit', 'agent-hook-registrations-manifest.json'));
+    await applyInit(root, opts);
 
     const merged = JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8'));
     expect(merged.model).toBe('opus'); // user key survives
     const all = JSON.stringify(merged.hooks);
     expect(all).toContain('echo mine'); // user hook survives
     expect(all).toContain('.claude/hooks/'); // devkit hooks merged in
+    expect(all.match(/decision-stop-check/g)).toHaveLength(1); // adopted, not duplicated
+    expect(existsSync(join(root, '.devkit', 'agent-hook-registrations-manifest.json'))).toBe(true);
   });
 
-  it('skips a git-TRACKED .cursor/hooks.json (warns, no edit, no exclude line)', async () => {
+  it('never edits or cleans tracked Cursor/Codex hook files', async () => {
     const root = mkTmp('overlay-cursor-');
     const git = (...a) => execFileSync('git', a, { cwd: root });
     git('init', '-q');
@@ -582,6 +591,9 @@ describe('overlay (local-only) install', () => {
     mkdirSync(join(root, '.cursor'), { recursive: true });
     const cursorBefore = '{ "version": 1, "hooks": {} }\n';
     writeFileSync(join(root, '.cursor', 'hooks.json'), cursorBefore);
+    mkdirSync(join(root, '.codex'), { recursive: true });
+    const codexBefore = '{}\n';
+    writeFileSync(join(root, '.codex', 'hooks.json'), codexBefore);
     git('add', '-A');
     git('commit', '-qm', 'init');
 
@@ -594,13 +606,51 @@ describe('overlay (local-only) install', () => {
 
     // tracked → untouched + warned + not excluded (an exclude line can't hide a tracked edit)
     expect(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8')).toBe(cursorBefore);
+    expect(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8')).toBe(codexBefore);
     expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
       '.cursor/hooks.json',
     );
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      '.codex/hooks.json',
+    );
     const logged = console.log.mock.calls.flat().join('\n');
     expect(logged).toContain('.cursor/hooks.json is git-tracked');
+    expect(logged).toContain('.codex/hooks.json is git-tracked');
     // Claude side still wired into the (untracked) local-override file
     expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(
+      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
+    ).toBe('');
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+    expect(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8')).toBe(cursorBefore);
+    expect(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8')).toBe(codexBefore);
+  });
+
+  it('relinquishes provider-native overlay assets that become tracked before clean', async () => {
+    const root = workRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: overlayAll(),
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    const kept = [
+      '.codex/agents/correctness-reviewer.toml',
+      '.codex/hooks/decision-stop-check.sh',
+      '.agents/skills/decisions/SKILL.md',
+    ];
+    execFileSync('git', ['add', '-f', ...kept], { cwd: root });
+    execFileSync('git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'adopt agent assets'], {
+      cwd: root,
+    });
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    for (const rel of kept) expect(existsSync(join(root, rel))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/api-security-reviewer.toml'))).toBe(false);
     expect(
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
     ).toBe('');
@@ -676,6 +726,10 @@ describe('overlay (local-only) install', () => {
     });
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
     expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(existsSync(join(root, '.agents', 'skills'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'agents'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'hooks'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'hooks.json'))).toBe(true);
 
     const cleanRun = (await import('../commands/clean.mts')).default;
     await cleanRun(['--yes'], root);
@@ -683,6 +737,10 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(false);
     expect(existsSync(join(root, '.claude', 'agents'))).toBe(false);
     expect(existsSync(join(root, '.claude', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, '.agents', 'skills'))).toBe(false);
+    expect(existsSync(join(root, '.codex', 'agents'))).toBe(false);
+    expect(existsSync(join(root, '.codex', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, '.codex', 'hooks.json'))).toBe(false);
     expect(existsSync(join(root, '.devkit'))).toBe(false);
     expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
     // devkit created settings.local.json + it's now empty after stripping → removed (no footprint)
@@ -695,6 +753,10 @@ describe('overlay (local-only) install', () => {
       '.claude/hooks/',
       '.cursor/hooks/',
       '.cursor/hooks.json',
+      '.agents/skills/',
+      '.codex/agents/',
+      '.codex/hooks/',
+      '.codex/hooks.json',
       'settings.local.json',
       '.fallow/',
       'fallow-baselines/',
@@ -711,6 +773,15 @@ describe('overlay (local-only) install', () => {
   it('clean KEEPS a settings.local.json that holds the user’s own content', async () => {
     const root = workRepo();
     seedLocalSettings(root, { model: 'opus', hooks: {} });
+    mkdirSync(join(root, '.codex'), { recursive: true });
+    const foreignCodexCommand = 'node ./team-stop.mjs';
+    writeFileSync(
+      join(root, '.codex', 'hooks.json'),
+      JSON.stringify({
+        description: 'team hooks',
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: foreignCodexCommand }] }] },
+      }),
+    );
     await applyInit(root, {
       stack: 'react-app',
       selection: overlayAll(),
@@ -723,6 +794,10 @@ describe('overlay (local-only) install', () => {
     const local = JSON.parse(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8'));
     expect(local.model).toBe('opus'); // user key survives
     expect(JSON.stringify(local.hooks)).not.toContain('.claude/hooks/'); // devkit hooks stripped
+    const codex = JSON.parse(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8'));
+    expect(codex.description).toBe('team hooks');
+    expect(JSON.stringify(codex.hooks)).toContain(foreignCodexCommand);
+    expect(JSON.stringify(codex.hooks)).not.toContain('.codex/hooks/decision-stop-check.sh');
   });
 
   it('isTracked: true for a committed file, false for an untracked one', () => {
@@ -740,10 +815,10 @@ describe('overlay (local-only) install', () => {
     expect(isTracked(root, 'untracked.txt')).toBe(false);
   });
 
-  it('clean recovers STRANDED overlay leftovers when .devkit (config + manifests) is gone', async () => {
-    // Reproduces the orphaned state: config + manifests deleted, core.hooksPath already restored, but
-    // the synced agent-half + fallow-baselines remain. clean must still find + remove them (by the
-    // bundled-name fallback, since the manifests are gone) — never strand a footprint.
+  it('orphan clean removes provable legacy assets but exposes ownership-uncertain native data', async () => {
+    // With every ownership record deleted, the legacy byte-matching fallback can still remove
+    // Claude/Cursor bundles. Codex projections and registrations must fail closed and become visible
+    // once stale devkit exclude lines are pruned; deleting or silently hiding them would risk user data.
     const root = workRepo();
     await applyInit(root, {
       stack: 'react-app',
@@ -758,15 +833,30 @@ describe('overlay (local-only) install', () => {
     const cleanRun = (await import('../commands/clean.mts')).default;
     await cleanRun(['--yes'], root);
 
-    // every synced artifact removed despite the missing manifests
+    // Byte-identical historical assets remain safely recoverable without their old manifests.
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(false);
     expect(existsSync(join(root, '.cursor', 'agents'))).toBe(false);
     expect(existsSync(join(root, '.claude', 'hooks'))).toBe(false);
     expect(existsSync(join(root, 'fallow-baselines'))).toBe(false);
-    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(false);
-    expect(
-      execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
-    ).toBe('');
+    // Provider-native outputs/settings lack proof after their v2 manifests/ledger were deleted.
+    expect(existsSync(join(root, '.agents', 'skills'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'agents'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'hooks'))).toBe(true);
+    expect(existsSync(join(root, '.claude', 'settings.local.json'))).toBe(true);
+    expect(existsSync(join(root, '.codex', 'hooks.json'))).toBe(true);
+    expect(console.log.mock.calls.flat().join('\n')).toContain(
+      'no hook registration ledger — preserving provider settings',
+    );
+    const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+    expect(exclude).not.toContain('.codex/');
+    expect(exclude).not.toContain('.agents/');
+    const status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    expect(status).toContain('.agents/');
+    expect(status).toContain('.codex/');
+    expect(status).toContain('.cursor/');
   });
 
   it('clean NEVER deletes a git-tracked skill dir (the user’s own, not a devkit stray)', () => {

@@ -6,6 +6,7 @@
  * strip exactly the commands a component added.
  *
  * Each registration:
+ *   registrationId — stable identity shared by future provider-native projections
  *   event    — a Claude hook event (UserPromptSubmit | PreToolUse | PostToolUse | Stop | PreCompact)
  *   matcher  — the Claude matcher string ('' = all)
  *   command  — the shell command (uses $CLAUDE_PROJECT_DIR; the consumer's repo root)
@@ -27,6 +28,7 @@ export const HOOK_REGISTRATIONS = {
     // optional general agentHooks component: selecting the guard is sufficient to install it.
     decisions: [
         {
+            registrationId: 'decisions:pre-edit',
             event: 'PreToolUse',
             matcher: 'Edit|Write|MultiEdit|Delete',
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
@@ -37,11 +39,13 @@ export const HOOK_REGISTRATIONS = {
     // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
     searchSteering: [
         {
+            registrationId: 'search-steering:pre-bash',
             event: 'PreToolUse',
             matcher: 'Bash',
             command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-guard${SELF_EXT}`,
         },
         {
+            registrationId: 'search-steering:post-bash',
             event: 'PostToolUse',
             matcher: 'Bash',
             command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${SELF_EXT}`,
@@ -51,31 +55,37 @@ export const HOOK_REGISTRATIONS = {
     // their tool/config is absent). UserPromptSubmit nudge, Stop QA trio, format-after-edit, compactor.
     agentHooks: [
         {
+            registrationId: 'agent-hooks:prompt-reminder',
             event: 'UserPromptSubmit',
             matcher: '',
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',
         },
         {
+            registrationId: 'agent-hooks:decision-stop',
             event: 'Stop',
             matcher: '',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-stop-check.sh"',
         },
         {
+            registrationId: 'agent-hooks:lint-stop',
             event: 'Stop',
             matcher: '',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/lint-check.sh"',
         },
         {
+            registrationId: 'agent-hooks:knip-stop',
             event: 'Stop',
             matcher: '',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/knip-check.sh"',
         },
         {
+            registrationId: 'agent-hooks:format-after-edit',
             event: 'PostToolUse',
             matcher: 'Edit|Write|MultiEdit',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/format-after-edit.sh"',
         },
         {
+            registrationId: 'agent-hooks:strategic-compactor',
             event: 'PreCompact',
             matcher: '',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/strategic-compactor.sh"',

@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "../components.mjs";
-import { readJson, writeIfAbsent } from "../fs-helpers.mjs";
-import { isTracked } from "../git-tracked.mjs";
-import { HOOK_REGISTRATIONS, registrationsFor } from "./hook-registrations.mjs";
+import { AGENT_TARGETS } from "../../components.mjs";
+import { readJson, writeIfAbsent } from "../../fs-helpers.mjs";
+import { isTracked } from "../../git-tracked.mjs";
+import { HOOK_REGISTRATIONS, registrationsFor } from "./registrations.mjs";
 const settingsFile = (overlay) => (overlay ? 'settings.local.json' : 'settings.json');
 function addClaude(hooks, { event, matcher, command }) {
     if (!hooks[event])

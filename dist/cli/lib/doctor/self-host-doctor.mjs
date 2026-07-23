@@ -9,7 +9,8 @@ import { printQavisAdvisoryHealth } from "../../commands/doctor.mjs";
 import { detectGitRoot } from "../detect-git-root.mjs";
 import { extractGuardBlock } from "../husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
-import { checkAgents, checkSkills } from "./asset-checks.mjs";
+import { resolveExistingAgentProviders } from "../install/agent-providers.mjs";
+import { checkAgentAssets } from "./asset-checks.mjs";
 import { checkHookRunner } from "./hook-checks.mjs";
 import { printStrayGateCalls } from "./stray-gate-calls.mjs";
 export async function runSelfHostDoctor(cwd, cfg, fix) {
@@ -40,14 +41,14 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
     }
     // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
-    const sel = cfg.components ?? {};
-    const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
-    const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
+    const recorded = cfg.components ?? {};
+    const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
+    const sel = { ...recorded, agentTargets: surfaces };
     const advise = (r) => console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-    if (sel.skills && primary)
-        advise(await checkSkills(cwd, primary));
-    if (sel.agents && primary)
-        advise(await checkAgents(cwd, primary));
+    if (sel.skills && surfaces.length)
+        advise(checkAgentAssets(cwd, 'skills', surfaces, { guards: sel.guards ?? [] }));
+    if (sel.agents && surfaces.length)
+        advise(checkAgentAssets(cwd, 'agents', surfaces));
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.

@@ -10,6 +10,8 @@
 
 import { execFileSync } from 'node:child_process';
 
+const TRAILING_SLASH_RE = /\/$/;
+
 /**
  * @param gitRoot the dir holding `.git`
  * @param relPath git-root-relative POSIX path (file or dir)
@@ -22,7 +24,22 @@ export function isTracked(gitRoot: string, relPath: string): boolean {
       stdio: 'pipe',
     });
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as { status?: number }).status === 1) return false;
+    throw error;
   }
+}
+
+/** Snapshot tracked files and their parent directories for repeated lifecycle checks. */
+export function trackedPathPredicate(gitRoot: string): (relPath: string) => boolean {
+  const files = execFileSync('git', ['ls-files', '-z'], { cwd: gitRoot, encoding: 'utf8' });
+  const tracked = new Set<string>();
+  for (const file of files.split('\0').filter(Boolean)) {
+    let path = '';
+    for (const part of file.split('/')) {
+      path = path ? `${path}/${part}` : part;
+      tracked.add(path);
+    }
+  }
+  return (relPath) => tracked.has(relPath.replace(TRAILING_SLASH_RE, ''));
 }
