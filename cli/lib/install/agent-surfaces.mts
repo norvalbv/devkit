@@ -4,7 +4,9 @@ import { syncAgents } from '../../commands/sync/sync-agents.mts';
 import { syncSkills } from '../../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, type Selection } from '../components.mts';
 import { removeAgents, removeSkills } from '../sync-manifest.mts';
-import { selectedHookAssets } from './agent-hook-selection.mts';
+import { agentAssetDir } from './agent-assets.mts';
+import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
+import { selectedHookAssets } from './hook-registration-ledger/selection.mts';
 import {
   installHookRegistrations,
   removeHookRegistrations,
@@ -20,16 +22,21 @@ function pruneDeselectedSurfaces(
   agentTargets: string[],
   hookScripts: string[],
   dryRun: boolean,
+  legacyOwnedComponentIds: string[],
 ) {
-  const prunedTargets = AGENT_TARGETS.filter((target) => !agentTargets.includes(target));
+  const prunedTargets = SUPPORTED_AGENT_PROVIDERS.filter(
+    (target) => !agentTargets.includes(target),
+  );
   const settingsFile: Record<string, string> = {
     claude: '.claude/settings.json',
+    codex: '.codex/hooks.json',
     cursor: '.cursor/hooks.json',
   };
   const hasContent = prunedTargets.some(
     (target) =>
-      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${target}`, kind))) ||
-      existsSync(join(gitRoot, settingsFile[target])),
+      (['skills', 'agents', 'hooks'] as const).some((kind) =>
+        existsSync(join(gitRoot, agentAssetDir(target, kind))),
+      ) || existsSync(join(gitRoot, settingsFile[target])),
   );
   if (!prunedTargets.length || !hasContent) return;
   console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -41,7 +48,11 @@ function pruneDeselectedSurfaces(
       targets: prunedTargets,
       dropManifest: false,
     });
-  removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
+  removeHookRegistrations(gitRoot, {
+    dryRun,
+    targets: prunedTargets,
+    legacyOwnedComponentIds,
+  });
 }
 
 /** Exact-reconcile all selected agent assets and prune deselected surfaces. */
@@ -50,6 +61,7 @@ export function installAgentSurfaces(
   selection: Selection,
   dryRun: boolean,
   override: OverrideAsset = () => false,
+  legacyOwnedComponentIds: string[] = [],
 ) {
   const targets = selection.agentTargets ?? AGENT_TARGETS;
   if (selection.skills) {
@@ -83,17 +95,28 @@ export function installAgentSurfaces(
 
   if (hooks.components.length) {
     console.log('7c. agent hook registrations');
-    installHookRegistrations(gitRoot, hooks.components, { dryRun, targets });
+    installHookRegistrations(gitRoot, hooks.components, {
+      dryRun,
+      targets,
+      legacyOwnedComponentIds,
+    });
   } else if (
     targets.some((target) =>
       existsSync(
-        join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json'),
+        join(gitRoot, target === 'claude' ? '.claude/settings.json' : `.${target}/hooks.json`),
       ),
     )
   ) {
-    removeHookRegistrations(gitRoot, { dryRun, targets });
+    removeHookRegistrations(gitRoot, { dryRun, targets, legacyOwnedComponentIds });
   }
-  pruneDeselectedSurfaces(gitRoot, selection, targets, hooks.scripts, dryRun);
+  pruneDeselectedSurfaces(
+    gitRoot,
+    selection,
+    targets,
+    hooks.scripts,
+    dryRun,
+    legacyOwnedComponentIds,
+  );
   return targets;
 }
 

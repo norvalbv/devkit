@@ -12,6 +12,11 @@ import { join, relative } from 'node:path';
 import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "../../lib/install/agent-asset-manifest/compatibility.mjs";
+import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from "../../lib/install/agent-asset-manifest/lifecycle.mjs";
+import { readAgentAssetManifest } from "../../lib/install/agent-asset-manifest/reader.mjs";
+import { agentAssetDir } from "../../lib/install/agent-assets.mjs";
+import { resolveExistingAgentProviders } from "../../lib/install/agent-providers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
 // Recursively list every file under `dir`, returned as paths relative to `dir`.
 function walk(dir, base = dir) {
@@ -44,6 +49,10 @@ export function skillNamesForGuards(allNames, guards = []) {
  */
 export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false, guards = [] } = {}) {
     const dryRun = args.includes('--dry-run');
+    return withAgentAssetLifecycleLock(cwd, dryRun, () => syncSkillsLocked(args, cwd, targets, { skipTracked, override, guards }));
+}
+function syncSkillsLocked(args, cwd, targets, { skipTracked, override = () => false, guards = [] }) {
+    const dryRun = args.includes('--dry-run');
     const targetDirs = targets.map((t) => `.${t}/skills`);
     const skillsSrc = join(packageDir(), 'skills');
     const allRels = walk(skillsSrc);
@@ -54,7 +63,43 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
     // The prior manifest (also reused for the idempotency check below) — its keys tell findConflicts
     // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
     const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
-    const prev = readJson(manifestPath);
+    const decoded = readAgentAssetManifest(manifestPath, 'skills');
+    if (requiresProviderNativeLifecycle(decoded, targets)) {
+        const result = syncProviderNativeAssets({
+            root: cwd,
+            kind: 'skills',
+            sources: rels.map((logicalRel) => ({
+                logicalRel,
+                content: readFileSync(join(skillsSrc, logicalRel)),
+            })),
+            targets,
+            devkitRef,
+            dryRun,
+            skipTracked,
+            override,
+        });
+        const reported = new Set();
+        for (const skip of result.skips) {
+            if (reported.has(skip.unit))
+                continue;
+            reported.add(skip.unit);
+            console.log(skip.reason === 'tracked'
+                ? `  ! skipping skill "${skip.unit}" — git-tracked in the repo (left untouched)`
+                : `  ! preserving non-devkit skill "${skip.unit}" (left untouched — re-run with --force or select it to overwrite)`);
+        }
+        if (dryRun) {
+            for (const outputPath of result.outputPaths)
+                console.log(`  [dry-run] write ${outputPath}`);
+            console.log(`  [dry-run] write .devkit/skills-manifest.json (${rels.length} files)`);
+        }
+        else {
+            const dirs = targets.map((target) => agentAssetDir(target, 'skills'));
+            console.log(`  ✓ synced ${Object.keys(result.manifest.files).length} skill file(s) → ${dirs.join(' + ')}`);
+        }
+        return result.manifest;
+    }
+    assertLegacyAssetWriterCompatible(decoded, targets, 'skills');
+    const prev = decoded?.manifest ?? null;
     // Guard-aware exact reconciliation: only remove skill dirs that the previous manifest proves
     // Devkit owned. A consumer-authored, unmanifested `decisions` collision remains untouched.
     const previousNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
@@ -111,8 +156,7 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
     // Idempotency: keep generatedAt STABLE when nothing about the synced set changed
     // (same devkitRef + same file shas), so a re-run produces no spurious git diff. (manifestPath +
     // prev were read above — reused here, also the provenance source for findConflicts.)
-    const unchanged = prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
-    const generatedAt = unchanged && prev ? prev.generatedAt : new Date().toISOString();
+    const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
     // `targets` records WHICH surfaces devkit wrote to, so findConflicts can tell a name it owns on
     // one surface from a same-named divergent asset on another (surface-aware ownership).
     const manifest = { devkitRef, generatedAt, targets: [...targets], files };
@@ -136,12 +180,31 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
 export function detectSkillConflicts(root, targets = AGENT_TARGETS, guards = []) {
     const skillsSrc = join(packageDir(), 'skills');
     const names = skillNamesForGuards([...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))], guards);
-    return findConflicts(root, skillsSrc, names, targets, 'skills', readJson(join(root, '.devkit', 'skills-manifest.json')));
+    const decoded = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
+    if (requiresProviderNativeLifecycle(decoded, targets)) {
+        return [
+            ...new Set(findProviderNativeAssetConflicts({
+                root,
+                kind: 'skills',
+                sources: walk(skillsSrc)
+                    .filter((logicalRel) => names.includes(logicalRel.split('/')[0]))
+                    .map((logicalRel) => ({
+                    logicalRel,
+                    content: readFileSync(join(skillsSrc, logicalRel)),
+                })),
+                targets,
+            })
+                .filter((conflict) => conflict.reason !== 'tracked')
+                .map((conflict) => conflict.unit)),
+        ];
+    }
+    assertLegacyAssetWriterCompatible(decoded, targets, 'skills');
+    return findConflicts(root, skillsSrc, names, targets, 'skills', decoded?.manifest ?? null);
 }
 export const meta = {
     name: 'sync-skills',
-    summary: 'Copy bundled skills into .claude/skills + .cursor/skills.',
-    help: `devkit sync-skills — copy devkit's bundled skills into .claude/skills + .cursor/skills.
+    summary: 'Copy bundled skills into selected agent providers.',
+    help: `devkit sync-skills — copy devkit's bundled skills into Claude, Codex, and Cursor.
 
 Usage:
   devkit sync-skills [--dry-run] [--force]
@@ -154,11 +217,15 @@ export default function run(args, cwd) {
     // Skills are repo-wide → target the git root (= cwd for a single-package repo). Honour the
     // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.
     const { gitRoot } = detectGitRoot(cwd);
-    const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
+    // Config is package-local in a monorepo even though agent assets are repo-wide.
+    const cfg = readJson(join(cwd, '.devkit', 'config.json'));
     // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
     // per-asset picker is `devkit init` interactive only).
     const override = args.includes('--force') ? () => true : undefined;
-    syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, {
+    const targets = cfg
+        ? resolveExistingAgentProviders(gitRoot, cfg.components?.agentTargets, ['skills'])
+        : AGENT_TARGETS;
+    syncSkills(args, gitRoot, targets, {
         override,
         guards: cfg?.components?.guards ?? [],
     });

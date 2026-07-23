@@ -20,7 +20,7 @@ The package and agent assets use the same release tag. A prompt or skill cannot 
 - Git
 - [Bun](https://bun.sh/) for installation and repository development
 - Node.js 23.6 or newer when running the emitted JavaScript directly
-- A supported agent host when using the optional Claude/Cursor agent surfaces
+- A supported Claude, Codex, or Cursor host when using the optional agent surfaces
 
 ## Quick start
 
@@ -32,7 +32,9 @@ bunx devkit init
 bunx devkit doctor
 ```
 
-`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Use `--yes` for defaults or `--dry-run` to preview.
+`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Fresh installs target Claude, Codex, and Cursor; pass `--no-claude`, `--no-codex`, or `--no-cursor` to narrow the set. Existing installs keep their recorded provider selection during sync, upgrade, and repair. Use `--yes` for defaults or `--dry-run` to preview.
+
+When optional project hooks are selected for Codex, open `/hooks` once to review and trust their exact definitions. Codex skips new or changed project hooks until that trust review is complete.
 
 Extend the stable, extension-free package exports:
 

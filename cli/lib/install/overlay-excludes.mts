@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
-const AGENT_ASSET_RE = /^\.(?:claude|cursor)\/(?:skills|agents|hooks)(?:\/|\.json$)/;
+const AGENT_ASSET_RE =
+  /^\.(?:(?:claude|cursor)\/(?:skills|agents|hooks)(?:\/|$)|agents\/skills(?:\/|$)|codex\/(?:agents|hooks)(?:\/|$)|(?:cursor|codex)\/hooks\.json$)/;
 const CLAUDE_LOCAL_SETTINGS_RE = /^\.claude\/settings\.local\.json$/;
 const AGENT_MANIFEST_RE = /^\.devkit\/(?:skills|agents|agent-hooks)-manifest\.json$/;
 

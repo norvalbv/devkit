@@ -110,34 +110,39 @@ Research is **mandatory** for all critical issues. The critic will:
 
 ## Output Format
 
-The critic writes a **full report to file** and returns only a **compact summary** (~300 tokens) to the parent agent. This prevents context bloat and autocompaction issues.
+The critic returns one closed `plan_critique` JSON object as its final message. The response carries
+the full analysis, findings, atomic edge cases, actions, strengths, and research references. It does
+not write runtime artifacts into the repository or any provider directory; an installed capture hook
+may persist the final message privately outside the checkout.
 
-### What the parent agent receives (~300 tokens):
+The parent agent should inspect these fields first:
 
-```
-CRITIQUE: .cursor/.feature-critique.md
-VERDICT: RETHINK
-FEASIBILITY: Not Feasible
-CRITICAL_ISSUES: 2
-WARNINGS: 3
+- `status`: `reviewed`, `wrong_phase`, or `aborted`
+- `verdict`: `PROCEED`, `PROCEED_WITH_CHANGES`, `RETHINK`, or `REJECT` when reviewed
+- `summary`, `findings[]`, `edgeCases[]`, and `actions[]`
 
-SUMMARY: Symlink approach fails because neither Cursor nor Claude CLI follow
-symlinks to arbitrary directories. The core problem (config duplication) is
-real but needs a different solution.
+`wrong_phase` means the request is post-implementation. Route it to the future implementation
+reviewer; do not treat it as a plan critique result.
 
-ACTIONS:
-- Research Cursor's --include flag for custom agent paths
-- Consider a build-step that copies canonical configs to IDE directories
-- Validate Claude CLI's CLAUDE.md include directive as alternative
-```
+## Plan-exit lifecycle
 
-### Where the full report lives:
+Run this skill against a decision-complete draft immediately before exiting a feature or architecture
+plan:
 
-`.cursor/.feature-critique.md` — a single file overwritten on each invocation. The parent agent reads it after receiving the compact summary. Gitignored.
+1. Invoke one fresh `feature-critique` subagent with the finalized draft.
+2. If the first response is `aborted`, `wrong_phase`, or invalid JSON, surface that unresolved result;
+   never treat it as approval to implement.
+3. Accept `PROCEED`. For `PROCEED_WITH_CHANGES` with warnings only, incorporate those warnings.
+4. On `RETHINK`, `REJECT`, or any CRITICAL finding, revise the plan and run one fresh recheck with a
+   new subagent.
+5. If the second response still blocks, aborts, or is invalid, surface the unresolved issue instead
+   of looping.
 
-## Edge-cases artifact path
-
-The critic writes the edge-cases artifact to `.cursor/.edge-cases.json` by default. For parallel flows, put `EDGE_CASES_ID=<id>` at the **top** of the prompt (e.g. above a `---` separator); the critic will then write to `.cursor/.edge-cases-<id>.json` and set `flowId` in the artifact.
+Do not schedule periodic critique against unstable drafts. This skill is pre-implementation only.
+The one-recheck ceiling is a benchmark rollout bound, not a literature-proven optimum: grounded
+refinement can help ([Self-Refine](https://arxiv.org/abs/2303.17651),
+[CRITIC](https://arxiv.org/abs/2305.11738)), while unsupported intrinsic self-correction can regress
+([Huang et al.](https://arxiv.org/abs/2310.01798)).
 
 ## Invocation Example
 
@@ -164,9 +169,4 @@ copies + a checksum manifest sidestep dangling links.
 }
 ```
 
-### Reading the full report after invocation:
-
-```typescript
-// The parent agent can read the full critique when needed:
-// Read(".cursor/.feature-critique.md")
-```
+The Task result itself is the critique response; parse it as JSON and keep it as untrusted data.

@@ -17,9 +17,16 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../components.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
 import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest.mjs";
-export { checkHookRegistrations, installHookRegistrations, removeHookRegistrations, } from "./hook-settings.mjs";
-// Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
-const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "./agent-asset-manifest/compatibility.mjs";
+import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from "./agent-asset-manifest/lifecycle.mjs";
+import { readAgentAssetManifest } from "./agent-asset-manifest/reader.mjs";
+import { agentAssetDir } from "./agent-assets.mjs";
+import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from "./agent-providers.mjs";
+import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from "./hook-registration-ledger/codec.mjs";
+import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, } from "./hook-registration-ledger/install-support.mjs";
+import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from "./hook-registration-ledger/lifecycle.mjs";
+import { HOOK_REGISTRATIONS } from "./hook-registration-ledger/registrations.mjs";
+const hookDirs = (targets) => targets.map((target) => agentAssetDir(target, 'hooks'));
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
 function bundledHookNames() {
     return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -48,107 +55,259 @@ export function hookScriptsFor({ agentHooks, decisions, }) {
  *   `override('agent-hook', name)` is true.
  */
 export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS, only, desired, skipTracked, override = () => false, } = {}) {
-    const src = join(packageDir(), 'agents-hooks');
-    const dirs = hookDirs(targets);
-    let rels = bundledHookNames();
-    const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
-    const prev = readJson(manifestPath);
-    if (only?.length && desired)
-        throw new Error('syncHookScripts: only and desired are mutually exclusive');
-    if (only?.length) {
-        const unknown = only.filter((n) => !rels.includes(n));
-        if (unknown.length)
-            throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
-        rels = rels.filter((r) => only.includes(r));
-    }
-    if (desired) {
-        const unknown = desired.filter((name) => !rels.includes(name));
-        if (unknown.length)
-            throw new Error(`syncHookScripts: devkit ships no hook named ${unknown.join(', ')}`);
-        rels = rels.filter((name) => desired.includes(name));
-    }
-    const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
-    // `only` carries the prior manifest forward (add-to-owned-set); a full sync starts clean.
-    const files = only?.length ? { ...(prev?.files ?? {}) } : {};
-    // Exact reconciliation removes only manifest-owned scripts that are no longer selected. Include
-    // prior surfaces so a claude+cursor → claude switch cannot strand the old Cursor copy.
-    if (desired) {
-        const kept = new Set(rels);
-        const oldNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
-        const cleanupTargets = new Set([...(prev?.targets ?? []), ...targets]);
-        for (const name of oldNames) {
-            if (kept.has(name))
-                continue;
-            for (const target of cleanupTargets) {
-                const dest = join(root, `.${target}`, 'hooks', name);
-                if (!dryRun && existsSync(dest))
-                    rmSync(dest, { force: true });
+    return withAgentAssetLifecycleLock(root, dryRun, () => {
+        const src = join(packageDir(), 'agents-hooks');
+        const dirs = hookDirs(targets);
+        let rels = readdirSync(src, { withFileTypes: true })
+            .filter((e) => e.isFile())
+            .map((e) => e.name);
+        const manifestPath = join(root, '.devkit', 'agent-hooks-manifest.json');
+        const decoded = readAgentAssetManifest(manifestPath, 'hooks');
+        if (only?.length && desired)
+            throw new Error('syncHookScripts: only and desired are mutually exclusive');
+        if (only?.length) {
+            const unknown = only.filter((n) => !rels.includes(n));
+            if (unknown.length)
+                throw new Error(`sync-hooks --only: devkit ships no hook named ${unknown.join(', ')}`);
+            rels = rels.filter((r) => only.includes(r));
+        }
+        if (desired) {
+            const unknown = desired.filter((name) => !rels.includes(name));
+            if (unknown.length)
+                throw new Error(`syncHookScripts: devkit ships no hook named ${unknown.join(', ')}`);
+            rels = rels.filter((name) => desired.includes(name));
+        }
+        const devkitPkg = readJson(join(packageDir(), 'package.json'));
+        const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
+        if (requiresProviderNativeLifecycle(decoded, targets)) {
+            const result = syncProviderNativeAssets({
+                root,
+                kind: 'hooks',
+                manifestFilename: 'agent-hooks-manifest.json',
+                sources: rels.map((logicalRel) => ({
+                    logicalRel,
+                    content: readFileSync(join(src, logicalRel)),
+                })),
+                targets,
+                devkitRef,
+                dryRun,
+                skipTracked,
+                override,
+                retainUnspecified: Boolean(only?.length),
+                fileMode: 0o755,
+            });
+            const reported = new Set();
+            for (const skip of result.skips) {
+                if (reported.has(skip.unit))
+                    continue;
+                reported.add(skip.unit);
+                console.log(skip.reason === 'tracked'
+                    ? `  ! skipping agent-hook "${skip.unit}" — git-tracked (left untouched)`
+                    : `  ! preserving non-devkit agent-hook "${skip.unit}" (left untouched — re-run with --force or select it to overwrite)`);
+            }
+            console.log(`  ${dryRun ? '[dry-run] sync' : '✓ synced'} ${rels.length} agent-hook script(s) → ${hookDirs(targets).join(' + ')}`);
+            return result.manifest;
+        }
+        assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
+        const prev = decoded?.manifest ?? null;
+        const conflicts = new Set(findConflicts(root, src, rels, targets, 'hooks', prev));
+        const files = only?.length ? { ...(prev?.files ?? {}) } : {};
+        if (desired) {
+            const kept = new Set(rels);
+            const oldNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
+            const cleanupTargets = new Set([...(prev?.targets ?? []), ...targets]);
+            for (const name of oldNames) {
+                if (kept.has(name))
+                    continue;
+                for (const target of cleanupTargets) {
+                    const dest = join(root, agentAssetDir(target, 'hooks'), name);
+                    if (!dryRun && existsSync(dest))
+                        rmSync(dest, { force: true });
+                }
             }
         }
-    }
-    for (const rel of rels) {
-        // Overlay: a hook script git already tracks can't be hidden by .git/info/exclude → skip it (C2).
-        if (skipTracked && dirs.some((d) => skipTracked(`${d}/${rel}`))) {
-            console.log(`  ! skipping agent-hook "${rel}" — git-tracked (left untouched)`);
-            continue;
+        for (const rel of rels) {
+            if (skipTracked && dirs.some((d) => skipTracked(`${d}/${rel}`))) {
+                console.log(`  ! skipping agent-hook "${rel}" — git-tracked (left untouched)`);
+                continue;
+            }
+            if (conflicts.has(rel) && !override('agent-hook', rel)) {
+                console.log(`  ! preserving non-devkit agent-hook "${rel}" (left untouched — re-run with --force or select it to overwrite)`);
+                continue;
+            }
+            const content = readFileSync(join(src, rel));
+            files[rel] = sha256(join(src, rel));
+            if (dryRun)
+                continue;
+            for (const dir of dirs) {
+                const dest = join(root, dir, rel);
+                writeIfAbsent(dest, content, { force: true });
+                chmodSync(dest, 0o755);
+            }
         }
-        // Non-devkit collision: leave the consumer's own hook script untouched (+ out of the manifest).
-        if (conflicts.has(rel) && !override('agent-hook', rel)) {
-            console.log(`  ! preserving non-devkit agent-hook "${rel}" (left untouched — re-run with --force or select it to overwrite)`);
-            continue;
+        const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
+        const manifest = {
+            devkitRef,
+            generatedAt,
+            targets: [...targets],
+            files,
+        };
+        if (dryRun) {
+            console.log(`  [dry-run] sync ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
+            return manifest;
         }
-        const content = readFileSync(join(src, rel));
-        files[rel] = sha256(join(src, rel));
-        if (dryRun)
-            continue;
-        for (const dir of dirs) {
-            const dest = join(root, dir, rel);
-            writeIfAbsent(dest, content, { force: true });
-            chmodSync(dest, 0o755);
-        }
-    }
-    const devkitPkg = readJson(join(packageDir(), 'package.json'));
-    const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
-    const unchanged = prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
-    const manifest = {
-        devkitRef,
-        generatedAt: unchanged && prev ? prev.generatedAt : new Date().toISOString(),
-        // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
-        targets: [...targets],
-        files,
-    };
-    if (dryRun) {
-        console.log(`  [dry-run] sync ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
+        writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
+        console.log(`  ✓ synced ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
         return manifest;
-    }
-    writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
-        force: true,
     });
-    console.log(`  ✓ synced ${rels.length} agent-hook script(s) → ${dirs.join(' + ')}`);
-    return manifest;
 }
 /**
- * The consumer's OWN agent-hook scripts that collide with a devkit-bundled name (on disk,
- * unmanifested, divergent) — what an interactive `devkit init` lists for the user to pick from.
- * @param {string} root git root
- * @param {string[]} [targets] surfaces to check (default both)
- * @returns {string[]} colliding hook-script filenames
+ * The consumer's OWN agent-hook scripts that collide with a devkit-bundled name.
  */
 export function detectHookConflicts(root, targets = AGENT_TARGETS, desired) {
     const src = join(packageDir(), 'agents-hooks');
     const rels = bundledHookNames().filter((name) => !desired || desired.includes(name));
-    return findConflicts(root, src, rels, targets, 'hooks', readJson(join(root, '.devkit', 'agent-hooks-manifest.json')));
+    const decoded = readAgentAssetManifest(join(root, '.devkit', 'agent-hooks-manifest.json'), 'hooks');
+    if (requiresProviderNativeLifecycle(decoded, targets)) {
+        return [
+            ...new Set(findProviderNativeAssetConflicts({
+                root,
+                kind: 'hooks',
+                manifestFilename: 'agent-hooks-manifest.json',
+                sources: rels.map((logicalRel) => ({
+                    logicalRel,
+                    content: readFileSync(join(src, logicalRel)),
+                })),
+                targets,
+            })
+                .filter((conflict) => conflict.reason !== 'tracked')
+                .map((conflict) => conflict.unit)),
+        ];
+    }
+    assertLegacyAssetWriterCompatible(decoded, targets, 'hooks');
+    return findConflicts(root, src, rels, targets, 'hooks', decoded?.manifest ?? null);
 }
-/**
- * Remove the synced agent-hook scripts (per manifest) from the given surfaces' hook dirs.
- * `dropManifest` (default true) also deletes the manifest — pass false when pruning ONE surface
- * while the other still holds tracked scripts (a both → single-surface switch).
- *
- * @param {string} root the git root
- * @param {{ dryRun?: boolean, targets?: string[], dropManifest?: boolean }} [opts]
- */
-export function removeHookScripts(root, { dryRun = false, targets = AGENT_TARGETS, dropManifest = true } = {}) {
-    // Hook scripts are flat files in <surface>/hooks — the same teardown removeManifested does for
-    // skills/agents (manifest names, or the bundled set as fallback, tracked-safe on the fallback).
-    removeManifested(root, 'agent-hooks-manifest.json', hookDirs(targets), 'agent-hook script', dryRun, dropManifest, bundledNames('agents-hooks', (e) => e.isFile()), join(packageDir(), 'agents-hooks'));
+export function removeHookScripts(root, { dryRun = false, targets, dropManifest = true, skipTracked } = {}) {
+    withAgentAssetLifecycleLock(root, dryRun, () => {
+        const native = removeProviderNativeAssets({
+            root,
+            kind: 'hooks',
+            targets,
+            dryRun,
+            dropManifest,
+            skipTracked,
+        });
+        if (native.handled) {
+            console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${native.removed.length} synced agent-hook script(s)${dropManifest ? ' + manifest' : ''}`);
+            return;
+        }
+        const decoded = readAgentAssetManifest(join(root, '.devkit', 'agent-hooks-manifest.json'), 'hooks');
+        const inferredTargets = decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
+        const legacyTargets = (targets ?? inferredTargets).filter((target) => LEGACY_AGENT_PROVIDERS.includes(target));
+        if (!legacyTargets.length)
+            return;
+        removeManifested(root, 'agent-hooks-manifest.json', hookDirs(legacyTargets), 'agent-hook script', dryRun, dropManifest, bundledNames('agents-hooks', (e) => e.isFile()), join(packageDir(), 'agents-hooks'), skipTracked);
+    });
+}
+export function installHookRegistrations(root, componentIds, { dryRun = false, targets = AGENT_TARGETS, overlay = false, legacyOwnedComponentIds, } = {}) {
+    if (!componentIds.some((id) => HOOK_REGISTRATIONS[id]?.length))
+        return { wrote: [] };
+    const scope = overlay ? 'overlay' : 'shared';
+    return withAgentAssetLifecycleLock(root, dryRun, () => {
+        const initial = readHookRegistrationLedger(root) ?? ledgerOf();
+        let entries = [...initial.entries];
+        let published = initial;
+        const wrote = [];
+        const obsoleteIds = Object.keys(HOOK_REGISTRATIONS).filter((id) => !componentIds.includes(id));
+        for (const provider of requireAgentProviders(targets)) {
+            const rel = hookRegistrationDestination(provider, scope);
+            if (skipProvider(root, provider, rel, overlay))
+                continue;
+            let document = providerDocument(root, provider, rel);
+            entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
+            entries = transferHookRegistrationScope(entries, provider, scope);
+            const removed = removeLedgerAuthorizedHookRegistrations(document, projectHookRegistrations(obsoleteIds, [provider], scope), ledgerOf(entries), provider, scope);
+            entries = release(entries, [...removed.removed, ...removed.alreadyAbsent]);
+            document = removed.document;
+            const installed = installProjectedHookRegistrations(document, projectHookRegistrations(componentIds, [provider], scope), ledgerOf(entries), provider, scope);
+            const unresolved = removed.blocked.length ||
+                removed.drifted.length ||
+                installed.blocked.length ||
+                installed.collisions.length;
+            if (unresolved)
+                throw new Error(`${provider} hook registration conflicts require resolution`);
+            entries = adopt(entries, installed.ownershipEntries);
+            const plan = {
+                provider,
+                rel,
+                document: installed.document,
+                changed: removed.changed || installed.changed,
+                report: removed.changed || installed.ownershipEntries.length > 0,
+            };
+            published = publishPlan(root, plan, entries, published, dryRun);
+            if (plan.report)
+                wrote.push(plan.rel);
+        }
+        if (wrote.length && published.entries.length)
+            wrote.push(HOOK_REGISTRATION_LEDGER_REL);
+        console.log(`  ${dryRun ? '[dry-run] merge' : '✓ registered'} hook registrations`);
+        return { wrote: [...new Set(wrote)] };
+    });
+}
+export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_TARGETS, overlay = false, legacyOwnedComponentIds, } = {}) {
+    const scope = overlay ? 'overlay' : 'shared';
+    withAgentAssetLifecycleLock(root, dryRun, () => {
+        const storedLedger = readHookRegistrationLedger(root);
+        if (!storedLedger && !legacyOwnedComponentIds) {
+            console.log('  • no hook registration ledger — preserving provider settings');
+            return;
+        }
+        const ledger = storedLedger ?? ledgerOf();
+        let entries = [...ledger.entries];
+        let published = ledger;
+        const storedKeys = new Set(entries.map(ownedKey));
+        for (const provider of requireAgentProviders(targets)) {
+            const rel = hookRegistrationDestination(provider, scope);
+            if (skipProvider(root, provider, rel, overlay))
+                continue;
+            const document = providerDocument(root, provider, rel);
+            entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
+            entries = transferHookRegistrationScope(entries, provider, scope);
+            const removed = removeLedgerAuthorizedHookRegistrations(document, projectHookRegistrations(Object.keys(HOOK_REGISTRATIONS), [provider], scope), ledgerOf(entries), provider, scope);
+            entries = release(entries, [...removed.removed, ...removed.alreadyAbsent]);
+            entries = entries.filter((entry) => storedKeys.has(ownedKey(entry)));
+            const plan = { provider, rel, document: removed.document, changed: removed.changed };
+            published = publishPlan(root, plan, entries, published, dryRun);
+        }
+        console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} hook registrations`);
+    });
+}
+export function checkHookRegistrations(root, componentIds, { overlay = false, targets = AGENT_TARGETS, legacyOwnedComponentIds, } = {}) {
+    if (!componentIds.some((id) => HOOK_REGISTRATIONS[id]?.length))
+        return { ok: true, missing: [] };
+    const scope = overlay ? 'overlay' : 'shared';
+    const ledger = readHookRegistrationLedger(root);
+    const missing = [];
+    for (const provider of requireAgentProviders(targets)) {
+        const rel = hookRegistrationDestination(provider, scope);
+        if (!isSafeAgentAssetPath(root, rel, true)) {
+            missing.push(`${provider}:unsafe-config`);
+            continue;
+        }
+        const document = providerDocument(root, provider, rel);
+        const effectiveLedger = legacyOwnedComponentIds?.length
+            ? ledgerOf(adoptExactLegacy([...(ledger?.entries ?? [])], document, legacyOwnedComponentIds, provider, scope))
+            : ledger;
+        const result = checkProjectedHookRegistrations(document, projectHookRegistrations(componentIds, [provider], scope), effectiveLedger, provider, scope);
+        for (const [reason, candidates] of Object.entries({
+            missing: result.missing,
+            drifted: result.drifted,
+            collision: result.collisions,
+            blocked: result.blocked,
+            'untrusted-ledger': result.untrustedLedgerEntries,
+        }))
+            for (const candidate of candidates)
+                missing.push(`${provider}:${candidate.registrationId}:${reason}`);
+    }
+    return { ok: missing.length === 0, missing };
 }

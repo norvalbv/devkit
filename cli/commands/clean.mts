@@ -15,9 +15,13 @@ import { join, relative } from 'node:path';
 import { confirm, isCancel } from '@clack/prompts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
-import { isTracked } from '../lib/git-tracked.mts';
+import { isTracked, trackedPathPredicate } from '../lib/git-tracked.mts';
 import { removeCommitMsgBlock } from '../lib/husky/commit-msg-block.mts';
 import { removeGuardBlock } from '../lib/husky/husky-block.mts';
+import {
+  resolveExistingAgentProviders,
+  SUPPORTED_AGENT_PROVIDERS,
+} from '../lib/install/agent-providers.mts';
 import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { removeSearchCode } from '../lib/install/install-search-code.mts';
@@ -34,6 +38,7 @@ interface DevkitComponents {
   fallow?: boolean;
   searchCode?: boolean;
   guards?: string[];
+  agentTargets?: string[];
 }
 /** The subset of .devkit/config.json that `clean` reads to reverse an install. */
 interface DevkitConfig {
@@ -49,7 +54,7 @@ interface PackageJsonShape {
   devDependencies?: Record<string, string>;
   scripts?: Record<string, string>;
 }
-/** A parsed agent-surface settings file (.claude/settings.local.json / .cursor/hooks.json). */
+/** A parsed agent-surface settings file (Claude/Codex/Cursor hook configuration). */
 interface SettingsShape {
   hooks?: Record<string, unknown>;
   [key: string]: unknown;
@@ -79,7 +84,7 @@ function extendsDevkit(path: string): boolean {
 // agent-half + fallow lines (added when overlay grew past the lint/guard set) are prefix-tolerant
 // (`(.*\/)?`) so a monorepo `pkgRel/`-scoped entry is pruned too — a miss orphans the line.
 const DEVKIT_EXCLUDE_LINE =
-  /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.cursor\/hooks\.json|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/)/;
+  /^(# devkit overlay|\.devkit\/|.*\/\.devkit\/|.*guard\.config\.json|.*biome\.devkit\.jsonc|.*eslint\.config\.devkit\.mjs|.*eslint\/baselines\/|(.*\/)?\.claude\/(skills|agents|hooks)\/|(.*\/)?\.agents\/skills\/|(.*\/)?\.codex\/(agents|hooks)\/|(.*\/)?\.(cursor|codex)\/hooks\.json|(.*\/)?\.cursor\/(skills|agents|hooks)\/|(.*\/)?\.claude\/settings\.local\.json|(.*\/)?\.fallow\/|(.*\/)?fallow-baselines\/)/;
 const BLANK_RUN_RE = /\n{3,}/g;
 const LEADING_BLANKS_RE = /^\n+/;
 function pruneGitExclude(gitRoot: string, dryRun: boolean): void {
@@ -103,6 +108,9 @@ function hasOverlayStrays(gitRoot: string): boolean {
   if (existsSync(join(gitRoot, '.devkit')) || existsSync(join(gitRoot, 'fallow-baselines'))) {
     return true;
   }
+  const exclude = join(gitRoot, '.git', 'info', 'exclude');
+  if (existsSync(exclude) && readFileSync(exclude, 'utf8').includes('# devkit overlay'))
+    return true;
   const skillsSrc = join(packageDir(), 'skills');
   const names = existsSync(skillsSrc)
     ? readdirSync(skillsSrc, { withFileTypes: true })
@@ -124,10 +132,12 @@ function hasOverlayStrays(gitRoot: string): boolean {
 // the per-package overlay configs (in cwd) are removed only if git doesn't track them (never the
 // user's own guard.config.json / eslint dir).
 function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void {
-  removeSkills(gitRoot, dryRun);
-  removeAgents(gitRoot, dryRun);
-  removeHookScripts(gitRoot, { dryRun });
-  removeHookRegistrations(gitRoot, { dryRun, overlay: true });
+  const targets = [...SUPPORTED_AGENT_PROVIDERS];
+  const skipTracked = trackedPathPredicate(gitRoot);
+  removeSkills(gitRoot, dryRun, targets, true, skipTracked);
+  removeAgents(gitRoot, dryRun, targets, true, skipTracked);
+  removeHookScripts(gitRoot, { dryRun, targets, skipTracked });
+  removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
   removeEmptyOverlaySettings(gitRoot, dryRun);
   const pfx = cwd === gitRoot ? '' : `${relative(gitRoot, cwd)}/`;
   const rmUntracked = (rel: string, label: string) => {
@@ -180,13 +190,26 @@ function cleanOverlay(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
   const comp = cfg.components ?? {};
   const decisionsEnabled = comp.guards?.includes('decisions') ?? false;
-  if (comp.skills) removeSkills(gitRoot, dryRun);
-  if (comp.agents) removeAgents(gitRoot, dryRun);
-  if (comp.agentHooks || decisionsEnabled) removeHookScripts(gitRoot, { dryRun });
+  const targets = resolveExistingAgentProviders(gitRoot, comp.agentTargets);
+  const skipTracked = trackedPathPredicate(gitRoot);
+  if (comp.skills) removeSkills(gitRoot, dryRun, targets, true, skipTracked);
+  if (comp.agents) removeAgents(gitRoot, dryRun, targets, true, skipTracked);
+  if (comp.agentHooks || decisionsEnabled)
+    removeHookScripts(gitRoot, { dryRun, targets, skipTracked });
   // Strip devkit hooks from the LOCAL-override settings.local.json (where overlay registered them) +
-  // .cursor/hooks.json; never delete the files (they may hold the user's own local settings/hooks).
+  // provider hook documents; never delete files that still hold the user's own settings/hooks.
   if (comp.agentHooks || comp.searchSteering || decisionsEnabled) {
-    removeHookRegistrations(gitRoot, { dryRun, overlay: true });
+    const legacyOwnedComponentIds = [
+      comp.searchSteering && 'searchSteering',
+      comp.agentHooks && 'agentHooks',
+      decisionsEnabled && 'decisions',
+    ].filter((id): id is string => Boolean(id));
+    removeHookRegistrations(gitRoot, {
+      dryRun,
+      targets,
+      overlay: true,
+      legacyOwnedComponentIds,
+    });
     removeEmptyOverlaySettings(gitRoot, dryRun);
   }
   rm(join(gitRoot, '.devkit'), '.devkit/ (git-root hooks)', dryRun);
@@ -248,8 +271,16 @@ function removeEmptyOverlaySettings(gitRoot: string, dryRun: boolean): void {
     rm(claudeP, '.claude/settings.local.json (devkit-created, now empty)', dryRun);
   const cursorP = join(gitRoot, '.cursor', 'hooks.json');
   const cursor = readJson(cursorP) as SettingsShape | null;
-  if (cursor && onlyEmptyHooks(cursor, ['version', 'hooks']))
+  if (
+    cursor &&
+    onlyEmptyHooks(cursor, ['version', 'hooks']) &&
+    !isTracked(gitRoot, '.cursor/hooks.json')
+  )
     rm(cursorP, '.cursor/hooks.json (devkit-created, now empty)', dryRun);
+  const codexP = join(gitRoot, '.codex', 'hooks.json');
+  const codex = readJson(codexP) as SettingsShape | null;
+  if (codex && onlyEmptyHooks(codex, ['hooks']) && !isTracked(gitRoot, '.codex/hooks.json'))
+    rm(codexP, '.codex/hooks.json (devkit-created, now empty)', dryRun);
 }
 
 // Remove a single line devkit added to .gitignore (e.g. fallow's `.fallow/` cache dir). Leaves the
@@ -283,13 +314,18 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   }
   // The managed commit-msg block (review/sentry judges) — silent no-op when never installed.
   removeCommitMsgBlock(gitRoot, cfg.pkgRel ?? '', dryRun);
-  // skills + agents: remove the devkit-SYNCED files (per each manifest) from .claude + .cursor,
+  // skills + agents: remove the devkit-SYNCED provider-native files recorded by each manifest,
   // then drop the manifest. (Previously only the manifest was deleted, so the synced files leaked.)
-  removeSkills(gitRoot, dryRun);
-  removeAgents(gitRoot, dryRun);
+  const targets = resolveExistingAgentProviders(gitRoot, cfg.components?.agentTargets);
+  removeSkills(gitRoot, dryRun, targets);
+  removeAgents(gitRoot, dryRun, targets);
   // agent-hook scripts + the hook registrations they wrote.
-  removeHookScripts(gitRoot, { dryRun });
-  removeHookRegistrations(gitRoot, { dryRun });
+  removeHookScripts(gitRoot, { dryRun, targets });
+  const legacyOwnedComponentIds = [
+    cfg.components?.searchSteering && 'searchSteering',
+    cfg.components?.agentHooks && 'agentHooks',
+  ].filter((id): id is 'searchSteering' | 'agentHooks' => Boolean(id));
+  removeHookRegistrations(gitRoot, { dryRun, targets, legacyOwnedComponentIds });
   // devkit-created configs/data in the package.
   for (const f of ['biome.jsonc', 'tsconfig.json']) {
     if (extendsDevkit(join(cwd, f))) rm(join(cwd, f), f, dryRun);
