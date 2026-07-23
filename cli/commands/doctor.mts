@@ -25,6 +25,7 @@ import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mts';
+import { selectedHookAssets } from '../lib/install/agent-hook-selection.mts';
 import { checkHookRegistrations } from '../lib/install/install-hooks.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
@@ -249,7 +250,9 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 // a contributor on a stale devkit is told to `devkit update`, never blocked. Uses .devkit/config.json
 // only (NOT package.json), so overlay/standalone repos introduce nothing into the shared tree.
 export function checkVersion(cwd: string): CheckResult {
-  const pkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
+  const pkg = readJson(join(packageDir(), 'package.json')) as {
+    version?: string;
+  } | null;
   const running = pkg?.version;
   if (!running || !SEMVER.test(running)) return check('devkit version', 'OK', 'unknown');
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
@@ -512,13 +515,17 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   const primary = surfaces.includes('claude') ? 'claude' : surfaces[0];
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-  if (sel.skills && primary) advise(await checkSkills(cwd, primary));
+  if (sel.skills && primary) advise(await checkSkills(cwd, primary, sel.guards ?? []));
   if (sel.agents && primary) advise(await checkAgents(cwd, primary));
-  if (sel.agentHooks && primary) advise(checkAgentHookScripts(cwd, primary));
-  if (sel.agentHooks && surfaces.includes('claude')) {
-    const { ok } = checkHookRegistrations(gitRoot, ['agentHooks'], { overlay: true });
+  const hooks = selectedHookAssets(sel, { searchSteering: false });
+  if (hooks.scripts.length && primary) advise(checkAgentHookScripts(cwd, primary, hooks.scripts));
+  if (hooks.components.length) {
+    const { ok } = checkHookRegistrations(gitRoot, hooks.components, {
+      overlay: true,
+      targets: surfaces,
+    });
     console.log(
-      `  ${ok ? '✓' : '·'} hook registrations: ${ok ? 'agentHooks in .claude/settings.local.json' : 'not in settings.local.json (re-run init)'}`,
+      `  ${ok ? '✓' : '·'} hook registrations: ${ok ? `${hooks.components.join(', ')} on selected surfaces` : 'not registered on every selected surface (re-run init)'}`,
     );
   }
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
@@ -554,7 +561,6 @@ async function collectResults(
   cfg: DevkitConfig,
   configResult: CheckResult,
 ): Promise<{ results: CheckResult[]; sel: Partial<Selection> }> {
-  // Selection-aware: only check the components actually installed (fresh init always records it).
   const sel = cfg.components ?? DEFAULT_DOCTOR_SEL;
   // Standalone (no-package): biome/tsconfig extend VENDORED relative paths, and there is no devkit
   // pin to check (the whole point — no package dep).
@@ -583,23 +589,17 @@ async function collectResults(
       ),
     );
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
-  // structure-lint is a separate hook line (not a guard) — verify it when structure is recorded.
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
-  // Verify synced agent files against ONE selected surface (identical content on both).
   const surfaces = sel.agentTargets ?? ['claude', 'cursor'];
   const primarySurface = surfaces.includes('claude') ? 'claude' : surfaces[0];
-  if (sel.skills && primarySurface) results.push(await checkSkills(cwd, primarySurface));
+  if (sel.skills && primarySurface)
+    results.push(await checkSkills(cwd, primarySurface, sel.guards ?? []));
   if (sel.agents && primarySurface) results.push(await checkAgents(cwd, primarySurface));
-  if (sel.agentHooks && primarySurface) results.push(checkAgentHookScripts(cwd, primarySurface));
+  const hooks = selectedHookAssets(sel);
+  if (hooks.scripts.length && primarySurface)
+    results.push(checkAgentHookScripts(cwd, primarySurface, hooks.scripts));
   if (sel.searchSteering) results.push(checkSearchToolBins());
-  // Hook-owning components register into the surfaces' settings. checkHookRegistrations reads the
-  // Claude-shaped settings.json, so only verify when .claude is a selected surface.
-  const hookComponents = [
-    sel.searchSteering && 'searchSteering',
-    sel.agentHooks && 'agentHooks',
-  ].filter((x): x is 'searchSteering' | 'agentHooks' => Boolean(x));
-  if (hookComponents.length && surfaces.includes('claude'))
-    results.push(checkRegistrations(cwd, hookComponents));
+  if (hooks.components.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));

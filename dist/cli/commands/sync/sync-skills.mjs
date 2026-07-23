@@ -7,7 +7,7 @@
  * Writes .devkit/skills-manifest.json with a sha256 per file so `doctor` can tell which
  * side (consumer copy vs devkit source) drifted.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
@@ -25,6 +25,35 @@ function walk(dir, base = dir) {
     }
     return out;
 }
+export function skillNamesForGuards(allNames, guards = []) {
+    return allNames.filter((name) => name !== 'decisions' || guards.includes('decisions'));
+}
+/**
+ * Remove only a previously manifested decisions skill when skills are now disabled. This keeps
+ * `--no-skills` authoritative without turning a normal re-init into removal of every other skill,
+ * and never touches an unmanifested consumer-authored collision.
+ */
+export function pruneManifestedDecisionsSkill(cwd, dryRun = false) {
+    const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
+    const prev = readJson(manifestPath);
+    if (!prev || !Object.keys(prev.files).some((rel) => rel.startsWith('decisions/')))
+        return;
+    for (const target of prev.targets ?? AGENT_TARGETS) {
+        const dir = join(cwd, `.${target}`, 'skills', 'decisions');
+        if (!dryRun && existsSync(dir))
+            rmSync(dir, { recursive: true, force: true });
+    }
+    const files = Object.fromEntries(Object.entries(prev.files).filter(([rel]) => !rel.startsWith('decisions/')));
+    if (!dryRun) {
+        if (Object.keys(files).length) {
+            writeIfAbsent(manifestPath, `${JSON.stringify({ ...prev, generatedAt: new Date().toISOString(), files }, null, 2)}\n`, { force: true });
+        }
+        else {
+            rmSync(manifestPath, { force: true });
+        }
+    }
+    console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} decisions skill (skills disabled)`);
+}
 /**
  * Sync devkit's bundled skills into the consumer's agent surfaces + write the manifest.
  *
@@ -39,17 +68,32 @@ function walk(dir, base = dir) {
  *
  * Returns the manifest (for init to embed in its log).
  */
-export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
+export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false, guards = [] } = {}) {
     const dryRun = args.includes('--dry-run');
     const targetDirs = targets.map((t) => `.${t}/skills`);
     const skillsSrc = join(packageDir(), 'skills');
-    const rels = walk(skillsSrc);
+    const allRels = walk(skillsSrc);
+    const selectedNames = new Set(skillNamesForGuards([...new Set(allRels.map((rel) => rel.split('/')[0]))], guards));
+    const rels = allRels.filter((rel) => selectedNames.has(rel.split('/')[0]));
     const devkitPkg = readJson(join(packageDir(), 'package.json'));
     const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
     // The prior manifest (also reused for the idempotency check below) — its keys tell findConflicts
     // which on-disk skills devkit already OWNS (overwrite freely) vs the consumer's own (preserve).
     const manifestPath = join(cwd, '.devkit', 'skills-manifest.json');
     const prev = readJson(manifestPath);
+    // Guard-aware exact reconciliation: only remove skill dirs that the previous manifest proves
+    // Devkit owned. A consumer-authored, unmanifested `decisions` collision remains untouched.
+    const previousNames = new Set(Object.keys(prev?.files ?? {}).map((rel) => rel.split('/')[0]));
+    const cleanupTargets = new Set([...(prev?.targets ?? []), ...targets]);
+    for (const name of previousNames) {
+        if (selectedNames.has(name))
+            continue;
+        for (const target of cleanupTargets) {
+            const dir = join(cwd, `.${target}`, 'skills', name);
+            if (!dryRun && existsSync(dir))
+                rmSync(dir, { recursive: true, force: true });
+        }
+    }
     // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's
     // `.<surface>/skills/<name>` is git-tracked, the whole skill is left untouched.
     const skipNames = new Set();
@@ -102,7 +146,9 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
         console.log(`  [dry-run] write .devkit/skills-manifest.json (${rels.length} files)`);
     }
     else {
-        writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { force: true });
+        writeIfAbsent(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+            force: true,
+        });
         console.log(`  ✓ synced ${rels.length} skill file(s) → ${targetDirs.join(' + ')}`);
     }
     return manifest;
@@ -113,9 +159,9 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
  * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
  * skill names.
  */
-export function detectSkillConflicts(root, targets = AGENT_TARGETS) {
+export function detectSkillConflicts(root, targets = AGENT_TARGETS, guards = []) {
     const skillsSrc = join(packageDir(), 'skills');
-    const names = [...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))];
+    const names = skillNamesForGuards([...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))], guards);
     return findConflicts(root, skillsSrc, names, targets, 'skills', readJson(join(root, '.devkit', 'skills-manifest.json')));
 }
 export const meta = {
@@ -138,6 +184,9 @@ export default function run(args, cwd) {
     // --force adopts/overwrites non-devkit collisions (the standalone CLI is all-or-nothing — the
     // per-asset picker is `devkit init` interactive only).
     const override = args.includes('--force') ? () => true : undefined;
-    syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+    syncSkills(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, {
+        override,
+        guards: cfg?.components?.guards ?? [],
+    });
     return 0;
 }

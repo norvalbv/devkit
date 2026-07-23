@@ -38,9 +38,10 @@ import { INIT_HELP } from "../lib/help/init-help.mjs";
 import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
+import { installAgentSurfaces } from "../lib/install/agent-surfaces.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowGate, } from "../lib/install/install-fallow.mjs";
-import { detectHookConflicts, installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "../lib/install/install-hooks.mjs";
+import { detectHookConflicts, hookScriptsFor } from "../lib/install/install-hooks.mjs";
 import { installSearchCode } from "../lib/install/install-search-code.mjs";
 import { patchPackageJson } from "../lib/install/package-json.mjs";
 import { parseReviewFlags, reviewPlanFromFlags, } from "../lib/install/review-profile.mjs";
@@ -49,8 +50,8 @@ import { installGlobalHook } from "../lib/overlay-global-hook.mjs";
 import { installStandaloneConfigs, installStandaloneHook } from "../lib/standalone.mjs";
 import { removeAgents, removeSkills } from "../lib/sync-manifest.mjs";
 import { runWizard } from "../lib/wizard.mjs";
-import { detectAgentConflicts, syncAgents } from "./sync/sync-agents.mjs";
-import { detectSkillConflicts, syncSkills } from "./sync/sync-skills.mjs";
+import { detectAgentConflicts } from "./sync/sync-agents.mjs";
+import { detectSkillConflicts } from "./sync/sync-skills.mjs";
 import { repoUrl } from "./update.mjs";
 const INIT_VERSION = 2;
 // Stacks with a structure-lint preset (eslint.config.mjs + eslint/domains.mjs + baselines).
@@ -439,7 +440,10 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
         // Honour the consumer's hand-maintained import-wall exemptions (eslint/baselines/exempt.mjs):
         // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
         // during the scan — else it would be re-grandfathered every regen.
-        generateImportWallBaseline(cwd, { ...opts, exemptPatterns: await readImportWallExempt(cwd) });
+        generateImportWallBaseline(cwd, {
+            ...opts,
+            exemptPatterns: await readImportWallExempt(cwd),
+        });
     }
     catch (e) {
         console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
@@ -469,13 +473,17 @@ async function resolveAssetConflicts(gitRoot, selection, { interactive, force })
     const targets = selection.agentTargets ?? AGENT_TARGETS;
     const found = [];
     if (selection.skills)
-        for (const name of detectSkillConflicts(gitRoot, targets))
+        for (const name of detectSkillConflicts(gitRoot, targets, selection.guards ?? []))
             found.push({ kind: 'skill', name });
     if (selection.agents)
         for (const name of detectAgentConflicts(gitRoot, targets))
             found.push({ kind: 'agent', name });
-    if (selection.agentHooks)
-        for (const name of detectHookConflicts(gitRoot, targets))
+    const desiredHooks = hookScriptsFor({
+        agentHooks: Boolean(selection.agentHooks),
+        decisions: selection.guards?.includes('decisions') ?? false,
+    });
+    if (desiredHooks.length)
+        for (const name of detectHookConflicts(gitRoot, targets, desiredHooks))
             found.push({ kind: 'agent-hook', name });
     if (!found.length)
         return () => false;
@@ -491,7 +499,10 @@ async function resolveAssetConflicts(gitRoot, selection, { interactive, force })
     }
     const picked = await multiselect({
         message: 'These assets already exist and were NOT installed by devkit. Select any to OVERWRITE with devkit’s version (unselected are kept):',
-        options: found.map((c) => ({ value: `${c.kind}:${c.name}`, label: `${c.kind}: ${c.name}` })),
+        options: found.map((c) => ({
+            value: `${c.kind}:${c.name}`,
+            label: `${c.kind}: ${c.name}`,
+        })),
         initialValues: [],
         required: false,
     });
@@ -699,7 +710,7 @@ function removeStructure(cwd, prevConfig, dryRun) {
 }
 // Reason: flat removal dispatch: one `if (remove.includes(id)) removeX()` per component, ordered so guards (line-level) precede husky (block-level); high branch COUNT mirrors the component list, each branch a single delegated call
 // fallow-ignore-next-line complexity
-function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection) {
+function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
     if (!remove.length)
         return;
     console.log(`\nRemoving deselected component(s): ${remove.join(', ')}`);
@@ -716,22 +727,9 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selecti
         removeSkills(gitRoot, dryRun);
     if (remove.includes('agents'))
         removeAgents(gitRoot, dryRun);
-    if (remove.includes('agentHooks'))
-        removeHookScripts(gitRoot, { dryRun });
-    // searchSteering/agentHooks own hook registrations. Re-derive the survivors and re-install:
-    // installHookRegistrations strips ALL devkit hooks first, so the deselected one's entries drop
-    // and only the still-selected component's entries are re-added (idempotent). With none left,
-    // strip-only via removeHookRegistrations.
-    if (remove.includes('searchSteering') || remove.includes('agentHooks')) {
-        const survivors = [
-            selection.searchSteering && !remove.includes('searchSteering') && 'searchSteering',
-            selection.agentHooks && !remove.includes('agentHooks') && 'agentHooks',
-        ].filter((x) => Boolean(x));
-        if (survivors.length)
-            installHookRegistrations(gitRoot, survivors, { dryRun });
-        else
-            removeHookRegistrations(gitRoot, { dryRun });
-    }
+    // Agent-hook scripts + registrations are exact-reconciled by installAgentSurfaces before this
+    // removal pass. Re-removing them here would also delete a decisions-owned hook that survives a
+    // general agentHooks deselection.
     if (remove.includes('structure'))
         removeStructure(cwd, prevConfig, dryRun);
     if (remove.includes('husky'))
@@ -789,68 +787,6 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     console.log(globalCommitGate
         ? '  Global pre-commit gate wired — a plain `git commit` stays gated across `bun install`s.'
         : '  Re-run `devkit init --overlay` after a `bun install` (husky re-claims core.hooksPath),\n  or add --global-commit-gate once to gate plain `git commit` too.');
-}
-// Sync skills / agents / agent-hook scripts + their hook registrations to the SELECTED agent
-// surface(s) (.claude / .cursor), then prune any surface a prior run installed but that's now
-// deselected. Repo-wide → operates on the git root. Returns the resolved agentTargets (for config).
-// Reason: flat orchestration: ordered `if (selection.x) syncX()` steps (skills → agents → hook scripts → registrations → prune) that must run in dependency order since registrations reference the scripts synced first; branch COUNT is the surface count, each step trivial
-// fallow-ignore-next-line complexity
-function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false) {
-    const agentTargets = selection.agentTargets ?? AGENT_TARGETS;
-    if (selection.skills) {
-        console.log('7. skills');
-        // Skills are repo-wide → sync to the git root's selected agent surface(s) (+ manifest). A
-        // consumer's own same-named skill is preserved unless `override` adopts it (resolveAssetConflicts).
-        syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets, { override });
-    }
-    if (selection.agents) {
-        console.log('7a. agents');
-        // Agents are repo-wide too → sync to the git root's selected agent surface(s) (+ manifest).
-        syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, agentTargets, { override });
-    }
-    // Agent-hook scripts (agentHooks) live under <surface>/hooks; the registrations below reference
-    // them, so sync the scripts first.
-    if (selection.agentHooks) {
-        console.log('7b. agent-hook scripts');
-        syncHookScripts(gitRoot, { dryRun, targets: agentTargets, override });
-    }
-    // Register the agent hooks each selected component owns into the selected surfaces' settings.
-    const hookComponents = [
-        selection.searchSteering && 'searchSteering',
-        selection.agentHooks && 'agentHooks',
-    ].filter((x) => Boolean(x));
-    if (hookComponents.length) {
-        console.log('7c. agent hook registrations');
-        installHookRegistrations(gitRoot, hookComponents, { dryRun, targets: agentTargets });
-    }
-    pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun);
-    return agentTargets;
-}
-// A previous run may have synced to BOTH surfaces; if a surface is now deselected, remove devkit's
-// files from it (manifests kept — the surviving surface still tracks them). Only for components
-// staying selected; a fully-deselected component is removed wholesale by applyRemovals. Skipped on a
-// fresh install where the dropped surface has no devkit dir (no work, no noise).
-function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookComponents, dryRun) {
-    const prunedTargets = AGENT_TARGETS.filter((t) => !agentTargets.includes(t));
-    // Settings file holding hook registrations differs per surface (Claude settings.json vs Cursor
-    // hooks.json) — searchSteering writes one without a hooks/ script dir, so check it too.
-    const settingsFile = {
-        claude: '.claude/settings.json',
-        cursor: '.cursor/hooks.json',
-    };
-    const hasPrunableContent = prunedTargets.some((t) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${t}`, kind))) ||
-        existsSync(join(gitRoot, settingsFile[t])));
-    if (!prunedTargets.length || !hasPrunableContent)
-        return;
-    console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
-    if (selection.skills)
-        removeSkills(gitRoot, dryRun, prunedTargets, false);
-    if (selection.agents)
-        removeAgents(gitRoot, dryRun, prunedTargets, false);
-    if (selection.agentHooks)
-        removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
-    if (hookComponents.length)
-        removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
 }
 /**
  * The testable apply layer: given a resolved selection (+ removals), install/remove and
@@ -990,7 +926,10 @@ export async function applyInit(cwd, plan) {
     // surface a prior run installed. First resolve the non-devkit-collision policy (preserve the
     // consumer's own same-named assets unless they opt in — interactive picker / --force). Returns the
     // resolved agentTargets (recorded in the config below).
-    const override = await resolveAssetConflicts(gitRoot, selection, { interactive, force });
+    const override = await resolveAssetConflicts(gitRoot, selection, {
+        interactive,
+        force,
+    });
     const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override);
     if (selection.fallow) {
         console.log('8. fallow (optional code-health layer)');
@@ -1001,7 +940,7 @@ export async function applyInit(cwd, plan) {
         installSearchCode(cwd, dryRun);
     }
     // Removals (deselected + present).
-    applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun, selection);
+    applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
     // .devkit/config.json with the component selection.
     console.log('9. .devkit/config.json');
     const components = {
@@ -1017,7 +956,11 @@ export async function applyInit(cwd, plan) {
         searchCode: Boolean(selection.searchCode),
         lineGrowth: Boolean(selection.lineGrowth),
         agentTargets: [...agentTargets],
-        guards: selection.husky ? [...selection.guards] : [],
+        // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
+        // owns an agent pre-edit hook, so it remains authoritative in config even without husky.
+        guards: selection.husky
+            ? [...selection.guards]
+            : selection.guards.filter((guard) => guard === 'decisions'),
     };
     // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
     // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
