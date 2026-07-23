@@ -81,7 +81,6 @@ function slugPath(p, slug) {
 function readIndexRows(p) {
     return existsSync(p.indexPath) ? parseIndex(readFileSync(p.indexPath, 'utf8')) : [];
 }
-// ─── Per-axis file parse / render ───────────────────────────────────────────────
 // ─── Commands ───────────────────────────────────────────────────────────────────
 export function cmdAdd(slug, o, cwd = process.cwd()) {
     if (!slug) {

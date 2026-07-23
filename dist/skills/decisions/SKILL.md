@@ -137,7 +137,9 @@ where implementation churn lives — so it never masquerades as a target flip.
 only edit allowed is an entry you're authoring in the *current uncommitted* workflow (typo fix).
 Use `amend <slug> --target …` or `amend <slug> --note "…"` for that narrow case: only the newest
 entry absent from `HEAD` can be replaced, and the CLI refuses if committed or earlier working-tree
-history changed. Direct native agent edits are blocked while the decisions guard is selected.
+history changed. While the decisions guard is selected, direct native agent edits are blocked only
+under the configured decisions directory; shell commands and unsupported payloads remain outside
+this enforcement and fail open.
 To retire a mis-filed (non-epic) entry: **archive, don't delete** — move it under a
 `## [archived — impl-note, not an epic]` heading in the same file (INDEX stops surfacing it; the
 record stays intact). Deleting committed history would break the trust the whole log rests on.
