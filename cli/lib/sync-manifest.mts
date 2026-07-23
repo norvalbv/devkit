@@ -10,14 +10,19 @@
  */
 import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from './components.mts';
 import { packageDir, sha256 } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
 import {
   AGENT_ASSET_MANIFESTS,
   assertLegacyAssetWriterCompatible,
 } from './install/agent-asset-manifest/compatibility.mts';
+import {
+  removeProviderNativeAssets,
+  withAgentAssetLifecycleLock,
+} from './install/agent-asset-manifest/lifecycle.mts';
 import { readAgentAssetManifest } from './install/agent-asset-manifest/reader.mts';
+import { agentAssetDir } from './install/agent-assets.mts';
+import { LEGACY_AGENT_PROVIDERS } from './install/agent-providers.mts';
 
 export {
   decodeSyncManifest,
@@ -159,6 +164,7 @@ export function removeManifested(
   dropManifest: boolean,
   fallbackNames: string[] = [],
   srcDir: string | null = null,
+  skipTracked?: (relPath: string) => boolean,
 ): void {
   const manifestPath = join(root, '.devkit', manifestRel);
   const assetKind = AGENT_ASSET_MANIFESTS.find(({ filename }) => filename === manifestRel)?.kind;
@@ -192,15 +198,18 @@ export function removeManifested(
   // user's, e.g. a preserved non-devkit collision) — only devkit's own untouched strays (content
   // matches the bundle) are removed. With a manifest, `names` is exactly what devkit WROTE, and a
   // package-mode uninstall MUST remove its committed (tracked) files, so removal is unconditional.
-  const guardTracked = !manifest;
   let n = 0;
   for (const name of names) {
     for (const dir of dirs) {
       const rel = `${dir}/${name}`;
       const p = join(root, dir, name);
       if (!existsSync(p)) continue;
-      if (guardTracked) {
-        if (isTracked(root, rel)) continue;
+      if (manifest) {
+        // Overlay mode may relinquish a manifested path once the consumer tracks it. Otherwise the
+        // manifest remains authoritative even when its owned bytes no longer match this release.
+        if (skipTracked?.(rel)) continue;
+      } else {
+        if (skipTracked?.(rel) ?? isTracked(root, rel)) continue;
         if (srcDir && !matchesBundle(root, dir, name, srcDir)) {
           console.log(
             `  ! keeping ${kind} "${name}" — untracked + diverges from the bundle (not devkit's)`,
@@ -229,39 +238,83 @@ export function removeManifested(
 export function removeSkills(
   root: string,
   dryRun: boolean,
-  targets: string[] = AGENT_TARGETS,
+  targets?: string[],
   dropManifest = true,
+  skipTracked?: (relPath: string) => boolean,
 ): void {
-  const dirs = targets.map((t) => `.${t}/skills`);
-  const fallback = bundledNames('skills', (e) => e.isDirectory());
-  removeManifested(
-    root,
-    'skills-manifest.json',
-    dirs,
-    'skill',
-    dryRun,
-    dropManifest,
-    fallback,
-    join(packageDir(), 'skills'),
-  );
+  withAgentAssetLifecycleLock(root, dryRun, () => {
+    const native = removeProviderNativeAssets({
+      root,
+      kind: 'skills',
+      targets,
+      dryRun,
+      dropManifest,
+      skipTracked,
+    });
+    if (native.handled) {
+      console.log(
+        `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${native.removed.length} synced skill file(s)${dropManifest ? ' + manifest' : ''}`,
+      );
+      return;
+    }
+    const legacyTargets = (targets ?? [...LEGACY_AGENT_PROVIDERS]).filter((target) =>
+      LEGACY_AGENT_PROVIDERS.includes(target as (typeof LEGACY_AGENT_PROVIDERS)[number]),
+    );
+    if (!legacyTargets.length) return;
+    const dirs = legacyTargets.map((target) => agentAssetDir(target, 'skills'));
+    const fallback = bundledNames('skills', (e) => e.isDirectory());
+    removeManifested(
+      root,
+      'skills-manifest.json',
+      dirs,
+      'skill',
+      dryRun,
+      dropManifest,
+      fallback,
+      join(packageDir(), 'skills'),
+      skipTracked,
+    );
+  });
 }
 
 export function removeAgents(
   root: string,
   dryRun: boolean,
-  targets: string[] = AGENT_TARGETS,
+  targets?: string[],
   dropManifest = true,
+  skipTracked?: (relPath: string) => boolean,
 ): void {
-  const dirs = targets.map((t) => `.${t}/agents`);
-  const fallback = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md'));
-  removeManifested(
-    root,
-    'agents-manifest.json',
-    dirs,
-    'agent',
-    dryRun,
-    dropManifest,
-    fallback,
-    join(packageDir(), 'agents'),
-  );
+  withAgentAssetLifecycleLock(root, dryRun, () => {
+    const native = removeProviderNativeAssets({
+      root,
+      kind: 'agents',
+      targets,
+      dryRun,
+      dropManifest,
+      skipTracked,
+    });
+    if (native.handled) {
+      console.log(
+        `  ${dryRun ? '[dry-run] remove' : '✓ removed'} ${native.removed.length} synced agent file(s)${dropManifest ? ' + manifest' : ''}`,
+      );
+      return;
+    }
+    const legacyTargets = (targets ?? [...LEGACY_AGENT_PROVIDERS]).filter((target) =>
+      LEGACY_AGENT_PROVIDERS.includes(target as (typeof LEGACY_AGENT_PROVIDERS)[number]),
+    );
+    if (!legacyTargets.length) return;
+    const dirs = legacyTargets.map((target) => agentAssetDir(target, 'agents'));
+    const fallback = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md'));
+    removeManifested(
+      root,
+      'agents-manifest.json',
+      dirs,
+      'agent',
+      dryRun,
+      dropManifest,
+      fallback,
+      join(packageDir(), 'agents'),
+      skipTracked,
+    );
+  });
 }

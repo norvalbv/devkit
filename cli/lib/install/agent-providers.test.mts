@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   FRESH_DEFAULT_AGENT_PROVIDERS,
   LEGACY_AGENT_PROVIDERS,
+  requireAgentProviders,
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from './agent-providers.mts';
@@ -25,7 +26,14 @@ describe('agent provider model', () => {
   it('separates supported providers from legacy and fresh defaults', () => {
     expect(SUPPORTED_AGENT_PROVIDERS).toEqual(['claude', 'codex', 'cursor']);
     expect(LEGACY_AGENT_PROVIDERS).toEqual(['claude', 'cursor']);
-    expect(FRESH_DEFAULT_AGENT_PROVIDERS).toEqual(['claude', 'cursor']);
+    expect(FRESH_DEFAULT_AGENT_PROVIDERS).toEqual(['claude', 'codex', 'cursor']);
+  });
+
+  it('strictly validates, de-duplicates, and orders requested providers', () => {
+    expect(requireAgentProviders(['cursor', 'claude', 'cursor'])).toEqual(['claude', 'cursor']);
+    expect(() => requireAgentProviders(['claude', 'other'])).toThrow(
+      'Unsupported agent provider: "other"',
+    );
   });
 });
 

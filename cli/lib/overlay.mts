@@ -34,10 +34,11 @@ import { syncSkills } from '../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, normalizeSelection, type Selection } from './components.mts';
 import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
-import { isTracked } from './git-tracked.mts';
+import { trackedPathPredicate } from './git-tracked.mts';
 import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mts';
 import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mts';
 import { installHookRegistrations, syncHookScripts } from './install/install-hooks.mts';
+import { overlayAssetExcludes } from './install/overlay-asset-excludes.mts';
 
 const firstLine = (e: unknown): string => {
   let raw: unknown = '';
@@ -426,8 +427,8 @@ function resolveOverlayFallow(cwd: string, dryRun: boolean) {
 // Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
 // any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
 // relative paths to hide via .git/info/exclude (derived from each sync's returned manifest, so a
-// skipped-because-tracked file is never excluded for). searchSteering is deliberately NOT wired in
-// overlay: its hooks resolve a node_modules/@norvalbv/devkit path the package-less overlay lacks (C1).
+// skipped-because-tracked file is never excluded for). searchSteering stays unwired because its
+// node_modules/@norvalbv/devkit command cannot resolve in a package-less overlay (C1).
 // Reason: flat overlay agent-surface orchestration: ordered `if (sel.x) sync + derive excludes` steps (skills → agents → hook scripts → registrations) mirroring installAgentSurfaces; high branch COUNT, each trivial, no nesting
 // fallow-ignore-next-line complexity
 function installOverlayAgentSurfaces(
@@ -435,55 +436,45 @@ function installOverlayAgentSurfaces(
   sel: Selection,
   dryRun: boolean,
   force = false,
+  legacyOwnedComponentIds: string[] = [],
 ) {
   const targets = sel.agentTargets ?? AGENT_TARGETS;
-  const skipTracked = (rel: string) => isTracked(gitRoot, rel);
-  // Overlay has no interactive picker; --force is its all-or-nothing override of a non-devkit
-  // collision (matches the standalone CLI), else default-preserve. (A git-TRACKED collision is still
-  // left untouched by skipTracked regardless — exclude can't hide a tracked edit.)
+  const skipTracked = trackedPathPredicate(gitRoot);
+  // --force can replace an untracked collision; tracked files always remain untouched.
   const override = force ? () => true : undefined;
   const args = dryRun ? ['--dry-run'] : [];
   const excl = [];
   if (sel.skills) {
     console.log('  skills');
     const m = syncSkills(args, gitRoot, targets, { skipTracked, override });
-    for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
-      for (const t of targets) excl.push(`.${t}/skills/${name}/`);
-    // The sync ALWAYS writes the git-root manifest (even when every asset is preserved → files {}),
-    // so it must be hidden unconditionally — else an all-preserved run leaks it into `git status`.
+    excl.push(...overlayAssetExcludes(m, 'skills', targets));
+    // The manifest is always written, even if every asset is preserved.
     excl.push('.devkit/skills-manifest.json');
   }
   if (sel.agents) {
     console.log('  agents');
     const m = syncAgents(args, gitRoot, targets, { skipTracked, override });
-    for (const rel of Object.keys(m.files))
-      for (const t of targets) excl.push(`.${t}/agents/${rel}`);
+    excl.push(...overlayAssetExcludes(m, 'agents', targets));
     excl.push('.devkit/agents-manifest.json');
   }
   if (sel.agentHooks) {
     console.log('  agent-hook scripts');
     const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked, override });
-    for (const rel of Object.keys(m.files))
-      for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
+    excl.push(...overlayAssetExcludes(m, 'hooks', targets));
     excl.push('.devkit/agent-hooks-manifest.json');
     console.log('  agent hook registrations');
     const { wrote } = installHookRegistrations(gitRoot, ['agentHooks'], {
       dryRun,
       targets,
       overlay: true,
+      legacyOwnedComponentIds,
     });
     excl.push(...wrote);
   }
   return excl;
 }
 
-/**
- * Install the overlay. Returns { origHooksPath, fallowWired } (recorded in config so `devkit clean`
- * can restore core.hooksPath exactly + know whether fallow was wired).
- * @param cwd repo (or package) dir
- * @param sel resolved component selection
- * @param stack detected stack id
- */
+/** Install the overlay and return the cleanup metadata recorded in its config. */
 // Reason: flat overlay install orchestration: ordered guarded steps (config → lint → fallow → hook → alias → surfaces → exclude) each a single delegated call; high branch COUNT, near-zero nesting — splitting scatters the install sequence
 // fallow-ignore-next-line complexity
 export function installOverlay(
@@ -493,11 +484,16 @@ export function installOverlay(
   force: boolean,
   dryRun: boolean,
 ) {
-  // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
-  // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
+  // Configs live in cwd; hooks and git-exclude live at the git root (also in a monorepo).
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   // The real original hooksPath (never our own .devkit/hooks) — recorded for restore on clean.
   const origHooksPath = captureOrigHooksPath(gitRoot, cwd);
+  const prior = readJson(join(cwd, '.devkit', 'config.json')) as {
+    components?: Partial<Pick<Selection, 'searchSteering' | 'agentHooks'>>;
+  } | null;
+  const legacyOwnedComponentIds = (['searchSteering', 'agentHooks'] as const).filter((id) =>
+    Boolean(prior?.components?.[id]),
+  );
   const pfx = pkgRel ? `${pkgRel}/` : '';
   const excludes = new Set([
     `${LOCAL_HOOKS}/`, // .devkit/hooks at the git root
@@ -526,8 +522,7 @@ export function installOverlay(
   }
   if (writeEslintOverlay(cwd, force, dryRun)) excludes.add(`${pfx}eslint.config.devkit.mjs`);
 
-  // fallow (optional) — resolve BEFORE the hook so its gate fragment is wired in. ABORTs (returns
-  // false) if fallow can't be installed; .fallow/ cache + the grandfather baselines stay invisible.
+  // Resolve fallow before rendering the hook; an unavailable binary aborts only that component.
   let fallowWired = false;
   if (sel.fallow) {
     console.log('  fallow (code-health gate)');
@@ -542,19 +537,22 @@ export function installOverlay(
   console.log('  local hook');
   installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallowWired);
 
-  // per-clone `git ci` self-heal alias so a `bun install` (husky re-claims core.hooksPath) heals
-  // on the next CLI commit — set at the git root (the alias is repo-wide, like core.hooksPath).
+  // Per-clone alias restores this repo-wide hook path after husky reclaims it.
   installHealAlias(gitRoot, dryRun);
 
-  // agent-half (skills/agents/agentHooks) → the git root's surfaces (skipping anything git tracks),
-  // each path hidden via .git/info/exclude. Paths are git-root-relative (repo-wide, no pkgRel pfx).
-  for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun, force)) excludes.add(rel);
+  for (const rel of installOverlayAgentSurfaces(
+    gitRoot,
+    sel,
+    dryRun,
+    force,
+    legacyOwnedComponentIds,
+  ))
+    excludes.add(rel);
 
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
   addToGitExclude(gitRoot, [...excludes], dryRun);
 
-  // origHooksPath ('' = was unset) lets `devkit clean` restore exactly what was there; fallowWired
-  // tells applyOverlay whether to record the fallow component (so clean/doctor are accurate).
+  // Cleanup restores the original hook path and only removes components recorded as wired.
   return { origHooksPath, fallowWired };
 }

@@ -2,7 +2,7 @@
  * Wizard agent-surface selection. Regression for: "I only selected claude but .cursor hooks also
  * got installed." The picker used to be a multiselect pre-checking BOTH surfaces, so choosing
  * Claude without DESELECTing Cursor left both on. It's now a single SELECT — "Claude only" maps to
- * exactly ['claude'], and the apply layer must then write nothing under .cursor.
+ * exactly ['claude'], and the apply layer must then write nothing under .cursor/.codex/.agents.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,8 +55,12 @@ afterEach(() => {
 describe('wizard agent-surface selection', () => {
   it.each([
     ['claude', ['claude']],
+    ['codex', ['codex']],
     ['cursor', ['cursor']],
-    ['both', ['claude', 'cursor']],
+    ['claude-codex', ['claude', 'codex']],
+    ['claude-cursor', ['claude', 'cursor']],
+    ['codex-cursor', ['codex', 'cursor']],
+    ['all', ['claude', 'codex', 'cursor']],
   ])('select "%s" → agentTargets %j', async (surface, expected) => {
     setAnswers(surface);
     const r = await runWizard(WIZ_OPTS);
@@ -70,5 +74,7 @@ describe('wizard agent-surface selection', () => {
     await applyInit(root, { stack: 'generic', selection: r.selection, devkitRef: 'v0' });
     expect(existsSync(join(root, '.claude'))).toBe(true);
     expect(existsSync(join(root, '.cursor'))).toBe(false);
+    expect(existsSync(join(root, '.codex'))).toBe(false);
+    expect(existsSync(join(root, '.agents'))).toBe(false);
   });
 });

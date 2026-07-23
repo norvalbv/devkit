@@ -33,8 +33,7 @@ export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry'];
 
 /**
  * Compatibility name for the agent surfaces the current projection layer can sync into. Provider
- * support/default policy now lives in agent-providers.mts; keeping this legacy name on the fresh
- * Claude/Cursor default prevents the model-only slice from activating Codex projection early.
+ * support/default policy now lives in agent-providers.mts.
  */
 export const AGENT_TARGETS: string[] = [...FRESH_DEFAULT_AGENT_PROVIDERS];
 
@@ -51,11 +50,16 @@ export const COMPONENTS = [
     hint: 'tsconfig extending the devkit base',
     recommended: true,
   },
-  { id: 'skills', label: 'Agent skills', hint: 'sync to .claude + .cursor', recommended: true },
+  {
+    id: 'skills',
+    label: 'Agent skills',
+    hint: 'sync to Claude, Codex, and Cursor',
+    recommended: true,
+  },
   {
     id: 'agents',
     label: 'Review agents',
-    hint: 'review/testing subagents → .claude/.cursor agents',
+    hint: 'review/testing subagents → Claude/Codex/Cursor agents',
     recommended: true,
   },
   {
@@ -66,7 +70,7 @@ export const COMPONENTS = [
   },
   {
     id: 'agentHooks',
-    label: 'Agent hooks (Claude/Cursor)',
+    label: 'Agent hooks (Claude/Codex/Cursor)',
     hint: 'Stop/PostToolUse/UserPromptSubmit/PreCompact: decision nudge, rule recall, format-after-edit, QA, compaction',
     recommended: false,
   },

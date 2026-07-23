@@ -4,6 +4,7 @@
  * is never deleted by clean's no-manifest fallback. devkit's own copies (manifest-owned, or
  * byte-identical to the bundle) keep overwriting so a tag bump still propagates.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,7 @@ import { matchesBundle, removeSkills } from '../lib/sync-manifest.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, cleanup } = tmpRepos('conflict-');
+const initGit = (root) => execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
 
 // applyInit + the clean fallback shell out to git (detectGitRoot, isTracked per bundled name); under
 // the full suite's parallel load that subprocess contention can starve the default 5s timeout. Give
@@ -61,6 +63,7 @@ const legacyWriters = [
     kind: 'skills',
     manifest: 'skills-manifest.json',
     outputDir: 'skills',
+    codexOutput: '.agents/skills/brainstorming/SKILL.md',
     run: (root, targets) => syncSkills([], root, targets),
   },
   {
@@ -68,6 +71,7 @@ const legacyWriters = [
     kind: 'agents',
     manifest: 'agents-manifest.json',
     outputDir: 'agents',
+    codexOutput: '.codex/agents/testing-agent.toml',
     run: (root, targets) => syncAgents([], root, targets),
   },
   {
@@ -75,6 +79,7 @@ const legacyWriters = [
     kind: 'hooks',
     manifest: 'agent-hooks-manifest.json',
     outputDir: 'hooks',
+    codexOutput: '.codex/hooks/lint-check.sh',
     run: (root, targets) => syncHookScripts(root, { targets }),
   },
 ];
@@ -83,21 +88,12 @@ describe.each(legacyWriters)('$label writer compatibility preflight', (writer) =
   it.each([
     ['invalid manifest', '{', ['claude'], /valid JSON/],
     [
-      'v2 manifest',
-      JSON.stringify({
-        schemaVersion: 2,
-        kind: writer.kind,
-        devkitRef: null,
-        generatedAt: '2026-07-22T00:00:00.000Z',
-        files: {},
-        providers: {},
-      }),
-      ['claude'],
-      /schema v2/,
+      'path-like target',
+      null,
+      ['/../../tmp/quarantine-pwn'],
+      /cannot target|Unsupported agent provider/,
     ],
-    ['Codex target', null, ['codex'], /cannot target .*codex/],
-    ['path-like target', null, ['/../../tmp/quarantine-pwn'], /cannot target/],
-    ['empty target', null, [''], /cannot target/],
+    ['empty target', null, [''], /cannot target|Unsupported agent provider/],
   ])('refuses %s before mutation', (_name, manifest, targets, error) => {
     const root = tmpRepo();
     const manifestPath = join(root, '.devkit', writer.manifest);
@@ -112,9 +108,47 @@ describe.each(legacyWriters)('$label writer compatibility preflight', (writer) =
     if (manifest === null) expect(existsSync(manifestPath)).toBe(false);
     else expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
   });
+
+  it('accepts an existing v2 manifest and republishes it after syncing', () => {
+    const root = tmpRepo();
+    const manifestPath = join(root, '.devkit', writer.manifest);
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 2,
+        kind: writer.kind,
+        devkitRef: null,
+        generatedAt: '2026-07-22T00:00:00.000Z',
+        files: {},
+        providers: {},
+      }),
+    );
+
+    writer.run(root, ['claude']);
+
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      kind: writer.kind,
+    });
+    expect(existsSync(join(root, '.claude', writer.outputDir))).toBe(true);
+  });
+
+  it('writes Codex provider-native output and a v2 manifest', () => {
+    const root = tmpRepo();
+
+    writer.run(root, ['codex']);
+
+    expect(existsSync(join(root, writer.codexOutput))).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, '.devkit', writer.manifest), 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      kind: writer.kind,
+      providers: { codex: { files: expect.any(Object) } },
+    });
+  });
 });
 
-it('refuses legacy teardown of a v2 manifest before deleting its files', () => {
+it('v2 teardown removes only recorded outputs and preserves an unowned file', () => {
   const root = tmpRepo();
   seedSkill(root, '# keep me\n');
   const manifestPath = join(root, '.devkit', 'skills-manifest.json');
@@ -129,9 +163,9 @@ it('refuses legacy teardown of a v2 manifest before deleting its files', () => {
   mkdirSync(join(root, '.devkit'), { recursive: true });
   writeFileSync(manifestPath, manifest);
 
-  expect(() => removeSkills(root, false, ['claude'])).toThrow(/schema v2/);
+  expect(() => removeSkills(root, false, ['claude'])).not.toThrow();
   expect(readFileSync(SKILL(root), 'utf8')).toBe('# keep me\n');
-  expect(readFileSync(manifestPath, 'utf8')).toBe(manifest);
+  expect(existsSync(manifestPath)).toBe(false);
 });
 
 describe('install preserves a non-devkit collision by default', () => {
@@ -290,8 +324,28 @@ describe('agent-hook scripts: preserve a non-devkit collision, --force overrides
 });
 
 describe('clean fallback never deletes a preserved user asset (C1)', () => {
+  it('overlay clean removes a drifted asset that its legacy manifest still owns', () => {
+    const root = tmpRepo();
+    seedSkill(root, '# drifted after install\n');
+    const manifest = join(root, '.devkit', 'skills-manifest.json');
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(
+      manifest,
+      JSON.stringify({
+        files: { 'brainstorming/SKILL.md': '0'.repeat(64) },
+        targets: ['claude'],
+      }),
+    );
+
+    removeSkills(root, false, ['claude'], true, () => false);
+
+    expect(existsSync(join(root, '.claude', 'skills', 'brainstorming'))).toBe(false);
+    expect(existsSync(manifest)).toBe(false);
+  });
+
   it('keeps an untracked divergent user skill when the manifest is absent', () => {
     const root = tmpRepo();
+    initGit(root);
     seedSkill(root, '# mine\n'); // user's own, never manifested
 
     removeSkills(root, false, ['claude']); // no manifest → bundled-name fallback
@@ -301,6 +355,7 @@ describe('clean fallback never deletes a preserved user asset (C1)', () => {
 
   it('still removes a devkit stray (matches the bundle) when the manifest is absent', async () => {
     const root = tmpRepo();
+    initGit(root);
     await applyInit(root, {
       stack: 'generic',
       selection: only({ skills: true }),
@@ -379,6 +434,7 @@ describe('edge cases', () => {
 
   it('clean fallback keeps a devkit-named dir the user added a file to (manifest absent)', async () => {
     const root = tmpRepo();
+    initGit(root);
     await applyInit(root, {
       stack: 'generic',
       selection: only({ skills: true }),

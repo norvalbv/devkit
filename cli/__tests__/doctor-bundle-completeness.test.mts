@@ -17,9 +17,28 @@ const editManifest = (
   mutate: (files: Record<string, string>) => void,
 ) => {
   const p = join(root, '.devkit', `${kind}-manifest.json`);
-  const m = JSON.parse(readFileSync(p, 'utf8')) as { files: Record<string, string> };
+  const m = JSON.parse(readFileSync(p, 'utf8')) as {
+    schemaVersion?: number;
+    files: Record<string, string>;
+    providers?: Record<string, { files: Record<string, string> }>;
+  };
+  const before = Object.keys(m.files);
   mutate(m.files);
+  for (const logicalRel of before.filter((rel) => !(rel in m.files))) {
+    for (const [provider, projection] of Object.entries(m.providers ?? {})) {
+      const outputRel =
+        provider === 'codex' && kind === 'agents'
+          ? logicalRel.replace(/\.md$/, '.toml')
+          : logicalRel;
+      delete projection.files[outputRel];
+    }
+  }
   writeFileSync(p, JSON.stringify(m, null, 2));
+};
+const removeAgent = (root: string, name: string) => {
+  rmSync(join(root, '.claude/agents', name), { force: true });
+  rmSync(join(root, '.cursor/agents', name), { force: true });
+  rmSync(join(root, '.codex/agents', name.replace(/\.md$/, '.toml')), { force: true });
 };
 const agentsLine = (root: string) =>
   devkit(root, 'doctor')
@@ -41,7 +60,7 @@ describe('doctor bundle-completeness (agents)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     editManifest(root, 'agents', (f) => delete f['conventions-reviewer.md']);
-    rmSync(join(root, '.claude/agents/conventions-reviewer.md'));
+    removeAgent(root, 'conventions-reviewer.md');
     const line = agentsLine(root);
     expect(line).toMatch(/DRIFT/);
     expect(line).toContain('the manifest lacks');
@@ -63,7 +82,7 @@ describe('doctor bundle-completeness (agents)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     editManifest(root, 'agents', (f) => delete f['conventions-reviewer.md']);
-    rmSync(join(root, '.claude/agents/conventions-reviewer.md'));
+    removeAgent(root, 'conventions-reviewer.md');
     // (Overall exit may be 1 from unrelated drift in a bare fixture — assert the agents repair itself.)
     devkit(root, 'doctor', '--fix');
     expect(existsSync(join(root, '.claude/agents/conventions-reviewer.md'))).toBe(true);
@@ -123,10 +142,29 @@ describe('doctor bundle-completeness (skills, mirrored)', () => {
     editManifest(root, 'skills', (f) => {
       for (const k of Object.keys(f)) if (k.startsWith('decisions/')) delete f[k];
     });
-    rmSync(join(root, '.claude/skills/decisions'), { recursive: true, force: true });
+    for (const dir of ['.claude/skills', '.agents/skills', '.cursor/skills'])
+      rmSync(join(root, dir, 'decisions'), { recursive: true, force: true });
     const line = skillsLine(root);
     expect(line).toMatch(/DRIFT/);
     expect(line).toContain('the manifest lacks');
     expect(line).toContain('decisions');
+  });
+});
+
+describe('doctor provider hook ownership', () => {
+  it('accepts an exact pre-ledger configuration and migrates it on re-init', () => {
+    const root = tmpRepo();
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--agent-hooks', '--no-codex').status,
+    ).toBe(0);
+    const ledger = join(root, '.devkit/agent-hook-registrations-manifest.json');
+    rmSync(ledger);
+    expect(devkit(root, 'doctor').status).toBe(0);
+    expect(existsSync(ledger)).toBe(false);
+
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--agent-hooks', '--no-codex').status,
+    ).toBe(0);
+    expect(existsSync(ledger)).toBe(true);
   });
 });

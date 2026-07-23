@@ -43,7 +43,7 @@ describe('selection helpers', () => {
       structure: true,
     });
     expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
-    expect(s.agentTargets).toEqual(['claude', 'cursor']);
+    expect(s.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {
@@ -53,6 +53,7 @@ describe('selection helpers', () => {
     expect(s.guards).toEqual(['size']);
     expect(normalizeSelection({ agentTargets: null as never }).agentTargets).toEqual([
       'claude',
+      'codex',
       'cursor',
     ]);
   });
@@ -80,12 +81,22 @@ describe('selection helpers', () => {
     expect(sel.guards).toEqual(['fanout']);
   });
 
-  it('agentTargets: both by default, narrowed by --no-claude / --no-cursor', () => {
-    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual(['claude', 'cursor']);
+  it('agentTargets: all providers by default, narrowed by --no-<provider>', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+    ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-cursor'])).agentTargets).toEqual([
       'claude',
+      'codex',
     ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
+      'codex',
+      'cursor',
+    ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-codex'])).agentTargets).toEqual([
+      'claude',
       'cursor',
     ]);
   });
@@ -167,6 +178,31 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
     expect(existsSync(join(root, '.cursor/skills'))).toBe(false);
     expect(config(root).components.agentTargets).toEqual(['claude']);
+  });
+
+  it('fresh defaults install provider-native assets for Claude, Codex, and Cursor', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: true,
+        husky: false,
+        structure: false,
+        guards: [],
+      },
+      devkitRef: 'v0.3.0',
+    });
+
+    expect(existsSync(join(root, '.claude/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.agents/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude/agents/testing-agent.md'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/testing-agent.toml'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/agents/testing-agent.md'))).toBe(true);
+    expect(config(root).components.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {
