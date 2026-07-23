@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,11 +23,15 @@ const SCRIPT = fileURLToPath(new URL('../decisions.mts', import.meta.url));
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'decisions-'));
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  spawnSync('git', ['config', 'user.email', 'decisions@test.invalid'], { cwd: dir });
+  spawnSync('git', ['config', 'user.name', 'Decision Tests'], { cwd: dir });
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 function run(args) {
   return spawnSync('node', [SCRIPT, ...args], {
+    cwd: dir,
     encoding: 'utf8',
     env: {
       ...process.env,
@@ -39,6 +43,12 @@ function run(args) {
       DECISIONS_INDEX: join(dir, 'vec-index.json'),
     },
   });
+}
+
+function commitAll(message = 'decision baseline') {
+  spawnSync('git', ['add', '.'], { cwd: dir });
+  const result = spawnSync('git', ['commit', '-qm', message], { cwd: dir, encoding: 'utf8' });
+  expect(result.status, result.stderr).toBe(0);
 }
 
 // The required Target flags = the Context / Decision (Ruling) / Consequences spine.
@@ -336,5 +346,105 @@ describe('CLI round-trip', () => {
     const r = run(['reindex']);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Reindexed 0/1');
+  });
+});
+
+describe('draft amendments', () => {
+  it('rejects ambiguous target-and-note amendment modes', () => {
+    run(target('axis'));
+    const before = readFileSync(join(dir, 'axis.md'), 'utf8');
+    const blocked = run([
+      'amend',
+      'axis',
+      '--target',
+      ...reqFlags('replacement'),
+      '--note',
+      'also a note',
+    ]);
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('Usage: guard-decisions amend');
+    expect(readFileSync(join(dir, 'axis.md'), 'utf8')).toBe(before);
+  });
+
+  it('amends the sole Target on a new uncommitted axis and regenerates INDEX', () => {
+    expect(run(target('new-axis')).status).toBe(0);
+    const amended = run([
+      'amend',
+      'new-axis',
+      '--target',
+      ...reqFlags('replacement'),
+      '--title',
+      'replacement title',
+    ]);
+    expect(amended.status, amended.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'new-axis.md'), 'utf8');
+    expect(md).toContain('replacement title');
+    expect(md).not.toContain('new-axis-ruling');
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain('replacement-ruling');
+  });
+
+  it('amends an appended Target while preserving committed history', () => {
+    run(target('axis'));
+    commitAll();
+    expect(
+      run(['add', 'axis', '--target', ...reqFlags('second'), '--evidence-change', 'new benchmark'])
+        .status,
+    ).toBe(0);
+    const amended = run([
+      'amend',
+      'axis',
+      '--target',
+      ...reqFlags('final'),
+      '--evidence-change',
+      'corrected benchmark',
+    ]);
+    expect(amended.status, amended.stderr).toBe(0);
+    const md = readFileSync(join(dir, 'axis.md'), 'utf8');
+    expect(md).toContain('**Ruling:** axis-ruling');
+    expect(md).toContain('**Ruling:** final-ruling');
+    expect(md).not.toContain('**Ruling:** second-ruling');
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toContain('final-ruling');
+  });
+
+  it('amends the newest uncommitted note without changing INDEX', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+    const amended = run(['amend', 'axis', '--note', 'corrected note']);
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(readFileSync(join(dir, 'axis.md'), 'utf8')).toContain('corrected note');
+    expect(readFileSync(join(dir, 'axis.md'), 'utf8')).not.toContain('draft note');
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
+  it('refuses a committed newest entry without changing either file', () => {
+    run(target('axis'));
+    commitAll();
+    const file = join(dir, 'axis.md');
+    const index = join(dir, 'INDEX.md');
+    const beforeFile = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(index, 'utf8');
+    const blocked = run(['amend', 'axis', '--target', ...reqFlags('replacement')]);
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('already committed');
+    expect(readFileSync(file, 'utf8')).toBe(beforeFile);
+    expect(readFileSync(index, 'utf8')).toBe(beforeIndex);
+  });
+
+  it('refuses when earlier committed history changed, atomically', () => {
+    run(target('axis'));
+    commitAll();
+    run(['add', 'axis', '--note', 'draft note']);
+    const file = join(dir, 'axis.md');
+    const changed = readFileSync(file, 'utf8').replace('axis-ruling', 'tampered-ruling');
+    writeFileSync(file, changed);
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+
+    const blocked = run(['amend', 'axis', '--note', 'replacement note']);
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('earlier decision history differs from HEAD');
+    expect(readFileSync(file, 'utf8')).toBe(changed);
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
   });
 });

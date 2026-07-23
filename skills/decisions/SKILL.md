@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `scripts/decisions/decisions.mjs` (`add --target` · `add --note` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `scripts/decisions/decisions.mjs` (`add --target` · `add --note` · `amend --target` · `amend --note` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -49,7 +49,7 @@ prevents is *architectural knowledge vaporization* (Jansen & Bosch 2005) — the
 evaporates on the next refactor.
 
 ```
-node scripts/decisions/decisions.mjs add <slug> --target \
+guard-decisions add <slug> --target \
   --context "<the forcing FAILURE: what the system did before, the symptom it caused, + severity/blast-radius>" \
   --ruling  "<the DECISION / mechanism chosen>" \
   --consequences "<the user/business VALUE this protects — the promise kept>" \
@@ -126,7 +126,7 @@ history**: every re-target is permanently on the record for a human to read.
 ## Notes — cheap implementation convergence
 
 ```
-node scripts/decisions/decisions.mjs add <slug> --note "flat→raw payload because the extractor was lossy"
+guard-decisions add <slug> --note "flat→raw payload because the extractor was lossy"
 ```
 A `- <date> — …` bullet under the current Target. Not a ruling, doesn't touch the INDEX. This is
 where implementation churn lives — so it never masquerades as a target flip.
@@ -135,6 +135,9 @@ where implementation churn lives — so it never masquerades as a target flip.
 
 **Never mutate or delete a written block.** A→B→A is preserved; the *why* of each survives. The
 only edit allowed is an entry you're authoring in the *current uncommitted* workflow (typo fix).
+Use `amend <slug> --target …` or `amend <slug> --note "…"` for that narrow case: only the newest
+entry absent from `HEAD` can be replaced, and the CLI refuses if committed or earlier working-tree
+history changed. Direct native agent edits are blocked while the decisions guard is selected.
 To retire a mis-filed (non-epic) entry: **archive, don't delete** — move it under a
 `## [archived — impl-note, not an epic]` heading in the same file (INDEX stops surfacing it; the
 record stays intact). Deleting committed history would break the trust the whole log rests on.

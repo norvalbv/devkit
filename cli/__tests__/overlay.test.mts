@@ -491,6 +491,9 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.claude', 'skills'))).toBe(true);
     expect(existsSync(join(root, '.cursor', 'agents'))).toBe(true);
     expect(existsSync(join(root, '.devkit', 'skills-manifest.json'))).toBe(true);
+    expect(existsSync(join(root, '.claude', 'skills', 'decisions', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude', 'hooks', 'decision-edit-guard.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.claude', 'hooks', 'lint-check.sh'))).toBe(false);
     const exclude = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
     expect(exclude).toContain('.claude/skills/');
     expect(exclude).toContain('.cursor/agents/');
@@ -498,6 +501,32 @@ describe('overlay (local-only) install', () => {
     expect(
       execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim(),
     ).toBe('');
+  });
+
+  it('prunes decisions-owned overlay assets and registration when the guard is removed', async () => {
+    const root = workRepo();
+    const selected = defaultSelection();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: selected,
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...selected, guards: selected.guards.filter((guard) => guard !== 'decisions') },
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    expect(existsSync(join(root, '.claude', 'skills', 'decisions'))).toBe(false);
+    expect(existsSync(join(root, '.claude', 'hooks', 'decision-edit-guard.mjs'))).toBe(false);
+    expect(readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8')).not.toContain(
+      'decision-edit-guard.mjs',
+    );
+    expect(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')).not.toContain(
+      'decision-edit-guard.mjs',
+    );
   });
 
   it('Claude hooks register into settings.local.json (not the shared settings.json)', async () => {
