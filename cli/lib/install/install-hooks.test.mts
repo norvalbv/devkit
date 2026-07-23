@@ -120,6 +120,35 @@ describe('installHookRegistrations', () => {
     installHookRegistrations(root, ['agentHooks']);
     expect(claudeCommands(root)).toContain('echo mine');
   });
+
+  it('preserves consumer-owned commands stored under conventional hook directories', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+    const claudeSettings = claude(root);
+    claudeSettings.hooks.PreToolUse[0].hooks.push({
+      type: 'command',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
+    const cursorSettings = cursor(root);
+    cursorSettings.hooks.preToolUse.push({
+      command: '.cursor/hooks/my-own-guard.mjs',
+      matcher: 'Write',
+      failClosed: true,
+    });
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
+
+    installHookRegistrations(root, ['decisions']);
+
+    expect(claudeCommands(root)).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    );
+    expect(cursor(root).hooks.preToolUse).toContainEqual({
+      command: '.cursor/hooks/my-own-guard.mjs',
+      matcher: 'Write',
+      failClosed: true,
+    });
+  });
 });
 
 describe('checkHookRegistrations', () => {
@@ -144,6 +173,29 @@ describe('removeHookRegistrations', () => {
     removeHookRegistrations(root);
     const cmds = claudeCommands(root);
     expect(cmds).toEqual(['echo mine']);
+  });
+
+  it('does not strip consumer commands merely because they live in agent hook directories', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+    const claudeSettings = claude(root);
+    claudeSettings.hooks.PreToolUse[0].hooks.push({
+      type: 'command',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
+    const cursorSettings = cursor(root);
+    cursorSettings.hooks.preToolUse.push({ command: '.cursor/hooks/my-own-guard.mjs' });
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
+
+    removeHookRegistrations(root);
+
+    expect(claudeCommands(root)).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/my-own-guard.mjs"',
+    );
+    expect(cursor(root).hooks.preToolUse).toContainEqual({
+      command: '.cursor/hooks/my-own-guard.mjs',
+    });
   });
 
   it('no-ops cleanly when no settings exist', () => {

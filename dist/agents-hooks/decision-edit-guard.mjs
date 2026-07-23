@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_DECISIONS_DIR = "docs/decisions";
@@ -17,6 +17,7 @@ const MUTATING_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Delete"]);
 const PATH_KEYS = new Set(["file_path", "path", "target_file", "target_path"]);
 
 function configuredDir(root, env = process.env) {
+  // FRINK_DECISIONS_DIR remains a compatibility alias for pre-Devkit guard configurations.
   const fromEnv = env.GUARD_DECISIONS_DIR ?? env.FRINK_DECISIONS_DIR;
   if (fromEnv !== undefined) return fromEnv.trim() || null;
   const configPath = resolve(root, "guard.config.json");
@@ -50,7 +51,10 @@ function collectPaths(value, out = []) {
 
 function inside(candidate, directory) {
   const rel = relative(directory, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+  );
 }
 
 /** Return the denial reason for a known in-scope mutation, otherwise null (fail-open). */

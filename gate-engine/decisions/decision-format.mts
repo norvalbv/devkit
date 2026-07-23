@@ -12,6 +12,7 @@ const TARGET_HEAD_RE = /^## Target · /;
 const TARGET_FIELD_RE = /^\*\*([^:]+):\*\*\s*(.*)$/;
 const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/;
 const TITLE_CUT_RE = /\. |\.$| — |; /;
+const MARKDOWN_TABLE_BREAK_RE = /\s*[|\n\r]+\s*/g;
 
 export interface IndexRow {
   slug: string;
@@ -40,6 +41,24 @@ export interface AddOptions {
   evidenceChange?: string;
 }
 
+export interface TargetOptions extends AddOptions {
+  context: string;
+  ruling: string;
+  consequences: string;
+  tradeoff: string;
+  visionFit: string;
+}
+
+export function hasTargetFields(options: AddOptions): options is TargetOptions {
+  return Boolean(
+    options.ruling &&
+      options.context &&
+      options.consequences &&
+      options.tradeoff &&
+      options.visionFit,
+  );
+}
+
 export interface CurrentTarget {
   ruling: string;
   scope: string;
@@ -53,7 +72,7 @@ export function today() {
 
 export function sanitizeCell(value: string) {
   return String(value ?? '')
-    .replace(/[|\n\r]+/g, ' ')
+    .replace(MARKDOWN_TABLE_BREAK_RE, ' ')
     .trim();
 }
 
@@ -87,7 +106,10 @@ export function parseIndex(markdown: string): IndexRow[] {
 export function renderIndex(rows: IndexRow[]) {
   const body = [...rows]
     .sort((left, right) => left.slug.localeCompare(right.slug))
-    .map((row) => `| [${row.slug}](${row.slug}.md) | ${row.ruling} | ${row.why} | ${row.updated} |`)
+    .map(
+      (row) =>
+        `| [${row.slug}](${row.slug}.md) | ${sanitizeCell(row.ruling)} | ${sanitizeCell(row.why)} | ${sanitizeCell(row.updated)} |`,
+    )
     .join('\n');
   return INDEX_HEADER + (body ? `${body}\n` : '');
 }
@@ -128,7 +150,7 @@ function firstClause(value: string | undefined) {
   return (cut > 0 ? text.slice(0, cut) : text).slice(0, 100);
 }
 
-export function renderTarget(date: string, options: AddOptions) {
+export function renderTarget(date: string, options: TargetOptions) {
   const lines = [
     `## Target · ${date} — ${sanitizeCell(options.title || firstClause(options.ruling))}`,
     '',
