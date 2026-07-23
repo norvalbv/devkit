@@ -11,12 +11,20 @@ const TARGET_HEAD_RE = /^## Target · /;
 const TARGET_FIELD_RE = /^\*\*([^:]+):\*\*\s*(.*)$/;
 const NOTE_BULLET_RE = /^-\s+\d{4}-\d{2}-\d{2}\b/;
 const TITLE_CUT_RE = /\. |\.$| — |; /;
+const MARKDOWN_TABLE_BREAK_RE = /\s*[|\n\r]+\s*/g;
+export function hasTargetFields(options) {
+    return Boolean(options.ruling &&
+        options.context &&
+        options.consequences &&
+        options.tradeoff &&
+        options.visionFit);
+}
 export function today() {
     return process.env.DECISIONS_TODAY ?? new Date().toISOString().slice(0, 10);
 }
 export function sanitizeCell(value) {
     return String(value ?? '')
-        .replace(/[|\n\r]+/g, ' ')
+        .replace(MARKDOWN_TABLE_BREAK_RE, ' ')
         .trim();
 }
 export function whyHook(why) {
@@ -50,7 +58,7 @@ export function parseIndex(markdown) {
 export function renderIndex(rows) {
     const body = [...rows]
         .sort((left, right) => left.slug.localeCompare(right.slug))
-        .map((row) => `| [${row.slug}](${row.slug}.md) | ${row.ruling} | ${row.why} | ${row.updated} |`)
+        .map((row) => `| [${row.slug}](${row.slug}.md) | ${sanitizeCell(row.ruling)} | ${sanitizeCell(row.why)} | ${sanitizeCell(row.updated)} |`)
         .join('\n');
     return INDEX_HEADER + (body ? `${body}\n` : '');
 }

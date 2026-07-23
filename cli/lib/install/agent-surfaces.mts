@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { syncAgents } from '../../commands/sync/sync-agents.mts';
-import { pruneManifestedDecisionsSkill, syncSkills } from '../../commands/sync/sync-skills.mts';
+import { syncSkills } from '../../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, type Selection } from '../components.mts';
 import { removeAgents, removeSkills } from '../sync-manifest.mts';
 import { selectedHookAssets } from './agent-hook-selection.mts';
@@ -58,8 +58,9 @@ export function installAgentSurfaces(
       override,
       guards: selection.guards ?? [],
     });
-  } else {
-    pruneManifestedDecisionsSkill(gitRoot, dryRun);
+  } else if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) {
+    console.log('7. remove deselected skills');
+    removeSkills(gitRoot, dryRun);
   }
   if (selection.agents) {
     console.log('7a. agents');

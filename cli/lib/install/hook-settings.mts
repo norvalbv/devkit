@@ -2,11 +2,9 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from '../components.mts';
 import { readJson, writeIfAbsent } from '../fs-helpers.mts';
 import { isTracked } from '../git-tracked.mts';
-import { registrationsFor } from './hook-registrations.mts';
+import { HOOK_REGISTRATIONS, registrationsFor } from './hook-registrations.mts';
 
 const settingsFile = (overlay: boolean) => (overlay ? 'settings.local.json' : 'settings.json');
-const DEVKIT_MARKERS = ['@norvalbv/devkit/gate-engine', '.claude/hooks/', '.cursor/hooks/'];
-const isDevkit = (command: string) => DEVKIT_MARKERS.some((marker) => command.includes(marker));
 
 interface HookRegistration {
   event: string;
@@ -50,21 +48,6 @@ interface CursorHook {
 }
 type CursorHooksBlock = Record<string, CursorHook[]>;
 
-function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
-  const out: ClaudeHooksBlock = {};
-  for (const [event, groups] of Object.entries(hooks ?? {})) {
-    const kept: ClaudeHookGroup[] = [];
-    for (const group of groups) {
-      const commands = (group.hooks ?? []).filter(
-        (hook) => !(hook.command && isDevkit(hook.command)),
-      );
-      if (commands.length) kept.push({ ...group, hooks: commands });
-    }
-    if (kept.length) out[event] = kept;
-  }
-  return out;
-}
-
 function addClaude(
   hooks: ClaudeHooksBlock,
   { event, matcher, command }: HookRegistration,
@@ -105,10 +88,37 @@ function toCursorCommand(command: string): string {
     .trim();
 }
 
+const ALL_DEVKIT_REGISTRATIONS = registrationsFor(Object.keys(HOOK_REGISTRATIONS));
+const DEVKIT_CLAUDE_COMMANDS = new Set(
+  ALL_DEVKIT_REGISTRATIONS.map((registration) => registration.command),
+);
+const DEVKIT_CURSOR_COMMANDS = new Set(
+  ALL_DEVKIT_REGISTRATIONS.filter(
+    ({ event, matcher, cursorEvent }) => cursorEvent ?? CURSOR_EVENT[event]?.[matcher],
+  ).map((registration) => toCursorCommand(registration.command)),
+);
+
+function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
+  const out: ClaudeHooksBlock = {};
+  for (const [event, groups] of Object.entries(hooks ?? {})) {
+    const kept: ClaudeHookGroup[] = [];
+    for (const group of groups) {
+      const commands = (group.hooks ?? []).filter(
+        (hook) => !(hook.command && DEVKIT_CLAUDE_COMMANDS.has(hook.command)),
+      );
+      if (commands.length) kept.push({ ...group, hooks: commands });
+    }
+    if (kept.length) out[event] = kept;
+  }
+  return out;
+}
+
 function stripCursor(hooks?: CursorHooksBlock): CursorHooksBlock {
   const out: CursorHooksBlock = {};
   for (const [event, list] of Object.entries(hooks ?? {})) {
-    const kept = (list ?? []).filter((hook) => !(hook.command && isDevkit(hook.command)));
+    const kept = (list ?? []).filter(
+      (hook) => !(hook.command && DEVKIT_CURSOR_COMMANDS.has(hook.command)),
+    );
     if (kept.length) out[event] = kept;
   }
   return out;

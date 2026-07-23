@@ -168,8 +168,10 @@ export function removeManifested(root, manifestRel, dirs, kind, dryRun, dropMani
  * @param targets surfaces to remove from (default both)
  * @param dropManifest also delete the manifest (default true — a full uninstall)
  */
-export function removeSkills(root, dryRun, targets = AGENT_TARGETS, dropManifest = true) {
-    const dirs = targets.map((t) => `.${t}/skills`);
+export function removeSkills(root, dryRun, targets, dropManifest = true) {
+    const manifest = readJson(join(root, '.devkit', 'skills-manifest.json'));
+    const managedTargets = targets ?? manifest?.targets ?? AGENT_TARGETS;
+    const dirs = managedTargets.map((t) => `.${t}/skills`);
     const fallback = bundledNames('skills', (e) => e.isDirectory());
     removeManifested(root, 'skills-manifest.json', dirs, 'skill', dryRun, dropManifest, fallback, join(packageDir(), 'skills'));
 }

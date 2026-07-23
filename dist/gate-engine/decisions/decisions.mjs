@@ -49,7 +49,7 @@ import { pathToFileURL } from 'node:url';
 import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { amendDecision } from "./amend.mjs";
 import { writeFileAtomic } from "./atomic-write.mjs";
-import { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from "./decision-format.mjs";
+import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from "./decision-format.mjs";
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from "./decision-format.mjs";
 const EMBED_URL = 'http://localhost:11434/api/embed';
 const EMBED_MODEL = 'nomic-embed-text';
@@ -97,7 +97,7 @@ export function cmdAmend(slug, o, cwd = process.cwd()) {
 // Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, already-targeted re-target guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
 // fallow-ignore-next-line complexity
 function addTarget(slug, o, p) {
-    if (!o.ruling || !o.context || !o.consequences || !o.tradeoff || !o.visionFit) {
+    if (!hasTargetFields(o)) {
         console.error('Usage: guard-decisions add <slug> --target \\\n' +
             '  --context "<the forcing failure: what broke + the symptom + severity/blast-radius>" \\\n' +
             '  --ruling "<the decision / mechanism chosen>" \\\n' +

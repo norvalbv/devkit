@@ -54,6 +54,7 @@ import { writeFileAtomic } from './atomic-write.mts';
 import {
   type AddOptions,
   currentTarget,
+  hasTargetFields,
   type IndexRow,
   parseDecision,
   parseIndex,
@@ -78,6 +79,7 @@ export {
   renderIndex,
   renderNote,
   renderTarget,
+  type TargetOptions,
   upsertRow,
 } from './decision-format.mts';
 
@@ -150,8 +152,6 @@ function readIndexRows(p: Paths): IndexRow[] {
   return existsSync(p.indexPath) ? parseIndex(readFileSync(p.indexPath, 'utf8')) : [];
 }
 
-// ─── Per-axis file parse / render ───────────────────────────────────────────────
-
 // ─── Commands ───────────────────────────────────────────────────────────────────
 
 export function cmdAdd(slug: string, o: AddOptions, cwd = process.cwd()) {
@@ -170,7 +170,7 @@ export function cmdAmend(slug: string, o: AddOptions, cwd = process.cwd()) {
 // Reason: the branches ARE the Target-recording state machine (required-field guard, unknown-axis-without-new guard, already-targeted re-target guard, exists-vs-new render path); each guard maps to a distinct user error and extracting them hides the decision logic
 // fallow-ignore-next-line complexity
 function addTarget(slug: string, o: AddOptions, p: Paths) {
-  if (!o.ruling || !o.context || !o.consequences || !o.tradeoff || !o.visionFit) {
+  if (!hasTargetFields(o)) {
     console.error(
       'Usage: guard-decisions add <slug> --target \\\n' +
         '  --context "<the forcing failure: what broke + the symptom + severity/blast-radius>" \\\n' +

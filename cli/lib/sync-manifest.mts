@@ -208,10 +208,12 @@ export function removeManifested(
 export function removeSkills(
   root: string,
   dryRun: boolean,
-  targets: string[] = AGENT_TARGETS,
+  targets?: string[],
   dropManifest = true,
 ): void {
-  const dirs = targets.map((t) => `.${t}/skills`);
+  const manifest = readJson(join(root, '.devkit', 'skills-manifest.json')) as SyncManifest | null;
+  const managedTargets = targets ?? manifest?.targets ?? AGENT_TARGETS;
+  const dirs = managedTargets.map((t) => `.${t}/skills`);
   const fallback = bundledNames('skills', (e) => e.isDirectory());
   removeManifested(
     root,

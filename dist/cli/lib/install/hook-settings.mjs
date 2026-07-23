@@ -2,24 +2,8 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../components.mjs";
 import { readJson, writeIfAbsent } from "../fs-helpers.mjs";
 import { isTracked } from "../git-tracked.mjs";
-import { registrationsFor } from "./hook-registrations.mjs";
+import { HOOK_REGISTRATIONS, registrationsFor } from "./hook-registrations.mjs";
 const settingsFile = (overlay) => (overlay ? 'settings.local.json' : 'settings.json');
-const DEVKIT_MARKERS = ['@norvalbv/devkit/gate-engine', '.claude/hooks/', '.cursor/hooks/'];
-const isDevkit = (command) => DEVKIT_MARKERS.some((marker) => command.includes(marker));
-function stripClaude(hooks) {
-    const out = {};
-    for (const [event, groups] of Object.entries(hooks ?? {})) {
-        const kept = [];
-        for (const group of groups) {
-            const commands = (group.hooks ?? []).filter((hook) => !(hook.command && isDevkit(hook.command)));
-            if (commands.length)
-                kept.push({ ...group, hooks: commands });
-        }
-        if (kept.length)
-            out[event] = kept;
-    }
-    return out;
-}
 function addClaude(hooks, { event, matcher, command }) {
     if (!hooks[event])
         hooks[event] = [];
@@ -55,10 +39,27 @@ function toCursorCommand(command) {
         .replace(QUOTE_RE, '')
         .trim();
 }
+const ALL_DEVKIT_REGISTRATIONS = registrationsFor(Object.keys(HOOK_REGISTRATIONS));
+const DEVKIT_CLAUDE_COMMANDS = new Set(ALL_DEVKIT_REGISTRATIONS.map((registration) => registration.command));
+const DEVKIT_CURSOR_COMMANDS = new Set(ALL_DEVKIT_REGISTRATIONS.filter(({ event, matcher, cursorEvent }) => cursorEvent ?? CURSOR_EVENT[event]?.[matcher]).map((registration) => toCursorCommand(registration.command)));
+function stripClaude(hooks) {
+    const out = {};
+    for (const [event, groups] of Object.entries(hooks ?? {})) {
+        const kept = [];
+        for (const group of groups) {
+            const commands = (group.hooks ?? []).filter((hook) => !(hook.command && DEVKIT_CLAUDE_COMMANDS.has(hook.command)));
+            if (commands.length)
+                kept.push({ ...group, hooks: commands });
+        }
+        if (kept.length)
+            out[event] = kept;
+    }
+    return out;
+}
 function stripCursor(hooks) {
     const out = {};
     for (const [event, list] of Object.entries(hooks ?? {})) {
-        const kept = (list ?? []).filter((hook) => !(hook.command && isDevkit(hook.command)));
+        const kept = (list ?? []).filter((hook) => !(hook.command && DEVKIT_CURSOR_COMMANDS.has(hook.command)));
         if (kept.length)
             out[event] = kept;
     }

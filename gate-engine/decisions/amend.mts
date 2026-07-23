@@ -5,6 +5,7 @@ import { writeFileAtomic } from './atomic-write.mts';
 import {
   type AddOptions,
   currentTarget,
+  hasTargetFields,
   parseDecision,
   parseIndex,
   renderDecision,
@@ -153,14 +154,7 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   if (!slug || Boolean(options.isTarget) === Boolean(options.note)) {
     throw new Error('Usage: guard-decisions amend <slug> --target … | --note "…"');
   }
-  if (
-    options.isTarget &&
-    (!options.ruling ||
-      !options.context ||
-      !options.consequences ||
-      !options.tradeoff ||
-      !options.visionFit)
-  ) {
+  if (options.isTarget && !hasTargetFields(options)) {
     throw new Error(
       'amend --target requires --context, --ruling, --consequences, --tradeoff, and --vision-fit',
     );
@@ -180,9 +174,10 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
   ) {
     throw new Error('amending an appended Target requires --evidence-change "<what shifted>"');
   }
-  const replacement = options.isTarget
-    ? renderTarget(date, options)
-    : renderNote(date, options.note ?? '');
+  const replacement =
+    options.isTarget && hasTargetFields(options)
+      ? renderTarget(date, options)
+      : renderNote(date, options.note ?? '');
   const before = workingParsed.body.slice(0, latest.start).replace(TRAILING_WS_RE, '');
   const separator = options.isTarget ? '\n\n' : '\n';
   const body = `${before}${separator}${replacement}\n`;

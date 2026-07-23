@@ -323,7 +323,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
   });
 
-  it('switching to --no-skills prunes a previously manifested decisions skill', async () => {
+  it('switching to --no-skills prunes every previously manifested skill', async () => {
     const root = tmpRepo();
     const base = {
       biome: false,
@@ -337,9 +337,17 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     };
     await applyInit(root, { stack: 'generic', selection: { ...base, skills: true } });
     expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(true);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(true);
+    const consumerSkill = join(root, '.cursor/skills/brainstorming/SKILL.md');
+    mkdirSync(join(root, '.cursor/skills/brainstorming'), { recursive: true });
+    writeFileSync(consumerSkill, '# consumer-owned on an unmanaged surface\n');
 
     await applyInit(root, { stack: 'generic', selection: { ...base, skills: false } });
     expect(existsSync(join(root, '.claude/skills/decisions'))).toBe(false);
+    expect(existsSync(join(root, '.claude/skills/brainstorming'))).toBe(false);
+    expect(existsSync(join(root, '.devkit/skills-manifest.json'))).toBe(false);
+    expect(readFileSync(consumerSkill, 'utf8')).toBe('# consumer-owned on an unmanaged surface\n');
     expect(existsSync(join(root, '.claude/hooks/decision-edit-guard.mjs'))).toBe(true);
   });
 
