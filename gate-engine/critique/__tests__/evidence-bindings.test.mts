@@ -709,8 +709,15 @@ describe('plan critique evidence bindings', () => {
     const root = evidenceRoot();
     const record = storedRecord(repository, root, 'mismatch-work');
     persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+    const missingEvidenceRoot = path.join(root, 'missing');
     git(repository, 'checkout', '-q', '-b', 'other');
-    expect(resolvePlanCritiqueBinding({ cwd: repository, workId: record.workId })).toEqual({
+    expect(
+      resolvePlanCritiqueBinding({
+        cwd: repository,
+        evidenceRoot: missingEvidenceRoot,
+        workId: record.workId,
+      }),
+    ).toEqual({
       status: 'unavailable',
       reason: 'branch_mismatch',
       candidates: 1,
@@ -729,7 +736,13 @@ describe('plan critique evidence bindings', () => {
     chmodSync(path.dirname(destination), 0o700);
     copyFileSync(source, destination);
     chmodSync(destination, 0o600);
-    expect(resolvePlanCritiqueBinding({ cwd: otherRepository, workId: record.workId })).toEqual({
+    expect(
+      resolvePlanCritiqueBinding({
+        cwd: otherRepository,
+        evidenceRoot: missingEvidenceRoot,
+        workId: record.workId,
+      }),
+    ).toEqual({
       status: 'unavailable',
       reason: 'repository_mismatch',
       candidates: 1,

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync } from 'node:fs';
+import { type BigIntStats, closeSync, constants, fstatSync, lstatSync, openSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { withFileLock } from '../eval/publish-lock.mts';
@@ -16,8 +16,14 @@ interface EvidenceRootLocation {
 }
 
 interface EvidenceRootIdentity {
+  birthtimeNanoseconds: bigint;
   device: bigint;
   inode: bigint;
+}
+
+interface EvidenceRootHandle {
+  descriptor?: number;
+  identity: EvidenceRootIdentity;
 }
 
 type PersistenceAction = (canonicalRoot: string) => unknown;
@@ -91,18 +97,57 @@ function persistenceLockPath(location: EvidenceRootLocation, canonicalRoot: stri
   return path.join(location.parent, `.plan-critique-${digest}.lock`);
 }
 
+function evidenceRootIdentity(stat: BigIntStats): EvidenceRootIdentity {
+  return {
+    birthtimeNanoseconds: stat.birthtimeNs,
+    device: stat.dev,
+    inode: stat.ino,
+  };
+}
+
 function rootIdentity(root: string): EvidenceRootIdentity | null {
   try {
     const stat = lstatSync(root, { bigint: true });
-    return { device: stat.dev, inode: stat.ino };
+    return evidenceRootIdentity(stat);
   } catch (error) {
     if (missing(error)) return null;
     throw error;
   }
 }
 
+function openRootIdentity(root: string): EvidenceRootHandle | null {
+  if (process.platform !== 'linux') {
+    const identity = rootIdentity(root);
+    return identity && { identity };
+  }
+  let descriptor: number;
+  try {
+    descriptor = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (missing(error)) return null;
+    throw error;
+  }
+  try {
+    const stat = fstatSync(descriptor, { bigint: true });
+    return { descriptor, identity: evidenceRootIdentity(stat) };
+  } catch (error) {
+    try {
+      closeSync(descriptor);
+    } catch {}
+    throw error;
+  }
+}
+
 function sameRootIdentity(left: EvidenceRootIdentity, right: EvidenceRootIdentity): boolean {
-  return left.device === right.device && left.inode === right.inode;
+  return (
+    left.birthtimeNanoseconds === right.birthtimeNanoseconds &&
+    left.device === right.device &&
+    left.inode === right.inode
+  );
+}
+
+function closeRootHandle(rootHandle: EvidenceRootHandle): void {
+  if (rootHandle.descriptor !== undefined) closeSync(rootHandle.descriptor);
 }
 
 function existingRoot(location: EvidenceRootLocation): string | null {
@@ -157,12 +202,13 @@ export function withExistingPlanCritiquePersistenceLock<Action extends Persisten
   if (!location) return { status: 'absent' };
   const canonicalRoot = existingRoot(location);
   if (!canonicalRoot) return { status: 'absent' };
-  const identity = rootIdentity(canonicalRoot);
-  if (!identity) return { status: 'absent' };
+  const rootHandle = openRootIdentity(canonicalRoot);
+  if (!rootHandle) return { status: 'absent' };
   const lockPath = persistenceLockPath(location, canonicalRoot);
   let lockActionEntered = false;
+  let result: ExistingPlanCritiquePersistenceLockResult<ReturnType<Action>>;
   try {
-    return withFileLock(
+    result = withFileLock(
       lockPath,
       OPERATION,
       () => {
@@ -171,18 +217,28 @@ export function withExistingPlanCritiquePersistenceLock<Action extends Persisten
         if (!lockedRoot) return { status: 'absent' };
         const lockedIdentity = rootIdentity(lockedRoot);
         if (!lockedIdentity) return { status: 'absent' };
-        if (lockedRoot !== canonicalRoot || !sameRootIdentity(identity, lockedIdentity))
+        if (lockedRoot !== canonicalRoot || !sameRootIdentity(rootHandle.identity, lockedIdentity))
           throw new Error('plan critique evidence root changed while acquiring persistence lock');
         return { status: 'locked', value: runSynchronousAction(action, lockedRoot) };
       },
       { createParent: false },
     );
   } catch (error) {
+    let rootAbsent = false;
     if (!lockActionEntered) {
       try {
-        if (!existingRoot(location)) return { status: 'absent' };
+        rootAbsent = !existingRoot(location);
       } catch {}
     }
+    if (rootAbsent) {
+      closeRootHandle(rootHandle);
+      return { status: 'absent' };
+    }
+    try {
+      closeRootHandle(rootHandle);
+    } catch {}
     throw error;
   }
+  closeRootHandle(rootHandle);
+  return result;
 }

@@ -335,6 +335,15 @@ export function resolvePlanCritiqueBinding(
     return { ...preflightRepository, candidates: 0 };
   const preflight = selectBinding(preflightRepository.context, workId);
   if (preflight.status === 'unavailable') return preflight;
+  const { binding: preflightBinding, candidates: preflightCandidates } = preflight;
+  const { context: preflightContext } = preflightRepository;
+  if (
+    preflightBinding.repository.fingerprint !== preflightContext.fingerprint ||
+    preflightBinding.repository.fingerprintSource !== preflightContext.fingerprintSource
+  )
+    return unavailable('repository_mismatch', preflightCandidates);
+  if (preflightBinding.repository.branch !== preflightContext.branch)
+    return unavailable('branch_mismatch', preflightCandidates);
   let evidenceRoot: string | null;
   try {
     evidenceRoot = resolvePlanCritiqueEvidenceRoot(evidenceOptions(options.evidenceRoot), false);

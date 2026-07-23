@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { withFileLock } from "../eval/publish-lock.mjs";
@@ -49,10 +49,17 @@ function persistenceLockPath(location, canonicalRoot) {
     const digest = createHash('sha256').update(canonicalRoot).digest('hex');
     return path.join(location.parent, `.plan-critique-${digest}.lock`);
 }
+function evidenceRootIdentity(stat) {
+    return {
+        birthtimeNanoseconds: stat.birthtimeNs,
+        device: stat.dev,
+        inode: stat.ino,
+    };
+}
 function rootIdentity(root) {
     try {
         const stat = lstatSync(root, { bigint: true });
-        return { device: stat.dev, inode: stat.ino };
+        return evidenceRootIdentity(stat);
     }
     catch (error) {
         if (missing(error))
@@ -60,8 +67,40 @@ function rootIdentity(root) {
         throw error;
     }
 }
+function openRootIdentity(root) {
+    if (process.platform !== 'linux') {
+        const identity = rootIdentity(root);
+        return identity && { identity };
+    }
+    let descriptor;
+    try {
+        descriptor = openSync(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    }
+    catch (error) {
+        if (missing(error))
+            return null;
+        throw error;
+    }
+    try {
+        const stat = fstatSync(descriptor, { bigint: true });
+        return { descriptor, identity: evidenceRootIdentity(stat) };
+    }
+    catch (error) {
+        try {
+            closeSync(descriptor);
+        }
+        catch { }
+        throw error;
+    }
+}
 function sameRootIdentity(left, right) {
-    return left.device === right.device && left.inode === right.inode;
+    return (left.birthtimeNanoseconds === right.birthtimeNanoseconds &&
+        left.device === right.device &&
+        left.inode === right.inode);
+}
+function closeRootHandle(rootHandle) {
+    if (rootHandle.descriptor !== undefined)
+        closeSync(rootHandle.descriptor);
 }
 function existingRoot(location) {
     try {
@@ -109,13 +148,14 @@ export function withExistingPlanCritiquePersistenceLock(options, action) {
     const canonicalRoot = existingRoot(location);
     if (!canonicalRoot)
         return { status: 'absent' };
-    const identity = rootIdentity(canonicalRoot);
-    if (!identity)
+    const rootHandle = openRootIdentity(canonicalRoot);
+    if (!rootHandle)
         return { status: 'absent' };
     const lockPath = persistenceLockPath(location, canonicalRoot);
     let lockActionEntered = false;
+    let result;
     try {
-        return withFileLock(lockPath, OPERATION, () => {
+        result = withFileLock(lockPath, OPERATION, () => {
             lockActionEntered = true;
             const lockedRoot = existingRoot(location);
             if (!lockedRoot)
@@ -123,19 +163,29 @@ export function withExistingPlanCritiquePersistenceLock(options, action) {
             const lockedIdentity = rootIdentity(lockedRoot);
             if (!lockedIdentity)
                 return { status: 'absent' };
-            if (lockedRoot !== canonicalRoot || !sameRootIdentity(identity, lockedIdentity))
+            if (lockedRoot !== canonicalRoot || !sameRootIdentity(rootHandle.identity, lockedIdentity))
                 throw new Error('plan critique evidence root changed while acquiring persistence lock');
             return { status: 'locked', value: runSynchronousAction(action, lockedRoot) };
         }, { createParent: false });
     }
     catch (error) {
+        let rootAbsent = false;
         if (!lockActionEntered) {
             try {
-                if (!existingRoot(location))
-                    return { status: 'absent' };
+                rootAbsent = !existingRoot(location);
             }
             catch { }
         }
+        if (rootAbsent) {
+            closeRootHandle(rootHandle);
+            return { status: 'absent' };
+        }
+        try {
+            closeRootHandle(rootHandle);
+        }
+        catch { }
         throw error;
     }
+    closeRootHandle(rootHandle);
+    return result;
 }
