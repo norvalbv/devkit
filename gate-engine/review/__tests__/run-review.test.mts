@@ -966,9 +966,24 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
 
   it('FAIL → exit 1 (hard by default, no env, no config key)', async () => {
     const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-completeness-fail';
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async () => 'gap: no error handling\nVERDICT: FAIL — misleading scope');
     expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'review_result',
+        reviewer: 'feature-completeness-reviewer',
+        status: 'fail',
+        reason: 'misleading scope',
+      }),
+    );
   });
 
   it('FAIL + GUARD_COMPLETENESS_HARD=0 → softened to warn for this run, exit 0', async () => {
@@ -1000,6 +1015,68 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     expect(captured.args[1]).toContain('RELEVANT RECORDED TARGETS');
     expect(captured.args[1]).toContain('Brief for feature-completeness-reviewer.');
     expect(captured.args).toContain('opus'); // straight opus, no cascade
+  });
+
+  it('emits the parsed completeness verdict through the standard reviewer telemetry contract', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-completeness';
+    expect(
+      await runCompleteness(msg(repo, 'feat: add db layer'), repo, {
+        exec: mkExec(async () => 'VERDICT: PASS — scope is complete'),
+      }),
+    ).toBe(0);
+
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'review_result',
+        ship_id: 'ship-completeness',
+        reviewer: 'feature-completeness-reviewer',
+        status: 'pass',
+        escalated: false,
+        model: 'opus',
+        reason: 'scope is complete',
+      }),
+    );
+  });
+
+  it('records malformed verdicts and judge outages as inconclusive without changing exit behavior', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-completeness-inconclusive';
+    const malformed = mkExec(async () => 'a response with no verdict line');
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: malformed })).toBe(0);
+    const unavailable = mkExec(async (opts) => {
+      opts.onOutage?.('timeout');
+      return null;
+    });
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: unavailable })).toBe(2);
+
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'review_result');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reviewer: 'feature-completeness-reviewer',
+          status: 'inconclusive',
+          reason: 'judge returned no PASS/FAIL verdict',
+        }),
+        expect.objectContaining({
+          reviewer: 'feature-completeness-reviewer',
+          status: 'inconclusive',
+          reason: 'judge timed out',
+        }),
+      ]),
+    );
   });
 
   it('GUARD_NO_COMPLETENESS=1 skips before any spawn', async () => {

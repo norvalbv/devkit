@@ -29,6 +29,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../judge/run-judge.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
@@ -39,6 +40,7 @@ const AGENT_NAME = 'feature-completeness-reviewer';
 // gap-finder on a big commit was SIGTERM'd at 360s and silently skipped — the PR #60 lesson.
 const TIMEOUT_MS = 420000;
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
+type JudgeOutage = 'timeout' | 'transient' | 'empty';
 
 // The capped, omission-accounted stdin-evidence builder (sc-1060) now lives in diff-evidence.mts
 // so gate-engine/review/claude-md.mts's CLAUDE.md renderer can reuse the same capping shape for
@@ -168,14 +170,37 @@ export async function runCompleteness(
     return envFlag('AI_STRICT') ? 3 : 2;
   }
 
+  let outage: JudgeOutage | null = null;
+  const startedAt = Date.now();
   const raw = await exec({
     label: 'review:completeness',
     args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', TOOLS],
     input: diff,
     timeout: TIMEOUT_MS,
     cwd,
+    onOutage: (kind) => {
+      outage = kind;
+    },
   });
+  const secs = Math.round((Date.now() - startedAt) / 1000);
   if (raw === null) {
+    const reason =
+      outage === 'timeout'
+        ? 'judge timed out'
+        : outage === 'empty'
+          ? 'judge returned no output'
+          : outage === 'transient'
+            ? 'judge unavailable'
+            : 'judge unavailable, timed out, or returned no output';
+    emitGateEvent({
+      type: 'review_result',
+      reviewer: AGENT_NAME,
+      status: 'inconclusive',
+      escalated: false,
+      model: 'opus',
+      reason,
+      secs,
+    });
     // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
     // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
     if (envFlag('AI_STRICT')) {
@@ -188,6 +213,15 @@ export async function runCompleteness(
     return 2; // fail-open on a normal commit
   }
   const { verdict, reason } = parseReviewVerdict(raw);
+  emitGateEvent({
+    type: 'review_result',
+    reviewer: AGENT_NAME,
+    status: verdict === 'FAIL' ? 'fail' : verdict === 'PASS' ? 'pass' : 'inconclusive',
+    escalated: false,
+    model: 'opus',
+    reason: reason || (verdict === null ? 'judge returned no PASS/FAIL verdict' : ''),
+    secs,
+  });
   if (verdict !== 'FAIL') return 0;
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());
