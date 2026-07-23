@@ -36,19 +36,19 @@ import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { isTracked } from './git-tracked.mts';
 import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mts';
+import { selectedHookAssets } from './install/agent-hook-selection.mts';
 import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mts';
-import { installHookRegistrations, syncHookScripts } from './install/install-hooks.mts';
+import {
+  installHookRegistrations,
+  removeHookRegistrations,
+  removeHookScripts,
+  syncHookScripts,
+} from './install/install-hooks.mts';
+import { addToGitExclude } from './install/overlay-excludes.mts';
+import { firstLine } from './standalone.mts';
+import { removeAgents, removeSkills } from './sync-manifest.mts';
 
-const firstLine = (e: unknown): string => {
-  let raw: unknown = '';
-  if (e && typeof e === 'object') {
-    if ('stderr' in e && e.stderr) raw = e.stderr;
-    else if ('message' in e && e.message) raw = e.message;
-  }
-  return String(raw).trim().split('\n')[0];
-};
 const LOCAL_HOOKS = '.devkit/hooks';
-// The per-clone `git ci` SELF-HEAL alias. husky's committed `prepare` re-claims core.hooksPath on
 // every `bun install`; this LOCAL (uncommitted) alias re-points it back to our hooks dir right
 // before a commit, so `git ci …` keeps devkit's gates wired without touching anything committed.
 // Fail-open `;` (never `&&`): a re-point hiccup must NEVER block your commit — it just runs the
@@ -60,31 +60,6 @@ const HEAL_ALIAS_CMD = `!git config --local core.hooksPath ${LOCAL_HOOKS}; git c
 const isHealAlias = (v: string) => v.startsWith('!') && v.includes(`core.hooksPath ${LOCAL_HOOKS}`);
 // husky sets core.hooksPath to `.husky/_`; the real committed script is the parent's hook.
 const HUSKY_UNDERSCORE_RE = /\/_$/;
-const EXCLUDE_HEADER = '# devkit overlay (local-only) — not committed';
-
-// Append paths to .git/info/exclude (per-clone, uncommitted), skipping any already present.
-// `gitRoot` is the dir that holds `.git` — NOT necessarily cwd (a monorepo package is a subdir).
-function addToGitExclude(gitRoot: string, relPaths: string[], dryRun: boolean) {
-  const infoDir = join(gitRoot, '.git', 'info');
-  const file = join(infoDir, 'exclude');
-  const existing = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  const lines = existing.split('\n');
-  const missing = relPaths.filter((p) => !lines.includes(p));
-  if (!missing.length) {
-    console.log('  • .git/info/exclude already covers devkit files');
-    return;
-  }
-  if (dryRun) {
-    console.log(`  [dry-run] add to .git/info/exclude: ${missing.join(', ')}`);
-    return;
-  }
-  const header = existing.includes(EXCLUDE_HEADER) ? '' : `\n${EXCLUDE_HEADER}\n`;
-  const sep = existing && !existing.endsWith('\n') ? '\n' : '';
-  mkdirSync(infoDir, { recursive: true }); // a fresh/odd clone may lack .git/info
-  writeFileSync(file, `${existing}${sep}${header}${missing.join('\n')}\n`);
-  console.log(`  ✓ git-ignored locally (.git/info/exclude): ${missing.join(', ')}`);
-}
-
 // Standard git hook names — used to pick the repo's real hooks out of a hooks dir (ignoring
 // husky internals / .sample files / stray entries).
 const GIT_HOOKS = new Set([
@@ -336,7 +311,9 @@ function installOverlayHook(
     chmodSync(p, 0o755);
   }
   try {
-    execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], { cwd: gitRoot });
+    execFileSync('git', ['config', 'core.hooksPath', LOCAL_HOOKS], {
+      cwd: gitRoot,
+    });
     const extra = passthrough.length ? ` (+ pass-through: ${passthrough.join(', ')})` : '';
     console.log(
       `  ✓ core.hooksPath → ${LOCAL_HOOKS} (local) — pre-commit + your hooks preserved${extra}`,
@@ -358,7 +335,11 @@ function installOverlayHook(
 export function syncOverlayHook(
   gitRoot: string,
   cwd: string,
-  cfg: { components?: Partial<Selection>; pkgRel?: string; origHooksPath?: string },
+  cfg: {
+    components?: Partial<Selection>;
+    pkgRel?: string;
+    origHooksPath?: string;
+  },
   { dryRun }: { dryRun: boolean },
 ): { missing: boolean; drift: boolean } {
   const sel = normalizeSelection(cfg.components ?? {});
@@ -423,12 +404,6 @@ function resolveOverlayFallow(cwd: string, dryRun: boolean) {
   return true;
 }
 
-// Sync the agent-half (skills + agents + agentHooks) into the git root's selected surfaces, skipping
-// any path git already TRACKS (C2 — exclude can't hide a tracked file), and return the git-root-
-// relative paths to hide via .git/info/exclude (derived from each sync's returned manifest, so a
-// skipped-because-tracked file is never excluded for). searchSteering is deliberately NOT wired in
-// overlay: its hooks resolve a node_modules/@norvalbv/devkit path the package-less overlay lacks (C1).
-// Reason: flat overlay agent-surface orchestration: ordered `if (sel.x) sync + derive excludes` steps (skills → agents → hook scripts → registrations) mirroring installAgentSurfaces; high branch COUNT, each trivial, no nesting
 // fallow-ignore-next-line complexity
 function installOverlayAgentSurfaces(
   gitRoot: string,
@@ -438,20 +413,21 @@ function installOverlayAgentSurfaces(
 ) {
   const targets = sel.agentTargets ?? AGENT_TARGETS;
   const skipTracked = (rel: string) => isTracked(gitRoot, rel);
-  // Overlay has no interactive picker; --force is its all-or-nothing override of a non-devkit
-  // collision (matches the standalone CLI), else default-preserve. (A git-TRACKED collision is still
-  // left untouched by skipTracked regardless — exclude can't hide a tracked edit.)
   const override = force ? () => true : undefined;
   const args = dryRun ? ['--dry-run'] : [];
   const excl = [];
   if (sel.skills) {
     console.log('  skills');
-    const m = syncSkills(args, gitRoot, targets, { skipTracked, override });
+    const m = syncSkills(args, gitRoot, targets, {
+      skipTracked,
+      override,
+      guards: sel.guards ?? [],
+    });
     for (const name of new Set(Object.keys(m.files).map((r) => r.split('/')[0])))
       for (const t of targets) excl.push(`.${t}/skills/${name}/`);
-    // The sync ALWAYS writes the git-root manifest (even when every asset is preserved → files {}),
-    // so it must be hidden unconditionally — else an all-preserved run leaks it into `git status`.
     excl.push('.devkit/skills-manifest.json');
+  } else if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) {
+    removeSkills(gitRoot, dryRun);
   }
   if (sel.agents) {
     console.log('  agents');
@@ -459,20 +435,42 @@ function installOverlayAgentSurfaces(
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/agents/${rel}`);
     excl.push('.devkit/agents-manifest.json');
+  } else if (existsSync(join(gitRoot, '.devkit', 'agents-manifest.json'))) {
+    removeAgents(gitRoot, dryRun);
   }
-  if (sel.agentHooks) {
+  const hooks = selectedHookAssets(sel, { searchSteering: false });
+  const desiredHooks = hooks.scripts;
+  if (desiredHooks.length) {
     console.log('  agent-hook scripts');
-    const m = syncHookScripts(gitRoot, { dryRun, targets, skipTracked, override });
+    const m = syncHookScripts(gitRoot, {
+      dryRun,
+      targets,
+      desired: desiredHooks,
+      skipTracked,
+      override,
+    });
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
     excl.push('.devkit/agent-hooks-manifest.json');
     console.log('  agent hook registrations');
-    const { wrote } = installHookRegistrations(gitRoot, ['agentHooks'], {
+    const { wrote } = installHookRegistrations(gitRoot, hooks.components, {
       dryRun,
       targets,
       overlay: true,
     });
     excl.push(...wrote);
+  } else {
+    if (existsSync(join(gitRoot, '.devkit', 'agent-hooks-manifest.json')))
+      removeHookScripts(gitRoot, { dryRun });
+    removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
+  }
+  const prunedTargets = AGENT_TARGETS.filter((target) => !targets.includes(target));
+  if (prunedTargets.length) {
+    if (sel.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
+    if (sel.agents) removeAgents(gitRoot, dryRun, prunedTargets, false);
+    if (desiredHooks.length)
+      removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
+    removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets, overlay: true });
   }
   return excl;
 }
@@ -514,7 +512,9 @@ export function installOverlay(
     if (dryRun) {
       console.log('  [dry-run] write guard.config.json');
     } else {
-      writeIfAbsent(join(cwd, 'guard.config.json'), readFileSync(src, 'utf8'), { force });
+      writeIfAbsent(join(cwd, 'guard.config.json'), readFileSync(src, 'utf8'), {
+        force,
+      });
       console.log('  ✓ guard.config.json');
     }
   }

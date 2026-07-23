@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { readJson } from "../../lib/fs-helpers.mjs";
-import { syncHookScripts } from "../../lib/install/install-hooks.mjs";
+import { DECISION_EDIT_HOOK, hookScriptsFor, syncHookScripts, } from "../../lib/install/install-hooks.mjs";
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
 function listFlag(args, name) {
     const i = args.indexOf(name);
@@ -49,13 +49,25 @@ export default function run(args, cwd) {
     const { gitRoot } = detectGitRoot(cwd);
     const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
     const only = listFlag(args, '--only');
+    const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
     const targets = listFlag(args, '--targets') ?? cfg?.components?.agentTargets ?? AGENT_TARGETS;
     const bad = targets.filter((t) => !AGENT_TARGETS.includes(t));
     if (bad.length) {
         console.error(`sync-hooks --targets: unknown surface ${bad.join(', ')} (use ${AGENT_TARGETS.join('|')})`);
         return 1;
     }
+    if (only?.includes(DECISION_EDIT_HOOK) && !decisions) {
+        console.error('sync-hooks: decision-edit-guard.mjs requires the decisions guard');
+        return 1;
+    }
     const override = args.includes('--force') ? () => true : undefined;
-    syncHookScripts(gitRoot, { dryRun: args.includes('--dry-run'), targets, only, override });
+    const desired = only ? undefined : hookScriptsFor({ agentHooks: true, decisions });
+    syncHookScripts(gitRoot, {
+        dryRun: args.includes('--dry-run'),
+        targets,
+        only,
+        desired,
+        override,
+    });
     return 0;
 }

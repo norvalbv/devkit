@@ -20,11 +20,19 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from '../../lib/components.mts';
 import { detectGitRoot } from '../../lib/detect-git-root.mts';
 import { readJson } from '../../lib/fs-helpers.mts';
-import { syncHookScripts } from '../../lib/install/install-hooks.mts';
+import {
+  DECISION_EDIT_HOOK,
+  hookScriptsFor,
+  syncHookScripts,
+} from '../../lib/install/install-hooks.mts';
 
 // The relevant slice of `.devkit/config.json` this command reads.
 interface DevkitConfig {
-  components?: { agentTargets?: string[] };
+  components?: {
+    agentTargets?: string[];
+    agentHooks?: boolean;
+    guards?: string[];
+  };
 }
 
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
@@ -58,6 +66,7 @@ export default function run(args: string[], cwd: string): number {
   const { gitRoot } = detectGitRoot(cwd);
   const cfg: DevkitConfig | null = readJson(join(gitRoot, '.devkit', 'config.json'));
   const only = listFlag(args, '--only');
+  const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
   const targets = listFlag(args, '--targets') ?? cfg?.components?.agentTargets ?? AGENT_TARGETS;
   const bad = targets.filter((t) => !AGENT_TARGETS.includes(t));
   if (bad.length) {
@@ -66,7 +75,18 @@ export default function run(args: string[], cwd: string): number {
     );
     return 1;
   }
+  if (only?.includes(DECISION_EDIT_HOOK) && !decisions) {
+    console.error('sync-hooks: decision-edit-guard.mjs requires the decisions guard');
+    return 1;
+  }
   const override = args.includes('--force') ? () => true : undefined;
-  syncHookScripts(gitRoot, { dryRun: args.includes('--dry-run'), targets, only, override });
+  const desired = only ? undefined : hookScriptsFor({ agentHooks: true, decisions });
+  syncHookScripts(gitRoot, {
+    dryRun: args.includes('--dry-run'),
+    targets,
+    only,
+    desired,
+    override,
+  });
   return 0;
 }

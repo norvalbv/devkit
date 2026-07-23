@@ -1,0 +1,27 @@
+{
+  "pairs": [
+    {
+      "symbolA": "installGlobalHook",
+      "fileA": "cli/lib/overlay-global-hook.mts",
+      "symbolB": "installOverlayHook",
+      "fileB": "cli/lib/overlay.mts",
+      "description": "Local overlay and global bootstrap intentionally mirror core.hooksPath installation while owning different persistence and recovery flows.",
+      "date": "2026-07-23",
+      "rangeA": "85-105",
+      "rangeB": "308-347",
+      "similarity": 0.8751
+    },
+    {
+      "symbolA": "removeHookRegistrations",
+      "fileA": "cli/lib/install/hook-settings.mts",
+      "symbolB": "removeHookScripts",
+      "fileB": "cli/lib/install/install-hooks.mts",
+      "description": "Registration removal rewrites consumer-owned Claude/Cursor settings while script removal deletes Devkit manifest-owned files; their parallel lifecycle shape preserves separate ownership boundaries.",
+      "date": "2026-07-23",
+      "rangeA": "181-210",
+      "rangeB": "226-242",
+      "similarity": 0.8637
+    }
+  ],
+  "clones": []
+}

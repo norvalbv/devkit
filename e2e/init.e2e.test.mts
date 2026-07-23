@@ -39,7 +39,8 @@ describe('e2e: devkit init', () => {
     // (deleted from the fixture env), so assert only the `#v<version>` tag half.
     const pkg = JSON.parse(readFileSync(join(fx.repoDir, 'package.json'), 'utf8'));
     expect(pkg.devDependencies?.['@norvalbv/devkit']).toMatch(/#v\d/);
-    expect(pkg.scripts?.prepare).toBe('husky');
+    expect(pkg.scripts?.prepare).toContain('husky');
+    expect(pkg.scripts?.prepare).toContain('devkit sync-hook-runner');
 
     // The assembled hook invokes the deterministic gate; config records the stack.
     expect(readFileSync(join(fx.repoDir, '.husky/pre-commit'), 'utf8')).toContain(

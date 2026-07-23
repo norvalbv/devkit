@@ -122,9 +122,13 @@ function restoreHooksPath(gitRoot, orig, dryRun) {
     }
     try {
         if (target)
-            execFileSync('git', ['config', 'core.hooksPath', target], { cwd: gitRoot });
+            execFileSync('git', ['config', 'core.hooksPath', target], {
+                cwd: gitRoot,
+            });
         else
-            execFileSync('git', ['config', '--unset', 'core.hooksPath'], { cwd: gitRoot });
+            execFileSync('git', ['config', '--unset', 'core.hooksPath'], {
+                cwd: gitRoot,
+            });
         console.log(`  ✓ restored core.hooksPath → ${target || '(unset)'}`);
     }
     catch (e) {
@@ -142,15 +146,16 @@ function cleanOverlay(cwd, cfg, dryRun) {
     // agent-half (skills/agents/agent-hook scripts + their registrations) — repo-wide at the git root.
     // The synced files + manifests are git-ignored; removing them keeps the round-trip footprint-free.
     const comp = cfg.components ?? {};
+    const decisionsEnabled = comp.guards?.includes('decisions') ?? false;
     if (comp.skills)
         removeSkills(gitRoot, dryRun);
     if (comp.agents)
         removeAgents(gitRoot, dryRun);
-    if (comp.agentHooks)
+    if (comp.agentHooks || decisionsEnabled)
         removeHookScripts(gitRoot, { dryRun });
     // Strip devkit hooks from the LOCAL-override settings.local.json (where overlay registered them) +
     // .cursor/hooks.json; never delete the files (they may hold the user's own local settings/hooks).
-    if (comp.agentHooks || comp.searchSteering) {
+    if (comp.agentHooks || comp.searchSteering || decisionsEnabled) {
         removeHookRegistrations(gitRoot, { dryRun, overlay: true });
         removeEmptyOverlaySettings(gitRoot, dryRun);
     }
