@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectPaths,
+  describeError,
   findBlockers,
+  isTransientSpawnFailure,
+  jsonObjectSpans,
   makeOverlap,
+  parseAuditPayload,
   parseHunkRanges,
   parseStagedFiles,
 } from '../staged-filter.mts';
@@ -225,5 +229,122 @@ describe('findBlockers', () => {
   it('ignores non-array dead_code values (e.g. summary objects)', () => {
     const audit = { dead_code: { total_issues: 3, summary: { x: 1 }, unused_files: [] } };
     expect(findBlockers(audit, ranges, staged)).toEqual([]);
+  });
+});
+
+// sc-1192: the gate reaches this filter only because its own `jq` already read a verdict out of
+// the SAME bytes, so a stricter parser here rejects payloads the caller considers valid — and an
+// anonymous exit 2 then blocks a clean scoped commit on the unscoped worktree verdict.
+describe('jsonObjectSpans', () => {
+  it('spans a balanced object and ignores trailing bytes', () => {
+    expect(jsonObjectSpans('{"a":{"b":1}} trailing')).toEqual(['{"a":{"b":1}}']);
+  });
+
+  it('returns every top-level object in order', () => {
+    expect(jsonObjectSpans('{"a":1}\n{"b":2}')).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it('does not close on a brace inside a string', () => {
+    expect(jsonObjectSpans('{"msg":"a } b","c":1}')).toEqual(['{"msg":"a } b","c":1}']);
+  });
+
+  it('does not close on an escaped quote inside a string', () => {
+    expect(jsonObjectSpans('{"msg":"say \\" } now","c":1}')).toEqual([
+      '{"msg":"say \\" } now","c":1}',
+    ]);
+  });
+
+  it('treats a backslash outside a string as an ordinary character', () => {
+    expect(jsonObjectSpans('\\{"a":1}')).toEqual(['{"a":1}']);
+  });
+
+  it('yields nothing with no object, or when the object never closes', () => {
+    expect(jsonObjectSpans('warning: nothing here')).toEqual([]);
+    expect(jsonObjectSpans('{"a":1')).toEqual([]);
+  });
+});
+
+describe('parseAuditPayload', () => {
+  it('parses a clean payload', () => {
+    expect(parseAuditPayload('{"verdict":"fail"}')).toEqual({ verdict: 'fail' });
+  });
+
+  it('tolerates a BOM and surrounding whitespace', () => {
+    expect(parseAuditPayload('﻿\n  {"verdict":"fail"}  \n')).toEqual({ verdict: 'fail' });
+  });
+
+  it('tolerates a warning line printed before the JSON', () => {
+    const text = 'WARN invalid entry pattern\n{"verdict":"fail","dead_code":{}}';
+    expect(parseAuditPayload(text)).toMatchObject({ verdict: 'fail' });
+  });
+
+  it('picks the audit envelope over a preamble that is ITSELF valid JSON', () => {
+    // Selecting the first balanced span here would return the log line: it parses cleanly, carries
+    // no findings, and would pass a commit that must block — a fail-OPEN in the fix meant to close
+    // one. The audit is identified by `verdict`, the same property the gate's own jq matched on.
+    const text =
+      '{"level":"warn","msg":"baseline stale"}\n{"verdict":"fail","complexity":{"findings":[{"introduced":true,"path":"src/a.ts","line":1,"line_count":1}]}}';
+    expect(parseAuditPayload(text)).toMatchObject({
+      verdict: 'fail',
+      complexity: { findings: [{ introduced: true, path: 'src/a.ts' }] },
+    });
+  });
+
+  it('fails closed when no span carries a verdict', () => {
+    expect(() => parseAuditPayload('{"level":"warn"}\n{"level":"info"}')).toThrow(SyntaxError);
+  });
+
+  it('fails closed when the payload is ambiguous (several verdict objects)', () => {
+    const text = '{"verdict":"pass"}\n{"verdict":"fail"}';
+    expect(() => parseAuditPayload(text)).toThrow(SyntaxError);
+  });
+
+  it('tolerates trailing bytes after the JSON object', () => {
+    expect(parseAuditPayload('{"verdict":"fail"}\nDone in 3s\n')).toEqual({ verdict: 'fail' });
+  });
+
+  it('throws on an empty payload', () => {
+    expect(() => parseAuditPayload('   \n')).toThrow(/empty payload/);
+  });
+
+  it('throws the ORIGINAL parse error on a truncated payload (never guesses)', () => {
+    // Truncated JSON must stay fail-closed: silently salvaging a prefix would drop findings.
+    expect(() => parseAuditPayload('{"verdict":"fail","dead_code":{')).toThrow(SyntaxError);
+  });
+});
+
+describe('isTransientSpawnFailure', () => {
+  it('retries only a failure to START the child, never a child that ran and failed', () => {
+    // The gate chain forks this filter while a fleet of reviewers is live; a lost fork race must
+    // not turn a clean scoped commit into an unscoped block.
+    expect(isTransientSpawnFailure(Object.assign(new Error('x'), { code: 'EAGAIN' }))).toBe(true);
+    expect(isTransientSpawnFailure(Object.assign(new Error('x'), { code: 'ENOMEM' }))).toBe(true);
+    // git ran and exited non-zero (bad repo): a retry would just fail again, slower.
+    expect(isTransientSpawnFailure(Object.assign(new Error('x'), { status: 128 }))).toBe(false);
+    expect(isTransientSpawnFailure(Object.assign(new Error('x'), { code: 'ENOENT' }))).toBe(false);
+    expect(isTransientSpawnFailure(new Error('x'))).toBe(false);
+    expect(isTransientSpawnFailure(null)).toBe(false);
+  });
+});
+
+describe('describeError', () => {
+  it('composes message, errno, exit status and child stderr', () => {
+    const reason = describeError(
+      Object.assign(new Error('Command failed: git diff --cached'), {
+        code: 'EAGAIN',
+        status: 128,
+        stderr: 'fatal: not a git repository\n',
+      }),
+    );
+    expect(reason).toContain('Command failed: git diff --cached');
+    expect(reason).toContain('errno=EAGAIN');
+    expect(reason).toContain('exit=128');
+    expect(reason).toContain('fatal: not a git repository');
+  });
+
+  it('collapses newlines and bounds the length so a blocked commit stays readable', () => {
+    const reason = describeError(new Error(`x${'y'.repeat(5000)}`));
+    expect(reason.length).toBeLessThanOrEqual(401);
+    expect(reason).not.toContain('\n');
   });
 });
