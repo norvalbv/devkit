@@ -24,7 +24,11 @@
  * I/O: reads the `fallow audit --format json` payload on stdin.
  *   exit 0 → no introduced finding overlaps the staged diff (gate may pass)
  *   exit 1 → ≥1 does (gate should block); the blockers are printed to stdout
- *   exit 2 → could not compute (caller decides; the gate treats this as fail-open)
+ *   exit 2 → could not compute; the REASON is written to stderr. Callers fail CLOSED on
+ *            this (a gate that cannot attribute must not weaken itself, so it blocks on
+ *            the unscoped worktree verdict). sc-1192: an anonymous exit 2 blocked an
+ *            otherwise-clean scoped ship with nothing to act on and no way to tell which
+ *            step failed, so every exit-2 path now names itself.
  *
  * W-3 (devkit invariant): the staged diff is read with `git diff --cached` run in
  * the CONSUMER cwd (process.cwd()), so every path the filter compares is the
@@ -47,6 +51,15 @@ const RE_CR = /\r$/;
 const RE_LINECOL = /:\d+(:\d+)?$/;
 const RE_PATHLIKE = /(^|\/)[\w.-]+\.[a-z0-9]+$/i;
 const RE_HASLETTER = /[a-z]/i;
+const RE_BOM = /^﻿/;
+
+// Spawn failures the OS reports under transient pressure, NOT a bad command: the gate chain runs
+// this filter while a fleet of reviewer/judge processes is live, and a fork that loses that race
+// would otherwise turn a clean scoped commit into an unscoped block. One retry costs 250ms and
+// only ever fires on these; a real git failure (bad repo, missing binary) still surfaces at once.
+const TRANSIENT_SPAWN_ERRNOS = new Set(['EAGAIN', 'ENOMEM', 'EMFILE', 'ENFILE', 'EINTR']);
+const SPAWN_RETRY_DELAY_MS = 250;
+const REASON_MAX_CHARS = 400;
 
 // A changed line range on the new (index) side of a diff: [startLine, endLine] inclusive.
 type LineRange = [number, number];
@@ -96,8 +109,99 @@ type Blocker =
 function readStdin(): string {
   try {
     return readFileSync(0, 'utf8');
+  } catch (err) {
+    throw new Error(`could not read stdin — ${describeError(err)}`);
+  }
+}
+
+// A failed execSync carries the child's stderr and either an errno string (spawn failed) or a
+// numeric status (ran, exited non-zero). Both matter to a human reading a blocked commit.
+interface ExecFailure {
+  message?: string;
+  code?: unknown;
+  status?: number | null;
+  stderr?: Buffer | string | null;
+}
+
+/** One-line, bounded description of a thrown error — the payload of every exit-2 reason. */
+export function describeError(err: unknown): string {
+  const e = (err ?? {}) as ExecFailure;
+  // Short structured fields FIRST: the message and the child's stderr are unbounded (git's usage
+  // dump runs to thousands of chars), so appending errno/exit after them loses exactly the two
+  // fields that classify the failure the moment truncation bites.
+  const parts: string[] = [];
+  if (typeof e.code === 'string') parts.push(`errno=${e.code}`);
+  if (typeof e.status === 'number') parts.push(`exit=${e.status}`);
+  if (e.message) parts.push(e.message);
+  const stderr = e.stderr ? String(e.stderr).trim() : '';
+  if (stderr) parts.push(`stderr: ${stderr}`);
+  const reason = parts.join(' | ').replace(/\s+/g, ' ').trim() || String(err);
+  return reason.length > REASON_MAX_CHARS ? `${reason.slice(0, REASON_MAX_CHARS)}…` : reason;
+}
+
+/** Name the failure on stderr, then exit 2. The caller fails closed — but now it can say why. */
+function fail(reason: string): never {
+  process.stderr.write(`fallow-staged-filter: ${reason}\n`);
+  process.exit(2);
+}
+
+/** Spans of every balanced top-level `{...}` object in the text, in order. String- and
+ *  escape-aware, so a brace inside a finding's message never closes a span early. Pure —
+ *  exported for tests. */
+export function jsonObjectSpans(text: string): string[] {
+  const spans: string[] = [];
+  let open = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (escaped) escaped = false;
+    else if (inString && ch === '\\') escaped = true;
+    else if (ch === '"') inString = !inString;
+    else if (inString) continue;
+    else if (ch === '{') {
+      if (depth === 0) open = i;
+      depth++;
+    } else if (ch === '}' && depth > 0 && --depth === 0) {
+      spans.push(text.slice(open, i + 1));
+    }
+  }
+  return spans;
+}
+
+/**
+ * Parse the `fallow audit --format json` payload, tolerating the wrapping the gate's own `jq`
+ * already tolerates: a BOM, and any preamble/trailing bytes around the JSON object (a warning
+ * line on the audit's stdout, a shell that appended something). The gate only reaches this
+ * filter because `jq` read a verdict out of the SAME bytes, so a stricter parser here would
+ * reject payloads the caller already considers valid. Pure — exported for tests.
+ */
+export function parseAuditPayload(text: string): AuditPayload {
+  const cleaned = text.replace(RE_BOM, '').trim();
+  if (!cleaned) throw new Error('empty payload (nothing on stdin)');
+  try {
+    return JSON.parse(cleaned) as AuditPayload;
+  } catch (err) {
+    // Identify the audit by the SAME property the caller matched on: the gate only runs this
+    // filter because its `jq` read `.verdict` out of these bytes. Taking the first balanced span
+    // instead would hand back a preamble that is itself valid JSON (structured/ndjson logging) —
+    // parsing clean, carrying no findings, and passing a commit that must block. An ambiguous
+    // text (no candidate, or several) rethrows the ORIGINAL parse error, which names the
+    // offending position in the real payload.
+    const candidates = jsonObjectSpans(cleaned).filter(isVerdictObject);
+    if (candidates.length !== 1) throw err;
+    return JSON.parse(candidates[0]) as AuditPayload;
+  }
+}
+
+/** True when a span parses as an object carrying a `verdict` — fallow's audit envelope. */
+function isVerdictObject(span: string): boolean {
+  try {
+    const value: unknown = JSON.parse(span);
+    return typeof value === 'object' && value !== null && 'verdict' in value;
   } catch {
-    return '';
+    return false;
   }
 }
 
@@ -242,20 +346,43 @@ export function findBlockers(
 /**
  * Read the staged diff for the CONSUMER repo (cwd) and return parsed ranges + files.
  * Pulled out of main() so the git invocation is a single, testable seam. Throws on a
- * git failure (main treats that as exit 2 / fail-open). Exported for completeness.
+ * git failure (main turns that into a NAMED exit 2). Exported for completeness.
  */
 export function readStagedDiff(cwd = process.cwd()): StagedDiff {
   const opts: ExecSyncOptionsWithStringEncoding = {
     encoding: 'utf8',
     cwd,
     maxBuffer: 256 * 1024 * 1024,
+    // execSync forwards a child's stderr to OUR stderr by default and leaves err.stderr null. The
+    // gate discards this process's stderr on the pass path, so git's own words would be lost
+    // exactly when they explain a block. Pipe it so the failure reason can carry them instead.
+    stdio: ['ignore', 'pipe', 'pipe'],
   };
   return {
-    ranges: parseHunkRanges(execSync('git diff --cached -U0 --diff-filter=ACMR', opts)),
+    ranges: parseHunkRanges(gitRead('git diff --cached -U0 --diff-filter=ACMR', opts)),
     stagedFiles: parseStagedFiles(
-      execSync('git diff --cached --name-only --diff-filter=ACMR', opts),
+      gitRead('git diff --cached --name-only --diff-filter=ACMR', opts),
     ),
   };
+}
+
+/** True when a failed exec could not START the child (OS pressure), as opposed to a child that ran
+ *  and failed — only the former is worth retrying. Pure — exported for tests. */
+export function isTransientSpawnFailure(err: unknown): boolean {
+  const code = (err as ExecFailure | null)?.code;
+  return typeof code === 'string' && TRANSIENT_SPAWN_ERRNOS.has(code);
+}
+
+/** execSync with one retry on a transient spawn failure (see TRANSIENT_SPAWN_ERRNOS). */
+function gitRead(command: string, opts: ExecSyncOptionsWithStringEncoding): string {
+  try {
+    return execSync(command, opts);
+  } catch (err) {
+    if (!isTransientSpawnFailure(err)) throw err;
+    // Synchronous sleep: this whole module is a sync CLI, and a timer would need an async main.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, SPAWN_RETRY_DELAY_MS);
+    return execSync(command, opts);
+  }
 }
 
 function main() {
@@ -263,16 +390,16 @@ function main() {
   try {
     // Parse boundary: the stdin payload is `fallow audit --format json` — read it as AuditPayload
     // (findBlockers treats every field defensively, so a shape mismatch degrades, never throws).
-    audit = JSON.parse(readStdin()) as AuditPayload;
-  } catch {
-    process.exit(2); // unreadable payload → let the caller fail-open
+    audit = parseAuditPayload(readStdin());
+  } catch (err) {
+    fail(`unreadable fallow audit payload on stdin — ${describeError(err)}`);
   }
 
   let diff: StagedDiff;
   try {
     diff = readStagedDiff();
-  } catch {
-    process.exit(2);
+  } catch (err) {
+    fail(`could not read the staged diff in ${process.cwd()} — ${describeError(err)}`);
   }
 
   const blockers = findBlockers(audit, diff.ranges, diff.stagedFiles);
