@@ -63,3 +63,7 @@ gate-engine/review/eval/conventions/runs.log
 gate-engine/review/eval/conventions/transcripts/
 gate-engine/edge-cases/eval/raw/
 gate-engine/edge-cases/eval/cases.jsonl
+# sc-1119 bench working data: synthetic guards carry frink diff excerpts (same privacy posture as
+# cases.jsonl above; regenerate via guards-generate.mts). NOTE: eval/results.baseline.json IS
+# committed (IDs + numbers only, enforced by the results-privacy test) — do not add it here.
+gate-engine/edge-cases/eval/guards-synthetic.jsonl

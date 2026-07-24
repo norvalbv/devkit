@@ -69,8 +69,10 @@ const git = (repoPath, args) => {
   }
 };
 
-/** Mechanical evidence bundle — assembled BEFORE any model sees the case; the model may only cite this. */
-const gatherEvidence = (c) => {
+/** Mechanical evidence bundle — assembled BEFORE any model sees the case; the model may only cite
+ * this. Exported for noise-audit.mts (the blind relabel must see a mechanical bundle, never the
+ * first pass's curated evidence.detail). NOT for the bench judge — see buildInput. */
+export const gatherEvidence = (c) => {
   const repoPath = REPO_PATHS[c.repo];
   const bundle = {
     turnTestRuns: c.turnActivity?.testRuns ?? [],
@@ -176,7 +178,10 @@ const bundleText = (bundle) =>
     })
     .join('\n');
 
-const buildInput = (c, bundle) => {
+/** Labeler input view. Exported for noise-audit.mts ONLY — it embeds the gold RESPONSE and
+ * provenance headers, so the bench judge must never receive it (the bench builds its own blinded
+ * projection: no response, no model/provider/source/date). */
+export const buildInput = (c, bundle) => {
   // The labeler judges the SAME anchor view the benchmarked judge receives (shared excerptDiff) —
   // a wider labeler view turns label/judge disagreement into a truncation artifact (audit F5).
   let anchor = '';
@@ -208,8 +213,12 @@ const parseProposal = (raw) => {
   return JSON.parse(stripped.slice(start, end + 1));
 };
 
+// ── CLI body (import-safe: noise-audit.mts imports the helpers above without running a label
+// pass — the run below only fires when label.mts IS the entrypoint) ──────────────────────────────
+const isMain = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+
 // ── audit mode: review queues, no LLM ────────────────────────────────────────────────────────────
-if (audit) {
+if (isMain && audit) {
   const proposals = readJsonl(proposalsPath);
   const queues = { liveBug: [], noise: [], lowConfidence: [], degenerate: [] };
   for (const p of proposals) {
@@ -233,13 +242,14 @@ if (audit) {
 }
 
 // ── labeling run ─────────────────────────────────────────────────────────────────────────────────
-const candidates = readJsonl(candidatesPath);
-const done = new Set(readJsonl(proposalsPath).map((p) => p.id));
+const candidates = isMain ? readJsonl(candidatesPath) : [];
+const done = new Set(isMain ? readJsonl(proposalsPath).map((p) => p.id) : []);
 const todo = candidates
   .filter((c) => !done.has(c.id))
   .filter((c) => !onlyIds || onlyIds.includes(c.id))
   .slice(0, limit);
-console.log(`label: ${todo.length} to propose (${done.size} already done, model ${MODEL})`);
+if (isMain)
+  console.log(`label: ${todo.length} to propose (${done.size} already done, model ${MODEL})`);
 
 const labelOne = async (c) => {
   const bundle = gatherEvidence(c);
@@ -282,17 +292,19 @@ const labelOne = async (c) => {
   return null;
 };
 
-let failed = 0;
-for (let i = 0; i < todo.length; i += CONCURRENCY) {
-  const batch = todo.slice(i, i + CONCURRENCY);
-  const results = await Promise.all(batch.map(labelOne));
-  for (const r of results) {
-    if (!r) {
-      failed++;
-      continue;
+if (isMain) {
+  let failed = 0;
+  for (let i = 0; i < todo.length; i += CONCURRENCY) {
+    const batch = todo.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(batch.map(labelOne));
+    for (const r of results) {
+      if (!r) {
+        failed++;
+        continue;
+      }
+      appendFileSync(proposalsPath, `${JSON.stringify(r)}\n`);
     }
-    appendFileSync(proposalsPath, `${JSON.stringify(r)}\n`);
+    console.log(`label: ${Math.min(i + CONCURRENCY, todo.length)}/${todo.length} processed`);
   }
-  console.log(`label: ${Math.min(i + CONCURRENCY, todo.length)}/${todo.length} processed`);
+  console.log(`label: done (${failed} failed — rerun to retry those)`);
 }
-console.log(`label: done (${failed} failed — rerun to retry those)`);
