@@ -22,7 +22,7 @@
  * Output: one `eslint/baselines/<tree>.mjs` per existing tree (overwritten).
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mts';
@@ -868,8 +868,8 @@ export function resolveBaselineRoots(
   return Object.entries(roots).map(([tree, root]) => [`${root}/`, `${tree}.mjs`]);
 }
 
-// CLI entry: `node generate-structure-baseline.mjs [cwd]`.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// CLI entry: `node generate-structure-baseline.mjs [cwd]`. realpathSync: see staged-filter.mts.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const cwd = process.argv[2] ? join(process.cwd(), process.argv[2]) : process.cwd();
   generateStructureBaselines(cwd, { log: (m) => console.log(m) }).then(() => {});
 }

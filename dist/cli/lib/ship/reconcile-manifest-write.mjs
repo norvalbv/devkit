@@ -36,9 +36,9 @@
  * miss only costs a manual reconcile later; it must never unwind a shipped PR.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { writeFileAtomic } from "../atomic-write.mjs";
 const LOCK_STALE_MS = 60_000; // a lock dir older than this is a dead writer/reader — reap it
 const LOCK_WAIT_MS = 5_000; // total time to retry a contended lock before throwing (never write unlocked)
@@ -265,6 +265,8 @@ function main() {
         merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
     }, paths);
 }
-// Run only as a CLI entrypoint — importing the module (e.g. a test importing recordShip) must not exit.
-if (process.argv[1] === fileURLToPath(import.meta.url))
+// Run only as a CLI entrypoint — importing the module (e.g. a test importing recordShip) must not
+// exit. Realpath argv[1] so the guard also fires through a symlink (ship-branch.sh resolves a real
+// path today, but a symlinked module dir would silently no-op) — see staged-filter.mts for the class.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
     process.exit(main());

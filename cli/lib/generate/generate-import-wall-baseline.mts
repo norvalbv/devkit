@@ -27,7 +27,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mts';
@@ -269,8 +269,9 @@ export function generateImportWallBaseline(
   return entries;
 }
 
-// CLI entry: `node generate-import-wall-baseline.mjs [cwd]`.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// CLI entry: `node generate-import-wall-baseline.mjs [cwd]`. Realpath argv[1] so the guard also
+// fires through a symlink (a shim, or a symlinked checkout) — see staged-filter.mts for the class.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const cwd = process.argv[2] ? join(process.cwd(), process.argv[2]) : process.cwd();
   try {
     generateImportWallBaseline(cwd, { log: (m) => console.log(m) });
