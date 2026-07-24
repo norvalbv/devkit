@@ -107,7 +107,13 @@ for p in "${PATHS[@]}"; do
   if [ -e "$ROOT/$p" ]; then
     mkdir -p "$WT/$(dirname "$p")"
     cp -Pp "$ROOT/$p" "$WT/$p"
-    git -C "$WT" add -- "$p"
+    # -f: a briefed path can be TRACKED on the PR branch yet sit under a gitignored dir (a tracked
+    # `dist/` build artifact is the case that bit us). A plain `git add` STAGES it but still exits
+    # nonzero with "The following paths are ignored", and set -e (top of file) would abort the whole
+    # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
+    # caller-explicit (positional after --; directories already rejected above), so forcing it is
+    # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
+    git -C "$WT" add -f -- "$p"
   else
     git -C "$WT" rm -q --ignore-unmatch -- "$p" || true
   fi
