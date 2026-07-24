@@ -36,7 +36,7 @@
  * CLI (guarded below), so importing this module performs no git / stdin / exit.
  */
 import { type ExecSyncOptionsWithStringEncoding, execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 // Hoisted to module scope (biome lint/performance/useTopLevelRegex). None are
@@ -284,7 +284,11 @@ function main() {
 }
 
 // Run as a CLI only — importing this module (e.g. from the test) must not touch
-// git, stdin, or process.exit.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// git, stdin, or process.exit. Realpath BOTH sides: a published bin is always reached through a
+// symlink shim (node_modules/.bin, or a global install's bin dir), so comparing the raw argv[1]
+// against the real module path is false whenever the gate is invoked by its published name — the
+// process would parse stdin, dispatch NOTHING, and exit 0 (a silently dead gate). Same idiom as
+// clone-detector.mts / allowlist-cli.mts and every other gate module.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main();
 }

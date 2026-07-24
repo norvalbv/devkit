@@ -43,7 +43,10 @@ describe('e2e: commit gate', () => {
     expect(headCount(fx)).toBe(before + 1);
     // Corroboration: the hook fired and nothing was blocked.
     expect(out(commit)).toContain(MARKERS.detGates);
-    expect(out(commit)).not.toContain(MARKERS.structViolation);
+    // MARKERS.fanoutExceeded is what the sibling test trips; a clean change must NOT print it.
+    // (Was `MARKERS.structViolation` — a key that does not exist on MARKERS, so the assertion was
+    // vacuously true: the same silently-dead-check class as sc-1178.)
+    expect(out(commit)).not.toContain(MARKERS.fanoutExceeded);
   });
 
   it('deterministic gate violation blocks the commit (exit 1, HEAD frozen, change still staged)', async () => {
