@@ -23,12 +23,22 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
-function run(args, dir, env = {}) {
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function run(args, dir, env = {}, opts = {}) {
   return spawnSync('/bin/bash', [scriptPath, ...args], {
     cwd: dir,
     input: 'body\n',
     encoding: 'utf8',
     env: { ...process.env, ...GENV, ...env },
+    ...opts,
   });
 }
 
@@ -757,4 +767,89 @@ describe('reship — repo path with a space (linked-worktree COMMIT_EDITMSG carr
     expect(r.status).not.toBe(0); // the hook failed the commit
     expect(r.stderr).not.toMatch(/repo path has a space/); // no space → no hint, despite COMMIT_EDITMSG in log
   });
+});
+
+// Regression (sc-1199): a reviewer REJECTION used to hang the re-ship forever. The gate exits 1 in
+// seconds, so the commit ceiling never fires — but a child the gate leaked still holds the capture
+// pipe's write-end, the reader never sees EOF, and the whole run wedges. Because it never returned,
+// the EXIT trap never ran and the ephemeral worktree stayed checked out, which is what blocked the
+// operator from re-shipping the CORRECTED snapshot. The fix reaps the leaked group once the leader
+// exits; this test is the shape of the original report, end to end.
+describe('reship — a rejecting gate that leaks a pipe-holder is reaped', () => {
+  it('reports the rejection, kills the leaked child, and reclaims the worktree', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+    ])
+      g(a, { stdio: 'ignore' });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    // The gate: leak a long-lived child onto the commit's stdio (what a `claude` judge subprocess
+    // does when the reviewer that spawned it exits first), print a verdict, reject.
+    const leakPidFile = join(dir, 'leaked.pid');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      [
+        '#!/bin/sh',
+        'sleep 120 &',
+        'echo "$!" > "$LEAK_PID_FILE"',
+        'echo "guard-review: conventions-reviewer FAILED — staged snapshot rejected"',
+        'exit 1',
+        '',
+      ].join('\n'),
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    writeFileSync(join(dir, 'a.ts'), 'v1\n');
+    g(['add', 'a.ts'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first', '--no-verify'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const started = Date.now();
+    // SHIP_COMMIT_TIMEOUT far out on purpose: the ceiling must not be what ends this run. The
+    // spawnSync timeout is the test's own backstop so a regression fails loudly instead of hanging.
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--', 'a.ts'],
+      dir,
+      { SHIP_COMMIT_TIMEOUT: '600', LEAK_PID_FILE: leakPidFile },
+      { timeout: 90_000 },
+    );
+    const elapsed = Date.now() - started;
+    const leaked = Number(readFileSync(leakPidFile, 'utf8').trim());
+
+    try {
+      expect(r.status, r.stderr).toBe(1); // the reviewer's rejection, NOT a timeout status
+      expect(r.stderr).not.toMatch(/hit the .*ceiling/); // and not the timeout banner either
+      expect(elapsed).toBeLessThan(45_000); // pre-fix: hangs until the leaked child exits (120s)
+      expect(processAlive(leaked), 'gate-leaked child should be reaped').toBe(false);
+      // The verdict still reached the operator — reaping the gate must not cost them the reason.
+      expect(readFileSync(join(dir, '.devkit/last-ship-gates-feat-pr.log'), 'utf8')).toMatch(
+        /conventions-reviewer FAILED/,
+      );
+      // The ephemeral worktree is gone, so the corrected snapshot can be re-shipped immediately.
+      expect(g(['worktree', 'list', '--porcelain'])).not.toMatch(/devkit-reship-/);
+    } finally {
+      try {
+        process.kill(leaked, 'SIGKILL'); // never strand a 120s sleeper in CI
+      } catch {
+        /* already reaped — the passing case */
+      }
+    }
+  }, 120_000);
 });

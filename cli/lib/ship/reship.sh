@@ -96,6 +96,14 @@ cleanup() {
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
+# bash runs the EXIT trap on a signal too, so cleanup was never at risk — but it REPORTS 0 for INT and
+# QUIT, so an interrupted reship read as a successful one to any caller checking the status. Re-exit
+# with the conventional 128+signo; `exit` from a handler still runs the EXIT trap, so the worktree
+# teardown above is unchanged. Only the reported status becomes honest.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 131' QUIT
+trap 'exit 143' TERM
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
