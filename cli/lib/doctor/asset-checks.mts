@@ -118,7 +118,8 @@ export async function checkAgents(cwd: string, surface = 'claude'): Promise<Chec
   return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
 }
 
-// agentHooks: the six synced scripts (under <surface>/hooks) match the manifest, and are present.
+// agentHooks: the synced scripts (under <surface>/hooks) match the manifest, and are present. The
+// set is whatever agents-hooks/ holds — never a count baked in here.
 export function checkAgentHookScripts(
   cwd: string,
   surface = 'claude',

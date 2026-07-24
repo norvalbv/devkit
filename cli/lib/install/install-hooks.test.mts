@@ -86,19 +86,40 @@ describe('installHookRegistrations', () => {
     expect(cur.afterShellExecution).toHaveLength(1);
   });
 
-  it('registers all six agentHooks across the correct Claude events', () => {
+  it('registers all seven agentHooks across the correct Claude events', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['agentHooks']);
     const h = claude(root).hooks;
     expect(h.UserPromptSubmit).toHaveLength(1);
     expect(h.Stop[0].hooks).toHaveLength(3); // decision + lint + knip
     expect(h.PreCompact).toHaveLength(1);
-    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1); UserPromptSubmit dropped.
+    // The fallow gate is the one agentHooks entry that gates a Bash tool call before it runs.
+    expect(h.PreToolUse[0].hooks[0].command).toContain('fallow-gate.sh');
+    expect(h.PreToolUse[0].matcher).toBe('Bash');
+    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1),
+    // PreToolUse+Bash→beforeShellExecution (1); UserPromptSubmit dropped.
     const cur = cursor(root).hooks;
     expect(cur.stop).toHaveLength(3);
     expect(cur.afterFileEdit).toHaveLength(1);
     expect(cur.preCompact).toHaveLength(1);
+    expect(cur.beforeShellExecution).toHaveLength(1);
     expect(cur.UserPromptSubmit).toBeUndefined();
+  });
+
+  it('reduces every agentHooks command to a bare .cursor/hooks path', () => {
+    // toCursorCommand strips a LEADING `node`/`bash` only, so a registration carrying an env-var
+    // prefix (`VAR=1 bash …`) silently mirrors to Cursor as an unrunnable string. Asserting the
+    // shape of every command catches that for any future entry, not just today's.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['agentHooks']);
+    const commands = Object.values(cursor(root).hooks)
+      .flat()
+      .flatMap((group) => group.hooks ?? [group])
+      .map((hook) => hook.command);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) {
+      expect(command).toMatch(/^\.cursor\/hooks\/[\w.-]+$/);
+    }
   });
 
   it('is idempotent — a re-run does not duplicate', () => {
@@ -107,7 +128,7 @@ describe('installHookRegistrations', () => {
     const first = claudeCommands(root).length;
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     expect(claudeCommands(root).length).toBe(first);
-    expect(first).toBe(8);
+    expect(first).toBe(9);
   });
 
   it('preserves a foreign (non-devkit) hook command on merge', () => {

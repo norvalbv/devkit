@@ -92,6 +92,14 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       matcher: '',
       command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/strategic-compactor.sh"',
     },
+    {
+      // Bare runner + path, like every other entry: toCursorCommand derives the .cursor mirror by
+      // stripping a LEADING `node`/`bash`, so an env-var prefix here would emit a broken Cursor
+      // command. The gate's commit-only default and its .fallowrc self-skip live in the script.
+      event: 'PreToolUse',
+      matcher: 'Bash',
+      command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    },
   ],
 };
 
