@@ -101,7 +101,8 @@ export async function checkAgents(cwd, surface = 'claude') {
     }
     return check('agents', 'OK', `${Object.keys(manifest.files).length} agent file(s) in sync`);
 }
-// agentHooks: the six synced scripts (under <surface>/hooks) match the manifest, and are present.
+// agentHooks: the synced scripts (under <surface>/hooks) match the manifest, and are present. The
+// set is whatever agents-hooks/ holds — never a count baked in here.
 export function checkAgentHookScripts(cwd, surface = 'claude', expected = null) {
     const { gitRoot } = detectGitRoot(cwd);
     const manifest = readJson(join(gitRoot, '.devkit', 'agent-hooks-manifest.json'));
