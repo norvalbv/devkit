@@ -8,25 +8,35 @@
 # the gate verdicts a normal `git commit` shows. The log is the full, untruncated record; a compact
 # status line points the agent at it.
 #
-# Mechanics: `2>&1 | tee "$log" >&2` — fold the gate output (which is on stderr) into the stream BEFORE
-# tee, capture it to the log, and send tee's copy to STDERR (never stdout — the PR URL must stay the
-# caller's last stdout line). `${PIPESTATUS[0]}` preserves the commit's real exit code under
-# `set -euo pipefail`, guarded by a `set +e`/`set -e` island so a blocking gate doesn't abort before
-# we read it; the non-zero return then lets the caller's `set -e` abort + its cleanup trap drop the
-# empty branch (unchanged failure semantics, plus visibility).
+# Mechanics: the commit runs under run_gates_with_capture, which folds the gate output (which is on
+# stderr) into one stream, captures it to the log, and sends its copy to STDERR (never stdout — the PR
+# URL must stay the caller's last stdout line). The commit's real exit code survives the capture; the
+# non-zero return then lets the caller's `set -e` abort + its cleanup trap drop the empty branch
+# (unchanged failure semantics, plus visibility).
 #
 # R2 (sc-1002): bound the commit so a HUNG gate can't wedge a shipping AGENT forever. A pre-commit gate
 # that never returns (a wedged `claude -p` judge / `bunx` toolchain) — or any child it backgrounds that
-# inherits git's stdout — would otherwise keep `git commit` AND the `tee` pipe blocked, with no human to
-# Ctrl-C. We wrap the commit in coreutils `timeout`; on expiry its DEFAULT process-group kill reaps the
-# hook AND its grandchildren, closing every copy of the pipe write-end so `tee` unblocks and the pipeline
-# returns 124. The non-zero rc then flows through the caller's `set -e` + EXIT trap (unchanged failure path).
+# inherits git's stdout — would otherwise keep `git commit` AND the capture pipe blocked, with no human
+# to Ctrl-C. The gate therefore runs under a supervisor that owns it as a process GROUP and kills the
+# GROUP on expiry, reaping the hook AND its grandchildren so every copy of the pipe write-end closes,
+# the reader unblocks, and the run returns 124.
 #
-# NEVER add `timeout --foreground`: it signals only the leader (git), leaving a backgrounded pipe-holder
-# alive → `tee` blocks forever → the timeout buys nothing. The default group-kill is the whole point.
+# THE INVARIANT, restated for whatever replaces the mechanism: only ever signal the GROUP. Anything
+# that signals the leader alone — `timeout --foreground`, `kill $git_pid` — leaves a backgrounded
+# pipe-holder alive, the reader blocks forever, and the bound buys nothing. The supervisor goes one
+# further and adopts processes that escaped into a group of their own, via an ownership token.
 #
-# Portability: macOS ships no `timeout` (it's coreutils `gtimeout`, or absent). With neither on PATH we run
-# bare (today's behaviour) and say so once — a silent no-op the operator THINKS protects them is worse.
+# R3 (sc-1199): expiry is not the only way a gate outlives its usefulness. A reviewer that REJECTS
+# exits in seconds, so the ceiling never fires — and any child it leaked still holds the pipe, which
+# used to hang the ship indefinitely with its ephemeral worktree checked out. So: a non-zero hook
+# result does NOT end the gate's lifetime. Once the leader exits, a lingering group gets a short grace
+# and is then reaped down the same group-kill path. The leader's status survives the reap — a rejection
+# must always read as that reviewer's rejection, never as a timeout.
+#
+# Portability: hang protection is unconditional and needs no coreutils — node plus /bin/ps, both of
+# which ship already requires. Exit codes the caller can now see: 124 (the ceiling, or a leaked group
+# that outlived a CLEAN leader), 129/130/131/143 (a signal forwarded to the gate), 137 (the supervisor
+# itself was SIGKILLed — NOT a ceiling).
 #
 # Usage:  commit_with_gate_capture <worktree> <root> <branch> <title> <body>
 commit_with_gate_capture() {
