@@ -96,6 +96,14 @@ cleanup() {
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
+# bash runs the EXIT trap on a signal too, so cleanup was never at risk — but it REPORTS 0 for INT and
+# QUIT, so an interrupted reship read as a successful one to any caller checking the status. Re-exit
+# with the conventional 128+signo; `exit` from a handler still runs the EXIT trap, so the worktree
+# teardown above is unchanged. Only the reported status becomes honest.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 131' QUIT
+trap 'exit 143' TERM
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
@@ -107,7 +115,13 @@ for p in "${PATHS[@]}"; do
   if [ -e "$ROOT/$p" ]; then
     mkdir -p "$WT/$(dirname "$p")"
     cp -Pp "$ROOT/$p" "$WT/$p"
-    git -C "$WT" add -- "$p"
+    # -f: a briefed path can be TRACKED on the PR branch yet sit under a gitignored dir (a tracked
+    # `dist/` build artifact is the case that bit us). A plain `git add` STAGES it but still exits
+    # nonzero with "The following paths are ignored", and set -e (top of file) would abort the whole
+    # re-push before the staged-set snapshot, gates, commit, and push. Every PATHS entry is
+    # caller-explicit (positional after --; directories already rejected above), so forcing it is
+    # exactly what was asked — same reasoning as husky-block.mts's `git add -f`.
+    git -C "$WT" add -f -- "$p"
   else
     git -C "$WT" rm -q --ignore-unmatch -- "$p" || true
   fi
