@@ -153,10 +153,16 @@ function signalFixture(root: string): {
   return { script, leaderReady, descendantReady, leaderSignal, descendantSignal };
 }
 
-function backgroundFixture(root: string): { script: string; ready: string; signal: string } {
-  const script = join(root, 'background-fixture.mjs');
-  const ready = join(root, 'background-ready');
-  const signal = join(root, 'background-signal');
+// A leader that spawns a descendant sharing its stdio, then exits — leaving the gate's output pipe
+// held open by a process the supervisor must find and reap. `exitCode` picks which half of the
+// linger contract is under test: 0 (a "clean" leader that leaked) or non-zero (a gate rejection).
+function backgroundFixture(
+  root: string,
+  exitCode = 0,
+): { script: string; ready: string; signal: string } {
+  const script = join(root, `background-fixture-${exitCode}.mjs`);
+  const ready = join(root, `background-ready-${exitCode}`);
+  const signal = join(root, `background-signal-${exitCode}`);
   writeFileSync(
     script,
     [
@@ -168,6 +174,7 @@ function backgroundFixture(root: string): { script: string; ready: string; signa
       'const check = setInterval(() => {',
       '  if (!existsSync(ready)) return;',
       '  clearInterval(check);',
+      `  process.exit(${exitCode});`,
       '}, 5);',
     ].join('\n'),
   );
@@ -333,10 +340,14 @@ describe('review gate supervisor', () => {
     expect(readFileSync(fixture.descendantSignal, 'utf8')).toBe('SIGTERM');
   });
 
-  it('keeps supervising a pipe-holding descendant after the command leader exits', () => {
+  it('reaps a pipe-holding descendant once the command leader exits clean', () => {
     const fixture = backgroundFixture(mkTmp('devkit-review-background-'));
+    const started = Date.now();
+    // 600s, not 5s: the ceiling must be far enough out that a 124 here can ONLY have come from the
+    // post-leader-exit reap. Under the old behaviour this test passed by WAITING for expiry, which
+    // is exactly the bug — on a ship the ceiling is an hour (sc-1199).
     const result = supervisor(
-      '5',
+      '600',
       '--',
       process.execPath,
       fixture.script,
@@ -346,6 +357,27 @@ describe('review gate supervisor', () => {
 
     expect(result.status, result.stderr).toBe(124);
     expect(readFileSync(fixture.signal, 'utf8')).toBe('SIGTERM');
+    expect(Date.now() - started).toBeLessThan(WAIT_MS);
+  });
+
+  it('preserves a non-zero leader status while reaping its lingering descendant', () => {
+    const fixture = backgroundFixture(mkTmp('devkit-review-rejection-'), 1);
+    const started = Date.now();
+    const result = supervisor(
+      '600',
+      '--',
+      process.execPath,
+      fixture.script,
+      fixture.ready,
+      fixture.signal,
+    );
+
+    // The load-bearing assertion of sc-1199: a gate that REJECTED must still report its rejection.
+    // Reporting 124 here would tell a shipping agent "re-run to converge" for a verdict that will
+    // never converge on its own, and would mis-tag the ship telemetry as a timeout.
+    expect(result.status, result.stderr).toBe(1);
+    expect(readFileSync(fixture.signal, 'utf8')).toBe('SIGTERM');
+    expect(Date.now() - started).toBeLessThan(WAIT_MS);
   });
 
   it.each([
@@ -404,6 +436,39 @@ describe('review gate supervisor', () => {
         process.kill(pid, 'SIGKILL');
       } catch {}
     }
+  });
+
+  // macOS returns EPERM — not ESRCH — from kill(-pgid, sig) while it is still reaping that group's
+  // members. The liveness probe already tolerated that window; a REAL signal landing in it threw, and
+  // the throw settles the supervisor at 1. Latent while only `devkit review` was supervised; once ship
+  // joined (sc-1199) it started failing commits that had already landed with every gate green — 39 of
+  // 40 supervised runs took EPERM on the group SIGTERM under parallel load. Injected here rather than
+  // raced, so the guarantee is deterministic on every platform.
+  it('treats EPERM from a group signal as a group mid-reap, not a supervisor failure', async () => {
+    const realKill = process.kill.bind(process);
+    let injected = 0;
+    process.kill = ((pid: number, signal?: string | number) => {
+      // Only group signals (negative pid), and never the `0` liveness probe — that path was already
+      // tolerant, so intercepting it would test the wrong half.
+      if (pid < 0 && signal !== 0 && injected < 3) {
+        injected += 1;
+        const error: NodeJS.ErrnoException = new Error('kill EPERM');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return realKill(pid, signal as NodeJS.Signals);
+    }) as typeof process.kill;
+
+    try {
+      // A 10ms ceiling forces cleanup immediately, so the group SIGTERM — the call that used to throw
+      // — happens while the injection is armed. Expiry must still report 124, not a rejection or 1.
+      await expect(superviseGateCommand(10, ['/bin/sleep', '1'])).resolves.toBe(124);
+    } finally {
+      process.kill = realKill;
+    }
+    expect(injected, 'the EPERM injection never fired — the test proved nothing').toBeGreaterThan(
+      0,
+    );
   });
 
   it('refuses to launch target code when its process inspector fails preflight', async () => {
@@ -774,7 +839,11 @@ describe('review gate supervisor', () => {
     expect(existsSync(commandMarker)).toBe(true);
   });
 
-  it('uses the private supervisor only for review mode', () => {
+  // Was 'uses the private supervisor only for review mode'. Ship/reship used to take a coreutils
+  // `timeout` path whose group-kill fired only on expiry, so a fast gate REJECTION left the leaked
+  // tree holding the capture pipe and wedged the ship (sc-1199). One mechanism now serves both, and
+  // a `timeout` binary on PATH must go untouched in either mode.
+  it('uses the private supervisor for ship as well as review', () => {
     const root = mkTmp('devkit-review-runner-');
     const fakeTimeout = join(root, 'timeout');
     const timeoutArgs = join(root, 'timeout-args');
@@ -795,13 +864,32 @@ describe('review gate supervisor', () => {
 
       const ship = gateHarness(root, 'ship', '7', [process.execPath, '-e', 'process.exit(0)']);
       expect(ship.status, ship.stderr).toBe(0);
-      expect(readFileSync(timeoutArgs, 'utf8').split('\n').slice(0, 3)).toEqual(['-k', '10', '7']);
+      expect(existsSync(timeoutArgs)).toBe(false);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
       if (previousCapture === undefined) delete process.env.TIMEOUT_ARGS;
       else process.env.TIMEOUT_ARGS = previousCapture;
     }
+  });
+
+  // The capture tees to $log AND the optional telemetry archive, and a tee that cannot open one of
+  // its files exits non-zero — which the runner turns into a failed gate. $log deserves that; the
+  // archive does not. Ship reached this code path for the first time in sc-1199, so an unwritable
+  // telemetry path would have started sinking otherwise-passing commits.
+  it('keeps an unwritable gate archive best-effort on the supervised path', () => {
+    const root = mkTmp('devkit-gate-archive-');
+    const blocker = join(root, 'archive-parent-is-a-file');
+    writeFileSync(blocker, 'not a directory\n');
+    const result = gateHarness(root, 'ship', '30', [process.execPath, '-e', 'process.exit(0)'], {
+      ...process.env,
+      DEVKIT_GATE_ARCHIVE_LOG: join(blocker, 'archive.log'),
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toMatch(/could not archive gate output .* continuing/);
+    expect(result.stderr).not.toMatch(/could not persist gate output/);
+    expect(existsSync(join(root, 'gate.log'))).toBe(true);
   });
 
   it('rejects malformed invocations', () => {
