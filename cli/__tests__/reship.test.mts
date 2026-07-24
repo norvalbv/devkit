@@ -162,6 +162,67 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
   });
 });
 
+// Regression (sc-1183): a briefed path can be TRACKED on the PR branch yet sit under a gitignored
+// dir (a tracked dist/ build artifact is the case that bit us). The staging loop's `git add` STAGES
+// it but exits nonzero with "The following paths are ignored", and set -euo pipefail aborted the
+// whole re-push before gates/commit/push. `git add -f` on the caller-explicit path fixes it — same
+// failure mode as husky-block-exec.test.mts's force-added dist/ re-stage.
+describe('reship — tracked file under a gitignored directory', () => {
+  it('re-ships a tracked-but-gitignored dist/ file without aborting on the ignore diagnostic', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const dir = mkdtempSync(join(tmpdir(), 'reshipwt-'));
+    dirs.push(dir);
+    const env = { ...process.env, ...GENV };
+    const g = (a, o = {}) =>
+      execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o });
+    mkdirSync(join(dir, '.husky'), { recursive: true });
+    writeFileSync(join(dir, '.husky/.keep'), '');
+    for (const a of [
+      ['init', '-q', '-b', 'work'],
+      ['config', 'user.email', 'a@b.c'],
+      ['config', 'user.name', 'a'],
+      ['config', 'commit.gpgsign', 'false'],
+      ['add', '.husky/.keep'],
+      ['commit', '-q', '-m', 'base'],
+      ['config', 'core.hooksPath', '.husky/_'],
+      ['remote', 'add', 'origin', bare],
+    ])
+      g(a, { stdio: 'ignore' });
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+
+    // .gitignore ignores dist/, but dist/out.mjs is FORCE-ADDED so it is tracked on the PR-branch tip
+    // — the exact "tracked file beneath an ignored directory" shape from the report.
+    writeFileSync(join(dir, '.gitignore'), 'dist/\n');
+    mkdirSync(join(dir, 'dist'));
+    writeFileSync(join(dir, 'dist/out.mjs'), 'v1\n');
+    g(['add', '.gitignore'], { stdio: 'ignore' });
+    g(['add', '-f', 'dist/out.mjs'], { stdio: 'ignore' });
+    g(['commit', '-q', '-m', 'first'], { stdio: 'ignore' });
+    g(['push', '-q', 'origin', 'HEAD:feat/pr'], { stdio: 'ignore' });
+    const prTip = g(['rev-parse', 'origin/feat/pr']).trim();
+
+    // The agent edits the tracked-but-ignored artifact and re-pushes onto the open PR.
+    writeFileSync(join(dir, 'dist/out.mjs'), 'v2\n');
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--', 'dist/out.mjs'], dir, { SHIP_DRY_RUN: '1' });
+    const wt = WT_RE.exec(r.stderr)?.[1];
+    try {
+      expect(r.status, r.stderr).toBe(0); // did NOT abort on the ignore diagnostic
+      expect(r.stderr).not.toMatch(/paths are ignored|ignored by/); // -f suppressed git's refusal
+      expect(wt, 'dry-run should keep + name the worktree').toBeTruthy();
+      const gwt = (a) => execFileSync('git', ['-C', wt, ...a], { env, encoding: 'utf8' }).trim();
+      expect(gwt(['show', 'HEAD:dist/out.mjs'])).toBe('v2'); // the new content is committed...
+      expect(gwt(['rev-parse', 'HEAD~1'])).toBe(prTip); // ...parented on the PR-branch tip
+    } finally {
+      if (wt) g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+    }
+  });
+});
+
 describe('reship — merges the re-pushed paths into the branch reconcile entry', () => {
   it('on a real push, extends branches[$BR] with this commit content (tip blob) + new paths', () => {
     const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
