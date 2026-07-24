@@ -1,9 +1,16 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:os';
 import { runDirectReviewCli } from "../run-direct.mjs";
+import { readProcessTable } from "./process-table.mjs";
 const KILL_GRACE_MS = 10_000;
 const FORCED_CLEANUP_MAX_MS = KILL_GRACE_MS * 2;
+// The leader has exited but something in its group still holds the gate's stdio. Waiting for that to
+// resolve itself is how a REJECTED gate used to wedge a ship forever (sc-1199): the reviewer exits 1
+// in seconds, nothing signals the group, and the leaked child keeps the capture pipe's write-end open
+// so the reader never sees EOF. The expiry timeout is not the bound here — it is measured in the hour
+// for a ship. Give the stragglers a short grace to drain on their own, then reap the group.
+const LINGER_GRACE_MS = 5_000;
 const GROUP_POLL_MS = 25;
 const OWNERSHIP_SAMPLE_MS = 250;
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -13,9 +20,6 @@ const OWNERSHIP_TOKEN_ENV = 'DEVKIT_REVIEW_GATE_OWNER';
 const OWNERSHIP_SEED_ENV = 'DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN';
 const OWNERSHIP_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const NATURAL_RESERVED_STATUSES = new Set([124, 129, 130, 131, 143]);
-const PROCESS_TABLE_MAX_BYTES = 16 * 1024 * 1024;
-const PROCESS_LINE_PATTERN = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+\S+\s+(.+?)\s*$/;
-const PROCESS_PID_PATTERN = /^\s*(\d+)/;
 const SIGNAL_EXIT_CODES = {
     SIGHUP: 129,
     SIGINT: 130,
@@ -45,8 +49,15 @@ function signalGroup(groupId, signal) {
     catch (cause) {
         if (errorCode(cause) === 'ESRCH')
             return false;
-        // A terminated group can transiently report EPERM while macOS reaps its members.
-        if (signal === 0 && errorCode(cause) === 'EPERM')
+        // A terminated group can transiently report EPERM while macOS reaps its members. That window is
+        // not specific to the liveness probe — a real SIGTERM/SIGKILL lands in it just as often, and the
+        // tolerance used to be wired for `signal === 0` only, so an ordinary group signal arriving mid-reap
+        // THREW. That throw becomes terminalFailure and settles the supervisor at 1. Measured on macOS
+        // under parallel load: 39 of 40 supervised runs took EPERM on the group SIGTERM. It stayed latent
+        // while only `devkit review` was supervised; the moment ship joined, it began failing commits that
+        // had already landed with every gate green. Report the group as still present and let the poll
+        // loop settle it on ESRCH — the same conservative reading the probe already took.
+        if (errorCode(cause) === 'EPERM')
             return true;
         throw new Error(`could not signal gate process group ${groupId} with ${String(signal)}`, {
             cause,
@@ -62,47 +73,6 @@ function childExitCode(code, signal) {
 }
 function naturalExitCode(status) {
     return NATURAL_RESERVED_STATUSES.has(status) ? 1 : status;
-}
-function processTableOutput(args) {
-    const result = spawnSync('/bin/ps', args, {
-        encoding: 'utf8',
-        maxBuffer: PROCESS_TABLE_MAX_BYTES,
-    });
-    if (result.error)
-        throw new Error('could not inspect the gate process tree', { cause: result.error });
-    if (result.status !== 0) {
-        throw new Error(`could not inspect the gate process tree (ps exit ${String(result.status)})`);
-    }
-    return result.stdout;
-}
-function readProcessTable(ownershipMarker) {
-    const output = processTableOutput('-A -o pid= -o ppid= -o pgid= -o stat= -o lstart='.split(' '));
-    const table = new Map();
-    for (const line of output.split('\n')) {
-        const match = PROCESS_LINE_PATTERN.exec(line);
-        if (!match)
-            continue;
-        const pid = Number(match[1]);
-        table.set(pid, {
-            pid,
-            parentPid: Number(match[2]),
-            groupId: Number(match[3]),
-            identity: match[4],
-            ownershipToken: false,
-        });
-    }
-    if (ownershipMarker) {
-        const environmentArgs = process.platform === 'linux'
-            ? ['-A', 'eww', '-o', 'pid=', '-o', 'command=']
-            : ['-A', '-wwE', '-o', 'pid=', '-o', 'command='];
-        for (const line of processTableOutput(environmentArgs).split('\n')) {
-            const pid = Number(PROCESS_PID_PATTERN.exec(line)?.[1]);
-            const record = table.get(pid);
-            if (record && line.includes(ownershipMarker))
-                record.ownershipToken = true;
-        }
-    }
-    return table;
 }
 function matchesIdentity(record, identity) {
     return identity !== undefined && record?.identity === identity;
@@ -272,6 +242,7 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
         let graceTimer;
         let ownershipTimer;
         let pollTimer;
+        let lingerTimer;
         let terminationSignal = 'SIGTERM';
         let inspectionFailure;
         let terminalFailure;
@@ -291,6 +262,8 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
                 clearTimeout(ownershipTimer);
             if (pollTimer)
                 clearTimeout(pollTimer);
+            if (lingerTimer)
+                clearTimeout(lingerTimer);
         };
         const settle = (status, cause) => {
             if (finished)
@@ -340,6 +313,12 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
                 }
             }
         };
+        // What a reaped-after-linger run reports. A gate that REJECTED must still read as a rejection —
+        // `naturalExitCode(childStatus)` is byte-for-byte what settle() would have resolved had the group
+        // drained on its own, so the reap is invisible to the caller's attribution (a ship keeps blaming
+        // the reviewer, not a timeout). A leader that exited CLEAN while leaking a live tree is the one
+        // case we override: it verified nothing conclusive, so it takes the expiry status.
+        const lingerStatus = () => (childStatus === 0 ? 124 : naturalExitCode(childStatus));
         const checkForCompletion = () => {
             if (finished)
                 return;
@@ -357,6 +336,14 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
             }
             if (!childDone && forcedStatus === undefined)
                 return;
+            // The leader is gone and the group is not. Arm the reap once (not per poll); after this the
+            // outcome is bounded by LINGER_GRACE + KILL_GRACE rather than by the expiry timeout.
+            if (childDone && forcedStatus === undefined && lingerTimer === undefined) {
+                lingerTimer = setTimeout(() => {
+                    lingerTimer = undefined;
+                    beginForcedCleanup(lingerStatus());
+                }, LINGER_GRACE_MS);
+            }
             if (pollTimer !== undefined)
                 return;
             pollTimer = setTimeout(() => {
@@ -393,6 +380,9 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
             if (ownershipTimer)
                 clearTimeout(ownershipTimer);
             ownershipTimer = undefined;
+            if (lingerTimer)
+                clearTimeout(lingerTimer);
+            lingerTimer = undefined;
             signalForcedProcesses();
             cleanupDeadlineTimer = setTimeout(() => {
                 terminationSignal = 'SIGKILL';
