@@ -21,6 +21,12 @@
  * agent (exit code is the only channel that survives output filtering), so a ship must not
  * proceed with its gap-finder silently dark · exit 0 = everything else (pass / softened warn /
  * skipped).
+ *
+ * A confident PASS is cached in the review gate's own store (.devkit/review-cache.json) on every
+ * byte the judge read, so a ship retry after an unrelated failure skips this judge instead of
+ * re-spending opus on an unchanged judgement — the convergence contract the domain reviewers
+ * already honoured (docs/decisions/ship-gates-converge-not-restart.md).
+ *
  * Knobs: GUARD_NO_COMPLETENESS=1 skip · GUARD_COMPLETENESS_HARD=0 soften · cfg.noLlm skip.
  */
 
@@ -30,14 +36,12 @@ import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
-import { execJudgeAsync } from '../judge/run-judge.mts';
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
+import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
-import { parseReviewVerdict, stripFrontmatter } from './reviewers.mts';
+import { cacheKey, parseReviewVerdict, stripFrontmatter } from './reviewers.mts';
 
 const AGENT_NAME = 'feature-completeness-reviewer';
-// Aligned with the review gate's strict/escalate cap (sc-1048 rationale): the straight-opus
-// gap-finder on a big commit was SIGTERM'd at 360s and silently skipped — the PR #60 lesson.
-const TIMEOUT_MS = 420000;
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
 // The capped, omission-accounted stdin-evidence builder (sc-1060) now lives in diff-evidence.mts
@@ -168,26 +172,51 @@ export async function runCompleteness(
     return envFlag('AI_STRICT') ? 3 : 2;
   }
 
+  // PASS cache, same store and shape as the domain reviewers (.devkit/review-cache.json): an
+  // identical judgement never re-runs. Without it this gate was the ONE thing a ship retry always
+  // re-paid — ~7 minutes of opus, from scratch, every attempt, while all seven reviewers reported
+  // `cached PASS` (sc-1227). Convergence is the recorded contract
+  // (docs/decisions/ship-gates-converge-not-restart.md), and completeness was outside it.
+  // Key = every byte the judge reads: the prompt (message, governing Targets, brief) plus the
+  // capped stdin evidence. An amended message or a re-staged hunk therefore MISSES and re-judges.
+  const key = cacheKey('completeness', diff, prompt);
+  if (loadCache(cwd)[key]) {
+    console.error('guard-review: completeness — cached PASS (identical judgement)');
+    return 0;
+  }
+
+  let outage: 'timeout' | 'transient' | 'empty' | undefined;
   const raw = await exec({
     label: 'review:completeness',
     args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', TOOLS],
     input: diff,
-    timeout: TIMEOUT_MS,
+    timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
+    onOutage: (kind) => {
+      outage = kind;
+    },
   });
   if (raw === null) {
     // Outage/timeout (execJudgeAsync already warned). Under strict ship the skip must be an EXIT
     // CODE, not a stderr line — a headless shipping agent only reliably sees the code.
     if (envFlag('AI_STRICT')) {
+      // Name the CAUSE: a cap kill is the gate's own contention kill, and the auth/quota remedy
+      // sends the operator chasing a phantom problem on a healthy CLI (sc-1227).
+      const timedOut = outage === 'timeout';
       console.error(
-        'guard-review: completeness SKIPPED (judge outage/timeout) — strict ship mode fails closed.\n' +
-          '   Remedy: check `claude` CLI auth/quota, then re-run devkit ship.',
+        `guard-review: completeness SKIPPED (${timedOut ? 'judge timed out' : 'judge outage'}) — strict ship mode fails closed.\n` +
+          `   Remedy: ${strictRemedy(timedOut ? 'timeout' : 'outage')} (an earned PASS is cached).`,
       );
       return 3;
     }
     return 2; // fail-open on a normal commit
   }
   const { verdict, reason } = parseReviewVerdict(raw);
+  // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
+  // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
+  // FAIL the judge did make; caching it would make one softened run silence every later re-run).
+  if (verdict === 'PASS')
+    savePasses(cwd, { [key]: { at: new Date().toISOString(), model: 'opus' } });
   if (verdict !== 'FAIL') return 0;
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());

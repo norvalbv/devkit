@@ -581,7 +581,7 @@ function preflightClaude() {
 function printEstimate(rows: CompletenessCase[], matchRuns: number) {
   const slots = rows.reduce((n, r) => n + r.gold.length + r.decoys.length, 0);
   const revLo = rows.length * 60;
-  const revHi = rows.length * 360; // the gate's own TIMEOUT_MS ceiling
+  const revHi = rows.length * 360; // OBSERVED spread, not the cap (that would print ~5× the spend)
   const matcher = Math.round((slots * matchRuns * 15) / MATCH_CONCURRENCY);
   console.log(
     `completeness-eval: budget ≈ ${Math.round((revLo + matcher) / 60)}–${Math.round((revHi + matcher) / 60)} min  ` +

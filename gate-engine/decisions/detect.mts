@@ -24,7 +24,6 @@
  * package dir (__dirname). Run from a consumer's node_modules, this gate reads THAT repo.
  */
 
-import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -34,6 +33,7 @@ import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
+import { git, stagedFiles } from './git-io.mts';
 import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mts';
 
 // 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder).
@@ -163,13 +163,7 @@ export function gateVerdict(s: {
   return 1;
 }
 
-// ─── git I/O wrappers (thin; run in the CONSUMER cwd) ────────────────────────────
-
-// argv-based on purpose: staged FILENAMES (e.g. a nested package.json path) ride some of
-// these calls, and a shell string lets a crafted path expand before git runs.
-function git(cwd: string, args: string[]): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
+// git/stagedFiles are shared with the check-alignment gate — see git-io.mts.
 
 // Pure: the dependency NAMES whose spec differs between two parsed package.json objects. Exported
 // for tests — the seen-set's dep-change identity (distinct decisions vs the same bump) rides on it.
@@ -404,8 +398,7 @@ function strictShip() {
 }
 
 function decisionStaged(cwd: string, decisionFileMatcher: RegExp): boolean {
-  const names = git(cwd, ['diff', '--cached', '--name-only']);
-  return names.split('\n').some((n) => decisionFileMatcher.test(n.trim()));
+  return stagedFiles(cwd).some((n) => decisionFileMatcher.test(n));
 }
 
 // ─── Dispatch ─────────────────────────────────────────────────────────────────
