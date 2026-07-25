@@ -32,6 +32,8 @@ export type Outcome =
 export interface RecallCase {
   id: string;
   q: string;
+  /** Hash of the corpus this case's labels were validated against; see bench.mts staleLabels(). */
+  storeHash?: string;
   type: CaseType;
   gold: string[];
   goldRequired?: string[];

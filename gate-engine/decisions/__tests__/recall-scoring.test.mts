@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { leakJaccard, lintRecallCases, storeHash } from '../eval/recall/bench.mts';
+import { leakJaccard, lintRecallCases, staleLabels, storeHash } from '../eval/recall/bench.mts';
 import {
   abstained,
   type Envelope,
@@ -283,6 +283,30 @@ describe('bench helpers', () => {
       expect(storeHash(dir)).not.toBe(before);
       // Stable across calls with no change — it must not be time- or order-dependent.
       expect(storeHash(dir)).toBe(storeHash(dir));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('staleLabels (the label-rot tripwire)', () => {
+  it('flags cases labelled against a different corpus, and unstamped ones', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'recall-drift-'));
+    try {
+      writeFileSync(join(dir, 'a.md'), 'original');
+      const h = storeHash(dir);
+      const cases = [
+        { id: 'fresh', q: 'q', type: 'SINGLE', gold: ['a'], storeHash: h },
+        { id: 'unstamped', q: 'q', type: 'SINGLE', gold: ['a'] },
+      ];
+      expect(staleLabels(dir, cases).map((d) => d.id)).toEqual(['unstamped']);
+
+      // Editing the corpus rots every label that was validated against the old bytes. An ABSTAIN
+      // case is the dangerous one: it stays syntactically valid and silently starts scoring a
+      // correct retriever as broken the day someone records a ruling on its topic.
+      writeFileSync(join(dir, 'a.md'), 'a ruling was added here');
+      expect(staleLabels(dir, cases).map((d) => d.id)).toEqual(['fresh', 'unstamped']);
+      expect(staleLabels(dir, cases)[0]).toMatchObject({ was: h, now: storeHash(dir) });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

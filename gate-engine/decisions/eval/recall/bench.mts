@@ -102,6 +102,20 @@ export function lintRecallCases(rows: RecallCase[]) {
   return errors;
 }
 
+/**
+ * Cases are only valid against the corpus they were LABELLED against, so each one records its
+ * storeHash and `coverage` reports every mismatch.
+ *
+ * This is the tripwire the whole frozen-corpus design rests on. A label does not fail loudly when it
+ * rots — an ABSTAIN case stays syntactically fine forever and simply starts scoring a correct
+ * retriever as broken the day someone records a ruling on its topic. Without this check the suite
+ * would keep reporting confident numbers off stale ground truth, which is worse than not measuring.
+ */
+export function staleLabels(corpus: string, cases: RecallCase[]) {
+  const now = storeHash(corpus);
+  return cases.filter((c) => c.storeHash !== now).map((c) => ({ id: c.id, was: c.storeHash, now }));
+}
+
 /** Full text of an axis file, for the leakage gate. */
 function axisText(corpus: string, slug: string) {
   const f = path.join(corpus, `${slug}.md`);
@@ -198,6 +212,19 @@ function coverage(corpus: string, cases: RecallCase[]) {
   console.log(`corpus ${path.basename(corpus)} · storeHash ${storeHash(corpus)}`);
   for (const [t, n] of Object.entries(byType).sort()) console.log(`  ${t.padEnd(15)} ${n}`);
 
+  const drifted = staleLabels(corpus, cases);
+  if (drifted.length) {
+    console.log(
+      `\n  ✗ label drift — ${drifted.length} case(s) were labelled against a different corpus:`,
+    );
+    for (const d of drifted)
+      console.log(`      ${d.id}  labelled ${d.was ?? '(unstamped)'} · corpus ${d.now}`);
+    console.log('    Re-validate those labels against this corpus, then restamp `storeHash`.');
+    console.log(
+      '    ABSTAIN labels rot fastest: one stays correct only until someone rules on its topic.',
+    );
+  }
+
   console.log('\n  leakage (token Jaccard, question vs its gold axis file):');
   const leaks: { id: string; j: number }[] = [];
   for (const c of cases) {
@@ -212,7 +239,7 @@ function coverage(corpus: string, cases: RecallCase[]) {
   for (const o of over)
     console.log(`    ✗ ${o.id} — ${o.j.toFixed(3)} rewrites the ruling; reject`);
   if (!over.length) console.log('    ✓ every case is below the ceiling');
-  return over.length;
+  return over.length + drifted.length;
 }
 
 export async function main(argv: string[]) {
