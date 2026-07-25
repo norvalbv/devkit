@@ -47,6 +47,12 @@ const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 // get the bare gate name (module-level per biome's useTopLevelRegex).
 const GUARD_PREFIX_RE = /^guard-/;
 const GATE_SUFFIX_RE = /\(.*\)$/;
+// 127 is the shell's "command not found", so the gate's own binary never resolved — a dependency
+// problem, not a lint finding. Naming it matters because the raw text ("biome: command not found")
+// sends the reader after the linter: under `devkit ship` the gates run in an ephemeral worktree whose
+// dependencies are SYMLINKED in, and a link resolved to a checkout with nothing installed produces
+// exactly this (sc-1243). Worded for any layout — a repo may legitimately have no node_modules.
+const NOT_FOUND_RE = /\(unexpected:127\)/;
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
@@ -295,6 +301,18 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     console.error(
       '   Every deterministic failure is listed above — fix them together, then commit once.',
     );
+    if (fails.some((f) => NOT_FOUND_RE.test(f))) {
+      console.error(
+        '   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a',
+      );
+      console.error(
+        '   dependency problem, not a code finding. Under `devkit ship` the gates run in an',
+      );
+      console.error(
+        '   ephemeral worktree whose dependencies are symlinked in; check the "↳ linked …" lines',
+      );
+      console.error('   above for where each one actually resolved to.');
+    }
     return 1;
   }
   // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
