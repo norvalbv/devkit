@@ -28,8 +28,10 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type CoverageConfig, coverageBypassed, resolveGuardConfig } from '../config.mts';
 import { emitGateEvent } from '../judge/gate-events.mts';
+// Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
+// runner writes can never drift apart.
+import { COVERAGE_FILE } from './produce.mts';
 
-const COVERAGE_FILE = 'coverage/coverage-final.json';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
 // configured are enforced; the rest are computed but ignored.
 const METRICS = ['statements', 'functions', 'branches', 'lines'] as const;
@@ -144,6 +146,10 @@ export function runCoverage(cwd = process.cwd()): number {
       '   SYMLINKED IN from your checkout — so it must exist THERE; the ephemeral ship',
     );
     console.error('   worktree cannot produce one.');
+    console.error('   Sharing this checkout with another agent? Point that script at `devkit');
+    console.error(
+      '   coverage-run` — concurrent plain `vitest --coverage` runs delete each other.',
+    );
     for (const line of BYPASS_REMEDY) console.error(line);
     // The old text said only "set coverage: false in guard.config.json" — which SILENTLY NO-OPS under
     // ship, because the ship worktree reads that file from the committed base, not your working tree.
