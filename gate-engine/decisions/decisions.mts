@@ -35,7 +35,8 @@
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
- *   query "<text>" [--top K]        rank axes — semantic (Ollama), lexical floor on fallback
+ *   query "<text>" [--top K] [--json]  rank axes — semantic (Ollama), lexical floor on fallback;
+ *                                   --json emits the machine-readable envelope the bench scores
  *   reindex                         cold-build the derived embedding cache
  *   list / show <slug> / check <slug>
  *
@@ -266,10 +267,78 @@ function printRanked(rows: IndexRow[], mode: string) {
     console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${whyHook(r.why)}` : ''}`);
 }
 
-export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cwd()) {
+/**
+ * Machine-readable `query` output — the ONLY contract the retrieval benchmark has with this CLI.
+ *
+ * The prose form cannot express what a bench must score: it shows no rank scores, and renders
+ * "nothing rules on this" identically to a hit. Every field here exists because a specific failure
+ * mode is otherwise unmeasurable — `state` for abstention, `score`/`margin` for rank quality,
+ * `liveRulingId` for which block answered.
+ *
+ * `state` declares only the two states retrieval can currently REACH. A third, `SUPERSEDED`, belongs
+ * here the moment the format records supersession, and is deliberately NOT declared before then: an
+ * enum member no code path can produce is a dead state, and this repo's own correctness reviewer
+ * treats those as defects rather than forward-compatibility.
+ *
+ * `tau` is null because no relevance threshold is applied yet — abstention is currently only the
+ * zero-lexical-overlap case. It becomes a number when the threshold is calibrated against the gold
+ * set; null means "no threshold", never "threshold of zero".
+ */
+export interface QueryEnvelope {
+  state: 'RULED' | 'NO_RULING';
+  source: RankResult['source'];
+  tau: number | null;
+  margin: number | null;
+  rows: {
+    rank: number;
+    slug: string;
+    score: number;
+    liveRulingId: string | null;
+    ruling: string;
+    why: string;
+    updated: string;
+  }[];
+  cost: { llmCalls: number; ms: number };
+}
+
+export async function queryEnvelope(
+  text: string,
+  k = 5,
+  cwd = process.cwd(),
+): Promise<QueryEnvelope> {
+  const started = Date.now();
+  const { source, rows } = await rankAxes(text, k, cwd);
+  return {
+    state: rows.length ? 'RULED' : 'NO_RULING',
+    source,
+    tau: null,
+    // Flatness of the top of the ranking. A near-zero margin over several axes is the signature of
+    // the "five loosely-related results, none of which settled it" failure, so it is reported even
+    // though nothing acts on it yet. Null when there is no second row to compare against.
+    margin: rows.length >= 2 ? rows[0].score - rows[1].score : null,
+    rows: rows.map((r, i) => ({
+      rank: i + 1,
+      slug: r.slug,
+      score: r.score,
+      liveRulingId: r.liveRulingId,
+      ruling: r.ruling,
+      why: r.why,
+      updated: r.updated,
+    })),
+    // Retrieval makes no model calls. Embedding runs on a local Ollama and is free but not
+    // instant, so its cost shows up in `ms` rather than as a separate priced counter.
+    cost: { llmCalls: 0, ms: Date.now() - started },
+  };
+}
+
+export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cwd(), json = false) {
   if (!text?.trim()) {
-    console.error('Usage: guard-decisions query "<text>" [--top K]');
+    console.error('Usage: guard-decisions query "<text>" [--top K] [--json]');
     process.exit(1);
+  }
+  if (json) {
+    console.log(JSON.stringify(await queryEnvelope(text, k, cwd), null, 2));
+    return;
   }
   const { source, rows } = await rankAxes(text, k, cwd);
   if (rows.length === 0) {
@@ -338,7 +407,7 @@ export async function main(argv: string[]) {
       const [text, ...rest] = args;
       const top = flag(rest, '--top');
       const n = top ? Number.parseInt(top, 10) : 5;
-      await cmdQuery(text, n > 0 ? n : 5);
+      await cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'));
       break;
     }
     case 'reindex':
