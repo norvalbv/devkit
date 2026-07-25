@@ -23,6 +23,8 @@ const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
 /** Legacy (pre-Target) schema: `**Ruling:**` / `**Why / target:**` under a bare `## <date> — …`. */
 const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
+const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
+const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
 // ─── Candidate set ───────────────────────────────────────────────────────────────
 /**
  * The retrieval candidate set is the decisions DIRECTORY, not INDEX.md.
@@ -65,7 +67,7 @@ function axisRow(p, slug, fallback) {
         body = parseDecision(readFileSync(slugPath(p, slug), 'utf8')).body;
     }
     catch {
-        return fallback ?? { slug, ruling: '', why: '', updated: '' };
+        return { ...(fallback ?? { slug, ruling: '', why: '', updated: '' }), liveRulingId: null };
     }
     const target = currentTarget(body);
     // Legacy (pre-Target) blocks carry the same `**Ruling:**` field under a bare `## <date>` heading;
@@ -74,7 +76,21 @@ function axisRow(p, slug, fallback) {
     const ruling = target?.ruling || legacyRulings.at(-1)?.[1]?.trim() || fallback?.ruling || '';
     const why = target?.fields.context || body.match(WHY_FIELD_RE)?.[1] || fallback?.why || '';
     const dates = [...body.matchAll(ANY_DATE_RE)].map((m) => m[1]).sort();
-    return { slug, ruling, why, updated: dates.at(-1) ?? fallback?.updated ?? '' };
+    return {
+        slug,
+        ruling,
+        why,
+        updated: dates.at(-1) ?? fallback?.updated ?? '',
+        liveRulingId: liveRulingIdOf(body, Boolean(target)),
+    };
+}
+/** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
+function liveRulingIdOf(body, hasTarget) {
+    const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
+    const dates = [...body.matchAll(re)].map((m) => m[1]);
+    // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
+    const last = dates.at(-1);
+    return last ? `${hasTarget ? 'target' : 'entry'}:${last}` : null;
 }
 function slugPath(p, slug) {
     return path.join(p.decisionsDir, `${slug}.md`);
@@ -101,7 +117,7 @@ export function bm25Rank(queryText, rows, k = 5, k1 = 1.5, b = 0.75) {
     const N = docs.length;
     const avgdl = docs.reduce((s, d) => s + d.length, 0) / N || 1;
     const df = new Map(qTerms.map((t) => [t, docs.filter((d) => d.includes(t)).length]));
-    return rows
+    return (rows
         .map((r, i) => {
         const d = docs[i];
         let score = 0;
@@ -118,8 +134,10 @@ export function bm25Rank(queryText, rows, k = 5, k1 = 1.5, b = 0.75) {
         return { ...r, score };
     })
         .filter((r) => r.score > 0)
-        .sort((x, y) => y.score - x.score)
-        .slice(0, k);
+        // Slug breaks a score tie so rank is REPRODUCIBLE: the bench asserts two runs agree on order,
+        // and Array.sort is not required to be stable across engines for equal keys.
+        .sort((x, y) => y.score - x.score || x.slug.localeCompare(y.slug))
+        .slice(0, k));
 }
 // ─── Semantic tier (per-axis embeddings, local Ollama) ───────────────────────────
 export function cosine(a, b) {

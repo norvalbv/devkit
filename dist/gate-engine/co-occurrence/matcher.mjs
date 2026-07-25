@@ -29,6 +29,9 @@
  *   scan --gate          Exit 1 if dups found (block), 0 if clean, 2 if it could
  *                        not run (fail-open — incl. no index configured). The
  *                        pre-commit gate runs `scan --new --changed --gate`.
+ *                        Every reported pair is verified against the WORKING TREE first
+ *                        (chunk-index.mts): a side whose indexed code is no longer on disk
+ *                        drops the pair and is named — a stale index must never block.
  *   bench                Score the rule against labels.json (precision/recall/F1).
  *   baseline             Freeze every current candidate into the allowlist and
  *                        mark DB chunks allowlisted. Idempotent.
@@ -42,10 +45,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { envBool, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from "./allowlist-io.mjs";
 import { flagReader } from "./argv.mjs";
 import { loadChangedSet } from "./changed-files.mjs";
+import { buildVectors, canVerify, chunkColumns, dot, freshnessNotice, orderKey, partitionFresh, verifierForIndex, } from "./chunk-index.mjs";
 import { classifyPair } from "./classify.mjs";
 import { isExpired } from "./decay.mjs";
 import { missingIndexMessage, refreshIndex } from "./index-refresh.mjs";
@@ -129,18 +133,27 @@ const changedSet = CHANGED ? loadChangedSet(cfg.cwd) : null;
 // ── Load + normalize ────────────────────────────────────────────────────────
 let db;
 let rows;
+// Chunks-table columns — whether this index can be verified at all. GUARD_DUP_VERIFY_TREE=0
+// (FRINK_* alias) leaves them empty → verification off, gate exactly as before.
+let columns = [];
 try {
     db = new DatabaseSync(dbPath);
     // No internal busy_timeout on the index — wait out a watcher's writer rather than
     // erroring immediately under contention (cf. WAL: reads still see a snapshot).
     db.exec('PRAGMA busy_timeout = 5000;');
+    if (envBool('DUP_VERIFY_TREE') ?? true)
+        columns = chunkColumns(db);
+    // `id` only when the index has it — an unconditional select throws there, failing open every run.
     rows = db
-        .prepare('SELECT file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL')
+        .prepare(`SELECT ${canVerify(columns) ? 'id, ' : ''}file_path, symbol_name, start_line, end_line, code_hash, embedding, code_embedding FROM chunks WHERE code_embedding IS NOT NULL AND embedding IS NOT NULL AND symbol_name IS NOT NULL`)
         .all();
 }
 catch (e) {
     cannotRun(`co-occurrence matcher: index read failed (${e instanceof Error ? e.message : String(e)}).`);
 }
+// Working-tree freshness for reported pairs. Built once (caches file reads, carries the root-mismatch
+// fuse) and applied ONLY in runScan — in reconcile/baseline a drop would delete a real approval.
+const verifier = verifierForIndex(db, cfg.cwd, columns);
 // Normalize separators to '/' once, at the index-read boundary, so every downstream key
 // (detect/orderKey/symFileKey + the --changed `changed.has()` compare) is OS-agnostic. The
 // allowlist, git diff output, and MATCHER_CHANGED_FILES are all '/'; a Windows index that
@@ -153,13 +166,7 @@ if (n === 0) {
     console.error('No embedded chunks with a symbol_name. Nothing to match.');
     process.exit(0);
 }
-const dim = decode(rows[0].code_embedding).length;
-const codeV = new Float32Array(n * dim);
-const descV = new Float32Array(n * dim);
-for (let i = 0; i < n; i++) {
-    normInto(decode(rows[i].code_embedding), codeV, i * dim);
-    normInto(decode(rows[i].embedding), descV, i * dim);
-}
+const { dim, codeV, descV } = buildVectors(rows);
 const isTest = (i) => rows[i].file_path.includes('.test.');
 const loc = (i) => rows[i].end_line - rows[i].start_line + 1;
 // ── Detect all candidate pairs ──────────────────────────────────────────────
@@ -177,11 +184,11 @@ function detect(knobs, changed = null) {
             if (changed && !changed.has(rows[i].file_path) && !changed.has(rows[j].file_path))
                 continue;
             const bj = j * dim;
-            const code = dot(codeV, bi, codeV, bj);
+            const code = dot(codeV, bi, codeV, bj, dim);
             // Cheap pre-filter: nothing below the loosest code gate can qualify.
             if (code < knobs.driftCode && rows[i].code_hash !== rows[j].code_hash)
                 continue;
-            const desc = dot(descV, bi, descV, bj);
+            const desc = dot(descV, bi, descV, bj, dim);
             const tier = classifyPair({
                 hashEqual: rows[i].code_hash === rows[j].code_hash,
                 code,
@@ -191,14 +198,16 @@ function detect(knobs, changed = null) {
             }, knobs);
             if (!tier)
                 continue;
-            const [x, y] = orderKey(i, j);
+            const [x, y] = orderKey(rows, i, j);
             const key = `${rows[x].symbol_name} ${rows[x].file_path} ${rows[y].symbol_name} ${rows[y].file_path}`;
             const prev = out.get(key);
             if (!prev || code > prev.code) {
                 out.set(key, {
+                    idA: Number(rows[x].id),
                     symbolA: rows[x].symbol_name,
                     fileA: rows[x].file_path,
                     rangeA: `${rows[x].start_line}-${rows[x].end_line}`,
+                    idB: Number(rows[y].id),
                     symbolB: rows[y].symbol_name,
                     fileB: rows[y].file_path,
                     rangeB: `${rows[y].start_line}-${rows[y].end_line}`,
@@ -239,11 +248,20 @@ function runScan() {
             .map(symFileKey));
         pairs = pairs.filter((p) => !known.has(symFileKey(p)));
     }
+    // Working-tree freshness, LAST filter before anything is counted or printed: a pair whose indexed
+    // code is no longer on disk is an artefact of a stale/reverted index, not a duplication. Drop-only,
+    // and every drop is named below rather than "fixed" by allowlisting a pair that does not co-exist.
+    const { fresh, dropped } = partitionFresh(pairs, verifier);
+    pairs = fresh;
     const byTier = { exact: 0, near: 0, drifted: 0 };
     for (const p of pairs)
         byTier[p.tier]++;
     console.log(`Knobs: ${JSON.stringify(KNOBS)} (tests ${INCLUDE_TESTS ? 'included' : 'excluded'})`);
     console.log(`${ONLY_NEW ? 'New candidates' : 'Candidates'}: ${pairs.length}  (exact ${byTier.exact} | near ${byTier.near} | drifted ${byTier.drifted})\n`);
+    // Before the clean short-circuit: a withheld finding must still be visible, or "clean" reads as
+    // "nothing there" when it really means "the index disagrees with the disk".
+    for (const l of freshnessNotice(dropped, { verified: verifier.enabled, blocking: false }))
+        console.log(l);
     if (ONLY_NEW && pairs.length === 0) {
         console.log('No new duplication since the last baseline. ✓');
         if (GATE)
@@ -278,6 +296,10 @@ function runScan() {
             console.log(`  (+${pairs.length - displayed.length} more — re-run after addressing these)`);
         }
         console.log('');
+        // Blocking on evidence nobody could check: say so, so a symbol that isn't at its printed range
+        // reads as a stale index (re-index) rather than as something to approve.
+        for (const l of freshnessNotice([], { verified: verifier.enabled, blocking: true }))
+            console.log(l);
     }
     if (GATE)
         process.exit(pairs.length > 0 ? 1 : 0);
@@ -407,28 +429,6 @@ function runReconcile() {
     db.close();
 }
 // ── helpers ──────────────────────────────────────────────────────────────────
-function decode(blob) {
-    return new Float32Array(blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength));
-}
-function normInto(v, target, base) {
-    let s = 0;
-    for (let k = 0; k < v.length; k++)
-        s += v[k] * v[k];
-    s = Math.sqrt(s) || 1;
-    for (let k = 0; k < v.length; k++)
-        target[base + k] = v[k] / s;
-}
-function dot(a, ba, b, bb) {
-    let s = 0;
-    for (let k = 0; k < dim; k++)
-        s += a[ba + k] * b[bb + k];
-    return s;
-}
-function orderKey(i, j) {
-    const ai = `${rows[i].symbol_name} ${rows[i].file_path}`;
-    const aj = `${rows[j].symbol_name} ${rows[j].file_path}`;
-    return ai < aj ? [i, j] : [j, i];
-}
 function symKey(a, b) {
     return a < b ? `${a} ${b}` : `${b} ${a}`;
 }

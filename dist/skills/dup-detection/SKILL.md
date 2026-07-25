@@ -87,6 +87,7 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 | Confusing `reconcile` and `prune` | `prune` = calendar age. `reconcile` = detection miss. See table. |
 | Forgetting `guard-dup-allowlist remove` after a real refactor | The entry doesn't auto-clean. `reconcile` will catch it eventually; `remove` is faster. |
 | Hand-building `add` instead of pasting the gate's pre-filled command | Hand-built commands omit `--similarity` + `--range-a/-b` → metadata empty in the allowlist. Paste the gate's command. |
+| Allowlisting a pair the gate named at a range where the file doesn't define it | That's a STALE INDEX, not a dup. Re-index (`search-code index --seed-files "<file>"`) — an `add` here records a pair that does not co-exist, permanently. |
 
 ## Red flags — STOP and re-check
 
@@ -94,5 +95,22 @@ Some pairs are **intentional deploy artifacts**, not real dups: one path is a *g
 - "I'll `searchCode` to find the dup." → No — entry already names it.
 - "This generated mirror (e.g. `vercel-serverless/_shared/`) shouldn't exist; let me refactor." → No — it's generated.
 - "What does `prune` do again?" → Re-read the table above; do not guess.
+- "The gate says `SymbolX <> SymbolX` between the file I extracted FROM and the new file." → Check the working tree first: if the old file no longer defines it, the index is stale. Re-index; never approve it.
+
+## When the gate says the index is stale
+
+The gate verifies every pair against the working tree before reporting it, and prints what it withheld:
+
+```
+Stale index — dropped 1 candidate pair(s) whose indexed code is NOT in the working tree:
+  StopRunButton  src/FlowRunStrip/index.tsx  (indexed body not found on disk)
+  Re-index these file(s) to restore coverage — do not approve them: src/FlowRunStrip/index.tsx
+```
+
+That is a *withheld* finding, not a pass: re-index those files (`search-code index --seed-files "<files>"`)
+and re-run to get real coverage back. A `Freshness NOT verified` line means the opposite — the index
+carries no `raw_code`/`id`, or its paths don't resolve in this checkout, so the pairs above it were
+reported unchecked. Verify the ranges by eye before approving anything. `GUARD_DUP_VERIFY_TREE=0`
+turns the check off.
 
 **Full reference:** `guard-dup --help` / `guard-dup-allowlist --help`.
