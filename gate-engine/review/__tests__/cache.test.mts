@@ -1,5 +1,13 @@
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,9 +25,29 @@ const gitRepo = () => {
   return d;
 };
 
+const TELEMETRY_ENV = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID'];
+const savedEnv = {};
 afterEach(() => {
   while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
+  for (const k of TELEMETRY_ENV) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
 });
+// Route this file's emits at a temp sink instead of the developer's live telemetry.
+const captureEvents = (repo) => {
+  for (const k of TELEMETRY_ENV) savedEnv[k] = process.env[k];
+  const sink = join(repo, 'events.jsonl');
+  process.env.DEVKIT_GATE_EVENTS = sink;
+  process.env.DEVKIT_SHIP_ID = 'ship-cache-test';
+  return () =>
+    existsSync(sink)
+      ? readFileSync(sink, 'utf8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l))
+      : [];
+};
 
 describe('cachePath', () => {
   it('anchors to the repo root .devkit even from a subdirectory', () => {
@@ -82,6 +110,27 @@ describe('loadCache / savePasses / clearCache', () => {
     savePasses(repo, many);
     expect(Object.keys(loadCache(repo)).length).toBe(100);
   });
+  it('reports a durable write', () => {
+    const repo = gitRepo();
+    expect(savePasses(repo, { 'commit-guard:abc': { at: '2026-01-01T00:00:00Z' } })).toBe(true);
+  });
+
+  it('a LOST write is named and emitted — the PASS was earned but will be silently re-judged', () => {
+    const repo = gitRepo();
+    const events = captureEvents(repo);
+    // `.devkit` as a FILE: the store can neither create its lock dir nor publish, so the write
+    // fails. Previously savePasses discarded that boolean, making lock contention on a shared
+    // main-checkout `.devkit/` indistinguishable from an ordinary cache miss (sc-1239).
+    writeFileSync(join(repo, '.devkit'), 'not a directory');
+    expect(savePasses(repo, { 'correctness-reviewer:abc': { at: '2026-01-01T00:00:00Z' } })).toBe(
+      false,
+    );
+    // Labelled like judge_exec/cache_hit: the key prefix IS the reviewer name (see cacheKey).
+    expect(events()).toContainEqual(
+      expect.objectContaining({ type: 'cache_write_failed', judge: 'review:correctness-reviewer' }),
+    );
+  });
+
   it('clearCache empties without deleting the file', () => {
     const repo = gitRepo();
     savePasses(repo, { k: { at: '2026-01-01T00:00:00Z', model: 's' } });

@@ -34,6 +34,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from "../config.mjs";
 import { scopedTargets } from "../decisions/scoped-targets.mjs";
+import { emitCacheHit } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache, savePasses } from "./cache.mjs";
@@ -144,8 +145,11 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     // Key = every byte the judge reads: the prompt (message, governing Targets, brief) plus the
     // capped stdin evidence. An amended message or a re-staged hunk therefore MISSES and re-judges.
     const key = cacheKey('completeness', diff, prompt);
-    if (loadCache(cwd)[key]) {
+    const hit = loadCache(cwd)[key];
+    if (hit) {
         console.error('guard-review: completeness — cached PASS (identical judgement)');
+        // The most expensive entry in this store (~7min of opus): its hit rate is the one that pays.
+        emitCacheHit('review:completeness', hit.model);
         return 0;
     }
     let outage;

@@ -19,6 +19,8 @@ const ENV = [
   'DEVKIT_REVIEW_ID',
   'DEVKIT_REVIEW_REPO',
   'DEVKIT_REVIEW_BRANCH',
+  'DEVKIT_SHIP_REPO',
+  'DEVKIT_SHIP_BRANCH',
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_NO_TELEMETRY',
   'CLAUDECODE',
@@ -59,12 +61,32 @@ function gitRepo(): string {
 }
 
 describe('run-context', () => {
-  it('a ship: runId = DEVKIT_SHIP_ID, envelope carries only ship_id, sink = DEVKIT_GATE_EVENTS', () => {
+  it('a ship: runId = DEVKIT_SHIP_ID, envelope carries ship_id + repo/branch, sink = DEVKIT_GATE_EVENTS', () => {
     process.env.DEVKIT_SHIP_ID = 'ship-9';
+    process.env.DEVKIT_SHIP_REPO = 'devkit';
+    process.env.DEVKIT_SHIP_BRANCH = 'fix/sc-1239';
     process.env.DEVKIT_GATE_EVENTS = '/tmp/x/gate-events.jsonl';
     expect(runId()).toBe('ship-9');
-    expect(runEnvelope()).toEqual({ ship_id: 'ship-9', source: 'unknown' });
+    // repo/branch ride the ship envelope because the DEFAULT sink is per-machine: without them a
+    // second repo's ship interleaves into the same file with no way to tell the two apart, and a
+    // reader can only recover it by joining every row back to ship_attempt (sc-1239).
+    expect(runEnvelope()).toEqual({
+      ship_id: 'ship-9',
+      repo: 'devkit',
+      branch: 'fix/sc-1239',
+      source: 'unknown',
+    });
     expect(telemetrySink()).toBe('/tmp/x/gate-events.jsonl');
+  });
+
+  it('a ship that never exported repo/branch degrades to empty, never to a wrong label', () => {
+    process.env.DEVKIT_SHIP_ID = 'ship-legacy'; // e.g. a hand-set id, or an older ship script
+    expect(runEnvelope()).toEqual({
+      ship_id: 'ship-legacy',
+      repo: '',
+      branch: '',
+      source: 'unknown',
+    });
   });
 
   it('a review has an explicit review envelope and never masquerades as commit/ship', () => {
@@ -120,14 +142,14 @@ describe('run-context', () => {
     process.env.DEVKIT_SHIP_ID = 'ship-1';
     _resetRunContextForTests();
     expect(runId()).toBe('ship-1');
-    expect(runEnvelope()).toEqual({ ship_id: 'ship-1', source: 'unknown' });
+    expect(runEnvelope()).toMatchObject({ ship_id: 'ship-1', source: 'unknown' });
   });
 
   it('a ship id wins over a review id', () => {
     process.env.DEVKIT_SHIP_ID = 'ship-1';
     process.env.DEVKIT_REVIEW_ID = 'review-1';
     expect(runId()).toBe('ship-1');
-    expect(runEnvelope()).toEqual({ ship_id: 'ship-1', source: 'unknown' });
+    expect(runEnvelope()).toMatchObject({ ship_id: 'ship-1', source: 'unknown' });
   });
 
   it('capture on but not a git repo: fail-safe silent (runId null)', () => {
@@ -144,14 +166,14 @@ describe('run-context', () => {
       process.env.CLAUDECODE = '1';
       process.env.DEVKIT_SHIP_ID = 'ship-c';
       expect(originatingAgent()).toBe('claude');
-      expect(runEnvelope()).toEqual({ ship_id: 'ship-c', source: 'claude' });
+      expect(runEnvelope()).toMatchObject({ ship_id: 'ship-c', source: 'claude' });
     });
 
     it('CODEX_HOME (or CODEX_CLI_PATH) set, no CLAUDECODE → codex', () => {
       process.env.CODEX_HOME = '/Users/x/.codex';
       expect(originatingAgent()).toBe('codex');
       process.env.DEVKIT_SHIP_ID = 'ship-x';
-      expect(runEnvelope()).toEqual({ ship_id: 'ship-x', source: 'codex' });
+      expect(runEnvelope()).toMatchObject({ ship_id: 'ship-x', source: 'codex' });
     });
 
     it('CLAUDECODE wins when both are present (Claude is the active agent)', () => {
