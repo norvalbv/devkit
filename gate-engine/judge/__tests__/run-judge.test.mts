@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unavailableMessage } from '../run-judge.mts';
+import { strictRemedy, unavailableMessage } from '../run-judge.mts';
 
 // sc-1049: a 143/SIGTERM timeout-kill is the gate's OWN contention kill, NOT auth/quota. It must not
 // read as "offline/quota/absent" (that label sent an operator chasing a phantom quota problem on a
@@ -37,5 +37,38 @@ describe('unavailableMessage', () => {
     );
     // 0ms cap would be nonsense "after 0s" — also omitted.
     expect(unavailableMessage('review:x', { killed: true }, 0)).not.toContain('after');
+  });
+});
+
+// sc-1227: the gate-level SKIP lines never learned sc-1049's lesson — every fail-closed gate printed
+// "check `claude` CLI auth/quota" no matter the cause, and a 420s cap kill sent the operator there
+// on a healthy CLI. One wording seam, branched on the actual cause.
+describe('strictRemedy', () => {
+  it('a timeout says so explicitly and rules auth/quota OUT', () => {
+    const r = strictRemedy('timeout');
+    expect(r).toContain('hit its time cap');
+    expect(r).toContain('NOT an auth/quota problem');
+    expect(r).not.toContain('check `claude` CLI auth/quota');
+  });
+
+  it('the timeout remedy names the levers that actually work', () => {
+    const r = strictRemedy('timeout');
+    expect(r).toContain('Re-run `devkit ship`');
+    expect(r).toContain('600s agent tool cap'); // the real killer for an agent-driven commit
+    expect(r).toContain('smaller commit');
+  });
+
+  it('a sync gap points at the sync commands, not at the CLI', () => {
+    expect(strictRemedy('sync')).toContain('devkit sync-agents && devkit sync-skills');
+    expect(strictRemedy('sync')).not.toContain('auth/quota');
+  });
+
+  it('a genuine outage KEEPS the auth/quota remedy — that cause really is auth/quota', () => {
+    expect(strictRemedy('outage')).toBe('check `claude` CLI auth/quota, then re-run devkit ship');
+  });
+
+  it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {
+    const all = (['timeout', 'sync', 'outage'] as const).map(strictRemedy);
+    expect(new Set(all).size).toBe(3);
   });
 });

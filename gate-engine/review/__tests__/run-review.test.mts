@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
 import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
@@ -827,7 +828,7 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     expect(out).not.toContain('retrying once');
   });
 
-  it('strict first pass runs on the longer 420s cap (contention headroom); a normal commit keeps 300s', async () => {
+  it('every first pass — strict or not — runs on the shared DEEP_JUDGE_TIMEOUT_MS cap', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     // Capture the FIRST-pass timeout the gate hands each judge. Fresh repo per run so the PASS cache
     // (keyed on reviewer + diff hash) can't skip the second run's exec calls.
@@ -843,10 +844,43 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     };
 
     process.env.GUARD_AI_STRICT = '1';
-    expect(await capFor(consumerRepo({ backend: true }))).toBe(1800000); // STRICT_FIRST_TIMEOUT_MS (30 min)
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(DEEP_JUDGE_TIMEOUT_MS);
 
     delete process.env.GUARD_AI_STRICT;
-    expect(await capFor(consumerRepo({ backend: true }))).toBe(1800000); // FIRST_TIMEOUT_MS (30 min)
+    expect(await capFor(consumerRepo({ backend: true }))).toBe(DEEP_JUDGE_TIMEOUT_MS);
+  });
+
+  // sc-1227: a cap kill is the gate's OWN contention kill. Printing the auth/quota remedy for one
+  // sent an operator chasing a phantom problem on a demonstrably healthy CLI.
+  it('a timed-out judge reports a TIMEOUT, not an auth/quota outage', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async (opts) => {
+      opts.onOutage?.('timeout');
+      return null;
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('INCONCLUSIVE (judge timed out)');
+    expect(out).toContain('hit its time cap');
+    // The remedy may SAY "not an auth/quota problem"; what it must never do is SEND them there.
+    expect(out).not.toContain('check `claude` CLI auth/quota');
+  });
+
+  it('a transient outage KEEPS the auth/quota remedy (the cause still fits)', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async (opts) => {
+      opts.onOutage?.('transient');
+      return null;
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('INCONCLUSIVE (judge outage)');
+    expect(out).toContain('check `claude` CLI auth/quota');
+    expect(out).not.toContain('hit its time cap');
   });
 
   it('outage-then-success: the retry recovers and the gate passes clean', async () => {
@@ -1024,7 +1058,96 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     expect(
       await runCompleteness(msg(repo, 'feat: x'), repo, { exec: mkExec(async () => null) }),
     ).toBe(3);
-    expect(err.mock.calls.flat().join('\n')).toContain('strict ship mode fails closed');
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('strict ship mode fails closed');
+    // A genuine outage: the auth/quota remedy still fits, and must survive the timeout split.
+    expect(out).toContain('check `claude` CLI auth/quota');
+  });
+
+  // sc-1227 — the bug: this judge was pinned to the OLD 420s cap while the review gate moved to
+  // 1800s, so any commit needing >420s could never ship (strict fails closed, and this is the last
+  // gate). Assert against the shared constant, never a literal, so the two cannot drift again.
+  it('runs on the SAME shared cap as the review cascade — never its own literal', async () => {
+    const repo = consumerRepo({ backend: true });
+    let captured: { timeout?: number };
+    const exec = mkExec(async (opts) => {
+      captured = opts;
+      return 'VERDICT: PASS';
+    });
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(0);
+    expect(captured.timeout).toBe(DEEP_JUDGE_TIMEOUT_MS);
+    expect(captured.timeout).toBeGreaterThan(420000); // the cap that made this gate unshippable
+  });
+
+  it('a TIMED-OUT judge names the timeout and drops the auth/quota dead end', async () => {
+    const repo = consumerRepo({ backend: true });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_AI_STRICT = '1';
+    const exec = mkExec(async (opts) => {
+      opts.onOutage?.('timeout');
+      return null;
+    });
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec })).toBe(3);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('SKIPPED (judge timed out)');
+    expect(out).toContain('hit its time cap');
+    // The remedy may SAY "not an auth/quota problem"; what it must never do is SEND them there.
+    expect(out).not.toContain('check `claude` CLI auth/quota');
+  });
+
+  // sc-1227 — the other half: this gate was the ONE thing a ship retry always re-paid, ~7 min of
+  // opus from scratch, while all seven reviewers reported `cached PASS`.
+  it('a PASS caches: the identical judgement never spawns a second judge', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const first = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: first })).toBe(0);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    const second = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: x'), repo, { exec: second })).toBe(0);
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('an amended commit message MISSES the cache — the message is this gate’s intent signal', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(
+      await runCompleteness(msg(repo, 'feat: x'), repo, {
+        exec: mkExec(async () => 'VERDICT: PASS'),
+      }),
+    ).toBe(0);
+    const again = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: x (amended)'), repo, { exec: again })).toBe(0);
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it('a FAIL, an outage, and a softened FAIL are never cached', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fail = consumerRepo({ backend: true });
+    expect(
+      await runCompleteness(msg(fail, 'feat: x'), fail, {
+        exec: mkExec(async () => 'VERDICT: FAIL — half-shipped'),
+      }),
+    ).toBe(1);
+    expect(Object.keys(loadCache(fail)).length).toBe(0);
+
+    const dark = consumerRepo({ backend: true });
+    expect(
+      await runCompleteness(msg(dark, 'feat: x'), dark, { exec: mkExec(async () => null) }),
+    ).toBe(2);
+    expect(Object.keys(loadCache(dark)).length).toBe(0);
+
+    // The soften exits 0 on a verdict the judge really did FAIL. Caching it would let one softened
+    // run silence the gate for every later re-run of the same commit.
+    const soft = consumerRepo({ backend: true });
+    process.env.GUARD_COMPLETENESS_HARD = '0';
+    expect(
+      await runCompleteness(msg(soft, 'feat: x'), soft, {
+        exec: mkExec(async () => 'VERDICT: FAIL — half-shipped'),
+      }),
+    ).toBe(0);
+    expect(Object.keys(loadCache(soft)).length).toBe(0);
   });
 
   it('stdin carries the FULL --stat map ahead of the capped diff', async () => {
