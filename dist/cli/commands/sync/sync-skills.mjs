@@ -13,6 +13,49 @@ import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
+/**
+ * True when a manifest-owned skill tree is still exactly what devkit wrote: every recorded file
+ * present with its recorded sha, and nothing extra alongside them. A skill is deleted as a UNIT,
+ * so one edited or added file has to protect the whole directory.
+ */
+function skillDirIsPristine(skillsRoot, name, prev) {
+    const owned = new Map(Object.entries(prev?.files ?? {}).filter(([rel]) => rel.split('/')[0] === name));
+    if (!owned.size)
+        return false; // unmanifested → not devkit's to remove
+    const found = filesUnderNoSymlinks(join(skillsRoot, name));
+    if (found === null)
+        return false; // symlinked → the consumer's, and unsafe to hash (see below)
+    const onDisk = found.map((rel) => `${name}/${rel}`);
+    if (onDisk.length !== owned.size)
+        return false; // a file was added or removed
+    return onDisk.every((rel) => owned.get(rel) === sha256(join(skillsRoot, rel)));
+}
+/**
+ * Every file under `dir`, or null if the tree contains a SYMLINK anywhere.
+ *
+ * devkit ships no symlinks, so one is definitionally the consumer's — but the null matters for a
+ * second reason: `readdirSync(withFileTypes)` reports a symlink-to-directory as a non-directory
+ * entry (Dirent is lstat-shaped), so a plain walk hands it to sha256, which FOLLOWS the link and
+ * throws EISDIR — crashing the whole sync instead of preserving the skill it was asked to protect.
+ * Same guard, same reason as sync-manifest.mts's entryMatches.
+ */
+function filesUnderNoSymlinks(dir, base = dir) {
+    const out = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink())
+            return null;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            const nested = filesUnderNoSymlinks(full, base);
+            if (nested === null)
+                return null;
+            out.push(...nested);
+        }
+        else
+            out.push(relative(base, full));
+    }
+    return out;
+}
 // Recursively list every file under `dir`, returned as paths relative to `dir`.
 function walk(dir, base = dir) {
     const out = [];
@@ -63,9 +106,19 @@ export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
         if (selectedNames.has(name))
             continue;
         for (const target of cleanupTargets) {
-            const dir = join(cwd, `.${target}`, 'skills', name);
-            if (!dryRun && existsSync(dir))
-                rmSync(dir, { recursive: true, force: true });
+            const skillsRoot = join(cwd, `.${target}`, 'skills');
+            if (!existsSync(join(skillsRoot, name)))
+                continue;
+            // Manifest membership means devkit WROTE this skill once — not that the tree is still
+            // devkit's. Deselecting a component must never delete edits the consumer made to it, the
+            // same rule findConflicts already enforces on the write side ("preserving non-devkit
+            // skill"). Reclaim only a pristine copy; leave a touched one with a visible notice.
+            if (!skillDirIsPristine(skillsRoot, name, prev)) {
+                console.log(`  ! keeping deselected skill ".${target}/skills/${name}" — modified since devkit wrote it (delete it yourself if unwanted)`);
+                continue;
+            }
+            if (!dryRun)
+                rmSync(join(skillsRoot, name), { recursive: true, force: true });
         }
     }
     // Tracked-skip is per-skill `<name>/` (the unit devkit owns + clean removes): if any target's

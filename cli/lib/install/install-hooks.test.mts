@@ -4,7 +4,15 @@
  * console.log is silenced. Covers: merge shape, both surfaces, idempotency (re-run does not
  * duplicate), preservation of a foreign hook, the Cursor event mapping, and removal.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -312,6 +320,23 @@ describe('syncHookScripts --only / --targets', () => {
     syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
     expect(existsSync(hook)).toBe(true);
     expect(readFileSync(hook, 'utf8')).toContain('# frink-local tweak');
+  });
+
+  it('keeps a deselected hook replaced by a symlink, without crashing the sync', () => {
+    // sha256 FOLLOWS the link: a hook swapped for a link to a directory throws EISDIR and aborts
+    // the whole sync instead of preserving it. Same hazard sync-manifest's entryMatches guards.
+    const root = tmpRepo();
+    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
+    const hook = join(root, '.claude', 'hooks', 'decision-stop-check.sh');
+    const linkTarget = join(root, 'link-target-dir');
+    mkdirSync(linkTarget, { recursive: true });
+    rmSync(hook);
+    symlinkSync(linkTarget, hook);
+
+    expect(() =>
+      syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] }),
+    ).not.toThrow();
+    expect(existsSync(hook)).toBe(true);
   });
 
   it('still prunes a deselected hook left pristine', () => {
