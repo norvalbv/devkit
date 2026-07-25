@@ -39,6 +39,16 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
 - **size** — you added an `eslint-disable max-lines`; the count may only shrink. Refactor instead.
 - **decisions / dup / clone** — see each gate's message; it names the offending file and the fix.
 
+## The dup gate names a symbol my file doesn't define (extract refactor blocked)
+It can't any more, and if you see it on an older devkit: **the search-code index is stale, not your code.**
+`guard-dup` now verifies every pair against the working tree first — a side whose indexed body is no
+longer on disk drops the pair and is printed as `Stale index — dropped N candidate pair(s) …`. That is a
+*withheld* finding: re-index those files (`search-code index --seed-files "<files>"`) and re-run to get
+coverage back. **Never** paste the `guard-dup-allowlist add` command for such a pair — it would record a
+permanent approval for a duplication that does not co-exist. A `Freshness NOT verified` line means the
+index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs above it were reported
+unchecked — eyeball the ranges before approving. `GUARD_DUP_VERIFY_TREE=0` disables the check.
+
 ## Commit blocked because I'm on a protected branch
 Don't hand-roll a branch (that moves a shared checkout's HEAD). Use `devkit ship <branch> "<title>" -- <paths>`
 — it commits onto a new branch and opens a PR **without** moving HEAD, so parallel agents stay undisturbed.
