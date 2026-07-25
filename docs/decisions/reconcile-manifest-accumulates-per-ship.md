@@ -18,3 +18,4 @@ created: 2026-06-28
 **Anchored-bet:** [VALIDATED]
 **Scope:** cli/lib/ship/**,cli/lib/reconcile.mjs
 **Source:** collab · workflow-reconcile
+- 2026-07-25 — reconcile no longer ASSERTS ff-pullability from the manifest, it MEASURES it against the tree: upstream-changed paths intersected with locally-dirty ones, minus index==upstream (git's own keep_entry exemption, which is exactly what the restore produces). With a non-empty list it names the blockers and withholds both the ff-pullable claim and the git pull --ff-only instruction — the old unconditional pair steered an agent into git's 'commit your changes or stash them', which destroys the concurrent edits reconcile declined to touch one line earlier. Catches a peer's dirty file that no ship ever recorded, which a warnings-derived check cannot see (sc-1235).

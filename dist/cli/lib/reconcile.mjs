@@ -21,6 +21,12 @@
  * already-reconciled (index==upstream==worktree) → skip; worktree ∈ {shipped, upstream} →
  * restore (stage, idempotent); worktree foreign to both → skip+warn (never clobber a human edit).
  * Divergence (local baseRef not an ancestor of upstream) → strictly hands-off (skip+warn all).
+ *
+ * Whether the tree ends up ff-pullable is then MEASURED, not asserted — see ffBlockers(). A file
+ * left byte-for-byte (a peer agent's live edit) that upstream also changed still blocks the pull,
+ * and the caller must say so rather than hand back a `git pull --ff-only` that is about to abort:
+ * git answers that abort with "commit your changes or stash them", and stashing there destroys the
+ * exact concurrent work this module declined to touch one step earlier.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -41,6 +47,27 @@ export function git(root, args, { allowFail = true } = {}) {
         if (allowFail)
             return null;
         throw e;
+    }
+}
+/**
+ * Untrimmed, NUL-split git output — `null` when the probe FAILED (distinct from `[]`, which means
+ * it ran and found nothing). Not `git()`: that trims, and `trim()` eats the leading ' ' of a
+ * porcelain status record (" M path") and of any path that genuinely starts with a space, both of
+ * which silently drop a blocker. `--no-optional-locks` because porcelain diff/status otherwise
+ * refresh-and-WRITE .git/index — a dry run must stay byte-pure, and N agents share this tree.
+ */
+function gitZ(root, args) {
+    try {
+        return execFileSync('git', ['-C', root, '--no-optional-locks', ...args], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            maxBuffer: 64 * 1024 * 1024, // a few thousand dirty paths overflow Node's 1 MiB default
+        })
+            .split('\0')
+            .filter((s) => s.length > 0);
+    }
+    catch {
+        return null;
     }
 }
 /** Boolean exit of `git merge-base --is-ancestor a b` (a is an ancestor of b ⇒ clean ff). */
@@ -174,9 +201,121 @@ function reconcilePath(mainRepo, P, apply) {
     }
     return { warning: `${P.path}: edited after ship — left byte-for-byte as you have it` };
 }
+/**
+ * Porcelain-v1 worktree-column codes that make git overwrite the file. 'D' is EXCLUDED on purpose:
+ * an UNSTAGED deletion hits verify_uptodate's `lstat` → ENOENT branch, which returns 0 (allowed).
+ * Reporting it would be a false positive, and a false alarm here reads as "reconcile failed".
+ */
+const WT_BLOCKING = new Set(['M', 'T', 'A', 'U']);
+/** Which of `paths` exist as untracked, non-ignored files (git's verify_absent case). Chunked for ARG_MAX. */
+function untrackedAt(root, paths) {
+    const found = [];
+    for (let i = 0; i < paths.length; i += 500) {
+        // :(literal) so a filename containing *, ? or [ is not read back as a glob.
+        const recs = gitZ(root, [
+            'ls-files',
+            '-o',
+            '--exclude-standard',
+            '-z',
+            '--',
+            ...paths.slice(i, i + 500).map((p) => `:(literal)${p}`),
+        ]);
+        if (!recs)
+            return null;
+        found.push(...recs);
+    }
+    return found;
+}
+/**
+ * The paths that would make `git pull --ff-only` abort right now — VERIFIED against the tree, not
+ * inferred from this run's warnings (a peer agent's dirty file that no ship ever recorded blocks
+ * the ff identically, and produces no warning at all). `exempt` is what this run restores/would
+ * restore; under --apply the checkout already made index==upstream, under a dry run nothing is
+ * staged yet, so subtracting it in BOTH modes makes the dry run predict the apply exactly.
+ *
+ * An ff is not a merge: checkout_fast_forward runs unpack_trees/twoway_merge, which per path
+ * (H=HEAD blob, U=FETCH_HEAD blob, I=index, W=worktree) refuses iff U!=H and NOT I==U and either
+ * I!=H (a third blob staged → reject_merge), or W differs from I (verify_uptodate), or the path is
+ * an upstream ADD sitting under an untracked file (verify_absent). I==U is an absolute exemption —
+ * git takes keep_entry and never looks at the worktree, which is exactly the end state the restore
+ * above produces. Not detected, all benign misses rather than false claims: macOS case-fold
+ * collisions on an upstream add (git compares with ignore_case, our pathspec probe does not),
+ * `merge.overwriteIgnore=false` (devkit never sets it), and submodule CONTENT dirtiness
+ * (suppressed below — a gitlink SHA change still counts, via the index column).
+ */
+export function ffBlockers(root, upstream, exempt) {
+    // `upstream` is the SHA the caller already resolved, never the literal FETCH_HEAD ref: .git/FETCH_HEAD
+    // is a mutable file and N agents share this tree, so a peer's fetch landing between these probes
+    // would measure `changed` and `idxVsUpstream` against two different commits and yield a blocker
+    // list that reflects no real state — the one failure mode that must not hide behind a claim.
+    //
+    // --no-renames is load-bearing, not cosmetic: unpack_trees is a path-wise tree compare that knows
+    // nothing about renames, but porcelain diff defaults to detecting them and then prints ONLY the
+    // new path — hiding the deleted old path, i.e. a false negative on a path that really blocks.
+    const changed = gitZ(root, ['diff', '--name-status', '-z', '--no-renames', 'HEAD', upstream]);
+    // I==U. Needed on top of `exempt` for idempotent re-runs: a path a PREVIOUS run staged returns
+    // {done} and never enters `restored`, so the exempt set alone would re-report it as a blocker.
+    const idxVsUpstream = gitZ(root, [
+        'diff',
+        '--name-only',
+        '-z',
+        '--no-renames',
+        '--cached',
+        upstream,
+    ]);
+    // Both dirtiness columns. `git diff --name-only HEAD` alone would be wrong: stage an edit then
+    // revert the worktree and it prints nothing, yet I!=H && I!=U still hits reject_merge.
+    const status = gitZ(root, [
+        'status',
+        '--porcelain=v1',
+        '-z',
+        '--no-renames',
+        '--untracked-files=no', // untracked collisions are probed by path below, far cheaper than a full scan
+        '--ignore-submodules=dirty',
+    ]);
+    if (!changed || !idxVsUpstream || !status)
+        return null;
+    const candidates = [];
+    const upstreamAdds = new Set();
+    for (let i = 0; i + 1 < changed.length; i += 2) {
+        const path = changed[i + 1];
+        candidates.push(path);
+        if (changed[i].startsWith('A'))
+            upstreamAdds.add(path);
+    }
+    const stale = new Set(idxVsUpstream);
+    const code = new Map(status.map((r) => [r.slice(3), r.slice(0, 2)]));
+    const blocked = [];
+    const maybeUntracked = [];
+    for (const p of candidates) {
+        if (exempt.has(p) || !stale.has(p))
+            continue; // I==U (or this run makes it so) → keep_entry
+        const st = code.get(p);
+        if (st === undefined) {
+            // Clean and tracked ⇒ git updates it cleanly. The one exception is an upstream ADD, where
+            // there is nothing to track and an untracked file may be sitting in its way.
+            if (upstreamAdds.has(p))
+                maybeUntracked.push(p);
+        }
+        else if (st[0] !== ' ')
+            blocked.push(p); // index differs from HEAD → reject_merge
+        else if (WT_BLOCKING.has(st[1]))
+            blocked.push(p); // worktree differs from index → verify_uptodate
+    }
+    if (maybeUntracked.length > 0) {
+        const collisions = untrackedAt(root, maybeUntracked);
+        if (!collisions)
+            return null;
+        blocked.push(...collisions);
+    }
+    return [...new Set(blocked)].sort();
+}
 /** Reconcile one manifest branch (STEP A–D). Pure read under !apply. */
 export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
-    const base = { branch, restored: [], warnings: [] };
+    // ffBlockers: null on every early return below — none of them reaches a valid FETCH_HEAD, and
+    // reporting [] there would let the renderer read a verified all-clear out of a branch that never
+    // fetched. Only the full path at the bottom produces a measurement.
+    const base = { branch, restored: [], warnings: [], upstreamSha: null, baseRef: entry.baseRef };
     const merged = detectMerged({ repo: entry.repo, prNumber: entry.prNumber, branch });
     if (merged !== 'MERGED') {
         return {
@@ -234,5 +373,17 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
             warnings.push(`manifest entry not pruned (${msg}); a re-run will clear it`);
         }
     }
-    return { branch, merged: true, action, restored, warnings };
+    // `action` deliberately still keys on warnings alone: the manifest records SHIPPED debt, and a
+    // peer's unrelated dirty file is not this branch's debt to hold the entry open for.
+    return {
+        branch,
+        merged: true,
+        action,
+        restored,
+        warnings,
+        // Carried, not measured: FETCH_HEAD is overwritten by the next branch's fetch, so this resolved
+        // sha is the only way the caller can measure this base ref once every branch has restored.
+        upstreamSha: fetchHead,
+        baseRef: entry.baseRef,
+    };
 }

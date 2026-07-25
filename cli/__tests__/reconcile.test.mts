@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadManifest, reconcileBranch } from '../lib/reconcile.mts';
+import { ffBlockers, loadManifest, reconcileBranch } from '../lib/reconcile.mts';
 
 // Each test drives a real bare-origin repo through ~10 git subprocesses (init/commit/push/fetch/
 // merge/checkout); under full-suite parallel load that exceeds vitest's 5s default. Give the file
@@ -89,6 +89,30 @@ function entryFor(_root, g, base, paths, { prNumber = 1 } = {}) {
   };
 }
 
+/** Persist a manifest where the CLI will read it. `branches` maps branch name → entry. */
+function writeManifest(root, branches) {
+  execFileSync('mkdir', ['-p', join(root, '.devkit')]);
+  writeFileSync(
+    join(root, '.devkit', 'reconcile-manifest.json'),
+    `${JSON.stringify({ version: 1, branches }, null, 2)}\n`,
+  );
+}
+
+/** Run the real CLI against `root` with the merge state stubbed MERGED. */
+const runCli = (root, ...args) =>
+  spawnSync(process.execPath, [CLI, 'reconcile', '--main-repo', root, ...args], {
+    encoding: 'utf8',
+    env: { ...GENV, DEVKIT_RECONCILE_MERGED_OVERRIDE: 'MERGED' },
+  });
+
+/**
+ * What a `git pull --ff-only` of this branch's base would hit, measured the way the CLI does — once,
+ * after the run, against the sha the branch resolved. Under a dry run nothing is staged yet, so the
+ * would-restore paths are subtracted, exactly as `measureBases` does.
+ */
+const blockersAfter = (root, res, { apply = true } = {}) =>
+  ffBlockers(root, res.upstreamSha, apply ? new Set() : new Set(res.restored));
+
 /** Does `git merge --ff-only FETCH_HEAD` succeed after a fresh fetch? (the user's actual goal) */
 function ffPullSucceeds(root, g) {
   g('fetch', '-q', 'origin', '0.0.9');
@@ -126,6 +150,7 @@ describe('reconcile — the core payoff: stale tree becomes ff-pullable', () => 
     expect(res.restored).toEqual(['foo.ts']);
     expect(res.warnings).toEqual([]);
     expect(res.action).toBe('prune');
+    expect(blockersAfter(root, res)).toEqual([]); // measured all-clear, not an assumption
     expect(g('diff', '--cached', '--name-only')).toContain('foo.ts'); // staged into the index
     expect(ffPullSucceeds(root, g), 'after reconcile the ff pull must SUCCEED').toBe(true);
     expect(readFileSync(join(root, 'bar.ts'), 'utf8')).toBe('agentB-wip\n'); // parallel work preserved
@@ -155,6 +180,9 @@ describe('reconcile — the three-way gate', () => {
     expect(again.restored).toEqual([]);
     expect(again.warnings).toEqual([]);
     expect(again.action).toBe('prune');
+    // The path is absent from `restored` on a re-run (it returns {done}), so only the index==upstream
+    // probe can exempt it — this is the assertion that would fail if that probe were dropped.
+    expect(blockersAfter(root, again)).toEqual([]);
   });
 
   it('a concurrent human edit after ship is skipped+warned, never clobbered', () => {
@@ -211,6 +239,125 @@ describe('reconcile — the three-way gate', () => {
   });
 });
 
+/**
+ * sc-1235 — reconcile used to CLAIM "the tree is now ff-pullable" unconditionally, then hand back a
+ * `git pull --ff-only` that the files it had just warned it left edited went on to block. git answers
+ * that abort with "commit your changes or stash them", so the claim steered agents straight at the one
+ * recovery that destroys the concurrent work reconcile exists to protect. Every test here cross-checks
+ * the computed list against the REAL ff oracle, which is the arbiter — assert on `res` FIRST, because
+ * ffPullSucceeds() merges the repo on success and leaves failed-merge state on failure.
+ */
+describe('reconcile — ff-pullability is measured, not claimed', () => {
+  /** Upstream changed BOTH files; only foo.ts was shipped, bar.ts is a peer agent's live edit. */
+  const peerDirtyRepo = () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n'); // pristine shipped → reconciles cleanly
+    writeFileSync(join(root, 'bar.ts'), 'agentB-wip\n'); // never shipped by anyone
+    return { root, g, entry: entryFor(root, g, base, [{ path: 'foo.ts' }]) };
+  };
+
+  it('names a warned path as an ff blocker, and the oracle agrees the pull fails', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    writeFileSync(join(root, 'foo.ts'), 'HUMAN-EDIT\n'); // the peer edit reconcile must not touch
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.warnings[0]).toMatch(/edited after ship/);
+    expect(blockersAfter(root, res)).toEqual(['foo.ts']); // the exact state that used to print "ff-pullable"
+    expect(ffPullSucceeds(root, g), 'a named blocker must mean the ff really fails').toBe(false);
+  });
+
+  it("a peer's dirty file that no ship ever recorded blocks the ff, with zero warnings", () => {
+    const { root, g, entry } = peerDirtyRepo();
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.restored).toEqual(['foo.ts']);
+    expect(res.warnings).toEqual([]); // nothing to warn about — bar.ts was never shipped
+    expect(res.action).toBe('prune');
+    expect(blockersAfter(root, res)).toEqual(['bar.ts']); // unreachable by any warning-derived check
+    expect(ffPullSucceeds(root, g)).toBe(false);
+  });
+
+  it('dry-run predicts exactly what --apply reports, and still stages nothing', () => {
+    const { root, g, entry } = peerDirtyRepo();
+    const dry = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: false });
+    const predicted = blockersAfter(root, dry, { apply: false }); // measure BEFORE anything is staged
+    expect(g('diff', '--cached', '--name-only')).toBe('');
+    const applied = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(predicted).toEqual(blockersAfter(root, applied));
+  });
+
+  it('index==upstream exempts a path even when the worktree later diverges', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true }); // stages upstream
+    writeFileSync(join(root, 'foo.ts'), 'LATER-EDIT\n'); // someone edits it again afterwards
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(blockersAfter(root, res)).toEqual([]); // twoway_merge takes keep_entry and never reads the worktree
+    expect(ffPullSucceeds(root, g)).toBe(true);
+    expect(readFileSync(join(root, 'foo.ts'), 'utf8')).toBe('LATER-EDIT\n'); // and it survives the ff
+  });
+
+  it('a staged-then-reverted worktree blocks, though `git diff HEAD` shows nothing for it', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'STAGED\n');
+    g('add', '--', 'bar.ts');
+    writeFileSync(join(root, 'bar.ts'), 'other\n'); // worktree back to HEAD, index holds a third blob
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+
+    // Documents why the dirty set is the union of BOTH status columns, not `git diff --name-only HEAD`.
+    expect(g('diff', '--name-only', 'HEAD')).not.toContain('bar.ts');
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(blockersAfter(root, res)).toEqual(['bar.ts']); // I != H and I != U → reject_merge
+    expect(ffPullSucceeds(root, g)).toBe(false);
+  });
+
+  it('an untracked file sitting where upstream ADDS one is a blocker', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'new.ts': 'UPSTREAM-ADD\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'new.ts'), 'peer-wip\n'); // untracked, in the way of the add
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(blockersAfter(root, res)).toEqual(['new.ts']); // verify_absent → untracked files would be overwritten
+    expect(ffPullSucceeds(root, g)).toBe(false);
+  });
+
+  it('measures against the resolved sha, not the moving FETCH_HEAD ref', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'bar.ts'), 'agentB-wip\n');
+    g('fetch', '-q', 'origin', '0.0.9');
+    const merged = g('rev-parse', 'FETCH_HEAD');
+
+    // A peer agent's `git fetch` lands mid-measurement — .git/FETCH_HEAD is a mutable file, and N
+    // agents share this tree. Pointing it back at `base` makes `diff HEAD FETCH_HEAD` empty, so an
+    // implementation that re-read the ref instead of the passed sha would report a bare all-clear.
+    writeFileSync(join(root, '.git', 'FETCH_HEAD'), `${base}\t\tbranch '0.0.9' of origin\n`);
+    expect(ffBlockers(root, merged, new Set())).toEqual(['bar.ts']);
+  });
+
+  it('an UNSTAGED worktree deletion is not reported (false alarms read as "reconcile failed")', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    rmSync(join(root, 'bar.ts')); // deleted, never staged → verify_uptodate's ENOENT branch allows it
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(blockersAfter(root, res)).toEqual([]);
+    expect(ffPullSucceeds(root, g), 'an unstaged deletion must NOT be called a blocker').toBe(true);
+  });
+});
+
 describe('reconcile — merge state + manifest', () => {
   it('an un-merged PR keeps the entry, touches nothing', () => {
     process.env.DEVKIT_RECONCILE_MERGED_OVERRIDE = 'OPEN';
@@ -222,6 +369,7 @@ describe('reconcile — merge state + manifest', () => {
     expect(res.merged).toBe(false);
     expect(res.action).toBe('keep');
     expect(res.restored).toEqual([]);
+    expect(res.upstreamSha).toBeNull(); // never fetched ⇒ nothing to measure this base ref against
   });
 
   it('gh unavailable → merged:unknown, keep (fail-open)', () => {
@@ -269,22 +417,93 @@ describe('reconcile — CLI surface', () => {
     const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
     mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
     writeFileSync(join(root, 'foo.ts'), 'NEW\n');
-    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
-    const manifest = { version: 1, branches: { 'feat/x': entry } };
-    execFileSync('mkdir', ['-p', join(root, '.devkit')]);
-    writeFileSync(
-      join(root, '.devkit', 'reconcile-manifest.json'),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-    );
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
 
-    const r = spawnSync(process.execPath, [CLI, 'reconcile', '--main-repo', root, '--json'], {
-      encoding: 'utf8',
-      env: { ...GENV, DEVKIT_RECONCILE_MERGED_OVERRIDE: 'MERGED' },
-    });
+    const r = runCli(root, '--json');
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.branches[0].branch).toBe('feat/x');
     expect(out.branches[0].restored).toEqual(['foo.ts']);
     expect(g('diff', '--cached', '--name-only')).toBe(''); // dry-run mutated nothing
+  });
+
+  /** Upstream changed both files; only foo.ts was shipped, bar.ts is a peer agent's live edit. */
+  const peerDirtyCliRepo = () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'UPSTREAM-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'agentB-wip\n');
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
+    return root;
+  };
+
+  it('--apply names the blockers, drops the ff-pullable claim, and never suggests stash/restore', () => {
+    const r = runCli(peerDirtyCliRepo(), '--apply');
+    expect(r.status).toBe(0); // advisory: callers chaining `reconcile --apply && …` must not break
+    expect(r.stdout).toMatch(/✗ bar\.ts/);
+    expect(r.stdout).toMatch(/still block `git pull --ff-only`/);
+    expect(r.stdout).not.toMatch(/ff-pullable/); // the claim that caused the incident
+    expect(r.stdout).not.toMatch(/Finalize with/); // nor the command that would abort
+    // The one recovery that destroys a peer's uncommitted work must never be suggested.
+    expect(r.stdout).not.toMatch(/\bgit stash\b|\bgit restore\b|\bgit checkout\b/);
+  });
+
+  it("the unblocked run's guidance is byte-for-byte what it has always been", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
+
+    const r = runCli(root, '--apply');
+    expect(r.stdout).toContain(
+      'Shipped files restored to merged-upstream content; the tree is now ff-pullable.',
+    );
+    expect(r.stdout).toContain(
+      'Finalize with `git pull --ff-only` — HEAD is intentionally not advanced (shared-tree invariant).',
+    );
+  });
+
+  it('a file a LATER branch restores is not reported as blocking (measured after the whole run)', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'other\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'NEW-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n'); // feat/x's shipped edit
+    writeFileSync(join(root, 'bar.ts'), 'NEW-BAR\n'); // feat/y's — restored only on the SECOND pass
+    writeManifest(root, {
+      'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]),
+      'feat/y': entryFor(root, g, base, [{ path: 'bar.ts' }]),
+    });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    // A measurement taken right after feat/x would still see bar.ts dirty and call it a blocker,
+    // even though feat/y restores it moments later in the same run.
+    expect(r.stdout).not.toMatch(/✗ bar\.ts/);
+    expect(r.stdout).toMatch(/the tree is now ff-pullable/);
+    expect(ffPullSucceeds(root, g), 'and the ff really does succeed').toBe(true);
+  });
+
+  it("an unmeasurable base ref withholds the all-clear instead of inheriting another branch's", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const ok = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    // A second branch on a base that cannot be fetched: nothing about ITS upstream is known, so an
+    // empty blocker list is ignorance. The first branch measuring clean must not speak for it.
+    writeManifest(root, { 'feat/x': ok, 'feat/y': { ...ok, baseRef: 'no-such-ref' } });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toMatch(/the tree is now ff-pullable/);
+    expect(r.stdout).toMatch(/NOT verified: no-such-ref could not be checked/);
+    const out = JSON.parse(runCli(root, '--json').stdout);
+    expect(out.ffPullable).toBeNull(); // don't-know, never a machine-readable all-clear
+    expect(out.ffUnverifiedBases).toEqual(['no-such-ref']);
+  });
+
+  it('--json carries ffPullable:false and the blockers keyed by base ref', () => {
+    const out = JSON.parse(runCli(peerDirtyCliRepo(), '--apply', '--json').stdout);
+    expect(out.ffPullable).toBe(false);
+    expect(out.ffBlockersByBase).toEqual({ '0.0.9': ['bar.ts'] }); // never pooled across bases
+    expect(out.ffUnverifiedBases).toEqual([]);
   });
 });
