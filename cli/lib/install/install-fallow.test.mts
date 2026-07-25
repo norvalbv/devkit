@@ -3,7 +3,7 @@
  * out to bun/npm/cargo/fallow — each case scripts the per-command exit status it wants.
  * File IO (gitignore) runs against a real tmp repo, mirroring detect-stack.test.mjs.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,9 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const spawnSync = vi.fn();
 vi.mock('node:child_process', () => ({ spawnSync: (...a) => spawnSync(...a) }));
 
-const { FALLOW_PINNED_VERSION, detectFallow, installFallow, ensureFallowGitignore } = await import(
-  './install-fallow.mts'
-);
+const {
+  FALLOW_PINNED_VERSION,
+  detectFallow,
+  installFallow,
+  ensureFallowGitignore,
+  wireFallowHooks,
+} = await import('./install-fallow.mts');
 
 let roots = [];
 function tmpRepo() {
@@ -133,5 +137,56 @@ describe('ensureFallowGitignore', () => {
     const root = tmpRepo();
     ensureFallowGitignore({ cwd: root, dryRun: true });
     expect(existsSync(join(root, '.gitignore'))).toBe(false);
+  });
+});
+
+// devkit installs FALLOW's hooks rather than shipping a gate of its own: `fallow audit` already
+// defaults to --gate new-only and takes --diff-file/--diff-stdin, so a devkit-authored gate would
+// reimplement fallow's attribution and drift from it. What devkit owns is the WIRING — including
+// the Cursor surface, which fallow's installer does not write.
+describe('wireFallowHooks', () => {
+  it("wires both of fallow's own hooks: the git hook and the agent gate", () => {
+    spawnSync.mockReturnValue(result(0));
+    const root = tmpRepo();
+    const r = wireFallowHooks({ cwd: root });
+    expect(r.ok).toBe(true);
+    const targets = spawnSync.mock.calls
+      .filter(([cmd, args]) => cmd === 'fallow' && args[0] === 'hooks')
+      .map(([, args]) => args[args.indexOf('--target') + 1]);
+    expect(targets).toEqual(['git', 'agent']);
+  });
+
+  it("mirrors fallow's Claude-only agent hook onto the Cursor surface", () => {
+    spawnSync.mockReturnValue(result(0));
+    const root = tmpRepo();
+    // Stand in for what `fallow hooks install --target agent` writes (Claude surface only).
+    mkdirSync(join(root, '.claude', 'hooks'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'hooks', 'fallow-gate.sh'), '#!/bin/sh\nexit 0\n');
+
+    wireFallowHooks({ cwd: root });
+
+    expect(existsSync(join(root, '.cursor', 'hooks', 'fallow-gate.sh'))).toBe(true);
+    const hooks = JSON.parse(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8'));
+    expect(hooks.hooks.beforeShellExecution).toEqual([{ command: '.cursor/hooks/fallow-gate.sh' }]);
+  });
+
+  it('is idempotent — a re-run does not stack duplicate Cursor entries', () => {
+    spawnSync.mockReturnValue(result(0));
+    const root = tmpRepo();
+    mkdirSync(join(root, '.claude', 'hooks'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'hooks', 'fallow-gate.sh'), '#!/bin/sh\nexit 0\n');
+
+    wireFallowHooks({ cwd: root });
+    wireFallowHooks({ cwd: root });
+
+    const hooks = JSON.parse(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8'));
+    expect(hooks.hooks.beforeShellExecution).toHaveLength(1);
+  });
+
+  it('skips the mirror when fallow wrote no agent hook (fail-open)', () => {
+    spawnSync.mockReturnValue(result(0));
+    const root = tmpRepo();
+    wireFallowHooks({ cwd: root });
+    expect(existsSync(join(root, '.cursor', 'hooks.json'))).toBe(false);
   });
 });

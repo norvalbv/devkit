@@ -94,23 +94,19 @@ describe('installHookRegistrations', () => {
     expect(cur.afterShellExecution).toHaveLength(1);
   });
 
-  it('registers all seven agentHooks across the correct Claude events', () => {
+  it('registers all six agentHooks across the correct Claude events', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['agentHooks']);
     const h = claude(root).hooks;
     expect(h.UserPromptSubmit).toHaveLength(1);
     expect(h.Stop[0].hooks).toHaveLength(3); // decision + lint + knip
     expect(h.PreCompact).toHaveLength(1);
-    // The fallow gate is the one agentHooks entry that gates a Bash tool call before it runs.
-    expect(h.PreToolUse[0].hooks[0].command).toContain('fallow-gate.sh');
-    expect(h.PreToolUse[0].matcher).toBe('Bash');
-    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1),
-    // PreToolUse+Bash→beforeShellExecution (1); UserPromptSubmit dropped.
+    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1);
+    // UserPromptSubmit dropped.
     const cur = cursor(root).hooks;
     expect(cur.stop).toHaveLength(3);
     expect(cur.afterFileEdit).toHaveLength(1);
     expect(cur.preCompact).toHaveLength(1);
-    expect(cur.beforeShellExecution).toHaveLength(1);
     expect(cur.UserPromptSubmit).toBeUndefined();
   });
 
@@ -136,7 +132,48 @@ describe('installHookRegistrations', () => {
     const first = claudeCommands(root).length;
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     expect(claudeCommands(root).length).toBe(first);
-    expect(first).toBe(9);
+    expect(first).toBe(8);
+  });
+
+  it('reclaims a RETIRED devkit command a consumer still has installed', () => {
+    // devkit briefly registered its own .claude/hooks/fallow-gate.sh. The strip set is derived from
+    // the LIVE registry, so deleting that entry also deleted devkit's ability to remove it — the
+    // consumer would keep a dead hook forever, double-firing alongside the entry fallow's own
+    // installer writes for the same path. RETIRED_CLAUDE_COMMANDS keeps it strip-only.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"' },
+      ],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+
+    expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
+  });
+
+  it("leaves fallow's OWN gate registration alone (exact match, not a path match)", () => {
+    // fallow's installer writes its own entry for a script at the same path, with an env prefix.
+    // Reclaiming devkit's retired string must not touch it, or every devkit init would silently
+    // disable the gate devkit itself just wired.
+    const root = tmpRepo();
+    const fallowOwn =
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"';
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [{ type: 'command', command: fallowOwn }],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+
+    expect(claudeCommands(root)).toContain(fallowOwn);
   });
 
   it('preserves a foreign (non-devkit) hook command on merge', () => {

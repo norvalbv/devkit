@@ -40,7 +40,7 @@ import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeF
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
 import { installAgentSurfaces } from "../lib/install/agent-surfaces.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
-import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowGate, } from "../lib/install/install-fallow.mjs";
+import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from "../lib/install/install-fallow.mjs";
 import { detectHookConflicts, hookScriptsFor } from "../lib/install/install-hooks.mjs";
 import { installSearchCode } from "../lib/install/install-search-code.mjs";
 import { patchPackageJson } from "../lib/install/package-json.mjs";
@@ -551,8 +551,9 @@ async function applyFallow(cwd, dryRun, interactive) {
             }
         }
     }
-    const gate = wireFallowGate({ cwd, dryRun, target: 'git' });
-    console.log(`  ${gate.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
+    const gate = wireFallowHooks({ cwd, dryRun });
+    for (const line of gate.log)
+        console.log(`  ${line}`);
     if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
         const saved = saveFallowBaselines({ cwd, dryRun });
         console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);

@@ -61,7 +61,7 @@ import {
   ensureFallowGitignore,
   installFallow,
   saveFallowBaselines,
-  wireFallowGate,
+  wireFallowHooks,
 } from '../lib/install/install-fallow.mts';
 import { detectHookConflicts, hookScriptsFor } from '../lib/install/install-hooks.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
@@ -674,8 +674,8 @@ async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean) {
     }
   }
 
-  const gate = wireFallowGate({ cwd, dryRun, target: 'git' });
-  console.log(`  ${gate.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
+  const gate = wireFallowHooks({ cwd, dryRun });
+  for (const line of gate.log) console.log(`  ${line}`);
   if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
     const saved = saveFallowBaselines({ cwd, dryRun });
     console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);
