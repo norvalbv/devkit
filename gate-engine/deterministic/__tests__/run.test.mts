@@ -69,6 +69,25 @@ describe('runDeterministic — aggregation + trichotomy', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('guard-fanout(unexpected:127)');
   });
 
+  it('127 says the BINARY did not resolve, not that the gate found something', () => {
+    // sc-1243: a ship worktree that linked a node_modules with nothing installed made every gate exit
+    // 127, and the report named only the gate — sending the reader after the linter, not the link.
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['fanout']);
+    expect(runDeterministic(d, { exec: mkExec({ 'folder-fanout': 127 }) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('exit 127 = command not found');
+    expect(out).toMatch(/BINARY did not resolve/);
+    expect(out).toMatch(/symlinked in/);
+  });
+
+  it('does not mention 127 when no gate exited 127', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['fanout']);
+    expect(runDeterministic(d, { exec: mkExec({ 'folder-fanout': 1 }) })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('exit 127');
+  });
+
   it('runs ONLY the selected guards (components.guards)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec({});
