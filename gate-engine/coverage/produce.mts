@@ -36,7 +36,7 @@ import {
   rmSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 export const COVERAGE_DIR = 'coverage';
 export const REPORT_NAME = 'coverage-final.json';
@@ -80,35 +80,45 @@ export function pruneStaleRuns(cwd: string, now = Date.now(), maxAgeMs = STALE_R
   return pruned;
 }
 
+/** The stable artifact's mtime, or null when there is none. Snapshot this BEFORE the run starts. */
+export function snapshotArtifact(cwd: string): number | null {
+  try {
+    return statSync(join(cwd, COVERAGE_FILE)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Move this run's report to the stable path — the step that keeps the gate honest.
  *
  * Returns true when a fresh report was published. When the run produced NO report (tests failed;
  * vitest's `reportOnFailure` is false by default, so nothing is written) it removes the stale
- * artifact rather than leaving the previous run's behind — UNLESS a sibling published a newer one
- * while we were running.
+ * artifact rather than leaving the previous run's behind — UNLESS a sibling replaced it while we
+ * were running.
  *
- * Two properties have to hold at once, and `startedAt` is what reconciles them:
+ * Two properties have to hold at once, and `before` (from snapshotArtifact, taken before the run)
+ * is what reconciles them:
  *
  *  - FAIL-CLOSED. While reportsDirectory was `./coverage`, vitest's startup `rm -rf` had already
  *    wiped the old report, so a failed run left no artifact and the gate blocked — the behaviour
- *    docs/decisions/coverage-gate.md exists to protect. Publishing per-run without any delete would
+ *    docs/decisions/coverage-gate.md exists to protect. Publishing per-run without any clear would
  *    silently convert that gate to fail-OPEN.
- *  - NO CROSS-RUN DESTRUCTION. An artifact NEWER than this run's start belongs to a sibling that
- *    started later or finished after us and SUCCEEDED. Deleting it would let a failing run destroy a
- *    passing run's result — reintroducing, at the artifact level, the very interference this module
- *    exists to remove.
+ *  - NO CROSS-RUN DESTRUCTION. An artifact that CHANGED during our run belongs to a sibling that
+ *    succeeded while we were going. Deleting it would let a failing run destroy a passing run's
+ *    result — reintroducing, at the artifact level, the interference this module exists to remove.
  *
- * An artifact at-or-older than our start predates this run, so it is stale by definition and goes.
+ * IDENTITY, NOT WALL-CLOCK. An earlier cut compared the artifact's mtime against the run's start
+ * time, which is unsound: `Date.now()` is millisecond-truncated while mtimes carry sub-millisecond
+ * precision, so an artifact written in the SAME millisecond the run started reads as "newer" and
+ * survives — a fail-open whose likelihood depends on how fast the machine is. Comparing the mtime to
+ * the one observed before the run is exact: unchanged means it is the very file we started with.
  *
  * CLAIM FIRST, INSPECT SECOND. `stat` then `unlink` would be a TOCTOU: a sibling can publish in the
- * gap and we would delete the good report it just wrote. `rename` is atomic, so moving the artifact
- * into our own run directory is a claim exactly one racer can win, and nothing that arrives afterwards
- * can be destroyed by us. Worst case we claim a sibling's report, another sibling publishes a newer
- * one in the gap, and our put-back replaces it — swapping one successful report for another, never
- * leaving the gate with nothing.
+ * gap and we would delete the good report it just wrote. `rename` is atomic, so the claim has exactly
+ * one winner and nothing arriving afterwards can be destroyed by us.
  */
-export function publishCoverage(runDir: string, cwd: string, startedAt = Date.now()): boolean {
+export function publishCoverage(runDir: string, cwd: string, before: number | null): boolean {
   const fresh = join(runDir, REPORT_NAME);
   const stable = join(cwd, COVERAGE_FILE);
   if (existsSync(fresh)) {
@@ -116,16 +126,21 @@ export function publishCoverage(runDir: string, cwd: string, startedAt = Date.no
     renameSync(fresh, stable);
     return true;
   }
-  const claimed = join(runDir, `cleared-${REPORT_NAME}`);
+  // The claim target sits BESIDE `stable` in coverage/, never inside runDir. vitest's
+  // `cleanAfterRun()` removes the reports directory whenever it ends up empty — precisely what a
+  // failed run leaves behind, the case this clear exists for. Renaming into a directory vitest just
+  // deleted throws ENOENT, the catch swallows it, and the stale artifact survives. Beside it, the
+  // directory is guaranteed to exist (it holds `stable`) and stays on one filesystem, so the rename
+  // is still atomic.
+  const claimed = join(cwd, COVERAGE_DIR, `.cleared-${basename(runDir)}-${REPORT_NAME}`);
   try {
     renameSync(stable, claimed);
   } catch {
     return false; // nothing to clear, or a sibling claimed it first
   }
   try {
-    // rename() preserves mtime, so this is when the report was actually WRITTEN. Newer than our
-    // start ⇒ a sibling produced it while we were running ⇒ not ours to throw away.
-    if (statSync(claimed).mtimeMs > startedAt) {
+    // Appeared from nothing, or changed under us ⇒ a sibling's successful report ⇒ put it back.
+    if (before === null || statSync(claimed).mtimeMs !== before) {
       renameSync(claimed, stable);
       return false;
     }
@@ -183,9 +198,9 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
   pruneStaleRuns(cwd);
   const runDir = resolveRunDir(cwd);
   mkdirSync(runDir, { recursive: true });
-  // Captured BEFORE vitest starts: anything published after this instant came from a sibling run,
-  // and a failure of ours must not delete it. See publishCoverage.
-  const startedAt = Date.now();
+  // Captured BEFORE vitest starts: if the artifact changes from this, a sibling published it while
+  // we were running and a failure of ours must not delete it. See publishCoverage.
+  const before = snapshotArtifact(cwd);
 
   let settled = false;
   let published = false;
@@ -195,7 +210,7 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     // `finally`: a throw while publishing must not strand the run directory for the pruner to find
     // hours later.
     try {
-      published = publishCoverage(runDir, cwd, startedAt);
+      published = publishCoverage(runDir, cwd, before);
     } finally {
       rmSync(runDir, { recursive: true, force: true });
     }
