@@ -12,7 +12,7 @@
  * "Ship the generator, never the data": the registry is the mechanism; the consumer's
  * settings.json (their data) is merged, never clobbered.
  */
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_TARGETS } from "../components.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
@@ -88,7 +88,10 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
                 // is exactly the rule the write path below already enforces via findConflicts
                 // ("preserving non-devkit agent-hook"). Compare against the sha devkit recorded: reclaim
                 // only pristine copies, and leave a modified one in place with a visible notice.
-                if (sha256(dest) !== prev?.files?.[name]) {
+                // lstat first: sha256 FOLLOWS a symlink, so a hook the consumer replaced with a link to a
+                // directory would throw EISDIR and abort the sync. devkit ships no symlinks, so one is the
+                // consumer's by definition — keep it. Same guard as sync-manifest.mts's entryMatches.
+                if (lstatSync(dest).isSymbolicLink() || sha256(dest) !== prev?.files?.[name]) {
                     console.log(`  ! keeping deselected agent-hook ".${target}/hooks/${name}" — modified since devkit wrote it (delete it yourself if unwanted)`);
                     continue;
                 }
