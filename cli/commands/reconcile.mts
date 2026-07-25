@@ -8,7 +8,13 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
-import { git, loadManifest, type ReconcileResult, reconcileBranch } from '../lib/reconcile.mts';
+import {
+  ffBlockers,
+  git,
+  loadManifest,
+  type ReconcileResult,
+  reconcileBranch,
+} from '../lib/reconcile.mts';
 
 /** Parsed `devkit reconcile` flags. */
 interface Flags {
@@ -67,7 +73,114 @@ function parse(args: string[]): Flags {
   return f;
 }
 
-function render(results: ReconcileResult[], { apply }: { apply: boolean }): string {
+/** What one `git pull --ff-only` of `ref` would hit, once every branch in this run has restored. */
+interface BaseVerdict {
+  ref: string;
+  blockers: string[];
+}
+
+/**
+ * Measure ff-pullability ONCE PER BASE REF, after every branch has finished restoring, and name any
+ * base ref that could not be measured at all.
+ *
+ * Two things this ordering buys, both of which a per-branch measurement gets wrong. (1) A run
+ * reconciles N branches; a file branch 2 restores still looks dirty to a measurement taken right
+ * after branch 1, so pooling per-branch results reports a blocker that no longer exists. (2) A
+ * measurement is only meaningful against the upstream it was taken from — pooling across base refs
+ * would claim a file blocks a pull of `main` because it differs from `release/1.x`.
+ *
+ * `unverified` is keyed on baseRef rather than "did every branch measure": a measurement is
+ * whole-tree (upstream-changed ∩ dirty), not manifest-scoped, so one measured branch answers for
+ * every branch sharing its baseRef. Demanding all of them would print a NOT-verified caveat
+ * whenever an un-merged branch sits beside a merged one — the normal state of an accumulating
+ * manifest, and a second false statement in place of the one being fixed. A baseRef NO branch could
+ * measure is a real hole, where an empty blocker list is ignorance rather than an all-clear.
+ */
+function measureBases(
+  mainRepo: string,
+  results: ReconcileResult[],
+  apply: boolean,
+): { verdicts: BaseVerdict[]; unverified: string[] } {
+  const upstreamOf = new Map<string, string>(); // baseRef → resolved upstream sha
+  const restoredBy = new Map<string, Set<string>>(); // baseRef → paths this run restores
+  for (const r of results) {
+    if (r.baseRef === null) continue;
+    if (r.upstreamSha) upstreamOf.set(r.baseRef, r.upstreamSha);
+    const seen = restoredBy.get(r.baseRef) ?? new Set<string>();
+    for (const p of r.restored) seen.add(p);
+    restoredBy.set(r.baseRef, seen);
+  }
+  const verdicts: BaseVerdict[] = [];
+  const unverified: string[] = [];
+  for (const [ref, sha] of upstreamOf) {
+    // Under --apply the restores are already staged (index==upstream exempts them anyway); under a
+    // dry run nothing is staged, so the would-restore paths must be subtracted explicitly.
+    const blockers = ffBlockers(
+      mainRepo,
+      sha,
+      apply ? new Set() : (restoredBy.get(ref) ?? new Set()),
+    );
+    if (blockers === null)
+      unverified.push(ref); // a git probe failed — don't know, never an all-clear
+    else verdicts.push({ ref, blockers: blockers.sort() });
+  }
+  for (const ref of restoredBy.keys()) if (!upstreamOf.has(ref)) unverified.push(ref);
+  return {
+    verdicts: verdicts.sort((a, b) => a.ref.localeCompare(b.ref)),
+    unverified: [...new Set(unverified)].sort(),
+  };
+}
+
+/**
+ * The trailer: what to do next. Never hands back a `git pull --ff-only` that is about to abort.
+ * Every blocker is reported UNDER the base ref it was measured against — a file that differs from
+ * `release/1.x` says nothing about pulling `main`, so one pooled list would mislead on both.
+ */
+function guidance(
+  verdicts: BaseVerdict[],
+  unverified: string[],
+  apply: boolean,
+  anyRestore: boolean,
+): string[] {
+  const blocked = verdicts.filter((v) => v.blockers.length > 0);
+  const restoreLine = apply
+    ? 'Shipped files restored to merged-upstream content.'
+    : 'These files would be restored to merged-upstream content (run with --apply).';
+
+  if (blocked.length === 0) {
+    if (unverified.length > 0)
+      return [
+        ...(anyRestore ? [restoreLine] : []),
+        `ff-pullability is NOT verified: ${unverified.join(', ')} could not be checked.`,
+        '`git pull --ff-only` may still abort. If it names files, do NOT stash, restore or checkout',
+        "them — commit or ship them instead; they are another agent's in-flight work.",
+      ];
+    return [
+      apply
+        ? 'Shipped files restored to merged-upstream content; the tree is now ff-pullable.'
+        : restoreLine,
+      'Finalize with `git pull --ff-only` — HEAD is intentionally not advanced (shared-tree invariant).',
+    ];
+  }
+  const total = blocked.reduce((n, v) => n + v.blockers.length, 0);
+  return [
+    ...(anyRestore ? [restoreLine] : []),
+    `${total} file(s) ${apply ? 'still block' : 'would still block'} \`git pull --ff-only\` — upstream changed them too and your copy is uncommitted:`,
+    ...blocked.flatMap((v) => [`  ${v.ref}:`, ...v.blockers.map((p) => `    ✗ ${p}`)]),
+    ...(unverified.length > 0 ? [`(${unverified.join(', ')} could not be checked at all.)`] : []),
+    'Left byte-for-byte on purpose: these are live concurrent edits in this shared tree.',
+    'Do NOT stash, restore, checkout or delete them — git answers this abort with "commit your',
+    'changes or stash them", and following that advice here destroys another agent\'s in-flight work.',
+    'Ship each one instead (`devkit ship <branch> "<title>" -- <path>`), or leave it to its owner and',
+    're-run `devkit reconcile --apply` once that PR merges. The pull is safe only once this list is empty.',
+  ];
+}
+
+function render(
+  mainRepo: string,
+  results: ReconcileResult[],
+  { apply }: { apply: boolean },
+): string {
   const pruned = results.filter((r) => r.action === 'prune').length;
   const restoredN = results.reduce((n, r) => n + r.restored.length, 0);
   const warnedN = results.reduce((n, r) => n + r.warnings.length, 0);
@@ -85,16 +198,16 @@ function render(results: ReconcileResult[], { apply }: { apply: boolean }): stri
     }
     for (const w of r.warnings) lines.push(`  ⚠ ${w}`);
   }
-  if (anyRestore) {
+  const { verdicts, unverified } = measureBases(mainRepo, results, apply);
+  const anyBlocked = verdicts.some((v) => v.blockers.length > 0);
+  // Blockers alone are enough to speak up: a run where every path warned restores nothing and used
+  // to print no trailer at all, leaving the operator to invent a next step. That is the worst case.
+  // With blockers, guidance() keeps the restore facts but sheds the ff claim and withholds the
+  // `git pull --ff-only` instruction — handing an agent a command that is about to abort is what
+  // sent the last one toward stashing a peer's work.
+  if (anyRestore || anyBlocked || unverified.length > 0) {
     lines.push('');
-    lines.push(
-      apply
-        ? 'Shipped files restored to merged-upstream content; the tree is now ff-pullable.'
-        : 'These files would be restored to merged-upstream content (run with --apply).',
-    );
-    lines.push(
-      'Finalize with `git pull --ff-only` — HEAD is intentionally not advanced (shared-tree invariant).',
-    );
+    lines.push(...guidance(verdicts, unverified, apply, anyRestore));
   }
   return lines.join('\n');
 }
@@ -128,16 +241,39 @@ export default function reconcile(args: string[], cwd: string): number {
         action: 'keep',
         restored: [],
         warnings: [entry ? 'empty manifest entry' : 'no such branch in manifest'],
+        upstreamSha: null, // never fetched
+        baseRef: null, // no manifest entry ⇒ no upstream it could even be measured against
       };
     }
     return reconcileBranch({ mainRepo, branch: name, entry, apply: f.apply });
   });
 
-  if (f.json) console.log(JSON.stringify({ branches: results }, null, 2));
-  else
+  if (f.json) {
+    // --json skips render() entirely, and a machine consumer is exactly who acts on "ff-pullable"
+    // without reading the warnings. Keyed by base ref, never pooled: a caller pulls ONE base, and a
+    // file that differs from another base's upstream says nothing about theirs.
+    const { verdicts, unverified } = measureBases(mainRepo, results, f.apply);
+    console.log(
+      JSON.stringify(
+        {
+          branches: results,
+          ffBlockersByBase: Object.fromEntries(verdicts.map((v) => [v.ref, v.blockers])),
+          ffUnverifiedBases: unverified, // base refs no branch could measure at all
+          // null = don't know. An empty blocker list under an unmeasured base ref is ignorance, and
+          // a machine caller must never read it as an all-clear.
+          ffPullable:
+            unverified.length > 0 || verdicts.length === 0
+              ? null
+              : verdicts.every((v) => v.blockers.length === 0),
+        },
+        null,
+        2,
+      ),
+    );
+  } else
     console.log(
       names.length
-        ? render(results, { apply: f.apply })
+        ? render(mainRepo, results, { apply: f.apply })
         : 'reconcile: nothing recorded (no manifest branches).',
     );
   return 0;
