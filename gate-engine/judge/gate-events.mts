@@ -24,6 +24,23 @@ import { runEnvelope, telemetrySink } from './run-context.mts';
  * default ~/.devkit/telemetry sink. runEnvelope() stamps the correlation id (ship_id) plus, for a
  * commit run, run_mode/repo/branch so the collector can synthesise a run. Never throws.
  */
+/**
+ * A cache hit is a gate's cheapest and most INVISIBLE outcome: no judge runs, so neither a
+ * judge_exec nor a *_result event is emitted, and the run reads downstream exactly as though that
+ * judge had never been selected. The hit RATE was therefore unmeasurable — the one number any
+ * judgement-cache change has to be sized against, and the number sc-1239 was filed on a bad
+ * estimate of (its "9.4%" was reviewer PROSE containing the word "caching").
+ *
+ * `judge` uses the SAME labels as judge_exec (`review:<reviewer>`, `review:completeness`,
+ * `decision-alignment`), so a reader gets the rate as cache_hit / (cache_hit + judge_exec) grouped
+ * by judge, with no join. Deliberately its own event type rather than a synthetic `*_result` row:
+ * that would inflate the fail-rate denominator and flatten the duration percentiles read off the
+ * very same rows any follow-up has to size itself against.
+ */
+export function emitCacheHit(judge: string, model?: unknown): void {
+  emitGateEvent({ type: 'cache_hit', judge, ...(model ? { model } : {}) });
+}
+
 export function emitGateEvent(ev: Record<string, unknown>): void {
   const file = telemetrySink();
   if (!file) return;

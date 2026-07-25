@@ -93,16 +93,27 @@ export function runId() {
 }
 /**
  * Fields stamped onto every emitted event so the collector can correlate — and, for a commit run,
- * synthesise a run row: `run_mode` + repo + branch ride the gate events themselves. A ship omits
- * those (its ship_attempt already carries repo/branch); `ship_id` is the correlation key either way.
+ * synthesise a run row: `run_mode` + repo + branch ride the gate events themselves.
  * Every non-silent envelope also carries `source` — the originating agent — so a downstream reader
  * can attribute each ship/commit to Claude vs Codex.
+ *
+ * A ship used to omit repo/branch on the grounds that its `ship_attempt` already carries them. That
+ * holds only for a reader who JOINS on ship_id; the raw stream was unreadable without one, and since
+ * the default sink is per-MACHINE (~/.devkit/telemetry/gate-events.jsonl) two repos' runs interleave
+ * with no way to separate them — every per-reviewer figure over that file silently blends repos
+ * (sc-1239). The ship path exports its own repo/branch (commit-with-gate-capture.sh); absent (an
+ * older/hand-set DEVKIT_SHIP_ID) they degrade to '' rather than mislabelling the run.
  */
 export function runEnvelope() {
     const source = originatingAgent();
     const ship = process.env.DEVKIT_SHIP_ID;
     if (ship)
-        return { ship_id: ship, source };
+        return {
+            ship_id: ship,
+            repo: process.env.DEVKIT_SHIP_REPO ?? '',
+            branch: process.env.DEVKIT_SHIP_BRANCH ?? '',
+            source,
+        };
     const review = process.env.DEVKIT_REVIEW_ID;
     if (review)
         return {
