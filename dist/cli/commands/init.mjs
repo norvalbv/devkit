@@ -38,10 +38,11 @@ import { INIT_HELP } from "../lib/help/init-help.mjs";
 import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
+import { selectedHookAssets } from "../lib/install/agent-hook-selection.mjs";
 import { installAgentSurfaces } from "../lib/install/agent-surfaces.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
-import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowGate, } from "../lib/install/install-fallow.mjs";
-import { detectHookConflicts, hookScriptsFor } from "../lib/install/install-hooks.mjs";
+import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from "../lib/install/install-fallow.mjs";
+import { detectHookConflicts } from "../lib/install/install-hooks.mjs";
 import { installSearchCode } from "../lib/install/install-search-code.mjs";
 import { patchPackageJson } from "../lib/install/package-json.mjs";
 import { parseReviewFlags, reviewPlanFromFlags, } from "../lib/install/review-profile.mjs";
@@ -478,10 +479,9 @@ async function resolveAssetConflicts(gitRoot, selection, { interactive, force })
     if (selection.agents)
         for (const name of detectAgentConflicts(gitRoot, targets))
             found.push({ kind: 'agent', name });
-    const desiredHooks = hookScriptsFor({
-        agentHooks: Boolean(selection.agentHooks),
-        decisions: selection.guards?.includes('decisions') ?? false,
-    });
+    // ONE derivation of the hook set (selectedHookAssets), not a second copy of the rules here —
+    // the duplicate is how a caller ended up omitting `fallow` and pruning an installed gate.
+    const desiredHooks = selectedHookAssets(selection).scripts;
     if (desiredHooks.length)
         for (const name of detectHookConflicts(gitRoot, targets, desiredHooks))
             found.push({ kind: 'agent-hook', name });
@@ -551,8 +551,9 @@ async function applyFallow(cwd, dryRun, interactive) {
             }
         }
     }
-    const gate = wireFallowGate({ cwd, dryRun, target: 'git' });
-    console.log(`  ${gate.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
+    const gate = wireFallowHooks({ cwd, dryRun });
+    for (const line of gate.log)
+        console.log(`  ${line}`);
     if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
         const saved = saveFallowBaselines({ cwd, dryRun });
         console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);

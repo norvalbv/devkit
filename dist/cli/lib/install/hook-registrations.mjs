@@ -80,13 +80,15 @@ export const HOOK_REGISTRATIONS = {
             matcher: '',
             command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/strategic-compactor.sh"',
         },
+    ],
+    // fallow: devkit's staged-scope wrapper. Bound to the FALLOW component, not agentHooks — a repo
+    // can adopt fallow without opting into the agent-hook bundle (the primary consumer does exactly
+    // that). Bare runner + path so the Cursor mirror reduces cleanly.
+    fallow: [
         {
-            // Bare runner + path, like every other entry: toCursorCommand derives the .cursor mirror by
-            // stripping a LEADING `node`/`bash`, so an env-var prefix here would emit a broken Cursor
-            // command. The gate's commit-only default and its .fallowrc self-skip live in the script.
             event: 'PreToolUse',
             matcher: 'Bash',
-            command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+            command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
         },
     ],
 };

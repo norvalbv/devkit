@@ -55,15 +55,16 @@ import {
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
+import { selectedHookAssets } from '../lib/install/agent-hook-selection.mts';
 import { installAgentSurfaces } from '../lib/install/agent-surfaces.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
   ensureFallowGitignore,
   installFallow,
   saveFallowBaselines,
-  wireFallowGate,
+  wireFallowHooks,
 } from '../lib/install/install-fallow.mts';
-import { detectHookConflicts, hookScriptsFor } from '../lib/install/install-hooks.mts';
+import { detectHookConflicts } from '../lib/install/install-hooks.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
 import {
@@ -597,10 +598,9 @@ async function resolveAssetConflicts(
       found.push({ kind: 'skill', name });
   if (selection.agents)
     for (const name of detectAgentConflicts(gitRoot, targets)) found.push({ kind: 'agent', name });
-  const desiredHooks = hookScriptsFor({
-    agentHooks: Boolean(selection.agentHooks),
-    decisions: selection.guards?.includes('decisions') ?? false,
-  });
+  // ONE derivation of the hook set (selectedHookAssets), not a second copy of the rules here —
+  // the duplicate is how a caller ended up omitting `fallow` and pruning an installed gate.
+  const desiredHooks = selectedHookAssets(selection).scripts;
   if (desiredHooks.length)
     for (const name of detectHookConflicts(gitRoot, targets, desiredHooks))
       found.push({ kind: 'agent-hook', name });
@@ -674,8 +674,8 @@ async function applyFallow(cwd: string, dryRun: boolean, interactive: boolean) {
     }
   }
 
-  const gate = wireFallowGate({ cwd, dryRun, target: 'git' });
-  console.log(`  ${gate.ok ? '✓ wired' : '! could not wire'} fallow git hook`);
+  const gate = wireFallowHooks({ cwd, dryRun });
+  for (const line of gate.log) console.log(`  ${line}`);
   if (gate.ok && (dryRun || fallowHasDebt(cwd))) {
     const saved = saveFallowBaselines({ cwd, dryRun });
     console.log(`  ${saved.ok ? '✓ saved' : '! some'} fallow baselines (grandfather debt)`);
