@@ -17,10 +17,12 @@ export function selectedHookAssets(
       searchSteering && selection.searchSteering && 'searchSteering',
       selection.agentHooks && 'agentHooks',
       decisions && 'decisions',
+      selection.fallow && 'fallow',
     ].filter((value): value is string => Boolean(value)),
     scripts: hookScriptsFor({
       agentHooks: Boolean(selection.agentHooks),
       decisions,
+      fallow: Boolean(selection.fallow),
     }),
   };
 }

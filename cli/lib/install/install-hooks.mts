@@ -59,6 +59,7 @@ interface AgentHooksManifest extends SyncManifest {
 }
 
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+export const FALLOW_STAGED_GATE = 'fallow-staged-gate.sh';
 
 function bundledHookNames(): string[] {
   return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -72,14 +73,23 @@ function bundledHookNames(): string[] {
 export function hookScriptsFor({
   agentHooks,
   decisions,
+  fallow,
 }: {
   agentHooks: boolean;
   decisions: boolean;
+  /** REQUIRED, not optional: an optional flag defaulting to false let two callers omit it, and a
+   *  missing `fallow` silently prunes an installed gate as "deselected". Keep the compiler honest. */
+  fallow: boolean;
 }): string[] {
   const all = bundledHookNames();
+  // Two scripts belong to their OWN component rather than the agentHooks bundle, so a repo can
+  // select either without the rest.
+  const owned = new Set([DECISION_EDIT_HOOK, FALLOW_STAGED_GATE]);
   return all.filter(
     (name) =>
-      (agentHooks && name !== DECISION_EDIT_HOOK) || (decisions && name === DECISION_EDIT_HOOK),
+      (agentHooks && !owned.has(name)) ||
+      (decisions && name === DECISION_EDIT_HOOK) ||
+      (fallow && name === FALLOW_STAGED_GATE),
   );
 }
 

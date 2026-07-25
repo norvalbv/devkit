@@ -21,6 +21,7 @@ export { checkHookRegistrations, installHookRegistrations, removeHookRegistratio
 // Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
 const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+export const FALLOW_STAGED_GATE = 'fallow-staged-gate.sh';
 function bundledHookNames() {
     return readdirSync(join(packageDir(), 'agents-hooks'), {
         withFileTypes: true,
@@ -29,9 +30,14 @@ function bundledHookNames() {
         .map((entry) => entry.name);
 }
 /** The exact hook-script set implied by Devkit component selection. */
-export function hookScriptsFor({ agentHooks, decisions, }) {
+export function hookScriptsFor({ agentHooks, decisions, fallow, }) {
     const all = bundledHookNames();
-    return all.filter((name) => (agentHooks && name !== DECISION_EDIT_HOOK) || (decisions && name === DECISION_EDIT_HOOK));
+    // Two scripts belong to their OWN component rather than the agentHooks bundle, so a repo can
+    // select either without the rest.
+    const owned = new Set([DECISION_EDIT_HOOK, FALLOW_STAGED_GATE]);
+    return all.filter((name) => (agentHooks && !owned.has(name)) ||
+        (decisions && name === DECISION_EDIT_HOOK) ||
+        (fallow && name === FALLOW_STAGED_GATE));
 }
 // Copy the bundled agent-hook scripts (agents-hooks/*.mjs|.sh) into the consumer's hook dirs and
 // write .devkit/agent-hooks-manifest.json (per-file sha256, like skills/agents). The registrations

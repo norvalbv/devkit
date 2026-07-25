@@ -31,6 +31,7 @@ interface DevkitConfig {
   components?: {
     agentTargets?: string[];
     agentHooks?: boolean;
+    fallow?: boolean;
     guards?: string[];
   };
 }
@@ -67,6 +68,10 @@ export default function run(args: string[], cwd: string): number {
   const cfg: DevkitConfig | null = readJson(join(gitRoot, '.devkit', 'config.json'));
   const only = listFlag(args, '--only');
   const decisions = cfg?.components?.guards?.includes('decisions') ?? false;
+  // The fallow staged gate belongs to the FALLOW component, so a full sync must read the recorded
+  // selection: omitting it makes `desired` exclude an installed gate, and exact reconciliation then
+  // prunes it as deselected — silently disabling the gate on every `devkit sync-hooks`.
+  const fallow = cfg?.components?.fallow ?? false;
   const targets = listFlag(args, '--targets') ?? cfg?.components?.agentTargets ?? AGENT_TARGETS;
   const bad = targets.filter((t) => !AGENT_TARGETS.includes(t));
   if (bad.length) {
@@ -80,7 +85,7 @@ export default function run(args: string[], cwd: string): number {
     return 1;
   }
   const override = args.includes('--force') ? () => true : undefined;
-  const desired = only ? undefined : hookScriptsFor({ agentHooks: true, decisions });
+  const desired = only ? undefined : hookScriptsFor({ agentHooks: true, decisions, fallow });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
     targets,
