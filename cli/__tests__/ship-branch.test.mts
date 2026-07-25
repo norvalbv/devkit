@@ -1680,3 +1680,46 @@ describe('ship-branch.sh — staged-set invariants (index clobber)', () => {
     ]);
   });
 });
+
+// Regression (sc-1199 fallout): devkit's own `dist/` is gitignored with its contents force-tracked.
+// A NEW file there fell through BOTH staging passes — the tracked-diff skips it (absent from BASE)
+// and `ls-files -o --exclude-standard` omits it (ignored) — so ship pushed a PR silently missing it.
+// That published a devkit whose gate supervisor could not resolve its own import at runtime.
+describe('ship-branch.sh — a NEW file under a gitignored tree', () => {
+  it('stages and commits a briefed untracked-but-ignored path', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, '.gitignore'), 'dist/\n');
+    git(['add', '.gitignore'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'ignore dist'], { stdio: 'ignore' });
+    // Brand new, untracked, and ignored — the exact shape that vanished.
+    mkdirSync(join(dir, 'dist'), { recursive: true });
+    writeFileSync(join(dir, 'dist/new-out.mjs'), 'export const x = 1;\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/distnew', 't', 'dist/new-out.mjs'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+
+    expect(r.status, r.stderr).toBe(0);
+    // The file must be IN the commit, not merely copied into the worktree.
+    expect(git(['show', 'feat/distnew:dist/new-out.mjs'])).toBe('export const x = 1;\n');
+    expect(git(['diff', '--name-only', 'HEAD', 'feat/distnew']).trim()).toBe('dist/new-out.mjs');
+  });
+
+  it('still ships an ordinary untracked path unchanged', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/plain', 't', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(git(['diff', '--name-only', 'HEAD', 'feat/plain']).trim()).toBe('note.txt');
+  });
+});

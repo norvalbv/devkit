@@ -136,20 +136,22 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
-# Nothing to commit → say so NOW. Staging (below) has exactly two inputs: the tracked diff vs BASE
-# and the untracked files in scope. Both empty ⇒ an empty index — which git only reports AFTER the
+# Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
+# BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
+# under a gitignored, force-tracked tree such as devkit's own dist/). All empty ⇒ an empty index — which git only reports AFTER the
 # whole gate chain has run ("nothing added to commit but untracked files present", the untracked ones
 # being our own gate symlinks), whereupon the EXIT trap force-deletes the branch it just made and
 # prints a bare "Deleted branch … (was …)" on stdout. The operator pays a multi-minute gate run for a
 # cryptic failure. reship.sh's "no changes vs origin/$BR" guard already covers the re-push flow; here
 # is its new-ship twin, hoisted ahead of the worktree so nothing is created to churn. Mirrors the two
-# staging commands exactly (same BASE, same --exclude-standard, same pathspec) so the guard cannot
+# staging commands exactly (same BASE, same enumerations, same pathspec) so the guard cannot
 # disagree with what staging will do. A git ERROR (non-zero but not "differences found") reads as
 # "has changes" and falls through to the old behaviour — fail toward the status quo, never toward a
 # false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
 # (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
 if git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
-   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ]; then
+   [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ] &&
+   [ -z "$(git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}")" ]; then
   echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
   if [ -n "$BASE_FLAG" ]; then
     # --base already answers "your work is committed elsewhere" — the remaining causes are a base that
@@ -229,6 +231,20 @@ git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read
   mkdir -p "$WT/$(dirname "$f")"
   cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
   git -C "$WT" add -- "$f"
+done
+
+# ...and the untracked files git IGNORES. `ls-files -o --exclude-standard` omits them BY DESIGN, so
+# a NEW file under a gitignored-but-force-tracked tree fell through both passes: the tracked-diff
+# above skips it (not in BASE), this enumeration skipped it (ignored) — and the ship pushed a PR
+# missing it, with no warning. devkit's own `dist/` is exactly that shape: gitignored, contents
+# force-tracked. sc-1199's `process-table.mts` shipped its source while its build output silently
+# vanished, publishing a devkit whose gate supervisor could not resolve its own import.
+# Every PATHS entry is caller-explicit (positional after --; directories rejected above), so
+# forcing them is precisely what was asked — same reasoning as reship.sh's `git add -f` (#199).
+git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+  mkdir -p "$WT/$(dirname "$f")"
+  cp -Pp "$ROOT/$f" "$WT/$f"
+  git -C "$WT" add -f -- "$f"
 done
 
 # Snapshot the index the instant staging finishes — the two assertions below hold the gate chain to
