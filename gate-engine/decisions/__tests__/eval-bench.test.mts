@@ -7,6 +7,7 @@ import {
   BenchAbort,
   cleanBenchEnv,
   compare,
+  lintCases,
   majorityVerdict,
   materializeFixture,
   mcnemarMidP,
@@ -403,6 +404,56 @@ describe('majorityVerdict', () => {
   });
 });
 
+// ─── Corpus lint (runs before any paid call) ──────────────────────────────────────
+
+describe('lintCases', () => {
+  const detectRow = (over = {}) => ({
+    id: 'd1',
+    diff: 'diff --git a/x b/x',
+    expected: 'ROUTINE',
+    note: 'why',
+    entries: [],
+    ...over,
+  });
+
+  it('accepts the shipped corpora shape, including free-skip rows with an EMPTY diff', () => {
+    // Regression guard: a free-skip row carries diff: "" on purpose — the smell tripwire never
+    // fires so no judge runs. Treating empty-string as missing rejected 12 legitimate rows.
+    expect(lintCases('detect', [detectRow(), detectRow({ id: 'd2', diff: '' })])).toEqual([]);
+  });
+
+  it('names the row and the reason for missing fields, bad labels and duplicate ids', () => {
+    const errors = lintCases('detect', [
+      detectRow({ id: 'dup' }),
+      detectRow({ id: 'dup', expected: 'MAYBE' }),
+      detectRow({ id: 'noNote', note: '' }),
+      detectRow({ id: 'noEntries', entries: undefined }),
+      detectRow({ id: 'noDiff', diff: undefined }),
+    ]);
+    expect(errors).toEqual([
+      'row 2 (dup): duplicate id',
+      'row 2 (dup): expected "MAYBE" is not one of DECISION | ROUTINE | NULL',
+      'row 3 (noNote): missing "note"',
+      'row 4 (noEntries): "entries" must be array',
+      'row 5 (noDiff): missing "diff"',
+    ]);
+  });
+
+  it('alignment rows need a target ruling and a base repo to be materializable', () => {
+    const ok = {
+      id: 'a1',
+      expected: 'ALIGN',
+      note: 'n',
+      target: { ruling: 'r' },
+      repo: { base: {} },
+    };
+    expect(lintCases('alignment', [ok])).toEqual([]);
+    expect(lintCases('alignment', [{ ...ok, repo: {} }])).toEqual([
+      'row 1 (a1): needs target.ruling and repo.base',
+    ]);
+  });
+});
+
 // ─── Baseline comparison (flip-table gate) ────────────────────────────────────────
 
 describe('compare', () => {
@@ -469,26 +520,42 @@ describe('compare', () => {
   });
 
   it('skips (never lies) on config, gate-hash or corpus-hash mismatch, or missing section', () => {
-    const r = compare('detect', detectSummary({ recall: 0.5 }), {
-      ...detectSummary({ recall: 0.9 }),
-      model: 'sonnet',
-    });
+    // Metrics are healthy here on purpose: this asserts the COMPARISON is skipped, nothing else.
+    // The floor's independence from these skips is covered by the next test.
+    const r = compare('detect', detectSummary({}), { ...detectSummary({}), model: 'sonnet' });
     expect(r.regressed).toBe(false);
     expect(r.lines[0]).toContain('baseline config differs');
     const h = compare(
       'detect',
-      { ...detectSummary({ recall: 0.5 }), gateHash: 'aaa' },
-      { ...detectSummary({ recall: 0.9 }), gateHash: 'bbb' },
+      { ...detectSummary({}), gateHash: 'aaa' },
+      { ...detectSummary({}), gateHash: 'bbb' },
     );
     expect(h.regressed).toBe(false);
     expect(h.lines[0]).toContain('gate code changed');
     const c = compare(
       'detect',
-      { ...detectSummary({ recall: 0.5 }), corpusHash: 'aaa' },
-      { ...detectSummary({ recall: 0.9 }), corpusHash: 'bbb' },
+      { ...detectSummary({}), corpusHash: 'aaa' },
+      { ...detectSummary({}), corpusHash: 'bbb' },
     );
     expect(c.lines[0]).toContain('corpus changed');
     expect(compare('detect', detectSummary({}), undefined).regressed).toBe(false);
+  });
+
+  it('the floor fires with NO baseline and through a comparability skip', () => {
+    // Regression guard for the ordering bug that made `--fail` a no-op: the floor is absolute, so
+    // having nothing comparable to flip against must not turn a catastrophic run into an exit 0.
+    const none = compare('detect', detectSummary({ recall: 0.5 }), undefined);
+    expect(none.regressed).toBe(true);
+    expect(none.lines[0]).toContain('FLOOR BREACH');
+
+    const skipped = compare('detect', detectSummary({ recall: 0.5 }), {
+      ...detectSummary({}),
+      model: 'sonnet',
+    });
+    expect(skipped.regressed).toBe(true);
+    expect(skipped.lines.some((l) => l.includes('FLOOR BREACH'))).toBe(true);
+    // …and it still reports WHY the comparison itself was skipped.
+    expect(skipped.lines.some((l) => l.includes('baseline config differs'))).toBe(true);
   });
 
   it('alignment: outages skip the comparison; floor checks the scored config', () => {
@@ -502,7 +569,7 @@ describe('compare', () => {
     });
     expect(compare('alignment', s(true, 0.5, 0.9), s(true, 0.9, 0.9)).regressed).toBe(true); // floor
     expect(compare('alignment', s(false, 0.9, 0.5), s(false, 0.9, 0.9)).regressed).toBe(true); // cascade-off gates firstPass
-    const o = compare('alignment', s(true, 0.5, 0.9, 2), s(true, 0.9, 0.9));
+    const o = compare('alignment', s(true, 0.9, 0.9, 2), s(true, 0.9, 0.9));
     expect(o.regressed).toBe(false);
     expect(o.lines[0]).toContain('outage');
   });
