@@ -23,10 +23,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   COVERAGE_DIR,
   COVERAGE_FILE,
+  produceCoverage,
   pruneStaleRuns,
   publishCoverage,
   REPORT_NAME,
   RUNS_DIR,
+  reservesCoverageDir,
   resolveRunDir,
   resolveVitest,
   STALE_RUN_MS,
@@ -160,6 +162,23 @@ describe('pruneStaleRuns', () => {
   });
 });
 
+describe('reservesCoverageDir', () => {
+  // vitest rejects a duplicated --coverage.reportsDirectory itself, but with a raw stack trace
+  // naming our internal run directory. Catching it first is about the message, not correctness.
+  it.each([
+    ['--coverage.reportsDirectory=/tmp/elsewhere'],
+    ['--coverage.reportsDirectory'],
+  ])('spots the reserved flag in %s', (arg) => {
+    expect(reservesCoverageDir(['run', arg])).toBe(true);
+  });
+
+  it('lets every other vitest argument through', () => {
+    expect(reservesCoverageDir(['src/foo.test.ts', '--coverage.reporter=json', '--bail=1'])).toBe(
+      false,
+    );
+  });
+});
+
 describe('resolveVitest', () => {
   // The gate accepts any istanbul-shaped report; only this RUNNER is vitest-specific, so it has to be
   // able to tell that it cannot help rather than guessing at another runner's CLI.
@@ -172,6 +191,41 @@ describe('resolveVitest', () => {
     mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
     writeFileSync(join(root, 'node_modules', '.bin', 'vitest'), '');
     expect(resolveVitest(root)).toBe(join(root, 'node_modules', '.bin', 'vitest'));
+  });
+});
+
+describe('a run that verified nothing', () => {
+  // The gate already fails CLOSED on an absent artifact, so this is diagnosis rather than a
+  // correctness hole: without it, a consumer missing the `json` reporter gets a green
+  // test:run:coverage and then a commit-time block whose cause is three steps upstream.
+  it('exits non-zero when vitest passes but emits no report', async () => {
+    const root = makeRoot();
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          coverage: { provider: 'v8', reporter: ['text'] },
+        },
+      };\n`,
+    );
+    writeFileSync(
+      join(root, 'ok.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('passes', () => { expect(1).toBe(1); });\n`,
+    );
+
+    expect(await produceCoverage(root)).toBe(1);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+  }, 120_000);
+
+  it('refuses to forward the reports-directory flag it owns', async () => {
+    const root = makeRoot();
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    expect(await produceCoverage(root, ['--coverage.reportsDirectory=/tmp/elsewhere'])).toBe(1);
+    // Rejected before anything ran, so no run directory was ever created.
+    expect(existsSync(join(root, RUNS_DIR))).toBe(false);
   });
 });
 

@@ -135,6 +135,12 @@ export function resolveVitest(cwd) {
     const bin = join(cwd, 'node_modules', '.bin', 'vitest');
     return existsSync(bin) ? bin : null;
 }
+/** The flag this runner owns — passing it too is what isolation MEANS, so it cannot be delegated. */
+export const RESERVED_FLAG = '--coverage.reportsDirectory';
+/** True when the forwarded args try to set the one option this runner must control. */
+export function reservesCoverageDir(argv) {
+    return argv.some((arg) => arg === RESERVED_FLAG || arg.startsWith(`${RESERVED_FLAG}=`));
+}
 /**
  * Run the consumer's vitest suite with coverage in an isolated reports directory, publish the report,
  * and return vitest's exit code.
@@ -148,6 +154,16 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
         console.error('   and keep using `guard-coverage` as normal.');
         return 1;
     }
+    // Passing this through would collide with the flag we add below. vitest rejects the duplicate
+    // itself, but with a raw stack trace that names our internal run directory — useless to whoever
+    // typed it. Say what is actually wrong instead.
+    if (reservesCoverageDir(argv)) {
+        console.error(`🚫 ${RESERVED_FLAG} is owned by \`devkit coverage-run\`.`);
+        console.error('   Giving every run its own reports directory IS this command; pointing it back');
+        console.error(`   at a shared one restores the race. The report is published to ${COVERAGE_FILE}`);
+        console.error('   regardless — drop the flag and read it there.');
+        return 1;
+    }
     pruneStaleRuns(cwd);
     const runDir = resolveRunDir(cwd);
     mkdirSync(runDir, { recursive: true });
@@ -155,12 +171,19 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
     // and a failure of ours must not delete it. See publishCoverage.
     const startedAt = Date.now();
     let settled = false;
+    let published = false;
     const settle = () => {
         if (settled)
             return;
         settled = true;
-        publishCoverage(runDir, cwd, startedAt);
-        rmSync(runDir, { recursive: true, force: true });
+        // `finally`: a throw while publishing must not strand the run directory for the pruner to find
+        // hours later.
+        try {
+            published = publishCoverage(runDir, cwd, startedAt);
+        }
+        finally {
+            rmSync(runDir, { recursive: true, force: true });
+        }
     };
     // The CLI flag beats the consumer's vitest.config reportsDirectory — that is what lets this fix
     // ship entirely from devkit, with no config edit in the consuming repo.
@@ -177,5 +200,16 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
         child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
     });
     settle();
+    // Green tests but no report means the suite never emitted one — most often because `json` is
+    // missing from coverage.reporter. The gate still fails CLOSED on the absent artifact, so this is
+    // not a correctness hole; it is a diagnosis. Reporting success here sends the developer to a
+    // commit-time block whose cause is three steps upstream, so name it at the point it happened.
+    if (code === 0 && !published) {
+        console.error(`🚫 vitest passed but produced no ${REPORT_NAME}.`);
+        console.error("   The coverage gate reads that file — add 'json' to coverage.reporter in your");
+        console.error('   vitest config, then re-run. Exiting non-zero so a run that verified nothing');
+        console.error('   is not mistaken for a run that verified coverage.');
+        return 1;
+    }
     return code;
 }
