@@ -1,11 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,7 +53,9 @@ function seedRepoWithLinkedWorktree({ husky = true } = {}) {
   )) {
     const target = join(main, rel);
     mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, 'x');
+    // 0o755 on the hook: git SKIPS a non-executable hook, so a 0644 shim is a dark gate chain, and
+    // the worktree postcondition checks for exactly that.
+    writeFileSync(target, 'x', { mode: rel.startsWith('.husky/') ? 0o755 : 0o644 });
   }
 
   // The linked worktree: a clean checkout, so none of the above exists in it.
@@ -60,16 +64,31 @@ function seedRepoWithLinkedWorktree({ husky = true } = {}) {
 
   const wt = join(root, 'ephemeral');
   mkdirSync(wt, { recursive: true });
-  return { main, linked, wt };
+  return { main, linked, wt, git };
 }
 
-/** Invoke the real prepare_gate_worktree against <wt> with <root> as the consumer root. */
+/**
+ * Invoke the real prepare_gate_worktree against <wt> with <root> as the consumer root.
+ *
+ * `set -euo pipefail` is not decoration: every real caller sources this file under it
+ * (ship-branch.sh, reship.sh, review-target.sh), so a predicate that answers "no" must never abort
+ * the caller. Without it these tests would run the code in a shell no consumer uses.
+ */
 function prepare(wt: string, root: string) {
   return spawnSync(
     '/bin/bash',
-    ['-c', `. "${scriptPath}"; prepare_gate_worktree "${wt}" "${root}" ship`],
+    ['-c', `set -euo pipefail; . "${scriptPath}"; prepare_gate_worktree "${wt}" "${root}" ship`],
     { encoding: 'utf8', env: { ...process.env, ...GIT_ENV } },
   );
+}
+
+/** Seed a directory tree under <base>, `{ 'rel/path': 'contents' }`. */
+function seedFiles(base: string, files: Record<string, string>) {
+  for (const [rel, body] of Object.entries(files)) {
+    const target = join(base, rel);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, body);
+  }
 }
 
 const linkTarget = (p: string) => (lstatSync(p).isSymbolicLink() ? readlinkSync(p) : null);
@@ -105,5 +124,160 @@ describe('prepare_gate_worktree — gate deps in a linked worktree', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/missing \.husky\/_/);
     expect(r.stderr).toMatch(/gates must not fail open/);
+  });
+
+  it('names the resolved source of every link it makes', () => {
+    // prepare_gate_worktree used to link in silence, which is why sc-1243 presented as "this repo has
+    // no linters installed" rather than "the wrong node_modules got linked".
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+
+    const r = prepare(wt, linked);
+
+    expect(r.stderr).toContain(`linked node_modules ← ${join(main, 'node_modules')}`);
+  });
+});
+
+// sc-1243. Running vitest inside a linked worktree creates node_modules/ holding ONLY caches (.vite,
+// .vite-temp) — no packages, no .bin. An existence-only preference picked THAT over the main
+// checkout's complete one, and every bare-binary package.json script in the ephemeral worktree died
+// with `command not found` (127): the gate stage failed, the pre-commit hook failed, and the ship
+// deleted the branch it had created.
+describe('prepare_gate_worktree — a present-but-unusable dependency dir', () => {
+  it('does NOT prefer a node_modules holding only cache dirs', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(linked, { 'node_modules/.vite/deps.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
+  });
+
+  it('resolves a binary through the link it created', () => {
+    // The end the whole ticket is about: `biome`/`eslint` are found via node_modules/.bin. Executing a
+    // seeded shim through the symlink proves the exact resolution path 127 proves broken, without
+    // paying for a real `bun run lint`.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    const shim = join(main, 'node_modules/.bin/faketool');
+    mkdirSync(dirname(shim), { recursive: true });
+    writeFileSync(shim, '#!/bin/sh\necho resolved\n', { mode: 0o755 });
+    seedFiles(linked, { 'node_modules/.vite/deps.json': '{}' });
+
+    prepare(wt, linked);
+
+    expect(execFileSync(join(wt, 'node_modules/.bin/faketool'), { encoding: 'utf8' })).toContain(
+      'resolved',
+    );
+  });
+
+  it('still prefers a linked worktree that has a REAL node_modules of its own', () => {
+    // The deliberate-override case from the original design: a per-worktree install must keep winning.
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(linked, { 'node_modules/.vite/deps.json': '{}', 'node_modules/own-dep.js': 'x' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(linked, 'node_modules'));
+  });
+
+  it('treats a node_modules whose only entry is .bin as usable', () => {
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(linked, { 'node_modules/.bin/tool': 'x' });
+
+    prepare(wt, linked);
+
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(linked, 'node_modules'));
+  });
+
+  it('leaves an unusable dir in BOTH worktrees resolving exactly as it did before', () => {
+    // The safety claim behind keeping the existence tail: when neither candidate is populated the
+    // resolution is byte-for-byte the old one (root first), so no path can newly fail.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    rmSync(join(main, 'node_modules'), { recursive: true, force: true });
+    seedFiles(main, { 'node_modules/.vite/x': '{}' });
+    seedFiles(linked, { 'node_modules/.vite/x': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(linked, 'node_modules'));
+  });
+
+  it('does not let a DANGLING node_modules symlink win', () => {
+    // `[ -e ]` is already false for a dangling link, so main wins today. The populated check must not
+    // accidentally reverse that by treating "not a directory" as usable.
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    symlinkSync(join(linked, 'nowhere'), join(linked, 'node_modules'));
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
+  });
+
+  it('keeps the fail-CLOSED coverage gate fail-closed: an empty local coverage/ is linked AS IS', () => {
+    // Deliberately NOT given the populated-preference. Borrowing the main worktree's coverage artifact
+    // would pass the gate on coverage computed from another branch's source — decision coverage-gate.md
+    // Rejected (b). An empty local coverage/ must stay linked so the gate finds nothing and blocks.
+    const { linked, wt } = seedRepoWithLinkedWorktree();
+    mkdirSync(join(linked, 'coverage'), { recursive: true });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'coverage'))).toBe(join(linked, 'coverage'));
+  });
+});
+
+// The hole the populated-preference cannot close: a `.husky/_` that IS populated but carries no
+// pre-commit shim resolves fine, and the ship then commits and opens a PR with zero gates.
+describe('prepare_gate_worktree — the worktree must have a hook chain git will run', () => {
+  /** As `prepare`, but with <wt> a real worktree of the seeded repo so core.hooksPath resolves. */
+  function prepareInRepo(wt: string, root: string, main: string, git: (a: string[]) => string) {
+    rmSync(wt, { recursive: true, force: true });
+    git(['-C', main, 'worktree', 'add', '-q', '--detach', wt]);
+    return prepare(wt, root);
+  }
+
+  it('fails closed when the hook git would run is missing', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    git(['-C', main, 'config', 'core.hooksPath', '.husky/_']);
+    rmSync(join(main, '.husky/_/pre-commit'));
+    seedFiles(main, { '.husky/_/husky.sh': 'x' }); // populated, but nothing git will execute
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/no executable pre-commit hook/);
+    expect(r.stderr).toMatch(/gates must not fail open/);
+  });
+
+  it('fails closed when the hook exists but is not executable', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    git(['-C', main, 'config', 'core.hooksPath', '.husky/_']);
+    chmodSync(join(main, '.husky/_/pre-commit'), 0o644); // git silently SKIPS a non-executable hook
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/no executable pre-commit hook/);
+  });
+
+  it('passes when the linked runner supplies the hook', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    git(['-C', main, 'config', 'core.hooksPath', '.husky/_']);
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+  });
+
+  it('does not newly fail a repo that configures no hooksPath at all', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
   });
 });
