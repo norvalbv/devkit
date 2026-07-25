@@ -50,9 +50,9 @@ moves the shared HEAD or clobbers a concurrent edit.
 
 ## `devkit ship` stopped at `⏱ ship: gate chain hit the …s ceiling (exit 124)`
 This is **budget, not a hang** — the banner says so. The gate chain has a **hang ceiling**
-(`SHIP_COMMIT_TIMEOUT`, default 1800s); hitting it usually means the first attempt ran out of budget, not
+(`SHIP_COMMIT_TIMEOUT`, default 3600s); hitting it usually means the first attempt ran out of budget, not
 that a gate wedged. Everything earned is cached — completed reviewer verdicts (**checkpointed verdicts**),
-cleared decisions judgements, and the all-green **deterministic-prefix cache**. **Re-run the same
+the completeness judgement, cleared decisions judgements, and the all-green **deterministic-prefix cache**. **Re-run the same
 `devkit ship` command**: only unfinished work re-runs, so the retry converges. The banner names the stage
 it was mid-flight in and any reviewers missing a completion heartbeat. For more room per attempt, see
 `SHIP_COMMIT_TIMEOUT` below.
