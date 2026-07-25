@@ -19,10 +19,20 @@ export function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
-/** Staged paths (`git diff --cached --name-only`), trimmed, with blank lines dropped. */
+/**
+ * Staged paths, VERBATIM. `-z` (NUL-delimited) is load-bearing, not a style choice: plain
+ * `--name-only` C-quotes any path holding a tab/newline/quote (`tab\tx.ts` → `"tab\tx.ts"`), and
+ * line-splitting cannot recover the original bytes. Both copies this replaced also trimmed each
+ * record, which silently ate the REAL leading spaces of a `  x.ts` (git emits those unquoted).
+ *
+ * Either mangling is a live correctness hole downstream, because these names are fed straight back
+ * to git: check-alignment passes them to `git diff --cached -- <paths>` (a mangled name matches
+ * nothing, so the gate judges a partial diff and under-reports), and detect matches them against
+ * decisionFileRe (a trailing `"` breaks the `\.md$` anchor, so a staged decision reads as absent
+ * and the gate blocks claiming none was recorded).
+ */
 export function stagedFiles(cwd: string): string[] {
-  return git(cwd, ['diff', '--cached', '--name-only'])
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  return git(cwd, ['diff', '--cached', '--name-only', '-z'])
+    .split('\0')
+    .filter((s) => s.length > 0);
 }

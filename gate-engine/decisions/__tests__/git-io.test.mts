@@ -28,19 +28,43 @@ describe('decisions git-io', () => {
     expect(git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBeTruthy();
   });
 
-  it('stagedFiles lists staged paths and drops the trailing blank line', () => {
+  it('stagedFiles lists staged paths with no empty records', () => {
     writeFileSync(join(repo, 'a.ts'), 'export const a = 1;\n');
     writeFileSync(join(repo, 'b.ts'), 'export const b = 2;\n');
     sh('add a.ts b.ts');
     const files = stagedFiles(repo);
     expect(files).toEqual(['a.ts', 'b.ts']);
-    // The blank-line drop is load-bearing: detect's decisionStaged now maps its matcher over THIS
-    // list instead of over raw split('\n') output.
     expect(files).not.toContain('');
   });
 
   it('stagedFiles is empty when nothing is staged — never [""]', () => {
     expect(stagedFiles(repo)).toEqual([]);
+  });
+
+  // These names are fed straight back to git (check-alignment: `git diff --cached -- <paths>`;
+  // detect: matched against decisionFileRe). Plain --name-only C-quotes the tab one to
+  // `"tab\tx.ts"` and line-splitting can't undo it, and trimming records eats the real leading
+  // spaces git emits unquoted — either way the downstream lookup silently matches nothing.
+  it('stagedFiles returns awkward names VERBATIM — no C-quoting, no trimmed leading space', () => {
+    const tabbed = 'tab\tx.ts';
+    const leading = '  lead.ts';
+    writeFileSync(join(repo, tabbed), 'export const t = 1;\n');
+    writeFileSync(join(repo, leading), 'export const l = 1;\n');
+    sh('add -A');
+    const files = stagedFiles(repo);
+    expect(files).toContain(tabbed);
+    expect(files).toContain(leading);
+    expect(files.some((f) => f.startsWith('"'))).toBe(false);
+  });
+
+  // The whole point of returning them verbatim: git must find them again.
+  it('a verbatim awkward name round-trips back through git', () => {
+    const tabbed = 'tab\tx.ts';
+    writeFileSync(join(repo, tabbed), 'export const t = 1;\n');
+    sh('add -A');
+    const only = stagedFiles(repo).filter((f) => f.includes('\t'));
+    expect(only).toHaveLength(1);
+    expect(git(repo, ['diff', '--cached', '--name-only', '--', only[0]]).trim()).toBeTruthy();
   });
 
   // Thin by design: a git failure is the CALLER's to classify (fail-open vs block), so it must
