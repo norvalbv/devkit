@@ -56,6 +56,10 @@ commit_with_gate_capture() {
   export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${br//\//-}-$$-$(date +%s)")}"
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
   local repo_name; repo_name="$(basename "$root")"
+  # Also EXPORTED so the in-process gate envelope (judge/run-context.mts) can stamp repo/branch on
+  # every event a ship emits. Without them a ship's gate events are repo-blind, and a shared
+  # telemetry sink interleaves two repos' runs with no way to separate them (sc-1239).
+  export DEVKIT_SHIP_REPO="$repo_name" DEVKIT_SHIP_BRANCH="$br"
 
   # Per-SHIP gate log the collector reads for the drill-down + fail-classification. The per-branch
   # $log (in the repo) is OVERWRITTEN by the next ship, so it can't back a historical drill-down; a

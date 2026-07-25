@@ -419,6 +419,37 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  it('a cache hit reports itself as its own event type — never as a synthetic review_result', async () => {
+    const repo = consumerRepo({ backend: true });
+    await runReviewGate(repo, { exec: passWithArtifact(repo) }); // warm the cache off-telemetry
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-cache-hit';
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const hits = events.filter((e) => e.type === 'cache_hit');
+    // Labelled exactly as judge_exec labels the same judge, so a reader gets the hit RATE as
+    // cache_hit / (cache_hit + judge_exec) grouped by judge — no join, no inference. Before this
+    // a hit emitted nothing at all and read downstream as "that reviewer was never selected".
+    expect(hits.map((e) => e.judge).sort()).toEqual([
+      'review:api-security-reviewer',
+      'review:backend-performance-reviewer',
+      'review:commit-guard',
+      'review:conventions-reviewer',
+      'review:correctness-reviewer',
+    ]);
+    // The model of the verdict being REUSED (pin-aware), not the cascade default.
+    expect(hits.find((e) => e.judge === 'review:correctness-reviewer').model).toBe('sonnet');
+    // A synthetic pass row would inflate review_result's fail-rate denominator and flatten the
+    // duration percentiles that any judgement-cache change has to be sized against.
+    expect(events.filter((e) => e.type === 'review_result')).toEqual([]);
+  });
+
   it('first-pass FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {

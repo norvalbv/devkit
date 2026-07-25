@@ -1,0 +1,21 @@
+---
+slug: gate-telemetry-self-describing
+created: 2026-07-25
+---
+
+# gate-telemetry-self-describing
+
+## Target · 2026-07-25 — Gate telemetry is self-describing: every event names its repo, and cheap outcomes emit their own type
+
+**Context:** Story sc-1239 was filed, triaged and nearly implemented against numbers that could not be computed from the data it cited. Ship events carried no repo field and the default sink is per-MACHINE (~/.devkit/telemetry/gate-events.jsonl), so two repos' runs interleaved indistinguishably: on 2026-07-25 that file held 310 review_result rows, 0 with a repo, and 42 rows for frontend reviewers this repo's own config can never select. Cache hits emitted nothing at all, so the hit RATE — the one number a judgement-cache change must be sized against — was unobtainable; the story's '9.4% hit rate' was actually review_result rows whose reviewer PROSE contained the word 'caching'. A cache write lost to lock contention on a shared .devkit/ was equally silent, leaving a re-judged PASS indistinguishable from an ordinary miss. Cost: a medium-severity performance story proposing concurrency and cache-key rewrites, three of whose four proposals were already implemented.
+**Ruling:** Gate telemetry is self-describing. (1) Every emitted event identifies its origin: the ship envelope stamps repo/branch from DEVKIT_SHIP_REPO/DEVKIT_SHIP_BRANCH exported by the ship script, degrading to empty strings rather than guessing. (2) Every judgement outcome emits — INCLUDING the non-outcomes: a cache hit emits cache_hit, a lost cache write emits cache_write_failed. (3) Those cheap outcomes get their OWN event type, never a synthetic row on an existing one, and carry the SAME judge label judge_exec uses — so hit rate is cache_hit/(cache_hit+judge_exec) grouped by judge, with no join and no inference.
+**Consequences:**
+- Positive: Per-repo, per-judge hit rate and lost-write rate are readable straight off the raw stream, so a cache or concurrency change can be sized before it is written and verified after — instead of argued from a proxy. The existing review_result rows keep their meaning as a population of judgements that actually ran, so fail-rate and duration percentiles stay trustworthy.
+- Negative: One event per cache hit instead of silence, on the cheapest path in the gate (a fully-cached review now writes ~5 lines where it wrote none). A second event type every consumer must learn, and a third for write failures. repo/branch depend on the ship script exporting them, so a caller that sets DEVKIT_SHIP_ID by hand gets empty strings — honest, but still unattributed.
+**Vision-fit:** n/a — internal tooling
+**Researched:** Measured directly against ~/.devkit/telemetry/gate-events.jsonl for 2026-07-25: 425 judge_exec (403 ok / 5 timeout / 17 transient), 310 review_result with zero repo fields, 59 ships with 0 repeated reviewers (refuting the reported double-run), and a 10-transient burst inside 19s across 5 reviewers.
+**Rejected:** (a) Fold cache hits into review_result as a synthetic {status:'pass', secs:0} row — REJECTED: it inflates that event's fail-rate denominator and flattens the duration percentiles read off the very same rows, destroying the baseline the follow-up cache work has to be sized against. (b) Leave ship events repo-less and have readers JOIN every row back to ship_attempt on ship_id — REJECTED: the sink is per-machine, so any un-joined read silently blends repos, which is exactly how this story's numbers were produced. (c) Derive repo in-process from git rev-parse --show-toplevel — REJECTED: a ship runs its gates inside an ephemeral worktree whose basename is a temp directory, so it would confidently record the wrong repo.
+**Anchored-bet:** [BET]
+**Revisit-when:** The default sink becomes per-repo rather than per-machine (making the repo field redundant), or a consumer needs hit rate at a granularity finer than the judge label.
+**Scope:** gate-engine/judge/gate-events.mts,gate-engine/judge/run-context.mts
+**Source:** shortcut · sc-1239

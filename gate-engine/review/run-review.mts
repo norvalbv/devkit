@@ -32,7 +32,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
-import { emitGateEvent } from '../judge/gate-events.mts';
+import { emitCacheHit, emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
@@ -498,14 +498,12 @@ export async function runReviewGate(
   const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
   const toRun: { sel: ReviewerSelection; key: string; diffText: string }[] = [];
   for (let i = 0; i < selected.length; i++) {
-    const key = cacheKey(
-      selected[i].reviewer.name,
-      diffs[i],
-      identitySalts.get(selected[i].reviewer.name) ?? '',
-    );
-    if (cache[key])
-      console.error(`guard-review: ${selected[i].reviewer.name} — cached PASS (identical diff)`);
-    else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
+    const name = selected[i].reviewer.name;
+    const key = cacheKey(name, diffs[i], identitySalts.get(name) ?? '');
+    if (cache[key]) {
+      console.error(`guard-review: ${name} — cached PASS (identical diff)`);
+      emitCacheHit(`review:${name}`, cache[key].model); // else this saving is invisible downstream
+    } else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
   }
   if (toRun.length === 0) return 0;
   console.error(

@@ -42,6 +42,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
+import { emitCacheHit } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
 import { execJudge, strictRemedy } from "../judge/run-judge.mjs";
 import { currentTarget, parseDecision } from "./decisions.mjs";
@@ -322,6 +323,7 @@ function alignmentPass(cwd, cfg, changed) {
         const key = verdictKey('align', t.slug, t.ruling, t.vision, domainDiff);
         if (hasVerdict(cwd, key)) {
             console.error(`decision-alignment: "${t.slug}" — cached ALIGN (identical diff)`);
+            emitCacheHit('decision-alignment'); // no model: the store records the verdict, not its judge
             continue;
         }
         const d = judgeDetailed(matched, t, cwd);
