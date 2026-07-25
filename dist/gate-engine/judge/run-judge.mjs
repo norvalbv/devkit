@@ -52,6 +52,53 @@ export function unavailableMessage(label, e, timeout) {
 function warnUnavailable(label, e, timeout) {
     console.error(unavailableMessage(label, e, timeout));
 }
+/**
+ * THE cap for a deep, tool-using judge that investigates a whole staged diff — the review-gate
+ * cascade (first pass + escalation) AND the commit-msg completeness judge. ONE constant on purpose
+ * (sc-1227): these were two independent literals, the review gate's was raised to 30 min for the
+ * reason below, completeness's was left at 420000 under a comment still claiming the two were
+ * "aligned", and every commit whose completeness judgement ran past 420s became unshippable —
+ * strict ship fails closed on a SKIP and completeness is the last gate.
+ *
+ * WHY 30 min (sc-1048): the correctness reviewer's deep four-lens investigation legitimately runs
+ * past the old 420s cap and got SIGKILLed mid-verdict — measured on the usage-tracker as repeated
+ * 421s inconclusive timeouts while the median run is ~60-250s. The cap is sized for the
+ * slow-but-working judge, not the median. A judge that TIMES OUT is never re-run (see
+ * cascadeVerdict), so a stuck judge still costs at most one cap, not two.
+ *
+ * NOTE: a single pass exceeds the 600s foreground tool cap — an AGENT-driven commit (the gate run
+ * inside a Bash tool) is still killed at 600s, so this cap takes FULL effect only for a commit run
+ * in a real terminal (or a detached ship), where SHIP_COMMIT_TIMEOUT is the outer bound.
+ *
+ * NOT for the shallow, scope-limited judges: the decisions gate's haiku/opus alignment cascade
+ * reads one target's staged hunks and keeps its own much tighter caps.
+ */
+export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
+/**
+ * The remedy line a fail-closed (strict/ship) gate prints when a judge produced no verdict. ONE
+ * wording seam for every gate (sc-1227) — completeness, the review cascade and decision-alignment
+ * each hand-rolled their own copy, and the copies drifted.
+ *
+ * The CAUSE decides the remedy, and getting that wrong costs real operator time:
+ * - `timeout` — the gate's OWN contention kill at the cap. Sending the operator to auth/quota here
+ *   is a dead end on a demonstrably healthy CLI (sc-1227, the same misdiagnosis sc-1049 fixed for
+ *   the warning line). The levers that actually work are re-running, getting out from under the
+ *   600s agent-tool cap, and shrinking the commit.
+ * - `sync` — a missing brief/checklist artifact: an un-synced consumer, not an outage.
+ * - `outage` — a genuine dark judge (ENOENT / 401 / non-zero exit): auth/quota is the right place.
+ *
+ * Each caller appends its own cached-verdict clause — what a retry re-uses differs per gate.
+ */
+export function strictRemedy(cause) {
+    if (cause === 'timeout')
+        return ('the judge hit its time cap — this is NOT an auth/quota problem. Re-run `devkit ship`; run ' +
+            'it in a real terminal or a detached ship so the 600s agent tool cap cannot kill it early; ' +
+            'or stage a smaller commit, which judges faster');
+    if (cause === 'sync')
+        return ('run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are ' +
+            'present, then re-run devkit ship');
+    return 'check `claude` CLI auth/quota, then re-run devkit ship';
+}
 // execFile's `timeout` fires by KILLING the child (SIGTERM), which marks the error `killed`. That
 // kill — not ENOENT / quota / a non-zero exit — is the one outage a retry can't fix: the re-run would
 // burn the same budget again. Callers that retry use this to skip a timeout. (ETIMEDOUT covers the
