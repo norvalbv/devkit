@@ -108,7 +108,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Deterministic orchestrator | bin | shipped | none | — |
 | Semantic duplication gate | bin | shipped | evidence-only | co-occurrence |
 | Duplication allowlist CLI | bin | shipped | none | — |
-| Fallow staged filter | bin | shipped | none | — |
 | Folder fan-out ratchet | bin | shipped | none | — |
 | Prefix cache gate | bin | shipped | none | — |
 | qavis advisory gate | bin | shipped | external-required | qavis |

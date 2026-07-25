@@ -18,6 +18,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   checkHookRegistrations,
+  FALLOW_STAGED_GATE,
+  hookScriptsFor,
   installHookRegistrations,
   removeHookRegistrations,
   syncHookScripts,
@@ -94,23 +96,19 @@ describe('installHookRegistrations', () => {
     expect(cur.afterShellExecution).toHaveLength(1);
   });
 
-  it('registers all seven agentHooks across the correct Claude events', () => {
+  it('registers all six agentHooks across the correct Claude events', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['agentHooks']);
     const h = claude(root).hooks;
     expect(h.UserPromptSubmit).toHaveLength(1);
     expect(h.Stop[0].hooks).toHaveLength(3); // decision + lint + knip
     expect(h.PreCompact).toHaveLength(1);
-    // The fallow gate is the one agentHooks entry that gates a Bash tool call before it runs.
-    expect(h.PreToolUse[0].hooks[0].command).toContain('fallow-gate.sh');
-    expect(h.PreToolUse[0].matcher).toBe('Bash');
-    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1),
-    // PreToolUse+Bash→beforeShellExecution (1); UserPromptSubmit dropped.
+    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1);
+    // UserPromptSubmit dropped.
     const cur = cursor(root).hooks;
     expect(cur.stop).toHaveLength(3);
     expect(cur.afterFileEdit).toHaveLength(1);
     expect(cur.preCompact).toHaveLength(1);
-    expect(cur.beforeShellExecution).toHaveLength(1);
     expect(cur.UserPromptSubmit).toBeUndefined();
   });
 
@@ -136,7 +134,95 @@ describe('installHookRegistrations', () => {
     const first = claudeCommands(root).length;
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     expect(claudeCommands(root).length).toBe(first);
-    expect(first).toBe(9);
+    expect(first).toBe(8);
+  });
+
+  it('reclaims a RETIRED devkit command a consumer still has installed', () => {
+    // devkit briefly registered its own .claude/hooks/fallow-gate.sh. The strip set is derived from
+    // the LIVE registry, so deleting that entry also deleted devkit's ability to remove it — the
+    // consumer would keep a dead hook forever, double-firing alongside the entry fallow's own
+    // installer writes for the same path. RETIRED_CLAUDE_COMMANDS keeps it strip-only.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"' },
+      ],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+
+    expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
+  });
+
+  it("reclaims fallow's OWN generated agent-gate registration", () => {
+    // devkit briefly installed it via `fallow hooks install --target agent`. It resolves its base
+    // as the merge-base against the remote default, so left in place it fires beside devkit's
+    // staged-scope wrapper and re-blocks on the unstaged work the wrapper exists to exclude.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command:
+            'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+        },
+      ],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+
+    expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
+  });
+
+  it('reclaims the CURSOR mirror of a retired registration', () => {
+    // The retired Claude entry was mirrored to Cursor, and the script it points at is deleted by
+    // the generic sync — so without a Cursor reclaim the consumer keeps a beforeShellExecution
+    // entry aimed at a file that no longer exists, with no code path able to remove it.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
+    const settings = cursor(root);
+    settings.hooks.beforeShellExecution = [{ command: '.cursor/hooks/fallow-gate.sh' }];
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
+
+    const commands = Object.values(cursor(root).hooks)
+      .flat()
+      .map((hook) => hook.command);
+    expect(commands).not.toContain('.cursor/hooks/fallow-gate.sh');
+  });
+
+  it("leaves devkit's LIVE staged gate alone when reclaiming the retired one", () => {
+    // devkit's live gate is a DIFFERENT script (fallow-staged-gate.sh) owned by the FALLOW
+    // component. Reclaiming the retired fallow-gate.sh strings must not touch it, or every init
+    // would disable the gate it just wired.
+    const root = tmpRepo();
+    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
+    const liveGate = 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"';
+    expect(claudeCommands(root)).toContain(liveGate);
+
+    const settings = claude(root);
+    settings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"' },
+      ],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
+
+    const commands = claudeCommands(root);
+    expect(commands).toContain(liveGate); // the live gate survives...
+    expect(commands.some((c) => c.endsWith('/fallow-gate.sh"'))).toBe(false); // ...the retired one does not
   });
 
   it('preserves a foreign (non-devkit) hook command on merge', () => {
@@ -305,6 +391,26 @@ describe('syncHookScripts --only / --targets', () => {
     expect(hookExists(root, 'decision-edit-guard.mjs')).toBe(false);
     expect(hookExists(root, 'lint-check.sh')).toBe(true);
     expect(Object.keys(manifest(root).files)).toEqual(['lint-check.sh']);
+  });
+
+  it('keeps the fallow gate for a fallow:true repo — it is not part of the agentHooks bundle', () => {
+    // The gate belongs to the FALLOW component. A caller that computes `desired` without the
+    // fallow flag omits an INSTALLED gate, and exact reconciliation then prunes it as deselected —
+    // silently disabling it. hookScriptsFor's `fallow` param is required so no caller can forget.
+    const root = tmpRepo();
+    const withFallow = hookScriptsFor({ agentHooks: false, decisions: false, fallow: true });
+    expect(withFallow).toContain(FALLOW_STAGED_GATE);
+    syncHookScripts(root, { desired: withFallow, targets: ['claude'] });
+    expect(hookExists(root, FALLOW_STAGED_GATE)).toBe(true);
+
+    // A later full sync for the SAME selection must not remove it.
+    syncHookScripts(root, { desired: withFallow, targets: ['claude'] });
+    expect(hookExists(root, FALLOW_STAGED_GATE)).toBe(true);
+
+    // And the agentHooks bundle alone must not carry it.
+    expect(hookScriptsFor({ agentHooks: true, decisions: false, fallow: false })).not.toContain(
+      FALLOW_STAGED_GATE,
+    );
   });
 
   it('does NOT prune a deselected hook the consumer has since edited', () => {

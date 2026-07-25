@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const fallowSpies = vi.hoisted(() => ({
   installFallow: vi.fn(() => ({ ok: true, method: 'bun', message: 'installed fallow' })),
   ensureFallowGitignore: vi.fn(),
-  wireFallowGate: vi.fn(() => ({ ok: true })),
+  wireFallowHooks: vi.fn(() => ({ ok: true, log: ['wired'] })),
   saveFallowBaselines: vi.fn(() => ({ ok: true })),
 }));
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
@@ -590,12 +590,12 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     });
     expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
     expect(fallowSpies.ensureFallowGitignore).toHaveBeenCalledTimes(1);
-    expect(fallowSpies.wireFallowGate).toHaveBeenCalledTimes(1);
-    // Gate target is git (the husky-managed hook, not the agent hook).
-    expect(fallowSpies.wireFallowGate.mock.calls[0][0]).toMatchObject({ target: 'git' });
+    // devkit wires FALLOW's own hooks (git + agent + the Cursor mirror) rather than shipping a
+    // gate of its own — wireFallowHooks owns that; install-fallow.test covers its per-target calls.
+    expect(fallowSpies.wireFallowHooks).toHaveBeenCalledTimes(1);
     // install runs before the gate is wired.
     expect(fallowSpies.installFallow.mock.invocationCallOrder[0]).toBeLessThan(
-      fallowSpies.wireFallowGate.mock.invocationCallOrder[0],
+      fallowSpies.wireFallowHooks.mock.invocationCallOrder[0],
     );
     expect(config(root).components.fallow).toBe(true);
   });
@@ -608,7 +608,7 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
       devkitRef: 'v0.3.0',
     });
     expect(fallowSpies.installFallow).not.toHaveBeenCalled();
-    expect(fallowSpies.wireFallowGate).not.toHaveBeenCalled();
+    expect(fallowSpies.wireFallowHooks).not.toHaveBeenCalled();
     expect(config(root).components.fallow).toBe(false);
   });
 });

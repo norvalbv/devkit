@@ -42,12 +42,46 @@ function toCursorCommand(command) {
 const ALL_DEVKIT_REGISTRATIONS = registrationsFor(Object.keys(HOOK_REGISTRATIONS));
 const DEVKIT_CLAUDE_COMMANDS = new Set(ALL_DEVKIT_REGISTRATIONS.map((registration) => registration.command));
 const DEVKIT_CURSOR_COMMANDS = new Set(ALL_DEVKIT_REGISTRATIONS.filter(({ event, matcher, cursorEvent }) => cursorEvent ?? CURSOR_EVENT[event]?.[matcher]).map((registration) => toCursorCommand(registration.command)));
+/**
+ * Commands devkit ONCE registered and must still reclaim on a reconcile.
+ *
+ * The strip sets above are derived from the LIVE registry, so a command string vanishes from them
+ * the moment its registration is deleted — and with it devkit's ability to remove what it wrote.
+ * A consumer that installed the retired hook would keep a dead entry that no `init`, `doctor` or
+ * `clean` could ever reach again, contradicting this module's own contract ("removal strips exactly
+ * the commands a component added").
+ *
+ * Concretely: devkit briefly shipped its own `.claude/hooks/fallow-gate.sh` gate
+ * ([[fallow-gate-owned-by-fallow]]). It now wires fallow's own hook instead, and fallow's installer
+ * writes an entry for a script at that same path — so the orphan would not merely linger, it would
+ * fire the gate twice per Bash tool call. These are STRIP-ONLY: never re-added, only cleaned up.
+ * The match is exact, so fallow's own entry (which carries a `FALLOW_GATE_COMMIT_ONLY=1` prefix) is
+ * untouched.
+ *
+ * BOTH surfaces need reclaiming. The Claude registration was mirrored to Cursor as
+ * `.cursor/hooks/fallow-gate.sh`, and the script itself is removed by the generic sync (the file no
+ * longer exists in agents-hooks/) — so without the Cursor set, a consumer keeps a
+ * `beforeShellExecution` entry pointing at a deleted file, forever. devkit's live gate registers a
+ * DIFFERENT command (`fallow-staged-gate.sh`), so reclaiming the old string cannot touch it.
+ */
+const RETIRED_CLAUDE_COMMANDS = new Set([
+    // devkit's own short-lived gate.
+    'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    // fallow's GENERATED agent gate, which devkit briefly installed via `fallow hooks install
+    // --target agent`. It resolves its base as the merge-base against the remote default, so left in
+    // place it fires beside devkit's staged-scope wrapper and re-blocks on the very unstaged work the
+    // wrapper exists to exclude.
+    'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+]);
+/** The Cursor mirrors of those same retired registrations (toCursorCommand of the strings above). */
+const RETIRED_CURSOR_COMMANDS = new Set(['.cursor/hooks/fallow-gate.sh']);
 function stripClaude(hooks) {
     const out = {};
     for (const [event, groups] of Object.entries(hooks ?? {})) {
         const kept = [];
         for (const group of groups) {
-            const commands = (group.hooks ?? []).filter((hook) => !(hook.command && DEVKIT_CLAUDE_COMMANDS.has(hook.command)));
+            const commands = (group.hooks ?? []).filter((hook) => !(hook.command &&
+                (DEVKIT_CLAUDE_COMMANDS.has(hook.command) || RETIRED_CLAUDE_COMMANDS.has(hook.command))));
             if (commands.length)
                 kept.push({ ...group, hooks: commands });
         }
@@ -59,7 +93,8 @@ function stripClaude(hooks) {
 function stripCursor(hooks) {
     const out = {};
     for (const [event, list] of Object.entries(hooks ?? {})) {
-        const kept = (list ?? []).filter((hook) => !(hook.command && DEVKIT_CURSOR_COMMANDS.has(hook.command)));
+        const kept = (list ?? []).filter((hook) => !(hook.command &&
+            (DEVKIT_CURSOR_COMMANDS.has(hook.command) || RETIRED_CURSOR_COMMANDS.has(hook.command))));
         if (kept.length)
             out[event] = kept;
     }

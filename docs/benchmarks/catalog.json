@@ -22,7 +22,6 @@
     { "id": "bin-guard-deterministic", "label": "Deterministic orchestrator", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-deterministic" },
     { "id": "bin-guard-dup", "label": "Semantic duplication gate", "kind": "bin", "lifecycle": "shipped", "evidence": "evidence-only", "suiteIds": ["co-occurrence"], "canonical": "package.json#bin:guard-dup" },
     { "id": "bin-guard-dup-allowlist", "label": "Duplication allowlist CLI", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-dup-allowlist" },
-    { "id": "bin-guard-fallow-staged", "label": "Fallow staged filter", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-fallow-staged" },
     { "id": "bin-guard-fanout", "label": "Folder fan-out ratchet", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-fanout" },
     { "id": "bin-guard-prefix", "label": "Prefix cache gate", "kind": "bin", "lifecycle": "shipped", "evidence": "none", "suiteIds": [], "canonical": "package.json#bin:guard-prefix" },
     { "id": "bin-guard-qavis-advisory", "label": "qavis advisory gate", "kind": "bin", "lifecycle": "shipped", "evidence": "external-required", "suiteIds": ["qavis"], "canonical": "package.json#bin:guard-qavis-advisory" },

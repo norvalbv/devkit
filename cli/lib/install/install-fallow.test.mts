@@ -12,9 +12,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const spawnSync = vi.fn();
 vi.mock('node:child_process', () => ({ spawnSync: (...a) => spawnSync(...a) }));
 
-const { FALLOW_PINNED_VERSION, detectFallow, installFallow, ensureFallowGitignore } = await import(
-  './install-fallow.mts'
-);
+const {
+  FALLOW_PINNED_VERSION,
+  detectFallow,
+  installFallow,
+  ensureFallowGitignore,
+  wireFallowHooks,
+} = await import('./install-fallow.mts');
 
 let roots = [];
 function tmpRepo() {
@@ -133,5 +137,24 @@ describe('ensureFallowGitignore', () => {
     const root = tmpRepo();
     ensureFallowGitignore({ cwd: root, dryRun: true });
     expect(existsSync(join(root, '.gitignore'))).toBe(false);
+  });
+});
+
+// devkit installs FALLOW's hooks rather than shipping a gate of its own: `fallow audit` already
+// defaults to --gate new-only and takes --diff-file/--diff-stdin, so a devkit-authored gate would
+// reimplement fallow's attribution and drift from it. What devkit owns is the WIRING — including
+// the Cursor surface, which fallow's installer does not write.
+describe('wireFallowHooks', () => {
+  it("wires fallow's own GIT hook, and deliberately not its agent gate", () => {
+    spawnSync.mockReturnValue(result(0));
+    const root = tmpRepo();
+    const r = wireFallowHooks({ cwd: root });
+    expect(r.ok).toBe(true);
+    const targets = spawnSync.mock.calls
+      .filter(([cmd, args]) => cmd === 'fallow' && args[0] === 'hooks')
+      .map(([, args]) => args[args.indexOf('--target') + 1]);
+    // ONLY the git hook. fallow's agent gate is deliberately not installed — it would fire beside
+    // devkit's staged-scope wrapper and re-block on the unstaged work the wrapper excludes.
+    expect(targets).toEqual(['git']);
   });
 });

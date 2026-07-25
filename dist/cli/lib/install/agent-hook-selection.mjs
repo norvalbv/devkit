@@ -7,10 +7,12 @@ export function selectedHookAssets(selection, { searchSteering = true } = {}) {
             searchSteering && selection.searchSteering && 'searchSteering',
             selection.agentHooks && 'agentHooks',
             decisions && 'decisions',
+            selection.fallow && 'fallow',
         ].filter((value) => Boolean(value)),
         scripts: hookScriptsFor({
             agentHooks: Boolean(selection.agentHooks),
             decisions,
+            fallow: Boolean(selection.fallow),
         }),
     };
 }
