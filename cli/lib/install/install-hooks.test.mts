@@ -298,4 +298,26 @@ describe('syncHookScripts --only / --targets', () => {
     expect(hookExists(root, 'lint-check.sh')).toBe(true);
     expect(Object.keys(manifest(root).files)).toEqual(['lint-check.sh']);
   });
+
+  it('does NOT prune a deselected hook the consumer has since edited', () => {
+    // Manifest membership records that devkit WROTE the file, not that the file is still devkit's.
+    // A consumer repo that turned a component off after customising its hook would otherwise have
+    // that work deleted — while the write path refuses the same clobber (findConflicts). Real
+    // instance: a repo with agentHooks:false lost three hooks it had authored changes in.
+    const root = tmpRepo();
+    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
+    const hook = join(root, '.claude', 'hooks', 'decision-stop-check.sh');
+    writeFileSync(hook, `${readFileSync(hook, 'utf8')}\n# frink-local tweak\n`);
+
+    syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
+    expect(existsSync(hook)).toBe(true);
+    expect(readFileSync(hook, 'utf8')).toContain('# frink-local tweak');
+  });
+
+  it('still prunes a deselected hook left pristine', () => {
+    const root = tmpRepo();
+    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
+    syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
+    expect(hookExists(root, 'decision-stop-check.sh')).toBe(false);
+  });
 });

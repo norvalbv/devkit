@@ -81,7 +81,18 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
                 continue;
             for (const target of cleanupTargets) {
                 const dest = join(root, `.${target}`, 'hooks', name);
-                if (!dryRun && existsSync(dest))
+                if (!existsSync(dest))
+                    continue;
+                // Manifest membership means devkit WROTE this file once — not that the file is still
+                // devkit's. Deselecting a component must never delete edits the consumer made to it, which
+                // is exactly the rule the write path below already enforces via findConflicts
+                // ("preserving non-devkit agent-hook"). Compare against the sha devkit recorded: reclaim
+                // only pristine copies, and leave a modified one in place with a visible notice.
+                if (sha256(dest) !== prev?.files?.[name]) {
+                    console.log(`  ! keeping deselected agent-hook ".${target}/hooks/${name}" — modified since devkit wrote it (delete it yourself if unwanted)`);
+                    continue;
+                }
+                if (!dryRun)
                     rmSync(dest, { force: true });
             }
         }
