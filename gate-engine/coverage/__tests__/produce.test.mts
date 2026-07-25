@@ -32,6 +32,7 @@ import {
   resolveRunDir,
   resolveVitest,
   STALE_RUN_MS,
+  snapshotArtifact,
 } from '../produce.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -91,7 +92,7 @@ describe('publishCoverage', () => {
     const dir = runDirWith(root, 'runA');
     writeFileSync(join(dir, REPORT_NAME), '{"a.ts":{}}');
 
-    expect(publishCoverage(dir, root)).toBe(true);
+    expect(publishCoverage(dir, root, null)).toBe(true);
     expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({ 'a.ts': {} });
     expect(existsSync(join(dir, REPORT_NAME))).toBe(false);
   });
@@ -104,34 +105,73 @@ describe('publishCoverage', () => {
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
     const dir = runDirWith(root, 'runA');
-    // Explicit: the artifact predates this run, so it is stale by definition. Leaving startedAt to
-    // default to Date.now() would race the file's own mtime and make this assertion a coin flip.
-    const startedAfterTheArtifactWasWritten = Date.now() + 60_000;
+    // Unchanged since we snapshotted it ⇒ it is the very file this run started with ⇒ stale.
+    const before = snapshotArtifact(root);
 
-    expect(publishCoverage(dir, root, startedAfterTheArtifactWasWritten)).toBe(false);
+    expect(publishCoverage(dir, root, before)).toBe(false);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
   });
 
-  // ...but a FAILING run must not destroy a SUCCEEDING sibling's result either. An artifact newer
-  // than our start belongs to a run that published while we were still going, and deleting it would
+  // ...but a FAILING run must not destroy a SUCCEEDING sibling's result either. An artifact that
+  // CHANGED since our snapshot was republished by a sibling while we ran, and deleting it would
   // reintroduce — at the artifact level — the cross-run interference this module exists to remove.
-  it('keeps an artifact a sibling published after this run started', () => {
+  it('keeps an artifact a sibling replaced while this run was going', () => {
     const root = makeRoot();
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
     const dir = runDirWith(root, 'runA');
-    const startedBeforeTheSiblingPublished = Date.now() - 60_000;
+    const aDifferentFileThanTheOneThereNow = snapshotArtifact(root)! - 5_000;
 
-    expect(publishCoverage(dir, root, startedBeforeTheSiblingPublished)).toBe(false);
+    expect(publishCoverage(dir, root, aDifferentFileThanTheOneThereNow)).toBe(false);
     expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({
       'sibling.ts': {},
     });
   });
 
+  // A run whose artifact appeared from nothing never owned it — a sibling created it mid-run.
+  it('keeps an artifact that appeared during the run', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
+    const dir = runDirWith(root, 'runA');
+
+    expect(publishCoverage(dir, root, null)).toBe(false); // null = nothing there when we started
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+  });
+
+  // THE FAIL-OPEN (found in v0.43.1, in the field). On a failed run vitest's `cleanAfterRun()` deletes
+  // the reports directory once it is empty — so by the time we clear, runDir is GONE. While the claim
+  // file was written inside runDir, the rename threw ENOENT, the catch swallowed it, and the previous
+  // run's report survived for the gate to trust. Every other test here created runDir by hand, so the
+  // one arrangement that actually occurs in production was the one never exercised.
+  it('still clears the stale artifact when vitest deleted the run directory', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
+    const dir = runDirWith(root, 'runA');
+    const before = snapshotArtifact(root);
+    rmSync(dir, { recursive: true, force: true }); // exactly what cleanAfterRun() does
+
+    expect(publishCoverage(dir, root, before)).toBe(false);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+  });
+
+  it('leaves no claim file behind in coverage/', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
+    const dir = runDirWith(root, 'runA');
+    const before = snapshotArtifact(root);
+    rmSync(dir, { recursive: true, force: true });
+
+    publishCoverage(dir, root, before);
+    expect(readdirSync(join(root, COVERAGE_DIR)).filter((f) => f.includes('cleared'))).toEqual([]);
+  });
+
   it('is a no-op when there is neither a fresh nor a stale report', () => {
     const root = makeRoot();
     const dir = runDirWith(root, 'runA');
-    expect(() => publishCoverage(dir, root)).not.toThrow();
+    expect(() => publishCoverage(dir, root, null)).not.toThrow();
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
   });
 
@@ -139,7 +179,7 @@ describe('publishCoverage', () => {
     const root = makeRoot();
     const dir = runDirWith(root, 'runA');
     writeFileSync(join(dir, REPORT_NAME), '{}');
-    expect(publishCoverage(dir, root)).toBe(true);
+    expect(publishCoverage(dir, root, null)).toBe(true);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
   });
 });
@@ -217,6 +257,32 @@ describe('a run that verified nothing', () => {
     );
 
     expect(await produceCoverage(root)).toBe(1);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+  }, 120_000);
+
+  // The fail-closed guarantee, end to end against real vitest — the arrangement the unit tests could
+  // not reproduce, because it depends on vitest deleting its own reports directory.
+  it('clears a previous report when the suite actually fails', async () => {
+    const root = makeRoot();
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage' },
+        },
+      };\n`,
+    );
+    writeFileSync(
+      join(root, 'boom.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('fails', () => { expect(1).toBe(2); });\n`,
+    );
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+
+    expect(await produceCoverage(root)).not.toBe(0);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
   }, 120_000);
 
