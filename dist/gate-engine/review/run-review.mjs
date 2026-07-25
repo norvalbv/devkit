@@ -33,7 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { envFlag, resolveGuardConfig } from "../config.mjs";
 import { emitGateEvent } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
-import { execJudgeAsync } from "../judge/run-judge.mjs";
+import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { composeTranscript, saveTranscript } from "../judge/transcript-store.mjs";
 import { loadCache, savePasses } from "./cache.mjs";
 import { renderGoverningClaudeMd } from "./claude-md.mjs";
@@ -46,6 +46,9 @@ import { agentBody, cleanupChecklistState, enforceChecklistContract, passAssetVe
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
 // (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
 const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
+// A cap kill, likewise, is the gate's OWN contention kill — not auth/quota. Matches the reasons
+// cascadeVerdict sets from the judge's outage KIND (`judge timed out` / `escalation timed out`).
+const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
 // GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
 // per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
 function skippedReviewers() {
@@ -54,29 +57,17 @@ function skippedReviewers() {
         .map((s) => s.trim())
         .filter(Boolean));
 }
-// Judge timeouts include the checklist workflow (generate → per-item marks → finalize) on top of
-// diff investigation. The per-pass caps are GENEROUS (30 min): the correctness reviewer's deep
-// four-lens investigation legitimately runs past the old 420s cap and got SIGKILLed mid-verdict —
-// measured on the usage-tracker as repeated 421s inconclusive timeouts while the median run is
-// ~60-250s. The cap is sized for the slow-but-working judge, not the median. A judge that TIMES OUT
-// is never re-run (see cascadeVerdict), so a stuck judge still costs at most one cap, not two.
+// Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
+// (judge/run-judge.mts), as does the commit-msg completeness judge; the 30-min rationale lives with
+// the constant. Three same-valued locals here is exactly how it drifted from completeness (sc-1227).
 //
 // Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
-// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate. PER-CASCADE worst ≈
-// 1×1800 (first pass) + 1800 (escalate) = 3600s. With the concurrency cap (GUARD_REVIEW_CONCURRENCY,
-// default 2) cascades run in ceil(N/K) WAVES, so the theoretical worst wall-clock far exceeds
-// SHIP_COMMIT_TIMEOUT (now 3600s default) — by design: a killed ship CONVERGES on re-run because
-// PASSes checkpoint per-completion and the caches skip everything already earned
-// (docs/decisions/ship-gates-converge-not-restart.md). In practice only correctness approaches the
-// cap; the rest finish <300s, so a real ship is one slow wave + fast waves, comfortably under 3600s.
-//
-// NOTE: a single pass can now exceed the 600s foreground tool cap — an AGENT-driven commit (the gate
-// run inside a Bash tool) is still killed at 600s, so the generous caps take FULL effect only for a
-// commit run in a real terminal (or a detached ship), where SHIP_COMMIT_TIMEOUT is the outer bound.
-const FIRST_TIMEOUT_MS = 1800000; // 30 min — the slow-but-working reviewer (correctness) needs the room
-// ship/strict first pass shares the same generous cap; the outer SHIP_COMMIT_TIMEOUT is the safety net.
-const STRICT_FIRST_TIMEOUT_MS = 1800000;
-const ESCALATE_TIMEOUT_MS = 1800000; // opus re-investigation; only fires pre-block, never retried
+// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate + completeness on the same
+// cap. PER-CASCADE worst ≈ 1800 (first) + 1800 (escalate) = 3600s; under the concurrency cap (default
+// 2, see the docblock) cascades run in ceil(N/K) WAVES, so the theoretical worst far exceeds
+// SHIP_COMMIT_TIMEOUT (3600s) — by design: a killed ship CONVERGES on re-run because PASSes checkpoint
+// per-completion and the caches skip what was earned (docs/decisions/ship-gates-converge-not-restart.md).
+// Only correctness nears the cap; the rest finish <300s, so a real ship is one slow wave + fast waves.
 // Bounded-concurrency map: at most `limit` fn calls in flight, input order preserved.
 // LOAD-BEARING: fn must never reject — the caller pre-wraps the cascade body in .catch. A worker
 // rejection here would reject Promise.all and abandon siblings' pending per-completion checkpoints.
@@ -250,7 +241,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         label: `review:${reviewer.name}`,
         args: args(prompt, passModel),
         input,
-        timeout: retryFirst ? STRICT_FIRST_TIMEOUT_MS : FIRST_TIMEOUT_MS, // retryFirst === strict/ship
+        timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         transcript: false, // this gate persists its own review-<name> transcript — don't store twice
         env: judgeEnv,
@@ -261,9 +252,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
     let first = await exec(firstOpts);
     if (first === null && retryFirst && firstOutage !== 'timeout') {
         // Strict (ship) runs get ONE first-pass retry — a TRANSIENT/empty failure must not fail a ship
-        // closed. A TIMEOUT is NOT retried: the strict first pass already ran on the longer
-        // STRICT_FIRST_TIMEOUT_MS (a contended judge got its extra time UP FRONT), so a re-run burns the
-        // same budget past the ship ceiling. The escalation pass never retries: outage stays inconclusive.
+        // closed. A TIMEOUT is NOT retried: the pass already had the full DEEP_JUDGE_TIMEOUT_MS (a
+        // contended judge got its time UP FRONT), so a re-run burns the same budget again past the ship
+        // ceiling. The escalation pass never retries: outage stays inconclusive.
         // Colon (not " — ") on purpose: the ship timeout banner's awk reads `<name> — ` as COMPLETED.
         console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
@@ -273,7 +264,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         return {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: 'judge outage',
+            // The CAUSE rides in the reason so the strict remedy can name it (sc-1227): a cap kill is
+            // not an auth/quota outage, and that remedy wastes the operator's time on a healthy CLI.
+            reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
             escalated: false,
             model: passModel,
         };
@@ -308,20 +301,24 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             model: passModel,
             transcript: first,
         };
+    let secondOutage;
     const second = await exec({
         label: `review:${reviewer.name}:escalate`,
         args: args(escalatePrompt(prompt, first), 'opus'),
         input: stat,
-        timeout: ESCALATE_TIMEOUT_MS,
+        timeout: DEEP_JUDGE_TIMEOUT_MS, // opus re-investigation; only fires pre-block, never retried
         cwd,
         transcript: false, // this gate persists its own review-<name> transcript — don't store twice
         env: judgeEnv,
+        onOutage: (kind) => {
+            secondOutage = kind;
+        },
     });
     if (second === null)
         return {
             name: reviewer.name,
             status: 'inconclusive',
-            reason: 'escalation outage',
+            reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
             escalated: true,
             model: passModel,
             transcript: first, // the first-pass FAIL evidence survives even when opus was dark
@@ -508,15 +505,16 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         return 1;
     const inconclusive = results.filter((r) => r.status === 'inconclusive');
     for (const r of inconclusive) {
-        // The remedy must match the CAUSE: a missing brief (cascadeVerdict) or missing checklist artifact
-        // (verifyChecklist) is a SYNC gap — the auth/quota remedy is actively wrong and contradicts the
-        // reason. In a `devkit ship` worktree the briefs/skills must also be LINKED in (ship-branch.sh
-        // does this); an un-synced main checkout is the other cause. Runtime outages (judge outage, no
-        // VERDICT, engine error) keep the auth/quota remedy.
-        const syncCause = SYNC_INCONCLUSIVE_RE.test(r.reason);
-        const remedy = syncCause
-            ? 'run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are present, then re-run devkit ship'
-            : 'check `claude` CLI auth/quota, then re-run devkit ship';
+        // The remedy must match the CAUSE (wording: judge/run-judge strictRemedy). A missing brief
+        // (cascadeVerdict) or missing checklist artifact (verifyChecklist) is a SYNC gap — auth/quota is
+        // actively wrong there and contradicts the reason; in a `devkit ship` worktree the briefs/skills
+        // must also be LINKED in (ship-branch.sh does this), an un-synced main checkout being the other
+        // cause. A cap kill is a TIMEOUT, also not auth/quota. Only a genuine dark judge keeps it.
+        const remedy = strictRemedy(SYNC_INCONCLUSIVE_RE.test(r.reason)
+            ? 'sync'
+            : TIMEOUT_INCONCLUSIVE_RE.test(r.reason)
+                ? 'timeout'
+                : 'outage');
         console.error(strict
             ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${remedy} (completed verdicts are cached).`

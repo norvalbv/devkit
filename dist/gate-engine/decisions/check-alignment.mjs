@@ -38,14 +38,14 @@
  * CONSUMER cwd. Nothing anchors to the package dir. Run from a consumer's node_modules, this gate
  * judges THAT repo's staged changes against THAT repo's decision log.
  */
-import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
-import { execJudge } from "../judge/run-judge.mjs";
+import { execJudge, strictRemedy } from "../judge/run-judge.mjs";
 import { currentTarget, parseDecision } from "./decisions.mjs";
+import { git, stagedFiles } from "./git-io.mjs";
 import { hasVerdict, saveVerdict, verdictKey } from "./verdict-cache.mjs";
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
 const GLOB_ESC_RE = /[.+^${}()|[\]\\]/g;
@@ -127,18 +127,8 @@ export function parseDepthVerdict(raw) {
     const hits = ['PASS', 'THIN'].filter((v) => DEPTH_RE[v].test(out));
     return hits.length === 1 ? hits[0] : null;
 }
-// ─── git + fs + claude I/O (thin; run in the CONSUMER cwd) ───────────────────────
-// argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
-// JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
-function git(cwd, args) {
-    return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-function stagedFiles(cwd) {
-    return git(cwd, ['diff', '--cached', '--name-only'])
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-}
+// ─── fs + claude I/O (thin; run in the CONSUMER cwd) ─────────────────────────────
+// git/stagedFiles are shared with the detect gate — see git-io.mts.
 /** Every axis whose CURRENT Target declares a Scope → {slug, ruling, vision, scopeGlobs}. */
 export function loadScopedTargets(dir) {
     const target = dir ?? resolveFromCwd(resolveGuardConfig(process.cwd()), 'decisionsDir');
@@ -341,8 +331,11 @@ function alignmentPass(cwd, cfg, changed) {
             saveVerdict(cwd, key); // confident non-block only
         if (d.finalVerdict === null && strict) {
             // outage (first or escalation pass) or unparseable transcript
+            // Shared wording (judge/run-judge strictRemedy) so the three fail-closed gates cannot drift.
+            // This judge layer does not surface the outage KIND, so it reports the generic outage remedy;
+            // its caps are tight (120s/240s) and a cap kill here is not the observed failure mode.
             console.error(`decision-alignment: judge unavailable for target "${t.slug}" — strict ship mode fails closed.\n` +
-                '  Remedy: check `claude` CLI auth/quota, then re-run devkit ship.');
+                `  Remedy: ${strictRemedy('outage')}.`);
             process.exit(3);
         }
         if (gateExit(d.finalVerdict) !== 1)

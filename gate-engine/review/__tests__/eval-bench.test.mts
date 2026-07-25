@@ -432,12 +432,42 @@ describe('runCase', () => {
     }
   });
 
-  it('a scope-mismatched recorded-decision decoy aborts — the reviewer was never tempted', async () => {
+  it('a scope-mismatched decoy still reaches the prompt via the SEMANTIC channel', async () => {
+    // scopedTargets has two channels: scope-match (glob) and semantic (the commit message). Here
+    // the glob misses (Scope src/**, staged file in lib/) but the message "add export-csv shortcut
+    // action" matches the shortcuts-global-only Target, so the semantic supplement supplies it —
+    // which is exactly that channel's job.
+    //
+    // This used to abort with "not in the gate prompt": retrieval ranked INDEX.md rows only, and
+    // the fixture has no INDEX.md, so the semantic channel was silently dead. It is dead in real
+    // repos too whenever INDEX is incomplete — measured at 27% of axes on a real 86-axis corpus.
+    // Candidate generation now reads the decisions directory, so the channel works as designed.
     const row = makeRow({
       repo: {
         base: {
           'lib/other.ts': 'export {};\n',
-          // Scope src/** but the staged file lives in lib/ — the Target never loads.
+          'docs/decisions/shortcuts-global-only.md': DECOY_TARGET_MD,
+        },
+        staged: { 'lib/other.ts': 'export const x = 1;\n' },
+      },
+      gold: [],
+    });
+    const result = await runCase(row, {
+      reviewerExec: async () => REVIEWER_TRANSCRIPT,
+      matcherExec: matcherStub,
+      saveTranscript: false,
+    });
+    expect(result.id).toBe('test-registration-gap');
+  });
+
+  it('a decoy Target that reaches the reviewer by NO channel aborts as a fixture bug', async () => {
+    // The fixture-sanity assertion still bites: a decoy neither scope-matched nor topically
+    // reachable tests nothing, so the bench must refuse to score the case rather than pass it.
+    const row = makeRow({
+      message: 'chore: bump lockfile',
+      repo: {
+        base: {
+          'lib/other.ts': 'export {};\n',
           'docs/decisions/shortcuts-global-only.md': DECOY_TARGET_MD,
         },
         staged: { 'lib/other.ts': 'export const x = 1;\n' },

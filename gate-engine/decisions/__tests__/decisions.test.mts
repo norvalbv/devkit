@@ -9,6 +9,7 @@ import {
   clampGist,
   cosine,
   currentTarget,
+  loadAxisRows,
   parseDecision,
   parseIndex,
   renderDecision,
@@ -232,6 +233,78 @@ describe('retrieval helpers', () => {
     expect(g).toContain('CURRENT');
     expect(g).not.toContain('OLD');
     expect(g.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('loadAxisRows (the retrieval candidate set)', () => {
+  const paths = () => ({
+    cwd: dir,
+    decisionsDir: dir,
+    indexPath: join(dir, 'INDEX.md'),
+    vecIndexPath: join(dir, 'vec-index.json'),
+  });
+  const write = (name, body) => writeFileSync(join(dir, name), body);
+  const axis = (slug, blocks) =>
+    `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n\n${blocks}`;
+  const targetBlock = (date, ruling, context = 'a forcing failure') =>
+    `## Target · ${date} — ${ruling}\n\n**Context:** ${context}\n**Ruling:** ${ruling}\n**Source:** manual\n`;
+
+  it('returns an axis with NO INDEX row — the 27%-unreachable bug', () => {
+    // INDEX.md deliberately omits `orphan`; before this it could not be returned at any k.
+    write(
+      'INDEX.md',
+      renderIndex([{ slug: 'listed', ruling: 'r', why: 'w', updated: '2026-01-01' }]),
+    );
+    write('listed.md', axis('listed', targetBlock('2026-01-01', 'listed ruling')));
+    write('orphan.md', axis('orphan', targetBlock('2026-02-02', 'orphan ruling')));
+
+    const rows = loadAxisRows(paths());
+    expect(rows.map((r) => r.slug).sort()).toEqual(['listed', 'orphan']);
+    expect(rows.find((r) => r.slug === 'orphan')?.ruling).toBe('orphan ruling');
+  });
+
+  it('drops an INDEX row whose file is gone (it could never be shown)', () => {
+    write(
+      'INDEX.md',
+      renderIndex([{ slug: 'ghost', ruling: 'r', why: 'w', updated: '2026-01-01' }]),
+    );
+    expect(loadAxisRows(paths())).toEqual([]);
+  });
+
+  it('takes the LAST Target on a re-targeted axis, not the first', () => {
+    write(
+      'axis.md',
+      axis(
+        'axis',
+        `${targetBlock('2026-01-01', 'superseded ruling')}\n${targetBlock('2026-03-03', 'current ruling')}`,
+      ),
+    );
+    const row = loadAxisRows(paths())[0];
+    expect(row.ruling).toBe('current ruling');
+    expect(row.updated).toBe('2026-03-03');
+  });
+
+  it('reads the legacy pre-Target schema (## <date> — … with **Why / target:**)', () => {
+    // 49 of 86 blocks in the real corpus still use this shape; currentTarget() returns null for it.
+    write(
+      'legacy.md',
+      axis(
+        'legacy',
+        '## 2026-04-04 — no embeddings in v1\n\n**Ruling:** no embeddings in v1\n**Why / target:** axis set is bounded\n**Source:** brainstorm\n',
+      ),
+    );
+    const row = loadAxisRows(paths())[0];
+    expect(row.ruling).toBe('no embeddings in v1');
+    expect(row.why).toBe('axis set is bounded');
+    expect(row.updated).toBe('2026-04-04');
+  });
+
+  it('dates from a note bullet count toward `updated` (notes are newer than their Target)', () => {
+    write(
+      'hot.md',
+      axis('hot', `${targetBlock('2026-01-01', 'the ruling')}- 2026-06-09 — a later note\n`),
+    );
+    expect(loadAxisRows(paths())[0].updated).toBe('2026-06-09');
   });
 });
 
