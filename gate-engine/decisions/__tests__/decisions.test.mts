@@ -299,6 +299,36 @@ describe('loadAxisRows (the retrieval candidate set)', () => {
     expect(row.updated).toBe('2026-04-04');
   });
 
+  it('liveRulingId names the block a ruling was read from, per schema generation', () => {
+    write('modern.md', axis('modern', targetBlock('2026-01-01', 'r')));
+    write(
+      'legacy.md',
+      axis('legacy', '## 2026-04-04 — old\n\n**Ruling:** r\n**Source:** manual\n'),
+    );
+    write('bare.md', axis('bare', '- 2026-05-05 — a note with no block at all\n'));
+    const byslug = Object.fromEntries(loadAxisRows(paths()).map((r) => [r.slug, r.liveRulingId]));
+    expect(byslug).toEqual({
+      modern: 'target:2026-01-01',
+      legacy: 'entry:2026-04-04',
+      bare: null,
+    });
+  });
+
+  it('liveRulingId reports the LAST Target, so a stale ruling is visible against `updated`', () => {
+    // The real-corpus pathology, made machine-checkable without an LLM: the block answering the
+    // query is dated months before the file's newest content.
+    write(
+      'hot.md',
+      axis(
+        'hot',
+        `${targetBlock('2026-06-08', 'hooks follow the user')}- 2026-07-25 — actually they cannot\n`,
+      ),
+    );
+    const row = loadAxisRows(paths())[0];
+    expect(row.liveRulingId).toBe('target:2026-06-08');
+    expect(row.updated).toBe('2026-07-25'); // the gap IS the staleness signal
+  });
+
   it('dates from a note bullet count toward `updated` (notes are newer than their Target)', () => {
     write(
       'hot.md',
@@ -586,5 +616,50 @@ describe('draft amendments', () => {
     expect(blocked.stderr).toContain('earlier decision history differs from HEAD');
     expect(readFileSync(file, 'utf8')).toBe(changed);
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+});
+
+describe('query --json envelope (the bench contract)', () => {
+  const write = (name, body) => writeFileSync(join(dir, name), body);
+  const axis = (slug, ruling) =>
+    `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n\n## Target · 2026-01-01 — ${ruling}\n\n**Context:** a forcing failure\n**Ruling:** ${ruling}\n**Source:** manual\n`;
+  const json = (args) => JSON.parse(run(args).stdout);
+
+  it('RULED: ranks are 1..n, scores descend, margin is top1 - top2', () => {
+    write('http-transport.md', axis('http-transport', 'use an http proxy transport'));
+    write('auth-provider.md', axis('auth-provider', 'verify jwks at the edge'));
+    const env = json(['query', 'http proxy transport', '--json']);
+
+    expect(env.state).toBe('RULED');
+    expect(env.tau).toBeNull(); // no threshold is applied yet — null means "none", not zero
+    expect(env.rows.map((r) => r.rank)).toEqual([1]);
+    expect(env.rows[0].slug).toBe('http-transport');
+    expect(env.rows[0].liveRulingId).toBe('target:2026-01-01');
+    expect(env.cost.llmCalls).toBe(0);
+    expect(typeof env.cost.ms).toBe('number');
+  });
+
+  it('NO_RULING: nothing matched — empty rows, null margin, never a consolation list', () => {
+    write('http-transport.md', axis('http-transport', 'use an http proxy transport'));
+    const env = json(['query', 'kubernetes helm chart autoscaling', '--json']);
+    expect(env.state).toBe('NO_RULING');
+    expect(env.source).toBe('none');
+    expect(env.rows).toEqual([]);
+    expect(env.margin).toBeNull();
+  });
+
+  it('distinguishes an EMPTY log from a searched one that rules on nothing', () => {
+    expect(json(['query', 'anything', '--json']).source).toBe('empty');
+  });
+
+  it('ties break by slug so rank is reproducible across runs', () => {
+    // Identical bodies ⇒ identical BM25 scores; only the slug can order them.
+    write('zzz-axis.md', axis('zzz-axis', 'the shared ruling text'));
+    write('aaa-axis.md', axis('aaa-axis', 'the shared ruling text'));
+    const first = json(['query', 'shared ruling text', '--json']);
+    const second = json(['query', 'shared ruling text', '--json']);
+    expect(first.rows[0].score).toBeCloseTo(first.rows[1].score);
+    expect(first.rows.map((r) => r.slug)).toEqual(['aaa-axis', 'zzz-axis']);
+    expect(second.rows.map((r) => r.slug)).toEqual(first.rows.map((r) => r.slug));
   });
 });

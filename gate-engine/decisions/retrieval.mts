@@ -26,6 +26,8 @@ const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
 /** Legacy (pre-Target) schema: `**Ruling:**` / `**Why / target:**` under a bare `## <date> — …`. */
 const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
+const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
+const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
 
 /** Resolved on-disk paths for one consumer cwd (see decisions.mts `paths()`). */
 export interface RetrievalPaths {
@@ -43,8 +45,22 @@ interface VecEntry {
 }
 type VecIndex = Record<string, VecEntry>;
 
-/** An INDEX row plus its retrieval score. */
-type RankedRow = IndexRow & { score: number };
+/**
+ * A retrieval candidate: an INDEX-row-shaped record plus the id of the block that is CURRENT for
+ * that axis.
+ *
+ * `liveRulingId` exists so a consumer can name WHICH block a returned ruling came from without
+ * re-parsing the file — `target:<date>` for the current `## Target ·` block, `entry:<date>` for the
+ * legacy `## <date> —` schema (49 of 86 blocks in the frink corpus still use it), null when neither
+ * parses. It is deliberately a positional fact, not a claim about supersession: nothing in the
+ * format records that yet, so the id says "this is the block we read", never "this one is valid".
+ */
+export interface AxisRow extends IndexRow {
+  liveRulingId: string | null;
+}
+
+/** A candidate plus its retrieval score. */
+type RankedRow = AxisRow & { score: number };
 
 /**
  * Ranked axes plus which retrieval tier produced them.
@@ -57,7 +73,7 @@ type RankedRow = IndexRow & { score: number };
  */
 export interface RankResult {
   source: 'semantic' | 'lexical' | 'empty' | 'none';
-  rows: IndexRow[];
+  rows: RankedRow[];
 }
 
 /** The Ollama /api/embed response (external boundary). */
@@ -81,14 +97,14 @@ interface EmbedResponse {
  * INDEX stays the human-readable rendering, and supplies `ruling`/`why` only as a fallback for a
  * file we cannot parse a ruling out of.
  */
-export function loadAxisRows(p: RetrievalPaths): IndexRow[] {
+export function loadAxisRows(p: RetrievalPaths): AxisRow[] {
   const indexed = new Map(
     (existsSync(p.indexPath) ? parseIndex(readFileSync(p.indexPath, 'utf8')) : []).map((r) => [
       r.slug,
       r,
     ]),
   );
-  const rows: IndexRow[] = [];
+  const rows: AxisRow[] = [];
   const seen = new Set<string>();
   if (existsSync(p.decisionsDir)) {
     for (const file of readdirSync(p.decisionsDir).sort()) {
@@ -104,12 +120,12 @@ export function loadAxisRows(p: RetrievalPaths): IndexRow[] {
 }
 
 /** Derive one candidate row from an axis FILE, falling back to its INDEX row where unparseable. */
-function axisRow(p: RetrievalPaths, slug: string, fallback: IndexRow | undefined): IndexRow {
+function axisRow(p: RetrievalPaths, slug: string, fallback: IndexRow | undefined): AxisRow {
   let body = '';
   try {
     body = parseDecision(readFileSync(slugPath(p, slug), 'utf8')).body;
   } catch {
-    return fallback ?? { slug, ruling: '', why: '', updated: '' };
+    return { ...(fallback ?? { slug, ruling: '', why: '', updated: '' }), liveRulingId: null };
   }
   const target = currentTarget(body);
   // Legacy (pre-Target) blocks carry the same `**Ruling:**` field under a bare `## <date>` heading;
@@ -118,7 +134,22 @@ function axisRow(p: RetrievalPaths, slug: string, fallback: IndexRow | undefined
   const ruling = target?.ruling || legacyRulings.at(-1)?.[1]?.trim() || fallback?.ruling || '';
   const why = target?.fields.context || body.match(WHY_FIELD_RE)?.[1] || fallback?.why || '';
   const dates = [...body.matchAll(ANY_DATE_RE)].map((m) => m[1]).sort();
-  return { slug, ruling, why, updated: dates.at(-1) ?? fallback?.updated ?? '' };
+  return {
+    slug,
+    ruling,
+    why,
+    updated: dates.at(-1) ?? fallback?.updated ?? '',
+    liveRulingId: liveRulingIdOf(body, Boolean(target)),
+  };
+}
+
+/** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
+function liveRulingIdOf(body: string, hasTarget: boolean): string | null {
+  const re = hasTarget ? TARGET_HEADING_RE : LEGACY_HEADING_RE;
+  const dates = [...body.matchAll(re)].map((m) => m[1]);
+  // Last heading wins, matching currentTarget's rule — append order IS chronological order here.
+  const last = dates.at(-1);
+  return last ? `${hasTarget ? 'target' : 'entry'}:${last}` : null;
 }
 
 function slugPath(p: RetrievalPaths, slug: string) {
@@ -142,7 +173,7 @@ function tokenize(text: string): string[] {
 // standard defaults. Pure, zero-dep.
 export function bm25Rank(
   queryText: string,
-  rows: IndexRow[],
+  rows: AxisRow[],
   k = 5,
   k1 = 1.5,
   b = 0.75,
@@ -155,23 +186,27 @@ export function bm25Rank(
   const df = new Map<string, number>(
     qTerms.map((t) => [t, docs.filter((d) => d.includes(t)).length]),
   );
-  return rows
-    .map((r, i) => {
-      const d = docs[i];
-      let score = 0;
-      for (const t of qTerms) {
-        const n = df.get(t);
-        if (!n) continue;
-        const tf = d.filter((w) => w === t).length;
-        if (!tf) continue;
-        const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
-        score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.length) / avgdl)));
-      }
-      return { ...r, score };
-    })
-    .filter((r) => r.score > 0)
-    .sort((x, y) => y.score - x.score)
-    .slice(0, k);
+  return (
+    rows
+      .map((r, i) => {
+        const d = docs[i];
+        let score = 0;
+        for (const t of qTerms) {
+          const n = df.get(t);
+          if (!n) continue;
+          const tf = d.filter((w) => w === t).length;
+          if (!tf) continue;
+          const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
+          score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.length) / avgdl)));
+        }
+        return { ...r, score };
+      })
+      .filter((r) => r.score > 0)
+      // Slug breaks a score tie so rank is REPRODUCIBLE: the bench asserts two runs agree on order,
+      // and Array.sort is not required to be stable across engines for equal keys.
+      .sort((x, y) => y.score - x.score || x.slug.localeCompare(y.slug))
+      .slice(0, k)
+  );
 }
 
 // ─── Semantic tier (per-axis embeddings, local Ollama) ───────────────────────────
