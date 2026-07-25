@@ -44,7 +44,6 @@
  * past block; archive a mis-filed entry by moving it under a `## [archived …]` heading, never delete.
  */
 
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -67,6 +66,7 @@ import {
   upsertRow,
   whyHook,
 } from './decision-format.mts';
+import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './retrieval.mts';
 
 export {
   type AddOptions,
@@ -82,14 +82,18 @@ export {
   type TargetOptions,
   upsertRow,
 } from './decision-format.mts';
-
-const EMBED_URL = 'http://localhost:11434/api/embed';
-const EMBED_MODEL = 'nomic-embed-text';
+// The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
+export {
+  bm25Rank,
+  clampGist,
+  cosine,
+  gistOf,
+  loadAxisRows,
+  type RankResult,
+} from './retrieval.mts';
 
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
-const WS_RE = /\s+/g;
-const TOKEN_RE = /[a-z0-9]+/g;
 
 // ─── Consumer-cwd path resolution (W-3) ──────────────────────────────────────────
 // Every on-disk path is derived from the CONSUMER cwd via the shared config loader.
@@ -100,28 +104,6 @@ const TOKEN_RE = /[a-z0-9]+/g;
 // Resolved on-disk paths for one consumer cwd.
 interface Paths extends DecisionPaths {
   vecIndexPath: string;
-}
-
-// One cached per-axis embedding in the derived vector index.
-interface VecEntry {
-  hash: string;
-  vec: number[];
-  model: string;
-}
-type VecIndex = Record<string, VecEntry>;
-
-// An INDEX row plus its retrieval score.
-type RankedRow = IndexRow & { score: number };
-
-// Ranked axes plus which retrieval tier produced them.
-export interface RankResult {
-  source: 'semantic' | 'lexical' | 'index';
-  rows: IndexRow[];
-}
-
-// The Ollama /api/embed response (external boundary).
-interface EmbedResponse {
-  embeddings?: number[][];
 }
 
 function paths(cwd = process.cwd()): Paths {
@@ -271,180 +253,17 @@ export function checkExists(slug: string, cwd = process.cwd()) {
   return existsSync(slugPath(paths(cwd), slug));
 }
 
-// ─── Retrieval: lexical floor + per-axis semantic search ─────────────────────────
-// Both rank IN-SCRIPT over the bounded INDEX/cache and return only top-k to the caller, so the
-// agent's context never loads the whole (monotonically growing) corpus. Semantic is the happy
-// path; lexical is the always-available floor + the fallback when Ollama/the model is absent.
-
-// Prose tokenizer: lowercase, alphanumeric runs, drop single chars. NO stopword list — BM25's IDF
-// down-weights common terms in a principled way (a hand-rolled stoplist is brittle + English-only).
-function tokenize(text: string): string[] {
-  const out: string[] = [];
-  for (const m of String(text).toLowerCase().matchAll(TOKEN_RE)) {
-    if (m[0].length > 1) out.push(m[0]);
-  }
-  return out;
+/** Rank axes for a consumer cwd. Thin wrapper: retrieval.mts takes resolved paths, not a cwd. */
+export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promise<RankResult> {
+  return rankAxesIn(text, k, paths(cwd));
 }
 
-// Lexical floor (the Ollama-down fallback): rank INDEX rows by BM25. IDF rewards rare shared terms
-// and discounts common ones (so "the"/"and" carry ~no weight without a stoplist); k1/b are the
-// standard defaults. Pure, zero-dep.
-export function bm25Rank(
-  queryText: string,
-  rows: IndexRow[],
-  k = 5,
-  k1 = 1.5,
-  b = 0.75,
-): RankedRow[] {
-  const qTerms = [...new Set(tokenize(queryText))];
-  if (qTerms.length === 0 || rows.length === 0) return [];
-  const docs = rows.map((r) => tokenize(`${r.slug} ${r.ruling} ${r.why}`));
-  const N = docs.length;
-  const avgdl = docs.reduce((s, d) => s + d.length, 0) / N || 1;
-  const df = new Map<string, number>(
-    qTerms.map((t) => [t, docs.filter((d) => d.includes(t)).length]),
-  );
-  return rows
-    .map((r, i) => {
-      const d = docs[i];
-      let score = 0;
-      for (const t of qTerms) {
-        const n = df.get(t);
-        if (!n) continue;
-        const tf = d.filter((w) => w === t).length;
-        if (!tf) continue;
-        const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
-        score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.length) / avgdl)));
-      }
-      return { ...r, score };
-    })
-    .filter((r) => r.score > 0)
-    .sort((x, y) => y.score - x.score)
-    .slice(0, k);
-}
-
-export function cosine(a: number[], b: number[]) {
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i += 1) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
-}
-
-// Embed via Ollama. Returns number[] or null (opted out / Ollama down / model absent / bad
-// response) → the caller falls back to the lexical floor. Never throws.
-// nomic-embed-text REQUIRES task prefixes (`search_query:` / `search_document:`) for calibrated
-// retrieval similarity — without them, query↔doc cosine is poorly ranked.
-async function embed(
-  text: string,
-  kind: 'query' | 'document' = 'document',
-): Promise<number[] | null> {
-  if (process.env.DECISIONS_NO_EMBED) return null;
-  const prefixed = `${kind === 'query' ? 'search_query: ' : 'search_document: '}${String(text).slice(0, 8000)}`;
-  try {
-    const res = await fetch(EMBED_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: EMBED_MODEL, input: prefixed }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as EmbedResponse | null;
-    const vec = data?.embeddings?.[0];
-    return Array.isArray(vec) && vec.length ? vec : null;
-  } catch {
-    return null;
-  }
-}
-
-function axisHash(text: string) {
-  return createHash('sha1').update(text).digest('hex');
-}
-
-// Cap the gist at the TAIL (newest entries), never the head — the current ruling is the LAST
-// entry (append-only), and that's what retrieval most needs to match on a hot, oft-flipped axis.
-export function clampGist(body: string, max = 6000) {
-  const t = body.replace(WS_RE, ' ').trim();
-  return t.length > max ? t.slice(-max) : t;
-}
-
-// Searchable gist of an axis = its CURRENT Target block (the stable ruling we want `query` to
-// surface), not the note tail — a hot axis's notes would otherwise outrank the Target (clampGist is
-// tail-biased). Falls back to the whole body for unmigrated / note-only / old-format axes.
-function gistOf(p: Paths, slug: string): string | null {
-  const file = slugPath(p, slug);
-  if (!existsSync(file)) return null;
-  const { body } = parseDecision(readFileSync(file, 'utf8'));
-  const t = currentTarget(body);
-  return clampGist(t ? t.block : body);
-}
-
-function loadVecIndex(p: Paths): VecIndex {
-  if (!existsSync(p.vecIndexPath)) return {};
-  try {
-    return JSON.parse(readFileSync(p.vecIndexPath, 'utf8')) as VecIndex;
-  } catch {
-    return {}; // corrupt derived cache → rebuilt lazily, never fatal
-  }
-}
-
-function saveVecIndex(p: Paths, idx: VecIndex) {
-  mkdirSync(path.dirname(p.vecIndexPath), { recursive: true });
-  writeFileAtomic(p.vecIndexPath, `${JSON.stringify(idx)}\n`);
-}
-
-// Lazy content-hash rehash: (re)embed an axis only if its gist changed (or is new/missing).
-// Returns true if it (re)embedded. No manual reindex discipline — drift self-heals on query.
-async function embedAxis(p: Paths, slug: string, idx: VecIndex): Promise<boolean> {
-  const gist = gistOf(p, slug);
-  if (!gist) return false;
-  const h = axisHash(gist);
-  // Skip only if BOTH content and embedding model are unchanged — a model swap must re-embed
-  // (vectors from different models aren't comparable, even at the same dimension).
-  if (idx[slug]?.hash === h && idx[slug]?.model === EMBED_MODEL) return false;
-  const vec = await embed(gist, 'document');
-  if (!vec) return false; // embed unavailable → leave for the lexical floor; retry next query
-  idx[slug] = { hash: h, vec, model: EMBED_MODEL };
-  return true;
-}
-
+// `why` is now the axis file's full Context (the INDEX cell was truncated to 70 chars), so bound it
+// at print time — the ranker wants the whole thing, a terminal reader does not.
 function printRanked(rows: IndexRow[], mode: string) {
   console.log(`# top ${rows.length} ${rows.length === 1 ? 'axis' : 'axes'} (${mode})`);
-  for (const r of rows) console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${r.why}` : ''}`);
-}
-
-// Rank the recorded axes against a free-text query and RETURN the ranked rows (data, not printed) so
-// both `query` (which prints them) and `scoped-targets` (which emits JSON) share one ranker. Returns
-// { source: 'semantic'|'lexical'|'index', rows } — rows are INDEX rows ({slug, ruling, why, …}).
-// Reason: the branches ARE the query ranking algorithm's fallback tiers (semantic cosine over the vector index, then BM25 lexical floor, then raw first-k); the embed-availability and stale-dim filtering are inherent to degrading gracefully and flattening scatters one ranked lookup
-// fallow-ignore-next-line complexity
-export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promise<RankResult> {
-  const p = paths(cwd);
-  const rows = readIndexRows(p);
-  if (rows.length === 0) return { source: 'index', rows: [] };
-  const qvec = await embed(text, 'query');
-  if (qvec) {
-    const idx = loadVecIndex(p);
-    let dirty = false;
-    for (const r of rows) if (await embedAxis(p, r.slug, idx)) dirty = true;
-    if (dirty) saveVecIndex(p, idx);
-    const ranked = rows
-      .filter((r) => idx[r.slug]?.vec?.length === qvec.length) // skip stale-dim vectors → lexical covers
-      .map((r) => ({ ...r, score: cosine(qvec, idx[r.slug].vec) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, k);
-    if (ranked.length) return { source: 'semantic', rows: ranked };
-  }
-  // Fallback floor: BM25 over the INDEX rows (or, if nothing matches, the first k rows).
-  const lex = bm25Rank(text, rows, k);
-  return lex.length
-    ? { source: 'lexical', rows: lex }
-    : { source: 'index', rows: rows.slice(0, k) };
+  for (const r of rows)
+    console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${whyHook(r.why)}` : ''}`);
 }
 
 export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cwd()) {
@@ -454,29 +273,22 @@ export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cw
   }
   const { source, rows } = await rankAxes(text, k, cwd);
   if (rows.length === 0) {
-    console.log('No decisions recorded.');
+    // Two different answers, deliberately worded differently — an agent must be able to tell an
+    // empty log from a searched log that rules on nothing.
+    console.log(
+      source === 'empty'
+        ? 'No decisions recorded.'
+        : 'No recorded decision rules on this. (searched every axis; nothing matched)',
+    );
     return;
   }
   printRanked(rows, source);
 }
 
 export async function cmdReindex(cwd = process.cwd()) {
-  const p = paths(cwd);
-  const rows = readIndexRows(p);
-  const idx = loadVecIndex(p); // non-destructive: keep prior good vectors if an embed fails now
-  let n = 0;
-  for (const r of rows) {
-    const gist = gistOf(p, r.slug);
-    if (!gist) continue;
-    const vec = await embed(gist, 'document'); // force re-embed (ignore hash) — e.g. after model change
-    if (vec) {
-      idx[r.slug] = { hash: axisHash(gist), vec, model: EMBED_MODEL };
-      n += 1;
-    }
-  }
-  saveVecIndex(p, idx);
+  const { done, total } = await reindexAll(paths(cwd));
   console.log(
-    `Reindexed ${n}/${rows.length} axes${n < rows.length ? ' (some embeds unavailable — lexical still covers them)' : ''}.`,
+    `Reindexed ${done}/${total} axes${done < total ? ' (some embeds unavailable — lexical still covers them)' : ''}.`,
   );
 }
 
