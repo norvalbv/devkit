@@ -182,9 +182,36 @@ function scoreCurrentState(
   if (!cs || !row) return { ...base, outcome: 'MISS', goldRank, csa: false, sfer: false };
 
   const liveBlockReturned = row.liveRulingId === cs.liveId;
-  const text = row.ruling;
-  const surfaced = cs.mustSurface.every((s) => text.toLowerCase().includes(s.toLowerCase()));
-  const assertsStale = cs.mustNotAssert.some((s) => assertedUnqualified(text, s));
+  const quals = row.qualifiedBy ?? [];
+  // The CURRENT state of an axis is its ruling PLUS the notes that qualify it, so that composite is
+  // what gets checked — not the ruling alone, which by construction can never contain the note text.
+  const text = [row.ruling, ...quals.map((q) => q.text)].join('\n');
+  // `.every()` on an empty list is vacuously TRUE, which would claim the live content surfaced when
+  // the case names none — and that forces assertsStale false below, disabling SFER for that case.
+  // An empty list is evidence of nothing, so it reads as NOT surfaced: the fail-safe direction.
+  // The corpus lint also rejects the shape outright; this is the second line of defence, because a
+  // scorer that silently cannot fail is the worst outcome available to a benchmark.
+  const surfaced =
+    cs.mustSurface.length > 0 &&
+    cs.mustSurface.every((s) => text.toLowerCase().includes(s.toLowerCase()));
+  // A stale claim misleads when the answer carries it WITHOUT the live content that corrects it.
+  //
+  // Keyed on `surfaced` — the specific live text this case names — and deliberately NOT on whether
+  // the axis has qualifiers at all. An earlier version gated on `quals.length === 0`, which meant a
+  // single unrelated note suppressed the whole check: on a real corpus almost every hot axis carries
+  // notes (one has 20, nearly all about other things), so SFER would have read 0 forever while
+  // genuinely stale rulings passed. A metric that cannot fail is worse than no metric.
+  //
+  // Not a vocabulary test either: real qualifiers use no supersession words — the corpus says
+  // "PARKED", "still blocked", "unscheduled". The marker window survives only as a secondary path
+  // for prose that qualifies a claim inline, within the ruling itself.
+  //
+  // Looked for in the RULING, never the composite: notes routinely quote a ruling back while
+  // contradicting it — a real one reads "NOT a reversal of Target #2's 'hooks now FOLLOW'" — so
+  // scanning the composite would fire SFER on an answer that correctly surfaced the very note that
+  // corrects the claim. The composite is what `surfaced` is for; the claim itself is the ruling's.
+  const assertsStale =
+    !surfaced && cs.mustNotAssert.some((s) => assertedUnqualified(row.ruling, s));
 
   return {
     ...base,

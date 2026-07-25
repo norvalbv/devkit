@@ -329,6 +329,27 @@ describe('loadAxisRows (the retrieval candidate set)', () => {
     expect(row.updated).toBe('2026-07-25'); // the gap IS the staleness signal
   });
 
+  it('bounds qualifiers at BOTH ends: past a trailing [archived] heading, and not INTO it', () => {
+    // The archived block carries its own dated bullets — the shape the first version of this test
+    // failed to exercise (it used a bullet-free '> retired' body, so the missing end-boundary went
+    // unnoticed). Archiving rather than deleting is the documented way to retire a mis-filed entry,
+    // so retired bullets are normal and must never be served as live qualifiers.
+    write(
+      'trailing.md',
+      axis(
+        'trailing',
+        `${targetBlock('2026-03-03', 'the live ruling')}- 2026-04-04 — this note falsifies it\n\n` +
+          '## [archived — impl-note, not an epic]\n\n' +
+          '- 2026-01-01 — RETIRED bullet that must not resurface\n' +
+          '- 2026-02-02 — another RETIRED bullet\n',
+      ),
+    );
+    const row = loadAxisRows(paths()).find((r) => r.slug === 'trailing');
+    expect(row?.liveRulingId).toBe('target:2026-03-03');
+    expect(row?.qualifiers.map((q) => q.date)).toEqual(['2026-04-04']);
+    expect(JSON.stringify(row?.entries)).not.toContain('RETIRED');
+  });
+
   it('dates from a note bullet count toward `updated` (notes are newer than their Target)', () => {
     write(
       'hot.md',

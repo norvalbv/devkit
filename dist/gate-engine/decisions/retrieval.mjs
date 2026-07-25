@@ -14,17 +14,20 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { writeFileAtomic } from "./atomic-write.mjs";
 import { currentTarget, parseDecision, parseIndex } from "./decision-format.mjs";
+import { corpusIdf, orderQualifiers, tokenize } from "./qualifiers.mjs";
+// Re-exported so retrieval stays the single entry point for the recall path.
+export { corpusIdf, orderQualifiers } from "./qualifiers.mjs";
 export const EMBED_URL = 'http://localhost:11434/api/embed';
 export const EMBED_MODEL = 'nomic-embed-text';
 // Top-level regexes (these run in loops).
 const WS_RE = /\s+/g;
-const TOKEN_RE = /[a-z0-9]+/g;
 const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;
 /** Legacy (pre-Target) schema: `**Ruling:**` / `**Why / target:**` under a bare `## <date> — …`. */
 const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
 const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
 const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
+const NOTE_LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)$/;
 // ─── Candidate set ───────────────────────────────────────────────────────────────
 /**
  * The retrieval candidate set is the decisions DIRECTORY, not INDEX.md.
@@ -67,7 +70,12 @@ function axisRow(p, slug, fallback) {
         body = parseDecision(readFileSync(slugPath(p, slug), 'utf8')).body;
     }
     catch {
-        return { ...(fallback ?? { slug, ruling: '', why: '', updated: '' }), liveRulingId: null };
+        return {
+            ...(fallback ?? { slug, ruling: '', why: '', updated: '' }),
+            liveRulingId: null,
+            entries: [],
+            qualifiers: [],
+        };
     }
     const target = currentTarget(body);
     // Legacy (pre-Target) blocks carry the same `**Ruling:**` field under a bare `## <date>` heading;
@@ -76,13 +84,68 @@ function axisRow(p, slug, fallback) {
     const ruling = target?.ruling || legacyRulings.at(-1)?.[1]?.trim() || fallback?.ruling || '';
     const why = target?.fields.context || body.match(WHY_FIELD_RE)?.[1] || fallback?.why || '';
     const dates = [...body.matchAll(ANY_DATE_RE)].map((m) => m[1]).sort();
+    const liveRulingId = liveRulingIdOf(body, Boolean(target));
+    const entries = axisEntries(body, liveRulingId);
     return {
         slug,
         ruling,
         why,
         updated: dates.at(-1) ?? fallback?.updated ?? '',
-        liveRulingId: liveRulingIdOf(body, Boolean(target)),
+        liveRulingId,
+        entries,
+        qualifiers: entries.filter((e) => e.kind === 'note'),
     };
+}
+/**
+ * Split an axis into independently-searchable ENTRIES: the current ruling block, then each note
+ * appended after it.
+ *
+ * Retrieval scores entries and rolls up to the axis by MAX, never by sum or concatenation. Both
+ * alternatives are wrong in opposite directions: concatenating puts the notes in the tail, and
+ * `clampGist` is tail-biased so a hot axis's churn would outrank its own ruling; summing would let
+ * an axis with twenty notes beat a better-matching axis with one. Max means a note CAN be the hit
+ * that surfaces an axis, while note count buys no advantage — the same segment-then-max shape that
+ * makes long-document scoring work (SummaC, arXiv:2111.09525).
+ */
+export function axisEntries(body, liveRulingId) {
+    const entries = [];
+    const target = currentTarget(body);
+    const rulingDate = liveRulingId?.split(':')[1] ?? '';
+    // The ruling block: the current Target when there is one, else the whole body (legacy schema).
+    entries.push({
+        id: liveRulingId ?? 'ruling:unknown',
+        kind: 'ruling',
+        date: rulingDate,
+        text: target ? target.block : body,
+    });
+    // Notes AFTER the current ruling's heading. Notes under a superseded Target qualify a ruling that
+    // is no longer current, so they are deliberately not part of the live answer.
+    //
+    // Located by the ruling's own DATE rather than "the last `## ` heading": those differ whenever an
+    // `## [archived …]` heading trails the current Target, and taking the last one would slice past
+    // every real note and report an axis as unqualified — silently returning a falsified ruling bare,
+    // which is the exact failure this function exists to prevent.
+    const headIndex = liveRulingId
+        ? Math.max(body.lastIndexOf(`## Target · ${rulingDate}`), body.lastIndexOf(`## ${rulingDate} `))
+        : -1;
+    // Bounded at BOTH ends. Locating the start by date fixed only half of it: the tail still ran to
+    // end-of-file, so bullets under a trailing `## [archived …]` heading — the documented way to
+    // retire a mis-filed entry rather than delete it — were collected as live qualifiers of the
+    // CURRENT ruling. Retired text would then surface in the prose warning, in `qualifiedBy`, and in
+    // per-entry scoring, presenting superseded content as though it still qualifies the axis.
+    const tail = headIndex === -1 ? body : sliceToNextHeading(body.slice(headIndex));
+    for (const line of tail.split('\n')) {
+        const m = line.match(NOTE_LINE_RE);
+        if (m)
+            entries.push({ id: `note:${m[1]}`, kind: 'note', date: m[1], text: m[2] });
+    }
+    return entries;
+}
+/** A block's own text: from its heading up to the next `## ` heading, or the end of the body. */
+function sliceToNextHeading(fromHeading) {
+    // Search from index 1 so the block's OWN heading does not terminate it immediately.
+    const next = fromHeading.indexOf('\n## ', 1);
+    return next === -1 ? fromHeading : fromHeading.slice(0, next);
 }
 /** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
 function liveRulingIdOf(body, hasTarget) {
@@ -96,43 +159,53 @@ function slugPath(p, slug) {
     return path.join(p.decisionsDir, `${slug}.md`);
 }
 // ─── Lexical floor (BM25) ────────────────────────────────────────────────────────
-// Prose tokenizer: lowercase, alphanumeric runs, drop single chars. NO stopword list — BM25's IDF
-// down-weights common terms in a principled way (a hand-rolled stoplist is brittle + English-only).
-function tokenize(text) {
-    const out = [];
-    for (const m of String(text).toLowerCase().matchAll(TOKEN_RE)) {
-        if (m[0].length > 1)
-            out.push(m[0]);
-    }
-    return out;
-}
 // Lexical floor (the Ollama-down fallback): rank candidate rows by BM25. IDF rewards rare shared
 // terms and discounts common ones (so "the"/"and" carry ~no weight without a stoplist); k1/b are the
 // standard defaults. Pure, zero-dep.
-export function bm25Rank(queryText, rows, k = 5, k1 = 1.5, b = 0.75) {
+export function bm25Rank(queryText, rows, k = 5, k1 = 1.5, b = 0.75, idf = corpusIdf(rows)) {
     const qTerms = [...new Set(tokenize(queryText))];
     if (qTerms.length === 0 || rows.length === 0)
         return [];
-    const docs = rows.map((r) => tokenize(`${r.slug} ${r.ruling} ${r.why}`));
-    const N = docs.length;
-    const avgdl = docs.reduce((s, d) => s + d.length, 0) / N || 1;
-    const df = new Map(qTerms.map((t) => [t, docs.filter((d) => d.includes(t)).length]));
-    return (rows
-        .map((r, i) => {
-        const d = docs[i];
+    // One BM25 document per ENTRY, not per axis: a note has to be able to win on its own terms.
+    const units = rows.flatMap((r, ri) => (r.entries?.length
+        ? r.entries
+        : [
+            {
+                id: r.liveRulingId ?? 'ruling:unknown',
+                kind: 'ruling',
+                date: '',
+                text: `${r.ruling} ${r.why}`,
+            },
+        ]).map((e) => ({ ri, entry: e, doc: tokenize(`${r.slug} ${e.text}`) })));
+    const N = units.length;
+    const avgdl = units.reduce((s, u) => s + u.doc.length, 0) / N || 1;
+    const df = new Map(qTerms.map((t) => [t, units.filter((u) => u.doc.includes(t)).length]));
+    // Roll up to the axis by MAX. Summing would make note count a ranking advantage; max means the
+    // best-matching single unit speaks for the axis, and records WHICH unit it was.
+    const best = new Map();
+    for (const u of units) {
         let score = 0;
         for (const t of qTerms) {
             const n = df.get(t);
             if (!n)
                 continue;
-            const tf = d.filter((w) => w === t).length;
+            const tf = u.doc.filter((w) => w === t).length;
             if (!tf)
                 continue;
             const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
-            score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.length) / avgdl)));
+            score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * u.doc.length) / avgdl)));
         }
-        return { ...r, score };
-    })
+        const prior = best.get(u.ri);
+        if (!prior || score > prior.score)
+            best.set(u.ri, { score, entryId: u.entry.id });
+    }
+    return (rows
+        .map((r, i) => ({
+        ...r,
+        score: best.get(i)?.score ?? 0,
+        matchedEntryId: best.get(i)?.entryId ?? null,
+        qualifiers: orderQualifiers(queryText, r.qualifiers ?? [], idf),
+    }))
         .filter((r) => r.score > 0)
         // Slug breaks a score tie so rank is REPRODUCIBLE: the bench asserts two runs agree on order,
         // and Array.sort is not required to be stable across engines for equal keys.
@@ -186,16 +259,19 @@ export function clampGist(body, max = 6000) {
     const t = body.replace(WS_RE, ' ').trim();
     return t.length > max ? t.slice(-max) : t;
 }
-// Searchable gist of an axis = its CURRENT Target block (the stable ruling we want `query` to
-// surface), not the note tail — a hot axis's notes would otherwise outrank the Target (clampGist is
-// tail-biased). Falls back to the whole body for unmigrated / note-only / old-format axes.
+// Searchable gist of an axis = its CURRENT ruling block PLUS the notes that qualify it. The notes
+// used to be excluded because clampGist is tail-biased and a hot axis's churn would outrank its own
+// ruling — a real objection, which is why the lexical tier now scores per ENTRY and rolls up by max.
+// The single-vector semantic tier cannot express that, so it takes the composite and accepts the
+// bias; per-entry embeddings are the next step if the tier sweep shows it matters.
 export function gistOf(p, slug) {
     const file = slugPath(p, slug);
     if (!existsSync(file))
         return null;
     const { body } = parseDecision(readFileSync(file, 'utf8'));
     const t = currentTarget(body);
-    return clampGist(t ? t.block : body);
+    const live = axisEntries(body, liveRulingIdOf(body, Boolean(t)));
+    return clampGist(live.length ? live.map((e) => e.text).join('\n') : t ? t.block : body);
 }
 function loadVecIndex(p) {
     if (!existsSync(p.vecIndexPath))
@@ -237,6 +313,7 @@ export async function rankAxes(text, k = 5, p) {
     const rows = loadAxisRows(p);
     if (rows.length === 0)
         return { source: 'empty', rows: [] };
+    const idf = corpusIdf(rows);
     const qvec = await embed(text, 'query');
     if (qvec) {
         const idx = loadVecIndex(p);
@@ -248,7 +325,17 @@ export async function rankAxes(text, k = 5, p) {
             saveVecIndex(p, idx);
         const ranked = rows
             .filter((r) => idx[r.slug]?.vec?.length === qvec.length) // skip stale-dim vectors → lexical covers
-            .map((r) => ({ ...r, score: cosine(qvec, idx[r.slug].vec) }))
+            .map((r) => ({
+            ...r,
+            score: cosine(qvec, idx[r.slug].vec),
+            // NULL, not the ruling id: this tier embeds the whole axis (ruling + qualifiers) as ONE
+            // vector, so it genuinely cannot say which unit matched. Naming the ruling would be a false
+            // provenance claim — a query matching only note text would be reported as ruling-sourced.
+            // Null means "this tier cannot attribute the match", which is the truth. Per-entry
+            // embeddings would let it answer properly; until then it declines to guess.
+            matchedEntryId: null,
+            qualifiers: orderQualifiers(text, r.qualifiers ?? [], idf),
+        }))
             .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))
             .slice(0, k);
         if (ranked.length)
@@ -258,7 +345,7 @@ export async function rankAxes(text, k = 5, p) {
     // to hand back `rows.slice(0, k)` — that old fallback returned the alphabetically-first k axes and
     // was indistinguishable from a real hit, which is how "nothing rules on this" came to look exactly
     // like an answer. Callers get an empty set and a `none` source instead.
-    const lex = bm25Rank(text, rows, k);
+    const lex = bm25Rank(text, rows, k, undefined, undefined, idf);
     return lex.length ? { source: 'lexical', rows: lex } : { source: 'none', rows: [] };
 }
 /** Force a full re-embed of every axis (ignoring the content hash) — `guard-decisions reindex`. */
