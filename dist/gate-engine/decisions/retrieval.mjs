@@ -116,13 +116,13 @@ export function axisEntries(body, liveRulingId) {
         id: liveRulingId ?? 'ruling:unknown',
         kind: 'ruling',
         date: rulingDate,
-        text: target ? target.block : body,
+        text: '',
     });
-    // Notes AFTER the current ruling's heading. Notes under a superseded Target qualify a ruling that
-    // is no longer current, so they are deliberately not part of the live answer.
+    // Notes AFTER the current ruling's heading. Notes under a superseded ruling qualify one that is
+    // no longer current, so they are deliberately not part of the live answer.
     //
     // Located by the ruling's own DATE rather than "the last `## ` heading": those differ whenever an
-    // `## [archived …]` heading trails the current Target, and taking the last one would slice past
+    // `## [archived …]` heading trails the current block, and taking the last one would slice past
     // every real note and report an axis as unqualified — silently returning a falsified ruling bare,
     // which is the exact failure this function exists to prevent.
     const headIndex = liveRulingId
@@ -131,15 +131,31 @@ export function axisEntries(body, liveRulingId) {
     // Bounded at BOTH ends. Locating the start by date fixed only half of it: the tail still ran to
     // end-of-file, so bullets under a trailing `## [archived …]` heading — the documented way to
     // retire a mis-filed entry rather than delete it — were collected as live qualifiers of the
-    // CURRENT ruling. Retired text would then surface in the prose warning, in `qualifiedBy`, and in
-    // per-entry scoring, presenting superseded content as though it still qualifies the axis.
+    // CURRENT ruling.
     const tail = headIndex === -1 ? body : sliceToNextHeading(body.slice(headIndex));
+    // The ruling's OWN text. `currentTarget().block` already stops at the first note bullet for the
+    // modern schema; the legacy branch must do the same within its own block rather than take the
+    // whole body. Taking the body meant an append-only legacy file indexed every SUPERSEDED
+    // `## <date>` block as though it were the current ruling — 12 files in the real corpus have that
+    // shape, one with 8 blocks — so BM25 and the embedding matched retired text while the entry still
+    // reported the current block's id.
+    entries[0].text = target ? target.block : upToFirstNote(tail);
     for (const line of tail.split('\n')) {
         const m = line.match(NOTE_LINE_RE);
         if (m)
             entries.push({ id: `note:${m[1]}`, kind: 'note', date: m[1], text: m[2] });
     }
     return entries;
+}
+/** A block's prose, excluding the dated note bullets appended under it. */
+function upToFirstNote(block) {
+    const lines = [];
+    for (const line of block.split('\n')) {
+        if (NOTE_LINE_RE.test(line))
+            break;
+        lines.push(line);
+    }
+    return lines.join('\n').trim();
 }
 /** A block's own text: from its heading up to the next `## ` heading, or the end of the body. */
 function sliceToNextHeading(fromHeading) {

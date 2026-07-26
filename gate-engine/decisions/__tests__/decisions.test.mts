@@ -350,6 +350,27 @@ describe('loadAxisRows (the retrieval candidate set)', () => {
     expect(JSON.stringify(row?.entries)).not.toContain('RETIRED');
   });
 
+  it('a multi-block LEGACY axis indexes only its current block, not the whole file', () => {
+    // Append-only legacy files stack `## <date>` blocks. Taking the whole body as the ruling text
+    // meant every SUPERSEDED block was indexed as though it were current — 12 files in the real
+    // corpus have this shape. The seed corpus had none, which is why no test caught it.
+    write(
+      'legacy-stack.md',
+      axis(
+        'legacy-stack',
+        '## 2026-01-05 — the retired ruling\n\n**Ruling:** SUPERSEDED_TEXT wall clock\n**Source:** seed\n' +
+          '- 2026-01-08 — a note under the RETIRED block\n\n' +
+          '## 2026-01-12 — the current ruling\n\n**Ruling:** monotonic source only\n**Source:** seed\n' +
+          '- 2026-02-02 — a note under the CURRENT block\n',
+      ),
+    );
+    const row = loadAxisRows(paths()).find((r) => r.slug === 'legacy-stack');
+    expect(row?.liveRulingId).toBe('entry:2026-01-12');
+    expect(row?.entries[0].text).not.toContain('SUPERSEDED_TEXT');
+    // Only the note under the CURRENT block qualifies it.
+    expect(row?.qualifiers.map((q) => q.date)).toEqual(['2026-02-02']);
+  });
+
   it('dates from a note bullet count toward `updated` (notes are newer than their Target)', () => {
     write(
       'hot.md',
