@@ -42,6 +42,25 @@ function repoOn(branch, { staged = [], config } = {}) {
   return dir;
 }
 
+/** A linked worktree of `repo` on `branch`, with its own independently staged files. */
+function worktreeOn(repo, branch, { staged = [] } = {}) {
+  const parent = mkdtempSync(join(tmpdir(), 'guard-wt-'));
+  const dir = join(parent, 'linked');
+  dirs.push(parent);
+  const g = (cwd, ...a) =>
+    execFileSync('git', ['-C', cwd, ...a], {
+      env: GENV,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  g(repo, 'worktree', 'add', '-q', '-b', branch, dir);
+  for (const f of staged) {
+    mkdirSync(dirname(join(dir, f)), { recursive: true });
+    writeFileSync(join(dir, f), 'x\n');
+    g(dir, 'add', f);
+  }
+  return dir;
+}
+
 /** decide() on a command running in `dir`. */
 const run = (command, dir, rand = 'r4nd') => decide({ tool_input: { command } }, dir, rand);
 
@@ -59,6 +78,11 @@ describe('protected-branch-guard — allows', () => {
     const dir = repoOn('main', { staged: ['a.ts'] });
     expect(run('git status', dir)).toBeNull();
     expect(run('echo "git commit -m x"', dir)).toBeNull(); // quoted text, not a real commit
+  });
+  it('a feature-branch worktree reached through assignment + cd (not the protected session cwd)', () => {
+    const shared = repoOn('0.0.9', { staged: ['shared-session.ts'] });
+    const worktree = worktreeOn(shared, 'feat/worktree', { staged: ['my-change.ts'] });
+    expect(run(`W=${worktree} && cd "$W" && git commit -m "mine"`, shared)).toBeNull();
   });
 });
 
@@ -83,6 +107,35 @@ describe('protected-branch-guard — denies on a protected branch', () => {
     expect(r).toContain('devkit ship');
   });
 
+  it('expands a double-quoted variable used as the explicit git -C target', () => {
+    const shared = repoOn('feat/shared', { staged: ['shared-session.ts'] });
+    const worktree = worktreeOn(shared, '0.0.9', { staged: ['worktree-only.ts'] });
+    const r = run(`W=${worktree} && git -C "$W" -C . commit -m "mine"`, shared);
+    expect(r).toMatch(/protected branch "0.0.9"/);
+    expect(r).toContain("-- 'worktree-only.ts'");
+  });
+
+  it('does not expand a single-quoted variable used as the explicit git -C target', () => {
+    const shared = repoOn('feat/shared', { staged: ['shared-session.ts'] });
+    const worktree = worktreeOn(shared, '0.0.9', { staged: ['worktree-only.ts'] });
+    expect(run(`W=${worktree} && git -C '$W' commit -m "mine"`, shared)).toBeNull();
+  });
+
+  it('does not expand an escaped variable inside a double-quoted git -C target', () => {
+    const shared = repoOn('feat/shared', { staged: ['shared-session.ts'] });
+    const worktree = worktreeOn(shared, '0.0.9', { staged: ['worktree-only.ts'] });
+    expect(run(`W=${worktree} && git -C "\\$W" commit -m "mine"`, shared)).toBeNull();
+  });
+
+  it('reads branch + staged paths from a protected worktree reached through assignment + cd', () => {
+    const shared = repoOn('feat/shared', { staged: ['shared-session.ts'] });
+    const worktree = worktreeOn(shared, '0.0.9', { staged: ['worktree-only.ts'] });
+    const r = run(`W=${worktree} && cd "$W" && git commit -m "mine"`, shared);
+    expect(r).toMatch(/protected branch "0.0.9"/);
+    expect(r).toContain("-- 'worktree-only.ts'");
+    expect(r).not.toContain('shared-session.ts');
+  });
+
   it('--pr <branch> becomes a re-push command (--pr, ff, the existing branch)', () => {
     const dir = repoOn('0.0.9', { staged: ['a.ts'] });
     const r = run('git commit --pr feat/open -m "more"', dir);
@@ -103,10 +156,28 @@ describe('protected-branch-guard — denies on a protected branch', () => {
     expect(r).toContain("devkit ship 'agent/feat-x-add-the-thing-z' 'feat(x): add the thing'");
   });
 
-  it('passes a multi-`-m` body via --body (one clean command, body on the PR)', () => {
+  it('preserves backslashes before ordinary characters inside a double-quoted message', () => {
     const dir = repoOn('main', { staged: ['a.ts'] });
-    const r = run('git commit -m "the title" -m "the body"', dir, 'z');
-    expect(r).toContain("devkit ship 'agent/the-title-z' 'the title' --body 'the body' -- 'a.ts'");
+    const r = run('git commit -m "path: C:\\Users\\test"', dir, 'z');
+    expect(r).toContain("devkit ship 'agent/path-c-users-test-z' 'path: C:\\Users\\test'");
+  });
+
+  it('preserves escaped embedded quotes inside a double-quoted message', () => {
+    const dir = repoOn('main', { staged: ['a.ts'] });
+    const r = run('git commit -m "say \\"hello\\" now"', dir, 'z');
+    expect(r).toContain(`devkit ship 'agent/say-hello-now-z' 'say "hello" now'`);
+  });
+
+  it('passes a multi-`-m` body via --body without splitting quoted shell separators', () => {
+    const dir = repoOn('main', { staged: ['a.ts'] });
+    const r = run(
+      'git commit -m "the title" -m "first paragraph" -m "second; still body && intact"',
+      dir,
+      'z',
+    );
+    expect(r).toContain(
+      "devkit ship 'agent/the-title-z' 'the title' --body 'first paragraph\n\nsecond; still body && intact' -- 'a.ts'",
+    );
   });
 
   it('no body (single -m) → no --body', () => {
