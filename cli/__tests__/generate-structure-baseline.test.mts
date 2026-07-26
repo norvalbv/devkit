@@ -55,6 +55,41 @@ describe('generateTreeBaseline — renderer', () => {
     const baseline = generateTreeBaseline('renderer', root, { domains: {} });
     expect(baseline).toContain('lib/audio/player.ts');
   });
+
+  it('classifies the complete component and feature-folder contract', () => {
+    const root = tmpRepo();
+    const cases = [
+      ['components/Valid/index.tsx', false],
+      ['components/Valid/constants.ts', false],
+      ['components/Valid/types.ts', false],
+      ['components/Valid/Valid.test.tsx', false],
+      ['components/Valid/styles.module.css', false],
+      ['components/Valid/__tests__/snapshot.test.tsx', false],
+      ['components/Valid/Sub/index.tsx', false],
+      ['components/BadSibling/index.tsx', false],
+      ['components/BadSibling/foo.ts', true],
+      ['components/BadSibling/Sub/index.tsx', false],
+      ['components/BadSibling/Sub/bar.ts', true],
+      ['components/MissingIndex/foo.ts', true],
+      ['components/IndexTsOnly/index.ts', true],
+      ['components/grouping/index.tsx', false],
+      ['features/contract/Comp/index.tsx', false],
+      ['features/contract/Comp/Comp.test.tsx', false],
+      ['features/contract/Comp/Nested/index.tsx', false],
+      ['features/contract/Comp/__tests__/foo.test.tsx', false],
+      ['features/contract/loose.ts', true],
+      ['features/contract/sub-folder/Comp/index.tsx', false],
+      ['features/contract/sub-folder/loose.ts', true],
+      ['features/BadTop/Comp/index.tsx', true],
+    ] as const;
+
+    for (const [rel] of cases) write(root, `src/renderer/${rel}`, '');
+
+    const violators = new Set(generateTreeBaseline('renderer', root, { domains: {} }));
+    for (const [rel, shouldFail] of cases) {
+      expect(violators.has(rel), rel).toBe(shouldFail);
+    }
+  });
 });
 
 describe('generateTreeBaseline — main', () => {
