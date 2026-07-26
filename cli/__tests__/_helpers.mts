@@ -34,10 +34,18 @@ function supervisedCommand(
   command: string,
   argsOrOptions: readonly string[] | Record<string, unknown> | undefined,
   maybeOptions: Record<string, unknown> | undefined,
+  groupOnly = false,
 ) {
   const call = commandCall(command, argsOrOptions, maybeOptions);
   return {
-    args: [TEST_SUBPROCESS, String(call.timeoutMs), '--', call.command, ...call.args],
+    args: [
+      TEST_SUBPROCESS,
+      ...(groupOnly ? ['--group-only'] : []),
+      String(call.timeoutMs),
+      '--',
+      call.command,
+      ...call.args,
+    ],
     options: {
       ...call.options,
       timeout: call.timeoutMs + TEST_SUBPROCESS_CLEANUP_MS,
@@ -59,18 +67,15 @@ export const testSpawnSync = ((
   return nodeSpawnSync(process.execPath, supervised.args, supervised.options);
 }) as typeof nodeSpawnSync;
 
-/** Leaf-command counterpart to testSpawnSync. Git and other direct execs get a hard deadline without
- * paying for a process-tree supervisor on every fixture setup command. */
+/** Exec-style counterpart to testSpawnSync. It retains execFileSync's return/throw contract while
+ * routing short leaf commands through the supervisor's process-group kill path. */
 export const testExecFileSync = ((
   command: string,
   argsOrOptions?: readonly string[] | Record<string, unknown>,
   maybeOptions?: Record<string, unknown>,
 ) => {
-  const call = commandCall(command, argsOrOptions, maybeOptions);
-  return nodeExecFileSync(call.command, call.args, {
-    ...call.options,
-    timeout: call.timeoutMs,
-  });
+  const supervised = supervisedCommand(command, argsOrOptions, maybeOptions, true);
+  return nodeExecFileSync(process.execPath, supervised.args, supervised.options);
 }) as typeof nodeExecFileSync;
 
 /** Whether a PID still refers to a live process. */

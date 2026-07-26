@@ -1,19 +1,26 @@
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
-import { readProcessTable } from '../lib/ship/review/process/process-table.mts';
+import {
+  type ProcessTableReader,
+  readProcessTable,
+} from '../lib/ship/review/process/process-table.mts';
 
 function usage(): never {
-  throw new Error('usage: test-subprocess <timeout-ms> -- <command...>');
+  throw new Error('usage: test-subprocess [--group-only] <timeout-ms> -- <command...>');
 }
 
 async function main(args: string[]): Promise<void> {
-  if (args.length < 3 || args[1] !== '--') return usage();
-  const timeoutMs = Number(args[0]);
+  const groupOnly = args[0] === '--group-only';
+  const timeoutIndex = groupOnly ? 1 : 0;
+  const separatorIndex = timeoutIndex + 1;
+  if (args.length < separatorIndex + 2 || args[separatorIndex] !== '--') return usage();
+  const timeoutMs = Number(args[timeoutIndex]);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return usage();
+  const inspectProcesses: ProcessTableReader = groupOnly ? () => new Map() : readProcessTable;
 
   process.exitCode = await superviseGateCommand(
     timeoutMs,
-    args.slice(2),
-    readProcessTable,
+    args.slice(separatorIndex + 1),
+    inspectProcesses,
     undefined,
     false,
   );

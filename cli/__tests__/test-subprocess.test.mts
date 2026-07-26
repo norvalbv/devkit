@@ -7,6 +7,21 @@ const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(cleanup);
 
+function execTimeoutStatus(
+  command: string,
+  args: readonly string[],
+  options: Record<string, unknown>,
+): number | null {
+  try {
+    testExecFileSync(command, args, options);
+    return 0;
+  } catch (cause) {
+    return cause !== null && typeof cause === 'object' && 'status' in cause
+      ? Number(cause.status)
+      : null;
+  }
+}
+
 describe('supervised synchronous test subprocesses', () => {
   it('preserves command output and natural exit status', () => {
     const result = testSpawnSync(
@@ -26,7 +41,14 @@ describe('supervised synchronous test subprocesses', () => {
     ).toThrow(expect.objectContaining({ status: 19 }));
   });
 
-  it('times out and reaps a command process group instead of blocking the Vitest worker', () => {
+  it.each([
+    {
+      api: 'spawnSync',
+      timeoutStatus: (command: string, args: readonly string[], options: Record<string, unknown>) =>
+        testSpawnSync(command, args, options).status,
+    },
+    { api: 'execFileSync', timeoutStatus: execTimeoutStatus },
+  ])('$api times out and reaps the command process group', ({ timeoutStatus }) => {
     const root = mkTmp('test-subprocess-');
     const childPidFile = join(root, 'child.pid');
     const script = [
@@ -37,13 +59,13 @@ describe('supervised synchronous test subprocesses', () => {
       'setInterval(() => {}, 1_000);',
     ].join('\n');
 
-    const result = testSpawnSync(process.execPath, ['-e', script, childPidFile], {
+    const status = timeoutStatus(process.execPath, ['-e', script, childPidFile], {
       encoding: 'utf8',
       timeout: 250,
     });
     const childPid = existsSync(childPidFile) ? Number(readFileSync(childPidFile, 'utf8')) : 0;
 
-    expect(result.status, result.stderr).toBe(124);
+    expect(status).toBe(124);
     expect(childPid).toBeGreaterThan(1);
     expect(processAlive(childPid)).toBe(false);
   });
