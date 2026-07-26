@@ -137,7 +137,32 @@ describe('installHookRegistrations', () => {
     expect(first).toBe(8);
   });
 
-  it('reclaims a RETIRED devkit command a consumer still has installed', () => {
+  it('preserves registrations owned by a deselected component', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['agentHooks']);
+
+    installHookRegistrations(root, ['decisions']);
+
+    const claudeHooks = claudeCommands(root);
+    expect(claudeHooks).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',
+    );
+    expect(claudeHooks).toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
+    );
+    const cursorHooks = cursor(root).hooks;
+    expect(cursorHooks.stop).toHaveLength(3);
+    expect(cursorHooks.preCompact).toEqual([{ command: '.cursor/hooks/strategic-compactor.sh' }]);
+    expect(cursorHooks.preToolUse).toEqual([
+      {
+        command: '.cursor/hooks/decision-edit-guard.mjs',
+        matcher: 'Write|Delete',
+        failClosed: false,
+      },
+    ]);
+  });
+
+  it('reclaims a RETIRED devkit command only when its owning component is selected', () => {
     // devkit briefly registered its own .claude/hooks/fallow-gate.sh. The strip set is derived from
     // the LIVE registry, so deleting that entry also deleted devkit's ability to remove it — the
     // consumer would keep a dead hook forever, double-firing alongside the entry fallow's own
@@ -154,11 +179,16 @@ describe('installHookRegistrations', () => {
     writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
 
     installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    expect(claudeCommands(root)).toContain(
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    );
+
+    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
 
     expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
   });
 
-  it("reclaims fallow's OWN generated agent-gate registration", () => {
+  it("reclaims fallow's OWN generated agent-gate registration only when fallow is selected", () => {
     // devkit briefly installed it via `fallow hooks install --target agent`. It resolves its base
     // as the merge-base against the remote default, so left in place it fires beside devkit's
     // staged-scope wrapper and re-blocks on the unstaged work the wrapper exists to exclude.
@@ -178,11 +208,16 @@ describe('installHookRegistrations', () => {
     writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
 
     installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
+    expect(claudeCommands(root)).toContain(
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    );
+
+    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
 
     expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
   });
 
-  it('reclaims the CURSOR mirror of a retired registration', () => {
+  it('reclaims the CURSOR mirror of a retired registration only when fallow is selected', () => {
     // The retired Claude entry was mirrored to Cursor, and the script it points at is deleted by
     // the generic sync — so without a Cursor reclaim the consumer keeps a beforeShellExecution
     // entry aimed at a file that no longer exists, with no code path able to remove it.
@@ -193,6 +228,11 @@ describe('installHookRegistrations', () => {
     writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(settings));
 
     installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
+    expect(cursor(root).hooks.beforeShellExecution).toContainEqual({
+      command: '.cursor/hooks/fallow-gate.sh',
+    });
+
+    installHookRegistrations(root, ['fallow'], { targets: ['cursor'] });
 
     const commands = Object.values(cursor(root).hooks)
       .flat()
@@ -288,6 +328,46 @@ describe('removeHookRegistrations', () => {
     removeHookRegistrations(root);
     const cmds = claudeCommands(root);
     expect(cmds).toEqual(['echo mine']);
+  });
+
+  it('strips retired registrations during an explicit remove-all', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions']);
+    const claudeSettings = claude(root);
+    claudeSettings.hooks.PreToolUse.push({
+      matcher: 'Bash',
+      hooks: [
+        {
+          type: 'command',
+          command:
+            'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+        },
+      ],
+    });
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
+    const cursorSettings = cursor(root);
+    cursorSettings.hooks.beforeShellExecution = [{ command: '.cursor/hooks/fallow-gate.sh' }];
+    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
+
+    removeHookRegistrations(root);
+
+    expect(claudeCommands(root)).toEqual([]);
+    expect(Object.values(cursor(root).hooks).flat()).toEqual([]);
+  });
+
+  it('can remove one component without touching another component registration', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['decisions', 'agentHooks']);
+
+    removeHookRegistrations(root, { componentIds: ['decisions'] });
+
+    const commands = claudeCommands(root);
+    expect(commands).not.toContain(
+      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
+    );
+    expect(commands).toContain('bash "$CLAUDE_PROJECT_DIR/.claude/hooks/lint-check.sh"');
+    expect(cursor(root).hooks.preToolUse).toBeUndefined();
+    expect(cursor(root).hooks.stop).toHaveLength(3);
   });
 
   it('does not strip consumer commands merely because they live in agent hook directories', () => {

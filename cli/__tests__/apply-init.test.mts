@@ -427,6 +427,47 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(settings).toContain('lint-check.sh');
   });
 
+  it('preserves hook commands whose components were already recorded deselected', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: false,
+      agents: false,
+      agentHooks: false,
+      fallow: false,
+      husky: true,
+      structure: false,
+      agentTargets: ['claude', 'cursor'],
+      guards: ['decisions'],
+    };
+    await applyInit(root, { stack: 'generic', selection });
+
+    const claudePath = join(root, '.claude/settings.json');
+    const claudeSettings = JSON.parse(readFileSync(claudePath, 'utf8'));
+    claudeSettings.hooks.UserPromptSubmit = [
+      {
+        matcher: '',
+        hooks: [
+          {
+            type: 'command',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',
+          },
+        ],
+      },
+    ];
+    writeFileSync(claudePath, JSON.stringify(claudeSettings));
+    const cursorPath = join(root, '.cursor/hooks.json');
+    const cursorSettings = JSON.parse(readFileSync(cursorPath, 'utf8'));
+    cursorSettings.hooks.stop = [{ command: '.cursor/hooks/lint-check.sh' }];
+    writeFileSync(cursorPath, JSON.stringify(cursorSettings));
+
+    await applyInit(root, { stack: 'generic', selection });
+
+    expect(readFileSync(claudePath, 'utf8')).toContain('claude-rules-reminder.mjs');
+    expect(readFileSync(cursorPath, 'utf8')).toContain('.cursor/hooks/lint-check.sh');
+  });
+
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {
     const root = tmpRepo();
     const base = {
