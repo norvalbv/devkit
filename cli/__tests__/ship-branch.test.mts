@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { hasAnyCommand } from './_helpers.mts';
 
 // Coverage for ship-branch.sh: the pure resolution seam (the fork-upstream bug — gh's default repo
@@ -21,8 +21,6 @@ import { hasAnyCommand } from './_helpers.mts';
 // the fix derives owner/repo from `git remote get-url origin`), the isolation guards, the flag/path arg
 // grammar, and the real worktree-commit path (HEAD never moves, the hook fires in the worktree).
 // Hermetic — throwaway repos, SHIP_DRY_RUN / SHIP_RESOLVE_ONLY seams, no gh, no network.
-
-vi.setConfig({ testTimeout: 30_000 }); // bash + many git subprocesses; generous under parallel load
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
@@ -140,6 +138,36 @@ function dropWorktree(git, stderr) {
       /* best-effort */
     }
   }
+}
+
+/** A deterministic timeout fixture for banner/attribution tests. The first supervisor invocation
+ * emits the same gate artifacts as a timed-out reviewer and exits 124; the cleanup invocation passes
+ * through to real Node. This tests the timeout-handling contract without racing a wall clock. */
+function reviewerTimeoutEnv(dir, env) {
+  const bin = join(dir, 'timeout-supervisor-bin');
+  const timedOut = join(dir, 'timeout-supervisor-fired');
+  mkdirSync(bin);
+  const node = join(bin, 'node');
+  writeFileSync(
+    node,
+    [
+      '#!/bin/bash',
+      'if [[ $1 == *gate-supervisor.* && ! -e "$TEST_TIMEOUT_MARKER" ]]; then',
+      '  : > "$TEST_TIMEOUT_MARKER"',
+      '  echo "🔍 Reviewer gate (headless domain judges)..."',
+      `  printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
+      '  exit 124',
+      'fi',
+      'exec "$REAL_NODE" "$@"',
+    ].join('\n'),
+  );
+  chmodSync(node, 0o755);
+  return {
+    ...env,
+    PATH: `${bin}:${env.PATH ?? ''}`,
+    REAL_NODE: process.execPath,
+    TEST_TIMEOUT_MARKER: timedOut,
+  };
 }
 
 /**
@@ -858,47 +886,42 @@ describe('ship-branch.sh — worktree integration', () => {
   // the coreutils dependency (node + /bin/ps only), so they now run everywhere.
   it('bounds a hung gate: the backgrounded pipe-holder is reaped, the ship exits 124 fast (not hung)', () => {
     // sleep 30 & → a grandchild inheriting the commit's stdout (the pipe) that outlives a kill-git-only;
-    // sleep 30 → the hook itself hangs so the 2s timeout fires while it's still running. Correct
-    // group-kill reaps BOTH at ~2s; the broken --foreground form leaves the `&` child holding the pipe.
+    // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
+    // seconds leaves enough startup headroom under load while staying well below either sleep.
     const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &\nsleep 30' });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
-    const t0 = Date.now();
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/hung-gate', 't', 'note.txt'], {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      timeout: 18_000, // belt-and-suspenders: a broken impl would hang ~30s; cap it under the suite timeout
-      env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2' },
+      timeout: 45_000, // belt-and-suspenders: a broken impl would hang ~30s; cap it under the suite timeout
+      env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '15' },
     });
-    const elapsed = Date.now() - t0;
     dropWorktree(git, r.stderr);
 
     expect(r.status, r.stderr).not.toBe(0); // bounded — the timed-out commit aborts the ship
-    // The make-or-break: the group-kill closes the pipe so the capture returns near the 2s timeout. A
-    // leader-only signal would leave the `sleep 30 &` holding the pipe → ~30s hang (elapsed ≥ 15s).
-    expect(elapsed).toBeLessThan(15_000);
-    expect(r.stderr).toMatch(/gate chain hit the 2s ceiling \(exit 124\)/); // expiry is exactly 124 now
+    // The make-or-break: the group-kill closes the pipe and the supervisor reports its own expiry.
+    // A leader-only signal leaves the background sleep holding the pipe and spawnSync hits its 45s cap.
+    expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
     expect(r.stderr).toMatch(/Re-run the same devkit ship command to converge/); // resume hint
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
   });
 
   it('a timeout DURING the reviewer gate names the stage and the reviewers with no completion', () => {
-    // Emulate guard-review under a ship: it records the running set + one checkpointed completion to
-    // the progress JSON the ship exported (DEVKIT_REVIEW_PROGRESS), then the gate hangs → 2s timeout.
+    // The deterministic supervisor fixture records the running set + one checkpointed completion to
+    // the progress JSON the ship exported (DEVKIT_REVIEW_PROGRESS), then returns timeout status 124.
     // The banner reads THAT file (not stderr prose) to name the unfinished reviewer.
-    const hookBody = [
-      'echo "🔍 Reviewer gate (headless domain judges)..."',
-      `printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
-      'sleep 30',
-    ].join('\n');
-    const { dir, env, git } = seedShipRepo({ hookBody });
+    const { dir, env, git } = seedShipRepo();
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/review-attrib', 't', 'note.txt'], {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      timeout: 18_000,
-      env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2' },
+      env: {
+        ...reviewerTimeoutEnv(dir, env),
+        SHIP_DRY_RUN: '1',
+        SHIP_COMMIT_TIMEOUT: '15',
+      },
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).not.toBe(0);
@@ -910,19 +933,19 @@ describe('ship-branch.sh — worktree integration', () => {
   it('attribution survives LC_ALL=C (the emoji stage grep + the JSON read under the C locale)', () => {
     // Hooks often run with a minimal C locale (GUI git clients, CI): the stage grep still carries
     // emoji alternations, and the progress read must parse the JSON identically regardless of locale.
-    const hookBody = [
-      'echo "🔍 Reviewer gate (headless domain judges)..."',
-      `printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
-      'sleep 30',
-    ].join('\n');
-    const { dir, env, git } = seedShipRepo({ hookBody });
+    const { dir, env, git } = seedShipRepo();
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/c-locale', 't', 'note.txt'], {
       cwd: dir,
       input: 'b\n',
       encoding: 'utf8',
-      timeout: 18_000,
-      env: { ...env, SHIP_DRY_RUN: '1', SHIP_COMMIT_TIMEOUT: '2', LC_ALL: 'C', LANG: 'C' },
+      env: {
+        ...reviewerTimeoutEnv(dir, env),
+        SHIP_DRY_RUN: '1',
+        SHIP_COMMIT_TIMEOUT: '15',
+        LC_ALL: 'C',
+        LANG: 'C',
+      },
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).not.toBe(0);

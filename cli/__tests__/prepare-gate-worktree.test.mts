@@ -13,15 +13,13 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 // Gate dependencies (.husky/_, node_modules, coverage) are all GITIGNORED, so `git worktree add`
 // never brings them across. The consumer root can itself be a linked worktree — devkit's own stated
 // premise ("parallel agents share one working tree"), and what any tool spawning per-task worktrees
 // produces. Linking only from $root therefore failed closed on .husky/_ for a perfectly set-up repo
 // and silently dropped node_modules/coverage. These cover the fallback to the MAIN worktree.
-
-vi.setConfig({ testTimeout: 30_000 });
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/prepare-gate-worktree.sh', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };

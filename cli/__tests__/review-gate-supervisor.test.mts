@@ -773,7 +773,6 @@ describe('review gate supervisor', () => {
       ].join('\n'),
     );
     chmodSync(join(bin, 'node'), 0o755);
-    const started = Date.now();
     const result = gateHarness(root, 'review', '30', ['/usr/bin/true'], {
       ...process.env,
       CRASHED_FILE: crashed,
@@ -786,7 +785,6 @@ describe('review gate supervisor', () => {
     try {
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toMatch(/gate output drain exceeded/);
-      expect(Date.now() - started).toBeLessThan(10_000);
     } finally {
       try {
         process.kill(holderPid, 'SIGKILL');

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { decide } from '../lib/guard/protected-branch-guard.mts';
 
 // The protected-branch guard: a direct `git commit` on a protected branch (main / X.Y.Z) is DENIED
@@ -10,8 +10,6 @@ import { decide } from '../lib/guard/protected-branch-guard.mts';
 // `--pr` becomes a re-push; un-translatable commits (-a/-am, no -m, empty index) deny with a fix-it.
 // Everything else (feature branch, detached, not-a-commit) is allowed (decide → null). Hermetic —
 // real throwaway repos for branch resolution; decide() called directly.
-
-vi.setConfig({ testTimeout: 30_000 });
 
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const dirs = [];
