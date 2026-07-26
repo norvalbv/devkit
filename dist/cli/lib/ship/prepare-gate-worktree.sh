@@ -55,7 +55,10 @@ gate_dir_is_populated() {
   [ -n "$first" ]
 }
 
-# Which dirs get the populated-preference. Deliberately NOT everything gate_link_source resolves:
+# Which dirs get the populated-preference by default. Callers resolving cache/config projections may
+# opt other directories in explicitly; plain files still use the existence preference below.
+#
+# Deliberately NOT everything gate_link_source resolves:
 #
 #   coverage  — an empty/`.tmp`-only local coverage/ must stay linked AS IS so the fail-CLOSED coverage
 #               gate finds no coverage-final.json and blocks. Borrowing the main worktree's artifact
@@ -83,12 +86,14 @@ gate_prefers_populated() {
 # Resolving `$root` first keeps a worktree that HAS its own copy (or a deliberate override) winning —
 # but for the dirs above, "has its own copy" now means a USABLE one, not merely a present one.
 #
-# The existence tail is kept rather than replaced: when NEITHER candidate is populated the resolution
-# is byte-for-byte what it always was, so this can introduce no new failure mode. That also means the
-# predicate is never load-bearing for a fail-closed guarantee — see the hook postcondition below.
+# Pass `prefer-populated` as the optional fourth argument for any other directory where an empty local
+# copy is unusable. The existence tail is kept rather than replaced: when NEITHER candidate is
+# populated the resolution is byte-for-byte what it always was, so this can introduce no new failure
+# mode. That also means the predicate is never load-bearing for a fail-closed guarantee — see the hook
+# postcondition below.
 gate_link_source() {
-  local root=$1 main_root=$2 rel=$3
-  if gate_prefers_populated "$rel"; then
+  local root=$1 main_root=$2 rel=$3 populated_preference=${4:-}
+  if [ "$populated_preference" = prefer-populated ] || gate_prefers_populated "$rel"; then
     if gate_dir_is_populated "$root/$rel"; then printf '%s\n' "$root/$rel"; return 0; fi
     if gate_dir_is_populated "$main_root/$rel"; then printf '%s\n' "$main_root/$rel"; return 0; fi
   fi

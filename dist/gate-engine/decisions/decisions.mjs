@@ -50,10 +50,10 @@ import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { amendDecision } from "./amend.mjs";
 import { writeFileAtomic } from "./atomic-write.mjs";
 import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from "./decision-format.mjs";
-import { rankAxes as rankAxesIn, reindexAll } from "./retrieval.mjs";
+import { rankAxes as rankAxesIn, reindexAll } from "./recall/retrieval.mjs";
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from "./decision-format.mjs";
 // The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
-export { bm25Rank, clampGist, cosine, gistOf, loadAxisRows, } from "./retrieval.mjs";
+export { bm25Rank, clampGist, cosine, gistOf, loadAxisRows, } from "./recall/retrieval.mjs";
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
 /** How many qualifying notes the PROSE surface shows before pointing at `show`. */
