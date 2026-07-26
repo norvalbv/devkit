@@ -36,6 +36,10 @@ export interface AddOptions {
   anchoredBet?: string;
   revisitWhen?: string;
   scope?: string;
+  /** `<id>` of the Target block this ruling replaces — `target:<date>` / `entry:<date>` within this
+   * axis, or `slug#target:<date>` / `slug#entry:<date>` across axis files. Resolved read-time only
+   * (recall/supersession.mts); this module just renders and re-reads the literal text. */
+  supersedes?: string;
   source?: string;
   ref?: string;
   evidenceChange?: string;
@@ -166,6 +170,7 @@ export function renderTarget(date: string, options: TargetOptions) {
   if (options.anchoredBet) lines.push(`**Anchored-bet:** ${options.anchoredBet}`);
   if (options.revisitWhen) lines.push(`**Revisit-when:** ${options.revisitWhen}`);
   if (options.scope) lines.push(`**Scope:** ${options.scope}`);
+  if (options.supersedes) lines.push(`**Supersedes:** ${options.supersedes}`);
   lines.push(
     `**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`,
   );
@@ -177,6 +182,22 @@ export function renderNote(date: string, text: string) {
   return `- ${date} — ${sanitizeCell(text)}`;
 }
 
+/**
+ * Extract every `**Field:** value` line from a block's raw text.
+ *
+ * The one field-parsing rule, shared: `currentTarget` below applies it to the LAST block only;
+ * `allTargetBlocks` (recall/supersession.mts) applies the same rule to every block, so a field like
+ * Supersedes reads identically wherever a caller reads it from — never two divergent extractors.
+ */
+export function parseTargetFields(text: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const field = line.match(TARGET_FIELD_RE);
+    if (field) fields[field[1].trim().toLowerCase()] = field[2].trim();
+  }
+  return fields;
+}
+
 export function currentTarget(body: string): CurrentTarget | null {
   let last = null;
   const parts = body.split('\n## ');
@@ -185,14 +206,12 @@ export function currentTarget(body: string): CurrentTarget | null {
     if (TARGET_HEAD_RE.test(heading)) last = heading;
   }
   if (!last) return null;
-  const fields: Record<string, string> = {};
   const blockLines: string[] = [];
   for (const line of last.split('\n')) {
     if (NOTE_BULLET_RE.test(line)) break;
     blockLines.push(line);
-    const field = line.match(TARGET_FIELD_RE);
-    if (field) fields[field[1].trim().toLowerCase()] = field[2].trim();
   }
+  const fields = parseTargetFields(blockLines.join('\n'));
   return {
     ruling: fields.ruling ?? '',
     scope: fields.scope ?? '',
