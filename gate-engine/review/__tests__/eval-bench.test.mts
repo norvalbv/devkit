@@ -6,7 +6,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadScopedTargets, matchScope } from '../../decisions/check-alignment.mts';
 import { BenchAbort, parseCasesText } from '../../decisions/eval/bench.mts';
 import {
@@ -374,8 +374,17 @@ describe('materializeCompletenessFixture', () => {
 // ─── runCase through the real gate (stub judges) ──────────────────────────────────
 
 describe('runCase', () => {
+  // Pin the decisions retriever to its lexical floor. These cases assert which decision records
+  // reach the gate prompt, and the dense tier is a LOCAL DAEMON: with Ollama running the retriever
+  // fuses both tiers and pulls in topically-near axes, without it the same assertion sees only
+  // lexical matches. Left unpinned, the decoy-reachability tests pass in CI and fail on a developer
+  // machine — a test whose verdict depends on what is installed is measuring the machine.
+  beforeEach(() => {
+    process.env.DECISIONS_NO_EMBED = '1';
+  });
   afterEach(() => {
     delete process.env.GUARD_NO_COMPLETENESS;
+    delete process.env.DECISIONS_NO_EMBED;
   });
 
   it('runs the gate end-to-end: findings scored, decoy clean, verdict captured', async () => {

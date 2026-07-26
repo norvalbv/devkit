@@ -1,28 +1,22 @@
-/**
- * Decision retrieval: the candidate set, the lexical floor, and the per-axis semantic index.
- *
- * Split out of decisions.mts so the RECORD path (add/amend/show) and the RECALL path are separately
- * readable — and so the recall path can grow a benchmark without pushing the writer over its size
- * budget.
- *
- * Both rankers score IN-SCRIPT over the bounded corpus and return only top-k, so an agent's context
- * never loads the whole (monotonically growing) decision log. Semantic is the happy path; BM25 is
- * the always-available floor and the fallback when Ollama or the embedding model is absent.
- */
-
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { writeFileAtomic } from '../atomic-write.mts';
 import { currentTarget, type IndexRow, parseDecision, parseIndex } from '../decision-format.mts';
+import {
+  axisHash,
+  cosine,
+  EMBED_MODEL,
+  embed,
+  embedDisabled,
+  loadVecIndex,
+  saveVecIndex,
+  type VecIndex,
+} from './embeddings.mts';
 import { sections } from './markdown.mts';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mts';
 
+export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mts';
 // Re-exported so retrieval stays the single entry point for the recall path.
 export { corpusIdf, orderQualifiers } from './qualifiers.mts';
-
-export const EMBED_URL = 'http://localhost:11434/api/embed';
-export const EMBED_MODEL = 'nomic-embed-text';
 
 // Top-level regexes (these run in loops).
 const WS_RE = /\s+/g;
@@ -41,14 +35,6 @@ export interface RetrievalPaths {
   indexPath: string;
   vecIndexPath: string;
 }
-
-/** One cached per-axis embedding in the derived vector index. */
-interface VecEntry {
-  hash: string;
-  vec: number[];
-  model: string;
-}
-type VecIndex = Record<string, VecEntry>;
 
 /**
  * A retrieval candidate: an INDEX-row-shaped record plus the id of the block that is CURRENT for
@@ -95,13 +81,10 @@ type RankedRow = AxisRow & { score: number; matchedEntryId: string | null };
  * entirely unrelated axes for questions the corpus had no ruling on.
  */
 export interface RankResult {
-  source: 'semantic' | 'lexical' | 'empty' | 'none';
+  // 'hybrid' = both tiers ran and were RRF-fused (the normal path). 'lexical'/'semantic' mean the
+  // other tier could not run — a degradation the caller should be able to see, not a silent default.
+  source: 'hybrid' | 'semantic' | 'lexical' | 'empty' | 'none';
   rows: RankedRow[];
-}
-
-/** The Ollama /api/embed response (external boundary). */
-interface EmbedResponse {
-  embeddings?: number[][];
 }
 
 // ─── Candidate set ───────────────────────────────────────────────────────────────
@@ -312,49 +295,6 @@ export function bm25Rank(
 
 // ─── Semantic tier (per-axis embeddings, local Ollama) ───────────────────────────
 
-export function cosine(a: number[], b: number[]) {
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i += 1) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
-}
-
-// Embed via Ollama. Returns number[] or null (opted out / Ollama down / model absent / bad
-// response) → the caller falls back to the lexical floor. Never throws.
-// nomic-embed-text REQUIRES task prefixes (`search_query:` / `search_document:`) for calibrated
-// retrieval similarity — without them, query↔doc cosine is poorly ranked.
-export async function embed(
-  text: string,
-  kind: 'query' | 'document' = 'document',
-): Promise<number[] | null> {
-  if (process.env.DECISIONS_NO_EMBED) return null;
-  const prefixed = `${kind === 'query' ? 'search_query: ' : 'search_document: '}${String(text).slice(0, 8000)}`;
-  try {
-    const res = await fetch(EMBED_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: EMBED_MODEL, input: prefixed }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as EmbedResponse | null;
-    const vec = data?.embeddings?.[0];
-    return Array.isArray(vec) && vec.length ? vec : null;
-  } catch {
-    return null;
-  }
-}
-
-function axisHash(text: string) {
-  return createHash('sha1').update(text).digest('hex');
-}
-
 // Cap the gist at the TAIL (newest entries), never the head — the current ruling is the LAST
 // entry (append-only), and that's what retrieval most needs to match on a hot, oft-flipped axis.
 export function clampGist(body: string, max = 6000) {
@@ -376,20 +316,6 @@ export function gistOf(p: RetrievalPaths, slug: string): string | null {
   return clampGist(live.length ? live.map((e) => e.text).join('\n') : t ? t.block : body);
 }
 
-function loadVecIndex(p: RetrievalPaths): VecIndex {
-  if (!existsSync(p.vecIndexPath)) return {};
-  try {
-    return JSON.parse(readFileSync(p.vecIndexPath, 'utf8')) as VecIndex;
-  } catch {
-    return {}; // corrupt derived cache → rebuilt lazily, never fatal
-  }
-}
-
-function saveVecIndex(p: RetrievalPaths, idx: VecIndex) {
-  mkdirSync(path.dirname(p.vecIndexPath), { recursive: true });
-  writeFileAtomic(p.vecIndexPath, `${JSON.stringify(idx)}\n`);
-}
-
 // Lazy content-hash rehash: (re)embed an axis only if its gist changed (or is new/missing).
 // Returns true if it (re)embedded. No manual reindex discipline — drift self-heals on query.
 export async function embedAxis(p: RetrievalPaths, slug: string, idx: VecIndex): Promise<boolean> {
@@ -407,43 +333,112 @@ export async function embedAxis(p: RetrievalPaths, slug: string, idx: VecIndex):
 
 // ─── Ranking ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Reciprocal Rank Fusion constant, from Cormack et al. 2009 — deliberately NOT tuned. At n≈35 axes
+ * and 29 cases, fitting K would fit noise; the published default is the honest choice until there is
+ * a corpus large enough to tune against. Recorded as a choice, not an oversight.
+ */
+const RRF_K = 60;
+
+/**
+ * Fuse ranked lists by Reciprocal Rank Fusion: an axis scores Σ 1/(RRF_K + rank) over the lists that
+ * returned it. Rank-based, so the two tiers' incomparable score scales (cosine 0–1 vs unbounded
+ * BM25) never have to be reconciled — the reason a weighted blend was rejected.
+ */
+function rrfFuse(lists: RankedRow[][], k: number): RankedRow[] {
+  const fused = new Map<string, RankedRow & { score: number }>();
+  for (const list of lists) {
+    list.forEach((row, i) => {
+      const prev = fused.get(row.slug);
+      const contribution = 1 / (RRF_K + i + 1);
+      if (!prev) {
+        fused.set(row.slug, { ...row, score: contribution });
+        return;
+      }
+      prev.score += contribution;
+      // Keep whichever list could attribute the match. Semantic embeds the whole axis as one vector
+      // and reports null; lexical knows which entry won. Preferring the non-null is the only way a
+      // fused row can still say WHICH note matched — losing that would undo 4.3.
+      if (prev.matchedEntryId == null && row.matchedEntryId != null)
+        prev.matchedEntryId = row.matchedEntryId;
+    });
+  }
+  return [...fused.values()]
+    .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))
+    .slice(0, k);
+}
+
 // Rank the recorded axes against a free-text query and RETURN the ranked rows (data, not printed) so
 // both `query` (which prints them) and `scoped-targets` (which emits JSON) share one ranker.
-// Reason: the branches ARE the query ranking algorithm's fallback tiers (semantic cosine over the vector index, then BM25 lexical floor, then raw first-k); the embed-availability and stale-dim filtering are inherent to degrading gracefully and flattening scatters one ranked lookup
-// fallow-ignore-next-line complexity
 export async function rankAxes(text: string, k = 5, p: RetrievalPaths): Promise<RankResult> {
   const rows = loadAxisRows(p);
   if (rows.length === 0) return { source: 'empty', rows: [] };
   const idf = corpusIdf(rows);
-  const qvec = await embed(text, 'query');
-  if (qvec) {
-    const idx = loadVecIndex(p);
-    let dirty = false;
-    for (const r of rows) if (await embedAxis(p, r.slug, idx)) dirty = true;
-    if (dirty) saveVecIndex(p, idx);
-    const ranked = rows
-      .filter((r) => idx[r.slug]?.vec?.length === qvec.length) // skip stale-dim vectors → lexical covers
-      .map((r) => ({
-        ...r,
-        score: cosine(qvec, idx[r.slug].vec),
-        // NULL, not the ruling id: this tier embeds the whole axis (ruling + qualifiers) as ONE
-        // vector, so it genuinely cannot say which unit matched. Naming the ruling would be a false
-        // provenance claim — a query matching only note text would be reported as ruling-sourced.
-        // Null means "this tier cannot attribute the match", which is the truth. Per-entry
-        // embeddings would let it answer properly; until then it declines to guess.
-        matchedEntryId: null,
-        qualifiers: orderQualifiers(text, r.qualifiers ?? [], idf),
-      }))
-      .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))
-      .slice(0, k);
-    if (ranked.length) return { source: 'semantic', rows: ranked };
+
+  // Both tiers run over the same candidates and are FUSED, never laddered. Measured on the 29-case
+  // suite: semantic alone gets containment 8/8 but drops multi-axis recall to 62.5%; lexical alone
+  // holds 75% multi-axis but misses the vocabulary-gap case. They fail differently, so the ladder —
+  // which made them mutually exclusive and let semantic win outright — was discarding real signal.
+  // Fusing also means CI scores the SAME code path a developer runs, which a fallback never did.
+  // DECISIONS_NO_LEXICAL is the mirror of DECISIONS_NO_EMBED: a diagnostic knob that isolates one
+  // tier so the bench can score all three configurations. Neither is a production path.
+  const lexical = process.env.DECISIONS_NO_LEXICAL
+    ? []
+    : bm25Rank(text, rows, rows.length, undefined, undefined, idf);
+  const semantic = await semanticRank(text, rows, p, idf);
+
+  if (!semantic) {
+    // Loud, once per query, on stderr: a silently lexical-only retriever is precisely the failure
+    // that hid for months — the only signal was the word `lexical` in a header nobody read.
+    // But ONLY when the tier is unavailable, never when it was switched off deliberately: tests and
+    // the CI bench tier both set DECISIONS_NO_EMBED, and accusing them of a broken install would
+    // make the warning noise, which is how a real one gets ignored.
+    if (!warnedNoEmbed && !embedDisabled()) {
+      warnedNoEmbed = true;
+      console.error(
+        `guard-decisions: embedding model ${EMBED_MODEL} unavailable — ranking LEXICALLY ONLY ` +
+          '(run `ollama pull ' +
+          `${EMBED_MODEL}\` to restore hybrid ranking)`,
+      );
+    }
+    return lexical.length
+      ? { source: 'lexical', rows: lexical.slice(0, k) }
+      : { source: 'none', rows: [] };
   }
-  // Fallback floor: BM25 over the candidate rows. Zero lexical overlap is an ABSTAIN, not a reason
-  // to hand back `rows.slice(0, k)` — that old fallback returned the alphabetically-first k axes and
-  // was indistinguishable from a real hit, which is how "nothing rules on this" came to look exactly
-  // like an answer. Callers get an empty set and a `none` source instead.
-  const lex = bm25Rank(text, rows, k, undefined, undefined, idf);
-  return lex.length ? { source: 'lexical', rows: lex } : { source: 'none', rows: [] };
+  if (!lexical.length) return { source: 'semantic', rows: semantic.slice(0, k) };
+
+  return { source: 'hybrid', rows: rrfFuse([lexical, semantic], k) };
+}
+
+let warnedNoEmbed = false;
+
+/** The dense tier, or null when embedding is unavailable — null is "could not run", distinct from
+ * an empty result, so the caller can tell degradation from a genuine miss. */
+async function semanticRank(
+  text: string,
+  rows: AxisRow[],
+  p: RetrievalPaths,
+  idf: Map<string, number>,
+): Promise<RankedRow[] | null> {
+  const qvec = await embed(text, 'query');
+  if (!qvec) return null;
+  const idx = loadVecIndex(p);
+  let dirty = false;
+  for (const r of rows) if (await embedAxis(p, r.slug, idx)) dirty = true;
+  if (dirty) saveVecIndex(p, idx);
+  const ranked = rows
+    .filter((r) => idx[r.slug]?.vec?.length === qvec.length) // stale-dim vectors → lexical covers
+    .map((r) => ({
+      ...r,
+      score: cosine(qvec, idx[r.slug].vec),
+      // NULL, not the ruling id: this tier embeds the whole axis (ruling + qualifiers) as ONE
+      // vector, so it genuinely cannot say which unit matched. Naming the ruling would be a false
+      // provenance claim — a query matching only note text would be reported as ruling-sourced.
+      matchedEntryId: null,
+      qualifiers: orderQualifiers(text, r.qualifiers ?? [], idf),
+    }))
+    .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug));
+  return ranked.length ? ranked : null;
 }
 
 /** Force a full re-embed of every axis (ignoring the content hash) — `guard-decisions reindex`. */
