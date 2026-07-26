@@ -230,6 +230,45 @@ describe('prepare_gate_worktree — a present-but-unusable dependency dir', () =
   });
 });
 
+// sc-1267. "Populated" only proves that an install exists; it does not prove that the install
+// satisfies the commit selected as the ship base. When origin/main adds a dependency after the
+// shared checkout last ran `bun install`, an unrelated ship can otherwise pass early binary-based
+// gates and die much later with ERR_MODULE_NOT_FOUND.
+describe('prepare_gate_worktree — dependency manifest freshness', () => {
+  it('falls back to the main worktree when the linked install misses a base dependency', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ devDependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+    seedFiles(main, { 'node_modules/fresh-dep/package.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, 'node_modules'))).toBe(join(main, 'node_modules'));
+  });
+
+  it('fails before gates when every available install misses a base dependency', () => {
+    const { main, linked, wt } = seedRepoWithLinkedWorktree();
+    seedFiles(wt, {
+      'package.json': JSON.stringify({ dependencies: { 'fresh-dep': '^1.0.0' } }),
+      'bun.lock': '{}',
+    });
+    seedFiles(linked, { 'node_modules/old-dep/package.json': '{}' });
+
+    const r = prepare(wt, linked);
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('no node_modules satisfies the ship base package.json');
+    expect(r.stderr).toContain('fresh-dep');
+    expect(r.stderr).toContain(join(linked, 'node_modules'));
+    expect(r.stderr).toContain(join(main, 'node_modules'));
+    expect(r.stderr).toContain('bun install --frozen-lockfile');
+  });
+});
+
 // The hole the populated-preference cannot close: a `.husky/_` that IS populated but carries no
 // pre-commit shim resolves fine, and the ship then commits and opens a PR with zero gates.
 describe('prepare_gate_worktree — the worktree must have a hook chain git will run', () => {
