@@ -371,6 +371,23 @@ describe('loadAxisRows (the retrieval candidate set)', () => {
     expect(row?.qualifiers.map((q) => q.date)).toEqual(['2026-02-02']);
   });
 
+  it('two blocks sharing a DATE bind to the last one, not the first', () => {
+    // today() is day-granularity, so an axis amended twice in one day has two same-date headings.
+    // Array.find would take the SUPERSEDED one and attach its notes to the current ruling.
+    write(
+      'same-day.md',
+      axis(
+        'same-day',
+        `${targetBlock('2026-03-11', 'the morning ruling')}- 2026-03-11 — note under the SUPERSEDED block\n\n` +
+          `${targetBlock('2026-03-11', 'the afternoon ruling')}- 2026-04-02 — note under the CURRENT block\n`,
+      ),
+    );
+    const row = loadAxisRows(paths()).find((r) => r.slug === 'same-day');
+    expect(row?.entries[0].text).toContain('afternoon');
+    expect(row?.entries[0].text).not.toContain('morning');
+    expect(row?.qualifiers.map((q) => q.date)).toEqual(['2026-04-02']);
+  });
+
   it('dates from a note bullet count toward `updated` (notes are newer than their Target)', () => {
     write(
       'hot.md',

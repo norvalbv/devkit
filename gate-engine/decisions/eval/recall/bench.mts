@@ -133,6 +133,45 @@ function axisText(corpus: string, slug: string) {
   return existsSync(f) ? readFileSync(f, 'utf8') : '';
 }
 
+/**
+ * Do the labels still describe THIS corpus? Checked mechanically, every run.
+ *
+ * The storeHash tripwire only proves the corpus CHANGED; it says nothing about whether a label
+ * survived the change, and re-stamping the hash silences it. That is not hypothetical — editing one
+ * axis left a CURRENT_STATE case whose `liveId` and every `mustSurface` substring had vanished from
+ * the file, and re-stamping hid it. It would have scored CSA=false forever: a permanent false
+ * failure penalising a CORRECT retriever, which is the inverted-label harm this suite exists to
+ * avoid. A hash says something moved; only these checks say the labels still mean anything.
+ */
+export function brokenLabels(corpus: string, cases: RecallCase[]) {
+  const errors: string[] = [];
+  for (const c of cases) {
+    for (const slug of [...c.gold, ...(c.goldRequired ?? []), ...(c.distractors ?? [])]) {
+      if (!existsSync(path.join(corpus, `${slug}.md`)))
+        errors.push(`${c.id}: references "${slug}", which is not in this corpus`);
+    }
+    const cs = c.currentState;
+    if (!cs) continue;
+    const text = axisText(corpus, cs.axis);
+    if (!text) {
+      errors.push(`${c.id}: currentState.axis "${cs.axis}" is not in this corpus`);
+      continue;
+    }
+    // Scoring is exact substring matching, so a substring that no longer appears does not fail
+    // loudly — it silently never fires. Both directions are checked verbatim.
+    for (const s of cs.mustSurface)
+      if (!text.includes(s))
+        errors.push(`${c.id}: mustSurface ${JSON.stringify(s)} not in ${cs.axis}.md`);
+    for (const s of cs.mustNotAssert)
+      if (!text.includes(s))
+        errors.push(`${c.id}: mustNotAssert ${JSON.stringify(s)} not in ${cs.axis}.md`);
+    const date = cs.liveId.split(':')[1] ?? '';
+    if (date && !text.includes(date))
+      errors.push(`${c.id}: liveId "${cs.liveId}" names a date absent from ${cs.axis}.md`);
+  }
+  return errors;
+}
+
 async function runCases(corpus: string, cases: RecallCase[]): Promise<Scored[]> {
   // Point the engine's config at the frozen corpus and away from any live tree or vector cache.
   process.env.GUARD_DECISIONS_DIR = corpus;
@@ -236,6 +275,15 @@ function coverage(corpus: string, cases: RecallCase[]) {
     );
   }
 
+  const broken = brokenLabels(corpus, cases);
+  if (broken.length) {
+    console.log(`\n  ✗ ${broken.length} label(s) no longer describe this corpus:`);
+    for (const b of broken) console.log(`      ${b}`);
+    console.log(
+      '    Re-validate against the corpus — a stale label scores a CORRECT retriever as broken.',
+    );
+  }
+
   console.log('\n  leakage (token Jaccard, question vs its gold axis file):');
   const leaks: { id: string; j: number }[] = [];
   for (const c of cases) {
@@ -250,7 +298,7 @@ function coverage(corpus: string, cases: RecallCase[]) {
   for (const o of over)
     console.log(`    ✗ ${o.id} — ${o.j.toFixed(3)} rewrites the ruling; reject`);
   if (!over.length) console.log('    ✓ every case is below the ceiling');
-  return over.length + drifted.length;
+  return over.length + drifted.length + broken.length;
 }
 
 export async function main(argv: string[]) {

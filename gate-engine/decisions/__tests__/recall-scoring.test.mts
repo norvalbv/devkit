@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { leakJaccard, lintRecallCases, staleLabels, storeHash } from '../eval/recall/bench.mts';
+import {
+  brokenLabels,
+  leakJaccard,
+  lintRecallCases,
+  staleLabels,
+  storeHash,
+} from '../eval/recall/bench.mts';
 import {
   abstained,
   type Envelope,
@@ -10,7 +16,7 @@ import {
   scoreCase,
   summarize,
 } from '../eval/recall/scoring.mts';
-import { corpusIdf, orderQualifiers } from '../retrieval.mts';
+import { corpusIdf, orderQualifiers } from '../recall/retrieval.mts';
 
 const env = (slugs: string[], over: Partial<Envelope['rows'][number]>[] = []): Envelope => ({
   state: slugs.length ? 'RULED' : 'NO_RULING',
@@ -495,5 +501,58 @@ describe('orderQualifiers (shared by every retrieval tier)', () => {
       ['here', 0.1],
     ]);
     expect(orderQualifiers('retry budget', [padded, terse], idf2)[0].date).toBe('2026-01-01');
+  });
+});
+
+describe('brokenLabels (labels must still describe the corpus)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'recall-labels-'));
+  writeFileSync(
+    join(dir, 'axis.md'),
+    '# axis\n\n## Target · 2026-01-01 — r\n\n**Ruling:** the guarantee holds\n- 2026-02-02 — PARKED, it does not\n',
+  );
+
+  it('passes when every referenced slug and substring is present', () => {
+    expect(
+      brokenLabels(dir, [
+        {
+          id: 'ok',
+          q: 'q',
+          type: 'CURRENT_STATE',
+          gold: ['axis'],
+          currentState: {
+            axis: 'axis',
+            liveId: 'target:2026-01-01',
+            staleId: 'target:2026-01-01',
+            mustSurface: ['PARKED'],
+            mustNotAssert: ['the guarantee holds'],
+          },
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('catches every way a label stops describing the corpus', () => {
+    // The hash tripwire only says the corpus MOVED; re-stamping it silences that. These checks are
+    // what say the labels still mean something — a rotted one scores a CORRECT retriever as broken.
+    const errors = brokenLabels(dir, [
+      {
+        id: 'rotted',
+        q: 'q',
+        type: 'CURRENT_STATE',
+        gold: ['vanished-axis'],
+        currentState: {
+          axis: 'axis',
+          liveId: 'target:1999-01-01',
+          staleId: 'x',
+          mustSurface: ['TEXT THAT IS GONE'],
+          mustNotAssert: ['ALSO GONE'],
+        },
+      },
+    ]);
+    expect(errors).toHaveLength(4);
+    expect(errors[0]).toContain('vanished-axis');
+    expect(errors.some((e) => e.includes('mustSurface'))).toBe(true);
+    expect(errors.some((e) => e.includes('mustNotAssert'))).toBe(true);
+    expect(errors.some((e) => e.includes('liveId'))).toBe(true);
   });
 });

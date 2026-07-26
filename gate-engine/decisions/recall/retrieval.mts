@@ -13,8 +13,9 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { writeFileAtomic } from './atomic-write.mts';
-import { currentTarget, type IndexRow, parseDecision, parseIndex } from './decision-format.mts';
+import { writeFileAtomic } from '../atomic-write.mts';
+import { currentTarget, type IndexRow, parseDecision, parseIndex } from '../decision-format.mts';
+import { sections } from './markdown.mts';
 import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mts';
 
 // Re-exported so retrieval stays the single entry point for the recall path.
@@ -186,60 +187,45 @@ function axisRow(p: RetrievalPaths, slug: string, fallback: IndexRow | undefined
  * makes long-document scoring work (SummaC, arXiv:2111.09525).
  */
 export function axisEntries(body: string, liveRulingId: string | null): AxisEntry[] {
-  const entries: AxisEntry[] = [];
   const target = currentTarget(body);
   const rulingDate = liveRulingId?.split(':')[1] ?? '';
-  // The ruling block: the current Target when there is one, else the whole body (legacy schema).
-  entries.push({
-    id: liveRulingId ?? 'ruling:unknown',
-    kind: 'ruling',
-    date: rulingDate,
-    text: '',
-  });
-  // Notes AFTER the current ruling's heading. Notes under a superseded ruling qualify one that is
-  // no longer current, so they are deliberately not part of the live answer.
-  //
-  // Located by the ruling's own DATE rather than "the last `## ` heading": those differ whenever an
-  // `## [archived …]` heading trails the current block, and taking the last one would slice past
-  // every real note and report an axis as unqualified — silently returning a falsified ruling bare,
-  // which is the exact failure this function exists to prevent.
-  const headIndex = liveRulingId
-    ? Math.max(body.lastIndexOf(`## Target · ${rulingDate}`), body.lastIndexOf(`## ${rulingDate} `))
-    : -1;
-  // Bounded at BOTH ends. Locating the start by date fixed only half of it: the tail still ran to
-  // end-of-file, so bullets under a trailing `## [archived …]` heading — the documented way to
-  // retire a mis-filed entry rather than delete it — were collected as live qualifiers of the
-  // CURRENT ruling.
-  const tail = headIndex === -1 ? body : sliceToNextHeading(body.slice(headIndex));
-  // The ruling's OWN text. `currentTarget().block` already stops at the first note bullet for the
-  // modern schema; the legacy branch must do the same within its own block rather than take the
-  // whole body. Taking the body meant an append-only legacy file indexed every SUPERSEDED
-  // `## <date>` block as though it were the current ruling — 12 files in the real corpus have that
-  // shape, one with 8 blocks — so BM25 and the embedding matched retired text while the entry still
-  // reported the current block's id.
-  entries[0].text = target ? target.block : upToFirstNote(tail);
-  for (const line of tail.split('\n')) {
-    const m = line.match(NOTE_LINE_RE);
-    if (m) entries.push({ id: `note:${m[1]}`, kind: 'note', date: m[1], text: m[2] });
+  const all = sections(body);
+  // The ruling's own section, found by its heading rather than by position. Both schema generations
+  // are named here because both are current somewhere: `## Target · <date>` and the legacy
+  // `## <date> — …` that still accounts for 49 of the real corpus's blocks.
+  // findLast, never find: EVERY other resolution in this engine takes the last match —
+  // currentTarget() takes the last Target block, axisRow takes legacyRulings.at(-1), and the
+  // string-arithmetic this replaced used lastIndexOf. Two blocks share a date whenever an axis is
+  // amended twice in one calendar day (today() is day-granularity, and the real corpus has such
+  // files), and first-match would bind to the SUPERSEDED one — attaching its notes to the current
+  // ruling and orphaning the real ones. That is the same notes-detached-from-their-ruling class the
+  // six earlier review rounds closed.
+  const lastMatching = (prefix: string) => {
+    for (let i = all.length - 1; i >= 0; i -= 1)
+      if (all[i].depth === 2 && all[i].heading.startsWith(prefix)) return all[i];
+    return undefined;
+  };
+  const own = lastMatching(`## Target · ${rulingDate}`) ?? lastMatching(`## ${rulingDate} `);
+
+  const entries: AxisEntry[] = [
+    {
+      id: liveRulingId ?? 'ruling:unknown',
+      kind: 'ruling',
+      date: rulingDate,
+      // The modern schema already has a parsed block; the legacy branch takes its OWN section's
+      // prose. Never the whole body — that folded every superseded block into the current ruling.
+      text: target ? target.block : (own?.prose ?? body),
+    },
+  ];
+
+  // Qualifiers are the dated bullets inside the ruling's OWN section. Bullets under any other
+  // heading — a superseded block, or a trailing `## [archived …]` — belong to that heading, and the
+  // section boundary now comes from the parser instead of being inferred.
+  for (const item of own?.items ?? []) {
+    const m = item.match(NOTE_LINE_RE);
+    if (m) entries.push({ id: `note:${m[1]}`, kind: 'note', date: m[1], text: m[2].trim() });
   }
   return entries;
-}
-
-/** A block's prose, excluding the dated note bullets appended under it. */
-function upToFirstNote(block: string) {
-  const lines: string[] = [];
-  for (const line of block.split('\n')) {
-    if (NOTE_LINE_RE.test(line)) break;
-    lines.push(line);
-  }
-  return lines.join('\n').trim();
-}
-
-/** A block's own text: from its heading up to the next `## ` heading, or the end of the body. */
-function sliceToNextHeading(fromHeading: string) {
-  // Search from index 1 so the block's OWN heading does not terminate it immediately.
-  const next = fromHeading.indexOf('\n## ', 1);
-  return next === -1 ? fromHeading : fromHeading.slice(0, next);
 }
 
 /** Name the block a ruling was read from: `target:<date>`, `entry:<date>` (legacy), or null. */
