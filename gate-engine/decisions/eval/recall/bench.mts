@@ -96,6 +96,17 @@ export function lintRecallCases(rows: RecallCase[]) {
     if (r?.type !== 'ABSTAIN' && !r?.gold?.length) errors.push(`${at}: ${r?.type} needs gold`);
     if (r?.type === 'CURRENT_STATE' && !r.currentState)
       errors.push(`${at}: CURRENT_STATE needs a currentState block`);
+    // Both lists must be non-empty or the case scores nothing: `[].every()` is vacuously true and
+    // `[].some()` vacuously false, so an empty list silently switches the staleness check OFF rather
+    // than failing loudly. Same class of defect as any "metric that cannot fail".
+    if (r?.type === 'CURRENT_STATE' && r.currentState && !r.currentState.mustSurface?.length)
+      errors.push(
+        `${at}: currentState.mustSurface must be non-empty (an empty list disables SFER)`,
+      );
+    if (r?.type === 'CURRENT_STATE' && r.currentState && !r.currentState.mustNotAssert?.length)
+      errors.push(
+        `${at}: currentState.mustNotAssert must be non-empty (an empty list disables SFER)`,
+      );
     if (r?.type === 'MULTI' && !(r.goldRequired?.length ?? 0))
       errors.push(`${at}: MULTI needs goldRequired`);
   }
