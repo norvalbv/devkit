@@ -22,6 +22,10 @@ is unset, treat all staged source files as in scope.
   queries describing what each staged symbol *does* (its purpose / behaviour / domain) — NOT its
   name. Function-name queries are an anti-pattern: the search tool is for concept matching; for
   exact-name lookups grep is faster and more reliable.
+- If the configured MCP search tool is unavailable, run `search-code search "<natural-language query>" --json`
+  from the repo root. `search-code` is an externally installed engine, not a vendored project file.
+  If the executable or repository index is unavailable, state that semantic retrieval is unavailable;
+  do not substitute grep, and continue with the deterministic matcher and clone checks.
 - Retrieval is hybrid (dense description embedding + sparse BM25 over raw code, RRF-fused). The
   similarity threshold below applies to the dense channel score returned in `similarity`.
 - Similarity threshold: 0.82. Hits below this or in the same file are ignored.
