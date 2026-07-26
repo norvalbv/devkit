@@ -5,7 +5,7 @@ import { syncSkills } from "../../commands/sync/sync-skills.mjs";
 import { AGENT_TARGETS } from "../components.mjs";
 import { removeAgents, removeSkills } from "../sync-manifest.mjs";
 import { selectedHookAssets } from "./agent-hook-selection.mjs";
-import { installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "./install-hooks.mjs";
+import { reconcileHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "./install-hooks.mjs";
 function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookScripts, dryRun) {
     const prunedTargets = AGENT_TARGETS.filter((target) => !agentTargets.includes(target));
     const settingsFile = {
@@ -30,7 +30,7 @@ function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookScripts, 
     removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets });
 }
 /** Exact-reconcile all selected agent assets and prune deselected surfaces. */
-export function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false) {
+export function installAgentSurfaces(gitRoot, selection, dryRun, override = () => false, previousSelection = {}) {
     const targets = selection.agentTargets ?? AGENT_TARGETS;
     if (selection.skills) {
         console.log('7. skills');
@@ -47,7 +47,7 @@ export function installAgentSurfaces(gitRoot, selection, dryRun, override = () =
         console.log('7a. agents');
         syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, targets, { override });
     }
-    const hooks = selectedHookAssets(selection);
+    const hooks = selectedHookAssets(selection, {}, previousSelection);
     if (hooks.scripts.length) {
         console.log('7b. agent-hook scripts');
         syncHookScripts(gitRoot, {
@@ -63,10 +63,14 @@ export function installAgentSurfaces(gitRoot, selection, dryRun, override = () =
     }
     if (hooks.components.length) {
         console.log('7c. agent hook registrations');
-        installHookRegistrations(gitRoot, hooks.components, { dryRun, targets });
+        reconcileHookRegistrations(gitRoot, hooks.components, hooks.previouslyOwnedComponents, {
+            dryRun,
+            targets,
+        });
     }
-    else if (targets.some((target) => existsSync(join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json')))) {
-        removeHookRegistrations(gitRoot, { dryRun, targets });
+    else if (hooks.previouslyOwnedComponents.length &&
+        targets.some((target) => existsSync(join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json')))) {
+        reconcileHookRegistrations(gitRoot, [], hooks.previouslyOwnedComponents, { dryRun, targets });
     }
     pruneDeselectedSurfaces(gitRoot, selection, targets, hooks.scripts, dryRun);
     return targets;

@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../components.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
 import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest.mjs";
-export { checkHookRegistrations, installHookRegistrations, removeHookRegistrations, } from "./hook-settings.mjs";
+export { checkHookRegistrations, installHookRegistrations, reconcileHookRegistrations, removeHookRegistrations, } from "./hook-settings.mjs";
 // Surface `<name>` (claude|cursor) → its hook-scripts dir (.claude/hooks | .cursor/hooks).
 const hookDirs = (targets) => targets.map((t) => `.${t}/hooks`);
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
