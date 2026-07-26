@@ -17,11 +17,6 @@ import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, cleanup } = tmpRepos('conflict-');
 
-// applyInit + the clean fallback shell out to git (detectGitRoot, isTracked per bundled name); under
-// the full suite's parallel load that subprocess contention can starve the default 5s timeout. Give
-// ample headroom (assertions unchanged) — same rationale as overlay.test.mjs.
-vi.setConfig({ testTimeout: 20000 });
-
 // A minimal selection: just sync skills (or agents) to the Claude surface — no biome/tsconfig/husky/
 // guards/structure/fallow noise, so applyInit exercises only the agent-surface path under test.
 const only = (overrides) => ({

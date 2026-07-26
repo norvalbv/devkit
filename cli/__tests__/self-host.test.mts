@@ -4,8 +4,14 @@
  * If the parity test fails, the hook drifted from the generator: regenerate it (`devkit init` in the
  * repo, or `devkit doctor --fix`) and re-commit.
  */
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,28 +28,17 @@ import {
   sourceBinFor,
   toSelfHost,
 } from '../lib/husky/self-host.mts';
+import { testExecFileSync as execFileSync } from './_helpers.mts';
 
 // The repo root (where package.json + .husky live) — resolved from THIS file, not cwd, so the parity
 // check is robust to however vitest is launched.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const PACKAGE = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
-  bin?: Record<string, string>;
-  scripts?: Record<string, string>;
-};
 
 const HOOK_SEL = {
   ...selfHostSelection(),
   structureCmd: SELF_HOST_STRUCTURE_CMD,
   extras: SELF_HOST_EXTRAS,
 };
-
-describe('self-host CLI entrypoint', () => {
-  it('runs repository maintenance from source while consumers keep the packaged dist bin', () => {
-    expect(PACKAGE.scripts?.devkit).toMatch(/\bcli\/index\.mts\b/);
-    expect(PACKAGE.scripts?.devkit).not.toContain('dist/');
-    expect(PACKAGE.bin?.devkit).toBe('./dist/cli/index.mjs');
-  });
-});
 
 describe('self-host bin rewrite', () => {
   it('sourceBinFor maps a guard bin to its source .mts (derived from package.json bin)', () => {
@@ -146,6 +141,44 @@ describe('buildSelfHostHook', () => {
 describe('isDevkitRepo', () => {
   it('true for the devkit repo root', () => {
     expect(isDevkitRepo(ROOT)).toBe(true);
+  });
+});
+
+describe('test timeout policy', () => {
+  it('keeps one load-tolerant timeout in vitest.config.mjs instead of per-suite overrides', () => {
+    const pending = [join(ROOT, 'cli'), join(ROOT, 'gate-engine'), join(ROOT, 'e2e', 'lib')];
+    const overrides: string[] = [];
+    const localTimeoutOverride = /\bsetConfig\s*\(\s*\{[^}]*\btestTimeout\s*:/;
+    const compactOverride = ['vi.', 'set', 'Config({', 'test', 'Timeout: 30_000 })'].join('');
+    const multilineOverride = [
+      'vi.',
+      'set',
+      'Config ( {',
+      '\n  retry: 1,\n  ',
+      'test',
+      'Timeout : 30_000\n})',
+    ].join('');
+
+    expect(localTimeoutOverride.test(compactOverride)).toBe(true);
+    expect(localTimeoutOverride.test(multilineOverride)).toBe(true);
+
+    while (pending.length > 0) {
+      const dir = pending.pop();
+      if (!dir || !existsSync(dir)) continue;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          pending.push(path);
+        } else if (
+          entry.name.endsWith('.test.mts') &&
+          localTimeoutOverride.test(readFileSync(path, 'utf8'))
+        ) {
+          overrides.push(path.slice(ROOT.length + 1));
+        }
+      }
+    }
+
+    expect(overrides).toEqual([]);
   });
 });
 

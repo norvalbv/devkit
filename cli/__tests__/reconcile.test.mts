@@ -5,18 +5,13 @@
  * `--apply`, a `git merge --ff-only` that the stale tree BLOCKED now SUCCEEDS — proving reconcile
  * makes the tree pullable without moving the shared HEAD.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ffBlockers, loadManifest, reconcileBranch } from '../lib/reconcile.mts';
-
-// Each test drives a real bare-origin repo through ~10 git subprocesses (init/commit/push/fetch/
-// merge/checkout); under full-suite parallel load that exceeds vitest's 5s default. Give the file
-// generous wall-clock — the tests still assert everything, they're just subprocess-bound.
-vi.setConfig({ testTimeout: 30_000 });
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };

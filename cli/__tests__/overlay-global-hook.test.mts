@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -10,7 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import cleanCmd from '../commands/clean.mts';
 import {
   globalHookInstalled,
@@ -18,12 +17,11 @@ import {
   installGlobalHook,
   removeGlobalHook,
 } from '../lib/overlay-global-hook.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // The opt-in global husky init.sh shim that gates a PLAIN `git commit` after husky reclaims
 // core.hooksPath. Two concerns: the marker-block writer/remover (hermetic, XDG → temp), and the
 // shim's runtime dispatch (sourced like husky's _/h, with a controlled $0 + cwd).
-
-vi.setConfig({ testTimeout: 30_000 });
 
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const dirs = [];
