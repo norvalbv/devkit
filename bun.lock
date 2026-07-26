@@ -13,6 +13,7 @@
         "@biomejs/biome": "^2.5.0",
         "@types/node": "^25.9.3",
         "@vitest/coverage-v8": "^4.1.10",
+        "es-module-lexer": "^2.1.0",
         "husky": "^9.1.7",
         "typescript": "^6.0.3",
         "vitest": "^4.1.10",

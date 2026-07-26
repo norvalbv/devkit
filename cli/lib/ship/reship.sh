@@ -78,6 +78,13 @@ git fetch origin "$BR" 2>/dev/null || {
 }
 BASE=$(git rev-parse FETCH_HEAD)
 
+# Match new-ship: run against the caller checkout before the detached worktree hides ignored,
+# unbriefed dist artifacts. The helper no-ops for every consumer repo.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
+[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
@@ -177,7 +184,6 @@ git -C "$WT" push origin "HEAD:$BR" || {
 # `devkit ship` created it). Best-effort — a miss only costs a manual reconcile, never unwinds the push.
 # --git-root "$WT": hash the just-committed (shipped) blobs. --base-sha "$BASE" (the PR-branch tip): classify
 # this commit's delta. --merge: keep the entry's PR metadata, overlay paths by path. (gh-free.)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist). Prefer whichever exists beside this script.
 RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"

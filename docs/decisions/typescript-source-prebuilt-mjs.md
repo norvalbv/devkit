@@ -19,3 +19,19 @@ created: 2026-07-05
 **Revisit-when:** Node ships stable execution of TypeScript from inside node_modules (removing the need to compile at all), OR devkit moves to a published registry package (build-at-publish replaces the committed dist).
 **Scope:** cli/commands/release.mts,scripts/copy-dist-assets.mjs,tsconfig.build.json,package.json
 **Source:** web · https://nodejs.org/api/typescript.html
+
+## Target · 2026-07-26 — Required new dist artifacts ship with their source
+
+**Context:** The release-only dist policy hid newly generated ignored files from normal status and ship discovery. Three independent source changes landed without their required artifact; a later rebuild then rewrote tracked importers to reference files absent from the package, putting every installed consumer gate at risk of failing before it could run.
+**Ruling:** Keep ordinary regenerated dist changes release-only, but ship each newly generated dist artifact in the feature change that first makes tracked output depend on it. Devkit self-host ship and reship fail before worktree creation when physical dist files are untracked, newly added dist paths are unbriefed, or tracked relative imports are unresolved.
+**Consequences:**
+- Positive: The introducing change owns every new runtime file it requires, so later rebuilds cannot reveal a delayed missing-module failure and release tags retain a self-contained package.
+- Negative: A feature PR that introduces a module now carries its narrow generated artifact and must brief that path explicitly; each self-host ship also pays one local dist, index, and import scan.
+**Vision-fit:** n/a — internal devkit release reliability
+**Researched:** Shortcut sc-1246 evidence from three independent omissions; current ship worktree and release implementation.
+**Rejected:** Release smoke only — it executes the CLI entrypoint and missed guard-dup relative imports. Doctor warning only — it does not block the publish path. Commit all regenerated dist on every feature PR — it adds broad generated churn unrelated to the new runtime file.
+**Anchored-bet:** [VALIDATED]
+**Revisit-when:** The package moves to a registry build-at-publish pipeline that constructs and verifies dist from source without committing generated output.
+**Scope:** cli/lib/ship/**,cli/commands/release.mts,scripts/copy-dist-assets.mjs,tsconfig.build.json,package.json
+**Source:** shortcut · sc-1246
+**Evidence-change:** Three independent post-ruling omissions showed that release-only bulk staging did not protect newly introduced runtime artifacts from disappearing before the release boundary.
