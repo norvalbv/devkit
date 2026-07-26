@@ -17,7 +17,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const DEFAULT_SHIP = 'devkit ship'; // a consuming repo overrides via .devkit/config.json → { ship: { command, extraArgs } }
 const RELEASE_BRANCH = /^\d+\.\d+\.\d+$/; // X.Y.Z — a release branch is protected alongside main
@@ -31,18 +31,15 @@ const ARG = `("[^"]*"|'[^']*'|[^-]\\S*)`;
 const UNIT = `${FLAG}\\s+(${ARG}\\s+)?`;
 const COMMIT_RE = new RegExp(`(^|[\\s;|&()\`])\\s*git\\s+(${UNIT})*commit([\\s]|$|[;|&"'\`])`);
 
-// Hoisted parsing regexes (biome useTopLevelRegex). The /g ones are consumed via match/matchAll,
-// which don't pollute lastIndex across calls.
-const SEG_SPLIT = /&&|\|\||[;|&]/;
-const GIT_COMMIT_RE = /\bgit\s.*\bcommit\b/;
+// Hoisted parsing regexes (biome useTopLevelRegex).
 const COMMIT_WORD_RE = /\bcommit\b/;
-const TOKENS_RE = /(?:"[^"]*"|'[^']*'|\S)+/g; // rough shell tokens (keeps quoted runs whole)
 const STAGE_ALL_RE = /^-[a-zA-Z]*a[a-zA-Z]*$/; // a short-flag bundle containing `a` (-a, -am, -na…)
-// Plain "…" / '…' / a bare token, AND escaped \"…\": a commit built inside a nested shell
-// arrives backslash-escaped, and without the escaped branch the title falls through to the
-// bare-token case and truncates to the first whitespace-delimited word (a mangled PR title).
-const MSG_RE = /(?:^|\s)(?:-m|--message)\s+(?:"([^"]*)"|'([^']*)'|\\"([^"]*)\\"|(\S+))/g;
-const PR_RE = /(?:^|\s)--pr\s+(\S+)/;
+const ASSIGNMENT_RE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
+const UNSAFE_CD_VALUE_RE = /[`*?[]/;
+const WHITESPACE_RE = /\s/;
+const BRACED_VAR_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}/;
+const PLAIN_VAR_RE = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
+type ShellQuote = "'" | '"' | '`' | 'escaped-double' | null;
 
 /** Run git in <dir>; trimmed stdout, or null on any failure (never throws). */
 function git(dir: string, args: string[]): string | null {
@@ -56,22 +53,6 @@ function git(dir: string, args: string[]): string | null {
   }
 }
 
-/**
- * The dir the commit targets: an explicit global `git -C <dir>` (before the subcommand) wins, else
- * cwd. Mirrors the bash guard — scopes `-C` to the commit's own invocation so `git commit -C <ish>`
- * (the reuse-message flag, AFTER commit) and a stray `-C` from a different git in a compound don't
- * hijack it.
- */
-function targetDir(command: string, cwd: string): string {
-  const pre = '(?:-[A-Za-z]\\S*\\s+|--\\S+\\s+)*';
-  const post = `\\s+(?:${UNIT})*commit`;
-  for (const quoted of [`"([^"]*)"`, `'([^']*)'`, `([^\\s"']+)`]) {
-    const m = command.match(new RegExp(`git\\s+${pre}-C\\s+${quoted}${post}`));
-    if (m) return m[1];
-  }
-  return cwd;
-}
-
 /** Short branch of HEAD in <dir>, or null for unborn / detached / not-a-repo / any error (→ allow). */
 function currentBranch(dir: string): string | null {
   if (git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD']) === null) return null; // unborn → allow
@@ -80,11 +61,224 @@ function currentBranch(dir: string): string | null {
 
 const isProtected = (branch: string): boolean => branch === 'main' || RELEASE_BRANCH.test(branch);
 
-/** Isolate the `git commit …` portion: the command segment containing it, from `commit` onward. */
-function commitSegment(command: string): string {
-  const seg = command.split(SEG_SPLIT).find((s) => GIT_COMMIT_RE.test(s)) ?? command;
-  const i = seg.search(COMMIT_WORD_RE);
-  return i === -1 ? seg : seg.slice(i + 'commit'.length);
+/**
+ * Split a shell command only at UNQUOTED control operators. A plain regex split corrupts commit
+ * messages containing `;`, `&&`, or `|`, which in turn truncates a multi-`-m` PR body.
+ */
+function shellSegments(command: string): string[] | null {
+  const segments: string[] = [];
+  let start = 0;
+  let quote: ShellQuote = null;
+  let escaped = false;
+  let active = false;
+  for (let i = 0; i < command.length; i += 1) {
+    const ch = command[i];
+    if (quote === 'escaped-double') {
+      if (ch === '\\' && command[i + 1] === '"') {
+        quote = null;
+        i += 1;
+      }
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      if (!quote && !active && command[i + 1] === '"') {
+        quote = 'escaped-double';
+        active = true;
+        i += 1;
+        continue;
+      }
+      escaped = true;
+      active = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      active = true;
+      continue;
+    }
+    if (WHITESPACE_RE.test(ch)) {
+      active = false;
+      continue;
+    }
+    const doubled = (ch === '&' || ch === '|') && command[i + 1] === ch;
+    const redirectsFd = ch === '&' && command[i - 1] === '>';
+    if (ch === ';' || ch === '|' || (ch === '&' && !redirectsFd)) {
+      segments.push(command.slice(start, i).trim());
+      if (doubled) i += 1;
+      start = i + 1;
+      active = false;
+      continue;
+    }
+    active = true;
+  }
+  if (quote || escaped) return null;
+  segments.push(command.slice(start).trim());
+  return segments.filter(Boolean);
+}
+
+/**
+ * Shell words with quote removal. When `variables` is provided, expand only variables established
+ * by earlier assignment-only segments; an unknown/command expansion is unsafe to guess.
+ */
+function shellWords(input: string, variables?: ReadonlyMap<string, string>): string[] | null {
+  const words: string[] = [];
+  let word = '';
+  let active = false;
+  let quote: ShellQuote = null;
+  const finish = () => {
+    if (!active) return;
+    words.push(word);
+    word = '';
+    active = false;
+  };
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (quote === 'escaped-double' && ch === '\\' && input[i + 1] === '"') {
+      quote = null;
+      i += 1;
+      continue;
+    }
+    if (!quote && WHITESPACE_RE.test(ch)) {
+      finish();
+      continue;
+    }
+    if (!quote && !active && ch === '\\' && input[i + 1] === '"') {
+      active = true;
+      quote = 'escaped-double';
+      i += 1;
+      continue;
+    }
+    if (ch === "'" && quote !== '"' && quote !== '`' && quote !== 'escaped-double') {
+      active = true;
+      quote = quote === "'" ? null : "'";
+      continue;
+    }
+    if (ch === '"' && quote !== "'" && quote !== '`' && quote !== 'escaped-double') {
+      active = true;
+      quote = quote === '"' ? null : '"';
+      continue;
+    }
+    if (ch === '`' && quote !== "'") {
+      if (variables) return null;
+      active = true;
+      quote = quote === '`' ? null : '`';
+      word += ch;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      const next = input[i + 1];
+      if (next === undefined) return null;
+      active = true;
+      if (
+        (quote === '"' || quote === 'escaped-double') &&
+        !['$', '`', '"', '\\', '\n'].includes(next)
+      ) {
+        word += '\\';
+        continue;
+      }
+      if (next === '\n') {
+        i += 1;
+        continue;
+      }
+      word += next;
+      i += 1;
+      continue;
+    }
+    if (ch === '$' && quote !== "'" && variables) {
+      if (input[i + 1] === '(') return null;
+      const braced = input.slice(i).match(BRACED_VAR_RE);
+      const plain = input.slice(i).match(PLAIN_VAR_RE);
+      const match = braced ?? plain;
+      if (!match) return null;
+      const value = variables.get(match[1]);
+      if (value === undefined) return null;
+      active = true;
+      word += value;
+      i += match[0].length - 1;
+      continue;
+    }
+    active = true;
+    word += ch;
+  }
+  if (quote) return null;
+  finish();
+  return words;
+}
+
+interface CommitInvocation {
+  segments: string[];
+  index: number;
+  segment: string;
+}
+
+/** Locate the shell segment that invokes `git commit`, without matching quoted prose. */
+function commitInvocation(command: string): CommitInvocation | null {
+  const segments = shellSegments(command);
+  if (!segments) return null;
+  const index = segments.findIndex((segment) => COMMIT_RE.test(segment));
+  return index === -1 ? null : { segments, index, segment: segments[index] };
+}
+
+/**
+ * Resolve the directory at the commit segment. We deliberately interpret only assignment-only
+ * segments plus `cd`: if an earlier command could have changed cwd in an unknown way, fail open
+ * instead of reading a different checkout and manufacturing an unsafe remediation.
+ */
+function targetDir(invocation: CommitInvocation, cwd: string): string | null {
+  let dir = cwd;
+  const variables = new Map<string, string>();
+  for (const segment of invocation.segments.slice(0, invocation.index)) {
+    const words = shellWords(segment, variables);
+    if (!words || words.length === 0) return null;
+    const assignments = words[0] === 'export' ? words.slice(1) : words;
+    if (assignments.length > 0 && assignments.every((word) => ASSIGNMENT_RE.test(word))) {
+      for (const assignment of assignments) {
+        const match = assignment.match(ASSIGNMENT_RE);
+        if (!match) return null;
+        variables.set(match[1], match[2]);
+      }
+      continue;
+    }
+    if (words[0] !== 'cd') return null;
+    const args = words[1] === '--' ? words.slice(2) : words.slice(1);
+    if (args.length !== 1 || args[0].startsWith('~') || UNSAFE_CD_VALUE_RE.test(args[0]))
+      return null;
+    dir = resolve(dir, args[0]);
+  }
+
+  // Resolve every global `git -C <dir>` before the commit subcommand using the same quote-aware
+  // words as `cd`. This preserves single-quoted / escaped `$VARS` as literals and applies multiple
+  // `-C` flags in Git's left-to-right order.
+  const commitMatch = COMMIT_RE.exec(invocation.segment);
+  if (!commitMatch) return null;
+  const commitOffset = commitMatch.index + commitMatch[0].lastIndexOf('commit');
+  const gitWords = shellWords(invocation.segment.slice(0, commitOffset), variables);
+  if (!gitWords) return null;
+  const gitIndex = gitWords.indexOf('git');
+  if (gitIndex === -1) return null;
+  for (let i = gitIndex + 1; i < gitWords.length; i += 1) {
+    const token = gitWords[i];
+    const value = token === '-C' ? gitWords[i + 1] : token.startsWith('-C') ? token.slice(2) : null;
+    if (value === null) continue;
+    if (!value || value.startsWith('~') || UNSAFE_CD_VALUE_RE.test(value)) return null;
+    dir = resolve(dir, value);
+    if (token === '-C') i += 1;
+  }
+  return dir;
+}
+
+/** Isolate the `git commit …` portion of its already quote-aware shell segment. */
+function commitSegment(segment: string): string {
+  const i = segment.search(COMMIT_WORD_RE);
+  return i === -1 ? segment : segment.slice(i + 'commit'.length);
 }
 
 const REJECT_STAGE_ALL =
@@ -114,17 +308,52 @@ type CommitIntent = RejectIntent | ShipIntent;
  * guidance rather than guessing). Reject: -a/-am/--all (shared-tree sweep), --amend / -F (out of the
  * ship model), and no -m (would open an editor).
  */
-function parseCommit(seg: string): CommitIntent {
-  const tokens = seg.match(TOKENS_RE) ?? [];
-  for (const t of tokens) {
-    if (STAGE_ALL_RE.test(t) || t === '--all') return { reject: REJECT_STAGE_ALL };
-    if (t === '--amend') return { reject: REJECT_AMEND };
-    if (t === '-F' || t === '--file') return { reject: REJECT_FILE };
+function parseCommit(seg: string): CommitIntent | null {
+  const tokens = shellWords(seg);
+  if (!tokens) return null;
+  const msgs: string[] = [];
+  let prBranch: string | null = null;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === '--') break;
+    if (STAGE_ALL_RE.test(token) || token === '--all') return { reject: REJECT_STAGE_ALL };
+    if (token === '--amend') return { reject: REJECT_AMEND };
+    if (
+      token === '-F' ||
+      token.startsWith('-F') ||
+      token === '--file' ||
+      token.startsWith('--file=')
+    ) {
+      return { reject: REJECT_FILE };
+    }
+    if (token === '-m' || token === '--message') {
+      const message = tokens[i + 1];
+      if (message === undefined) return null;
+      msgs.push(message);
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--message=')) {
+      msgs.push(token.slice('--message='.length));
+      continue;
+    }
+    if (token.startsWith('-m') && token.length > 2) {
+      msgs.push(token.slice(2));
+      continue;
+    }
+    if (token === '--pr') {
+      prBranch = tokens[i + 1] ?? null;
+      if (!prBranch) return null;
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--pr=')) {
+      prBranch = token.slice('--pr='.length) || null;
+      if (!prBranch) return null;
+    }
   }
-  const msgs = [...seg.matchAll(MSG_RE)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]);
   if (msgs.length === 0) return { reject: REJECT_NO_MSG };
-  const pr = seg.match(PR_RE);
-  return { title: msgs[0], body: msgs.slice(1).join('\n\n'), prBranch: pr ? pr[1] : null };
+  return { title: msgs[0], body: msgs.slice(1).join('\n\n'), prBranch };
 }
 
 /** Files in the index of <dir> (the explicit per-file ship scope), or [] on error. */
@@ -187,12 +416,16 @@ export function decide(
   rand?: string,
 ): string | null {
   const command = input?.tool_input?.command;
-  if (!command || !COMMIT_RE.test(command)) return null; // not a git commit → allow
-  const dir = targetDir(command, cwd);
+  if (!command) return null;
+  const invocation = commitInvocation(command);
+  if (!invocation) return null; // not a safely parsed git commit → allow
+  const dir = targetDir(invocation, cwd);
+  if (!dir) return null; // unknown shell cwd transition → fail open, never guess another checkout
   const branch = currentBranch(dir);
   if (!branch || !isProtected(branch)) return null; // detached/unborn/feature branch → allow
 
-  const intent = parseCommit(commitSegment(command));
+  const intent = parseCommit(commitSegment(invocation.segment));
+  if (!intent) return null; // malformed/unsupported shell quoting → fail open
   const head = `Blocked: direct \`git commit\` on protected branch "${branch}".`;
   const cfg = shipConfig(dir);
   if (intent.reject !== undefined) {
