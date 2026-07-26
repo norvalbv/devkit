@@ -7,7 +7,7 @@
  * against what the REPO resolves in package mode (its node_modules dep, else the pinned #v tag) and
  * against the running CLI in global mode. Two modes, auto-detected from the cwd:
  *   - package: `@norvalbv/devkit` is a dep here → re-pin package.json + `bun install`.
- *   - global:  otherwise → `bun add -g` the new tag (updates the global CLI on PATH).
+ *   - global:  otherwise → `bun add -g <package>@<tag>` (updates the global CLI on PATH).
  * bun caches git deps, so we `bun pm cache rm` first.
  *
  * Repo URL defaults to git+https — the repo is public, so https needs no auth and (unlike git+ssh,
@@ -166,7 +166,10 @@ export default async function update(args, cwd) {
         run('bun', ['install'], cwd); // README: use install for a re-pin (bun add can DependencyLoop)
     }
     else {
-        run('bun', ['add', '-g', `${BUN_REF}#v${latest}`], cwd);
+        // Supplying only the git URL makes Bun resolve the installed and requested copies as distinct
+        // dependency roots, then reject a global tag update as a DependencyLoop. Name the package so
+        // Bun replaces the existing global dependency instead.
+        run('bun', ['add', '-g', `${DEP}@${BUN_REF}#v${latest}`], cwd);
     }
     console.log(`✓ devkit updated to v${latest}.`);
     if (mode === 'package') {
