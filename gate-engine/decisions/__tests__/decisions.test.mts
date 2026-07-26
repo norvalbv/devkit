@@ -722,3 +722,42 @@ describe('query --json envelope (the bench contract)', () => {
     expect(second.rows.map((r) => r.slug)).toEqual(first.rows.map((r) => r.slug));
   });
 });
+
+// Creating a second axis on a question an existing axis already rules on is how the corpus ended
+// up with two live contradictory rulings. The nudge SHOWS the neighbour; it deliberately does not
+// block, because BM25 ruling-similarity measured over 30 real axes puts legitimately-distinct pairs
+// at the very top of the ranking, so any blocking threshold would reject good work.
+describe('new-axis duplicate nudge', () => {
+  it('names the nearest existing ruling and still records the Target', () => {
+    expect(
+      run(['add', 'ranking-algorithm', '--target', '--new', ...reqFlags('ranking-algorithm')])
+        .status,
+    ).toBe(0);
+
+    const res = run([
+      'add',
+      'ranking-rival',
+      '--target',
+      '--new',
+      '--context',
+      'rival broke: symptom Z',
+      '--ruling',
+      'ranking-algorithm-ruling',
+      '--consequences',
+      'value',
+      '--tradeoff',
+      'cost',
+      '--vision-fit',
+      'n/a',
+    ]);
+    expect(res.stderr).toContain('nearest existing rulings');
+    expect(res.stderr).toContain('ranking-algorithm');
+    expect(res.status).toBe(0); // advisory — a nudge that blocks is a nudge that gets disabled
+  });
+
+  it('says nothing when the log is empty — there is no neighbour to point at', () => {
+    const res = run(['add', 'first-ever', '--target', '--new', ...reqFlags('first-ever')]);
+    expect(res.stderr).not.toContain('nearest existing rulings');
+    expect(res.status).toBe(0);
+  });
+});

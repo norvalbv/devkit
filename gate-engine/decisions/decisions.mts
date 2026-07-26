@@ -67,6 +67,8 @@ import {
   upsertRow,
   whyHook,
 } from './decision-format.mts';
+import { warnNearestAxes } from './dedupe.mts';
+import { runDrift } from './drift.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
@@ -178,6 +180,7 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
     console.error(existsSync(p.indexPath) ? readFileSync(p.indexPath, 'utf8') : '(index empty)');
     process.exit(1);
   }
+  if (!exists) warnNearestAxes(slug, o, p);
   const date = today();
   let fm: Record<string, string>;
   let body: string;
@@ -439,6 +442,9 @@ export async function main(argv: string[]) {
       await cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'));
       break;
     }
+    case 'drift':
+      process.exitCode = runDrift(process.cwd());
+      break;
     case 'reindex':
       await cmdReindex();
       break;
@@ -460,7 +466,7 @@ export async function main(argv: string[]) {
       process.exit(checkExists(args[0]) ? 0 : 1);
       break;
     default:
-      console.error('Commands: add | amend | query | reindex | list | show | check');
+      console.error('Commands: add | amend | query | drift | reindex | list | show | check');
       process.exit(1);
   }
 }
