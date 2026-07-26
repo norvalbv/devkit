@@ -176,6 +176,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 
 ```bash
 bun install --frozen-lockfile
+bun run devkit -- <command>
 bun run test:run
 bun run typecheck
 bun run lint
@@ -183,7 +184,10 @@ bun run lint:structure
 bun run benchmarks:check
 ```
 
-Benchmark tracker development additionally uses `bun run benchmarks:typecheck`. Release builds compile `.mts` sources into `dist/`; day-to-day changes should not hand-edit generated `dist` files.
+`bun run devkit -- <command>` is the self-host entrypoint: it runs `cli/index.mts` so maintenance
+commands use the current source instead of the last compiled package bin. Benchmark tracker
+development additionally uses `bun run benchmarks:typecheck`. Release builds compile `.mts` sources
+into `dist/`; day-to-day changes should not hand-edit generated `dist` files.
 
 ## Documentation
 

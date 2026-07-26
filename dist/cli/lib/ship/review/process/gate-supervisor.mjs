@@ -212,7 +212,7 @@ function signalKnownProcesses(identities, signal) {
         throw signalFailure;
 }
 /** Run one gate command and own the lifetime of its complete POSIX process group. */
-export function superviseGateCommand(timeoutMs, command, inspectProcesses = readProcessTable, seededOwnershipToken) {
+export function superviseGateCommand(timeoutMs, command, inspectProcesses = readProcessTable, seededOwnershipToken, normalizeReservedStatuses = true) {
     if (process.platform === 'win32') {
         return Promise.reject(new Error('gate-supervisor requires POSIX process-group signals'));
     }
@@ -318,7 +318,8 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
         // drained on its own, so the reap is invisible to the caller's attribution (a ship keeps blaming
         // the reviewer, not a timeout). A leader that exited CLEAN while leaking a live tree is the one
         // case we override: it verified nothing conclusive, so it takes the expiry status.
-        const lingerStatus = () => (childStatus === 0 ? 124 : naturalExitCode(childStatus));
+        const reportedChildStatus = () => normalizeReservedStatuses ? naturalExitCode(childStatus) : childStatus;
+        const lingerStatus = () => (childStatus === 0 ? 124 : reportedChildStatus());
         const checkForCompletion = () => {
             if (finished)
                 return;
@@ -326,7 +327,7 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
                 if (forcedStatus !== undefined)
                     signalForcedProcesses();
                 if (completionReady(ownedProcessAlive())) {
-                    settle(forcedStatus ?? naturalExitCode(childStatus), terminalFailure);
+                    settle(forcedStatus ?? reportedChildStatus(), terminalFailure);
                     return;
                 }
             }
