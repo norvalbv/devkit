@@ -21,7 +21,8 @@
  * Tier sweep — the first question this suite exists to settle is whether the embedding tier earns
  * its keep at this corpus size, which no surveyed paper measures below a few thousand documents:
  *   BENCH_RETRIEVAL=lexical   BM25 only (default; what CI can run — no Ollama)
- *   BENCH_RETRIEVAL=semantic  requires a local Ollama + the embedding model
+ *   BENCH_RETRIEVAL=semantic  dense only; requires a local Ollama + the embedding model
+ *   BENCH_RETRIEVAL=hybrid    both tiers, RRF-fused — the production path when Ollama is present
  */
 
 import { createHash } from 'node:crypto';
@@ -176,8 +177,9 @@ async function runCases(corpus: string, cases: RecallCase[]): Promise<Scored[]> 
   // Point the engine's config at the frozen corpus and away from any live tree or vector cache.
   process.env.GUARD_DECISIONS_DIR = corpus;
   process.env.DECISIONS_INDEX = path.join(corpus, '..', '.vec-bench.json');
-  if ((process.env.BENCH_RETRIEVAL ?? 'lexical') === 'lexical')
-    process.env.DECISIONS_NO_EMBED = '1';
+  const tier = process.env.BENCH_RETRIEVAL ?? 'lexical';
+  if (tier === 'lexical') process.env.DECISIONS_NO_EMBED = '1';
+  if (tier === 'semantic') process.env.DECISIONS_NO_LEXICAL = '1';
   const { queryEnvelope } = await import('../../decisions.mts');
 
   const scored: Scored[] = [];
