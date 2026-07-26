@@ -11,6 +11,9 @@ import {
 import { rootRegistry } from './_helpers.mts';
 
 const linkScript = fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url));
+const prepareScript = fileURLToPath(
+  new URL('../lib/ship/prepare-gate-worktree.sh', import.meta.url),
+);
 const pathScript = fileURLToPath(new URL('../lib/ship/gate-config-paths.mts', import.meta.url));
 const projectionRuntime = fileURLToPath(
   new URL('../lib/ship/review/projection/runtime.mts', import.meta.url),
@@ -40,8 +43,9 @@ function project(
     '/bin/bash',
     [
       '-c',
-      'set -u; source "$1"; link_untracked_gate_configs "$2" "$3" "$4"',
+      'set -u; source "$1"; source "$2"; link_untracked_gate_configs "$3" "$4" "$5"',
       'test',
+      prepareScript,
       linkScript,
       worktree,
       root,
