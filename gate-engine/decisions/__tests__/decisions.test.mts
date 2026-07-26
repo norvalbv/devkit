@@ -9,6 +9,7 @@ import {
   clampGist,
   cosine,
   currentTarget,
+  effectiveScope,
   loadAxisRows,
   parseDecision,
   parseIndex,
@@ -18,6 +19,11 @@ import {
   renderTarget,
   upsertRow,
 } from '../decisions.mts';
+import {
+  allTargetBlocks,
+  parseSupersedesId,
+  resolveSupersession,
+} from '../recall/supersession.mts';
 
 const SCRIPT = fileURLToPath(new URL('../decisions.mts', import.meta.url));
 
@@ -197,6 +203,223 @@ describe('pure helpers', () => {
     expect(t.ruling).toBe('R');
     expect(t.block).toContain('**Ruling:** R');
     expect(t.block).not.toContain('NOTE_CHURN'); // gistOf embeds this block → notes can't outrank the Target
+  });
+
+  it('renderTarget renders **Supersedes:** only when given, alongside Scope/Revisit-when/Anchored-bet', () => {
+    const withSupersedes = renderTarget('2026-05-29', {
+      context: 'c',
+      ruling: 'r',
+      consequences: 'v',
+      tradeoff: 't',
+      visionFit: 'f',
+      supersedes: 'other-axis#target:2026-06-13',
+    });
+    expect(withSupersedes).toContain('**Supersedes:** other-axis#target:2026-06-13');
+    const without = renderTarget('2026-05-29', {
+      context: 'c',
+      ruling: 'r',
+      consequences: 'v',
+      tradeoff: 't',
+      visionFit: 'f',
+    });
+    expect(without).not.toContain('**Supersedes:**');
+  });
+
+  // currentTarget's contract stays "last block wins" — unchanged by Supersedes. Its generic
+  // `**Field:**` capture already surfaces `fields.supersedes` for free; nothing about resolving
+  // whether that pointer is valid or live belongs in this function (see resolveSupersession).
+  it('currentTarget still returns only the LAST block, and exposes its own Supersedes field', () => {
+    const body =
+      '\n# s\n\n## Target · 2026-01-01 — old\n\n**Ruling:** old-ruling\n\n' +
+      '## Target · 2026-02-01 — new\n\n**Ruling:** new-ruling\n**Supersedes:** target:2026-01-01\n';
+    const t = currentTarget(body);
+    expect(t.ruling).toBe('new-ruling');
+    expect(t.fields.supersedes).toBe('target:2026-01-01');
+  });
+});
+
+describe('supersession (recall/supersession.mts)', () => {
+  const write = (name, body) => writeFileSync(join(dir, name), body);
+  const axis = (slug, blocks) =>
+    `---\nslug: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n\n${blocks}`;
+  const targetBlock = (date, ruling, extraFields = '') =>
+    `## Target · ${date} — ${ruling}\n\n**Context:** a forcing failure\n**Ruling:** ${ruling}\n${extraFields}**Source:** manual\n`;
+
+  it('parseSupersedesId parses bare and slug-qualified ids of both kinds; rejects garbage', () => {
+    expect(parseSupersedesId('target:2026-06-13')).toEqual({
+      slug: null,
+      id: 'target:2026-06-13',
+    });
+    expect(parseSupersedesId('entry:2026-06-13')).toEqual({ slug: null, id: 'entry:2026-06-13' });
+    expect(parseSupersedesId('other-axis#target:2026-06-13')).toEqual({
+      slug: 'other-axis',
+      id: 'target:2026-06-13',
+    });
+    expect(parseSupersedesId('other-axis#entry:2026-01-01')).toEqual({
+      slug: 'other-axis',
+      id: 'entry:2026-01-01',
+    });
+    expect(parseSupersedesId('not an id')).toBeNull();
+  });
+
+  it('allTargetBlocks returns EVERY Target block, not just the last (currentTarget stays last-only)', () => {
+    write(
+      'axis.md',
+      axis(
+        'axis',
+        `${targetBlock('2026-01-01', 'first')}\n${targetBlock('2026-03-03', 'second', '**Supersedes:** target:2026-01-01\n')}`,
+      ),
+    );
+    const body = parseDecision(readFileSync(join(dir, 'axis.md'), 'utf8')).body;
+    const blocks = allTargetBlocks(body);
+    expect(blocks.map((b) => b.id)).toEqual(['target:2026-01-01', 'target:2026-03-03']);
+    expect(blocks[1].supersedes).toBe('target:2026-01-01');
+    expect(blocks[0].supersedes).toBeNull();
+  });
+
+  // renderTarget writes Vision-fit/Scope/Supersedes/Source right after the Consequences bullets with
+  // NO blank line — CommonMark treats that as a LAZY CONTINUATION of the list's last item, not new
+  // prose, so a naive `section.prose`-only read would silently drop every field rendered after
+  // Consequences. This exercises the ACTUAL renderTarget output, not a hand-rolled fixture that
+  // dodges the shape.
+  it('reads Supersedes from a REAL renderTarget block (fields after Consequences are not swallowed)', () => {
+    const rendered = renderTarget('2026-06-14', {
+      context: 'c',
+      ruling: 'r',
+      consequences: 'v',
+      tradeoff: 't',
+      visionFit: 'f',
+      supersedes: 'older#target:2026-06-13',
+    });
+    const blocks = allTargetBlocks(`\n# axis\n\n${rendered}\n`);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].supersedes).toBe('older#target:2026-06-13');
+  });
+
+  it('a Target explicitly superseding an earlier one in the SAME axis clears the ambiguity', () => {
+    write(
+      'axis.md',
+      axis(
+        'axis',
+        `${targetBlock('2026-01-01', 'first')}\n${targetBlock('2026-03-03', 'second', '**Supersedes:** target:2026-01-01\n')}`,
+      ),
+    );
+    const { multipleLive, unresolved } = resolveSupersession(dir);
+    expect(unresolved).toEqual([]);
+    expect(multipleLive).toEqual([]);
+  });
+
+  // The motivating gap: two axes, two live-looking Targets, no link between them. Once the newer
+  // one declares Supersedes, the older axis's current block is READ-TIME resolved as no longer
+  // live — the file itself is never touched (append-only survives).
+  it('a superseded Target is not treated as live — cross-axis reference resolves', () => {
+    write('older.md', axis('older', targetBlock('2026-06-13', 'via npx-skills')));
+    write(
+      'newer.md',
+      axis(
+        'newer',
+        targetBlock('2026-06-14', 'NOT npx-skills', '**Supersedes:** older#target:2026-06-13\n'),
+      ),
+    );
+    const { supersededBy, unresolved } = resolveSupersession(dir);
+    expect(unresolved).toEqual([]);
+    expect(supersededBy.get('older')).toBe('newer#target:2026-06-14');
+    expect(supersededBy.get('newer')).toBeNull(); // the superseding block itself is uncontested
+  });
+
+  it('a Supersedes id referencing a LEGACY entry (in another axis) resolves', () => {
+    write(
+      'legacy-old.md',
+      axis(
+        'legacy-old',
+        '## 2025-12-01 — old ruling\n\n**Ruling:** old ruling\n**Source:** manual\n',
+      ),
+    );
+    write(
+      'modern-new.md',
+      axis(
+        'modern-new',
+        targetBlock('2026-06-14', 'new ruling', '**Supersedes:** legacy-old#entry:2025-12-01\n'),
+      ),
+    );
+    expect(resolveSupersession(dir).unresolved).toEqual([]);
+  });
+
+  it('an unresolvable Supersedes id — bad shape, missing date, or unknown axis — is reported', () => {
+    write(
+      'bad-shape.md',
+      axis('bad-shape', targetBlock('2026-06-14', 'r', '**Supersedes:** not-an-id\n')),
+    );
+    write(
+      'dangling.md',
+      axis('dangling', targetBlock('2026-06-14', 'r', '**Supersedes:** target:1999-01-01\n')),
+    );
+    write(
+      'cross-dangling.md',
+      axis(
+        'cross-dangling',
+        targetBlock('2026-06-14', 'r', '**Supersedes:** nope#target:2026-06-13\n'),
+      ),
+    );
+    const { unresolved } = resolveSupersession(dir);
+    expect(unresolved.map((u) => u.slug).sort()).toEqual([
+      'bad-shape',
+      'cross-dangling',
+      'dangling',
+    ]);
+  });
+
+  // Every axis written before the Supersedes field exists has several Target blocks and declares
+  // none; for those the documented rule is positional — the last block is current. Reporting them
+  // flagged 5 of 5 multi-Target axes on the real corpus, a 100% false-positive rate, which is how a
+  // check gets switched off. Ambiguity is only reportable where the field is actually in use; the
+  // partial-adoption case that IS a real inconsistency is covered in drift.test.mts.
+  it('an axis that declares no Supersedes at all is NOT flagged ambiguous', () => {
+    write(
+      'ambiguous.md',
+      axis(
+        'ambiguous',
+        `${targetBlock('2026-01-01', 'first')}\n${targetBlock('2026-03-03', 'second')}`,
+      ),
+    );
+    expect(resolveSupersession(dir).multipleLive).toEqual([]);
+  });
+});
+
+// effectiveScope resolves what currentTarget().scope structurally cannot see: a rescope note is a
+// note bullet, and currentTarget stops at the first one on purpose (notes are cheap convergence,
+// not the ruling). These fixtures use the same `\n# s\n\n## Target · …` shape as the currentTarget
+// tests above — effectiveScope reads the same body.
+describe('effectiveScope (rescope resolution)', () => {
+  const withTrailer = (trailer: string) =>
+    '\n# ax\n\n## Target · 2026-01-01 — R\n\n**Context:** c\n**Ruling:** R\n' +
+    '**Consequences:**\n- Positive: p\n- Negative: n\n**Scope:** src/old/**\n**Source:** manual\n' +
+    trailer;
+
+  it('no rescope note: falls back to the Target’s own Scope', () => {
+    expect(effectiveScope(withTrailer(''))).toBe('src/old/**');
+  });
+
+  it('a rescope note overrides the stale Target Scope', () => {
+    const body = withTrailer('- 2026-02-01 — **Scope:** src/new/** — directory renamed\n');
+    expect(effectiveScope(body)).toBe('src/new/**');
+  });
+
+  it('the LAST rescope note wins when the axis was rescoped more than once', () => {
+    const body = withTrailer(
+      '- 2026-02-01 — **Scope:** src/new/** — first move\n' +
+        '- 2026-03-01 — **Scope:** src/newer/** — second move\n',
+    );
+    expect(effectiveScope(body)).toBe('src/newer/**');
+  });
+
+  it('an ordinary note that is not a Scope tag does not override the Target Scope', () => {
+    const body = withTrailer('- 2026-02-01 — unrelated implementation convergence note\n');
+    expect(effectiveScope(body)).toBe('src/old/**');
+  });
+
+  it('no Target at all: empty string, never throws', () => {
+    expect(effectiveScope('\n# ax\n\nno heading structure a Target could be read from\n')).toBe('');
   });
 });
 
@@ -395,6 +618,25 @@ describe('loadAxisRows (the retrieval candidate set)', () => {
     );
     expect(loadAxisRows(paths())[0].updated).toBe('2026-06-09');
   });
+
+  // Untagged notes keep exactly today's meaning (relation absent); only a note whose text BEGINS
+  // `**Amends:**` gets the marker — qualifying the Target rather than merely logging progress.
+  it('a note tagged **Amends:** carries relation "amends"; an untagged note does not', () => {
+    write(
+      'axis.md',
+      axis(
+        'axis',
+        `${targetBlock('2026-01-01', 'the ruling')}` +
+          '- 2026-02-02 — **Amends:** narrows the ruling to only the http transport\n' +
+          '- 2026-02-03 — plain progress note, not a relation tag\n',
+      ),
+    );
+    const row = loadAxisRows(paths()).find((r) => r.slug === 'axis');
+    const amends = row?.qualifiers.find((q) => q.date === '2026-02-02');
+    const plain = row?.qualifiers.find((q) => q.date === '2026-02-03');
+    expect(amends?.relation).toBe('amends');
+    expect(plain?.relation).toBeUndefined();
+  });
 });
 
 describe('CLI round-trip', () => {
@@ -468,6 +710,59 @@ describe('CLI round-trip', () => {
     const r = run(['add', 'ghost', '--note', 'x']);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('record one first');
+  });
+
+  it('a --supersedes flag round-trips into the rendered Target block', () => {
+    const r = run(target('ax', ['--supersedes', 'other-axis#target:2026-06-13']));
+    expect(r.status).toBe(0);
+    const md = readFileSync(join(dir, 'ax.md'), 'utf8');
+    expect(md).toContain('**Supersedes:** other-axis#target:2026-06-13');
+  });
+
+  describe('rescope (append-only Scope correction)', () => {
+    it('appends a tagged note in the ruled form; the original Scope line is untouched', () => {
+      run(target('ax', ['--scope', 'src/old/**']));
+      const before = readFileSync(join(dir, 'ax.md'), 'utf8');
+
+      const r = run(['rescope', 'ax', '--scope', 'src/new/**', '--reason', 'directory renamed']);
+      expect(r.status).toBe(0);
+
+      const md = readFileSync(join(dir, 'ax.md'), 'utf8');
+      expect(md).toContain('- 2026-05-29 — **Scope:** src/new/** — directory renamed');
+      // Append-only: the ORIGINAL Target block — including its own Scope line — is byte-identical.
+      expect(md.startsWith(before.replace(/\n$/, ''))).toBe(true);
+      expect(md).toContain('**Scope:** src/old/**');
+    });
+
+    it('does NOT touch the INDEX (a rescope is a note, not a ruling)', () => {
+      run(target('ax', ['--scope', 'src/old/**']));
+      const before = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+      run(['rescope', 'ax', '--scope', 'src/new/**', '--reason', 'moved']);
+      expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(before);
+    });
+
+    it('does NOT require --evidence-change, unlike a --target re-target', () => {
+      run(target('ax', ['--scope', 'src/old/**']));
+      const r = run(['rescope', 'ax', '--scope', 'src/new/**', '--reason', 'moved']);
+      expect(r.status).toBe(0);
+      expect(r.stderr).not.toContain('--evidence-change');
+    });
+
+    it('errors on an unknown axis', () => {
+      const r = run(['rescope', 'ghost', '--scope', 'src/**', '--reason', 'x']);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('record one first');
+    });
+
+    it('requires both --scope and --reason', () => {
+      run(target('ax'));
+      const noScope = run(['rescope', 'ax', '--reason', 'x']);
+      expect(noScope.status).toBe(1);
+      expect(noScope.stderr).toContain('Usage: guard-decisions rescope');
+      const noReason = run(['rescope', 'ax', '--scope', 'src/**']);
+      expect(noReason.status).toBe(1);
+      expect(noReason.stderr).toContain('Usage: guard-decisions rescope');
+    });
   });
 
   it('leaves no .tmp siblings (atomic writes)', () => {

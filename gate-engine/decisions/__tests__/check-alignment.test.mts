@@ -130,6 +130,24 @@ describe('loadScopedTargets', () => {
     expect(got[0].ruling).toBe('keep it generic');
     expect(got[0].vision).toBe('vis');
   });
+
+  // currentTarget().scope alone can never see this: it deliberately stops at the first note bullet,
+  // so a rescope note (also a note bullet) is invisible to it. loadScopedTargets must resolve the
+  // EFFECTIVE scope instead, or a rescoped axis would keep being judged against a dead glob.
+  it('uses the EFFECTIVE scope — a later rescope note overrides the stale Target Scope', () => {
+    const rescoped = `${scopedTargetMd('rehomed', 'src/gone/**', 'r', 'v')}- 2026-02-01 — **Scope:** src/live/** — directory renamed\n`;
+    writeFileSync(join(dir, 'rehomed.md'), rescoped);
+    const got = loadScopedTargets(dir);
+    expect(got).toHaveLength(1);
+    expect(got[0].scopeGlobs).toEqual(['src/live/**']);
+  });
+
+  it('an axis with no rescope note behaves exactly as before (the Target Scope stands)', () => {
+    writeFileSync(join(dir, 'plain.md'), scopedTargetMd('plain', 'src/plain/**', 'r', 'v'));
+    const got = loadScopedTargets(dir);
+    expect(got).toHaveLength(1);
+    expect(got[0].scopeGlobs).toEqual(['src/plain/**']);
+  });
 });
 
 describe('--gate (integration, real git repo)', () => {
