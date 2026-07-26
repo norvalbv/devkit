@@ -95,6 +95,8 @@ export {
 
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
+/** How many qualifying notes the PROSE surface shows before pointing at `show`. */
+const PROSE_QUALIFIERS = 3;
 
 // ─── Consumer-cwd path resolution (W-3) ──────────────────────────────────────────
 // Every on-disk path is derived from the CONSUMER cwd via the shared config loader.
@@ -261,10 +263,21 @@ export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promis
 
 // `why` is now the axis file's full Context (the INDEX cell was truncated to 70 chars), so bound it
 // at print time — the ranker wants the whole thing, a terminal reader does not.
-function printRanked(rows: IndexRow[], mode: string) {
+function printRanked(rows: RankResult['rows'], mode: string) {
   console.log(`# top ${rows.length} ${rows.length === 1 ? 'axis' : 'axes'} (${mode})`);
-  for (const r of rows)
+  for (const r of rows) {
     console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${whyHook(r.why)}` : ''}`);
+    // Never print a ruling alone when later notes qualify it — an agent reading only the ruling
+    // acts on a decision the record has already walked back. But a real axis carries ~20 notes, so
+    // the prose surface shows the most QUERY-RELEVANT few (retrieval ordered them that way) and says
+    // how many it held back. --json still carries the full set for machine consumers.
+    for (const q of r.qualifiers.slice(0, PROSE_QUALIFIERS))
+      console.log(`    ⚠ qualified by ${q.date} — ${whyHook(q.text)}`);
+    if (r.qualifiers.length > PROSE_QUALIFIERS)
+      console.log(
+        `    … ${r.qualifiers.length - PROSE_QUALIFIERS} more note(s): guard-decisions show ${r.slug}`,
+      );
+  }
 }
 
 /**
@@ -294,7 +307,21 @@ export interface QueryEnvelope {
     slug: string;
     score: number;
     liveRulingId: string | null;
+    /**
+     * Which unit of the axis matched: a `note:<date>` means a NOTE answered rather than the ruling.
+     *
+     * NULL means the tier could not attribute the match — not that the ruling matched. The semantic
+     * tier embeds the whole axis as one vector and so always reports null; only the lexical tier,
+     * which scores each entry separately, can name the unit.
+     */
+    matchedEntryId: string | null;
     ruling: string;
+    /**
+     * Notes appended after the ruling. A caller that reads `ruling` alone gets the recorded
+     * decision; a caller that wants CURRENT STATE has to read these too, because this is exactly
+     * where "we ruled X" and "X turned out to be impossible" diverge.
+     */
+    qualifiedBy: { id: string; date: string; text: string }[];
     why: string;
     updated: string;
   }[];
@@ -321,7 +348,9 @@ export async function queryEnvelope(
       slug: r.slug,
       score: r.score,
       liveRulingId: r.liveRulingId,
+      matchedEntryId: r.matchedEntryId,
       ruling: r.ruling,
+      qualifiedBy: r.qualifiers.map((q) => ({ id: q.id, date: q.date, text: q.text })),
       why: r.why,
       updated: r.updated,
     })),

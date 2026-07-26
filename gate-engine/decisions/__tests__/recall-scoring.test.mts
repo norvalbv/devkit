@@ -10,6 +10,7 @@ import {
   scoreCase,
   summarize,
 } from '../eval/recall/scoring.mts';
+import { corpusIdf, orderQualifiers } from '../retrieval.mts';
 
 const env = (slugs: string[], over: Partial<Envelope['rows'][number]>[] = []): Envelope => ({
   state: slugs.length ? 'RULED' : 'NO_RULING',
@@ -188,6 +189,107 @@ describe('scoreCase — CURRENT_STATE', () => {
     expect(ok.csa).toBe(true);
   });
 
+  it('surfacing the qualifiers makes a stale claim non-misleading, WITHOUT any marker word', () => {
+    // The structural rule that replaced the keyword window. Real qualifiers do not say
+    // "superseded" — the seed corpus's own notes say "PARKED" / "still blocked" / "unscheduled" —
+    // so a vocabulary test would score a correct, fully-qualified answer as a stale assertion.
+    const ok = scoreCase(
+      cs(),
+      env(
+        ['hooks'],
+        [
+          {
+            liveRulingId: 'target:2026-06-17',
+            ruling: 'hooks FOLLOW the user via deliver+enforce',
+            qualifiedBy: [
+              {
+                id: 'note:2026-06-19',
+                date: '2026-06-19',
+                text: 'PARKED: nothing executable to bridge',
+              },
+            ],
+          },
+        ],
+      ),
+    );
+    expect(ok.sfer).toBe(false);
+    expect(ok.csa).toBe(true); // mustSurface is satisfied by the qualifier text
+  });
+
+  it('an UNRELATED qualifier does not suppress SFER — the check keys on the live content', () => {
+    // Regression guard for a metric that could not fail: gating on "does this axis have any notes"
+    // meant one irrelevant note hid a genuinely stale ruling. Real axes carry ~20 unrelated notes,
+    // so SFER would have read 0 forever while regressions passed the gate.
+    const bad = scoreCase(
+      cs(),
+      env(
+        ['hooks'],
+        [
+          {
+            liveRulingId: 'target:2026-06-17',
+            ruling: 'hooks FOLLOW the user via deliver+enforce',
+            qualifiedBy: [
+              {
+                id: 'note:2026-06-20',
+                date: '2026-06-20',
+                text: 'unrelated: renamed a settings panel',
+              },
+            ],
+          },
+        ],
+      ),
+    );
+    expect(bad.sfer).toBe(true); // the live content was never surfaced
+    expect(bad.csa).toBe(false);
+  });
+
+  it('an EMPTY mustSurface cannot silently disable SFER (vacuous [].every)', () => {
+    // `[].every()` is true, which would claim the live content surfaced and switch staleness off.
+    // An empty list is evidence of nothing, so it must read as NOT surfaced.
+    const empty = { ...cs(), currentState: { ...cs().currentState!, mustSurface: [] } };
+    const s = scoreCase(
+      empty,
+      env(
+        ['hooks'],
+        [
+          {
+            liveRulingId: 'target:2026-06-17',
+            ruling: 'hooks FOLLOW the user via deliver+enforce',
+          },
+        ],
+      ),
+    );
+    expect(s.sfer).toBe(true);
+    expect(s.csa).toBe(false);
+  });
+
+  it('a note QUOTING the stale ruling back does not itself trigger SFER', () => {
+    // Real notes quote the ruling they contradict: "NOT a reversal of Target #2's 'hooks now
+    // FOLLOW'". Scanning the composite for the claim would fail an answer that correctly surfaced
+    // the correcting note — the claim belongs to the ruling, so only the ruling is scanned.
+    const ok = scoreCase(
+      cs(),
+      env(
+        ['hooks'],
+        [
+          {
+            liveRulingId: 'target:2026-06-17',
+            ruling: 'delivery is parked pending an executable bridge',
+            qualifiedBy: [
+              {
+                id: 'note:2026-06-19',
+                date: '2026-06-19',
+                text: 'NOT a reversal of the earlier hooks FOLLOW the user ruling — nothing executable to bridge',
+              },
+            ],
+          },
+        ],
+      ),
+    );
+    expect(ok.sfer).toBe(false);
+    expect(ok.csa).toBe(true);
+  });
+
   it('axis not returned at all is a Containment miss, not a staleness failure', () => {
     const s = scoreCase(cs(), env(['unrelated']));
     expect(s.outcome).toBe('MISS');
@@ -272,6 +374,24 @@ describe('bench helpers', () => {
     expect(lintRecallCases([{ id: 'e', q: 'q', type: 'CURRENT_STATE', gold: ['x'] }])).toEqual([
       'row 1 (e): CURRENT_STATE needs a currentState block',
     ]);
+    // The lint rejects the vacuous-truth shapes outright, so a case can never quietly score nothing.
+    const hollow = {
+      id: 'f',
+      q: 'q',
+      type: 'CURRENT_STATE',
+      gold: ['x'],
+      currentState: {
+        axis: 'x',
+        liveId: 'target:1',
+        staleId: 'target:0',
+        mustSurface: [],
+        mustNotAssert: [],
+      },
+    };
+    expect(lintRecallCases([hollow])).toEqual([
+      'row 1 (f): currentState.mustSurface must be non-empty (an empty list disables SFER)',
+      'row 1 (f): currentState.mustNotAssert must be non-empty (an empty list disables SFER)',
+    ]);
   });
 
   it('storeHash changes when the frozen corpus changes — the label-rot tripwire', () => {
@@ -310,5 +430,70 @@ describe('staleLabels (the label-rot tripwire)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('orderQualifiers (shared by every retrieval tier)', () => {
+  const note = (date: string, text: string) => ({
+    id: `note:${date}`,
+    kind: 'note' as const,
+    date,
+    text,
+  });
+
+  it('puts the query-relevant note first even when it is far from the newest', () => {
+    // The real shape: the note that falsifies a ruling is 4th of 20 by date, and callers show 3.
+    const quals = [
+      note('2026-06-08', 'follow-up restatus after the re-target'),
+      note('2026-06-09', 'go-live: flipped the delivery flag on'),
+      note('2026-06-09', 'hooks-follow PARKED post-MVP, nothing executable to bridge'),
+      note('2026-07-25', 'isolated config dir staged only skills and agents'),
+    ];
+    const idf = corpusIdf([
+      {
+        slug: 'a',
+        ruling: '',
+        why: '',
+        updated: '',
+        liveRulingId: null,
+        qualifiers: [],
+        entries: quals,
+      },
+      {
+        slug: 'b',
+        ruling: '',
+        why: '',
+        updated: '',
+        liveRulingId: null,
+        qualifiers: [],
+        entries: [
+          note('2026-01-01', 'the user after each of the follow up items across the board'),
+        ],
+      },
+    ]);
+    const top = orderQualifiers('do hooks follow the user across tools', quals, idf);
+    expect(top[0].text).toContain('hooks-follow PARKED');
+  });
+
+  it('falls back to newest-first when nothing matches, and never mutates the input', () => {
+    const quals = [note('2026-01-01', 'alpha'), note('2026-05-05', 'beta')];
+    const copy = [...quals];
+    expect(
+      orderQualifiers('unrelated kubernetes helm', quals, new Map()).map((q) => q.date),
+    ).toEqual(['2026-05-05', '2026-01-01']);
+    expect(quals).toEqual(copy);
+  });
+
+  it('length-normalises so a long rambling note cannot win on bulk alone', () => {
+    const terse = note('2026-01-01', 'retry budget exhausted');
+    const padded = note('2026-02-02', `retry ${'filler words here '.repeat(40)}`);
+    const idf2 = new Map([
+      ['retry', 1],
+      ['budget', 2],
+      ['filler', 0.1],
+      ['words', 0.1],
+      ['here', 0.1],
+    ]);
+    expect(orderQualifiers('retry budget', [padded, terse], idf2)[0].date).toBe('2026-01-01');
   });
 });

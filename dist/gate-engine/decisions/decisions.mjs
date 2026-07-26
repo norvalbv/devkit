@@ -56,6 +56,8 @@ export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, 
 export { bm25Rank, clampGist, cosine, gistOf, loadAxisRows, } from "./retrieval.mjs";
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
+/** How many qualifying notes the PROSE surface shows before pointing at `show`. */
+const PROSE_QUALIFIERS = 3;
 function paths(cwd = process.cwd()) {
     const cfg = resolveGuardConfig(cwd);
     const decisionsDir = resolveFromCwd(cfg, 'decisionsDir');
@@ -190,8 +192,17 @@ export async function rankAxes(text, k = 5, cwd = process.cwd()) {
 // at print time — the ranker wants the whole thing, a terminal reader does not.
 function printRanked(rows, mode) {
     console.log(`# top ${rows.length} ${rows.length === 1 ? 'axis' : 'axes'} (${mode})`);
-    for (const r of rows)
+    for (const r of rows) {
         console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${whyHook(r.why)}` : ''}`);
+        // Never print a ruling alone when later notes qualify it — an agent reading only the ruling
+        // acts on a decision the record has already walked back. But a real axis carries ~20 notes, so
+        // the prose surface shows the most QUERY-RELEVANT few (retrieval ordered them that way) and says
+        // how many it held back. --json still carries the full set for machine consumers.
+        for (const q of r.qualifiers.slice(0, PROSE_QUALIFIERS))
+            console.log(`    ⚠ qualified by ${q.date} — ${whyHook(q.text)}`);
+        if (r.qualifiers.length > PROSE_QUALIFIERS)
+            console.log(`    … ${r.qualifiers.length - PROSE_QUALIFIERS} more note(s): guard-decisions show ${r.slug}`);
+    }
 }
 export async function queryEnvelope(text, k = 5, cwd = process.cwd()) {
     const started = Date.now();
@@ -209,7 +220,9 @@ export async function queryEnvelope(text, k = 5, cwd = process.cwd()) {
             slug: r.slug,
             score: r.score,
             liveRulingId: r.liveRulingId,
+            matchedEntryId: r.matchedEntryId,
             ruling: r.ruling,
+            qualifiedBy: r.qualifiers.map((q) => ({ id: q.id, date: q.date, text: q.text })),
             why: r.why,
             updated: r.updated,
         })),
