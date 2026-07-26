@@ -5,6 +5,7 @@
       "name": "@norvalbv/devkit",
       "dependencies": {
         "@clack/prompts": "^1.5.1",
+        "es-module-lexer": "^2.1.0",
         "eslint": "^10.5.0",
         "eslint-plugin-project-structure": "^3.14.3",
         "mdast-util-from-markdown": "^2.0.3",

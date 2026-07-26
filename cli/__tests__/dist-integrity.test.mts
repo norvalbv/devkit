@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,9 @@ import { rootRegistry } from './_helpers.mts';
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const shipScript = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const packageJson = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
+) as { dependencies: Record<string, string> };
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 
@@ -35,6 +38,10 @@ function repo(name = '@norvalbv/devkit'): { base: string; root: string } {
 }
 
 describe('inspectDistIntegrity', () => {
+  it('declares its dynamic parser as a runtime dependency', () => {
+    expect(packageJson.dependencies['es-module-lexer']).toBeDefined();
+  });
+
   it('reports an ignored generated artifact missing from the Git index', async () => {
     const { base, root } = repo();
     mkdirSync(join(root, 'dist/cli'));
