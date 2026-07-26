@@ -9,7 +9,7 @@
     "gate-engine/co-occurrence/matcher.mts": 543,
     "gate-engine/critique/eval/bench.mts": 1177,
     "gate-engine/decisions/detect.mts": 543,
-    "gate-engine/decisions/eval/bench.mts": 895,
+    "gate-engine/decisions/eval/bench.mts": 834,
     "gate-engine/edge-cases/eval/lib/sources.mts": 571,
     "gate-engine/judge/verdict-store.mts": 524,
     "gate-engine/review/eval/bench.mts": 878,

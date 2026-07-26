@@ -65,6 +65,9 @@ export function lintCases(name, rows) {
   return errors;
 }
 
+/** The three judge sub-benches, in run order — the valid arguments to `loadCases`. */
+export const SUBS = ['detect', 'alignment', 'depth'];
+
 export function loadCases(name) {
   const file = path.join(here, `cases-${name}.jsonl`);
   let rows: ReturnType<typeof parseCasesText>;

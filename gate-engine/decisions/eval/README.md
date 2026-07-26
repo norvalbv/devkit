@@ -21,10 +21,29 @@ BENCH_RUNS=3 node bench.mjs all --baseline   # baseline tier: majority-of-3 verd
 BENCH_RUNS=3 node bench.mjs all --fail       # gate tier: exit 1 on floor breach / significant flips
 node bench.mjs coverage                  # corpus coverage matrix — zero claude calls
 node bench.mjs depth-audit               # the 100-year audit: judge YOUR real decision records (below)
+node bench.mjs all --fresh               # discard checkpoints and re-judge every row
 ```
 
 Exit `0` = ran (no regression under `--fail`) · `1` = regression (with `--fail`) · `2` = could not
 run (cases missing, `claude` absent, judge dark — see outage policy below).
+
+### Interrupted runs resume
+
+A full `all --baseline` run is ~150 minutes of `claude -p` cold starts, so it *will* be interrupted —
+a rate limit, a dark judge, a closed laptop. Every completed row is checkpointed to
+`progress-<sub>.jsonl` (gitignored) the moment it lands, and **re-running the same command replays
+those rows for free**, paying only for what is left; the budget line reports the remaining cost, and
+replayed rows print `(checkpoint)`. Exit `2` is therefore the retryable code — an unattended loop can
+simply re-run until it stops returning it:
+
+```sh
+until node bench.mjs all --baseline; [ $? -ne 2 ]; do sleep 90; done
+```
+
+A row is replayed only when the config (model/K/cascade) **and** `gateHash` **and** `corpusHash` all
+match, so a checkpoint from a different model, an edited gate or a re-labelled corpus never bleeds
+into a run it does not belong to — it is inert, not wrong. Outage (`NULL`) verdicts are never
+replayed: redoing them is the point. Use `--fresh` to discard and re-measure from zero.
 
 Each run prints per-row `OK/FAIL`, a confusion matrix, per-class precision/recall/F1 (+ macro-F1 for
 the 3-class alignment judge), the headline metric **with raw counts and a Wilson 95% interval**, the

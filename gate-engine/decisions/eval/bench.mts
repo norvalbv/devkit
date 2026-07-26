@@ -19,6 +19,7 @@
  *   node bench.mjs all --baseline                 # write this run as the baseline (results.baseline.json)
  *   node bench.mjs all --fail                     # exit 1 on floor breach or significant flips vs baseline
  *   node bench.mjs detect --dev                   # prompt-iteration tier: holdout rows excluded
+ *   node bench.mjs all --fresh                    # discard checkpoints and re-judge every row
  *   node bench.mjs coverage                       # corpus coverage matrix (zero claude calls)
  *   node bench.mjs depth-audit                    # the 100-year audit: judge THIS repo's real decision
  *                                                 # records (docs/decisions/) — no labels, informational
@@ -57,6 +58,12 @@
  * aborts (exit 2, sentry-style); an alignment row is 1–6 min, so a mid-run outage scores that row
  * NULL and continues (exit 2 only when every judged row was an outage). Outages print in the summary.
  *
+ * That abort is now cheap: every completed row is checkpointed to progress-<sub>.jsonl the moment it
+ * lands, so re-running the SAME command replays it for free and pays only for what is left. A ~150
+ * min run killed at minute 140 used to cost all 140 again; it now costs the remainder. Checkpoints
+ * are keyed by config + gateHash + corpusHash, so a model/corpus/gate change never replays into a
+ * run it does not belong to — see checkpoint.mts.
+ *
  * Cost: every judged row is a `claude -p` cold start. Budget ≈ detect 30s · depth 40s · alignment
  * 60–120s per row + 120–240s per escalation. An estimate prints before any token is spent.
  */
@@ -64,7 +71,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -86,8 +92,21 @@ import {
 } from '../check-alignment.mts';
 import { currentTarget, parseDecision } from '../decisions.mts';
 import { buildDetectJudgeInput, detectSmells, parseVerdict, runDetectJudge } from '../detect.mts';
-import { BenchAbort, loadCases } from './cases.mts';
+import { BenchAbort, loadCases, SUBS } from './cases.mts';
+import { NO_CHECKPOINT, openCheckpoint } from './checkpoint.mts';
 import { compare, wilson } from './compare.mts';
+import {
+  appendLedger,
+  byCategory,
+  ppvLine,
+  printConfusion,
+  printCoverage,
+  printEstimate,
+  printPerClass,
+  round3,
+  rowMap,
+  variantConsistency,
+} from './report.mts';
 
 // Re-exported: sibling benches (review, critique) and the unit tests import these from here.
 export { BenchAbort, lintCases, parseCasesText } from './cases.mts';
@@ -103,8 +122,6 @@ const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
 // between identical runs), so baseline/--fail runs vote majority-of-K and report the flip rate.
 // Alignment stays K=1 (rows cost 10x) and retries only baseline-discordant rows instead.
 const RUNS = Math.max(1, Number.parseInt(process.env.BENCH_RUNS ?? '1', 10) || 1);
-
-const SUBS = ['detect', 'alignment', 'depth'];
 
 // ─── Environment hygiene ──────────────────────────────────────────────────────────
 // GUARD_*/FRINK_* leak straight into the judges via resolveGuardConfig (NO_LLM nulls every row;
@@ -257,60 +274,70 @@ export function materializeFixture(row) {
 const rowLine = (id, ok, got, want, suffix = '') =>
   console.log(`  ${id.padEnd(30)} ${ok ? 'OK  ' : 'FAIL'}  got=${got} want=${want}${suffix}`);
 
+/** One detect row, judged. Returns the row EXACTLY as it is checkpointed — including the per-row
+ * cost figures — so a salvaged row is indistinguishable from a freshly judged one downstream. */
+function judgeDetectRow(c, model, runs) {
+  const base = { id: c.id, category: c.category, expected: c.expected };
+  if (detectSmells(c.entries, c.boundaries ?? []).length === 0)
+    return {
+      ...base,
+      got: 'ROUTINE',
+      ok: c.expected === 'ROUTINE',
+      freeSkip: true,
+      stable: true,
+      inputChars: 0,
+      rawChars: 0,
+    };
+  // Exact gate path: evidence extraction first, then the judge (never the raw diff).
+  const input = buildDetectJudgeInput(c.diff, c.entries, c.boundaries ?? []);
+  const verdicts = [];
+  for (let k = 0; k < runs; k += 1) {
+    const raw = runDetectJudge(process.cwd(), input, model);
+    if (raw === null) throw new BenchAbort(2, 'decisions-eval: claude went dark mid-run');
+    verdicts.push(parseVerdict(raw) ?? 'NULL');
+  }
+  const m = majorityVerdict(verdicts);
+  return {
+    ...base,
+    got: m.verdict,
+    ok: m.verdict === c.expected,
+    freeSkip: false,
+    stable: m.unanimous,
+    inputChars: input.length,
+    rawChars: String(c.diff).length,
+  };
+}
+
 /**
  * detect: rows whose declarative entries raise NO smell free-skip as ROUTINE (the gate never calls
  * the LLM there); the rest run the real downgrade judge on the row's diff. A dark judge aborts —
  * detect rows are cheap, a polluted run is worth less than a rerun.
  */
-export function runDetectBench(rows, { model = MODEL, runs = RUNS } = {}) {
+export function runDetectBench(
+  rows,
+  { model = MODEL, runs = RUNS, checkpoint = NO_CHECKPOINT } = {},
+) {
   const results = [];
-  let judgedChars = 0;
-  let judgedRaw = 0;
-  let judgedCount = 0;
-  let unstable = 0;
   for (const c of rows) {
-    const smells = detectSmells(c.entries, c.boundaries ?? []);
-    let got: string;
-    let freeSkip = false;
-    let stable = true;
-    if (smells.length === 0) {
-      got = 'ROUTINE';
-      freeSkip = true;
-    } else {
-      // Exact gate path: evidence extraction first, then the judge (never the raw diff).
-      const input = buildDetectJudgeInput(c.diff, c.entries, c.boundaries ?? []);
-      judgedCount += 1;
-      judgedChars += input.length;
-      judgedRaw += String(c.diff).length;
-      const verdicts = [];
-      for (let k = 0; k < runs; k += 1) {
-        const raw = runDetectJudge(process.cwd(), input, model);
-        if (raw === null) throw new BenchAbort(2, 'decisions-eval: claude went dark mid-run');
-        verdicts.push(parseVerdict(raw) ?? 'NULL');
-      }
-      const m = majorityVerdict(verdicts);
-      got = m.verdict;
-      stable = m.unanimous;
-      if (!stable) unstable += 1;
-    }
-    const ok = got === c.expected;
-    results.push({
-      id: c.id,
-      category: c.category,
-      expected: c.expected,
-      got,
-      ok,
-      freeSkip,
-      stable,
-    });
+    const saved = checkpoint.take(c.id);
+    const r = saved ?? judgeDetectRow(c, model, runs);
+    if (!saved) checkpoint.record(r);
+    results.push(r);
     rowLine(
       c.id,
-      ok,
-      got,
+      r.ok,
+      r.got,
       c.expected,
-      `${freeSkip ? ' (free-skip)' : ''}${stable ? '' : ' (unstable)'}`,
+      `${r.freeSkip ? ' (free-skip)' : ''}${r.stable ? '' : ' (unstable)'}${saved ? ' (checkpoint)' : ''}`,
     );
   }
+  // Cost/stability aggregates come off the ROWS, not counters incremented in the loop, so a resumed
+  // run reports the same numbers as the uninterrupted one it stands in for.
+  const judged = results.filter((r) => !r.freeSkip);
+  const judgedCount = judged.length;
+  const unstable = judged.filter((r) => !r.stable).length;
+  const judgedChars = judged.reduce((n, r) => n + (r.inputChars ?? 0), 0);
+  const judgedRaw = judged.reduce((n, r) => n + (r.rawChars ?? 0), 0);
   const t = tally(results, ['DECISION', 'ROUTINE']);
   // Expected-NULL rows are deliberate-ambiguity probes — displayed, but too unstable to gate on.
   const scored = tally(
@@ -347,114 +374,133 @@ export function runDetectBench(rows, { model = MODEL, runs = RUNS } = {}) {
  */
 export function runAlignmentBench(
   rows,
-  { model = MODEL, escalateModel = ESCALATE_MODEL, cascade = CASCADE, retryAgainst = null } = {},
+  {
+    model = MODEL,
+    escalateModel = ESCALATE_MODEL,
+    cascade = CASCADE,
+    retryAgainst = null,
+    checkpoint = NO_CHECKPOINT,
+  } = {},
 ) {
   const results = [];
-  let judged = 0;
-  let outages = 0;
-  let escalated = 0;
   for (const c of rows) {
-    let fx: ReturnType<typeof materializeFixture>;
-    try {
-      fx = materializeFixture(c);
-    } catch (e) {
-      // Fixture build failing is infra (git absent/misbehaving), not judge quality — abort with
-      // the could-not-run code instead of crashing the bench with a raw stack.
-      throw new BenchAbort(
-        2,
-        `decisions-eval: fixture build failed for ${c.id} — ${e?.message ?? e}`,
-      );
-    }
-    let first: string;
-    let final: string;
-    let didEscalate = false;
-    let outage = false;
-    try {
-      const matched = fx.staged.filter((f) => matchScope([f], c.target.scope));
-      if (matched.length === 0) {
-        first = 'NO-MATCH';
-        final = 'NO-MATCH';
-      } else {
-        judged += 1;
-        const d = judgeDetailed(
-          matched,
-          { ruling: c.target.ruling, vision: c.target.vision },
-          fx.repo,
-          { firstModel: model, escalateModel, escalate: cascade },
-        );
-        if (d === null || d.firstRaw === null) {
-          outage = true;
-          outages += 1;
-          first = 'NULL';
-          final = 'NULL';
-        } else {
-          first = d.firstVerdict ?? 'NULL';
-          final = d.finalVerdict ?? 'NULL';
-          didEscalate = d.escalated;
-          if (d.escalated) escalated += 1;
-        }
-      }
-    } finally {
-      fx.cleanup();
-    }
-    // Alignment rows cost 10x detect rows, so instead of K trials suite-wide, only a row whose
-    // verdict DISAGREES with the baseline is re-run once: a 1-of-2 disagreement is instability
-    // (stable:false — never counted as a regression flip), a 2-of-2 disagreement is real.
-    let stable = true;
-    if (
-      !outage &&
-      final !== 'NO-MATCH' &&
-      retryAgainst?.[c.id] &&
-      final !== retryAgainst[c.id].got
-    ) {
-      console.log(
-        `  ${c.id.padEnd(30)} …disagrees with baseline (${retryAgainst[c.id].got}) — retrying once`,
-      );
-      let fx2: ReturnType<typeof materializeFixture> | null;
-      try {
-        fx2 = materializeFixture(c);
-      } catch {
-        fx2 = null; // retry is best-effort; the first verdict stands, marked unstable
-      }
-      if (fx2) {
-        try {
-          const matched2 = fx2.staged.filter((f) => matchScope([f], c.target.scope));
-          const d2 = judgeDetailed(
-            matched2,
-            { ruling: c.target.ruling, vision: c.target.vision },
-            fx2.repo,
-            { firstModel: model, escalateModel, escalate: cascade },
-          );
-          const final2 = d2 === null || d2.firstRaw === null ? 'NULL' : (d2.finalVerdict ?? 'NULL');
-          stable = final2 === final; // both runs agree → the disagreement with baseline is real
-        } finally {
-          fx2.cleanup();
-        }
-      } else {
-        stable = false;
-      }
-    }
-    const ok = final === c.expected;
-    results.push({
-      id: c.id,
-      expected: c.expected,
-      first,
-      final,
-      escalated: didEscalate,
-      ok,
-      stable,
-    });
-    const detail = first === final ? '' : ` (haiku: ${first}${didEscalate ? ' → escalated' : ''})`;
+    const saved = checkpoint.take(c.id);
+    const r = saved ?? judgeAlignmentRow(c, { model, escalateModel, cascade, retryAgainst });
+    if (!saved) checkpoint.record(r);
+    results.push(r);
+    const detail =
+      r.first === r.final ? '' : ` (haiku: ${r.first}${r.escalated ? ' → escalated' : ''})`;
     rowLine(
       c.id,
-      ok,
-      final,
+      r.ok,
+      r.final,
       c.expected,
-      `${detail}${outage ? ' (outage)' : ''}${stable ? '' : ' (unstable)'}`,
+      `${detail}${r.outage ? ' (outage)' : ''}${r.stable ? '' : ' (unstable)'}${saved ? ' (checkpoint)' : ''}`,
     );
   }
+  const judged = results.filter((r) => r.judged).length;
+  const outages = results.filter((r) => r.outage).length;
+  const escalated = results.filter((r) => r.escalated).length;
   if (judged > 0 && outages === judged)
     throw new BenchAbort(2, 'decisions-eval: every judged alignment row was an outage');
+  return summariseAlignment(results, { model, escalateModel, cascade, judged, escalated, outages });
+}
+
+/** One alignment row: fixture → scope match → the REAL cascade → the baseline-discordant retry.
+ * `judged`/`outage` ride on the row so the suite tallies (escalation rate, all-outage abort) come
+ * off the results, and a resumed run counts them identically. */
+function judgeAlignmentRow(c, { model, escalateModel, cascade, retryAgainst }) {
+  let judged = false;
+  let fx: ReturnType<typeof materializeFixture>;
+  try {
+    fx = materializeFixture(c);
+  } catch (e) {
+    // Fixture build failing is infra (git absent/misbehaving), not judge quality — abort with
+    // the could-not-run code instead of crashing the bench with a raw stack.
+    throw new BenchAbort(
+      2,
+      `decisions-eval: fixture build failed for ${c.id} — ${e?.message ?? e}`,
+    );
+  }
+  let first: string;
+  let final: string;
+  let didEscalate = false;
+  let outage = false;
+  try {
+    const matched = fx.staged.filter((f) => matchScope([f], c.target.scope));
+    if (matched.length === 0) {
+      first = 'NO-MATCH';
+      final = 'NO-MATCH';
+    } else {
+      judged = true;
+      const d = judgeDetailed(
+        matched,
+        { ruling: c.target.ruling, vision: c.target.vision },
+        fx.repo,
+        { firstModel: model, escalateModel, escalate: cascade },
+      );
+      if (d === null || d.firstRaw === null) {
+        outage = true;
+        first = 'NULL';
+        final = 'NULL';
+      } else {
+        first = d.firstVerdict ?? 'NULL';
+        final = d.finalVerdict ?? 'NULL';
+        didEscalate = d.escalated;
+      }
+    }
+  } finally {
+    fx.cleanup();
+  }
+  // Alignment rows cost 10x detect rows, so instead of K trials suite-wide, only a row whose
+  // verdict DISAGREES with the baseline is re-run once: a 1-of-2 disagreement is instability
+  // (stable:false — never counted as a regression flip), a 2-of-2 disagreement is real.
+  let stable = true;
+  if (!outage && final !== 'NO-MATCH' && retryAgainst?.[c.id] && final !== retryAgainst[c.id].got) {
+    console.log(
+      `  ${c.id.padEnd(30)} …disagrees with baseline (${retryAgainst[c.id].got}) — retrying once`,
+    );
+    let fx2: ReturnType<typeof materializeFixture> | null;
+    try {
+      fx2 = materializeFixture(c);
+    } catch {
+      fx2 = null; // retry is best-effort; the first verdict stands, marked unstable
+    }
+    if (fx2) {
+      try {
+        const matched2 = fx2.staged.filter((f) => matchScope([f], c.target.scope));
+        const d2 = judgeDetailed(
+          matched2,
+          { ruling: c.target.ruling, vision: c.target.vision },
+          fx2.repo,
+          { firstModel: model, escalateModel, escalate: cascade },
+        );
+        const final2 = d2 === null || d2.firstRaw === null ? 'NULL' : (d2.finalVerdict ?? 'NULL');
+        stable = final2 === final; // both runs agree → the disagreement with baseline is real
+      } finally {
+        fx2.cleanup();
+      }
+    } else {
+      stable = false;
+    }
+  }
+  return {
+    id: c.id,
+    expected: c.expected,
+    first,
+    final,
+    escalated: didEscalate,
+    ok: final === c.expected,
+    stable,
+    judged,
+    outage,
+  };
+}
+
+function summariseAlignment(
+  results,
+  { model, escalateModel, cascade, judged, escalated, outages },
+) {
   const classes = ['ALIGN', 'CONTRADICT', 'UNCLEAR'];
   const finalT = tally(
     results.map((r) => ({ expected: r.expected, got: r.final })),
@@ -489,24 +535,39 @@ export function runAlignmentBench(
   };
 }
 
-/** depth: pure-text judge on each row's Target block. No free-skip class — the gate judges every
- * staged Target. Dark judge aborts (cheap rows, sentry-style). */
-export function runDepthBench(rows, { model = MODEL, runs = RUNS } = {}) {
-  const results = [];
-  let unstable = 0;
-  for (const c of rows) {
-    const verdicts = [];
-    for (let k = 0; k < runs; k += 1) {
-      const raw = runDepthJudge(process.cwd(), c.block, model);
-      if (raw === null) throw new BenchAbort(2, 'decisions-eval: claude went dark mid-run');
-      verdicts.push(parseDepthVerdict(raw) ?? 'NULL');
-    }
-    const { verdict: got, unanimous: stable } = majorityVerdict(verdicts);
-    if (!stable) unstable += 1;
-    const ok = got === c.expected;
-    results.push({ id: c.id, expected: c.expected, got, ok, stable });
-    rowLine(c.id, ok, got, c.expected, stable ? '' : ' (unstable)');
+function judgeDepthRow(c, model, runs) {
+  const verdicts = [];
+  for (let k = 0; k < runs; k += 1) {
+    const raw = runDepthJudge(process.cwd(), c.block, model);
+    if (raw === null) throw new BenchAbort(2, 'decisions-eval: claude went dark mid-run');
+    verdicts.push(parseDepthVerdict(raw) ?? 'NULL');
   }
+  const { verdict: got, unanimous: stable } = majorityVerdict(verdicts);
+  return { id: c.id, expected: c.expected, got, ok: got === c.expected, stable };
+}
+
+/** depth: pure-text judge on each row's Target block. No free-skip class — the gate judges every
+ * staged Target. Dark judge aborts (cheap rows, sentry-style) — cheaply now, since every row
+ * already judged is on disk and a re-run resumes from it. */
+export function runDepthBench(
+  rows,
+  { model = MODEL, runs = RUNS, checkpoint = NO_CHECKPOINT } = {},
+) {
+  const results = [];
+  for (const c of rows) {
+    const saved = checkpoint.take(c.id);
+    const r = saved ?? judgeDepthRow(c, model, runs);
+    if (!saved) checkpoint.record(r);
+    results.push(r);
+    rowLine(
+      c.id,
+      r.ok,
+      r.got,
+      c.expected,
+      `${r.stable ? '' : ' (unstable)'}${saved ? ' (checkpoint)' : ''}`,
+    );
+  }
+  const unstable = results.filter((r) => !r.stable).length;
   const t = tally(results, ['PASS', 'THIN']);
   return {
     model,
@@ -560,80 +621,14 @@ export function runDepthAudit({ model = MODEL } = {}) {
   return counts;
 }
 
-// ─── Reporting ────────────────────────────────────────────────────────────────────
-
-function round3(pc) {
-  return {
-    ...pc,
-    precision: Number(pc.precision.toFixed(3)),
-    recall: Number(pc.recall.toFixed(3)),
-    f1: Number(pc.f1.toFixed(3)),
-  };
-}
-
-/** Per-row verdict map for the baseline — what the flip-table gate diffs against. */
-function rowMap(results) {
-  const map = {};
-  for (const r of results)
-    map[r.id] = { got: r.final ?? r.got, ok: r.ok, stable: r.stable ?? true, expected: r.expected };
-  return map;
-}
-
-function byCategory(results) {
-  const cats = {};
-  for (const r of results) {
-    if (!r.category) continue;
-    cats[r.category] ??= { correct: 0, total: 0 };
-    cats[r.category].total += 1;
-    if (r.ok) cats[r.category].correct += 1;
-  }
-  return cats;
-}
-
-function printConfusion(confusion) {
-  const gots = [...new Set(Object.values(confusion).flatMap((g) => Object.keys(g)))].sort();
-  const expecteds = Object.keys(confusion).sort();
-  console.log(`  ${'want \\ got'.padEnd(14)}${gots.map((g) => g.padStart(12)).join('')}`);
-  for (const e of expecteds) {
-    const cells = gots.map((g) => String(confusion[e][g] ?? 0).padStart(12));
-    console.log(`  ${e.padEnd(14)}${cells.join('')}`);
-  }
-}
-
-function printPerClass(perClass) {
-  for (const [c, s] of Object.entries(perClass)) {
-    console.log(
-      `  ${c.padEnd(14)} precision ${s.precision.toFixed(2)}  recall ${s.recall.toFixed(2)}  ` +
-        `F1 ${s.f1.toFixed(2)}  (tp=${s.tp} fp=${s.fp} fn=${s.fn})`,
-    );
-  }
-}
-
 // ─── Orchestration ────────────────────────────────────────────────────────────────
 
-function printEstimate(plan, runs) {
-  const parts = [];
-  let seconds = 0;
-  if (plan.detect) {
-    const judged = plan.detect.filter(
-      (c) => detectSmells(c.entries, c.boundaries ?? []).length,
-    ).length;
-    seconds += judged * 30 * runs;
-    parts.push(`detect ${judged} judged × ~30s${runs > 1 ? ` × K=${runs}` : ''}`);
-  }
-  if (plan.alignment) {
-    const judged = plan.alignment.filter((c) =>
-      Object.keys(c.repo.staged).some((f) => matchScope([f], c.target.scope)),
-    ).length;
-    seconds += judged * 90;
-    parts.push(`alignment ${judged} judged × ~90s (+120–240s per escalation; K=1)`);
-  }
-  if (plan.depth) {
-    seconds += plan.depth.length * 40 * runs;
-    parts.push(`depth ${plan.depth.length} judged × ~40s${runs > 1 ? ` × K=${runs}` : ''}`);
-  }
-  console.log(`decisions-eval: budget ≈ ${Math.round(seconds / 60)} min  (${parts.join(' · ')})`);
-}
+/** What a checkpointed row's cost depended on. Rows judged under a different model/K/cascade are a
+ * different measurement and must never be replayed into this one. */
+const configKey = (name) =>
+  name === 'alignment'
+    ? `model=${MODEL} escalate=${ESCALATE_MODEL} cascade=${CASCADE ? 'on' : 'off'}`
+    : `model=${MODEL} K=${RUNS}`;
 
 // The judged corpus + the judge code, hashed into the baseline: a comparison against a baseline
 // generated from different rows or a different gate is mechanically skipped, never silently lied.
@@ -645,83 +640,6 @@ const gateHash = () =>
       readFileSync(path.join(here, `../check-alignment${SELF_EXT}`), 'utf8'),
   );
 
-/** Projected precision at realistic DECISION prevalence: the corpus is deliberately ~balanced for
- * measurement power, but real commit streams are mostly ROUTINE — precision is prevalence-dependent
- * (sensitivity/specificity are not), so report what the gate would look like in the wild. */
-function ppvLine(s) {
-  const tpr = s.decision.recall;
-  const negatives = s.routine.tp + s.decision.fp;
-  const fpr = negatives ? s.decision.fp / negatives : 0;
-  const ppv = (p) => {
-    const v = (tpr * p) / (tpr * p + fpr * (1 - p));
-    return Number.isFinite(v) ? v.toFixed(2) : '—';
-  };
-  return `  projected precision at real prevalence: p=5% → ${ppv(0.05)} · p=15% → ${ppv(0.15)}  (corpus is balanced by design)`;
-}
-
-/** Metamorphic variant groups: rows sharing variantOf must agree (invariance) — consistency is
- * its own metric, never folded into accuracy (a prompt that gains accuracy but loses consistency
- * is Goodharting the corpus). */
-function variantConsistency(rows, rowResults) {
-  const groups = {};
-  for (const r of rows) {
-    if (!r.variantOf || r.variantKind === 'directional') continue;
-    groups[r.variantOf] ??= new Set([r.variantOf]);
-    groups[r.variantOf].add(r.id);
-  }
-  const ids = Object.keys(groups);
-  if (!ids.length) return null;
-  let consistent = 0;
-  const broken = [];
-  for (const g of ids) {
-    const verdicts = new Set(
-      [...groups[g]].map((id) => rowResults[id]?.got).filter((v) => v !== undefined),
-    );
-    if (verdicts.size <= 1) consistent += 1;
-    else broken.push(g);
-  }
-  return { consistent, total: ids.length, broken };
-}
-
-/**
- * `bench.mjs coverage` — the corpus-coverage instrument (zero claude calls): per sub-bench, a
- * category × label × difficulty cell-count table plus provenance/holdout/variant tallies. Empty
- * or thin cells are the corpus's documented debt; grow rows toward them, not wherever is easy.
- */
-function printCoverage() {
-  for (const name of SUBS) {
-    const rows = loadCases(name);
-    console.log(`\n── ${name} (${rows.length} rows) ──`);
-    const cells = {};
-    const tag = { provenance: {}, holdout: 0, variants: 0 };
-    for (const r of rows) {
-      const key = `${(r.category ?? 'uncategorised').padEnd(24)} ${String(r.expected).padEnd(11)} ${r.difficulty ?? 'unset'}`;
-      cells[key] = (cells[key] ?? 0) + 1;
-      const p = r.provenance ?? 'authored';
-      tag.provenance[p] = (tag.provenance[p] ?? 0) + 1;
-      if (r.holdout) tag.holdout += 1;
-      if (r.variantOf) tag.variants += 1;
-    }
-    console.log(`  ${'category'.padEnd(24)} ${'expected'.padEnd(11)} difficulty  rows`);
-    for (const key of Object.keys(cells).sort()) console.log(`  ${key}  ${cells[key]}`);
-    console.log(
-      `  provenance: ${Object.entries(tag.provenance)
-        .map(([k, v]) => `${k}=${v}`)
-        .join(' ')} · holdout=${tag.holdout} · variant rows=${tag.variants}`,
-    );
-    const unset = rows.filter((r) => !r.difficulty).length;
-    if (unset) console.log(`  COVERAGE DEBT: ${unset} row(s) missing a difficulty tag`);
-  }
-}
-
-function appendLedger(entry) {
-  try {
-    appendFileSync(path.join(here, 'runs.log'), `${JSON.stringify(entry)}\n`);
-  } catch {
-    // The ledger is telemetry; never let it break a run.
-  }
-}
-
 function main(argv) {
   const args = new Set(argv);
   const which = SUBS.filter((s) => args.has(s));
@@ -729,6 +647,7 @@ function main(argv) {
   const writeBaseline = args.has('--baseline');
   const failOnRegression = args.has('--fail');
   const devOnly = args.has('--dev');
+  const fresh = args.has('--fresh');
 
   process.on('SIGINT', () => {
     activeFixtureCleanup?.();
@@ -763,9 +682,24 @@ function main(argv) {
 
   const plan = Object.fromEntries(run.map((s) => [s, loadCases(s)]));
   if (devOnly) for (const s of run) plan[s] = plan[s].filter((r) => !r.holdout);
-  printEstimate(plan, RUNS);
 
   const gh = gateHash();
+  const corpusHashes = Object.fromEntries(run.map((s) => [s, sha12(JSON.stringify(plan[s]))]));
+  // Opened BEFORE the estimate so the budget line quotes the work still to PAY for, not the work a
+  // resumed run already has on disk.
+  const checkpoints = Object.fromEntries(
+    run.map((s) => [
+      s,
+      openCheckpoint(s, {
+        config: configKey(s),
+        gateHash: gh,
+        corpusHash: corpusHashes[s],
+        fresh,
+      }),
+    ]),
+  );
+  printEstimate(plan, RUNS, Object.fromEntries(run.map((s) => [s, checkpoints[s].size])));
+
   const baseline = existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, 'utf8')) : {};
   // Captured BEFORE the loop: each sub-bench overwrites its own section as it finishes (read-merge-
   // write), so afterwards every section looks present.
@@ -781,15 +715,20 @@ function main(argv) {
 
   for (const name of run) {
     console.log(`\n── ${name} ──`);
+    const checkpoint = checkpoints[name];
+    if (checkpoint.size)
+      console.log(
+        `  resuming: ${checkpoint.size} row(s) replayed from checkpoint (no judge calls)`,
+      );
     const retryAgainst = name === 'alignment' ? (baseline.alignment?.rows ?? null) : null;
     const s =
       name === 'alignment'
-        ? runAlignmentBench(plan[name], { retryAgainst })
+        ? runAlignmentBench(plan[name], { retryAgainst, checkpoint })
         : name === 'detect'
-          ? runDetectBench(plan[name])
-          : runDepthBench(plan[name]);
+          ? runDetectBench(plan[name], { checkpoint })
+          : runDepthBench(plan[name], { checkpoint });
     s.gateHash = gh;
-    s.corpusHash = sha12(JSON.stringify(plan[name]));
+    s.corpusHash = corpusHashes[name];
     console.log('');
     const config =
       name === 'alignment'
