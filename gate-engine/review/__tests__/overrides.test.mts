@@ -75,7 +75,11 @@ describe('reconcile', () => {
     );
     const r = reconcile(cwd, 'correctness-reviewer', ['state-transitions'], 'D', NOW);
     expect(r.blocking).toEqual([]);
-    expect(r.suppressed[0].rationale).toMatch(/holds a lock/);
+    expect(r.suppressed[0]).toMatchObject({
+      rationale: 'writer holds a lock the fixture omits',
+      recorded_at: null,
+      recorded_by: 'file',
+    });
   });
 
   it('an env override suppresses AND is persisted through to the file (survives next commit)', () => {
@@ -93,6 +97,10 @@ describe('reconcile', () => {
       env,
     );
     expect(r.blocking).toEqual([]);
+    expect(r.suppressed[0]).toMatchObject({
+      recorded_at: NOW,
+      recorded_by: 'env',
+    });
     const stored = loadOverrides(cwd)[fp];
     expect(stored).toMatchObject({
       rationale: 'anchor is tight — false positive',
@@ -147,9 +155,9 @@ describe('reconcile', () => {
     // Re-reconciling EITHER reviewer alone still sees BOTH entries intact — a read for one
     // reviewer must never observe the other's waiver as lost.
     const rConv = reconcile(cwd, 'conventions-reviewer', ['app/handler.ts:4'], 'DIFF-SHARED', NOW);
-    expect(rConv.suppressed.map((s) => s.fp)).toEqual([fpConventions]);
+    expect(rConv.suppressed.map((s) => s.fingerprint)).toEqual([fpConventions]);
     const rCorr = reconcile(cwd, 'correctness-reviewer', ['concurrency-races'], 'DIFF-SHARED', NOW);
-    expect(rCorr.suppressed.map((s) => s.fp)).toEqual([fpCorrectness]);
+    expect(rCorr.suppressed.map((s) => s.fingerprint)).toEqual([fpCorrectness]);
   });
 });
 

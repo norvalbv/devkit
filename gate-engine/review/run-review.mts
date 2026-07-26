@@ -219,9 +219,7 @@ export async function runCascade(
   res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, (reason) =>
     cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason }),
   );
-  // Override valve — a single-pass (model-pinned) reviewer's FAIL blocks unless each failed lens is
-  // waived with a rationale (env OVERRIDE_<fp>_RATIONALE or .devkit/correctness-overrides.json). All
-  // waived → PASS; any un-waived → still FAIL, its reason names the fingerprints + how to waive them.
+  // Override valve: all failed lenses waived → PASS; any unwaived finding remains a named FAIL.
   // Read the artifact BEFORE the cleanup below (the fingerprint needs the failed lens names).
   if (res.status === 'fail' && sel.reviewer.model) {
     // A checklist reviewer's lens is the checklist item name (stable: fixed per diff, deterministic
@@ -261,9 +259,10 @@ export async function runCascade(
         diffText,
         new Date().toISOString(),
       );
+      if (suppressed.length > 0) res.waivers = suppressed;
       for (const s of suppressed)
         console.error(
-          `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fp}]: ${s.rationale}`,
+          `guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${s.rationale}`,
         );
       if (blocking.length === 0) {
         res.status = 'pass';
@@ -574,6 +573,7 @@ export async function runReviewGate(
           model: res.model ?? firstModel,
           reason: res.reason,
           secs,
+          ...(res.waivers?.length ? { waivers: res.waivers } : {}),
           ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
         });
         // Surface the one-line verdict reason on the completion line too (fails get theirs in the

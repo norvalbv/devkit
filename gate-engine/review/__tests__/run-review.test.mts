@@ -469,6 +469,9 @@ describe('runReviewGate — cascade + exit contract', () => {
 
   it('single-pass FAIL blocks with an override affordance; an OVERRIDE_ env with a rationale waives it', async () => {
     const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-waiver';
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exec = mkExec(async ({ label }) => {
       if (label === 'review:correctness-reviewer') {
@@ -492,6 +495,26 @@ describe('runReviewGate — cascade + exit contract', () => {
     } finally {
       delete process.env[key];
     }
+    const waived = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter(
+        (event) =>
+          event.type === 'review_result' &&
+          event.reviewer === 'correctness-reviewer' &&
+          event.status === 'pass',
+      )
+      .at(-1);
+    expect(waived.waivers).toEqual([
+      {
+        fingerprint: (m as RegExpMatchArray)[1],
+        lens: 'check-fail-1',
+        rationale: 'writer holds the shard lock the fixture omits — not a real race',
+        recorded_at: expect.any(String),
+        recorded_by: 'env',
+      },
+    ]);
   });
 
   it('a model-pinned reviewer (correctness) runs SINGLE-PASS — its first-pass FAIL blocks, never escalates', async () => {
