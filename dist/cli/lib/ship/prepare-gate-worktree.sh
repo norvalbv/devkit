@@ -102,6 +102,81 @@ gate_link_source() {
   return 1
 }
 
+gate_dependency_preflight_tool() {
+  local script_dir tool
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  tool="$script_dir/dependency-preflight.mts"
+  [ -f "$tool" ] || tool="$script_dir/dependency-preflight.mjs"
+  printf '%s\n' "$tool"
+}
+
+gate_dependency_install_remedy() {
+  local wt=$1
+  if [ -f "$wt/bun.lock" ] || [ -f "$wt/bun.lockb" ]; then
+    printf '%s\n' 'bun install --frozen-lockfile'
+  elif [ -f "$wt/pnpm-lock.yaml" ]; then
+    printf '%s\n' 'pnpm install --frozen-lockfile'
+  elif [ -f "$wt/yarn.lock" ]; then
+    printf '%s\n' 'yarn install --immutable'
+  elif [ -f "$wt/package-lock.json" ] || [ -f "$wt/npm-shrinkwrap.json" ]; then
+    printf '%s\n' 'npm ci'
+  else
+    printf '%s\n' 'install dependencies with this repo'\''s package manager'
+  fi
+}
+
+# Pick the first available install that satisfies the BASE package.json in the ephemeral worktree.
+# "Populated" is only a fast preference: a real but stale install can miss a dependency added by the
+# base after that checkout last installed. Try the linked root first, then the main worktree fallback.
+gate_node_modules_source() {
+  local wt=$1 root=$2 main_root=$3 tool candidate missing rc remedy
+  local candidates=("$root/node_modules")
+  local rejected=()
+  [ "$main_root" = "$root" ] || candidates+=("$main_root/node_modules")
+  tool=$(gate_dependency_preflight_tool)
+  [ -f "$tool" ] || {
+    echo "devkit ship: dependency preflight helper is unavailable" >&2
+    return 1
+  }
+
+  # Preserve the existing populated-first preference, then its existence fallback. The second pass
+  # matters for dependency-free repos whose node_modules contains only tool caches.
+  local pass
+  for pass in populated exists; do
+    for candidate in "${candidates[@]}"; do
+      if [ "$pass" = populated ]; then
+        gate_dir_is_populated "$candidate" || continue
+      else
+        [ -e "$candidate" ] || continue
+      fi
+      if missing=$(node "$tool" "$wt/package.json" "$candidate"); then
+        printf '%s\n' "$candidate"
+        return 0
+      else
+        rc=$?
+      fi
+      [ "$rc" -eq 1 ] || return "$rc"
+      missing=${missing//$'\n'/, }
+      rejected+=("$candidate"$'\t'"$missing")
+    done
+    [ "${#rejected[@]}" -eq 0 ] || break
+  done
+
+  # No install existed before this change either: preserve the old "nothing to link" result so
+  # non-JS repos and hermetic ship fixtures continue without a new precondition.
+  [ "${#rejected[@]}" -gt 0 ] || return 1
+  echo "devkit ship: no node_modules satisfies the ship base package.json:" >&2
+  local rejection path packages
+  for rejection in "${rejected[@]}"; do
+    path=${rejection%%$'\t'*}
+    packages=${rejection#*$'\t'}
+    echo "  - $path (missing: $packages)" >&2
+  done
+  remedy=$(gate_dependency_install_remedy "$wt")
+  echo "run \`$remedy\` in the checkout, then retry the same ship command." >&2
+  return 2
+}
+
 # The hook git will ACTUALLY run in the ephemeral worktree, or '' when nothing is configured.
 # Resolved, never hardcoded: husky points core.hooksPath at `.husky/_`, an overlay install points it
 # at `.devkit/hooks` (overlay.mts), and it may be unset entirely.
@@ -161,9 +236,19 @@ prepare_gate_worktree() {
   # the same ship, already "print[s] a loud notice so it is never silent"; this was its silent sibling,
   # and that silence is why sc-1243 read as "this repo has no linters installed" instead of "the wrong
   # node_modules got linked".
-  local d source
+  local d source dependency_rc
   for d in "${link_dirs[@]}"; do
-    source=$(gate_link_source "$root" "$main_root" "$d") || continue
+    if [ "$d" = node_modules ]; then
+      if source=$(gate_node_modules_source "$wt" "$root" "$main_root"); then
+        :
+      else
+        dependency_rc=$?
+        [ "$dependency_rc" -eq 1 ] && continue
+        return 1
+      fi
+    else
+      source=$(gate_link_source "$root" "$main_root" "$d") || continue
+    fi
     [ ! -e "$wt/$d" ] && [ ! -L "$wt/$d" ] || continue
     mkdir -p "$wt/$(dirname "$d")"
     ln -s "$source" "$wt/$d"

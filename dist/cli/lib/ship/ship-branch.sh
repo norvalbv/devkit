@@ -136,6 +136,14 @@ else
   BASE=$(git rev-parse HEAD)   # pin once: shared HEAD may advance mid-run
 fi
 
+# devkit self-host only: inspect the CALLER tree before the ephemeral worktree hides ignored,
+# unbriefed dist artifacts. Installed consumer copies run the same helper, which no-ops unless the
+# caller package is @norvalbv/devkit. Prefer source beside this script, then packaged .mjs.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
+[ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
+node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
+
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
 # under a gitignored, force-tracked tree such as devkit's own dist/). All empty ⇒ an empty index — which git only reports AFTER the
@@ -320,7 +328,6 @@ fi
 # --git-root "$WT" hashes the just-COMMITTED blobs (what the PR shipped), not $ROOT's working tree —
 # so a parallel agent's edit to a shipped file in this window can't be mis-recorded as the shipped blob.
 # The manifest itself still lands in $ROOT (the persistent shared tree); $WT is removed right after.
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist). Prefer whichever exists beside this script.
 RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
