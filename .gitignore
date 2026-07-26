@@ -30,6 +30,8 @@ node_modules
 gate-engine/decisions/eval/results.baseline.json
 # decisions-eval run ledger (local telemetry; the anti-Goodhart record of runs against the corpus)
 gate-engine/decisions/eval/runs.log
+# decisions-eval checkpoints: local scratch for resuming an interrupted run, not evidence
+gate-engine/decisions/eval/progress-*.jsonl
 # critique-eval: ledger + per-run transcripts are local telemetry. NOTE: its results.baseline.json
 # IS committed (sc-1059 requires a committed baseline) — do not add it here.
 gate-engine/critique/eval/runs.log

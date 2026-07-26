@@ -19,6 +19,7 @@ import {
   tally,
   wilson,
 } from '../eval/bench.mts';
+import { openCheckpoint } from '../eval/checkpoint.mts';
 
 // ─── Pure metrics ─────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,46 @@ describe('sub-benches (stubbed claude)', () => {
     expect(s.total).toBe(2);
     expect(s.accuracy).toBe(50); // the NULL row "failed" on display…
     expect(s.accuracyScored).toBe(100); // …but is excluded from what --fail gates on
+  });
+
+  // The point of checkpointing: a run killed at row N costs only rows N..end on the retry. The
+  // assertion that matters is the SPAWN COUNT — a resume that still called the judge would return
+  // the right numbers while costing the full 150 minutes, which is the failure being prevented.
+  it('detect: an aborted run resumes and re-judges only the rows it never finished', () => {
+    // Inside the per-test tmpdir, so afterEach cleans it up — no try/finally, which would read as
+    // a conditional `use*` call to the rules-of-hooks lint.
+    const ckDir = join(dir, 'ck');
+    mkdirSync(ckDir, { recursive: true });
+    const meta = { config: 'model=haiku K=1', gateHash: 'g1', corpusHash: 'c1', dir: ckDir };
+    const rows = [
+      { ...smellRow, id: 'r1' },
+      { ...smellRow, id: 'r2' },
+      { ...smellRow, id: 'r3' },
+    ];
+
+    // Judge answers for r1, then goes dark — the documented sentry-style abort.
+    useStub(
+      `if [ -f "${join(ckDir, 'seen')}" ]; then exit 3; fi\ntouch "${join(ckDir, 'seen')}"\necho ROUTINE\n`,
+    );
+    expect(() => runDetectBench(rows, { checkpoint: openCheckpoint('detect', meta) })).toThrow(
+      BenchAbort,
+    );
+    expect(calls().trim().split('\n')).toHaveLength(2); // r1 answered, r2 went dark
+
+    // Same command again: r1 replays off disk, only r2/r3 reach the judge.
+    rmSync(log, { force: true });
+    useStub('echo ROUTINE\n');
+    const resumed = openCheckpoint('detect', meta);
+    expect(resumed.size).toBe(1);
+    const s = runDetectBench(rows, { checkpoint: resumed });
+
+    expect(calls().trim().split('\n')).toHaveLength(2); // r2 + r3 only — r1 was never re-spawned
+    expect(s.results.map((r) => r.id)).toEqual(['r1', 'r2', 'r3']);
+    expect(s.correct).toBe(3);
+    // Cost aggregates ride on the rows, so a resumed run reports what the whole run cost —
+    // not just the rows this process happened to judge.
+    expect(s.meanInputChars).toBeGreaterThan(0);
+    expect(s.meanRawDiffChars).toBe(String(smellRow.diff).length);
   });
 
   it('detect: a dark judge aborts with exit code 2 (cheap rows, sentry-style)', () => {
