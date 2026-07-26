@@ -64,7 +64,8 @@ Containment is scored at axis level.
 
 What decays is **ENFORCEMENT**, and it is measurable today:
 
-- **7 of 28 records (25%) have a `**Scope:**` glob matching no path on disk.** `check-alignment`
+- **5 of 28 records have a `**Scope:**` glob matching no path on disk.** (An earlier draft said
+  7, from a cruder shell-glob check; 5 is the authoritative count from the gate's own `matchScope`.) `check-alignment`
   free-skips a Target whose scope matches nothing and exits 0 (`check-alignment.mts:29`), so those
   rulings are intact and silently unenforced. Causes are mechanical: the `.mjs`→`.mts` migration, and
   file moves — `decision-format-parsed-not-regexed` scopes `gate-engine/decisions/markdown.mts`,
@@ -94,6 +95,10 @@ as its own field. Counting `**Tradeoff:**` labels reports 0/29 and is wrong — 
 
 ## Open work, in leverage order
 
+> **Superseded — see "Final state" at the end of this document.** Items 1-4 shipped; 5 is still
+> blocked and 6-8 remain. Kept as written because the ORDER was the judgement call, and the reasoning
+> for it is worth more than a tidy list.
+
 1. **Scope-glob validity check** — deterministic, no LLM, catches the 7 known cases; a ruling whose
    gate has silently stopped firing is worse than a stale doc. (Story AC4, reduced to its mechanical
    core.)
@@ -111,3 +116,49 @@ as its own field. Counting `**Tradeoff:**` labels reports 0/29 and is wrong — 
 8. **Publish** — `bun gate-engine/eval/cli.mts publish --suite decisions --baseline
    gate-engine/decisions/eval/results.baseline.json --tree WORKTREE`, then `bun run benchmarks:render`.
    Requires a completely clean tree, so run it from a fresh checkout at `main`.
+
+---
+
+## Final state (sc-1236 closed out)
+
+All four acceptance criteria are implemented. What a reader needs to know:
+
+| AC | Delivered as |
+|---|---|
+| 1 — supersession surfaced on read | `**Supersedes:** <id>` on a Target, `**Amends:**` tag on a note. Resolved at READ time into a reverse edge; the superseded block is never rewritten, so append-only holds. Cross-axis refs use `slug#target:<date>`. |
+| 2 — refuse a duplicate live ruling | **Deliberately advisory, not blocking.** `add --new` prints the three nearest live rulings. Measured over 30 real axes, all six highest-BM25 pairs are legitimately distinct (top pair: the recall *benchmark* vs the ranking *algorithm*), so any blocking threshold would reject good work. |
+| 3 — category view | `guard-decisions categories`, frozen six-value vocabulary, validated at write time. Uncategorised records are listed as such, never bucketed. |
+| 4 — drift check | `guard-decisions drift` (deterministic, no LLM) plus `guard-decisions rescope` to fix what it finds by appending a dated `**Scope:**` correction. |
+
+### Commands added
+
+```
+guard-decisions drift                          # rulings whose Scope matches no code (exit 1 if any)
+guard-decisions rescope <slug> --scope … --reason …   # append-only Scope correction
+guard-decisions categories                     # category -> axis -> current ruling
+guard-decisions query "…" --full               # whole matched records, not truncated rulings
+node gate-engine/decisions/eval/bench.mts all --baseline   # resumable; re-run to continue
+```
+
+### Known gaps, stated plainly
+
+- **Abstention is still absent.** FANR 11/11 — the retriever never says "nothing rules on this". The
+  signal is identified (raw BM25 top-1; oracle FANR 1/11, FAR 0/18) but calibrating τ needs ~25
+  realistic answerable questions. Two shortcuts were tried and both measurably failed: deriving them
+  from the corpus (τ 7.6 vs oracle 11.55) and length-normalising the score to avoid needing them
+  (oracle degrades to 7/11; slug-calibrated abstains on everything). Do not retry either.
+- **`categories` is empty on the real corpus** — all 31 records predate the field, and `Category`
+  lives on a Target, which cannot be edited. Backfill needs a rescope-style append for that field.
+- **`check-alignment` does not yet skip superseded Targets** at commit time, and the query envelope
+  has no `SUPERSEDED` state — both need `eval/recall/scoring.mts` updated in lockstep.
+- **AC5 (ship the `check-alignment` hook fragment)** was flagged in the plan and remains unbuilt.
+- **The judge baseline is not published to the dashboard.** `results.baseline.json` exists locally
+  and is gitignored by design ("no baseline ships; each consumer generates theirs"). Publishing needs
+  a completely clean tree: `bun gate-engine/eval/cli.mts publish --suite decisions --baseline
+  gate-engine/decisions/eval/results.baseline.json --tree WORKTREE`, then `bun run benchmarks:render`.
+
+### How to read any number in this document
+
+State the **tier** and the **n**. Local runs are hybrid (needs Ollama); CI runs lexical-only. A
+retrieval figure without its tier is not comparable, and at n=29 the intervals are wide enough that
+point estimates mislead — `SetRecall 3/4` is `[30, 95]`.
