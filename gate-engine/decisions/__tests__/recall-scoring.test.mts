@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   brokenLabels,
   leakJaccard,
@@ -554,5 +554,34 @@ describe('brokenLabels (labels must still describe the corpus)', () => {
     expect(errors.some((e) => e.includes('mustSurface'))).toBe(true);
     expect(errors.some((e) => e.includes('mustNotAssert'))).toBe(true);
     expect(errors.some((e) => e.includes('liveId'))).toBe(true);
+  });
+});
+
+// ─── Degradation warning (regression: sc-1236 correctness review) ─────────────────
+// The "embedding model unavailable — ranking LEXICALLY ONLY" warning fired whenever embed() returned
+// null, but null ALSO means "deliberately switched off" (DECISIONS_NO_EMBED), which every test and
+// the default CI bench tier set. So the expected path accused the machine of a broken install and
+// told the reader to pull a model they had disabled — noise, which is how a real warning gets ignored.
+describe('dense-tier degradation warning', () => {
+  const load = async () => await import('../recall/embeddings.mts');
+
+  afterEach(() => {
+    delete process.env.DECISIONS_NO_EMBED;
+    vi.restoreAllMocks();
+  });
+
+  it('reports a deliberate opt-out as disabled, NOT as unavailable', async () => {
+    const { embedDisabled, embed } = await load();
+    process.env.DECISIONS_NO_EMBED = '1';
+    expect(embedDisabled()).toBe(true);
+    // embed() still returns null — the two situations are indistinguishable at THAT return value,
+    // which is exactly why the warning must consult embedDisabled() rather than the null.
+    await expect(embed('anything')).resolves.toBeNull();
+  });
+
+  it('reports an absent opt-out as not-disabled, so a real outage still warns', async () => {
+    const { embedDisabled } = await load();
+    delete process.env.DECISIONS_NO_EMBED;
+    expect(embedDisabled()).toBe(false);
   });
 });
