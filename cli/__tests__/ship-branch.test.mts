@@ -1429,7 +1429,7 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     expect(r.stderr).not.toMatch(/\.search-code\/index\.db .*commit it/);
   });
 
-  it('uses main-worktree gate inputs when shipping from a linked worktree', () => {
+  it('uses main-worktree gate inputs and classifies a symlinked cache without a fatal pathspec', () => {
     const hookBody = [
       '[ -e guard.config.json ] && echo CONFIG_SEEN || echo CONFIG_MISSING',
       '[ -e .search-code/index.db ] && echo INDEX_SEEN || echo INDEX_MISSING',
@@ -1455,12 +1455,11 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     dirs.push(linkedParent);
     const linked = join(linkedParent, 'checkout');
     git(['worktree', 'add', '-q', '-b', 'linked-task', linked], { stdio: 'ignore' });
-    mkdirSync(join(linked, '.search-code')); // interrupted/empty local index directory
+    execFileSync('ln', ['-s', join(dir, '.search-code'), join(linked, '.search-code')]);
     mkdirSync(join(linked, '.decisions')); // empty local projection must not hide populated main data
     mkdirSync(join(linked, '.fallow'));
     writeFileSync(join(linked, '.fallow/source'), 'linked'); // populated local override still wins
     writeFileSync(join(linked, 'note.txt'), 'hi\n');
-
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/linked-gate-inputs', 't', 'note.txt'], {
       cwd: linked,
       input: 'b\n',
@@ -1470,6 +1469,7 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/\.search-code\/index\.db .*gitignored cache/);
+    expect(r.stderr).not.toMatch(/fatal: pathspec/);
     const log = readFileSync(
       join(linked, '.devkit/last-ship-gates-feat-linked-gate-inputs.log'),
       'utf8',
