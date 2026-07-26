@@ -114,6 +114,22 @@ describe('packaged reviewer asset runtime', () => {
     expect(PACKAGED_REVIEW_ASSET_PATHS).not.toContain('skills/brainstorming/SKILL.md');
   });
 
+  it('makes commit-guard script discovery portable across agent providers', () => {
+    const sources = [
+      readFileSync(join(HERE, '../../agents/commit-guard.md'), 'utf8'),
+      readFileSync(join(HERE, '../../skills/commit-guard/SKILL.md'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      expect(source).toContain('.agents/skills/commit-guard');
+      expect(source).toContain('.claude/skills/commit-guard');
+      expect(source).toContain('.cursor/skills/commit-guard');
+      expect(source).toContain('[ -f "$candidate/scripts/checklist.mjs" ]');
+      expect(source).toContain('[ -f "$candidate/scripts/co-occurrence.mjs" ]');
+      expect(source).toContain('commit-guard scripts unavailable: run devkit sync-skills');
+    }
+  });
+
   it('copies only registered assets, dereferences links, preserves executability, and keeps preflight identity', () => {
     const source = packageFixture('devkit review package ');
     const originalBrief = join(source, 'agents/api-security-reviewer.md');
