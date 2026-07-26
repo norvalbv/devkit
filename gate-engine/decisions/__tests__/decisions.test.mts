@@ -667,6 +667,21 @@ describe('CLI round-trip', () => {
     expect(run(['show', 'mcp-transport']).stdout).toContain('**Ruling:** mcp-transport-ruling');
   });
 
+  it('--category writes **Category:** when it is a frozen value', () => {
+    const r = run(target('mcp-transport', ['--category', 'commit-gates']));
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(dir, 'mcp-transport.md'), 'utf8')).toContain(
+      '**Category:** commit-gates',
+    );
+  });
+
+  it('--category refuses an unrecognised value and writes nothing', () => {
+    const r = run(target('mcp-transport', ['--category', 'not-a-real-category']));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('Unknown category "not-a-real-category"');
+    expect(existsSync(join(dir, 'mcp-transport.md'))).toBe(false);
+  });
+
   it('re-targeting requires --evidence-change; both Targets preserved (append-only)', () => {
     run(target('ax'));
     const blocked = run(['add', 'ax', '--target', ...reqFlags('ax')]);
@@ -1015,6 +1030,48 @@ describe('query --json envelope (the bench contract)', () => {
     expect(first.rows[0].score).toBeCloseTo(first.rows[1].score);
     expect(first.rows.map((r) => r.slug)).toEqual(['aaa-axis', 'zzz-axis']);
     expect(second.rows.map((r) => r.slug)).toEqual(first.rows.map((r) => r.slug));
+  });
+});
+
+describe('query --full', () => {
+  it('prints the whole body of the top match, including text the truncated view omits', () => {
+    run(target('proxy-transport-axis'));
+    run(target('auth-provider-axis'));
+    const truncated = run(['query', 'proxy transport axis ruling']);
+    const full = run(['query', 'proxy transport axis ruling', '--full']);
+    expect(truncated.status).toBe(0);
+    expect(full.status).toBe(0);
+    // Consequences is written to every axis file (renderTarget), but the truncated prose view
+    // (printRanked) only ever prints the ruling + why-hook + a few qualifiers — never this field.
+    expect(truncated.stdout).not.toContain('Consequences');
+    expect(full.stdout).toContain('**Consequences:**');
+    expect(full.stdout).toContain('proxy-transport-axis value protected');
+  });
+
+  it('composes with --top: prints exactly the K whole records ranking narrowed to', () => {
+    run(target('gateway-transport-one'));
+    run(target('gateway-transport-two'));
+    run(target('gateway-transport-three'));
+    const r = run(['query', 'gateway transport', '--top', '2', '--full']);
+    expect(r.status).toBe(0);
+    // Each printed whole file carries exactly one `slug: <axis>` frontmatter line.
+    expect([...r.stdout.matchAll(/^slug: /gm)]).toHaveLength(2);
+  });
+
+  it('errors when combined with --json instead of silently picking one', () => {
+    const r = run(['query', 'anything', '--full', '--json']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/--json and --full are mutually exclusive/);
+  });
+
+  it('plain query (neither --full nor --json) keeps the truncated one-line view unchanged', () => {
+    run(target('plain-query-axis'));
+    const r = run(['query', 'plain-query-axis-ruling']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('# top 1 axis (lexical)');
+    expect(r.stdout).toContain('- plain-query-axis · plain-query-axis-ruling');
+    expect(r.stdout).not.toContain('Consequences');
+    expect(r.stdout).not.toContain('slug: plain-query-axis');
   });
 });
 

@@ -9,19 +9,22 @@
  *   guard-decisions add <slug> --target …| --note …   record a Target / append a note
  *   guard-decisions amend <slug> --target …| --note … replace only the newest uncommitted entry
  *   guard-decisions rescope <slug> --scope … --reason …  append-only Scope correction (a tagged note)
- *   guard-decisions query "<text>" [--top K]          rank axes (semantic → lexical floor)
+ *   guard-decisions query "<text>" [--top K] [--json|--full]  rank axes (semantic → lexical floor)
  *   guard-decisions reindex | list | show <slug> | check <slug>
  *   guard-decisions detect --gate | scan [--working]  architectural-smell gate (capture B)
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
  *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
+ *   guard-decisions categories                        per-category view (recall/category-report.mts)
  *
  * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
- * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); everything
- * else routes to decisions.mjs `main`.
+ * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); `categories`
+ * is a plain function call (it has no --gate/scan sub-dispatch of its own); everything else routes
+ * to decisions.mjs `main`.
  */
 
 import { realpathSync } from 'node:fs';
 import { main as decisionsMain } from './decisions.mts';
+import { cmdCategories } from './recall/category-report.mts';
 
 // Dev runs the .mts source (Node strips types); the shipped dist is compiled .mjs. Derive the
 // runtime extension from THIS module so the sub-engine URLs resolve in both.
@@ -34,6 +37,10 @@ const SUB_ENGINES: Record<string, URL> = {
 
 async function run(argv: string[]) {
   const [cmd, ...rest] = argv;
+  if (cmd === 'categories') {
+    cmdCategories();
+    return;
+  }
   const sub = SUB_ENGINES[cmd];
   if (sub) {
     // Re-enter the sub-engine as if invoked directly: it inspects process.argv and self-dispatches
