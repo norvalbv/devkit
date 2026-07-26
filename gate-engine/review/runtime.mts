@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { GuardConfig } from '../config.mts';
+import type { RecordedWaiver } from './overrides.mts';
 import {
   type ChecklistState,
   checklistAssetPath,
@@ -49,6 +50,9 @@ export interface ReviewOutcome {
   reason: string;
   escalated: boolean;
   transcript?: string;
+  /** Structured acknowledgement records for findings suppressed by the override valve. Present on
+   * both all-waived PASS and mixed waived+blocking FAIL outcomes. */
+  waivers?: RecordedWaiver[];
   /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
    * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
