@@ -1,10 +1,10 @@
-import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
-import { rootRegistry } from './_helpers.mts';
+import { processAlive, rootRegistry, testSpawnSync as spawnSync } from './_helpers.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUPERVISOR = join(HERE, '../lib/ship/review/process/gate-supervisor.mts');
@@ -66,15 +66,6 @@ function waitForPath(path: string, timeoutMs = WAIT_MS): Promise<void> {
     };
     check();
   });
-}
-
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 interface InspectedProcess {
@@ -320,6 +311,18 @@ describe('review gate supervisor', () => {
     const result = supervisor('5', '--', process.execPath, '-e', `process.exit(${status})`);
 
     expect(result.status, result.stderr).toBe(1);
+  });
+
+  it('can preserve a natural reserved exit for the synchronous test-process boundary', async () => {
+    await expect(
+      superviseGateCommand(
+        5_000,
+        [process.execPath, '-e', 'process.exit(124)'],
+        undefined,
+        undefined,
+        false,
+      ),
+    ).resolves.toBe(124);
   });
 
   it('returns 124 and terminates the complete command group on timeout', () => {

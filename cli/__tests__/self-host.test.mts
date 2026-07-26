@@ -4,7 +4,6 @@
  * If the parity test fails, the hook drifted from the generator: regenerate it (`devkit init` in the
  * repo, or `devkit doctor --fix`) and re-commit.
  */
-import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -29,6 +28,7 @@ import {
   sourceBinFor,
   toSelfHost,
 } from '../lib/husky/self-host.mts';
+import { testExecFileSync as execFileSync } from './_helpers.mts';
 
 // The repo root (where package.json + .husky live) — resolved from THIS file, not cwd, so the parity
 // check is robust to however vitest is launched.

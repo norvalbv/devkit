@@ -225,6 +225,7 @@ export function superviseGateCommand(
   command: readonly string[],
   inspectProcesses: ProcessTableReader = readProcessTable,
   seededOwnershipToken?: string,
+  normalizeReservedStatuses = true,
 ): Promise<number> {
   if (process.platform === 'win32') {
     return Promise.reject(new Error('gate-supervisor requires POSIX process-group signals'));
@@ -329,13 +330,15 @@ export function superviseGateCommand(
     // drained on its own, so the reap is invisible to the caller's attribution (a ship keeps blaming
     // the reviewer, not a timeout). A leader that exited CLEAN while leaking a live tree is the one
     // case we override: it verified nothing conclusive, so it takes the expiry status.
-    const lingerStatus = (): number => (childStatus === 0 ? 124 : naturalExitCode(childStatus));
+    const reportedChildStatus = (): number =>
+      normalizeReservedStatuses ? naturalExitCode(childStatus) : childStatus;
+    const lingerStatus = (): number => (childStatus === 0 ? 124 : reportedChildStatus());
     const checkForCompletion = (): void => {
       if (finished) return;
       try {
         if (forcedStatus !== undefined) signalForcedProcesses();
         if (completionReady(ownedProcessAlive())) {
-          settle(forcedStatus ?? naturalExitCode(childStatus), terminalFailure);
+          settle(forcedStatus ?? reportedChildStatus(), terminalFailure);
           return;
         }
       } catch (cause) {

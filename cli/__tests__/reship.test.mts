@@ -1,10 +1,14 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
+import {
+  testExecFileSync as execFileSync,
+  processAlive,
+  testSpawnSync as spawnSync,
+} from './_helpers.mts';
 
 // `devkit ship --pr <branch>` (re-push): adds the current changes to an EXISTING PR's branch as a
 // new commit on top of origin/<branch> (copy-not-patch), fast-forward push (never --force). Hermetic
@@ -20,15 +24,6 @@ const dirs = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
-
-function processAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function run(args, dir, env = {}, opts = {}) {
   return spawnSync('/bin/bash', [scriptPath, ...args], {

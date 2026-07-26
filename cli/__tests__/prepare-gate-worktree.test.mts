@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   lstatSync,
@@ -14,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // Gate dependencies (.husky/_, node_modules, coverage) are all GITIGNORED, so `git worktree add`
 // never brings them across. The consumer root can itself be a linked worktree — devkit's own stated

@@ -5,9 +5,6 @@
  */
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { execFileSync } from 'node:child_process';
-// Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
-// fallow-ignore-next-line code-duplication
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,7 +16,7 @@ import { applyOverlayConstraints, defaultSelection } from '../lib/components.mts
 import { isTracked } from '../lib/git-tracked.mts';
 import { HEAL_ALIAS_CMD, syncOverlayHook } from '../lib/overlay.mts';
 import { removeSkills } from '../lib/sync-manifest.mts';
-import { rootRegistry } from './_helpers.mts';
+import { testExecFileSync as execFileSync, rootRegistry } from './_helpers.mts';
 
 // A full overlay selection with the opt-ins (agentHooks + fallow) ON — what the wizard produces
 // when the user checks everything. applyInit consumes an already-resolved selection directly, so we

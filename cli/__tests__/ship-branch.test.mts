@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -14,7 +13,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { hasAnyCommand } from './_helpers.mts';
+import {
+  testExecFileSync as execFileSync,
+  hasAnyCommand,
+  testSpawnSync as spawnSync,
+} from './_helpers.mts';
 
 // Coverage for ship-branch.sh: the pure resolution seam (the fork-upstream bug — gh's default repo
 // can resolve to a fork's UPSTREAM remote instead of origin, opening the PR against the wrong repo;

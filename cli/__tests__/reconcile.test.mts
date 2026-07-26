@@ -5,13 +5,13 @@
  * `--apply`, a `git merge --ff-only` that the stale tree BLOCKED now SUCCEEDS — proving reconcile
  * makes the tree pullable without moving the shared HEAD.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ffBlockers, loadManifest, reconcileBranch } from '../lib/reconcile.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
 const GENV = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };

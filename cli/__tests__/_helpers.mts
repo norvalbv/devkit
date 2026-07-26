@@ -3,7 +3,7 @@
  * it up as a suite. Collapses the tmp-repo + subprocess-runner + cleanup boilerplate that every
  * subprocess-style CLI test repeated verbatim.
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync as nodeExecFileSync, spawnSync as nodeSpawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -11,12 +11,83 @@ import { fileURLToPath } from 'node:url';
 
 /** Absolute path to the devkit CLI entry (cli/index.mjs). */
 export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
+const TEST_SUBPROCESS = fileURLToPath(new URL('./test-subprocess.mts', import.meta.url));
+export const TEST_SUBPROCESS_TIMEOUT_MS = 90_000;
+const TEST_SUBPROCESS_CLEANUP_MS = 30_000;
+
+function commandCall(
+  command: string,
+  argsOrOptions: readonly string[] | Record<string, unknown> | undefined,
+  maybeOptions: Record<string, unknown> | undefined,
+) {
+  const args = Array.isArray(argsOrOptions) ? argsOrOptions : [];
+  const options = (Array.isArray(argsOrOptions) ? maybeOptions : argsOrOptions) ?? {};
+  const requestedTimeout = options.timeout;
+  const timeoutMs =
+    typeof requestedTimeout === 'number' && requestedTimeout > 0
+      ? requestedTimeout
+      : TEST_SUBPROCESS_TIMEOUT_MS;
+  return { command, args, options, timeoutMs };
+}
+
+function supervisedCommand(
+  command: string,
+  argsOrOptions: readonly string[] | Record<string, unknown> | undefined,
+  maybeOptions: Record<string, unknown> | undefined,
+) {
+  const call = commandCall(command, argsOrOptions, maybeOptions);
+  return {
+    args: [TEST_SUBPROCESS, String(call.timeoutMs), '--', call.command, ...call.args],
+    options: {
+      ...call.options,
+      timeout: call.timeoutMs + TEST_SUBPROCESS_CLEANUP_MS,
+    },
+  };
+}
+
+/**
+ * Synchronous test subprocess with a killable child-process boundary. Vitest's testTimeout cannot
+ * interrupt Node while spawnSync blocks, so the runner owns the command's complete process tree and
+ * returns 124 after a bounded cleanup instead of letting one broken fixture wedge the whole suite.
+ */
+export const testSpawnSync = ((
+  command: string,
+  argsOrOptions?: readonly string[] | Record<string, unknown>,
+  maybeOptions?: Record<string, unknown>,
+) => {
+  const supervised = supervisedCommand(command, argsOrOptions, maybeOptions);
+  return nodeSpawnSync(process.execPath, supervised.args, supervised.options);
+}) as typeof nodeSpawnSync;
+
+/** Leaf-command counterpart to testSpawnSync. Git and other direct execs get a hard deadline without
+ * paying for a process-tree supervisor on every fixture setup command. */
+export const testExecFileSync = ((
+  command: string,
+  argsOrOptions?: readonly string[] | Record<string, unknown>,
+  maybeOptions?: Record<string, unknown>,
+) => {
+  const call = commandCall(command, argsOrOptions, maybeOptions);
+  return nodeExecFileSync(call.command, call.args, {
+    ...call.options,
+    timeout: call.timeoutMs,
+  });
+}) as typeof nodeExecFileSync;
+
+/** Whether a PID still refers to a live process. */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Whether at least one command is available on PATH, without interpolating names into shell code. */
 export function hasAnyCommand(...commands) {
   return commands.some(
     (command) =>
-      spawnSync('bash', ['-c', 'command -v "$1"', 'devkit-test', command], {
+      testSpawnSync('bash', ['-c', 'command -v "$1"', 'devkit-test', command], {
         stdio: 'ignore',
       }).status === 0,
   );
@@ -43,7 +114,7 @@ export function tmpRepos(prefix) {
     return root;
   };
   const devkit = (root, ...args) =>
-    spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
+    testSpawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8' });
   const cleanup = () => {
     for (const r of roots) rmSync(r, { recursive: true, force: true });
     roots = [];
@@ -100,7 +171,7 @@ export function seedSessionLedger(root, sid, paths) {
 
 /** REPO_KEY exactly as session-edits-lib.sh computes it (`pwd -P | cksum`, first field). */
 export const repoKey = (root) =>
-  spawnSync('bash', ['-c', 'pwd -P | cksum | cut -d" " -f1'], {
+  testSpawnSync('bash', ['-c', 'pwd -P | cksum | cut -d" " -f1'], {
     cwd: root,
     encoding: 'utf8',
   }).stdout.trim();

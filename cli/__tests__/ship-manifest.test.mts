@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -17,6 +16,7 @@ import {
   readManifest as readManifestFn,
   recordShip,
 } from '../lib/ship/reconcile-manifest-write.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // Verifies the WRITE side of the ship↔reconcile contract: ship-branch.sh shells out to
 // reconcile-manifest-write.mts after `gh pr create` to record what shipped, so `devkit reconcile`

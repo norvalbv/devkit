@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -18,6 +17,7 @@ import {
   installGlobalHook,
   removeGlobalHook,
 } from '../lib/overlay-global-hook.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // The opt-in global husky init.sh shim that gates a PLAIN `git commit` after husky reclaims
 // core.hooksPath. Two concerns: the marker-block writer/remover (hermetic, XDG → temp), and the

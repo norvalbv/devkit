@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { decide } from '../lib/guard/protected-branch-guard.mts';
+import { testExecFileSync as execFileSync } from './_helpers.mts';
 
 // The protected-branch guard: a direct `git commit` on a protected branch (main / X.Y.Z) is DENIED
 // with a copy-paste-ready `devkit ship …` (auto branch + the agent's -m title + the staged paths);

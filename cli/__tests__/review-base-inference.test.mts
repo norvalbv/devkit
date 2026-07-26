@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // review-target.sh picks the base the judges diff against. The in-chain hook runs
 // `guard-review --gate` with NO --base, so inference decides what every reviewer sees. Inferring
