@@ -201,14 +201,15 @@ describe('update — command-level (mode detection, comparison basis, install br
     expect(ranInstall()).toBe(false);
   });
 
-  it('global mode (no devkit dep) → `bun add -g` the tag, never re-pins or `bun install`s', async () => {
+  it('global mode names devkit with its git tag so Bun replaces the installed global dependency', async () => {
     const dir = makeRepo({ dep: null }); // package.json without the dep
     silence();
     expect(await update([], dir)).toBe(0);
-    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith('bun', ['add', '-g', `${REF}#v9.9.9`], {
-      cwd: dir,
-      stdio: 'inherit',
-    });
+    expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
+      'bun',
+      ['add', '-g', `@norvalbv/devkit@${REF}#v9.9.9`],
+      { cwd: dir, stdio: 'inherit' },
+    );
     expect(ranInstall()).toBe(false);
   });
 });
