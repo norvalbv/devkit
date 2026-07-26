@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // review-target.sh picks the base the judges diff against. The in-chain hook runs
 // `guard-review --gate` with NO --base, so inference decides what every reviewer sees. Inferring
@@ -11,8 +11,6 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 // judges get handed the whole release. Observed before this fix: a 3-file, modification-only commit
 // was failed for "deleting" two files — one of 211 deletions in the 161 commits between the two
 // branches. Hermetic: DEVKIT_REVIEW_RESOLVE_ONLY exits before any snapshot/judge side effect.
-
-vi.setConfig({ testTimeout: 30_000 });
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/review-target.sh', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };

@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -11,18 +10,17 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   parseArgs,
   readManifest as readManifestFn,
   recordShip,
 } from '../lib/ship/reconcile-manifest-write.mts';
+import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // Verifies the WRITE side of the ship↔reconcile contract: ship-branch.sh shells out to
 // reconcile-manifest-write.mts after `gh pr create` to record what shipped, so `devkit reconcile`
 // can later restore the merged-upstream version. Hermetic — throwaway repos, no gh, no network.
-
-vi.setConfig({ testTimeout: 30_000 }); // git-subprocess-heavy; generous under parallel load
 
 const WRITER = fileURLToPath(new URL('../lib/ship/reconcile-manifest-write.mts', import.meta.url));
 const FIXTURE = JSON.parse(
