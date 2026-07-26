@@ -63,6 +63,7 @@ is_review_projection_purpose() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
+  local main_root='' candidate_root=$root source=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
   local linked=() candidates=()
   case "$purpose" in
@@ -105,7 +106,14 @@ link_untracked_gate_configs() {
     fi
   else
     candidates=("${GATE_PROJECTION_FIXED_CANDIDATES[@]}")
-    if resolved=$(node "$emitter" "$root" 2>/dev/null); then
+    main_root=$(gate_main_worktree "$root")
+    # A linked worktree may lack the untracked guard.config.json that defines indexPath,
+    # allowlistPath, and decisionsDir. Resolve that config first so the main-worktree fallback also
+    # discovers its config-driven candidates; each candidate still resolves root-first below.
+    if source=$(gate_link_source "$root" "$main_root" guard.config.json); then
+      candidate_root=$(dirname "$source")
+    fi
+    if resolved=$(node "$emitter" "$candidate_root" 2>/dev/null); then
       while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$resolved"
     else
       echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
@@ -139,10 +147,12 @@ link_untracked_gate_configs() {
   else
     for rel in "${candidates[@]}"; do
       # Present in the repo but absent from the committed worktree = the gate would fail open. The
-      # -L guard also skips a pre-existing symlink so `ln` never aborts on it.
-      [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+      # -L guard also skips a pre-existing symlink so `ln` never aborts on it. Empty local projection
+      # dirs are unusable, so a populated main-worktree copy wins; files keep root-first precedence.
+      source=$(gate_link_source "$root" "$main_root" "$rel" prefer-populated) || continue
+      [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
       mkdir -p "$wt/$(dirname "$rel")"
-      ln -s "$root/$rel" "$wt/$rel"
+      ln -s "$source" "$wt/$rel"
       linked+=("$rel")
     done
   fi

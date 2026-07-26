@@ -1429,6 +1429,58 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     expect(r.stderr).not.toMatch(/\.search-code\/index\.db .*commit it/);
   });
 
+  it('uses main-worktree gate inputs when shipping from a linked worktree', () => {
+    const hookBody = [
+      '[ -e guard.config.json ] && echo CONFIG_SEEN || echo CONFIG_MISSING',
+      '[ -e .search-code/index.db ] && echo INDEX_SEEN || echo INDEX_MISSING',
+      'grep -q main .decisions/source && echo EMPTY_DIR_FELL_BACK',
+      'grep -q linked .fallow/source && echo LOCAL_POPULATED_WON',
+      'exit 0',
+    ].join('\n');
+    const { dir, env, git } = seedShipRepo({ hookBody });
+    writeFileSync(join(dir, '.gitignore'), '.search-code/\n.decisions/\n.fallow/\n');
+    git(['add', '.gitignore'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'ignore gate caches'], { stdio: 'ignore' });
+
+    // These untracked/ignored inputs live only in the main checkout.
+    writeFileSync(join(dir, 'guard.config.json'), '{"indexPath":".search-code/index.db"}\n');
+    mkdirSync(join(dir, '.search-code'), { recursive: true });
+    writeFileSync(join(dir, '.search-code/index.db'), 'index');
+    mkdirSync(join(dir, '.decisions'), { recursive: true });
+    writeFileSync(join(dir, '.decisions/source'), 'main');
+    mkdirSync(join(dir, '.fallow'), { recursive: true });
+    writeFileSync(join(dir, '.fallow/source'), 'main');
+
+    const linkedParent = mkdtempSync(join(tmpdir(), 'ship-linked-root-'));
+    dirs.push(linkedParent);
+    const linked = join(linkedParent, 'checkout');
+    git(['worktree', 'add', '-q', '-b', 'linked-task', linked], { stdio: 'ignore' });
+    mkdirSync(join(linked, '.search-code')); // interrupted/empty local index directory
+    mkdirSync(join(linked, '.decisions')); // empty local projection must not hide populated main data
+    mkdirSync(join(linked, '.fallow'));
+    writeFileSync(join(linked, '.fallow/source'), 'linked'); // populated local override still wins
+    writeFileSync(join(linked, 'note.txt'), 'hi\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/linked-gate-inputs', 't', 'note.txt'], {
+      cwd: linked,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/\.search-code\/index\.db .*gitignored cache/);
+    const log = readFileSync(
+      join(linked, '.devkit/last-ship-gates-feat-linked-gate-inputs.log'),
+      'utf8',
+    );
+    expect(log).toMatch(/CONFIG_SEEN/);
+    expect(log).toMatch(/INDEX_SEEN/);
+    expect(log).toMatch(/EMPTY_DIR_FELL_BACK/);
+    expect(log).toMatch(/LOCAL_POPULATED_WON/);
+    expect(log).not.toMatch(/CONFIG_MISSING|INDEX_MISSING/);
+  });
+
   it('does not double-link a config already passed via --link (no ln clobber under set -e)', () => {
     const { dir, env, git } = seedShipRepo({ hookBody: cfgHook });
     writeFileSync(join(dir, 'guard.config.json'), '{"scanRoots":["src"]}\n'); // untracked
