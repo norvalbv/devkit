@@ -6,7 +6,7 @@ import { AGENT_TARGETS, type Selection } from '../components.mts';
 import { removeAgents, removeSkills } from '../sync-manifest.mts';
 import { selectedHookAssets } from './agent-hook-selection.mts';
 import {
-  installHookRegistrations,
+  reconcileHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
   syncHookScripts,
@@ -50,6 +50,7 @@ export function installAgentSurfaces(
   selection: Selection,
   dryRun: boolean,
   override: OverrideAsset = () => false,
+  previousSelection: Partial<Selection> = {},
 ) {
   const targets = selection.agentTargets ?? AGENT_TARGETS;
   if (selection.skills) {
@@ -67,7 +68,7 @@ export function installAgentSurfaces(
     syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, targets, { override });
   }
 
-  const hooks = selectedHookAssets(selection);
+  const hooks = selectedHookAssets(selection, {}, previousSelection);
   if (hooks.scripts.length) {
     console.log('7b. agent-hook scripts');
     syncHookScripts(gitRoot, {
@@ -83,15 +84,19 @@ export function installAgentSurfaces(
 
   if (hooks.components.length) {
     console.log('7c. agent hook registrations');
-    installHookRegistrations(gitRoot, hooks.components, { dryRun, targets });
+    reconcileHookRegistrations(gitRoot, hooks.components, hooks.previouslyOwnedComponents, {
+      dryRun,
+      targets,
+    });
   } else if (
+    hooks.previouslyOwnedComponents.length &&
     targets.some((target) =>
       existsSync(
         join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json'),
       ),
     )
   ) {
-    removeHookRegistrations(gitRoot, { dryRun, targets });
+    reconcileHookRegistrations(gitRoot, [], hooks.previouslyOwnedComponents, { dryRun, targets });
   }
   pruneDeselectedSurfaces(gitRoot, selection, targets, hooks.scripts, dryRun);
   return targets;
