@@ -67,7 +67,7 @@ import {
   upsertRow,
   whyHook,
 } from './decision-format.mts';
-import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './retrieval.mts';
+import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
   type AddOptions,
@@ -91,7 +91,7 @@ export {
   gistOf,
   loadAxisRows,
   type RankResult,
-} from './retrieval.mts';
+} from './recall/retrieval.mts';
 
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
