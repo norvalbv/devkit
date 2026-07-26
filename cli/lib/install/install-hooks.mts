@@ -27,6 +27,7 @@ import {
 export {
   checkHookRegistrations,
   installHookRegistrations,
+  reconcileHookRegistrations,
   removeHookRegistrations,
 } from './hook-settings.mts';
 

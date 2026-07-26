@@ -562,6 +562,31 @@ describe('overlay (local-only) install', () => {
     expect(all).toContain('.claude/hooks/'); // devkit hooks merged in
   });
 
+  it('removes a previously owned hook component without removing a retained one', async () => {
+    const root = workRepo();
+    const first = overlayAll();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: first,
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: {
+        ...first,
+        guards: first.guards.filter((guard) => guard !== 'decisions'),
+      },
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    const settings = readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8');
+    expect(settings).not.toContain('decision-edit-guard.mjs');
+    expect(settings).toContain('lint-check.sh');
+  });
+
   it('skips a git-TRACKED .cursor/hooks.json (warns, no edit, no exclude line)', async () => {
     const root = mkTmp('overlay-cursor-');
     const git = (...a) => execFileSync('git', a, { cwd: root });

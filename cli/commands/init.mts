@@ -56,7 +56,7 @@ import {
 } from '../lib/husky/husky-block.mts';
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
 import { selectedHookAssets } from '../lib/install/agent-hook-selection.mts';
-import { installAgentSurfaces } from '../lib/install/agent-surfaces.mts';
+import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-surfaces.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
   ensureFallowGitignore,
@@ -1109,7 +1109,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     interactive,
     force,
   });
-  const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override);
+  const agentTargets = syncSurfaces(gitRoot, selection, dryRun, override, prevConfig?.components);
 
   if (selection.fallow) {
     console.log('8. fallow (optional code-health layer)');

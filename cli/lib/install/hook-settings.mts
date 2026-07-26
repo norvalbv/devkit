@@ -20,6 +20,16 @@ interface HookRegistrationOptions {
   overlay?: boolean;
 }
 
+interface InstallHookRegistrationOptions extends HookRegistrationOptions {
+  /** Components selected now plus components recorded as devkit-owned by the previous install. */
+  ownedComponentIds?: string[];
+}
+
+interface RemoveHookRegistrationOptions extends HookRegistrationOptions {
+  /** Defaults to every registered component for clean/uninstall. */
+  componentIds?: string[];
+}
+
 interface ClaudeSettings {
   hooks?: ClaudeHooksBlock;
   [key: string]: unknown;
@@ -88,16 +98,6 @@ function toCursorCommand(command: string): string {
     .trim();
 }
 
-const ALL_DEVKIT_REGISTRATIONS = registrationsFor(Object.keys(HOOK_REGISTRATIONS));
-const DEVKIT_CLAUDE_COMMANDS = new Set(
-  ALL_DEVKIT_REGISTRATIONS.map((registration) => registration.command),
-);
-const DEVKIT_CURSOR_COMMANDS = new Set(
-  ALL_DEVKIT_REGISTRATIONS.filter(
-    ({ event, matcher, cursorEvent }) => cursorEvent ?? CURSOR_EVENT[event]?.[matcher],
-  ).map((registration) => toCursorCommand(registration.command)),
-);
-
 /**
  * Commands devkit ONCE registered and must still reclaim on a reconcile.
  *
@@ -111,39 +111,66 @@ const DEVKIT_CURSOR_COMMANDS = new Set(
  * ([[fallow-gate-owned-by-fallow]]). It now wires fallow's own hook instead, and fallow's installer
  * writes an entry for a script at that same path — so the orphan would not merely linger, it would
  * fire the gate twice per Bash tool call. These are STRIP-ONLY: never re-added, only cleaned up.
- * The match is exact, so fallow's own entry (which carries a `FALLOW_GATE_COMMIT_ONLY=1` prefix) is
- * untouched.
+ * Exact command matching keeps unrelated consumer hooks untouched.
  *
  * BOTH surfaces need reclaiming. The Claude registration was mirrored to Cursor as
  * `.cursor/hooks/fallow-gate.sh`, and the script itself is removed by the generic sync (the file no
  * longer exists in agents-hooks/) — so without the Cursor set, a consumer keeps a
  * `beforeShellExecution` entry pointing at a deleted file, forever. devkit's live gate registers a
  * DIFFERENT command (`fallow-staged-gate.sh`), so reclaiming the old string cannot touch it.
+ *
+ * Retired registrations remain owned by the component that introduced them. Reclaim them only
+ * while that component is selected (or during an explicit remove-all): a deselected component's
+ * command may now be consumer-owned, and an unrelated component reconcile has no authority over it.
  */
-const RETIRED_CLAUDE_COMMANDS = new Set([
-  // devkit's own short-lived gate.
-  'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-  // fallow's GENERATED agent gate, which devkit briefly installed via `fallow hooks install
-  // --target agent`. It resolves its base as the merge-base against the remote default, so left in
-  // place it fires beside devkit's staged-scope wrapper and re-blocks on the very unstaged work the
-  // wrapper exists to exclude.
-  'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-]);
+const RETIRED_COMMANDS: Record<string, { claude: string[]; cursor: string[] }> = {
+  fallow: {
+    claude: [
+      // devkit's own short-lived gate.
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+      // fallow's GENERATED agent gate, which devkit briefly installed via `fallow hooks install
+      // --target agent`. It resolves its base as the merge-base against the remote default, so left
+      // in place it fires beside devkit's staged-scope wrapper and re-blocks on the very unstaged
+      // work the wrapper exists to exclude.
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    ],
+    // The Cursor mirrors of those same retired registrations.
+    cursor: ['.cursor/hooks/fallow-gate.sh'],
+  },
+};
 
-/** The Cursor mirrors of those same retired registrations (toCursorCommand of the strings above). */
-const RETIRED_CURSOR_COMMANDS = new Set(['.cursor/hooks/fallow-gate.sh']);
+interface RegistrationCommands {
+  claude: Set<string>;
+  cursor: Set<string>;
+}
 
-function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
+function registrationCommandsFor(componentIds: string[]): RegistrationCommands {
+  const claude = new Set<string>();
+  const cursor = new Set<string>();
+  for (const registration of registrationsFor(componentIds)) {
+    claude.add(registration.command);
+    if (registration.cursorEvent ?? CURSOR_EVENT[registration.event]?.[registration.matcher]) {
+      cursor.add(toCursorCommand(registration.command));
+    }
+  }
+  for (const id of new Set(componentIds)) {
+    const retired = RETIRED_COMMANDS[id];
+    for (const command of retired?.claude ?? []) claude.add(command);
+    for (const command of retired?.cursor ?? []) cursor.add(command);
+  }
+  return { claude, cursor };
+}
+
+function stripClaude(
+  hooks: ClaudeHooksBlock | undefined,
+  commandsToStrip: ReadonlySet<string>,
+): ClaudeHooksBlock {
   const out: ClaudeHooksBlock = {};
   for (const [event, groups] of Object.entries(hooks ?? {})) {
     const kept: ClaudeHookGroup[] = [];
     for (const group of groups) {
       const commands = (group.hooks ?? []).filter(
-        (hook) =>
-          !(
-            hook.command &&
-            (DEVKIT_CLAUDE_COMMANDS.has(hook.command) || RETIRED_CLAUDE_COMMANDS.has(hook.command))
-          ),
+        (hook) => !(hook.command && commandsToStrip.has(hook.command)),
       );
       if (commands.length) kept.push({ ...group, hooks: commands });
     }
@@ -152,15 +179,14 @@ function stripClaude(hooks?: ClaudeHooksBlock): ClaudeHooksBlock {
   return out;
 }
 
-function stripCursor(hooks?: CursorHooksBlock): CursorHooksBlock {
+function stripCursor(
+  hooks: CursorHooksBlock | undefined,
+  commandsToStrip: ReadonlySet<string>,
+): CursorHooksBlock {
   const out: CursorHooksBlock = {};
   for (const [event, list] of Object.entries(hooks ?? {})) {
     const kept = (list ?? []).filter(
-      (hook) =>
-        !(
-          hook.command &&
-          (DEVKIT_CURSOR_COMMANDS.has(hook.command) || RETIRED_CURSOR_COMMANDS.has(hook.command))
-        ),
+      (hook) => !(hook.command && commandsToStrip.has(hook.command)),
     );
     if (kept.length) out[event] = kept;
   }
@@ -185,17 +211,23 @@ function addCursor(
 export function installHookRegistrations(
   root: string,
   componentIds: string[],
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
+  {
+    dryRun = false,
+    targets = AGENT_TARGETS,
+    overlay = false,
+    ownedComponentIds = componentIds,
+  }: InstallHookRegistrationOptions = {},
 ): { wrote: string[] } {
   const registrations = registrationsFor(componentIds);
   if (!registrations.length) return { wrote: [] };
+  const commandsToStrip = registrationCommandsFor(ownedComponentIds);
   const wrote: string[] = [];
 
   if (targets.includes('claude')) {
     const relative = `.claude/${settingsFile(overlay)}`;
     const file = join(root, relative);
     const settings: ClaudeSettings = (readJson(file) as ClaudeSettings | null) ?? {};
-    let hooks = stripClaude(settings.hooks);
+    let hooks = stripClaude(settings.hooks, commandsToStrip.claude);
     for (const registration of registrations) hooks = addClaude(hooks, registration);
     settings.hooks = hooks;
     if (!dryRun) writeIfAbsent(file, `${JSON.stringify(settings, null, 2)}\n`, { force: true });
@@ -214,7 +246,7 @@ export function installHookRegistrations(
         version: 1,
         hooks: {},
       };
-      let hooks = stripCursor(settings.hooks);
+      let hooks = stripCursor(settings.hooks, commandsToStrip.cursor);
       for (const registration of registrations) hooks = addCursor(hooks, registration);
       settings.hooks = hooks;
       if (!dryRun) writeIfAbsent(file, `${JSON.stringify(settings, null, 2)}\n`, { force: true });
@@ -230,11 +262,37 @@ export function installHookRegistrations(
   return { wrote };
 }
 
+/** Reconcile selected registrations plus ownership recorded by the previous install. */
+export function reconcileHookRegistrations(
+  root: string,
+  componentIds: string[],
+  previouslyOwnedComponentIds: string[],
+  options: HookRegistrationOptions = {},
+): { wrote: string[] } {
+  if (componentIds.length)
+    return installHookRegistrations(root, componentIds, {
+      ...options,
+      ownedComponentIds: [...new Set([...componentIds, ...previouslyOwnedComponentIds])],
+    });
+  if (previouslyOwnedComponentIds.length)
+    removeHookRegistrations(root, {
+      ...options,
+      componentIds: previouslyOwnedComponentIds,
+    });
+  return { wrote: [] };
+}
+
 /** Strip only Devkit-owned registrations from the selected surfaces. */
 export function removeHookRegistrations(
   root: string,
-  { dryRun = false, targets = AGENT_TARGETS, overlay = false }: HookRegistrationOptions = {},
+  {
+    dryRun = false,
+    targets = AGENT_TARGETS,
+    overlay = false,
+    componentIds = Object.keys(HOOK_REGISTRATIONS),
+  }: RemoveHookRegistrationOptions = {},
 ): void {
+  const commandsToStrip = registrationCommandsFor(componentIds);
   const claudePath = join(root, '.claude', settingsFile(overlay));
   const claude = targets.includes('claude')
     ? (readJson(claudePath) as ClaudeSettings | null)
@@ -252,11 +310,11 @@ export function removeHookRegistrations(
     return;
   }
   if (claude) {
-    claude.hooks = stripClaude(claude.hooks);
+    claude.hooks = stripClaude(claude.hooks, commandsToStrip.claude);
     writeIfAbsent(claudePath, `${JSON.stringify(claude, null, 2)}\n`, { force: true });
   }
   if (cursor) {
-    cursor.hooks = stripCursor(cursor.hooks);
+    cursor.hooks = stripCursor(cursor.hooks, commandsToStrip.cursor);
     writeIfAbsent(cursorPath, `${JSON.stringify(cursor, null, 2)}\n`, { force: true });
   }
   console.log('  ✓ removed devkit hook registrations');

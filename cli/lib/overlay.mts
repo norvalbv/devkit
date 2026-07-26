@@ -39,7 +39,7 @@ import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mts'
 import { selectedHookAssets } from './install/agent-hook-selection.mts';
 import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mts';
 import {
-  installHookRegistrations,
+  reconcileHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
   syncHookScripts,
@@ -49,10 +49,8 @@ import { firstLine } from './standalone.mts';
 import { removeAgents, removeSkills } from './sync-manifest.mts';
 
 const LOCAL_HOOKS = '.devkit/hooks';
-// every `bun install`; this LOCAL (uncommitted) alias re-points it back to our hooks dir right
-// before a commit, so `git ci …` keeps devkit's gates wired without touching anything committed.
-// Fail-open `;` (never `&&`): a re-point hiccup must NEVER block your commit — it just runs the
-// repo's own hooks that once, matching every devkit gate's fail-open stance.
+type PriorOverlayConfig = { components?: Partial<Selection> };
+// `git ci` re-points hooks after `bun install`; fail-open `;` preserves the gates' stance.
 const HEAL_ALIAS_NAME = 'ci';
 const HEAL_ALIAS_CMD = `!git config --local core.hooksPath ${LOCAL_HOOKS}; git commit`;
 // "Ours" by a STABLE marker (the re-point), not the exact literal — so a future HEAL_ALIAS_CMD
@@ -410,6 +408,7 @@ function installOverlayAgentSurfaces(
   sel: Selection,
   dryRun: boolean,
   force = false,
+  previousSelection: Partial<Selection> = {},
 ) {
   const targets = sel.agentTargets ?? AGENT_TARGETS;
   const skipTracked = (rel: string) => isTracked(gitRoot, rel);
@@ -438,7 +437,7 @@ function installOverlayAgentSurfaces(
   } else if (existsSync(join(gitRoot, '.devkit', 'agents-manifest.json'))) {
     removeAgents(gitRoot, dryRun);
   }
-  const hooks = selectedHookAssets(sel, { searchSteering: false });
+  const hooks = selectedHookAssets(sel, { searchSteering: false }, previousSelection);
   const desiredHooks = hooks.scripts;
   if (desiredHooks.length) {
     console.log('  agent-hook scripts');
@@ -452,18 +451,17 @@ function installOverlayAgentSurfaces(
     for (const rel of Object.keys(m.files))
       for (const t of targets) excl.push(`.${t}/hooks/${rel}`);
     excl.push('.devkit/agent-hooks-manifest.json');
-    console.log('  agent hook registrations');
-    const { wrote } = installHookRegistrations(gitRoot, hooks.components, {
-      dryRun,
-      targets,
-      overlay: true,
-    });
-    excl.push(...wrote);
   } else {
     if (existsSync(join(gitRoot, '.devkit', 'agent-hooks-manifest.json')))
       removeHookScripts(gitRoot, { dryRun });
-    removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
   }
+  const { wrote } = reconcileHookRegistrations(
+    gitRoot,
+    hooks.components,
+    hooks.previouslyOwnedComponents,
+    { dryRun, targets, overlay: true },
+  );
+  excl.push(...wrote);
   const prunedTargets = AGENT_TARGETS.filter((target) => !targets.includes(target));
   if (prunedTargets.length) {
     if (sel.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
@@ -474,6 +472,8 @@ function installOverlayAgentSurfaces(
   }
   return excl;
 }
+
+const syncOverlaySurfaces = installOverlayAgentSurfaces;
 
 /**
  * Install the overlay. Returns { origHooksPath, fallowWired } (recorded in config so `devkit clean`
@@ -494,6 +494,8 @@ export function installOverlay(
   // Configs/baselines live in cwd (the package); the hook + git-exclude target the GIT ROOT
   // (a monorepo package is a subdir, so .git is above cwd — this was the .git/info ENOENT).
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  const previous = (readJson(join(cwd, '.devkit', 'config.json')) as PriorOverlayConfig | null)
+    ?.components;
   // The real original hooksPath (never our own .devkit/hooks) — recorded for restore on clean.
   const origHooksPath = captureOrigHooksPath(gitRoot, cwd);
   const pfx = pkgRel ? `${pkgRel}/` : '';
@@ -542,13 +544,11 @@ export function installOverlay(
   console.log('  local hook');
   installOverlayHook(gitRoot, pkgRel, sel, origHooksPath, dryRun, fallowWired);
 
-  // per-clone `git ci` self-heal alias so a `bun install` (husky re-claims core.hooksPath) heals
-  // on the next CLI commit — set at the git root (the alias is repo-wide, like core.hooksPath).
+  // Repo-wide `git ci` alias self-heals core.hooksPath after husky reclaims it.
   installHealAlias(gitRoot, dryRun);
 
-  // agent-half (skills/agents/agentHooks) → the git root's surfaces (skipping anything git tracks),
-  // each path hidden via .git/info/exclude. Paths are git-root-relative (repo-wide, no pkgRel pfx).
-  for (const rel of installOverlayAgentSurfaces(gitRoot, sel, dryRun, force)) excludes.add(rel);
+  // Agent assets target git-root surfaces and remain hidden via .git/info/exclude.
+  for (const rel of syncOverlaySurfaces(gitRoot, sel, dryRun, force, previous)) excludes.add(rel);
 
   // make it all invisible to git (the git root's .git/info/exclude).
   console.log('  git-ignore (local)');
