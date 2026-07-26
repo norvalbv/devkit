@@ -8,6 +8,7 @@
  *
  *   guard-decisions add <slug> --target …| --note …   record a Target / append a note
  *   guard-decisions amend <slug> --target …| --note … replace only the newest uncommitted entry
+ *   guard-decisions rescope <slug> --scope … --reason …  append-only Scope correction (a tagged note)
  *   guard-decisions query "<text>" [--top K]          rank axes (semantic → lexical floor)
  *   guard-decisions reindex | list | show <slug> | check <slug>
  *   guard-decisions detect --gate | scan [--working]  architectural-smell gate (capture B)

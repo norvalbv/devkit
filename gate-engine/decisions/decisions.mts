@@ -34,6 +34,7 @@
  *               --anchored-bet "[BET]" --scope "glob,glob" --source ... --ref ... --new
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
+ *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
  *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
  *   query "<text>" [--top K] [--json]  rank axes — semantic (Ollama), lexical floor on fallback;
  *                                   --json emits the machine-readable envelope the bench scores
@@ -90,6 +91,7 @@ export {
   bm25Rank,
   clampGist,
   cosine,
+  effectiveScope,
   gistOf,
   loadAxisRows,
   type RankResult,
@@ -165,7 +167,7 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
         '  --consequences "<the user/business value this protects>" \\\n' +
         '  --tradeoff "<the cost knowingly paid — latency, complexity, a road not taken>" \\\n' +
         '  --vision-fit "<which product North Star; or n/a — internal tooling>" \\\n' +
-        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --new --evidence-change "…"]\n' +
+        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --supersedes "<id>" --new --evidence-change "…"]\n' +
         '(Context=WHY-now, Ruling=WHAT, Consequences/Tradeoff=SO-THAT + cost — the ADR Context/Decision/Consequences spine.)',
     );
     process.exit(1);
@@ -415,6 +417,7 @@ function optionsFromFlags(rest: string[]): AddOptions {
     anchoredBet: flag(rest, '--anchored-bet'),
     revisitWhen: flag(rest, '--revisit-when'),
     scope: flag(rest, '--scope'),
+    supersedes: flag(rest, '--supersedes'),
     source: flag(rest, '--source'),
     ref: flag(rest, '--ref'),
     evidenceChange: flag(rest, '--evidence-change'),
@@ -433,6 +436,19 @@ export async function main(argv: string[]) {
     case 'amend': {
       const [slug, ...rest] = args;
       cmdAmend(slug, optionsFromFlags(rest));
+      break;
+    }
+    case 'rescope': {
+      // Append-only Scope correction: reuses addNote's append path (never touches the Target's own
+      // Scope line), so no --evidence-change — that guard protects the RULING, not a glob fix.
+      const [slug, ...rest] = args;
+      const scope = flag(rest, '--scope');
+      const reason = flag(rest, '--reason');
+      if (!slug || !scope?.trim() || !reason?.trim()) {
+        console.error('Usage: guard-decisions rescope <slug> --scope "<globs>" --reason "<why>"');
+        process.exit(1);
+      }
+      addNote(slug, { note: `**Scope:** ${scope.trim()} — ${reason.trim()}` }, paths());
       break;
     }
     case 'query': {
@@ -466,7 +482,9 @@ export async function main(argv: string[]) {
       process.exit(checkExists(args[0]) ? 0 : 1);
       break;
     default:
-      console.error('Commands: add | amend | query | drift | reindex | list | show | check');
+      console.error(
+        'Commands: add | amend | rescope | query | drift | reindex | list | show | check',
+      );
       process.exit(1);
   }
 }
