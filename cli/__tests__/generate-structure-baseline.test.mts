@@ -86,6 +86,12 @@ describe('generateTreeBaseline — renderer', () => {
     for (const [rel] of cases) write(root, `src/renderer/${rel}`, '');
 
     const violators = new Set(generateTreeBaseline('renderer', root, { domains: {} }));
+    const expectedViolators = cases
+      .filter(([, shouldFail]) => shouldFail)
+      .map(([rel]) => rel)
+      .sort();
+    expect([...violators].sort()).toEqual(expectedViolators);
+
     for (const [rel, shouldFail] of cases) {
       expect(violators.has(rel), rel).toBe(shouldFail);
     }
