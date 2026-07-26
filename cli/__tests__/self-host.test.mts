@@ -26,12 +26,24 @@ import {
 // The repo root (where package.json + .husky live) — resolved from THIS file, not cwd, so the parity
 // check is robust to however vitest is launched.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const PACKAGE = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+  bin?: Record<string, string>;
+  scripts?: Record<string, string>;
+};
 
 const HOOK_SEL = {
   ...selfHostSelection(),
   structureCmd: SELF_HOST_STRUCTURE_CMD,
   extras: SELF_HOST_EXTRAS,
 };
+
+describe('self-host CLI entrypoint', () => {
+  it('runs repository maintenance from source while consumers keep the packaged dist bin', () => {
+    expect(PACKAGE.scripts?.devkit).toMatch(/\bcli\/index\.mts\b/);
+    expect(PACKAGE.scripts?.devkit).not.toContain('dist/');
+    expect(PACKAGE.bin?.devkit).toBe('./dist/cli/index.mjs');
+  });
+});
 
 describe('self-host bin rewrite', () => {
   it('sourceBinFor maps a guard bin to its source .mts (derived from package.json bin)', () => {
