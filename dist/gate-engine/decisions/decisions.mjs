@@ -50,6 +50,8 @@ import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { amendDecision } from "./amend.mjs";
 import { writeFileAtomic } from "./atomic-write.mjs";
 import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, sanitizeCell, today, upsertRow, whyHook, } from "./decision-format.mjs";
+import { warnNearestAxes } from "./dedupe.mjs";
+import { runDrift } from "./drift.mjs";
 import { rankAxes as rankAxesIn, reindexAll } from "./recall/retrieval.mjs";
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from "./decision-format.mjs";
 // The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
@@ -116,6 +118,8 @@ function addTarget(slug, o, p) {
         console.error(existsSync(p.indexPath) ? readFileSync(p.indexPath, 'utf8') : '(index empty)');
         process.exit(1);
     }
+    if (!exists)
+        warnNearestAxes(slug, o, p);
     const date = today();
     let fm;
     let body;
@@ -301,6 +305,9 @@ export async function main(argv) {
             await cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'));
             break;
         }
+        case 'drift':
+            process.exitCode = runDrift(process.cwd());
+            break;
         case 'reindex':
             await cmdReindex();
             break;
@@ -322,7 +329,7 @@ export async function main(argv) {
             process.exit(checkExists(args[0]) ? 0 : 1);
             break;
         default:
-            console.error('Commands: add | amend | query | reindex | list | show | check');
+            console.error('Commands: add | amend | query | drift | reindex | list | show | check');
             process.exit(1);
     }
 }

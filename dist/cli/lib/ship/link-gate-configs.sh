@@ -60,12 +60,42 @@ is_review_projection_purpose() {
   [ "$1" = review ] || [ "$1" = review-baseline ]
 }
 
+# gate_projection_source_is_ignored <consumer-root> <resolved-source> <repo-relative-path>
+#
+# `git check-ignore <repo-relative-path>` refuses to traverse a symlinked directory inside a
+# worktree. Gate inputs deliberately use that shape to share ignored caches from the main worktree,
+# so resolve the source's parent physically and ask the worktree that owns those bytes instead.
+gate_projection_source_is_ignored() {
+  local root=$1 source=$2 rel=$3 physical_parent physical_source owner='' candidate owner_rel
+  if ! physical_parent=$(cd -P "$(dirname "$source")" 2>/dev/null && pwd); then
+    git -C "$root" check-ignore -q -- "$rel"
+    return
+  fi
+  physical_source="$physical_parent/$(basename "$source")"
+  while IFS= read -r candidate; do
+    case "$physical_source" in
+      "$candidate"/*)
+        [ "${#candidate}" -gt "${#owner}" ] && owner=$candidate
+        ;;
+    esac
+  done < <(
+    git -C "$root" worktree list --porcelain 2>/dev/null |
+      awk '/^worktree /{print substr($0, 10)}'
+  )
+  if [ -n "$owner" ]; then
+    owner_rel=${physical_source#"$owner"/}
+    git -C "$owner" check-ignore -q -- "$owner_rel"
+  else
+    git -C "$root" check-ignore -q -- "$rel"
+  fi
+}
+
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
   local main_root='' candidate_root=$root source=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() candidates=()
+  local linked=() linked_sources=() candidates=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -138,6 +168,7 @@ link_untracked_gate_configs() {
     for rel in "${candidates[@]}"; do
       [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
       linked+=("$rel")
+      linked_sources+=("$root/$rel")
     done
     {
       if [ "${#linked[@]}" -gt 0 ]; then
@@ -154,6 +185,7 @@ link_untracked_gate_configs() {
       mkdir -p "$wt/$(dirname "$rel")"
       ln -s "$source" "$wt/$rel"
       linked+=("$rel")
+      linked_sources+=("$source")
     done
   fi
 
@@ -167,13 +199,15 @@ link_untracked_gate_configs() {
     else
       echo "   linked into the gate worktree so gates match a normal commit (not defaults):"
     fi
+    local linked_index=0
     for rel in "${linked[@]}"; do
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
-      if git -C "$root" check-ignore -q "$rel"; then
+      if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
         echo "   - $rel (gitignored cache — normal)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"
       fi
+      linked_index=$((linked_index + 1))
     done
   } >&2
   return 0
