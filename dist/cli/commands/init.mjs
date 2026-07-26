@@ -39,7 +39,7 @@ import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
 import { selectedHookAssets } from "../lib/install/agent-hook-selection.mjs";
-import { installAgentSurfaces } from "../lib/install/agent-surfaces.mjs";
+import { installAgentSurfaces as syncSurfaces } from "../lib/install/agent-surfaces.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from "../lib/install/install-fallow.mjs";
 import { detectHookConflicts } from "../lib/install/install-hooks.mjs";
@@ -931,7 +931,7 @@ export async function applyInit(cwd, plan) {
         interactive,
         force,
     });
-    const agentTargets = installAgentSurfaces(gitRoot, selection, dryRun, override);
+    const agentTargets = syncSurfaces(gitRoot, selection, dryRun, override, prevConfig?.components);
     if (selection.fallow) {
         console.log('8. fallow (optional code-health layer)');
         await applyFallow(cwd, dryRun, interactive);
