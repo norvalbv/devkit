@@ -31,13 +31,14 @@
  * Commands:
  *   add <slug> --target --context "..." --ruling "..." --consequences "..." --tradeoff "..."
  *              --vision-fit "..." [--title ... --researched ... --rejected ...
- *               --anchored-bet "[BET]" --scope "glob,glob" --source ... --ref ... --new
+ *               --anchored-bet "[BET]" --scope "glob,glob" --category "..." --source ... --ref ... --new
  *               --evidence-change "..."]                  (epic Target; updates INDEX)
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
  *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
- *   query "<text>" [--top K] [--json]  rank axes — semantic (Ollama), lexical floor on fallback;
- *                                   --json emits the machine-readable envelope the bench scores
+ *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
+ *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
+ *     body in rank order instead of the truncated ruling (exclusive with --json)
  *   reindex                         cold-build the derived embedding cache
  *   list / show <slug> / check <slug>
  *
@@ -70,6 +71,7 @@ import {
 } from './decision-format.mts';
 import { warnNearestAxes } from './dedupe.mts';
 import { runDrift } from './drift.mts';
+import { assertFullNotJson, printFull, printRanked } from './recall/full-print.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
@@ -99,8 +101,6 @@ export {
 
 // Top-level regexes (these run in loops).
 const TRAILING_WS_RE = /\s*$/;
-/** How many qualifying notes the PROSE surface shows before pointing at `show`. */
-const PROSE_QUALIFIERS = 3;
 
 // ─── Consumer-cwd path resolution (W-3) ──────────────────────────────────────────
 // Every on-disk path is derived from the CONSUMER cwd via the shared config loader.
@@ -167,7 +167,7 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
         '  --consequences "<the user/business value this protects>" \\\n' +
         '  --tradeoff "<the cost knowingly paid — latency, complexity, a road not taken>" \\\n' +
         '  --vision-fit "<which product North Star; or n/a — internal tooling>" \\\n' +
-        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --supersedes "<id>" --new --evidence-change "…"]\n' +
+        '  [--title "<short heading>" --researched … --rejected … --anchored-bet "[BET]" --revisit-when "<condition that voids this ruling>" --scope "glob,glob" --category "<see recall/categories.mts>" --supersedes "<id>" --new --evidence-change "…"]\n' +
         '(Context=WHY-now, Ruling=WHAT, Consequences/Tradeoff=SO-THAT + cost — the ADR Context/Decision/Consequences spine.)',
     );
     process.exit(1);
@@ -266,25 +266,6 @@ export async function rankAxes(text: string, k = 5, cwd = process.cwd()): Promis
   return rankAxesIn(text, k, paths(cwd));
 }
 
-// `why` is now the axis file's full Context (the INDEX cell was truncated to 70 chars), so bound it
-// at print time — the ranker wants the whole thing, a terminal reader does not.
-function printRanked(rows: RankResult['rows'], mode: string) {
-  console.log(`# top ${rows.length} ${rows.length === 1 ? 'axis' : 'axes'} (${mode})`);
-  for (const r of rows) {
-    console.log(`- ${r.slug} · ${r.ruling}${r.why ? ` · ${whyHook(r.why)}` : ''}`);
-    // Never print a ruling alone when later notes qualify it — an agent reading only the ruling
-    // acts on a decision the record has already walked back. But a real axis carries ~20 notes, so
-    // the prose surface shows the most QUERY-RELEVANT few (retrieval ordered them that way) and says
-    // how many it held back. --json still carries the full set for machine consumers.
-    for (const q of r.qualifiers.slice(0, PROSE_QUALIFIERS))
-      console.log(`    ⚠ qualified by ${q.date} — ${whyHook(q.text)}`);
-    if (r.qualifiers.length > PROSE_QUALIFIERS)
-      console.log(
-        `    … ${r.qualifiers.length - PROSE_QUALIFIERS} more note(s): guard-decisions show ${r.slug}`,
-      );
-  }
-}
-
 /**
  * Machine-readable `query` output — the ONLY contract the retrieval benchmark has with this CLI.
  *
@@ -365,11 +346,18 @@ export async function queryEnvelope(
   };
 }
 
-export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cwd(), json = false) {
+export async function cmdQuery(
+  text: string | undefined,
+  k = 5,
+  cwd = process.cwd(),
+  json = false,
+  full = false,
+) {
   if (!text?.trim()) {
-    console.error('Usage: guard-decisions query "<text>" [--top K] [--json]');
+    console.error('Usage: guard-decisions query "<text>" [--top K] [--json] [--full]');
     process.exit(1);
   }
+  assertFullNotJson(json, full);
   if (json) {
     console.log(JSON.stringify(await queryEnvelope(text, k, cwd), null, 2));
     return;
@@ -383,6 +371,10 @@ export async function cmdQuery(text: string | undefined, k = 5, cwd = process.cw
         ? 'No decisions recorded.'
         : 'No recorded decision rules on this. (searched every axis; nothing matched)',
     );
+    return;
+  }
+  if (full) {
+    printFull(rows, source, paths(cwd).decisionsDir);
     return;
   }
   printRanked(rows, source);
@@ -417,6 +409,7 @@ function optionsFromFlags(rest: string[]): AddOptions {
     anchoredBet: flag(rest, '--anchored-bet'),
     revisitWhen: flag(rest, '--revisit-when'),
     scope: flag(rest, '--scope'),
+    category: flag(rest, '--category'),
     supersedes: flag(rest, '--supersedes'),
     source: flag(rest, '--source'),
     ref: flag(rest, '--ref'),
@@ -455,7 +448,13 @@ export async function main(argv: string[]) {
       const [text, ...rest] = args;
       const top = flag(rest, '--top');
       const n = top ? Number.parseInt(top, 10) : 5;
-      await cmdQuery(text, n > 0 ? n : 5, process.cwd(), rest.includes('--json'));
+      await cmdQuery(
+        text,
+        n > 0 ? n : 5,
+        process.cwd(),
+        rest.includes('--json'),
+        rest.includes('--full'),
+      );
       break;
     }
     case 'drift':
