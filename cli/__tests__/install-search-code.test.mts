@@ -35,4 +35,19 @@ describe('search-code opt-in component', () => {
     expect(existsSync(join(root, 'search-code.config.json'))).toBe(false);
     expect(readFileSync(join(root, '.gitignore'), 'utf8')).not.toContain('.search-code/');
   });
+
+  it('syncs the external search-code CLI fallback for commit-guard', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+
+    for (const surface of ['.claude', '.cursor']) {
+      const skill = readFileSync(join(root, surface, 'skills/commit-guard/SKILL.md'), 'utf8');
+      const agent = readFileSync(join(root, surface, 'agents/commit-guard.md'), 'utf8');
+
+      expect(skill).toContain('`search-code search "<text>"`');
+      expect(skill).not.toContain('tools/search-code/bin/semantic-search.mjs');
+      expect(agent).toContain('`search-code search "<natural-language query>" --json`');
+      expect(agent).not.toContain('tools/search-code/bin/semantic-search.mjs');
+    }
+  });
 });
