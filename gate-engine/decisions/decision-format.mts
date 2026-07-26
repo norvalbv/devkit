@@ -1,3 +1,5 @@
+import { validateCategory } from './recall/categories.mts';
+
 const FM_ORDER = ['slug', 'created'];
 const INDEX_HEADER =
   '# Decision Index\n\n' +
@@ -36,6 +38,9 @@ export interface AddOptions {
   anchoredBet?: string;
   revisitWhen?: string;
   scope?: string;
+  /** One value from the frozen list in recall/categories.mts — validated (and rendered) by
+   * renderTarget, never here: AddOptions is a plain data bag, not a validation boundary. */
+  category?: string;
   /** `<id>` of the Target block this ruling replaces — `target:<date>` / `entry:<date>` within this
    * axis, or `slug#target:<date>` / `slug#entry:<date>` across axis files. Resolved read-time only
    * (recall/supersession.mts); this module just renders and re-reads the literal text. */
@@ -170,6 +175,16 @@ export function renderTarget(date: string, options: TargetOptions) {
   if (options.anchoredBet) lines.push(`**Anchored-bet:** ${options.anchoredBet}`);
   if (options.revisitWhen) lines.push(`**Revisit-when:** ${options.revisitWhen}`);
   if (options.scope) lines.push(`**Scope:** ${options.scope}`);
+  if (options.category) {
+    // Write-time validation, not a caller precondition: renderTarget is the ONLY place that emits
+    // `**Category:**`, so it is the one place that can guarantee an axis file never carries a value
+    // outside the frozen list (recall/categories.mts) — the read side (category-report.mts) treats
+    // an unrecognised value as uncategorised, so a value that slipped past here would silently lose
+    // its category rather than error, defeating the whole point of a closed vocabulary.
+    const err = validateCategory(options.category);
+    if (err) throw new Error(err);
+    lines.push(`**Category:** ${options.category}`);
+  }
   if (options.supersedes) lines.push(`**Supersedes:** ${options.supersedes}`);
   lines.push(
     `**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`,
