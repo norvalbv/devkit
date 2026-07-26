@@ -148,7 +148,19 @@ describe('test timeout policy', () => {
   it('keeps one load-tolerant timeout in vitest.config.mjs instead of per-suite overrides', () => {
     const pending = [join(ROOT, 'cli'), join(ROOT, 'gate-engine'), join(ROOT, 'e2e', 'lib')];
     const overrides: string[] = [];
-    const localTimeoutOverride = ['setConfig', '({ testTimeout:'].join('');
+    const localTimeoutOverride = /\bsetConfig\s*\(\s*\{[^}]*\btestTimeout\s*:/;
+    const compactOverride = ['vi.', 'set', 'Config({', 'test', 'Timeout: 30_000 })'].join('');
+    const multilineOverride = [
+      'vi.',
+      'set',
+      'Config ( {',
+      '\n  retry: 1,\n  ',
+      'test',
+      'Timeout : 30_000\n})',
+    ].join('');
+
+    expect(localTimeoutOverride.test(compactOverride)).toBe(true);
+    expect(localTimeoutOverride.test(multilineOverride)).toBe(true);
 
     while (pending.length > 0) {
       const dir = pending.pop();
@@ -159,7 +171,7 @@ describe('test timeout policy', () => {
           pending.push(path);
         } else if (
           entry.name.endsWith('.test.mts') &&
-          readFileSync(path, 'utf8').includes(localTimeoutOverride)
+          localTimeoutOverride.test(readFileSync(path, 'utf8'))
         ) {
           overrides.push(path.slice(ROOT.length + 1));
         }
