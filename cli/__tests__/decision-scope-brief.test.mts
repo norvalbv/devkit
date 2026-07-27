@@ -80,6 +80,12 @@ describe('decision-scope-brief', () => {
     expect(run({ file_path: 'src/b.ts' }, 'Edit', session)).not.toBe('');
   });
 
+  it('generates a fresh session for every call that omits one', () => {
+    stubBin(GOVERNED);
+    expect(run({ file_path: 'src/a.ts' })).not.toBe('');
+    expect(run({ file_path: 'src/a.ts' })).not.toBe('');
+  });
+
   it('ignores non-mutating tools', () => {
     stubBin(GOVERNED);
     expect(run({ file_path: 'src/a.ts' }, 'Read')).toBe('');
