@@ -450,6 +450,315 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(events.filter((e) => e.type === 'review_result')).toEqual([]);
   });
 
+  // ── review_scope / review_skipped ────────────────────────────────────────────────────────────
+  // A cache hit emits cache_hit and NO review_result (asserted above). That leaves the reviewer with
+  // no row naming the FILES and BYTES it covered, so a later "did this reviewer look at this file"
+  // question reads a cached PASS as absence. review_scope is that row, and it fires on both branches.
+
+  // prompt_identity hashes the four SYNCED assets a checklist reviewer runs with. consumerRepo is a
+  // minimal fixture that stages only briefs, so identity there is honestly null; a real consumer has
+  // devkit's synced skills. This writes that shape for the tests that assert on identity.
+  function syncSkillAssets(repo) {
+    mkdirSync(join(repo, '.claude', 'skills', '_devkit'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'skills', '_devkit', 'review-roots.mjs'), 'export {};\n');
+    for (const skill of [
+      'api-security',
+      'backend-performance',
+      'frontend-security',
+      'frontend-performance',
+      'commit-guard',
+      'correctness',
+    ]) {
+      mkdirSync(join(repo, '.claude', 'skills', skill, 'scripts'), { recursive: true });
+      writeFileSync(join(repo, '.claude', 'skills', skill, 'SKILL.md'), `# ${skill}\n`);
+      writeFileSync(
+        join(repo, '.claude', 'skills', skill, 'scripts', 'checklist.mjs'),
+        `// ${skill} checklist\n`,
+      );
+    }
+  }
+
+  it('emits a review_scope row for a cached PASS, naming the files and bytes it covered', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    await runReviewGate(repo, { exec: passWithArtifact(repo) }); // warm the cache off-telemetry
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-scope-cached';
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const scope = events.filter((e) => e.type === 'review_scope');
+    expect(scope.map((e) => e.reviewer).sort()).toEqual([
+      'api-security-reviewer',
+      'backend-performance-reviewer',
+      'commit-guard',
+      'conventions-reviewer',
+      'correctness-reviewer',
+    ]);
+    // Every one of them a cache hit this run, and each still says what it covered.
+    expect(scope.every((e) => e.cached === true)).toBe(true);
+    const backend = scope.find((e) => e.reviewer === 'backend-performance-reviewer');
+    expect(backend.files).toEqual(['src/main/db.ts']);
+    expect(backend.file_count).toBe(1);
+    expect(backend.diff_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(backend.files_sha256).toMatch(/^[0-9a-f]{64}$/);
+    // Read off the SYNCED consumer brief — this is the field that makes a production verdict
+    // attributable to the prompt version that produced it.
+    expect(backend.prompt_identity).toMatch(/^[0-9a-f]{64}$/);
+    expect(backend.has_checklist).toBe(true);
+    expect(scope.find((e) => e.reviewer === 'conventions-reviewer').has_checklist).toBe(false);
+  });
+
+  it('records prompt_identity as null rather than failing when a synced asset is absent', async () => {
+    // No syncSkillAssets here: a checklist reviewer's SKILL.md/checklist.mjs are missing, so its
+    // identity is genuinely unattributable. The gate must still pass — telemetry never fails a gate.
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-no-skills';
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    const scope = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_scope');
+    expect(
+      scope.find((e) => e.reviewer === 'backend-performance-reviewer').prompt_identity,
+    ).toBeNull();
+    // conventions is skill-less — its identity needs only the brief, which IS present.
+    expect(scope.find((e) => e.reviewer === 'conventions-reviewer').prompt_identity).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+  });
+
+  it('emits review_scope with cached:false when the judge actually runs', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-scope-live';
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    const scope = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_scope');
+    expect(scope.length).toBeGreaterThan(0);
+    expect(scope.every((e) => e.cached === false)).toBe(true);
+  });
+
+  it('names every reviewer that did NOT run, so non-selection is a row and not an absence', async () => {
+    const repo = consumerRepo({ backend: true }); // no frontend files staged
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-skips';
+    process.env.GUARD_REVIEW_SKIP = 'commit-guard';
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    const skips = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_skipped');
+    // The knob's drop is attributed to the knob, not lumped in with never-selected.
+    expect(skips.filter((e) => e.reason === 'GUARD_REVIEW_SKIP').map((e) => e.reviewer)).toEqual([
+      'commit-guard',
+    ]);
+    // The frontend pair was never selected — nothing they own was staged. Previously indistinguishable
+    // from "selected and passed", which is what would mislabel an external finding as their miss.
+    expect(
+      skips
+        .filter((e) => e.reason === 'not_selected')
+        .map((e) => e.reviewer)
+        .sort(),
+    ).toEqual(['frontend-performance-reviewer', 'frontend-security-reviewer']);
+    expect(skips.some((e) => e.reviewer === 'commit-guard' && e.reason === 'not_selected')).toBe(
+      false,
+    );
+  });
+
+  it('reports the gate-level disable as its own skip row', async () => {
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-gate-off';
+    process.env.GUARD_NO_REVIEW = '1';
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events.filter((e) => e.type === 'review_skipped')).toEqual([
+      expect.objectContaining({ reviewer: null, reason: 'gate_disabled' }),
+    ]);
+  });
+
+  it('keeps every emitted event inside the atomic-append window, spilling a wide scope to a ref', async () => {
+    const repo = consumerRepo({ backend: true });
+    // 400 staged backend files: the inline path list alone would blow the sub-4KB window that
+    // gate-events.mts relies on for tear-free concurrent appends.
+    for (let i = 0; i < 400; i++)
+      writeFileSync(
+        join(repo, 'src', 'main', `mod-${String(i).padStart(3, '0')}.ts`),
+        `export const v${i} = ${i};\n`,
+      );
+    execSync('git add .', { cwd: repo });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-wide-scope';
+    await runReviewGate(repo, { exec: passWithArtifact(repo) });
+    const lines = readFileSync(sink, 'utf8').trim().split('\n');
+    for (const line of lines)
+      expect(
+        Buffer.byteLength(line, 'utf8'),
+        `event exceeded the atomic window: ${line.slice(0, 120)}`,
+      ).toBeLessThan(4096);
+    const scope = lines.map((l) => JSON.parse(l)).filter((e) => e.type === 'review_scope');
+    const wide = scope.find((e) => e.reviewer === 'backend-performance-reviewer');
+    // Spilled — but the count and hash still ride inline, so a reader can never mistake a spilled
+    // scope for an empty one.
+    expect(wide.files).toBeUndefined();
+    expect(wide.scope_ref).toMatch(/scope-backend-performance-reviewer/);
+    expect(wide.file_count).toBe(401);
+    expect(wide.files_sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('spills a byte-heavy item vector to a ref rather than breaching the atomic window', async () => {
+    // The element caps (40 items × 3 issues × 200 chars) are NOT a byte bound on their own: a
+    // commit-guard lens is a repo PATH, and each entry can carry issue text. This is the case an
+    // earlier version got wrong — it capped counts and lengths but never the serialized size, so a
+    // wide commit-guard artifact produced a 10-30KB review_result line.
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-heavy-items';
+    const exec = mkExec(async ({ label }) => {
+      const reviewer = reviewerFromLabel(label);
+      if (reviewer?.stateFile) {
+        const key = reviewer.name === 'commit-guard' ? 'files' : 'items';
+        const rows = Array.from({ length: 60 }, (_, i) => ({
+          [key === 'files' ? 'path' : 'name']:
+            `src/main/deeply/nested/module-${i}/implementation.ts`,
+          status: 'fail',
+          issues: [`issue A ${'x'.repeat(240)}`, `issue B ${'y'.repeat(240)}`],
+        }));
+        writeFileSync(join(repo, reviewer.stateFile), JSON.stringify({ [key]: rows }));
+      }
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    const lines = readFileSync(sink, 'utf8').trim().split('\n');
+    for (const line of lines)
+      expect(
+        Buffer.byteLength(line, 'utf8'),
+        `event exceeded the atomic window: ${line.slice(0, 140)}`,
+      ).toBeLessThan(4096);
+    const heavy = lines
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_result' && e.item_count !== undefined);
+    expect(heavy.length).toBeGreaterThan(0);
+    for (const r of heavy) {
+      // Spilled, not truncated: the vector went to a sidecar and the ref replaced it.
+      expect(r.items).toBeUndefined();
+      expect(r.items_ref).toMatch(new RegExp(`items-${r.reviewer}`));
+      // The counts and the per-status tally survive the spill — otherwise "did these lenses fire"
+      // would be unanswerable exactly on the widest commits.
+      expect(r.item_count).toBe(60);
+      expect(r.item_tally.fail).toBe(40); // the 40-item cap, all non-passing
+    }
+  });
+
+  // ── the per-lens item vector ──────────────────────────────────────────────────────────────────
+  // Before this, only the free-prose `reason` survived, and only for a FAIL. A reviewer that cleared
+  // all four lenses and one that never looked produced byte-identical telemetry.
+
+  it('records the per-lens vector INCLUDING the passes on a clean run', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-items-pass';
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    const results = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_result');
+    const withItems = results.filter((e) => Array.isArray(e.items));
+    expect(withItems.length).toBeGreaterThan(0);
+    for (const r of withItems) {
+      expect(r.item_count).toBe(r.items.length);
+      // Every lens accounted for, all passing, and no issue text on a pass (checkItem clears it).
+      expect(r.items.every((i) => i.status === 'pass')).toBe(true);
+      expect(r.items.every((i) => i.issues === undefined)).toBe(true);
+      expect(r.items.every((i) => i.disposition === undefined)).toBe(true);
+      // Never the '(finding)' fallback: a named lens is what makes a block attributable at all.
+      expect(r.items.every((i) => typeof i.lens === 'string' && i.lens !== '(finding)')).toBe(true);
+    }
+    // The two artifact shapes are different UNITS and the event says which: a domain reviewer's lens
+    // is a bug class from items[], commit-guard's is a reviewed PATH from files[].
+    expect(withItems.find((e) => e.reviewer === 'backend-performance-reviewer').item_artifact).toBe(
+      'items',
+    );
+    const guard = withItems.find((e) => e.reviewer === 'commit-guard');
+    expect(guard.item_artifact).toBe('files');
+    expect(guard.items.every((i) => i.lens.includes('/'))).toBe(true);
+    // conventions-reviewer is skill-less: no artifact at all, which must read as absent rather than
+    // as an empty vector — "no artifact" and "artifact with zero failures" are different facts.
+    const conventions = results.find((e) => e.reviewer === 'conventions-reviewer');
+    expect(conventions.items).toBeUndefined();
+  });
+
+  it('attributes a failing lens to what the gate did with it', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-items-fail';
+    // correctness is pinned single-pass, so its FAIL runs the override valve and blocks by name.
+    const exec = mkExec(async ({ label }) => {
+      if (label === 'review:correctness-reviewer') {
+        // Written directly rather than via writeArtifact: this test is about real lens names and
+        // real issue text surviving into telemetry, which the generic helper doesn't produce.
+        writeFileSync(
+          join(repo, reviewerFromLabel(label).stateFile),
+          JSON.stringify({
+            items: [
+              { name: 'state-transitions', status: 'fail', issues: ['stale cursor never resets'] },
+              { name: 'concurrency-races', status: 'pass', issues: [] },
+              { name: 'writer-reader-contracts', status: 'pass', issues: [] },
+              { name: 'error-and-edge-classification', status: 'pass', issues: [] },
+            ],
+          }),
+        );
+        return 'VERDICT: FAIL — stale cursor';
+      }
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    const correctness = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .find((e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer');
+    expect(correctness.status).toBe('fail');
+    const failing = correctness.items.find((i) => i.status === 'fail');
+    // Non-passing items sort FIRST so capping can never keep the passes and drop the finding.
+    expect(correctness.items[0]).toBe(failing);
+    expect(failing.lens).toBe('state-transitions');
+    expect(failing.disposition).toBe('blocking');
+    expect(failing.issues).toEqual(['stale cursor never resets']);
+    // The passes are still recorded — that's the "did the other lenses fire" evidence.
+    expect(correctness.items.filter((i) => i.status === 'pass')).toHaveLength(3);
+  });
+
   it('first-pass FAIL → opus overturn → exit 0 and the PASS is cached', async () => {
     const repo = consumerRepo({ backend: true });
     const exec = mkExec(async ({ label }) => {
