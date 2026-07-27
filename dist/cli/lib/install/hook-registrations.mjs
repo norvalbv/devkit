@@ -33,6 +33,18 @@ export const HOOK_REGISTRATIONS = {
             cursorEvent: 'preToolUse',
             cursorMatcher: 'Write|Delete',
         },
+        // The brief is the guard's only INFORMING surface. Every other decision hook enforces after the
+        // fact — edit-guard denies a hand-write, stop-check nudges at turn end — which is too late to
+        // stop an agent re-solving a settled problem from the code alone. Matches Scope globs, never text
+        // similarity, so it needs no threshold and no model. Advisory only: it can neither block a write
+        // nor auto-approve one.
+        {
+            event: 'PreToolUse',
+            matcher: 'Edit|Write|MultiEdit',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs"',
+            cursorEvent: 'preToolUse',
+            cursorMatcher: 'Write',
+        },
     ],
     // story 15 — search-code steering: PreToolUse guard + PostToolUse counter (engine bins).
     searchSteering: [

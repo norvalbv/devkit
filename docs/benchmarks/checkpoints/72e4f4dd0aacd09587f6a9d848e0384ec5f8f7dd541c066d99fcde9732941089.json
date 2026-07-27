@@ -1,0 +1,265 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Deterministic suite: declared floors met, with per-case evidence"
+  },
+  "adapter": "deterministic",
+  "capturedAt": "2026-07-27T11:52:50.000Z",
+  "comparisons": [
+    {
+      "method": "adapter comparability contract",
+      "note": "Corpus or scoring contract changed",
+      "predecessorEventId": "evt-2026-07-27-decisions-recall-26b766b73ccd",
+      "verdict": "not-comparable"
+    }
+  ],
+  "hashes": {
+    "corpus": "sha256:eb96347d16b1398b18c746ca98f9f32f7985c3b0cfb286eb52a5a2e7fd1702c3",
+    "implementation": "sha256:2bd85c0eecccb7f9c6086494e0a331081ddb6fea796f685d4808beecf2277ab4",
+    "runner": "sha256:992f302a6885c33e8a42176c9872b4dfe85b768434d1cca0105c8ee689aa9698",
+    "scorer": "sha256:84d6fde229931d071eb801e42955235083e22eba1d54f5370b5097405fcc9370"
+  },
+  "metrics": [
+    {
+      "denominator": 12,
+      "direction": "higher",
+      "id": "containment-hybrid",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.7575059933447592,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Gold axis retrieved",
+      "numerator": 12,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 4,
+      "direction": "higher",
+      "id": "set-recall-hybrid",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.30064184258240184,
+        "method": "wilson-95",
+        "upper": 0.9544127391902995
+      },
+      "label": "Multi-axis set recall",
+      "numerator": 3,
+      "unit": "ratio",
+      "value": 0.75
+    },
+    {
+      "denominator": 12,
+      "direction": "higher",
+      "id": "containment",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.646120088858883,
+        "method": "wilson-95",
+        "upper": 0.9851349055950829
+      },
+      "label": "Gold axis retrieved (word-matching floor)",
+      "numerator": 11,
+      "unit": "ratio",
+      "value": 0.9166666666666666
+    },
+    {
+      "denominator": 4,
+      "direction": "higher",
+      "id": "set-recall",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.15003898915214947,
+        "method": "wilson-95",
+        "upper": 0.8499610108478506
+      },
+      "label": "Multi-axis set recall (word-matching floor)",
+      "numerator": 2,
+      "unit": "ratio",
+      "value": 0.5
+    },
+    {
+      "denominator": 6,
+      "direction": "higher",
+      "id": "current-state-accuracy",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.6096657120978346,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Current-state accuracy",
+      "numerator": 6,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 6,
+      "direction": "lower",
+      "id": "stale-fact-error",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 2.7755575615628914e-17,
+        "method": "wilson-95",
+        "upper": 0.3903342879021653
+      },
+      "label": "Stale-fact errors",
+      "numerator": 0,
+      "unit": "ratio",
+      "value": 0
+    },
+    {
+      "denominator": 11,
+      "direction": "lower",
+      "id": "false-answer-non-refusal",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.7411670330319684,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Answered when it should abstain",
+      "numerator": 11,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 18,
+      "direction": "lower",
+      "id": "false-abstention",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0,
+        "method": "wilson-95",
+        "upper": 0.17587922364665765
+      },
+      "label": "Abstained when it should answer",
+      "numerator": 0,
+      "unit": "ratio",
+      "value": 0
+    }
+  ],
+  "rows": {
+    "abstain-01": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-02": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-03": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-04": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-05": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-06": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-07": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-08": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-09": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-11": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "abstain-12": {
+      "goldRank": null,
+      "outcome": "FALSE_ANSWER"
+    },
+    "alert-noone-owns-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "audit-write-crash-01": {
+      "goldRank": null,
+      "outcome": "MISS"
+    },
+    "conn-pool-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-customer-delete-actually-gone": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-dashboard-incident-panel-survives": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-hardware-signing-key-swap": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-profile-view-log-cleanup": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-replica-money-query-guard": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "current-state-trace-fanout-guarantee": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "flag-cleanup-01": {
+      "goldRank": 5,
+      "outcome": "HIT"
+    },
+    "multi-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "multi-02": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "multi-04": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "multi-05": {
+      "goldRank": 2,
+      "outcome": "HIT"
+    },
+    "replica-billing-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "session-kill-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "soft-delete-purge-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    },
+    "svc-key-leak-01": {
+      "goldRank": 1,
+      "outcome": "HIT"
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "738e9bbd6488daf20e9b0bfa5c1fcc1401911168",
+  "suiteId": "decisions-recall"
+}

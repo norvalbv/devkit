@@ -58,10 +58,17 @@ describe('installHookRegistrations', () => {
     expect(preToolUse.matcher).toBe('Edit|Write|MultiEdit|Delete');
     expect(preToolUse.hooks[0].command).toContain('decision-edit-guard.mjs');
 
+    // Two pre-edit hooks, one per direction: the guard DENIES a hand-write to a record, the brief
+    // INFORMS before a governed source file is edited. Both are fail-open on the Cursor surface.
     expect(cursor(root).hooks.preToolUse).toEqual([
       {
         command: '.cursor/hooks/decision-edit-guard.mjs',
         matcher: 'Write|Delete',
+        failClosed: false,
+      },
+      {
+        command: '.cursor/hooks/decision-scope-brief.mjs',
+        matcher: 'Write',
         failClosed: false,
       },
     ]);
@@ -157,6 +164,11 @@ describe('installHookRegistrations', () => {
       {
         command: '.cursor/hooks/decision-edit-guard.mjs',
         matcher: 'Write|Delete',
+        failClosed: false,
+      },
+      {
+        command: '.cursor/hooks/decision-scope-brief.mjs',
+        matcher: 'Write',
         failClosed: false,
       },
     ]);
