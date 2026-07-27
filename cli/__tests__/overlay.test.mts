@@ -574,6 +574,39 @@ describe('overlay (local-only) install', () => {
     expect(existsSync(join(root, '.devkit', 'agent-hook-registrations-manifest.json'))).toBe(true);
   });
 
+  it('removes exact pre-ledger registrations when every hook component is deselected', async () => {
+    const root = workRepo();
+    seedLocalSettings(root, {
+      hooks: {
+        UserPromptSubmit: [{ matcher: '', hooks: [{ type: 'command', command: 'echo mine' }] }],
+      },
+    });
+    const selected = overlayAll();
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: selected,
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+    rmSync(join(root, '.devkit', 'agent-hook-registrations-manifest.json'));
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: {
+        ...selected,
+        agentHooks: false,
+        fallow: false,
+        guards: selected.guards.filter((guard) => guard !== 'decisions'),
+      },
+      overlay: true,
+      devkitRef: 'v0.21.0',
+    });
+
+    const settings = readFileSync(join(root, '.claude', 'settings.local.json'), 'utf8');
+    expect(settings).toContain('echo mine');
+    expect(settings).not.toContain('.claude/hooks/');
+  });
+
   it('never edits or cleans tracked Cursor/Codex hook files', async () => {
     const root = mkTmp('overlay-cursor-');
     const git = (...a) => execFileSync('git', a, { cwd: root });

@@ -433,13 +433,13 @@ function installOverlayAgentSurfaces(
     removeAgents(gitRoot, dryRun);
   }
   const hooks = selectedHookAssets(sel, { searchSteering: false });
-  const desiredHooks = hooks.scripts;
-  if (desiredHooks.length) {
+  const removal = { dryRun, overlay: true, legacyOwnedComponentIds };
+  if (hooks.scripts.length) {
     console.log('  agent-hook scripts');
     const m = syncHookScripts(gitRoot, {
       dryRun,
       targets,
-      desired: desiredHooks,
+      desired: hooks.scripts,
       skipTracked,
       override,
     });
@@ -456,15 +456,15 @@ function installOverlayAgentSurfaces(
   } else {
     if (existsSync(join(gitRoot, '.devkit', 'agent-hooks-manifest.json')))
       removeHookScripts(gitRoot, { dryRun });
-    removeHookRegistrations(gitRoot, { dryRun, targets, overlay: true });
+    removeHookRegistrations(gitRoot, { ...removal, targets });
   }
   const prunedTargets = AGENT_TARGETS.filter((target) => !targets.includes(target));
   if (prunedTargets.length) {
     if (sel.skills) removeSkills(gitRoot, dryRun, prunedTargets, false);
     if (sel.agents) removeAgents(gitRoot, dryRun, prunedTargets, false);
-    if (desiredHooks.length)
+    if (hooks.scripts.length)
       removeHookScripts(gitRoot, { dryRun, targets: prunedTargets, dropManifest: false });
-    removeHookRegistrations(gitRoot, { dryRun, targets: prunedTargets, overlay: true });
+    removeHookRegistrations(gitRoot, { ...removal, targets: prunedTargets });
   }
   return excl;
 }
