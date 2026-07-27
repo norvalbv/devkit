@@ -95,6 +95,23 @@ export function fetchLatestTag() {
 function run(cmd, args, cwd) {
     execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 }
+/**
+ * Resolve Bun's configured global bin directory, then execute that exact devkit binary. Bun can
+ * finish installing the requested global package before returning non-zero because a different
+ * dependency in its shared global manifest failed to link. Only an exact version match proves this
+ * update reached its target despite that unrelated failure.
+ */
+function activeGlobalVersion(cwd) {
+    try {
+        const binDir = execFileSync('bun', ['pm', 'bin', '-g'], { cwd, encoding: 'utf8' }).trim();
+        if (!binDir)
+            return null;
+        return execFileSync(join(binDir, 'devkit'), ['--version'], { cwd, encoding: 'utf8' }).trim();
+    }
+    catch {
+        return null;
+    }
+}
 function currentVersion() {
     const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
     return pkg.version;
@@ -169,7 +186,14 @@ export default async function update(args, cwd) {
         // Supplying only the git URL makes Bun resolve the installed and requested copies as distinct
         // dependency roots, then reject a global tag update as a DependencyLoop. Name the package so
         // Bun replaces the existing global dependency instead.
-        run('bun', ['add', '-g', `${DEP}@${BUN_REF}#v${latest}`], cwd);
+        try {
+            run('bun', ['add', '-g', `${DEP}@${BUN_REF}#v${latest}`], cwd);
+        }
+        catch (installError) {
+            if (activeGlobalVersion(cwd) !== latest)
+                throw installError;
+            console.warn(`  ! Bun reported a failure in another global dependency, but the active devkit is v${latest}.`);
+        }
     }
     console.log(`✓ devkit updated to v${latest}.`);
     if (mode === 'package') {

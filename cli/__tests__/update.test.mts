@@ -154,7 +154,12 @@ describe('update — command-level (mode detection, comparison basis, install br
   const ranInstall = () =>
     bunCalls().some((c) => (c[1] as string[] | undefined)?.[0] === 'install');
 
-  beforeEach(() => vi.mocked(execFileSync).mockClear());
+  beforeEach(() => {
+    vi.mocked(execFileSync).mockReset();
+    vi.mocked(execFileSync).mockImplementation((cmd: string, args: string[]) =>
+      cmd === 'git' && args?.[0] === 'ls-remote' ? 'abc123\trefs/tags/v9.9.9\n' : '',
+    );
+  });
   afterEach(() => {
     for (const s of spies.splice(0)) s.mockRestore();
     for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -211,5 +216,39 @@ describe('update — command-level (mode detection, comparison basis, install br
       { cwd: dir, stdio: 'inherit' },
     );
     expect(ranInstall()).toBe(false);
+  });
+
+  it('accepts a failed global Bun process only when the activated devkit reached the target', async () => {
+    const dir = makeRepo({ dep: null });
+    const log = silence();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    spies.push(warn);
+    vi.mocked(execFileSync).mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args?.[0] === 'ls-remote') return 'abc123\trefs/tags/v9.9.9\n';
+      if (cmd === 'bun' && args?.[0] === 'add') throw new Error('Failed to install 1 package');
+      if (cmd === 'bun' && args?.join(' ') === 'pm bin -g') return '/global/bin\n';
+      if (cmd === join('/global/bin', 'devkit')) return '9.9.9\n';
+      return '';
+    });
+
+    expect(await update([], dir)).toBe(0);
+    expect(warn.mock.calls.flat().join('\n')).toMatch(
+      /failure in another global dependency.*active devkit is v9\.9\.9/,
+    );
+    expect(log.mock.calls.flat().join('\n')).toMatch(/updated to v9\.9\.9/);
+  });
+
+  it('preserves the global Bun failure when the activated devkit did not reach the target', async () => {
+    const dir = makeRepo({ dep: null });
+    silence();
+    vi.mocked(execFileSync).mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'git' && args?.[0] === 'ls-remote') return 'abc123\trefs/tags/v9.9.9\n';
+      if (cmd === 'bun' && args?.[0] === 'add') throw new Error('Failed to install 1 package');
+      if (cmd === 'bun' && args?.join(' ') === 'pm bin -g') return '/global/bin\n';
+      if (cmd === join('/global/bin', 'devkit')) return '9.9.8\n';
+      return '';
+    });
+
+    await expect(update([], dir)).rejects.toThrow('Failed to install 1 package');
   });
 });
