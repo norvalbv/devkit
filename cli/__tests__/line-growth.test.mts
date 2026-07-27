@@ -14,6 +14,7 @@ import {
   LINE_CAP,
   previewGrandfather,
   setMaxLines,
+  TEST_LINE_CAP,
 } from '../../gate-engine/ratchets/size-disable.mts';
 import { defaultSelection } from '../lib/components.mts';
 
@@ -41,20 +42,25 @@ describe('line-growth block enabler', () => {
     expect(defaultSelection().lineGrowth).toBe(true);
   });
 
-  it('setMaxLines writes the cap + doc when absent; preserves a tuned value', () => {
+  it('setMaxLines writes both caps + docs when absent and preserves tuned values', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'] });
     expect(setMaxLines(root)).toBe(true);
     let cfg = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
     expect(cfg.maxLines).toBe(LINE_CAP);
+    expect(cfg.maxTestLines).toBe(TEST_LINE_CAP);
     expect(cfg['//maxLines']).toBeTypeOf('string');
+    expect(cfg['//maxTestLines']).toBeTypeOf('string');
     // Idempotent — a second call preserves the value and reports "no write".
     expect(setMaxLines(root)).toBe(false);
-    // A consumer's tuned cap is never clobbered.
+    // A consumer's tuned implementation cap is preserved while the missing test cap is back-filled.
     writeConfig(root, { scanRoots: ['src'], maxLines: 800 });
-    expect(setMaxLines(root)).toBe(false);
+    expect(setMaxLines(root)).toBe(true);
     cfg = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
     expect(cfg.maxLines).toBe(800);
+    expect(cfg.maxTestLines).toBe(TEST_LINE_CAP);
+    writeConfig(root, { scanRoots: ['src'], maxLines: 800, maxTestLines: 2500 });
+    expect(setMaxLines(root)).toBe(false);
   });
 
   it('setMaxLines is a no-op when guard.config.json is absent (no guards/structure)', () => {
@@ -63,13 +69,17 @@ describe('line-growth block enabler', () => {
     expect(existsSync(join(root, 'guard.config.json'))).toBe(false);
   });
 
-  it('hasLineCap reflects a positive maxLines only', () => {
+  it('hasLineCap requires both caps to be explicitly configured and accepts 0 = off', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'] });
     expect(hasLineCap(root)).toBe(false); // absent
     writeConfig(root, { scanRoots: ['src'], maxLines: 0 });
     expect(hasLineCap(root)).toBe(false); // 0 = off
     writeConfig(root, { scanRoots: ['src'], maxLines: 500 });
+    expect(hasLineCap(root)).toBe(false);
+    writeConfig(root, { scanRoots: ['src'], maxLines: 500, maxTestLines: 0 });
+    expect(hasLineCap(root)).toBe(true);
+    writeConfig(root, { scanRoots: ['src'], maxLines: 500, maxTestLines: 2000 });
     expect(hasLineCap(root)).toBe(true);
   });
 
@@ -77,6 +87,7 @@ describe('line-growth block enabler', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] }); // no cap yet
     writeSrc(root, 'giant.ts', big(600));
+    writeSrc(root, 'giant.test.ts', big(2200));
     writeSrc(root, 'small.ts', big(10));
     // A pre-existing disable-count baseline (adopted long ago) that must survive byte-for-byte.
     mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
@@ -86,15 +97,22 @@ describe('line-growth block enabler', () => {
 
     const { grandfathered } = enableLineGrowth(root);
 
-    expect(grandfathered).toBe(1);
+    expect(grandfathered).toBe(2);
     expect(hasLineCap(root)).toBe(true);
     expect(JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines).toBe(
       LINE_CAP,
     );
+    expect(JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxTestLines).toBe(
+      TEST_LINE_CAP,
+    );
     const lines = JSON.parse(
       readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
     );
-    expect(lines).toEqual({ maxLines: LINE_CAP, files: { 'src/giant.ts': 600 } });
+    expect(lines).toEqual({
+      maxLines: LINE_CAP,
+      maxTestLines: TEST_LINE_CAP,
+      files: { 'src/giant.test.ts': 2200, 'src/giant.ts': 600 },
+    });
     // The anti-laundering property: the disable-count baseline is untouched.
     expect(readFileSync(sizeJson, 'utf8')).toBe(sizeBefore);
   });
@@ -104,7 +122,8 @@ describe('line-growth block enabler', () => {
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] });
     writeSrc(root, 'a.ts', big(600));
     writeSrc(root, 'b.ts', big(10));
-    expect(previewGrandfather(root)).toBe(1);
+    writeSrc(root, 'a.test.ts', big(2200));
+    expect(previewGrandfather(root)).toBe(2);
     expect(hasLineCap(root)).toBe(false); // preview wrote nothing
   });
 

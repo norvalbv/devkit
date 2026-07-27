@@ -688,7 +688,9 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
     giant(root); // pre-existing giant must be grandfathered by init's freeze, not left to hard-error
     await applyInit(root, { stack: 'generic', selection: defaultSelection() });
 
-    expect(JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines).toBe(500);
+    const guardConfig = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(guardConfig.maxLines).toBe(500);
+    expect(guardConfig.maxTestLines).toBe(2000);
     expect(JSON.parse(readFileSync(linesBaseline(root), 'utf8')).files['src/giant.ts']).toBe(600);
     expect(config(root).components.lineGrowth).toBe(true);
   });
@@ -701,6 +703,9 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
 
     expect(
       JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines,
+    ).toBeUndefined();
+    expect(
+      JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxTestLines,
     ).toBeUndefined();
     expect(existsSync(linesBaseline(root))).toBe(false);
     expect(config(root).components.lineGrowth).toBe(false);

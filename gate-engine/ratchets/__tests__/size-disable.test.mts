@@ -248,6 +248,23 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(countOversized(root)).toEqual([{ file: 'src/big.ts', lines: 80 }]);
   });
 
+  it('countOversized applies the separate loose cap when test ratcheting is enabled', () => {
+    const root = makeRoot();
+    writeConfig(root, {
+      scanRoots: ['src'],
+      sourceExtensions: ['ts'],
+      maxLines: 50,
+      maxTestLines: 100,
+    });
+    write(root, 'src/big.ts', big(80));
+    write(root, 'src/big.test.ts', big(120));
+    write(root, 'src/small.test.ts', big(90));
+    expect(countOversized(root)).toEqual([
+      { file: 'src/big.test.ts', lines: 120 },
+      { file: 'src/big.ts', lines: 80 },
+    ]);
+  });
+
   it('off by default (maxLines 0) → never flags, however large', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] });
@@ -283,6 +300,26 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(r.stderr).toContain('src/legacy.ts: 100 lines (max 80)');
   });
 
+  it('grandfathers an oversized test and blocks growth past its recorded ceiling', () => {
+    const root = makeRoot();
+    writeConfig(root, {
+      scanRoots: ['src'],
+      sourceExtensions: ['ts'],
+      maxLines: 50,
+      maxTestLines: 100,
+    });
+    write(root, 'src/executor.test.ts', big(120));
+    expect(run(root, 'freeze').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/executor.test.ts']).toBe(120);
+    write(root, 'src/executor.test.ts', big(130));
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/executor.test.ts: 130 lines (max 120)');
+  });
+
   it('a STAGED file that shrinks (still over cap) → gate auto-lowers its ceiling', () => {
     const root = makeRoot();
     gitInit(root);
@@ -296,6 +333,26 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(60); // ceiling ratcheted down 80 → 60
+  });
+
+  it('a staged oversized test that shrinks auto-lowers its ceiling', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {
+      scanRoots: ['src'],
+      sourceExtensions: ['ts'],
+      maxLines: 50,
+      maxTestLines: 100,
+    });
+    write(root, 'src/executor.test.ts', big(120));
+    run(root, 'freeze');
+    write(root, 'src/executor.test.ts', big(110));
+    gitAdd(root, 'src/executor.test.ts');
+    expect(run(root, 'gate').status).toBe(0);
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/executor.test.ts']).toBe(110);
   });
 
   it('a STAGED file dropped under the cap → gate auto-removes it from the baseline (file kept while others remain)', () => {
@@ -441,7 +498,11 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
 
     expect(freezeLines(root)).toBe(1);
     const lines = JSON.parse(readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'));
-    expect(lines).toEqual({ maxLines: 50, files: { 'src/legacy.ts': 80 } });
+    expect(lines).toEqual({
+      maxLines: 50,
+      maxTestLines: 0,
+      files: { 'src/legacy.ts': 80 },
+    });
     // The disable-count baseline is byte-identical — freezeLines writes ONLY the line baseline.
     expect(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toBe(sizeBefore);
   });

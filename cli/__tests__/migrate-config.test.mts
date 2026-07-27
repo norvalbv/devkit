@@ -37,8 +37,9 @@ describe('computeMigration (react-app: 0.12-era snapshot → current model)', ()
     expect(gc.scanRoots).toEqual(['custom/src']); // preserved
     expect(gc.fanoutCap).toBe(99); // preserved
     expect(gc.structure.trees.map((t) => t.name)).toEqual(['components', 'pages']); // added
-    // maxLines is NOT template-merged (it needs a grandfather freeze) — `devkit upgrade` offers it.
+    // Line caps are NOT template-merged (they need a grandfather freeze) — upgrade offers them.
     expect(gc.maxLines).toBeUndefined();
+    expect(gc.maxTestLines).toBeUndefined();
   });
 
   it('plans NOTHING when already on the current shim + full guard.config', () => {
