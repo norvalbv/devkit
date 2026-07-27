@@ -135,6 +135,7 @@ describe('devkit upgrade — line-growth block back-fill', () => {
     expect(up.status, up.stderr || up.stdout).toBe(0);
 
     expect(gc(root).maxLines).toBe(500); // cap written
+    expect(gc(root).maxTestLines).toBe(2000);
     const lines = JSON.parse(
       readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
     );
@@ -148,9 +149,49 @@ describe('devkit upgrade — line-growth block back-fill', () => {
     // A default init already enables the block → the cap is present.
     expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
     expect(gc(root).maxLines).toBe(500);
+    expect(gc(root).maxTestLines).toBe(2000);
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).not.toMatch(/3b\. line-growth|line-growth block enabled/i);
+  });
+
+  it('preserves an explicit maxTestLines opt-out', () => {
+    const root = tmpRepo(CLIB_PKG);
+    expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
+    const guardPath = join(root, 'guard.config.json');
+    const guard = gc(root);
+    guard.maxTestLines = 0;
+    writeFileSync(guardPath, `${JSON.stringify(guard, null, 2)}\n`);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(gc(root).maxTestLines).toBe(0);
+    expect(up.stdout).not.toMatch(/3b\. line-growth|line-growth block enabled/i);
+  });
+
+  it('back-fills and freezes the test cap when a repo already has maxLines', () => {
+    const root = tmpRepo(CLIB_PKG);
+    expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
+    const guardPath = join(root, 'guard.config.json');
+    const guard = gc(root);
+    delete guard.maxTestLines;
+    delete guard['//maxTestLines'];
+    writeFileSync(guardPath, `${JSON.stringify(guard, null, 2)}\n`);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'executor.test.ts'),
+      Array(2200).fill('const x = 1;').join('\n'),
+    );
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(gc(root).maxLines).toBe(500);
+    expect(gc(root).maxTestLines).toBe(2000);
+    const lines = JSON.parse(
+      readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
+    );
+    expect(lines.files['src/executor.test.ts']).toBe(2200);
+    expect(up.stdout).toMatch(/line-growth block enabled/i);
   });
 });

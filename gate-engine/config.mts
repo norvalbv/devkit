@@ -73,6 +73,7 @@ export interface GuardConfig {
   decisionsDir: string;
   fanoutCap: number;
   maxLines: number;
+  maxTestLines: number;
   fanoutExempt: string[];
   allowlistPath: string;
   thresholds: Thresholds;
@@ -101,6 +102,7 @@ interface RawGuardConfigFile {
   decisionsDir?: string;
   fanoutCap?: number;
   maxLines?: number;
+  maxTestLines?: number;
   fanoutExempt?: string[];
   allowlistPath?: string;
   thresholds?: Partial<Thresholds>;
@@ -139,9 +141,9 @@ export const DEFAULTS = Object.freeze({
   // verbatim-clone scope is often deliberately narrower than semantic-dup scope: a repo can want
   // the matcher over every backend root while the clone gate only polices its UI + main process.
   cloneRoots: [],
-  // Implementation-file extensions the ratchets count (fan-out + size). Default TS — a JS/MJS
+  // Source extensions the ratchets count. Default TS — a JS/MJS
   // codebase (devkit itself, a node CLI) sets `["mjs","js"]` so the gates actually SEE its files.
-  // A file is a test when it matches `*.<ext>` AND `.test.`/`.spec.` (excluded from impl counts).
+  // Tests are excluded from implementation fan-out but have their own optional size ceiling.
   sourceExtensions: ['ts', 'tsx'],
   // Folder-structure topology (the structure-lint engine). Declared ONCE here; devkit's interpreter
   // generates the eslint rule + drives the baseline walk from this SAME spec (no drift). Empty by
@@ -158,6 +160,8 @@ export const DEFAULTS = Object.freeze({
   // so the structure-only eslint shim governs ANY stack. Existing over-cap files are grandfathered
   // shrink-only in eslint/baselines/size-lines.json. (Per-FUNCTION caps need a parser → not here yet.)
   maxLines: 0,
+  // Separate loose test-file ceiling. 0 = OFF; init/upgrade enables it alongside maxLines.
+  maxTestLines: 0,
   // Flat-by-design folders exempt from the fanout cap (was frink's hardcoded
   // grandfathered roots — now opt-in per consumer).
   fanoutExempt: [],
@@ -336,6 +340,10 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
       typeof file.maxLines === 'number' && Number.isFinite(file.maxLines)
         ? file.maxLines
         : DEFAULTS.maxLines,
+    maxTestLines:
+      typeof file.maxTestLines === 'number' && Number.isFinite(file.maxTestLines)
+        ? file.maxTestLines
+        : DEFAULTS.maxTestLines,
     fanoutExempt: arr(file.fanoutExempt, DEFAULTS.fanoutExempt),
     allowlistPath: allowlistEnv ?? file.allowlistPath ?? DEFAULTS.allowlistPath,
     // Shallow-merge thresholds so a consumer can override one knob without restating all.
@@ -413,8 +421,8 @@ const TEST_INFIX = /\.(test|spec)\./;
  * Build the impl-file matchers for a `sourceExtensions` list (e.g. `['ts','tsx']` or `['mjs','js']`),
  * so the ratchets are language-agnostic instead of hardcoding `.ts`/`.tsx`. Each returns a predicate:
  * `isSource(name)` true for an impl file; `isTest(name)` for its test variant (`.test.`/`.spec.`);
- * `isBarrel(name)` for an `index` barrel. The ratchets count files where `isSource && !isTest`
- * (fan-out also excludes `isBarrel`).
+ * `isBarrel(name)` for an `index` barrel. Fan-out and disable debt use non-test implementation
+ * files; the raw-line ratchet also uses `isTest` to apply its separate test ceiling.
  *
  * @param extensions bare extensions, no dot (e.g. `['ts','tsx']`)
  */
