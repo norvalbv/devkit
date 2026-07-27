@@ -1,3 +1,4 @@
+import { validateCategory } from "./recall/categories.mjs";
 const FM_ORDER = ['slug', 'created'];
 const INDEX_HEADER = '# Decision Index\n\n' +
     'Living architecture record — the current ruling per axis. Each row links to its full\n' +
@@ -116,13 +117,44 @@ export function renderTarget(date, options) {
         lines.push(`**Revisit-when:** ${options.revisitWhen}`);
     if (options.scope)
         lines.push(`**Scope:** ${options.scope}`);
+    if (options.category) {
+        // Write-time validation, not a caller precondition: renderTarget is the ONLY place that emits
+        // `**Category:**`, so it is the one place that can guarantee an axis file never carries a value
+        // outside the frozen list (recall/categories.mts) — the read side (category-report.mts) treats
+        // an unrecognised value as uncategorised, so a value that slipped past here would silently lose
+        // its category rather than error, defeating the whole point of a closed vocabulary.
+        const err = validateCategory(options.category);
+        if (err)
+            throw new Error(err);
+        lines.push(`**Category:** ${options.category}`);
+    }
+    if (options.supersedes)
+        lines.push(`**Supersedes:** ${options.supersedes}`);
     lines.push(`**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`);
-    if (options.evidenceChange)
-        lines.push(`**Evidence-change:** ${options.evidenceChange}`);
+    // Trimmed on both sides of the test: a whitespace-only value must not render a hollow
+    // `**Evidence-change:**` line, which parseTargetFields reads back as an empty (not absent) field.
+    if (options.evidenceChange?.trim())
+        lines.push(`**Evidence-change:** ${options.evidenceChange.trim()}`);
     return lines.join('\n');
 }
 export function renderNote(date, text) {
     return `- ${date} — ${sanitizeCell(text)}`;
+}
+/**
+ * Extract every `**Field:** value` line from a block's raw text.
+ *
+ * The one field-parsing rule, shared: `currentTarget` below applies it to the LAST block only;
+ * `allTargetBlocks` (recall/supersession.mts) applies the same rule to every block, so a field like
+ * Supersedes reads identically wherever a caller reads it from — never two divergent extractors.
+ */
+export function parseTargetFields(text) {
+    const fields = {};
+    for (const line of text.split('\n')) {
+        const field = line.match(TARGET_FIELD_RE);
+        if (field)
+            fields[field[1].trim().toLowerCase()] = field[2].trim();
+    }
+    return fields;
 }
 export function currentTarget(body) {
     let last = null;
@@ -134,16 +166,13 @@ export function currentTarget(body) {
     }
     if (!last)
         return null;
-    const fields = {};
     const blockLines = [];
     for (const line of last.split('\n')) {
         if (NOTE_BULLET_RE.test(line))
             break;
         blockLines.push(line);
-        const field = line.match(TARGET_FIELD_RE);
-        if (field)
-            fields[field[1].trim().toLowerCase()] = field[2].trim();
     }
+    const fields = parseTargetFields(blockLines.join('\n'));
     return {
         ruling: fields.ruling ?? '',
         scope: fields.scope ?? '',

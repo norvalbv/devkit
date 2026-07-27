@@ -131,7 +131,8 @@ export function amendDecision(slug, options, paths) {
     if (options.isTarget &&
         committed &&
         currentTarget(parseDecision(committed).body) &&
-        !options.evidenceChange) {
+        // Trimmed, matching the add-path guard: whitespace is not an evidence-state change.
+        !options.evidenceChange?.trim()) {
         throw new Error('amending an appended Target requires --evidence-change "<what shifted>"');
     }
     const replacement = options.isTarget && hasTargetFields(options)

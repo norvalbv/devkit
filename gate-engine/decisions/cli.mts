@@ -15,15 +15,21 @@
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
  *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
  *   guard-decisions categories                        per-category view (recall/category-report.mts)
+ *   guard-decisions integrity                         structural-integrity scan (integrity/scan.mts)
  *
  * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
  * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); `categories`
- * is a plain function call (it has no --gate/scan sub-dispatch of its own); everything else routes
- * to decisions.mjs `main`.
+ * and `integrity` are plain function calls (neither has a --gate/scan sub-dispatch of its own);
+ * everything else routes to decisions.mjs `main`.
+ *
+ * `integrity` is dispatched HERE rather than alongside `drift` in decisions.mts purely because that
+ * file is at its 500-line cap; `categories` set the precedent for a plain-function command living at
+ * this layer.
  */
 
 import { realpathSync } from 'node:fs';
 import { main as decisionsMain } from './decisions.mts';
+import { cmdIntegrity } from './integrity/scan.mts';
 import { cmdCategories } from './recall/category-report.mts';
 
 // Dev runs the .mts source (Node strips types); the shipped dist is compiled .mjs. Derive the
@@ -39,6 +45,12 @@ async function run(argv: string[]) {
   const [cmd, ...rest] = argv;
   if (cmd === 'categories') {
     cmdCategories();
+    return;
+  }
+  if (cmd === 'integrity') {
+    // A non-zero scan is a finding, not a crash — set exitCode rather than throwing into the
+    // catch below, which would relabel it as `guard-decisions: <error>`.
+    process.exitCode = cmdIntegrity();
     return;
   }
   const sub = SUB_ENGINES[cmd];
