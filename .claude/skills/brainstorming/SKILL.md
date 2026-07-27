@@ -35,12 +35,16 @@ Start by understanding the current project context, then ask questions one at a 
 ## After the Design
 
 **Capture the decision (this is the decision-log's primary capture path — Capture A):**
+
+Run this section only when `.devkit/config.json` records `decisions` in `components.guards`. If the
+guard is not selected, skip Capture A entirely: Devkit intentionally omits the decisions skill and
+does not claim a decision-record authoring workflow for that repo.
 When the settled design crosses the **two-clause road-not-taken criterion** — a *viable*
 alternative was rejected AND the rationale is load-bearing (you'd want the *why* in 6 months) —
 record it now, while the *why* is live in this conversation (it is never recoverable from the diff):
-- Surface any prior ruling first: `node scripts/decisions/decisions.mjs list` — reuse an existing
+- Surface any prior ruling first: `guard-decisions list` — reuse an existing
   axis slug if this decision already has one (and surface that prior ruling *inside* the A/B you posed).
-- Record: `node scripts/decisions/decisions.mjs add <slug> --ruling "..." --why "..." --rejected "..." --source brainstorm` (add `--new` for a new axis).
+- Record: `guard-decisions add <slug> --target --context "..." --ruling "..." --consequences "..." --tradeoff "..." --vision-fit "..." --source brainstorm` (add `--new` for a new axis).
 - See the `decisions` skill for the criterion, slug discipline, and supersession.
 
 Do NOT author a new `docs/plans/` design doc — that store is deprecating in favour of `docs/decisions/`.
