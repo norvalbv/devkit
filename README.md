@@ -106,6 +106,8 @@ not accumulate in this config; they remain Markdown under `decisionsDir`.
 ## Governance capabilities
 
 - Append-only architectural decisions and scope-aware alignment checks
+- Pre-edit briefing: rulings that already govern a file are surfaced *before* an agent writes to it,
+  matched on each ruling's own Scope globs rather than by text similarity
 - Domain and correctness reviewer gates over staged changes
 - Semantic duplication and token-clone detection
 - Folder fan-out, source-size, and project-structure ratchets
