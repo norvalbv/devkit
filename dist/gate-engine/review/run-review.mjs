@@ -38,10 +38,12 @@ import { composeTranscript, saveTranscript } from "../judge/transcript-store.mjs
 import { loadCache, savePasses } from "./cache.mjs";
 import { renderGoverningClaudeMd } from "./claude-md.mjs";
 import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
-import { blockingNote, reconcile } from "./overrides.mjs";
+import { attachItems, itemFields } from "./evidence/items.mjs";
+import { emitReviewScope, emitReviewSkipped, emitUnselected } from "./evidence/scope.mjs";
+import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
-import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseConventionFindings, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, enforceChecklistContract, passAssetVerifier, preflightReviewAssets, readChecklistState, reviewJudgeEnv, } from "./runtime.mjs";
+import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
+import { agentBody, cleanupChecklistState, consumerReviewerIdentity, enforceChecklistContract, passAssetVerifier, preflightReviewAssets, readChecklistState, reviewJudgeEnv, } from "./runtime.mjs";
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
 // (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
@@ -118,87 +120,23 @@ function stagedFiles(cwd) {
  * gate), a PASS is voided to inconclusive when the artifact is missing/incomplete/inconsistent
  * (verifyChecklist), and the artifact is removed afterwards either way.
  */
-// Deterministic domain-exclusivity guard for the bench-measured cross-domain false-blocks
-// (xdomain-sqli / xdomain-render: correctness FAILs a lens for a defect the security/performance
-// reviewers own — see agents/correctness-reviewer.md <exclusions>). ONE-SIDED and best-effort:
-// drops a failing lens ONLY when its reason matches an out-of-charter keyword AND matches NO
-// correctness-signal keyword — biased to UNDER-fire (keep the FAIL when in doubt) so it carries no
-// recall cost. It is NOT a semantic arbiter and NOT a guarantee: its safety is proportional to the
-// CORRECTNESS_SIGNAL coverage below, so that list is kept deliberately broad. Covers cross-domain
-// leaks ONLY (2 of the bench's 4 false-blocks). The in-domain surface-cue false-blocks want K-sample
-// self-consistency with an asymmetric block rule (Wang 2203.11171), NOT a same-family verify/refute
-// pass — such a pass overturns real FAILs (measured 0.78→0.67 here; Huang 2310.01798, Stechly
-// 2402.08115) and only pays off cross-family (Lu 2512.02304). Precision to ~0.95 is also unmeasurable
-// until the decoy corpus grows (n=28 → clean-pass CI [.69,.94]).
-const OUT_OF_CHARTER = /\b(sql|injection|xss|csrf|sanitiz|escap|secrets?|credentials?|deserializ|n\+1|select\s+\*|pagination|unbounded|re-?render|bundle\s?size|memoiz|throughput|latenc|perf(ormance)?)\b/i;
-// Deliberately broad — every miss here risks dropping a real FAIL, so err toward inclusion.
-const CORRECTNESS_SIGNAL = /\b(race|interleav|concurren|clobber|overwrit|overwrote|lost\s?update|stale|reset|invalidat|discard|dropped|unhandled|unchecked|ignored\s+(return|result|error)|missing|contract|signature|call\s?site|broadcast|dedup|classif|pars(e|ing)|off-by|wrong\s+(result|state|value)|incorrect|stuck|deadlock|leak|finally|rollback|revert|strand|CAS|atomic|toctou|check[\s-]?then[\s-]?act|order(ing)?|sequenc|idempoten|mutat|await|promise|callback|null|undefined|double[\s-]?(fire|write)|early\s+(return|exit)|exit\s?code|fall[\s-]?through|latch|unclaim|revive|cancel|retry|resum|recover)\b/i;
-/** Partition a checklist's failing lenses into ones that still block (`kept`) and ones dropped as
- * out-of-charter (`dropped`). A lens drops only when its issues are unambiguously security/perf. */
-export function domainExclusivityDrop(items = []) {
-    const kept = [];
-    const dropped = [];
-    for (const it of items) {
-        if (it.status !== 'fail')
-            continue;
-        const lens = it.name ?? '(finding)';
-        const text = (it.issues ?? []).join(' \n ');
-        if (text && OUT_OF_CHARTER.test(text) && !CORRECTNESS_SIGNAL.test(text))
-            dropped.push({ lens, reason: text });
-        else
-            kept.push(lens);
-    }
-    return { kept, dropped };
-}
 export async function runCascade(sel, opts) {
     const { cwd } = opts;
     cleanupChecklistState(cwd, sel.reviewer);
     let res = await cascadeVerdict(sel, opts);
     res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, (reason) => cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason }));
-    // Override valve: all failed lenses waived → PASS; any unwaived finding remains a named FAIL.
-    // Read the artifact BEFORE the cleanup below (the fingerprint needs the failed lens names).
-    if (res.status === 'fail' && sel.reviewer.model) {
-        // A checklist reviewer's lens is the checklist item name (stable: fixed per diff, deterministic
-        // parsing). A skill-less reviewer has no checklist — its lens is the OFFENDING path:line each
-        // violation names (parseConventionFindings), deterministic for a fixed diff exactly like a
-        // checklist item name. Neither ever uses the free-text VERDICT reason: a haiku judge's one-line
-        // paraphrase of the SAME violation can vary run-to-run on byte-identical input, which would
-        // silently un-match a dev's already-committed waiver and re-block them.
-        const state = readChecklistState(cwd, sel.reviewer);
-        const items = state?.items ?? [];
-        const failedCount = items.filter((i) => i.status === 'fail').length;
-        // Domain-exclusivity guard (checklist reviewers only): drop failing lenses flagging a
-        // security/performance defect this reviewer must stay silent on. One-sided/best-effort (see
-        // domainExclusivityDrop); conventions has no checklist, so this is a no-op there.
-        const { kept, dropped } = domainExclusivityDrop(items);
-        for (const d of dropped)
-            console.error(`guard-review: ${sel.reviewer.name} — ${d.lens} dropped as out-of-charter (security/performance is another reviewer's finding)`);
-        // A skill-less reviewer (conventions) has no checklist — its lens is the OFFENDING path:line each
-        // violation names (parseConventionFindings), never the free-text VERDICT reason.
-        const conventionLenses = parseConventionFindings(res.transcript ?? '').map((f) => `${f.offendingPath}:${f.offendingLine}`);
-        const failedLenses = sel.reviewer.stateFile ? kept : conventionLenses;
-        // All checklist lenses dropped as out-of-charter → not a correctness block (checklist reviewers only).
-        if (sel.reviewer.stateFile && failedCount > 0 && kept.length === 0) {
-            res.status = 'pass';
-            res.reason = `${dropped.length} out-of-charter finding(s) dropped (owned by security/performance reviewer)`;
-        }
-        else {
-            const lenses = failedLenses.length > 0 ? failedLenses : ['(finding)'];
-            const diffText = gitCached(cwd, [], sel.files);
-            const { suppressed, blocking } = reconcile(cwd, sel.reviewer.name, lenses, diffText, new Date().toISOString());
-            if (suppressed.length > 0)
-                res.waivers = suppressed;
-            for (const s of suppressed)
-                console.error(`guard-review: ${sel.reviewer.name} — ${s.lens} overridden [${s.fingerprint}]: ${s.rationale}`);
-            if (blocking.length === 0) {
-                res.status = 'pass';
-                res.reason = `all ${suppressed.length} finding(s) overridden`;
-            }
-            else {
-                res.reason = blockingNote(sel.reviewer.name, blocking);
-            }
-        }
-    }
+    // Override valve: all failed lenses waived → PASS; any unwaived finding remains a named FAIL. Runs
+    // BEFORE the cleanup below — the fingerprint needs the failed lens names off the artifact. Returns
+    // what the gate decided about each failing lens, which the item vector records: an out-of-charter
+    // drop and a waiver both leave a PASS behind, and only the disposition tells them apart.
+    const disposition = applyOverrideValve(sel, res, cwd, {
+        readState: () => readChecklistState(cwd, sel.reviewer),
+        stagedDiff: () => gitCached(cwd, [], sel.files),
+    });
+    // LAST read before the artifact is destroyed, and for EVERY status — not just the failing pinned
+    // path the valve above covers. This is the vector that answers "did this reviewer's lenses ever
+    // fire", which four of the domain reviewers currently cannot be asked at all.
+    attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
     cleanupChecklistState(cwd, sel.reviewer);
     return res;
 }
@@ -358,8 +296,10 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
  * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade.
  */
 export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
-    if (envFlag('NO_REVIEW'))
+    if (envFlag('NO_REVIEW')) {
+        emitReviewSkipped(null, 'gate_disabled');
         return 0;
+    }
     const strict = envFlag('AI_STRICT'); // the ship path sets this: retry once, then fail CLOSED
     const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
     let cfg;
@@ -369,18 +309,27 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     let identitySalts = new Map();
     try {
         cfg = resolveGuardConfig(cwd);
-        if (cfg.noLlm)
+        if (cfg.noLlm) {
+            emitReviewSkipped(null, 'no_llm');
             return 0;
+        }
         if (reviewMode)
             cfg = effectiveReviewConfig(cfg);
         selected = selectReviewers(stagedFiles(cwd), cfg);
         const skip = skippedReviewers();
+        const knobDropped = new Set();
         if (skip.size > 0) {
             // never a silent cap: name what the knob dropped
-            for (const d of selected.filter((s) => skip.has(s.reviewer.name)))
+            for (const d of selected.filter((s) => skip.has(s.reviewer.name))) {
                 console.error(`guard-review: ${d.reviewer.name} skipped (GUARD_REVIEW_SKIP)`);
+                knobDropped.add(d.reviewer.name);
+                emitReviewSkipped(d.reviewer.name, 'GUARD_REVIEW_SKIP');
+            }
             selected = selected.filter((s) => !skip.has(s.reviewer.name));
         }
+        // Before the early return: a run where nothing was selected is still a run, and "this reviewer
+        // did not look at this commit" is the fact that stops a later miss-analysis mislabelling it.
+        emitUnselected(selected, knobDropped);
         if (selected.length === 0)
             return 0;
         if (reviewMode) {
@@ -403,11 +352,20 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const concurrency = reviewConcurrency();
     const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
     const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
+    // Prompt-version identity for this run. Review mode already computed it over the PACKAGED assets
+    // (and needs the throwing preflight for its cache-safety contract); the ordinary commit/ship path
+    // has no asset root, so it reads the SYNCED consumer copies best-effort — same formula, so the two
+    // are comparable, and null rather than a throw when an asset is unreadable.
+    const promptIdentity = (sel) => identitySalts.get(sel.reviewer.name) ?? consumerReviewerIdentity(cwd, cfg, sel.reviewer);
     const toRun = [];
     for (let i = 0; i < selected.length; i++) {
         const name = selected[i].reviewer.name;
         const key = cacheKey(name, diffs[i], identitySalts.get(name) ?? '');
-        if (cache[key]) {
+        const cached = Boolean(cache[key]);
+        // Emitted for BOTH branches, before any judge runs: the scope row is the only record a cached
+        // PASS leaves behind that names the files and bytes it covered.
+        emitReviewScope(selected[i], diffs[i], promptIdentity(selected[i]), cached);
+        if (cached) {
             console.error(`guard-review: ${name} — cached PASS (identical diff)`);
             emitCacheHit(`review:${name}`, cache[key].model); // else this saving is invisible downstream
         }
@@ -482,6 +440,9 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
                 reason: res.reason,
                 secs,
                 ...(res.waivers?.length ? { waivers: res.waivers } : {}),
+                // The per-lens vector, passes included; empty when the judge left no artifact (see
+                // evidence/items.mts for the shape and the spill rule).
+                ...itemFields(res),
                 ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
             });
             // Surface the one-line verdict reason on the completion line too (fails get theirs in the

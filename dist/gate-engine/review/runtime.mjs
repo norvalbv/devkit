@@ -29,34 +29,81 @@ export function agentBody(cwd, cfg, name, assetRoot) {
         return null;
     }
 }
+/**
+ * The identity of one reviewer's execution inputs: its brief, its registry entry, its checklist
+ * trio when it has one, and the config subset that changes WHAT it reviews.
+ *
+ * Deliberately shared by the packaged review-mode preflight and the consumer-path telemetry stamp:
+ * one formula means a review-mode identity and a ship-mode identity are COMPARABLE whenever the
+ * bytes match, which is the entire reason for recording it. Two formulas would silently produce two
+ * incomparable namespaces and every cross-mode rate would be a blend.
+ */
+function hashReviewerIdentity(readAsset, reviewer, cfg) {
+    const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
+    const hash = createHash('sha256')
+        .update(readAsset(brief))
+        .update(JSON.stringify(reviewer));
+    if (hasChecklist(reviewer)) {
+        hash.update(readAsset(skill));
+        hash.update(readAsset(checklist));
+        hash.update(readAsset(REVIEW_ROOTS_HELPER));
+    }
+    hash.update(JSON.stringify({
+        scanRoots: cfg.scanRoots,
+        sourceExtensions: cfg.sourceExtensions,
+        review: cfg.review,
+        indexPath: cfg.indexPath,
+        searchTool: cfg.searchTool,
+    }));
+    return hash.digest('hex');
+}
 /** Validate and fingerprint current packaged assets before a review-mode cache lookup. */
 export function preflightReviewAssets(assetRoot, selected, cfg) {
     if (!assetRoot || !path.isAbsolute(assetRoot))
         throw new Error('DEVKIT_REVIEW_ASSET_ROOT is missing or not absolute');
-    const reviewRootsHelper = readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
+    // Eager, before the loop: an unreadable helper is a packaging fault, and it must surface even when
+    // no selected reviewer happens to carry a checklist.
+    readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
     const identities = new Map();
     for (const { reviewer } of selected) {
-        const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
-        const hash = createHash('sha256')
-            .update(readPackagedReviewAsset(assetRoot, brief))
-            .update(JSON.stringify(reviewer));
         if (hasChecklist(reviewer)) {
             if (!reviewer.stateFile.startsWith('.claude/') || !reviewer.cmds.gen || !reviewer.cmds.check)
                 throw new Error(`${reviewer.name} has an invalid checklist registry binding`);
-            hash.update(readPackagedReviewAsset(assetRoot, skill));
-            hash.update(readPackagedReviewAsset(assetRoot, checklist));
-            hash.update(reviewRootsHelper);
         }
-        hash.update(JSON.stringify({
-            scanRoots: cfg.scanRoots,
-            sourceExtensions: cfg.sourceExtensions,
-            review: cfg.review,
-            indexPath: cfg.indexPath,
-            searchTool: cfg.searchTool,
-        }));
-        identities.set(reviewer.name, hash.digest('hex'));
+        identities.set(reviewer.name, hashReviewerIdentity((rel) => readPackagedReviewAsset(assetRoot, rel), reviewer, cfg));
     }
     return identities;
+}
+/**
+ * The SYNCED consumer copy of a packaged asset. `reviewerAssetPaths` names package-relative paths;
+ * a consumer keeps its briefs wherever `review.agentsDir` points (configurable) and every skill
+ * asset under `.claude/` — devkit's own sync convention, the same one `checklistScript` encodes.
+ */
+function readConsumerReviewAsset(cwd, cfg, relativePath) {
+    const AGENTS_PREFIX = 'agents/';
+    if (relativePath.startsWith(AGENTS_PREFIX)) {
+        const dir = cfg.review.agentsDir;
+        const base = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+        return readFileSync(path.join(base, relativePath.slice(AGENTS_PREFIX.length)));
+    }
+    return readFileSync(path.resolve(cwd, '.claude', relativePath));
+}
+/**
+ * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
+ * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
+ * attributable to the prompt version that produced it.
+ *
+ * Returns null on ANY unreadable asset rather than throwing: it feeds telemetry only, and telemetry
+ * must never fail a gate. A genuinely missing brief is already handled upstream — `cascadeVerdict`
+ * resolves it to `inconclusive` — so a null here means "unattributable", never "broken".
+ */
+export function consumerReviewerIdentity(cwd, cfg, reviewer) {
+    try {
+        return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, rel), reviewer, cfg);
+    }
+    catch {
+        return null;
+    }
 }
 /** Recheck one completed reviewer's exact execution inputs before its PASS becomes durable. */
 export function verifyReviewAssetIdentity(assetRoot, selected, cfg, expected) {

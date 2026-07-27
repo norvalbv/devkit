@@ -12,7 +12,7 @@ import {
   summarize,
   validateRow,
 } from '../eval/reviewers/bench.mts';
-import { domainExclusivityDrop } from '../run-review.mts';
+import { domainExclusivityDrop } from '../overrides.mts';
 
 const APISEC = BENCH_REVIEWERS.find((r) => r.name === 'api-security-reviewer');
 

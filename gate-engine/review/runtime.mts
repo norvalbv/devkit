@@ -44,6 +44,18 @@ function readPackagedReviewAsset(assetRoot: string, relativePath: string): Buffe
   return readFileSync(path.join(assetRoot, relativePath));
 }
 
+/**
+ * One checklist item as the judge left it, snapshotted before the gate deletes the artifact.
+ * `disposition` is what the GATE then did with a failing item, which is not recoverable from the
+ * artifact alone: an out-of-charter drop and a waived finding both end as a PASS verdict.
+ */
+export interface ReviewItem {
+  lens: string;
+  status: string;
+  disposition?: 'blocking' | 'waived' | 'dropped_out_of_charter';
+  issues?: string[];
+}
+
 export interface ReviewOutcome {
   name: string;
   status: 'pass' | 'fail' | 'inconclusive' | 'error';
@@ -53,6 +65,24 @@ export interface ReviewOutcome {
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
    * both all-waived PASS and mixed waived+blocking FAIL outcomes. */
   waivers?: RecordedWaiver[];
+  /** The per-lens vector the judge produced, INCLUDING the passes — the only way to tell a reviewer
+   * that cleared every lens from one that never looked. Absent when no artifact existed (a
+   * skill-less reviewer, or a judge that never wrote one), which is itself the distinction a
+   * consumer needs: no artifact is not the same fact as an artifact with zero failures. */
+  items?: ReviewItem[];
+  /** Total items in the artifact before any capping, so a truncated vector is never mistaken for a
+   * short one. */
+  itemCount?: number;
+  /** Which artifact shape the vector came from: `items` (one per checklist lens — the domain
+   * reviewers) or `files` (one per reviewed file — commit-guard). A consumer needs this because the
+   * two are not the same unit: a `files` lens is a path, not a bug class. */
+  itemArtifact?: 'items' | 'files';
+  /** Per-status counts, ALWAYS present alongside a vector — the "did these lenses fire" answer that
+   * has to survive a spill to `itemsRef`. */
+  itemTally?: Record<string, number>;
+  /** Sidecar ref holding the full vector when inlining it would breach the event byte budget. Set
+   * INSTEAD of `items`, never alongside it. */
+  itemsRef?: string;
   /** The model that actually ran the first pass (Reviewer.model pin, else the cascade default).
    * Absent only when no judge ran (missing brief). Telemetry/cache must report THIS, never the
    * global default — a sonnet-pinned reviewer's verdict labeled 'haiku' sends readers of the
@@ -75,6 +105,44 @@ export function agentBody(
   }
 }
 
+/** Reads one asset named by its PACKAGE-relative path (`agents/x.md`, `skills/…`). */
+type ReviewAssetReader = (relativePath: string) => Buffer;
+
+/**
+ * The identity of one reviewer's execution inputs: its brief, its registry entry, its checklist
+ * trio when it has one, and the config subset that changes WHAT it reviews.
+ *
+ * Deliberately shared by the packaged review-mode preflight and the consumer-path telemetry stamp:
+ * one formula means a review-mode identity and a ship-mode identity are COMPARABLE whenever the
+ * bytes match, which is the entire reason for recording it. Two formulas would silently produce two
+ * incomparable namespaces and every cross-mode rate would be a blend.
+ */
+function hashReviewerIdentity(
+  readAsset: ReviewAssetReader,
+  reviewer: Reviewer,
+  cfg: GuardConfig,
+): string {
+  const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
+  const hash = createHash('sha256')
+    .update(readAsset(brief as string))
+    .update(JSON.stringify(reviewer));
+  if (hasChecklist(reviewer)) {
+    hash.update(readAsset(skill as string));
+    hash.update(readAsset(checklist as string));
+    hash.update(readAsset(REVIEW_ROOTS_HELPER));
+  }
+  hash.update(
+    JSON.stringify({
+      scanRoots: cfg.scanRoots,
+      sourceExtensions: cfg.sourceExtensions,
+      review: cfg.review,
+      indexPath: cfg.indexPath,
+      searchTool: cfg.searchTool,
+    }),
+  );
+  return hash.digest('hex');
+}
+
 /** Validate and fingerprint current packaged assets before a review-mode cache lookup. */
 export function preflightReviewAssets(
   assetRoot: string | undefined,
@@ -83,32 +151,57 @@ export function preflightReviewAssets(
 ): Map<string, string> {
   if (!assetRoot || !path.isAbsolute(assetRoot))
     throw new Error('DEVKIT_REVIEW_ASSET_ROOT is missing or not absolute');
-  const reviewRootsHelper = readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
+  // Eager, before the loop: an unreadable helper is a packaging fault, and it must surface even when
+  // no selected reviewer happens to carry a checklist.
+  readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
   const identities = new Map<string, string>();
   for (const { reviewer } of selected) {
-    const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
-    const hash = createHash('sha256')
-      .update(readPackagedReviewAsset(assetRoot, brief as string))
-      .update(JSON.stringify(reviewer));
     if (hasChecklist(reviewer)) {
       if (!reviewer.stateFile.startsWith('.claude/') || !reviewer.cmds.gen || !reviewer.cmds.check)
         throw new Error(`${reviewer.name} has an invalid checklist registry binding`);
-      hash.update(readPackagedReviewAsset(assetRoot, skill as string));
-      hash.update(readPackagedReviewAsset(assetRoot, checklist as string));
-      hash.update(reviewRootsHelper);
     }
-    hash.update(
-      JSON.stringify({
-        scanRoots: cfg.scanRoots,
-        sourceExtensions: cfg.sourceExtensions,
-        review: cfg.review,
-        indexPath: cfg.indexPath,
-        searchTool: cfg.searchTool,
-      }),
+    identities.set(
+      reviewer.name,
+      hashReviewerIdentity((rel) => readPackagedReviewAsset(assetRoot, rel), reviewer, cfg),
     );
-    identities.set(reviewer.name, hash.digest('hex'));
   }
   return identities;
+}
+
+/**
+ * The SYNCED consumer copy of a packaged asset. `reviewerAssetPaths` names package-relative paths;
+ * a consumer keeps its briefs wherever `review.agentsDir` points (configurable) and every skill
+ * asset under `.claude/` — devkit's own sync convention, the same one `checklistScript` encodes.
+ */
+function readConsumerReviewAsset(cwd: string, cfg: GuardConfig, relativePath: string): Buffer {
+  const AGENTS_PREFIX = 'agents/';
+  if (relativePath.startsWith(AGENTS_PREFIX)) {
+    const dir = cfg.review.agentsDir;
+    const base = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
+    return readFileSync(path.join(base, relativePath.slice(AGENTS_PREFIX.length)));
+  }
+  return readFileSync(path.resolve(cwd, '.claude', relativePath));
+}
+
+/**
+ * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
+ * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
+ * attributable to the prompt version that produced it.
+ *
+ * Returns null on ANY unreadable asset rather than throwing: it feeds telemetry only, and telemetry
+ * must never fail a gate. A genuinely missing brief is already handled upstream — `cascadeVerdict`
+ * resolves it to `inconclusive` — so a null here means "unattributable", never "broken".
+ */
+export function consumerReviewerIdentity(
+  cwd: string,
+  cfg: GuardConfig,
+  reviewer: Reviewer,
+): string | null {
+  try {
+    return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, rel), reviewer, cfg);
+  } catch {
+    return null;
+  }
 }
 
 /** Recheck one completed reviewer's exact execution inputs before its PASS becomes durable. */
