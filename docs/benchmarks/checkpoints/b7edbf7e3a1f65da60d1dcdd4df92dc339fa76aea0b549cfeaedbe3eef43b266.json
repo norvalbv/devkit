@@ -1,0 +1,172 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Deterministic suite: declared floors met, with per-case evidence"
+  },
+  "adapter": "deterministic",
+  "capturedAt": "2026-07-27T09:59:28.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:de92aa08db5dbd8243c68d7bd762d4aaca978e69d4f08a7fd02ba7bfdd8aef34",
+    "implementation": "sha256:499af6054d097b09e8c9cd8a994ee9f65075fa3eab9c52c51c2c9f21290546a2",
+    "runner": "sha256:16fa2d2d76362c4460205723a71b77b0e3b50b681523c443d27a2ce46756f742",
+    "scorer": "sha256:bc676fd0cf98183083d4bec095c6668c0ad338d9105ffdeb623706e4c5d61a1d"
+  },
+  "metrics": [
+    {
+      "denominator": 13,
+      "direction": "higher",
+      "id": "defect-recall",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.7719046276458016,
+        "method": "wilson-95",
+        "upper": 0.9999999999999999
+      },
+      "label": "Defect recall (perturbation corpus)",
+      "numerator": 13,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 18,
+      "direction": "lower",
+      "id": "false-positive-rate",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0,
+        "method": "wilson-95",
+        "upper": 0.17587922364665765
+      },
+      "label": "False-positive rate at R80",
+      "numerator": 0,
+      "unit": "ratio",
+      "value": 0
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "checks-exercised",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.6755924351161198,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "Declared checks with a perturbation case",
+      "numerator": 8,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 34,
+      "direction": "higher",
+      "id": "real-corpus-clean",
+      "inferenceUnit": "case",
+      "interval": {
+        "lower": 0.8984854458466761,
+        "method": "wilson-95",
+        "upper": 0.9999999999999999
+      },
+      "label": "Real records with no unexpected finding",
+      "numerator": 34,
+      "unit": "ratio",
+      "value": 1
+    }
+  ],
+  "rows": {
+    "clean-category-field-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "clean-legacy-schema-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "clean-multi-target-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "clean-short-na-fields-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "clean-single-target-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-duplicate-field-text-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-duplicate-field-text-02": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-frontmatter-created-after-target-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-02": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-03": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-h1-slug-mismatch-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-h1-slug-mismatch-02": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-index-stale-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-index-stale-02": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-note-amends-unresolvable-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-retarget-missing-evidence-change-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    },
+    "defect-target-heading-depth-01": {
+      "falsePositive": false,
+      "recallHit": true,
+      "unexpected": []
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "dcde693d058270bf6e27426cb6ef6ae84757ece9",
+  "suiteId": "decisions-save-quality"
+}

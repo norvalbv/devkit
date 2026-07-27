@@ -123,3 +123,52 @@ describe('guard-decisions integrity (via cli.mts, the real bin)', () => {
     expect(run(['integrity']).status).toBe(0);
   });
 });
+
+// One verb for "this replaces that": --supersedes on a --target writes **Supersedes:**, on a --note
+// it writes **Amends:** — the note-level marker retrieval has keyed on since sc-1236. The flag was
+// already parsed and silently ignored on the note path.
+describe('guard-decisions add --note --supersedes (via cli.mts, the real bin)', () => {
+  const seed = () =>
+    expect(run(['add', 'my-axis', '--target', '--new', ...reqFlags('my-axis')]).status).toBe(0);
+
+  it('writes an Amends-tagged note naming the note it replaces', () => {
+    seed();
+    expect(run(['add', 'my-axis', '--note', 'carry-on made real']).status).toBe(0);
+    const r = run([
+      'add',
+      'my-axis',
+      '--note',
+      'deleted, it was a lie',
+      '--supersedes',
+      'note:2026-07-26',
+    ]);
+    expect(r.status, r.stderr).toBe(0);
+
+    const file = readFileSync(join(dir, 'my-axis.md'), 'utf8');
+    expect(file).toContain('**Amends:** note:2026-07-26 — deleted, it was a lie');
+    expect(run(['integrity']).status).toBe(0);
+  });
+
+  // The sc-1282 lesson applied at a new write site: a CLI must never write a record its own check
+  // then rejects. Both failures below are caught BEFORE anything reaches disk.
+  it('refuses a pointer that names no note on the axis', () => {
+    seed();
+    const r = run(['add', 'my-axis', '--note', 'nope', '--supersedes', 'note:2020-01-01']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('names no note on this axis');
+    expect(run(['integrity']).status).toBe(0);
+  });
+
+  it('refuses a Target id — a note amends a NOTE, not a ruling', () => {
+    seed();
+    const r = run(['add', 'my-axis', '--note', 'nope', '--supersedes', 'target:2026-07-26']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('is not a note id');
+  });
+
+  it('leaves an ordinary note untouched when no relation is declared', () => {
+    seed();
+    expect(run(['add', 'my-axis', '--note', 'plain convergence']).status).toBe(0);
+    expect(readFileSync(join(dir, 'my-axis.md'), 'utf8')).not.toContain('**Amends:**');
+  });
+});

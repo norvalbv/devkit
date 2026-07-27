@@ -1,0 +1,162 @@
+{
+  "metrics": [
+    {
+      "id": "containment",
+      "label": "Gold axis retrieved (lexical tier)",
+      "k": 11,
+      "n": 12
+    },
+    {
+      "id": "set-recall",
+      "label": "Multi-axis set recall",
+      "k": 2,
+      "n": 4
+    },
+    {
+      "id": "current-state-accuracy",
+      "label": "Current-state accuracy",
+      "k": 6,
+      "n": 6
+    },
+    {
+      "id": "stale-fact-error",
+      "label": "Stale-fact errors",
+      "k": 0,
+      "n": 6,
+      "direction": "lower"
+    },
+    {
+      "id": "false-answer-non-refusal",
+      "label": "Answered when it should abstain",
+      "k": 11,
+      "n": 11,
+      "direction": "lower"
+    },
+    {
+      "id": "false-abstention",
+      "label": "Abstained when it should answer",
+      "k": 0,
+      "n": 18,
+      "direction": "lower"
+    }
+  ],
+  "rows": {
+    "conn-pool-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "soft-delete-purge-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "audit-write-crash-01": {
+      "outcome": "MISS",
+      "goldRank": null
+    },
+    "replica-billing-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "session-kill-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "flag-cleanup-01": {
+      "outcome": "HIT",
+      "goldRank": 5
+    },
+    "alert-noone-owns-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "svc-key-leak-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "multi-01": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "multi-02": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "multi-04": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "multi-05": {
+      "outcome": "HIT",
+      "goldRank": 2
+    },
+    "abstain-01": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-02": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-03": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-04": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-05": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-06": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-07": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-08": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-09": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-11": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "abstain-12": {
+      "outcome": "FALSE_ANSWER",
+      "goldRank": null
+    },
+    "current-state-trace-fanout-guarantee": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "current-state-replica-money-query-guard": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "current-state-dashboard-incident-panel-survives": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "current-state-profile-view-log-cleanup": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "current-state-hardware-signing-key-swap": {
+      "outcome": "HIT",
+      "goldRank": 1
+    },
+    "current-state-customer-delete-actually-gone": {
+      "outcome": "HIT",
+      "goldRank": 1
+    }
+  },
+  "floorsMet": true
+}

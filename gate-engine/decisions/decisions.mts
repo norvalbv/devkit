@@ -72,6 +72,7 @@ import {
 import { warnNearestAxes } from './dedupe.mts';
 import { runDrift } from './drift.mts';
 import { assertFullNotJson, printFull, printRanked } from './recall/full-print.mts';
+import { noteTextWithRelation } from './recall/note-relations.mts';
 import { type RankResult, rankAxes as rankAxesIn, reindexAll } from './recall/retrieval.mts';
 
 export {
@@ -234,9 +235,9 @@ function addNote(slug: string, o: AddOptions, p: Paths) {
   }
   const date = today();
   const parsed = parseDecision(readFileSync(file, 'utf8'));
-  const fm = { slug, created: parsed.fm.created || date };
-  const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, o.note)}\n`;
-  writeFileAtomic(file, renderDecision(fm, body));
+  const note = noteTextWithRelation(o.note, o.supersedes, parsed.body);
+  const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
+  writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
   console.log(`Noted on "${slug}" (${date}).`);
 }
 

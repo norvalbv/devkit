@@ -29,6 +29,7 @@
 
 import { type IndexRow, parseTargetFields } from '../decision-format.mts';
 import { sections } from '../recall/markdown.mts';
+import { validateAxisAmends } from '../recall/note-relations.mts';
 
 export const INTEGRITY_CHECK_IDS = [
   'index-stale',
@@ -38,6 +39,7 @@ export const INTEGRITY_CHECK_IDS = [
   'target-heading-depth',
   'duplicate-field-text',
   'retarget-missing-evidence-change',
+  'note-amends-unresolvable',
 ] as const;
 
 export type IntegrityCheckId = (typeof INTEGRITY_CHECK_IDS)[number];
@@ -245,9 +247,32 @@ export function checkIndexStale(axis: AxisDoc, indexRow: IndexRow | undefined): 
   ];
 }
 
+/** #8 — a note's `**Amends:**` must name a note that exists and predates it. The marker asserts THIS
+ * note supersedes THAT one; an assertion nothing can resolve is the same dangling-pointer defect
+ * drift already reports for a Target's `**Supersedes:**`, one level down. The pointer is DECLARED by
+ * the writer, never inferred — telling a genuine supersession from a refinement needs a note read
+ * against its predecessor, which is an LLM job and so belongs in the offline benchmark, not a check
+ * that runs on every commit. Fires 0/181 on the real corpora: nothing has ever been tagged, so this
+ * grandfathers nobody. */
+export function checkNoteAmends(
+  axis: AxisDoc,
+  foreignNoteIds: Map<string, Set<string>> = new Map(),
+): IntegrityFinding[] {
+  return validateAxisAmends(axis.slug, axis.body, foreignNoteIds).map((f) => ({
+    check: 'note-amends-unresolvable' as const,
+    slug: f.slug,
+    block: f.noteId,
+    detail: f.detail,
+  }));
+}
+
 /** Every structural check, in the order they read most naturally (identity → shape → content →
  * cross-file). Combined here once so scan.mts and the benchmark share a single check list. */
-export function checkAxis(axis: AxisDoc, indexRow: IndexRow | undefined): IntegrityFinding[] {
+export function checkAxis(
+  axis: AxisDoc,
+  indexRow: IndexRow | undefined,
+  foreignNoteIds: Map<string, Set<string>> = new Map(),
+): IntegrityFinding[] {
   return [
     ...checkFrontmatterSlug(axis),
     ...checkFrontmatterCreated(axis),
@@ -255,6 +280,7 @@ export function checkAxis(axis: AxisDoc, indexRow: IndexRow | undefined): Integr
     ...checkTargetHeadingDepth(axis),
     ...checkDuplicateFieldText(axis),
     ...checkRetargetEvidenceChange(axis),
+    ...checkNoteAmends(axis, foreignNoteIds),
     ...checkIndexStale(axis, indexRow),
   ];
 }

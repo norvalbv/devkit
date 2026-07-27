@@ -15,3 +15,5 @@ created: 2026-01-10
 **Vision-fit:** n/a
 **Rejected:** n/a
 **Source:** manual
+- 2026-02-12 — Cap raised to six on the two hosts that run no request-serving processes.
+- 2026-02-14 — **Amends:** note:2026-02-12 — Reverted to four everywhere; the exempted hosts turned out to share a connection pool with the API tier, so the exemption reintroduced the starvation it was meant to avoid.

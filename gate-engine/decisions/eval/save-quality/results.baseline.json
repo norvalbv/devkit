@@ -1,0 +1,122 @@
+{
+  "metrics": [
+    {
+      "id": "defect-recall",
+      "label": "Defect recall (perturbation corpus)",
+      "k": 13,
+      "n": 13
+    },
+    {
+      "id": "false-positive-rate",
+      "label": "False-positive rate at R80",
+      "k": 0,
+      "n": 18,
+      "direction": "lower"
+    },
+    {
+      "id": "checks-exercised",
+      "label": "Declared checks with a perturbation case",
+      "k": 8,
+      "n": 8
+    },
+    {
+      "id": "real-corpus-clean",
+      "label": "Real records with no unexpected finding",
+      "k": 34,
+      "n": 34
+    }
+  ],
+  "rows": {
+    "clean-single-target-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "clean-multi-target-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "clean-category-field-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "clean-short-na-fields-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "clean-legacy-schema-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-index-stale-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-index-stale-02": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-02": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-frontmatter-slug-mismatch-03": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-frontmatter-created-after-target-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-h1-slug-mismatch-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-h1-slug-mismatch-02": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-target-heading-depth-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-duplicate-field-text-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-duplicate-field-text-02": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-retarget-missing-evidence-change-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    },
+    "defect-note-amends-unresolvable-01": {
+      "recallHit": true,
+      "falsePositive": false,
+      "unexpected": []
+    }
+  },
+  "floorsMet": true
+}

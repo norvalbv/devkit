@@ -246,18 +246,29 @@ describe('checkAxis (combinator)', () => {
 
   it('proves every mutation IN perturb.mts trips exactly the check it names, and nothing else', () => {
     for (const [checkId, mutate] of Object.entries(MUTATIONS)) {
-      // retarget-missing-evidence-change needs a re-targeted axis; every other mutation works on the
+      // Two mutations need a richer fixture than a bare single-Target axis: a re-target to strip
+      // Evidence-change from, and a RESOLVED Amends edge to break. Every other one works on the
       // single-Target fixture.
+      const amendsAxis = cleanAxis('mutation-target', {
+        extra:
+          '- 2026-01-06 — the first convergence.\n' +
+          '- 2026-01-07 — **Amends:** note:2026-01-06 — that turned out wrong.\n',
+      });
       const fixture =
         checkId === 'retarget-missing-evidence-change'
           ? {
               axis: retargetedAxis('**Evidence-change:** what shifted.\n'),
               indexRow: { slug: 'my-axis', ruling: 'r', why: 'w', updated: '2026-02-01' },
             }
-          : {
-              axis: cleanAxis('mutation-target'),
-              indexRow: { slug: 'mutation-target', ruling: 'r', why: 'w', updated: '2026-01-05' },
-            };
+          : checkId === 'note-amends-unresolvable'
+            ? {
+                axis: amendsAxis,
+                indexRow: { slug: 'mutation-target', ruling: 'r', why: 'w', updated: '2026-01-07' },
+              }
+            : {
+                axis: cleanAxis('mutation-target'),
+                indexRow: { slug: 'mutation-target', ruling: 'r', why: 'w', updated: '2026-01-05' },
+              };
       const mutated = mutate(fixture);
       const findings = checkAxis(mutated.axis, mutated.indexRow);
       expect(findings.map((f) => f.check)).toEqual([checkId]);

@@ -16,6 +16,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from "../../config.mjs";
 import { parseDecision, parseIndex } from "../decision-format.mjs";
+import { axisNoteIds } from "../recall/note-relations.mjs";
 import { checkAxis } from "./checks.mjs";
 function loadAxisDocs(dir) {
     return readdirSync(dir)
@@ -38,7 +39,10 @@ export function scanCorpus(dir) {
         return { findings: [], filesScanned: 0 };
     const axes = loadAxisDocs(dir);
     const indexRows = loadIndexRows(dir);
-    const findings = axes.flatMap((axis) => checkAxis(axis, indexRows.get(axis.slug)));
+    // Cross-axis note ids, built once: a `slug#note:<date>` Amends can only be judged against the
+    // OTHER file, and resolving it per-axis would re-read the corpus for every reference.
+    const noteIds = new Map(axes.map((a) => [a.slug, axisNoteIds(a.body)]));
+    const findings = axes.flatMap((axis) => checkAxis(axis, indexRows.get(axis.slug), noteIds));
     return { findings, filesScanned: axes.length };
 }
 /** `guard-decisions integrity` — exit 1 when any structural-integrity finding exists, else 0. Mirrors

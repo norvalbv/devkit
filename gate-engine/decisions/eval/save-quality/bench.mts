@@ -64,6 +64,7 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const CORPUS = path.join(here, 'corpus', 'adapted');
 const CASES = path.join(here, 'cases-save.jsonl');
+const BASELINE = path.join(here, 'results.baseline.json');
 
 /**
  * The ONE known, named exception on the real corpus (see integrity/checks.mts's docstring):
@@ -244,6 +245,53 @@ function report(summary: ReturnType<typeof summarize>, real: RealCorpusReport | 
   }
 }
 
+/**
+ * The publishable baseline: the numbers this suite already computed, stated in the `deterministic`
+ * adapter's shape so the dashboard renders them verbatim rather than inferring them.
+ *
+ * Both directions are published, not just the flattering one. Recall alone would look perfect while a
+ * check quietly false-fired; FPR alone would look perfect while a check detected nothing. The real
+ * corpus is a third, separate number — never pooled with the perturbation ones (see this file's
+ * docstring), because a manufactured-defect corpus and a live log answer different questions.
+ */
+export function baselineOf(summary: ReturnType<typeof summarize>, real: RealCorpusReport | null) {
+  return {
+    metrics: [
+      {
+        id: 'defect-recall',
+        label: 'Defect recall (perturbation corpus)',
+        k: summary.recall.hit,
+        n: summary.recall.total,
+      },
+      {
+        id: 'false-positive-rate',
+        label: 'False-positive rate at R80',
+        k: summary.fpr.bad,
+        n: summary.fpr.total,
+        direction: 'lower',
+      },
+      {
+        id: 'checks-exercised',
+        label: 'Declared checks with a perturbation case',
+        k: INTEGRITY_CHECK_IDS.length - summary.checksUncovered.length,
+        n: INTEGRITY_CHECK_IDS.length,
+      },
+      ...(real
+        ? [
+            {
+              id: 'real-corpus-clean',
+              label: 'Real records with no unexpected finding',
+              k: real.filesScanned - real.unexpected.length,
+              n: real.filesScanned,
+            },
+          ]
+        : []),
+    ],
+    rows: summary.rows,
+    floorsMet: gatePassed(summary) && !summary.checksUncovered.length && !real?.unexpected.length,
+  };
+}
+
 function coverage(cases: SaveQualityCase[]) {
   console.log('\n── coverage ──');
   console.log(
@@ -270,7 +318,10 @@ export async function main(argv: string[]) {
   const summary = runPerturbation(cases);
   const real = runRealCorpus();
 
-  if (args.has('--json')) {
+  if (args.has('--baseline')) {
+    writeFileSync(BASELINE, `${JSON.stringify(baselineOf(summary, real), null, 2)}\n`);
+    console.log(`save-quality: wrote ${path.basename(BASELINE)}`);
+  } else if (args.has('--json')) {
     console.log(JSON.stringify({ perturbation: summary, real }, null, 2));
   } else {
     report(summary, real);
