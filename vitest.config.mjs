@@ -13,6 +13,7 @@ const GIT_INTEGRATION_TESTS = [
   'cli/__tests__/prepare-gate-worktree.test.mts',
   'cli/__tests__/reconcile.test.mts',
   'cli/__tests__/reship.test.mts',
+  'cli/__tests__/review.test.mts',
   'cli/__tests__/review-base-inference.test.mts',
   'cli/__tests__/review-gate-supervisor.test.mts',
   'cli/__tests__/ship-branch.test.mts',

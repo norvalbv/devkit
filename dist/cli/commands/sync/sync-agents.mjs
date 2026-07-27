@@ -12,6 +12,11 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "../../lib/install/agent-asset-manifest/compatibility.mjs";
+import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from "../../lib/install/agent-asset-manifest/lifecycle.mjs";
+import { readAgentAssetManifest } from "../../lib/install/agent-asset-manifest/reader.mjs";
+import { agentAssetDir } from "../../lib/install/agent-assets.mjs";
+import { resolveExistingAgentProviders } from "../../lib/install/agent-providers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
 function listAgents(dir) {
@@ -34,6 +39,10 @@ function listAgents(dir) {
  */
 export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false } = {}) {
     const dryRun = args.includes('--dry-run');
+    return withAgentAssetLifecycleLock(cwd, dryRun, () => syncAgentsLocked(args, cwd, targets, { skipTracked, override }));
+}
+function syncAgentsLocked(args, cwd, targets, { skipTracked, override = () => false }) {
+    const dryRun = args.includes('--dry-run');
     const targetDirs = targets.map((t) => `.${t}/agents`);
     const agentsSrc = join(packageDir(), 'agents');
     const rels = listAgents(agentsSrc);
@@ -42,7 +51,43 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
     // The prior manifest (reused for the idempotency check) — its keys are the provenance source for
     // findConflicts: a same-named agent the consumer authored (unmanifested + divergent) is PRESERVED.
     const manifestPath = join(cwd, '.devkit', 'agents-manifest.json');
-    const prev = readJson(manifestPath);
+    const decoded = readAgentAssetManifest(manifestPath, 'agents');
+    if (requiresProviderNativeLifecycle(decoded, targets)) {
+        const result = syncProviderNativeAssets({
+            root: cwd,
+            kind: 'agents',
+            sources: rels.map((logicalRel) => ({
+                logicalRel,
+                content: readFileSync(join(agentsSrc, logicalRel)),
+            })),
+            targets,
+            devkitRef,
+            dryRun,
+            skipTracked,
+            override,
+        });
+        const reported = new Set();
+        for (const skip of result.skips) {
+            if (reported.has(skip.unit))
+                continue;
+            reported.add(skip.unit);
+            console.log(skip.reason === 'tracked'
+                ? `  ! skipping agent "${skip.unit}" — git-tracked in the repo (left untouched)`
+                : `  ! preserving non-devkit agent "${skip.unit}" (left untouched — re-run with --force or select it to overwrite)`);
+        }
+        if (dryRun) {
+            for (const outputPath of result.outputPaths)
+                console.log(`  [dry-run] write ${outputPath}`);
+            console.log(`  [dry-run] write .devkit/agents-manifest.json (${rels.length} files)`);
+        }
+        else {
+            const dirs = targets.map((target) => agentAssetDir(target, 'agents'));
+            console.log(`  ✓ synced ${Object.keys(result.manifest.files).length} agent file(s) → ${dirs.join(' + ')}`);
+        }
+        return result.manifest;
+    }
+    assertLegacyAssetWriterCompatible(decoded, targets, 'agents');
+    const prev = decoded?.manifest ?? null;
     const conflicts = new Set(findConflicts(cwd, agentsSrc, rels, targets, 'agents', prev));
     const files = {};
     for (const rel of rels) {
@@ -75,8 +120,7 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
     // Idempotency: keep generatedAt STABLE when nothing about the synced set changed, so a re-run
     // produces no spurious git diff (same contract as the skills manifest). (manifestPath + prev were
     // read above — reused here, also the provenance source for findConflicts.)
-    const unchanged = prev && prev.devkitRef === devkitRef && JSON.stringify(prev.files) === JSON.stringify(files);
-    const generatedAt = unchanged && prev ? prev.generatedAt : new Date().toISOString();
+    const generatedAt = nextLegacyManifestGeneratedAt(prev, devkitRef, files);
     // `targets` records WHICH surfaces devkit wrote to → surface-aware ownership in findConflicts.
     const manifest = { devkitRef, generatedAt, targets: [...targets], files };
     if (dryRun) {
@@ -95,12 +139,29 @@ export function syncAgents(args, cwd, targets = AGENT_TARGETS, { skipTracked, ov
  */
 export function detectAgentConflicts(root, targets = AGENT_TARGETS) {
     const agentsSrc = join(packageDir(), 'agents');
-    return findConflicts(root, agentsSrc, listAgents(agentsSrc), targets, 'agents', readJson(join(root, '.devkit', 'agents-manifest.json')));
+    const decoded = readAgentAssetManifest(join(root, '.devkit', 'agents-manifest.json'), 'agents');
+    if (requiresProviderNativeLifecycle(decoded, targets)) {
+        return [
+            ...new Set(findProviderNativeAssetConflicts({
+                root,
+                kind: 'agents',
+                sources: listAgents(agentsSrc).map((logicalRel) => ({
+                    logicalRel,
+                    content: readFileSync(join(agentsSrc, logicalRel)),
+                })),
+                targets,
+            })
+                .filter((conflict) => conflict.reason !== 'tracked')
+                .map((conflict) => conflict.unit)),
+        ];
+    }
+    assertLegacyAssetWriterCompatible(decoded, targets, 'agents');
+    return findConflicts(root, agentsSrc, listAgents(agentsSrc), targets, 'agents', decoded?.manifest ?? null);
 }
 export const meta = {
     name: 'sync-agents',
-    summary: 'Copy review/testing agents into .claude + .cursor.',
-    help: `devkit sync-agents — copy devkit's review/testing agents into .claude/agents + .cursor/agents.
+    summary: 'Copy review/testing agents into selected agent providers.',
+    help: `devkit sync-agents — copy devkit's review/testing agents into Claude, Codex, and Cursor.
 
 Usage:
   devkit sync-agents [--dry-run] [--force]
@@ -113,8 +174,12 @@ export default function run(args, cwd) {
     // Agents are repo-wide → target the git root (= cwd for a single-package repo). Honour the
     // recorded agent-surface choice so a manual re-sync never re-adds a deselected surface.
     const { gitRoot } = detectGitRoot(cwd);
-    const cfg = readJson(join(gitRoot, '.devkit', 'config.json'));
+    // Config is package-local in a monorepo even though agent assets are repo-wide.
+    const cfg = readJson(join(cwd, '.devkit', 'config.json'));
     const override = args.includes('--force') ? () => true : undefined;
-    syncAgents(args, gitRoot, cfg?.components?.agentTargets ?? AGENT_TARGETS, { override });
+    const targets = cfg
+        ? resolveExistingAgentProviders(gitRoot, cfg.components?.agentTargets, ['agents'])
+        : AGENT_TARGETS;
+    syncAgents(args, gitRoot, targets, { override });
     return 0;
 }

@@ -3,6 +3,7 @@
  * the wizard funnels into. Calling applyInit with a chosen component map is preferable to
  * simulating a clack TTY: it covers the same install/remove logic the wizard drives.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -43,7 +44,7 @@ describe('selection helpers', () => {
       structure: true,
     });
     expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
-    expect(s.agentTargets).toEqual(['claude', 'cursor']);
+    expect(s.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('normalizeSelection fills missing keys + drops unknown guards', () => {
@@ -53,6 +54,7 @@ describe('selection helpers', () => {
     expect(s.guards).toEqual(['size']);
     expect(normalizeSelection({ agentTargets: null as never }).agentTargets).toEqual([
       'claude',
+      'codex',
       'cursor',
     ]);
   });
@@ -80,12 +82,22 @@ describe('selection helpers', () => {
     expect(sel.guards).toEqual(['fanout']);
   });
 
-  it('agentTargets: both by default, narrowed by --no-claude / --no-cursor', () => {
-    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual(['claude', 'cursor']);
+  it('agentTargets: all providers by default, narrowed by --no-<provider>', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).agentTargets).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+    ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-cursor'])).agentTargets).toEqual([
       'claude',
+      'codex',
     ]);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-claude'])).agentTargets).toEqual([
+      'codex',
+      'cursor',
+    ]);
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-codex'])).agentTargets).toEqual([
+      'claude',
       'cursor',
     ]);
   });
@@ -217,6 +229,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
 
   it('preserves legacy-enabled review behavior when reapplying an overlay', async () => {
     const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
     const selection = {
       biome: false,
       tsconfig: false,
@@ -432,45 +445,29 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(settings).toContain('lint-check.sh');
   });
 
-  it('preserves hook commands whose components were already recorded deselected', async () => {
+  it('fresh defaults install provider-native assets for Claude, Codex, and Cursor', async () => {
     const root = tmpRepo();
-    const selection = {
-      biome: false,
-      tsconfig: false,
-      skills: false,
-      agents: false,
-      agentHooks: false,
-      fallow: false,
-      husky: true,
-      structure: false,
-      agentTargets: ['claude', 'cursor'],
-      guards: ['decisions'],
-    };
-    await applyInit(root, { stack: 'generic', selection });
-
-    const claudePath = join(root, '.claude/settings.json');
-    const claudeSettings = JSON.parse(readFileSync(claudePath, 'utf8'));
-    claudeSettings.hooks.UserPromptSubmit = [
-      {
-        matcher: '',
-        hooks: [
-          {
-            type: 'command',
-            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',
-          },
-        ],
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        agents: true,
+        husky: false,
+        structure: false,
+        guards: [],
       },
-    ];
-    writeFileSync(claudePath, JSON.stringify(claudeSettings));
-    const cursorPath = join(root, '.cursor/hooks.json');
-    const cursorSettings = JSON.parse(readFileSync(cursorPath, 'utf8'));
-    cursorSettings.hooks.stop = [{ command: '.cursor/hooks/lint-check.sh' }];
-    writeFileSync(cursorPath, JSON.stringify(cursorSettings));
+      devkitRef: 'v0.3.0',
+    });
 
-    await applyInit(root, { stack: 'generic', selection });
-
-    expect(readFileSync(claudePath, 'utf8')).toContain('claude-rules-reminder.mjs');
-    expect(readFileSync(cursorPath, 'utf8')).toContain('.cursor/hooks/lint-check.sh');
+    expect(existsSync(join(root, '.claude/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.agents/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/skills/brainstorming/SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude/agents/testing-agent.md'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/testing-agent.toml'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/agents/testing-agent.md'))).toBe(true);
+    expect(config(root).components.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
   it('switching to one surface prunes the deselected surface but keeps the manifest', async () => {
@@ -636,8 +633,6 @@ describe('fallow apply step (mocked installer — never shells out)', () => {
     });
     expect(fallowSpies.installFallow).toHaveBeenCalledTimes(1);
     expect(fallowSpies.ensureFallowGitignore).toHaveBeenCalledTimes(1);
-    // devkit wires FALLOW's own hooks (git + agent + the Cursor mirror) rather than shipping a
-    // gate of its own — wireFallowHooks owns that; install-fallow.test covers its per-target calls.
     expect(fallowSpies.wireFallowHooks).toHaveBeenCalledTimes(1);
     // install runs before the gate is wired.
     expect(fallowSpies.installFallow.mock.invocationCallOrder[0]).toBeLessThan(

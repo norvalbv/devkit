@@ -20,11 +20,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, applyOverlayConstraints, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
+import { applyOverlayConstraints, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { selfHostSelection } from "../lib/husky/self-host.mjs";
+import { resolveExistingAgentProviders } from "../lib/install/agent-providers.mjs";
 import { adoptAgentAssetCollisions } from "../lib/install/agent-surfaces.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
@@ -72,12 +73,11 @@ export default async function upgrade(args, cwd) {
     const stack = cfg.stack ?? detectStack(cwd);
     const standalone = Boolean(cfg.standalone);
     const { gitRoot } = detectGitRoot(cwd);
-    // agentTargets: normalizeSelection ALWAYS fills this (both surfaces), so read the RAW recorded
+    // agentTargets: normalizeSelection ALWAYS fills the fresh defaults, so read the RAW recorded
     // value first — else a legacy claude-only repo gets .cursor re-added. When absent (legacy config),
-    // infer from which surfaces currently hold devkit content; fall back to both.
+    // infer only historical Claude/Cursor ownership; arbitrary .codex/.agents content is user-owned.
     const rawTargets = cfg.components?.agentTargets;
-    const inferred = AGENT_TARGETS.filter((t) => existsSync(join(gitRoot, `.${t}`, 'skills')) || existsSync(join(gitRoot, `.${t}`, 'agents')));
-    const agentTargets = rawTargets ?? (inferred.length ? inferred : AGENT_TARGETS);
+    const agentTargets = resolveExistingAgentProviders(gitRoot, rawTargets, ['skills', 'agents']);
     // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
     // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
     // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive

@@ -8,11 +8,10 @@
  * gate-engine/decisions/eval/README.md is the standard; departures are listed in ./README.md.
  *
  * Two row modes (one bench):
- *   intrinsic — no tools, everything inlined (BENCHMARK directive); scores the closed-set summary
- *               fields (VERDICT / FRAME_META / counts) + the seed benches' ported text checks.
- *   workflow  — the full contract in a disposable fixture repo (tools, report file, edge-cases
- *               artifact); adds the finding-set metrics via the audited matcher. The headline
- *               metrics live here.
+ *   intrinsic — no tools, everything inlined (BENCHMARK directive); scores closed fields from the
+ *               normalized response (VERDICT / FRAME_META / counts) + ported text checks.
+ *   workflow  — the full closed JSON contract in a disposable fixture repo; adds the finding-set
+ *               metrics via the audited matcher. The headline metrics live here.
  *
  *   node bench.mts                     # full run
  *   node bench.mts --dev               # prompt-iteration tier: holdout rows excluded
@@ -43,7 +42,7 @@
  * matcher.mts) + corpusHash + config; any mismatch skips the comparison mechanically. runs.log is
  * the anti-Goodhart ledger. Holdout rows are excluded from --dev and included in baseline/gate.
  *
- * NULL is a verdict: an unparseable summary scores NULL (its own confusion column). An outage is
+ * NULL is a verdict: a semantically unscorable response scores NULL (its own confusion column). An outage is
  * NOT a parse-NULL: intrinsic rows abort on the first dark row (cheap class, a polluted run is
  * worth less than a rerun); a workflow row needs ≥2 completed trials at K=3 (1 at K=1) or it
  * scores NULL and counts in `outages`. A baseline refuses to write with outages > 0; --fail
@@ -51,13 +50,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -84,7 +84,6 @@ import {
   type GoldSlot,
   kappa,
   mapPool,
-  parseReportFindings,
   parseSlotReply,
   runMatcher,
   scoreCase,
@@ -92,6 +91,7 @@ import {
 } from './matcher.mts';
 import {
   type CriticSource,
+  extractBenchmarkCritiqueResponse,
   FRAME_METAS,
   type FrameMeta,
   loadCritic,
@@ -102,12 +102,23 @@ import {
   VERDICTS,
   type Verdict,
 } from './run-critic.mts';
+import {
+  loadSalvageDir,
+  runnerHash,
+  type SalvagedTrial,
+  salvageFingerprint,
+  salvageUsable,
+  sha12,
+} from './salvage.mts';
+
+export { runnerHash, salvageFingerprint } from './salvage.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const baselinePath = path.join(here, 'results.baseline.json');
 const casesPath = path.join(here, 'cases-critique.jsonl');
 const auditPath = path.join(here, 'matcher-audit.jsonl');
 const transcriptsDir = path.join(here, 'transcripts');
+const TRANSCRIPT_ARTIFACT = /\.run[1-3]\.(?:summary\.txt|report\.md|artifact\.json)$/;
 
 const RUNS = Math.max(1, Number.parseInt(process.env.BENCH_RUNS ?? '1', 10) || 1);
 const MATCH_MODEL = process.env.BENCH_MATCH_MODEL ?? 'haiku';
@@ -121,16 +132,12 @@ const ROW_CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENC
 const RECALL_FLOOR = 0.75;
 const CLEAN_RATE_FLOOR = 0.75;
 const DECOY_FLAG_CEILING = 0.25;
-/** ≤300-token contract with chars/4 heuristic slack — measured, reported, never floored. */
-const SUMMARY_TOKEN_BUDGET = 330;
-
 // ─── Corpus ───────────────────────────────────────────────────────────────────────
 
 export interface Row {
   id: string;
   mode: 'intrinsic' | 'workflow';
   prompt: string;
-  edgeCasesId?: string;
   repo?: { base: Record<string, string>; staged: Record<string, string | null> };
   gold?: GoldSlot[];
   decoys?: DecoySlot[];
@@ -230,10 +237,11 @@ export interface RowResult {
   /** Decoy-only rows: did any run-majority fabricate a CRITICAL? null elsewhere. */
   falseAlarm: { got: boolean; ok: boolean; stable: boolean } | null;
   contract: {
-    summaryParsed: boolean;
-    withinTokenBudget: boolean;
-    reportWritten: boolean | null;
-    artifactValid: boolean | null;
+    responseValid: boolean;
+    validRuns: number;
+    /** Strict responses available to the semantic scorer, including benchmark-only extraction. */
+    semanticRuns: number;
+    totalRuns: number;
   } | null;
   fabricatedPerRun: number[];
   findingCount: number;
@@ -269,41 +277,6 @@ export interface RunDeps {
   salvage?: (rowId: string) => SalvagedTrial[];
 }
 
-export interface SalvagedTrial {
-  raw: string;
-  report: string | null;
-  /** null = the interrupted run predates artifact persistence — validity is UNKNOWN for this
-   * trial (scored null, excluded from the contract denominator), never assumed pass/fail. */
-  artifact: string | null;
-}
-
-/** Read saved trials for one row from a transcripts dir (summary is the trial's existence). */
-export function loadSalvageDir(dir: string, rowId: string): SalvagedTrial[] {
-  const trials: SalvagedTrial[] = [];
-  const readOrNull = (p: string): string | null => {
-    try {
-      return readFileSync(p, 'utf8');
-    } catch {
-      return null;
-    }
-  };
-  for (let k = 1; k <= 3; k += 1) {
-    const raw = readOrNull(path.join(dir, `${rowId}.run${k}.summary.txt`));
-    if (raw === null) continue;
-    trials.push({
-      raw,
-      report: readOrNull(path.join(dir, `${rowId}.run${k}.report.md`)),
-      artifact: readOrNull(path.join(dir, `${rowId}.run${k}.artifact.json`)),
-    });
-  }
-  return trials;
-}
-
-/** Enough salvaged trials to stand in for a full row: the same bar as the outage rule (a K=3
- * majority needs ≥2 trials; a K=1 dev row needs 1). */
-export const salvageUsable = (trials: SalvagedTrial[], runs: number): boolean =>
-  trials.length >= (runs >= 3 ? 2 : 1);
-
 /** Aggregate K parsed summaries into row-level verdict/frameMeta majorities. */
 export function aggregateSummaries(
   summaries: ParsedSummary[],
@@ -324,6 +297,8 @@ export function aggregateSummaries(
 export async function runIntrinsicRow(row: Row, deps: RunDeps): Promise<RowResult> {
   const summaries: ParsedSummary[] = [];
   const textOks: boolean[] = [];
+  let validRuns = 0;
+  let semanticRuns = 0;
   const salvaged = deps.salvage?.(row.id) ?? [];
   const trialRaws: string[] = [];
   if (salvageUsable(salvaged, deps.runs)) {
@@ -342,8 +317,38 @@ export async function runIntrinsicRow(row: Row, deps: RunDeps): Promise<RowResul
     }
   }
   for (const raw of trialRaws) {
-    summaries.push(parseSummary(raw));
-    textOks.push(textCheck(raw, row));
+    const exactSummary = parseSummary(raw);
+    if (exactSummary.responseValid) validRuns += 1;
+    const semantic = extractBenchmarkCritiqueResponse(raw);
+    if (!semantic) continue;
+    semanticRuns += 1;
+    summaries.push(semantic.exact ? exactSummary : semantic.summary);
+    textOks.push(textCheck(semantic.raw, row));
+  }
+  const minimum = deps.runs >= 3 ? 2 : 1;
+  const contract: NonNullable<RowResult['contract']> = {
+    responseValid: validRuns === deps.runs,
+    validRuns,
+    semanticRuns,
+    totalRuns: deps.runs,
+  };
+  if (semanticRuns < minimum) {
+    return {
+      id: row.id,
+      mode: 'intrinsic',
+      expected: row.expectVerdict[0],
+      verdict: { got: 'NULL', ok: false, stable: false },
+      frameMeta: null,
+      textOk: null,
+      slots: {},
+      severity: [],
+      falseAlarm: null,
+      contract,
+      fabricatedPerRun: [],
+      findingCount: 0,
+      outage: false,
+      ok: false,
+    };
   }
   const agg = aggregateSummaries(summaries, row);
   const text = majorityBool(textOks);
@@ -357,7 +362,7 @@ export async function runIntrinsicRow(row: Row, deps: RunDeps): Promise<RowResul
     slots: {},
     severity: [],
     falseAlarm: null,
-    contract: null,
+    contract,
     fabricatedPerRun: [],
     findingCount: 0,
     outage: false,
@@ -369,47 +374,34 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const gold = row.gold ?? [];
   const decoys = row.decoys ?? [];
   const summaries: ParsedSummary[] = [];
-  const contractPerRun: {
-    summaryParsed: boolean;
-    withinTokenBudget: boolean;
-    reportWritten: boolean;
-    artifactValid: boolean | null;
-  }[] = [];
   const slotGotPerRun: Record<string, string>[] = [];
   const severityPerRun: { slotId: string; got: FindingSeverity }[][] = [];
   const fabricatedPerRun: number[] = [];
   let findingCount = 0;
   let completed = 0;
+  let validRuns = 0;
+  let semanticRuns = 0;
 
-  // One trial's scoring, shared by the live and salvaged paths. artifactKnowable=false means the
-  // trial predates artifact persistence: validity scores null (excluded from the denominator),
-  // never an assumed pass/fail.
-  const scoreTrial = async (
-    out: { raw: string; report: string | null; artifact: string | null },
-    artifactKnowable: boolean,
-  ) => {
-    const summary = parseSummary(out.raw);
+  // One trial's scoring, shared by the live and salvaged paths.
+  const scoreTrial = async (raw: string) => {
+    const exactSummary = parseSummary(raw);
+    if (exactSummary.responseValid) validRuns += 1;
+    const semantic = extractBenchmarkCritiqueResponse(raw);
+    if (!semantic) return;
+    semanticRuns += 1;
+    const summary = semantic.exact ? exactSummary : semantic.summary;
     summaries.push(summary);
-    const findings = out.report ? parseReportFindings(out.report) : [];
+    const findings = semantic.findings.map((finding) => ({
+      severity: finding.severity,
+      desc: finding.claim,
+      body: [
+        `Lens: ${finding.lens}`,
+        `Evidence: ${finding.evidence}`,
+        `Impact: ${finding.impact}`,
+        `Recommendation: ${finding.recommendation}`,
+      ].join('\n'),
+    }));
     findingCount = Math.max(findingCount, findings.length);
-    let artifactValid: boolean | null = artifactKnowable ? false : null;
-    if (out.artifact) {
-      try {
-        const a = JSON.parse(out.artifact) as { risks?: unknown[]; flowId?: string };
-        artifactValid =
-          Array.isArray(a.risks) &&
-          a.risks.length > 0 &&
-          (!row.edgeCasesId || a.flowId === row.edgeCasesId);
-      } catch {
-        artifactValid = false;
-      }
-    }
-    contractPerRun.push({
-      summaryParsed: summary.verdict !== null,
-      withinTokenBudget: summary.approxTokens <= SUMMARY_TOKEN_BUDGET,
-      reportWritten: out.report !== null,
-      artifactValid,
-    });
     const outcomes = await (deps.match ?? runMatcher)(gold, decoys, findings, {
       model: MATCH_MODEL,
       runs: MATCH_RUNS,
@@ -425,7 +417,7 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
     // Already-paid trials from an interrupted run: no fixture, no spawn — matcher only.
     for (const t of salvaged) {
       completed += 1;
-      await scoreTrial(t, t.artifact !== null);
+      await scoreTrial(t.raw);
     }
   } else {
     for (let k = 0; k < deps.runs; k += 1) {
@@ -436,15 +428,11 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
           critic: deps.critic,
           prompt: row.prompt,
           fixtureDir: fx.repo,
-          edgeCasesId: row.edgeCasesId,
         });
         if (out.raw === null) continue; // expensive class: score what completed, count the outage
         completed += 1;
         deps.saveTranscript?.(`${row.id}.run${k + 1}.summary.txt`, out.raw);
-        if (out.report) deps.saveTranscript?.(`${row.id}.run${k + 1}.report.md`, out.report);
-        if (out.artifact)
-          deps.saveTranscript?.(`${row.id}.run${k + 1}.artifact.json`, out.artifact);
-        await scoreTrial({ raw: out.raw, report: out.report, artifact: out.artifact }, true);
+        await scoreTrial(out.raw);
       } finally {
         fx.cleanup();
         deps.registerCleanup(null);
@@ -454,7 +442,13 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
 
   // A K=3 row needs ≥2 completed trials for a majority worth the name; a K=1 (--dev) row needs 1.
   const minCompleted = deps.runs >= 3 ? 2 : 1;
-  if (completed < minCompleted) {
+  const contract: NonNullable<RowResult['contract']> = {
+    responseValid: validRuns === deps.runs,
+    validRuns,
+    semanticRuns,
+    totalRuns: deps.runs,
+  };
+  if (completed < minCompleted || semanticRuns < minCompleted) {
     return {
       id: row.id,
       mode: 'workflow',
@@ -465,10 +459,10 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
       slots: {},
       severity: [],
       falseAlarm: null,
-      contract: null,
+      contract,
       fabricatedPerRun,
       findingCount: 0,
-      outage: true,
+      outage: completed < minCompleted,
       ok: false,
     };
   }
@@ -505,16 +499,6 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
   const falseAlarm = isDecoyOnly(row)
     ? { got: fabricated.got, ok: !fabricated.got, stable: fabricated.stable }
     : null;
-  const artifactVals = contractPerRun
-    .map((c) => c.artifactValid)
-    .filter((v): v is boolean => v !== null);
-  const contract: RowResult['contract'] = {
-    summaryParsed: majorityBool(contractPerRun.map((c) => c.summaryParsed)).got,
-    withinTokenBudget: majorityBool(contractPerRun.map((c) => c.withinTokenBudget)).got,
-    reportWritten: majorityBool(contractPerRun.map((c) => c.reportWritten)).got,
-    // All trials unknowable (pre-persistence salvage) → null: unknown, not pass/fail.
-    artifactValid: artifactVals.length ? majorityBool(artifactVals).got : null,
-  };
   const goldOk = gold.every((g) => slots[g.id]?.ok);
   const decoysOk = decoys.every((d) => slots[d.id]?.ok);
   return {
@@ -578,7 +562,12 @@ export interface Summary {
 }
 
 export function summarize(results: RowResult[], critic: { model: string }): Summary {
-  const scored = results.filter((r) => !r.outage);
+  const scored = results.filter((r) => {
+    if (r.outage) return false;
+    const total = r.contract?.totalRuns ?? 0;
+    const minimum = total >= 3 ? 2 : 1;
+    return (r.contract?.semanticRuns ?? 0) >= minimum;
+  });
   const goldSlots = scored.flatMap((r) => Object.values(r.slots).filter((s) => s.kind === 'gold'));
   const decoySlots = scored.flatMap((r) =>
     Object.values(r.slots).filter((s) => s.kind === 'decoy'),
@@ -602,22 +591,17 @@ export function summarize(results: RowResult[], critic: { model: string }): Summ
   const metaRows = scored.filter((r) => r.frameMeta !== null);
   const sev = scored.flatMap((r) => r.severity);
   const workflowScored = scored.filter((r) => r.mode === 'workflow');
-  const contractKeys = [
-    'summaryParsed',
-    'withinTokenBudget',
-    'reportWritten',
-    'artifactValid',
-  ] as const;
-  const contract = Object.fromEntries(
-    contractKeys.map((key) => [
-      key,
-      {
-        ok: workflowScored.filter((r) => r.contract?.[key] === true).length,
-        // null = unknowable for that row (pre-persistence salvage) — out of the denominator.
-        total: workflowScored.filter((r) => r.contract !== null && r.contract[key] !== null).length,
-      },
-    ]),
-  );
+  const contractRows = results.filter((r) => r.contract !== null);
+  const contract = {
+    responseValid: {
+      ok: contractRows.reduce((sum, r) => sum + (r.contract?.validRuns ?? 0), 0),
+      total: contractRows.reduce((sum, r) => sum + (r.contract?.totalRuns ?? 0), 0),
+    },
+    semanticUsable: {
+      ok: contractRows.reduce((sum, r) => sum + (r.contract?.semanticRuns ?? 0), 0),
+      total: contractRows.reduce((sum, r) => sum + (r.contract?.totalRuns ?? 0), 0),
+    },
+  };
   // Informational precision: emitted findings matched to gold vs emitted (majority findingCount).
   const matched = goldSlots.filter((s) => s.ok).length;
   const emitted = workflowScored.reduce((n, r) => n + r.findingCount, 0);
@@ -798,14 +782,6 @@ export function compare(summary: Summary, base: Summary | undefined) {
 }
 
 // ─── Hashes, coverage, ledger, cost ───────────────────────────────────────────────
-
-const sha12 = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 12);
-const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
-export const runnerHash = () =>
-  sha12(
-    readFileSync(path.join(here, `run-critic${SELF_EXT}`), 'utf8') +
-      readFileSync(path.join(here, `matcher${SELF_EXT}`), 'utf8'),
-  );
 
 function printCoverage(rows: Row[]) {
   console.log(`\n── cases-critique (${rows.length} rows) ──`);
@@ -990,20 +966,23 @@ async function main(argv: string[]) {
   if (!rows.length) throw new BenchAbort(2, `critique-eval: no rows match --only ${only}`);
 
   const critic = loadCritic();
+  const currentSalvageFingerprint = salvageFingerprint(critic, readFileSync(casesPath, 'utf8'));
   // --salvage: reuse an interrupted run's saved trials instead of re-buying them. Trials are only
-  // exchangeable across runs of the SAME agent prompt — a changed md means the saved transcripts
-  // measured a different critic, so refuse rather than mix experiments.
+  // exchangeable when the agent/model, corpus, and generation/scoring harness all match.
   const salvagedIds: string[] = [];
   if (salvageDir) {
-    const marker = path.join(salvageDir, 'agent.hash');
+    const marker = path.join(salvageDir, 'salvage.hash');
     const savedHash = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
-    if (savedHash && savedHash !== sha12(critic.raw))
-      throw new BenchAbort(2, 'critique-eval: --salvage dir was produced by a different agent md');
+    if (!savedHash || savedHash !== currentSalvageFingerprint)
+      throw new BenchAbort(
+        2,
+        'critique-eval: --salvage dir fingerprint does not match agent/model, corpus, and runner',
+      );
     for (const r of rows)
       if (salvageUsable(loadSalvageDir(salvageDir, r.id), RUNS)) salvagedIds.push(r.id);
     console.log(
       `critique-eval: salvaging ${salvagedIds.length}/${rows.length} rows from ${salvageDir} ` +
-        `(${savedHash ? 'agentHash verified' : 'no agent.hash marker — verify the md is unchanged'}); ` +
+        `(fingerprint verified); ` +
         `live rows: [${
           rows
             .filter((r) => !salvagedIds.includes(r.id))
@@ -1019,6 +998,15 @@ async function main(argv: string[]) {
     );
 
   mkdirSync(transcriptsDir, { recursive: true });
+  const transcriptMarker = path.join(transcriptsDir, 'salvage.hash');
+  const existingTranscriptFingerprint = existsSync(transcriptMarker)
+    ? readFileSync(transcriptMarker, 'utf8').trim()
+    : null;
+  if (existingTranscriptFingerprint !== currentSalvageFingerprint) {
+    for (const name of readdirSync(transcriptsDir)) {
+      if (TRANSCRIPT_ARTIFACT.test(name)) unlinkSync(path.join(transcriptsDir, name));
+    }
+  }
   const deps: RunDeps = {
     critic,
     runs: RUNS,
@@ -1035,9 +1023,9 @@ async function main(argv: string[]) {
     },
     salvage: salvageDir ? (rowId) => loadSalvageDir(salvageDir, rowId) : undefined,
   };
-  // Stamp the transcripts dir with the agent hash so a FUTURE --salvage can verify exchangeability.
+  // Stamp the transcripts dir so a FUTURE --salvage can verify the complete experiment boundary.
   try {
-    writeFileSync(path.join(transcriptsDir, 'agent.hash'), sha12(critic.raw));
+    writeFileSync(transcriptMarker, currentSalvageFingerprint);
   } catch {
     // marker is best-effort
   }

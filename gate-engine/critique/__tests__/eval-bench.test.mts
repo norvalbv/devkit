@@ -2,7 +2,7 @@
 // injected execs (zero claude calls, zero tokens). The fixture-repo paths use REAL git in a
 // tmpdir (the decisions-eval convention) — cheap, and the materialize contract is load-bearing.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -16,6 +16,7 @@ import {
   runIntrinsicRow,
   runWorkflowRow,
   type Summary,
+  salvageFingerprint,
   summarize,
 } from '../eval/bench.mts';
 import {
@@ -26,6 +27,7 @@ import {
   type GoldSlot,
   kappa,
   mapPool,
+  parseCritiqueFindings,
   parseReportFindings,
   parseSlotReply,
   runMatcher,
@@ -36,12 +38,31 @@ import {
   BENCHMARK_DIRECTIVE,
   buildIntrinsicArgs,
   buildWorkflowArgs,
+  CLAUDE_RESULT_ARGS,
+  extractBenchmarkCritiqueResponse,
   parseSummary,
   runWorkflow,
+  unwrapClaudeResult,
   WORKFLOW_TOOLS,
 } from '../eval/run-critic.mts';
+import { REVIEWED_RESPONSE } from './response-fixture.mts';
 
 const critic = { body: 'AGENT BODY', model: 'opus', raw: '---\nmodel: opus\n---\nAGENT BODY' };
+
+describe('salvage fingerprint', () => {
+  it('binds saved trials to agent, model, corpus, and runner', () => {
+    const base = salvageFingerprint(critic, '{"id":"row"}', 'runner-a');
+    expect(salvageFingerprint(critic, '{"id":"row"}', 'runner-a')).toBe(base);
+    expect(
+      salvageFingerprint({ ...critic, raw: `${critic.raw}\nchanged` }, '{"id":"row"}', 'runner-a'),
+    ).not.toBe(base);
+    expect(salvageFingerprint({ ...critic, model: 'sonnet' }, '{"id":"row"}', 'runner-a')).not.toBe(
+      base,
+    );
+    expect(salvageFingerprint(critic, '{"id":"other"}', 'runner-a')).not.toBe(base);
+    expect(salvageFingerprint(critic, '{"id":"row"}', 'runner-b')).not.toBe(base);
+  });
+});
 
 const SUMMARY_OK = [
   'CRITIQUE: .cursor/.feature-critique.md',
@@ -56,6 +77,11 @@ const SUMMARY_OK = [
   'ACTIONS:',
   '- Implement the canonical home first',
 ].join('\n');
+const RESPONSE_OK = JSON.stringify({
+  ...REVIEWED_RESPONSE,
+  verdict: 'RETHINK',
+  frameMeta: 'BANDAID',
+});
 
 // ─── run-critic: argv order (the variadic-swallow trap) ───────────────────────────
 
@@ -66,6 +92,7 @@ describe('argv builders', () => {
     expect(prompt).toBeGreaterThan(-1);
     expect(args[prompt].startsWith(BENCHMARK_DIRECTIVE)).toBe(true);
     expect(prompt).toBeGreaterThan(args.indexOf('--no-session-persistence'));
+    expect(args.slice(prompt - 2, prompt)).toEqual(CLAUDE_RESULT_ARGS);
     expect(args.indexOf('--disallowedTools')).toBeGreaterThan(prompt);
     expect(args[args.indexOf('--append-system-prompt') + 1]).toBe('AGENT BODY');
     expect(args[args.indexOf('--model') + 1]).toBe('opus');
@@ -76,10 +103,26 @@ describe('argv builders', () => {
     const prompt = args.indexOf('PROPOSAL');
     const allowed = args.indexOf('--allowedTools');
     expect(prompt).toBeGreaterThan(-1);
+    expect(args.slice(prompt - 2, prompt)).toEqual(CLAUDE_RESULT_ARGS);
     expect(allowed).toBeGreaterThan(prompt);
     expect(args[allowed + 1]).toBe(WORKFLOW_TOOLS);
     expect(args.filter((a) => a === '--allowedTools')).toHaveLength(1);
     expect(args).not.toContain('--disallowedTools');
+  });
+});
+
+describe('Claude result transport', () => {
+  it('unwraps the final result from JSON output mode', () => {
+    expect(
+      unwrapClaudeResult(
+        JSON.stringify({ type: 'result', subtype: 'success', result: RESPONSE_OK }),
+      ),
+    ).toBe(RESPONSE_OK);
+  });
+
+  it('keeps direct responses for injected runners and older CLIs', () => {
+    expect(unwrapClaudeResult(RESPONSE_OK)).toBe(RESPONSE_OK);
+    expect(unwrapClaudeResult(null)).toBeNull();
   });
 });
 
@@ -108,6 +151,66 @@ describe('parseSummary', () => {
 
   it('tolerates markdown dressing on labels', () => {
     expect(parseSummary('**VERDICT**: REJECT').verdict).toBe('REJECT');
+  });
+
+  it('parses the closed JSON response and normalizes its verdict spelling', () => {
+    const summary = parseSummary(
+      JSON.stringify({ ...REVIEWED_RESPONSE, verdict: 'PROCEED_WITH_CHANGES' }),
+    );
+    expect(summary).toMatchObject({
+      responseValid: true,
+      verdict: 'PROCEED WITH CHANGES',
+      frameMeta: 'SOUND',
+      criticalCount: 1,
+      warningCount: 1,
+    });
+  });
+});
+
+describe('extractBenchmarkCritiqueResponse', () => {
+  it('distinguishes exact contract output from one embedded strict response', () => {
+    expect(extractBenchmarkCritiqueResponse(RESPONSE_OK)).toMatchObject({
+      raw: RESPONSE_OK,
+      exact: true,
+    });
+    expect(extractBenchmarkCritiqueResponse(`readiness note\n${RESPONSE_OK}`)).toMatchObject({
+      raw: RESPONSE_OK,
+      exact: false,
+    });
+    expect(extractBenchmarkCritiqueResponse(`\`\`\`json\n${RESPONSE_OK}\n\`\`\``)).toMatchObject({
+      raw: RESPONSE_OK,
+      exact: false,
+    });
+  });
+
+  it('projects semantic fields without repairing or accepting ambiguous output', () => {
+    expect(extractBenchmarkCritiqueResponse(`${RESPONSE_OK}\n${RESPONSE_OK}`)).toBeNull();
+    expect(extractBenchmarkCritiqueResponse(`note {not JSON}\n${RESPONSE_OK}`)).toMatchObject({
+      raw: RESPONSE_OK,
+      exact: false,
+    });
+    expect(
+      extractBenchmarkCritiqueResponse(
+        JSON.stringify({ ...REVIEWED_RESPONSE, unlistedField: true }),
+      ),
+    ).toMatchObject({ exact: false });
+    expect(
+      extractBenchmarkCritiqueResponse(
+        JSON.stringify({
+          ...REVIEWED_RESPONSE,
+          findings: [{ ...REVIEWED_RESPONSE.findings[0], claim: 42 }],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      extractBenchmarkCritiqueResponse(
+        JSON.stringify({
+          ...REVIEWED_RESPONSE,
+          findings: [{ ...REVIEWED_RESPONSE.findings[0], lens: 'CONTRACT_BOUNDARY' }],
+        }),
+      ),
+    ).toMatchObject({ exact: false });
+    expect(extractBenchmarkCritiqueResponse('VERDICT: RETHINK')).toBeNull();
   });
 });
 
@@ -146,6 +249,22 @@ describe('parseReportFindings', () => {
   it('absent sections parse to zero findings, and "What\'s Good" items never leak in', () => {
     expect(parseReportFindings('# nothing here')).toEqual([]);
     expect(parseReportFindings(REPORT).some((f) => f.desc.includes('goal'))).toBe(false);
+  });
+
+  it('projects closed JSON findings into the unchanged matcher shape', () => {
+    expect(parseCritiqueFindings(JSON.stringify(REVIEWED_RESPONSE))).toEqual([
+      expect.objectContaining({
+        severity: 'CRITICAL',
+        desc: 'The file writer and reader disagree.',
+        body: expect.stringContaining('Evidence: The runner reads a path'),
+      }),
+      expect.objectContaining({
+        severity: 'WARNING',
+        desc: 'Malformed model output needs a completed-failure state.',
+      }),
+    ]);
+    expect(parseCritiqueFindings(`prefix\n${JSON.stringify(REVIEWED_RESPONSE)}`)).toEqual([]);
+    expect(parseCritiqueFindings('VERDICT: RETHINK')).toEqual([]);
   });
 });
 
@@ -352,11 +471,17 @@ describe('aggregateSummaries', () => {
 const noDeps: Omit<RunDeps, 'critic' | 'runs'> = { registerCleanup: () => {} };
 
 describe('runIntrinsicRow', () => {
-  it('votes K trials and applies the ported text checks', async () => {
+  const response = (
+    verdict: 'RETHINK' | 'REJECT',
+    frameMeta: 'BANDAID' | 'SOUND',
+    summary: string,
+  ) => JSON.stringify({ ...REVIEWED_RESPONSE, verdict, frameMeta, summary });
+
+  it('votes K JSON trials and applies the ported text checks', async () => {
     const outs = [
-      'VERDICT: RETHINK\nFRAME_META: BANDAID\ncanonical home',
-      'VERDICT: RETHINK\nFRAME_META: BANDAID\nband-aid',
-      'VERDICT: PROCEED\nFRAME_META: SOUND\nfine',
+      response('RETHINK', 'BANDAID', 'Use the canonical home.'),
+      response('RETHINK', 'BANDAID', 'This is a band-aid.'),
+      response('REJECT', 'SOUND', 'The framing is otherwise sound.'),
     ];
     let k = 0;
     const r = await runIntrinsicRow(
@@ -366,7 +491,34 @@ describe('runIntrinsicRow', () => {
     expect(r.verdict).toMatchObject({ got: 'RETHINK', ok: true, stable: false });
     expect(r.frameMeta).toMatchObject({ got: 'BANDAID', ok: true });
     expect(r.textOk).toBe(true); // 2 of 3 runs hit a requireAny term
+    expect(r.contract).toEqual({
+      responseValid: true,
+      validRuns: 3,
+      semanticRuns: 3,
+      totalRuns: 3,
+    });
     expect(r.ok).toBe(true);
+  });
+
+  it('keeps intrinsic semantic scoring separate from exact transport validity', async () => {
+    const exact = response('RETHINK', 'BANDAID', 'Use the canonical home.');
+    const outs = [exact, `readiness\n${exact}`, 'VERDICT: RETHINK'];
+    let k = 0;
+    const r = await runIntrinsicRow(baseRow, {
+      ...noDeps,
+      critic,
+      runs: 3,
+      execIntrinsic: (async () => outs[k++]) as never,
+    });
+    expect(r.verdict).toMatchObject({ got: 'RETHINK', ok: true });
+    expect(r.contract).toEqual({
+      responseValid: false,
+      validRuns: 1,
+      semanticRuns: 2,
+      totalRuns: 3,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.outage).toBe(false);
   });
 
   it('aborts the run on a dark trial (cheap class)', async () => {
@@ -393,12 +545,7 @@ describe('runWorkflowRow', () => {
     category: 'c',
     note: 'why',
   };
-  const wfOut = (raw: string | null) => async () => ({
-    raw,
-    report: raw === null ? null : REPORT,
-    artifact: '{"risks":[{"id":"R1"}]}',
-    artifactPath: 'x',
-  });
+  const wfOut = (raw: string | null) => async () => ({ raw });
   const matchStub = async () => [
     { slotId: 'F1', kind: 'gold' as const, match: 1, stable: true, outage: false },
     { slotId: 'D1', kind: 'decoy' as const, match: 0, stable: true, outage: false },
@@ -409,28 +556,25 @@ describe('runWorkflowRow', () => {
       ...noDeps,
       critic,
       runs: 1,
-      execWorkflow: wfOut('VERDICT: RETHINK\nFRAME_META: BANDAID') as never,
+      execWorkflow: wfOut(RESPONSE_OK) as never,
       match: matchStub as never,
     });
     expect(r.outage).toBe(false);
     expect(r.slots.F1).toMatchObject({ got: 'hit', ok: true });
     expect(r.slots.D1).toMatchObject({ got: 'clean', ok: true });
-    expect(r.contract).toMatchObject({
-      reportWritten: true,
-      artifactValid: true,
-      summaryParsed: true,
+    expect(r.contract).toEqual({
+      responseValid: true,
+      validRuns: 1,
+      semanticRuns: 1,
+      totalRuns: 1,
     });
     expect(r.falseAlarm).toBeNull(); // row has gold — not a decoy-only instrument
     expect(r.ok).toBe(true);
   });
 
-  it('salvaged trials replace spawning entirely; missing artifact scores null, not fail', async () => {
+  it('salvaged JSON trials replace spawning entirely', async () => {
     let spawns = 0;
-    const salvage = () => [
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
-      { raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID', report: REPORT, artifact: null },
-    ];
+    const salvage = () => [{ raw: RESPONSE_OK }, { raw: RESPONSE_OK }, { raw: RESPONSE_OK }];
     const r = await runWorkflowRow(row, {
       ...noDeps,
       critic,
@@ -438,14 +582,19 @@ describe('runWorkflowRow', () => {
       salvage,
       execWorkflow: (async () => {
         spawns += 1;
-        return { raw: null, report: null, artifact: null, artifactPath: '' };
+        return { raw: null };
       }) as never,
       match: matchStub as never,
     });
     expect(spawns).toBe(0); // already-paid trials — nothing re-bought
     expect(r.outage).toBe(false);
     expect(r.verdict).toMatchObject({ got: 'RETHINK', ok: true, stable: true });
-    expect(r.contract).toMatchObject({ reportWritten: true, artifactValid: null });
+    expect(r.contract).toEqual({
+      responseValid: true,
+      validRuns: 3,
+      semanticRuns: 3,
+      totalRuns: 3,
+    });
   });
 
   it('too few salvaged trials for a K-majority falls back to live spawning', async () => {
@@ -454,20 +603,86 @@ describe('runWorkflowRow', () => {
       ...noDeps,
       critic,
       runs: 3,
-      salvage: () => [{ raw: 'VERDICT: RETHINK', report: null, artifact: null }], // 1 < 2
+      salvage: () => [{ raw: RESPONSE_OK }], // 1 < 2
       execWorkflow: (async () => {
         spawns += 1;
-        return {
-          raw: 'VERDICT: RETHINK\nFRAME_META: BANDAID',
-          report: REPORT,
-          artifact: '{"risks":[{"id":"R1"}]}',
-          artifactPath: 'x',
-        };
+        return { raw: RESPONSE_OK };
       }) as never,
       match: matchStub as never,
     });
     expect(spawns).toBe(3);
-    expect(r.contract).toMatchObject({ artifactValid: true });
+    expect(r.contract).toEqual({
+      responseValid: true,
+      validRuns: 3,
+      semanticRuns: 3,
+      totalRuns: 3,
+    });
+  });
+
+  it('reports exact validity while scoring intact semantic fields independently', async () => {
+    const raws = [
+      RESPONSE_OK,
+      `\`\`\`json\n${RESPONSE_OK}\n\`\`\``,
+      JSON.stringify({
+        ...REVIEWED_RESPONSE,
+        analysis: {
+          ...REVIEWED_RESPONSE.analysis,
+          configurationRows: [
+            { ...REVIEWED_RESPONSE.analysis.configurationRows[0], correct: 'yes' },
+          ],
+        },
+      }),
+    ];
+    let spawned = 0;
+    let matched = 0;
+    const r = await runWorkflowRow(row, {
+      ...noDeps,
+      critic,
+      runs: 3,
+      execWorkflow: (async () => ({ raw: raws[spawned++] })) as never,
+      match: (async (...args: Parameters<typeof matchStub>) => {
+        matched += 1;
+        return matchStub(...args);
+      }) as never,
+    });
+    expect(matched).toBe(3);
+    expect(r.contract).toEqual({
+      responseValid: false,
+      validRuns: 1,
+      semanticRuns: 3,
+      totalRuns: 3,
+    });
+    expect(r.verdict.got).toBe('RETHINK');
+    expect(r.slots.F1).toMatchObject({ got: 'hit', ok: true });
+    expect(r.ok).toBe(true);
+    expect(r.outage).toBe(false);
+  });
+
+  it('does not turn invalid responses into clean decoy outcomes', async () => {
+    let matched = 0;
+    const r = await runWorkflowRow(
+      { ...row, gold: [], decoys: [DECOYS[0]], expectVerdict: ['PROCEED'] },
+      {
+        ...noDeps,
+        critic,
+        runs: 3,
+        execWorkflow: wfOut(`${RESPONSE_OK}\n${RESPONSE_OK}`) as never,
+        match: (async () => {
+          matched += 1;
+          return [];
+        }) as never,
+      },
+    );
+    expect(matched).toBe(0);
+    expect(r.contract).toEqual({
+      responseValid: false,
+      validRuns: 0,
+      semanticRuns: 0,
+      totalRuns: 3,
+    });
+    expect(r.falseAlarm).toBeNull();
+    expect(r.slots).toEqual({});
+    expect(r.ok).toBe(false);
   });
 
   it('scores NULL when completed trials fall below the K-majority minimum', async () => {
@@ -483,32 +698,26 @@ describe('runWorkflowRow', () => {
   });
 });
 
-// ─── run-critic: workflow artifact reading + EDGE_CASES_ID plumbing ───────────────
+// ─── run-critic: workflow response transport ─────────────────────────────────────
 
 describe('runWorkflow', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'critique-eval-test-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('reads report + id-suffixed artifact from the fixture and prefixes the prompt', async () => {
-    mkdirSync(path.join(dir, '.cursor'), { recursive: true });
-    writeFileSync(path.join(dir, '.cursor', '.feature-critique.md'), '# report');
-    writeFileSync(path.join(dir, '.cursor', '.edge-cases-bench42.json'), '{"risks":[]}');
+  it('returns the closed response without prefixing a flow identifier', async () => {
     let seenPrompt = '';
     const exec = async ({ args }: { args: string[] }) => {
       seenPrompt = args.find((a) => a.includes('critique this')) ?? '';
-      return 'VERDICT: PROCEED';
+      return RESPONSE_OK;
     };
     const out = await runWorkflow({
       critic,
       prompt: 'critique this',
       fixtureDir: dir,
-      edgeCasesId: 'bench42',
       exec: exec as never,
     });
-    expect(seenPrompt.startsWith('EDGE_CASES_ID=bench42\n---\n')).toBe(true);
-    expect(out.report).toBe('# report');
-    expect(out.artifact).toBe('{"risks":[]}');
-    expect(out.artifactPath).toContain('.edge-cases-bench42.json');
+    expect(seenPrompt).toBe('critique this');
+    expect(out).toEqual({ raw: RESPONSE_OK });
   });
 });
 
@@ -703,10 +912,10 @@ describe('summarize helpers', () => {
         severity: [],
         falseAlarm: null,
         contract: {
-          summaryParsed: true,
-          withinTokenBudget: false,
-          reportWritten: true,
-          artifactValid: false,
+          responseValid: true,
+          validRuns: 3,
+          semanticRuns: 3,
+          totalRuns: 3,
         },
         fabricatedPerRun: [1],
         findingCount: 4,
@@ -718,7 +927,8 @@ describe('summarize helpers', () => {
     expect(s.perClass.security).toEqual({ hits: 1, total: 2 });
     expect(s.decoyFlags).toEqual({ flagged: 1, mentioned: 1, total: 2 });
     expect(s.recall).toEqual({ hits: 1, total: 2 });
-    expect(s.contract.withinTokenBudget).toEqual({ ok: 0, total: 1 });
+    expect(s.contract.responseValid).toEqual({ ok: 3, total: 3 });
+    expect(s.contract.semanticUsable).toEqual({ ok: 3, total: 3 });
     expect(s.precisionInfo).toEqual({ matched: 1, emitted: 4 });
   });
 });

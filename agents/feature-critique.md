@@ -180,7 +180,7 @@ Use exactly these root fields (no additions):
 - `analysis`: `title`, `proposal`, `decisionLogAlignment` (`present`, `targetsQueried`, `conflicts`),
   `sourceToSinkTrace`, `implicitAssumptions`, `layoutAlignment`, `configurationRows`, and
   `missingConsiderations`. Each configuration row has `configuration`, `expected`, `proposed`,
-  `correct`, and `evidence`.
+  `correct`, and `evidence`; `correct` is the JSON boolean `true` or `false`, never a string.
 - `verdict`, `feasibility`, `frameMeta`, `uxImpact`, `summary`
 - `findings`, `edgeCases`, `actions`, `strengths`, `researchReferences`
 
@@ -246,3 +246,5 @@ If the critique cannot complete, return `aborted` with the same neutral fields, 
 - **Reference project context**. Ground the critique in `guard.config.json`, the codebase, and (when present) the decision log — THIS project, not abstract best practices.
 - **Return only the closed JSON contract.** Never write runtime critique output into the repository
   or a provider directory; findings and edge cases live in the final response for external capture.
+- **Make the final message machine-parseable.** Its first character is `{` and its last character is
+  `}`. Remove any lead-in, confirmation, Markdown fence, or trailing commentary before returning it.

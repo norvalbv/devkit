@@ -7,20 +7,20 @@
     "outages": 0,
     "recall": {
       "hits": 23,
-      "total": 24
+      "total": 25
     },
     "cleanRate": {
-      "clean": 4,
+      "clean": 5,
       "total": 5
     },
     "decoyFlags": {
       "flagged": 2,
-      "mentioned": 2,
+      "mentioned": 4,
       "total": 20
     },
     "perClass": {
       "feasibility": {
-        "hits": 1,
+        "hits": 0,
         "total": 1
       },
       "ux": {
@@ -32,8 +32,8 @@
         "total": 2
       },
       "codebase-conflict": {
-        "hits": 5,
-        "total": 5
+        "hits": 6,
+        "total": 6
       },
       "data-flow": {
         "hits": 2,
@@ -54,24 +54,24 @@
     },
     "confusion": {
       "RETHINK": {
-        "RETHINK": 9,
-        "REJECT": 2
+        "RETHINK": 10,
+        "REJECT": 1
       },
       "PROCEED": {
-        "PROCEED": 3,
-        "PROCEED WITH CHANGES": 6
+        "PROCEED WITH CHANGES": 9
       },
       "REJECT": {
         "REJECT": 5,
         "RETHINK": 1
       },
       "PROCEED WITH CHANGES": {
-        "PROCEED WITH CHANGES": 6,
-        "REJECT": 1
+        "NULL": 1,
+        "PROCEED WITH CHANGES": 5,
+        "RETHINK": 1
       }
     },
     "frameMetaAccuracy": {
-      "correct": 12,
+      "correct": 11,
       "total": 12
     },
     "severityCalibration": {
@@ -80,24 +80,16 @@
     },
     "precisionInfo": {
       "matched": 23,
-      "emitted": 105
+      "emitted": 84
     },
     "contract": {
-      "summaryParsed": {
-        "ok": 20,
-        "total": 20
+      "responseValid": {
+        "ok": 33,
+        "total": 99
       },
-      "withinTokenBudget": {
-        "ok": 19,
-        "total": 20
-      },
-      "reportWritten": {
-        "ok": 20,
-        "total": 20
-      },
-      "artifactValid": {
-        "ok": 20,
-        "total": 20
+      "semanticUsable": {
+        "ok": 97,
+        "total": 99
       }
     },
     "rows": {
@@ -123,10 +115,10 @@
       },
       "int-fine-relative-time": {
         "expected": "PROCEED",
-        "got": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {},
         "falseAlarm": null,
         "outage": false
@@ -143,10 +135,10 @@
       },
       "int-notabug-cursor-advisory": {
         "expected": "RETHINK",
-        "got": "REJECT",
+        "got": "RETHINK",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {},
         "falseAlarm": null,
         "outage": false
@@ -163,7 +155,7 @@
       },
       "int-realfix-null-parse": {
         "expected": "PROCEED",
-        "got": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
         "verdictStable": true,
@@ -173,10 +165,10 @@
       },
       "ses-overlay-selfheal": {
         "expected": "PROCEED WITH CHANGES",
-        "got": "PROCEED WITH CHANGES",
-        "ok": true,
-        "verdictOk": true,
-        "verdictStable": true,
+        "got": "NULL",
+        "ok": false,
+        "verdictOk": false,
+        "verdictStable": false,
         "slots": {},
         "falseAlarm": null,
         "outage": false
@@ -206,7 +198,7 @@
         "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {},
         "falseAlarm": null,
         "outage": false
@@ -234,19 +226,24 @@
       "wf-symlink-skills": {
         "expected": "RETHINK",
         "got": "RETHINK",
-        "ok": true,
+        "ok": false,
         "verdictOk": true,
         "verdictStable": true,
         "slots": {
-          "F-symlink-follow": {
+          "F-cursor-format": {
             "got": "hit",
             "ok": true,
+            "stable": true
+          },
+          "F-symlink-follow": {
+            "got": "miss",
+            "ok": false,
             "stable": true
           },
           "F-dangling": {
             "got": "hit",
             "ok": true,
-            "stable": true
+            "stable": false
           },
           "F-git-platform": {
             "got": "hit",
@@ -282,7 +279,7 @@
           "D-single-resolver": {
             "got": "clean",
             "ok": true,
-            "stable": false
+            "stable": true
           }
         },
         "falseAlarm": null,
@@ -303,7 +300,7 @@
           "F-tag-target": {
             "got": "hit",
             "ok": true,
-            "stable": false
+            "stable": true
           },
           "D-one-command": {
             "got": "clean",
@@ -345,7 +342,7 @@
         "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {
           "F-bsd-portability": {
             "got": "hit",
@@ -355,7 +352,7 @@
           "D-guard-idea": {
             "got": "clean",
             "ok": true,
-            "stable": true
+            "stable": false
           }
         },
         "falseAlarm": null,
@@ -379,9 +376,9 @@
             "stable": false
           },
           "D-file-not-inline": {
-            "got": "clean",
-            "ok": true,
-            "stable": true
+            "got": "flagged",
+            "ok": false,
+            "stable": false
           }
         },
         "falseAlarm": null,
@@ -434,7 +431,7 @@
         "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {
           "F-json-contract": {
             "got": "hit",
@@ -455,7 +452,7 @@
         "got": "REJECT",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": false,
+        "verdictStable": true,
         "slots": {
           "F-env-exfiltration": {
             "got": "hit",
@@ -481,7 +478,7 @@
         "got": "RETHINK",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {
           "F-repo-rce": {
             "got": "hit",
@@ -525,10 +522,10 @@
       },
       "wf-dataflow-index-order": {
         "expected": "PROCEED WITH CHANGES",
-        "got": "REJECT",
+        "got": "RETHINK",
         "ok": false,
-        "verdictOk": false,
-        "verdictStable": true,
+        "verdictOk": true,
+        "verdictStable": false,
         "slots": {
           "F-keep-first-stale": {
             "got": "hit",
@@ -538,7 +535,7 @@
           "D-dedupe-need": {
             "got": "flagged",
             "ok": false,
-            "stable": false
+            "stable": true
           }
         },
         "falseAlarm": null,
@@ -603,9 +600,9 @@
         "verdictStable": true,
         "slots": {
           "D-early-return": {
-            "got": "clean",
+            "got": "mentioned",
             "ok": true,
-            "stable": true
+            "stable": false
           }
         },
         "falseAlarm": {
@@ -617,7 +614,7 @@
       },
       "wf-decoy-posix-space": {
         "expected": "PROCEED",
-        "got": "PROCEED",
+        "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
         "verdictStable": true,
@@ -654,20 +651,20 @@
       "wf-decoy-manifest-checksum": {
         "expected": "PROCEED",
         "got": "PROCEED WITH CHANGES",
-        "ok": false,
+        "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {
           "D-manifest-mechanism": {
-            "got": "flagged",
-            "ok": false,
-            "stable": true
+            "got": "mentioned",
+            "ok": true,
+            "stable": false
           }
         },
         "falseAlarm": {
-          "got": true,
-          "ok": false,
-          "stable": true
+          "got": false,
+          "ok": true,
+          "stable": false
         },
         "outage": false
       },
@@ -676,12 +673,12 @@
         "got": "PROCEED WITH CHANGES",
         "ok": true,
         "verdictOk": true,
-        "verdictStable": true,
+        "verdictStable": false,
         "slots": {
           "D-memo-choice": {
             "got": "mentioned",
             "ok": true,
-            "stable": true
+            "stable": false
           }
         },
         "falseAlarm": {
@@ -692,39 +689,8 @@
         "outage": false
       }
     },
-    "agentHash": "c439b397feca",
-    "salvagedRows": [
-      "int-bandaid-skill-dedup",
-      "int-bandaid-skill-dedup-v1",
-      "int-fine-relative-time",
-      "int-contradict-env-denylist",
-      "int-notabug-cursor-advisory",
-      "int-notabug-cursor-advisory-flip",
-      "int-realfix-null-parse",
-      "ses-overlay-selfheal",
-      "ses-reship-manifest",
-      "ses-sc1048-strict-cap",
-      "ses-integration-mcp",
-      "ses-desktop-novnc",
-      "int-verbose-decoy",
-      "wf-symlink-skills",
-      "wf-hooks-import-devkit",
-      "wf-release-direct-push",
-      "wf-git-ssh-default",
-      "wf-bsd-grep-slash-s",
-      "wf-cursor-hardcode",
-      "wf-eval-gate-on-deltas",
-      "wf-eval-gate-on-deltas-v1",
-      "wf-contract-edgecases-id",
-      "wf-security-env-telemetry",
-      "wf-security-config-cmd",
-      "wf-conflict-second-matcher",
-      "wf-dataflow-index-order",
-      "wf-ux-hard-block-warns",
-      "wf-decoy-wilson",
-      "wf-decoy-null-guard"
-    ],
-    "runnerHash": "77b1b13c29cd",
-    "corpusHash": "eed5fdcb950d"
+    "agentHash": "36b77ef31ffd",
+    "runnerHash": "a5950d2a8b95",
+    "corpusHash": "53bf01d5b017"
   }
 }

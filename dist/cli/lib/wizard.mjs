@@ -10,9 +10,18 @@
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
 import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
-// The components that sync into an agent surface (.claude / .cursor). Drives whether the wizard
+// The components that sync into an agent surface. Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
+const AGENT_SURFACE_SETS = {
+    all: [...AGENT_TARGETS],
+    'claude-codex': ['claude', 'codex'],
+    'claude-cursor': ['claude', 'cursor'],
+    'codex-cursor': ['codex', 'cursor'],
+    claude: ['claude'],
+    codex: ['codex'],
+    cursor: ['cursor'],
+};
 // Components OFFERED in OVERLAY mode (no package): the agent-half + the biome extend. Excludes
 // tsconfig/structure (need package/plugin resolution), searchSteering (its hooks reference a
 // node_modules path), search-code, and husky (the local hook is always on, not optional).
@@ -142,24 +151,29 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         if (!structAvail)
             selection.structure = false;
     }
-    // Agent surface(s): asked whenever something syncs into .claude/.cursor (every mode now does). A
+    // Agent surface(s): asked whenever something syncs into an agent provider (every mode now does). A
     // repo that uses only one tool picks just that surface → no redundant copy in the other's dir. A
-    // single SELECT (radio), not a multiselect: a multiselect pre-checking both made "Claude only"
-    // require actively DESELECTing Cursor — easy to miss, so both got installed. Radio = explicit intent.
+    // single SELECT (radio), not a multiselect: pre-checked multiselects make narrowing require active
+    // deselection and previously installed an unwanted provider. Radio keeps every supported subset
+    // explicit while defaulting fresh installs to all three.
     selection.agentTargets = [...AGENT_TARGETS];
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         const surface = await select({
             message: 'Sync skills/agents/hooks to which agent surface(s)?',
             options: [
-                { value: 'both', label: 'Both', hint: '.claude/ + .cursor/' },
+                { value: 'all', label: 'Claude + Codex + Cursor', hint: 'fresh-install default' },
+                { value: 'claude-codex', label: 'Claude + Codex' },
+                { value: 'claude-cursor', label: 'Claude + Cursor' },
+                { value: 'codex-cursor', label: 'Codex + Cursor' },
                 { value: 'claude', label: 'Claude only', hint: '.claude/' },
+                { value: 'codex', label: 'Codex only', hint: '.agents/ + .codex/' },
                 { value: 'cursor', label: 'Cursor only', hint: '.cursor/' },
             ],
-            initialValue: 'both',
+            initialValue: 'all',
         });
         if (bail(surface))
             return null;
-        selection.agentTargets = surface === 'both' ? [...AGENT_TARGETS] : [surface];
+        selection.agentTargets = [...(AGENT_SURFACE_SETS[surface] ?? AGENT_TARGETS)];
     }
     // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook). The
     // line-growth block rides this list as a checkbox (recommended-on) but is a CONFIG KNOB, not a guard
@@ -260,7 +274,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
             '✓ local hook → chains to the repo’s own',
             `${on('biome')} biome overlay (extends the repo, staged files)`,
             `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
-            `${on('agentHooks')} agent hooks → .claude/settings.local.json + .cursor/hooks.json (if untracked)`,
+            `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
             `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
         ].join('\n');
     }

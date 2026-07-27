@@ -11,9 +11,10 @@ export const LEGACY_AGENT_PROVIDERS = [
   'cursor',
 ] as const satisfies readonly AgentProvider[];
 
-/** Fresh-install defaults for this slice. A later activation can change only this policy. */
+/** Fresh-install defaults. Existing installs continue to honor their recorded provider set. */
 export const FRESH_DEFAULT_AGENT_PROVIDERS = [
   'claude',
+  'codex',
   'cursor',
 ] as const satisfies readonly AgentProvider[];
 
@@ -24,6 +25,15 @@ const SUPPORTED_AGENT_PROVIDER_NAMES = new Set<string>(SUPPORTED_AGENT_PROVIDERS
 
 export function isAgentProvider(value: unknown): value is AgentProvider {
   return typeof value === 'string' && SUPPORTED_AGENT_PROVIDER_NAMES.has(value);
+}
+
+/** Reject unknown providers, then de-duplicate valid providers in the supported stable order. */
+export function requireAgentProviders(values: readonly unknown[]): AgentProvider[] {
+  for (const value of values)
+    if (!isAgentProvider(value))
+      throw new Error(`Unsupported agent provider: ${JSON.stringify(value) ?? String(value)}`);
+  const selected = new Set(values as AgentProvider[]);
+  return SUPPORTED_AGENT_PROVIDERS.filter((provider) => selected.has(provider));
 }
 
 /** Validate and de-duplicate a recorded provider array without supplying defaults. */

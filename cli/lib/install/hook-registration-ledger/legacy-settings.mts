@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import { AGENT_TARGETS } from '../components.mts';
-import { readJson, writeIfAbsent } from '../fs-helpers.mts';
-import { isTracked } from '../git-tracked.mts';
-import { HOOK_REGISTRATIONS, registrationsFor } from './hook-registrations.mts';
+import { AGENT_TARGETS } from '../../components.mts';
+import { readJson, writeIfAbsent } from '../../fs-helpers.mts';
+import { isTracked } from '../../git-tracked.mts';
+import { HOOK_REGISTRATIONS, registrationsFor } from './registrations.mts';
 
 const settingsFile = (overlay: boolean) => (overlay ? 'settings.local.json' : 'settings.json');
 

@@ -4,16 +4,18 @@ import { syncAgents } from "../../commands/sync/sync-agents.mjs";
 import { syncSkills } from "../../commands/sync/sync-skills.mjs";
 import { AGENT_TARGETS } from "../components.mjs";
 import { removeAgents, removeSkills } from "../sync-manifest.mjs";
-import { selectedHookAssets } from "./agent-hook-selection.mjs";
+import { agentAssetDir } from "./agent-assets.mjs";
+import { SUPPORTED_AGENT_PROVIDERS } from "./agent-providers.mjs";
+import { selectedHookAssets } from "./hook-registration-ledger/selection.mjs";
 import { reconcileHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "./install-hooks.mjs";
 function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookScripts, dryRun) {
-    const prunedTargets = AGENT_TARGETS.filter((target) => !agentTargets.includes(target));
+    const prunedTargets = SUPPORTED_AGENT_PROVIDERS.filter((target) => !agentTargets.includes(target));
     const settingsFile = {
         claude: '.claude/settings.json',
+        codex: '.codex/hooks.json',
         cursor: '.cursor/hooks.json',
     };
-    const hasContent = prunedTargets.some((target) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${target}`, kind))) ||
-        existsSync(join(gitRoot, settingsFile[target])));
+    const hasContent = prunedTargets.some((target) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, agentAssetDir(target, kind)))) || existsSync(join(gitRoot, settingsFile[target])));
     if (!prunedTargets.length || !hasContent)
         return;
     console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -69,7 +71,7 @@ export function installAgentSurfaces(gitRoot, selection, dryRun, override = () =
         });
     }
     else if (hooks.previouslyOwnedComponents.length &&
-        targets.some((target) => existsSync(join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json')))) {
+        targets.some((target) => existsSync(join(gitRoot, target === 'claude' ? '.claude/settings.json' : `.${target}/hooks.json`)))) {
         reconcileHookRegistrations(gitRoot, [], hooks.previouslyOwnedComponents, { dryRun, targets });
     }
     pruneDeselectedSurfaces(gitRoot, selection, targets, hooks.scripts, dryRun);

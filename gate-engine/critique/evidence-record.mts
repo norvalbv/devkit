@@ -22,10 +22,11 @@ export const PLAN_CRITIQUE_INELIGIBLE_REASONS = [
   'aborted',
   'blocking_verdict',
   'critical_findings',
+  'unnecessary_recheck',
   'retry_limit_exceeded',
 ] as const;
 
-type Provider = (typeof PLAN_CRITIQUE_PROVIDERS)[number];
+export type PlanCritiqueProvider = (typeof PLAN_CRITIQUE_PROVIDERS)[number];
 type Status = (typeof PLAN_CRITIQUE_STATUSES)[number] | null;
 type Verdict = (typeof PLAN_CRITIQUE_VERDICTS)[number] | null;
 type IneligibleReason = (typeof PLAN_CRITIQUE_INELIGIBLE_REASONS)[number];
@@ -37,7 +38,7 @@ export interface PlanCritiqueRecordV1 {
   workId: string;
   lineage: { pass: number; parentCritiqueId: PlanCritiqueId | null };
   execution: {
-    provider: Provider;
+    provider: PlanCritiqueProvider;
     callbackHash: Sha256;
     model: string | null;
     modelHash: Sha256 | null;
@@ -77,12 +78,32 @@ export interface PlanCritiqueBlobSnapshotsV1 {
   opaqueTranscript?: Buffer;
 }
 
+export type PlanCritiqueContractFactsV1 = Omit<PlanCritiqueRecordV1['contract'], 'eligibility'>;
+
+export interface PlanCritiqueCaptureInputV1 {
+  workId: string;
+  execution: Pick<
+    PlanCritiqueRecordV1['execution'],
+    'provider' | 'callbackHash' | 'model' | 'promptHash'
+  >;
+  repository: PlanCritiqueRecordV1['repository'];
+  providerCompletedAt: string | null;
+  contract: PlanCritiqueContractFactsV1;
+  exactResponse: Uint8Array;
+  sanitizedProjection?: Uint8Array;
+  opaqueTranscript?: { bytes: Uint8Array; expiresAt: string };
+}
+
 export const sha256Bytes = (value: Uint8Array): Sha256 =>
   createHash('sha256').update(value).digest('hex');
 
 const invalid = (at: string): never => {
   throw new Error(`invalid plan critique record: ${at}`);
 };
+
+export function assertPlanCritiqueRecordValue(condition: unknown, at: string): asserts condition {
+  if (!condition) invalid(at);
+}
 
 const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype) as object;
 const typedArrayByteLength = Object.getOwnPropertyDescriptor(

@@ -60,8 +60,9 @@ Do NOT author a new `docs/plans/` design doc — that store is deprecating in fa
 - Immediately before presenting/exiting that plan, invoke one fresh `feature-critique` subagent with
   the finalized draft. If the first response is `aborted`, `wrong_phase`, or invalid JSON, surface it
   rather than treating it as approval. Apply warning-only `PROCEED_WITH_CHANGES` feedback. On
-  `RETHINK`, `REJECT`, or any CRITICAL finding, revise and run one fresh recheck; if that pass still
-  blocks, aborts, or is invalid, surface the unresolved issue instead of looping.
+  `RETHINK`, `REJECT`, or any CRITICAL finding, you—the parent/root planning agent—revise the plan
+  and run one fresh recheck by invoking a new critic; if that pass still blocks, aborts, or is
+  invalid, surface the unresolved issue instead of looping.
 - Ask: "Ready to set up for implementation?"
 - Create an isolated worktree for the work.
 
