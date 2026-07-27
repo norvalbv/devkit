@@ -31,7 +31,7 @@ import {
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
-import { stageBaseline, stagedSet } from './git-index.mts';
+import { hasStagedFiles, stageBaseline, stagedSet } from './git-index.mts';
 
 // The impl-file predicate bundle sourceMatchers() returns (isSource/isTest/isBarrel).
 type SourceMatchers = ReturnType<typeof sourceMatchers>;
@@ -259,7 +259,7 @@ function runLinesGate(
     ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
     : {};
   const staged = stagedSet(root);
-  const inCommit = staged !== null && staged.size > 0;
+  const inCommit = staged !== null && hasStagedFiles(root);
   // Scope to the committing files; with nothing staged, fall back to the whole tree (CI).
   const scoped = inCommit ? over.filter((o) => staged?.has(o.file)) : over;
 
@@ -337,7 +337,7 @@ function runDisableGate(
   const { grandfathered, legacy } = readDisableBaseline(baselineFile);
   const cur = current.perFile;
   const staged = stagedSet(root);
-  const inCommit = staged !== null && staged.size > 0;
+  const inCommit = staged !== null && hasStagedFiles(root);
   const ceil = (f: string): DisableCount => grandfathered[f] ?? { file: 0, fn: 0 };
 
   // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). Scope to
