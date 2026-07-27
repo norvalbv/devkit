@@ -45,7 +45,7 @@ import { envFlag, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { emitCacheHit } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
 import { execJudge, strictRemedy } from "../judge/run-judge.mjs";
-import { currentTarget, parseDecision } from "./decisions.mjs";
+import { currentTarget, effectiveScope, parseDecision } from "./decisions.mjs";
 import { git, stagedFiles } from "./git-io.mjs";
 import { hasVerdict, saveVerdict, verdictKey } from "./verdict-cache.mjs";
 // glob → regex literals. ** = any incl. `/`; * = any non-slash; ? = one non-slash.
@@ -130,7 +130,15 @@ export function parseDepthVerdict(raw) {
 }
 // ─── fs + claude I/O (thin; run in the CONSUMER cwd) ─────────────────────────────
 // git/stagedFiles are shared with the detect gate — see git-io.mts.
-/** Every axis whose CURRENT Target declares a Scope → {slug, ruling, vision, scopeGlobs}. */
+/**
+ * Every axis whose CURRENT section resolves to a Scope → {slug, ruling, vision, scopeGlobs}.
+ *
+ * The scope used is the EFFECTIVE one (`effectiveScope`): the Target's own `**Scope:**` field, or a
+ * later `rescope` note if the code has since moved. `currentTarget().scope` alone would miss a
+ * rescope — it deliberately stops at the first note bullet — and this gate would keep judging a
+ * glob that no longer matches anything, i.e. the drifted-and-silently-unenforced state `drift`
+ * exists to catch.
+ */
 export function loadScopedTargets(dir) {
     const target = dir ?? resolveFromCwd(resolveGuardConfig(process.cwd()), 'decisionsDir');
     if (!target || !existsSync(target))
@@ -139,14 +147,18 @@ export function loadScopedTargets(dir) {
     for (const f of readdirSync(target)) {
         if (!f.endsWith('.md') || f === 'INDEX.md')
             continue;
-        const t = currentTarget(parseDecision(readFileSync(path.join(target, f), 'utf8')).body);
-        if (!t?.scope)
+        const body = parseDecision(readFileSync(path.join(target, f), 'utf8')).body;
+        const t = currentTarget(body);
+        if (!t)
+            continue;
+        const scope = effectiveScope(body);
+        if (!scope)
             continue;
         out.push({
             slug: f.slice(0, -3),
             ruling: t.ruling,
             vision: t.fields['vision-fit'] ?? t.fields.context ?? '',
-            scopeGlobs: t.scope
+            scopeGlobs: scope
                 .split(',')
                 .map((s) => s.trim())
                 .filter(Boolean),

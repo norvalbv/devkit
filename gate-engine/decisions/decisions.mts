@@ -188,8 +188,9 @@ function addTarget(slug: string, o: AddOptions, p: Paths) {
   let body: string;
   if (exists) {
     const parsed = parseDecision(readFileSync(file, 'utf8'));
-    // Re-target guard: a Target moves only on an evidence-state change, never on impl pain.
-    if (currentTarget(parsed.body) && !o.evidenceChange) {
+    // Re-target guard: a Target moves only on an evidence-state change, never on impl pain. Trimmed
+    // so the CLI cannot write a hollow field that integrity/checks.mts would then flag as missing.
+    if (currentTarget(parsed.body) && !o.evidenceChange?.trim()) {
       console.error(
         `Axis "${slug}" already has a Target. An implementation change is a NOTE — drop --target:\n` +
           `  guard-decisions add ${slug} --note "<what converged>"\n` +

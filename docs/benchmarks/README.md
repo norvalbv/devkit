@@ -80,6 +80,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
 | Decision-log retrieval recall | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
+| Decision-log save quality | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
@@ -105,7 +106,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | devkit CLI | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
 | Coverage gate | bin | shipped | none | — |
-| Decisions gate | bin | shipped | evidence-only | decisions, decisions-recall |
+| Decisions gate | bin | shipped | evidence-only | decisions, decisions-recall, decisions-save-quality |
 | Deterministic orchestrator | bin | shipped | none | — |
 | Semantic duplication gate | bin | shipped | evidence-only | co-occurrence |
 | Duplication allowlist CLI | bin | shipped | none | — |
@@ -129,6 +130,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Sentry commit-message judge | judge | shipped | evidence-only | sentry |
 | qavis visual QA | judge | shipped | external-required | qavis |
 | Decision-log retrieval recall | benchmark | experimental | none | decisions-recall |
+| Decision-log save quality | benchmark | experimental | none | decisions-save-quality |
 | Semantic search retrieval | benchmark | experimental | evidence-only | search-tool |
 | Edge-case autonomy study | benchmark | no-ship | accepted | edge-cases |
 
