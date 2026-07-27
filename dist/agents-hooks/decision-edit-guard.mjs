@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_DECISIONS_DIR = "docs/decisions";
@@ -57,6 +57,18 @@ function inside(candidate, directory) {
   );
 }
 
+function canonicalizeAvailableParent(target) {
+  let existing = resolve(target);
+  const missing = [];
+  while (!existsSync(existing)) {
+    const parent = dirname(existing);
+    if (parent === existing) return target;
+    missing.unshift(basename(existing));
+    existing = parent;
+  }
+  return resolve(realpathSync(existing), ...missing);
+}
+
 /** Return the denial reason for a known in-scope mutation, otherwise null (fail-open). */
 export function decide(
   input,
@@ -68,10 +80,10 @@ export function decide(
     if (!MUTATING_TOOLS.has(toolName)) return null;
     const configured = configuredDir(root, env);
     if (!configured) return null;
-    const protectedDir = resolve(root, configured);
+    const protectedDir = canonicalizeAvailableParent(resolve(root, configured));
     const paths = collectPaths(input?.tool_input);
     const blocked = paths.find((filePath) =>
-      inside(resolve(root, filePath), protectedDir),
+      inside(canonicalizeAvailableParent(resolve(root, filePath)), protectedDir),
     );
     if (!blocked) return null;
     return (

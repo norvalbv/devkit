@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -57,6 +57,15 @@ describe('decision-edit-guard path policy', () => {
   it('normalizes relative traversal before testing containment', () => {
     expect(decide(payload('Edit', 'src/../docs/decisions/axis.md'), root)).not.toBeNull();
     expect(decide(payload('Edit', 'docs/decisions/../../src/axis.ts'), root)).toBeNull();
+  });
+
+  it('blocks a new file routed into decisions through a symlink', () => {
+    const decisions = join(root, 'docs/decisions');
+    mkdirSync(decisions, { recursive: true });
+    mkdirSync(join(root, 'tmp'), { recursive: true });
+    symlinkSync(decisions, join(root, 'tmp/decision-link'), 'dir');
+
+    expect(decide(payload('Write', 'tmp/decision-link/new.md'), root)).not.toBeNull();
   });
 
   it('blocks in-directory basenames that begin with two dots', () => {
