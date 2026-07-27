@@ -384,9 +384,16 @@ export async function main(argv: string[]) {
   const scored = await runCases(corpus, cases);
   const sum = summarize(scored);
   if (args.has('--baseline')) {
-    writeFileSync(BASELINE, `${JSON.stringify(baselineOf(sum), null, 2)}\n`);
+    const baseline = baselineOf(sum);
+    writeFileSync(BASELINE, `${JSON.stringify(baseline, null, 2)}\n`);
     console.log(`decisions-recall: wrote ${path.basename(BASELINE)}`);
-  } else if (args.has('--json'))
+    // The file is written either way — a failing run is evidence and has to be recordable. The
+    // COMMAND still fails, matching save-quality: a `bench --baseline && publish` chain that exits 0
+    // on a breached floor would publish the failure as though it were a pass.
+    if (!baseline.floorsMet) console.error('decisions-recall: a declared floor was not met');
+    process.exit(baseline.floorsMet ? 0 : 1);
+  }
+  if (args.has('--json'))
     console.log(JSON.stringify({ storeHash: storeHash(corpus), ...sum }, null, 2));
   else report(sum, corpus, cases);
   process.exit(0);
