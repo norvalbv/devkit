@@ -23,19 +23,17 @@ function stubBin(stdout: string, status = 0) {
   writeFileSync(bin, `#!/bin/sh\ncat <<'EOF'\n${stdout}\nEOF\nexit ${status}\n`, { mode: 0o755 });
 }
 
-// A fresh session id per call unless the caller pins one. Hoisted out of the default-parameter
-// expression: an assignment inside an expression is a lint error (noAssignInExpressions).
-function nextSession(): string {
-  n += 1;
-  return `s${n}`;
-}
-
-function run(toolInput: Record<string, unknown>, toolName = 'Edit', session = nextSession()) {
+function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: string) {
+  let sessionId = session;
+  if (sessionId === undefined) {
+    n += 1;
+    sessionId = `s${n}`;
+  }
   return spawnSync('node', [HOOK], {
     cwd: root,
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PROJECT_DIR: root },
-    input: JSON.stringify({ tool_name: toolName, session_id: session, tool_input: toolInput }),
+    input: JSON.stringify({ tool_name: toolName, session_id: sessionId, tool_input: toolInput }),
   }).stdout.trim();
 }
 
