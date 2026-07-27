@@ -467,6 +467,52 @@ export function parseEdgeCases(input: Json): ParsedBaseline {
   };
 }
 
+/**
+ * A suite that already knows its own numbers.
+ *
+ * Every other adapter here reverse-engineers metrics out of a bespoke result shape, because each
+ * LLM-judge suite reports differently. A DETERMINISTIC suite has no such excuse: it computes exact
+ * counts, so it can simply state them. The baseline IS the metric list —
+ * `{ metrics: [{id, label, k, n}], rows, floorsMet }` — which keeps the labels the suite's own author
+ * wrote instead of borrowing wording ("first-pass FAIL recall") from a reviewer-cohort model that
+ * does not apply to it. Reusable by any future suite that counts rather than judges.
+ *
+ * Acceptance restates the suite's own gate: metrics present, per-case evidence present, declared
+ * floors met. A run publishing zero metrics is never accepted — an empty run must not read as a pass.
+ */
+export function parseDeterministic(input: Json): ParsedBaseline {
+  const declared = Array.isArray(input.metrics) ? (input.metrics as Json[]) : [];
+  const metrics: MetricObservation[] = [];
+  for (const m of declared) {
+    if (!m || typeof m !== 'object' || typeof m.id !== 'string') continue;
+    const label = String(m.label ?? m.id);
+    const direction = m.direction === 'lower' ? 'lower' : 'higher';
+    if (typeof m.k === 'number' && typeof m.n === 'number' && m.n > 0)
+      metrics.push(ratio(m.id, label, m.k, m.n, direction, { inferenceUnit: 'case' }));
+    else if (typeof m.value === 'number')
+      metrics.push(scalar(m.id, label, m.value, direction, 'ratio', { inferenceUnit: 'case' }));
+  }
+  const rowsIn = input.rows && typeof input.rows === 'object' ? (input.rows as Json) : {};
+  // A failed floor is reported, never silently dropped: publishing exists so a regression shows up
+  // as a number moving the wrong way, not as a row quietly going missing.
+  const floorsMet = input.floorsMet !== false;
+  const accepted = metrics.length > 0 && Object.keys(rowsIn).length > 0 && floorsMet;
+  return {
+    metrics,
+    rows: rowsIn as Record<string, unknown>,
+    acceptance: {
+      accepted,
+      reason: accepted
+        ? 'Deterministic suite: declared floors met, with per-case evidence'
+        : metrics.length === 0
+          ? 'No metrics published — an empty run is not a pass'
+          : floorsMet
+            ? 'No per-case evidence recorded'
+            : 'A declared floor was not met',
+    },
+  };
+}
+
 const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   critique: parseCritique,
   completeness: parseCompleteness,
@@ -474,6 +520,7 @@ const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   reviewer: parseReviewer,
   decisions: parseDecisions,
   sentry: parseSentry,
+  deterministic: parseDeterministic,
   'edge-cases': parseEdgeCases,
 };
 

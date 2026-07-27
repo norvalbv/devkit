@@ -35,6 +35,8 @@ const NEGATIVE_LINE_RE = /^-\s*Negative:\s*.+$/m;
 // would have a middle block silently corrupted, defeating this module's whole guarantee that the
 // case and the check can never disagree about what the defect IS.
 const EVIDENCE_CHANGE_RE_G = /\n\*\*Evidence-change:\*\*[^\n]*/g;
+/** The `**Amends:** <id>` prefix of a tagged note, without its trailing prose. */
+const AMENDS_ID_RE = /\*\*Amends:\*\*\s*\S+/;
 
 function targetDates(body: string): string[] {
   return [...body.matchAll(TARGET_DATE_RE)].map((m) => m[1]);
@@ -136,6 +138,19 @@ export function mutateMissingEvidenceChange(f: Fixture): Fixture {
   };
 }
 
+/** #8 — repoint a note's `**Amends:**` at a date no note on the axis carries, turning a RESOLVED
+ * supersession edge into a dangling one. Repointing rather than deleting the marker on purpose:
+ * deleting it just yields an untagged note, which is no defect at all — the failure this check exists
+ * for is an assertion that outlives the thing it names. */
+export function mutateBreakNoteAmends(f: Fixture): Fixture {
+  if (!AMENDS_ID_RE.test(f.axis.body))
+    throw new Error('fixture has no **Amends:** note — cannot mutate note-amends-unresolvable');
+  return {
+    indexRow: f.indexRow,
+    axis: { ...f.axis, body: f.axis.body.replace(AMENDS_ID_RE, '**Amends:** note:1999-01-01') },
+  };
+}
+
 /** Every mutation, keyed by the check id it is designed to trip — one name-to-function map so a test
  * or the bench can drive "apply the mutation for check X" generically. */
 export const MUTATIONS = {
@@ -146,4 +161,5 @@ export const MUTATIONS = {
   'target-heading-depth': mutateTargetHeadingDepth,
   'duplicate-field-text': mutateDuplicateFieldText,
   'retarget-missing-evidence-change': mutateMissingEvidenceChange,
+  'note-amends-unresolvable': mutateBreakNoteAmends,
 } as const;

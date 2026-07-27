@@ -3,6 +3,7 @@ import path from 'node:path';
 import { currentTarget, parseDecision, parseIndex } from "../decision-format.mjs";
 import { axisHash, cosine, EMBED_MODEL, embed, embedDisabled, loadVecIndex, saveVecIndex, } from "./embeddings.mjs";
 import { sections } from "./markdown.mjs";
+import { axisNotes } from "./note-relations.mjs";
 import { corpusIdf, orderQualifiers, tokenize } from "./qualifiers.mjs";
 export { cosine, EMBED_MODEL, EMBED_URL, embed } from "./embeddings.mjs";
 // Re-exported so retrieval stays the single entry point for the recall path.
@@ -15,7 +16,6 @@ const RULING_FIELD_RE = /^\*\*Ruling:\*\*\s*(.+)$/gm;
 const WHY_FIELD_RE = /^\*\*(?:Why \/ target|Context):\*\*\s*(.+)$/m;
 const TARGET_HEADING_RE = /^## Target · (\d{4}-\d{2}-\d{2})/gm;
 const LEGACY_HEADING_RE = /^## (\d{4}-\d{2}-\d{2}) /gm;
-const NOTE_LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)$/;
 // ─── Candidate set ───────────────────────────────────────────────────────────────
 /**
  * The retrieval candidate set is the decisions DIRECTORY, not INDEX.md.
@@ -129,25 +129,26 @@ export function axisEntries(body, liveRulingId) {
     // Qualifiers are the dated bullets inside the ruling's OWN section. Bullets under any other
     // heading — a superseded block, or a trailing `## [archived …]` — belong to that heading, and the
     // section boundary now comes from the parser instead of being inferred.
-    for (const item of own?.items ?? []) {
-        const m = item.match(NOTE_LINE_RE);
-        if (!m)
+    //
+    // Ids come from note-relations.mts rather than being minted here. This file used to mint a bare
+    // `note:<date>`, which named SIX different bullets on an axis carrying six notes dated the same
+    // day — so no pointer could name one of them. The shared minter adds the `~N` occurrence suffix
+    // (the same scheme supersession.mts uses for same-day Targets) and is numbered axis-wide, so the
+    // id a reader sees here is the id an `**Amends:**` can reference.
+    const ownIndex = own ? all.indexOf(own) : -1;
+    for (const note of axisNotes(body)) {
+        if (note.sectionIndex !== ownIndex)
             continue;
-        const text = m[2].trim();
         entries.push({
-            id: `note:${m[1]}`,
+            id: note.id,
             kind: 'note',
-            date: m[1],
-            text,
-            relation: AMENDS_NOTE_RE.test(text) ? 'amends' : undefined,
+            date: note.date,
+            text: note.text,
+            relation: note.amendsTag ? 'amends' : undefined,
         });
     }
     return entries;
 }
-// Tag an `**Amends:**`-prefixed note writes: the relation marker distinguishing a note that
-// qualifies the Target from one that merely logs implementation progress (untagged notes are
-// unaffected — this only ever ADDS the `relation` field, never changes existing note behaviour).
-const AMENDS_NOTE_RE = /^\*\*Amends:\*\*/;
 // Tag a `rescope` note writes (decisions.mts cmdRescope): `- <date> — **Scope:** <globs> — <reason>`.
 // Non-greedy up to the em-dash boundary so a reason-less note (just the globs) still parses in full.
 const SCOPE_NOTE_RE = /^\*\*Scope:\*\*\s*(.+?)(?:\s+—\s+.+)?$/;

@@ -17,6 +17,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveFromCwd, resolveGuardConfig } from '../../config.mts';
 import { type IndexRow, parseDecision, parseIndex } from '../decision-format.mts';
+import { axisNoteIds } from '../recall/note-relations.mts';
 import { type AxisDoc, checkAxis, type IntegrityFinding } from './checks.mts';
 
 export interface ScanResult {
@@ -46,7 +47,10 @@ export function scanCorpus(dir: string): ScanResult {
   if (!existsSync(dir)) return { findings: [], filesScanned: 0 };
   const axes = loadAxisDocs(dir);
   const indexRows = loadIndexRows(dir);
-  const findings = axes.flatMap((axis) => checkAxis(axis, indexRows.get(axis.slug)));
+  // Cross-axis note ids, built once: a `slug#note:<date>` Amends can only be judged against the
+  // OTHER file, and resolving it per-axis would re-read the corpus for every reference.
+  const noteIds = new Map(axes.map((a) => [a.slug, axisNoteIds(a.body)]));
+  const findings = axes.flatMap((axis) => checkAxis(axis, indexRows.get(axis.slug), noteIds));
   return { findings, filesScanned: axes.length };
 }
 

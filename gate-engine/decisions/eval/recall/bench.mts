@@ -26,7 +26,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BenchAbort, parseCasesText } from '../cases.mts';
@@ -35,6 +35,73 @@ import { type RecallCase, type Scored, scoreCase, summarize } from './scoring.mt
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SEED_CORPUS = path.join(here, 'corpus', 'seed');
+const BASELINE = path.join(here, 'results.baseline.json');
+
+/**
+ * The publishable baseline, in the `deterministic` adapter's shape.
+ *
+ * Published against the LEXICAL tier (DECISIONS_NO_EMBED=1), which is what CI runs — a hybrid-tier
+ * number would be irreproducible for anyone without Ollama and `nomic-embed-text`, and a dashboard
+ * figure nobody else can regenerate is not evidence. Labels say so, because a retrieval number
+ * without its tier and n has repeatedly been walked back here.
+ *
+ * FANR is published as a FAILURE and left visible on purpose: the retriever never abstains (11/11
+ * cases where it should say "nothing rules on this", it answers anyway). Hiding a known-bad axis
+ * would make the dashboard an advertisement rather than an instrument.
+ */
+export function baselineOf(sum: ReturnType<typeof summarize>) {
+  const contain = {
+    hit: sum.containment.SINGLE.hit + sum.containment.MULTI.hit,
+    total: sum.containment.SINGLE.total + sum.containment.MULTI.total,
+  };
+  return {
+    metrics: [
+      {
+        id: 'containment',
+        label: 'Gold axis retrieved (lexical tier)',
+        k: contain.hit,
+        n: contain.total,
+      },
+      {
+        id: 'set-recall',
+        label: 'Multi-axis set recall',
+        k: sum.multi.setRecall.hit,
+        n: sum.multi.setRecall.total,
+      },
+      {
+        id: 'current-state-accuracy',
+        label: 'Current-state accuracy',
+        k: sum.currentState.csa.hit,
+        n: sum.currentState.csa.total,
+      },
+      {
+        id: 'stale-fact-error',
+        label: 'Stale-fact errors',
+        k: sum.currentState.sfer.bad,
+        n: sum.currentState.sfer.total,
+        direction: 'lower',
+      },
+      {
+        id: 'false-answer-non-refusal',
+        label: 'Answered when it should abstain',
+        k: sum.abstention.fanr.bad,
+        n: sum.abstention.fanr.total,
+        direction: 'lower',
+      },
+      {
+        id: 'false-abstention',
+        label: 'Abstained when it should answer',
+        k: sum.abstention.far.bad,
+        n: sum.abstention.far.total,
+        direction: 'lower',
+      },
+    ],
+    rows: sum.rows,
+    // The suite's own bar: zero engine errors and no stale ruling served. Abstention is deliberately
+    // NOT a floor — it is a known-open axis, published so the number can move, not gate on day one.
+    floorsMet: sum.errors === 0 && sum.currentState.sfer.bad === 0,
+  };
+}
 const CASES = path.join(here, 'cases-retrieval.jsonl');
 const TOP_K = 5;
 /** G1: a question sharing more than this fraction of its tokens with its gold axis tests string
@@ -316,7 +383,10 @@ export async function main(argv: string[]) {
 
   const scored = await runCases(corpus, cases);
   const sum = summarize(scored);
-  if (args.has('--json'))
+  if (args.has('--baseline')) {
+    writeFileSync(BASELINE, `${JSON.stringify(baselineOf(sum), null, 2)}\n`);
+    console.log(`decisions-recall: wrote ${path.basename(BASELINE)}`);
+  } else if (args.has('--json'))
     console.log(JSON.stringify({ storeHash: storeHash(corpus), ...sum }, null, 2));
   else report(sum, corpus, cases);
   process.exit(0);
