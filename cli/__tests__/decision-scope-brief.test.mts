@@ -23,7 +23,11 @@ function stubBin(stdout: string, status = 0) {
   writeFileSync(bin, `#!/bin/sh\ncat <<'EOF'\n${stdout}\nEOF\nexit ${status}\n`, { mode: 0o755 });
 }
 
-function run(toolInput: Record<string, unknown>, toolName = 'Edit', session = `s${(n += 1)}`) {
+function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: string) {
+  if (session === undefined) {
+    n += 1;
+    session = `s${n}`;
+  }
   return spawnSync('node', [HOOK], {
     cwd: root,
     encoding: 'utf8',
