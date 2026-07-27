@@ -55,6 +55,7 @@ import { currentTarget, hasTargetFields, parseDecision, parseIndex, renderDecisi
 import { warnNearestAxes } from "./dedupe.mjs";
 import { runDrift } from "./drift.mjs";
 import { assertFullNotJson, printFull, printRanked } from "./recall/full-print.mjs";
+import { noteTextWithRelation } from "./recall/note-relations.mjs";
 import { rankAxes as rankAxesIn, reindexAll } from "./recall/retrieval.mjs";
 export { currentTarget, parseDecision, parseIndex, renderDecision, renderIndex, renderNote, renderTarget, upsertRow, } from "./decision-format.mjs";
 // The recall path lives in retrieval.mts; re-exported so consumers and tests keep one entry point.
@@ -166,9 +167,9 @@ function addNote(slug, o, p) {
     }
     const date = today();
     const parsed = parseDecision(readFileSync(file, 'utf8'));
-    const fm = { slug, created: parsed.fm.created || date };
-    const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, o.note)}\n`;
-    writeFileAtomic(file, renderDecision(fm, body));
+    const note = noteTextWithRelation(o.note, o.supersedes, parsed.body);
+    const body = `${parsed.body.replace(TRAILING_WS_RE, '')}\n${renderNote(date, note)}\n`;
+    writeFileAtomic(file, renderDecision({ slug, created: parsed.fm.created || date }, body));
     console.log(`Noted on "${slug}" (${date}).`);
 }
 export function cmdList(cwd = process.cwd()) {
