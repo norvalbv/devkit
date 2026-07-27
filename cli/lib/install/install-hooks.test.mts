@@ -487,6 +487,17 @@ describe('syncHookScripts --only / --targets', () => {
     expect(existsSync(join(root, oldHook))).toBe(true);
   });
 
+  it('preserves a modified hook when exact desired reconciliation drops it', () => {
+    const root = tmpRepo();
+    const oldHook = join(root, '.claude/hooks/decision-edit-guard.mjs');
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
+    writeFileSync(oldHook, 'consumer edit');
+
+    syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
+
+    expect(readFileSync(oldHook, 'utf8')).toBe('consumer edit');
+  });
+
   it.each(['directory', 'symlink'])('preserves a stale hook %s collision', (kind) => {
     const root = tmpRepo();
     const oldHook = join(root, '.claude/hooks/decision-edit-guard.mjs');

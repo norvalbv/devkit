@@ -32,6 +32,7 @@ const AGENT_ASSET_CHECKS = {
   agents: ['agents', 'agents-manifest.json', 'run `devkit sync-agents`', 'agent file(s)'],
   hooks: ['agent-hooks', 'agent-hooks-manifest.json', 'run `devkit init`', 'hook script(s)'],
 } as const satisfies Record<AgentAssetKind, readonly [string, string, string, string]>;
+const PRE_LEDGER_HOOK_OWNERS = new Set(['searchSteering', 'agentHooks', 'decisions', 'fallow']);
 
 function assetExistsOnAnyProvider(
   gitRoot: string,
@@ -309,8 +310,8 @@ export function checkRegistrations(
     result = checkHookRegistrations(gitRoot, hookComponents, {
       targets,
       overlay,
-      legacyOwnedComponentIds: hookComponents.filter(
-        (component) => component === 'searchSteering' || component === 'agentHooks',
+      legacyOwnedComponentIds: hookComponents.filter((component) =>
+        PRE_LEDGER_HOOK_OWNERS.has(component),
       ),
     });
   } catch (error) {

@@ -114,6 +114,10 @@ export function syncHookScripts(root, { dryRun = false, targets = AGENT_TARGETS,
                     const dest = join(root, rel);
                     if (dryRun || !existsSync(dest) || !isSafeAgentAssetPath(root, rel, true))
                         continue;
+                    if (sha256(dest) !== prev?.files[name]) {
+                        console.log(`  ! keeping deselected agent-hook "${rel}" — modified since devkit wrote it`);
+                        continue;
+                    }
                     rmSync(dest, { force: true });
                 }
             }
