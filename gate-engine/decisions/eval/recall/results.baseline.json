@@ -1,14 +1,26 @@
 {
   "metrics": [
     {
+      "id": "containment-hybrid",
+      "label": "Gold axis retrieved",
+      "k": 12,
+      "n": 12
+    },
+    {
+      "id": "set-recall-hybrid",
+      "label": "Multi-axis set recall",
+      "k": 3,
+      "n": 4
+    },
+    {
       "id": "containment",
-      "label": "Gold axis retrieved (lexical tier)",
+      "label": "Gold axis retrieved (word-matching floor)",
       "k": 11,
       "n": 12
     },
     {
       "id": "set-recall",
-      "label": "Multi-axis set recall",
+      "label": "Multi-axis set recall (word-matching floor)",
       "k": 2,
       "n": 4
     },
