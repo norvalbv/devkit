@@ -24,15 +24,16 @@ function stubBin(stdout: string, status = 0) {
 }
 
 function run(toolInput: Record<string, unknown>, toolName = 'Edit', session?: string) {
-  if (session === undefined) {
+  let sessionId = session;
+  if (sessionId === undefined) {
     n += 1;
-    session = `s${n}`;
+    sessionId = `s${n}`;
   }
   return spawnSync('node', [HOOK], {
     cwd: root,
     encoding: 'utf8',
     env: { ...process.env, CLAUDE_PROJECT_DIR: root },
-    input: JSON.stringify({ tool_name: toolName, session_id: session, tool_input: toolInput }),
+    input: JSON.stringify({ tool_name: toolName, session_id: sessionId, tool_input: toolInput }),
   }).stdout.trim();
 }
 
