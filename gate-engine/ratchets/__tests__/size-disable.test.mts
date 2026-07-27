@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { stagedSet } from '../git-index.mts';
 import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
@@ -356,7 +357,45 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/y.ts', big(200)); // a parallel agent grows y past its ceiling, UNSTAGED
     write(root, 'src/x.ts', big(70)); // this agent's file is fine
     gitAdd(root, 'src/x.ts');
-    expect(run(root, 'gate').status).toBe(0); // y's unstaged growth must not block x's commit
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0); // y's unstaged growth must not block x's commit
+    expect(r.stderr).not.toContain('MERGE_HEAD'); // the expected non-merge fallback stays quiet
+  });
+
+  it('a merge ignores inherited upstream size debt but still gates merge-authored growth', () => {
+    const root = makeRoot();
+    gitInit(root);
+    execFileSync('git', ['branch', '-M', 'main'], { cwd: root });
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/base.ts', big(10));
+    gitAdd(root, 'guard.config.json', 'src/base.ts');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    execFileSync('git', ['switch', '-qc', 'feature'], { cwd: root });
+    write(root, 'src/feature.ts', big(10));
+    gitAdd(root, 'src/feature.ts');
+    execFileSync('git', ['commit', '-qm', 'feature'], { cwd: root });
+
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: root });
+    write(root, 'src/upstream.ts', `/* eslint-disable max-lines */\n${big(79)}`);
+    gitAdd(root, 'src/upstream.ts');
+    execFileSync('git', ['commit', '-qm', 'upstream'], { cwd: root });
+
+    execFileSync('git', ['switch', '-q', 'feature'], { cwd: root });
+    execFileSync('git', ['merge', '--no-commit', '--no-ff', 'main'], { cwd: root });
+
+    expect(stagedSet(root)).toEqual(new Set());
+    const r = run(root, 'gate');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain('src/upstream.ts');
+
+    write(root, 'src/resolution.ts', big(70));
+    gitAdd(root, 'src/resolution.ts');
+    expect(stagedSet(root)).toEqual(new Set(['src/resolution.ts']));
+    const resolved = run(root, 'gate');
+    expect(resolved.status).toBe(1);
+    expect(resolved.stderr).toContain('src/resolution.ts: 70 lines (max 50)');
+    expect(resolved.stderr).not.toContain('src/upstream.ts');
   });
 
   it('with nothing staged (CI / audit) the whole tree is enforced and the baseline is not mutated', () => {
