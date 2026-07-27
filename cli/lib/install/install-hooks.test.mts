@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -470,5 +471,39 @@ describe('syncHookScripts --only / --targets', () => {
     expect(hookExists(root, 'decision-edit-guard.mjs')).toBe(false);
     expect(hookExists(root, 'lint-check.sh')).toBe(true);
     expect(Object.keys(manifest(root).files)).toEqual(['lint-check.sh']);
+  });
+
+  it('preserves a tracked hook when exact desired reconciliation drops it', () => {
+    const root = tmpRepo();
+    const oldHook = '.claude/hooks/decision-edit-guard.mjs';
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
+
+    syncHookScripts(root, {
+      desired: ['lint-check.sh'],
+      targets: ['claude'],
+      skipTracked: (rel) => rel === oldHook,
+    });
+
+    expect(existsSync(join(root, oldHook))).toBe(true);
+  });
+
+  it.each(['directory', 'symlink'])('preserves a stale hook %s collision', (kind) => {
+    const root = tmpRepo();
+    const oldHook = join(root, '.claude/hooks/decision-edit-guard.mjs');
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
+    rmSync(oldHook);
+    if (kind === 'directory') mkdirSync(oldHook);
+    else {
+      const foreign = join(root, 'foreign-hook.mjs');
+      writeFileSync(foreign, 'foreign');
+      symlinkSync(foreign, oldHook);
+    }
+
+    expect(() =>
+      syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] }),
+    ).not.toThrow();
+    expect(
+      kind === 'directory' ? lstatSync(oldHook).isDirectory() : lstatSync(oldHook).isSymbolicLink(),
+    ).toBe(true);
   });
 });

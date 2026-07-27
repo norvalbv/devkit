@@ -221,7 +221,7 @@ describe('sync manifest hostile legacy input', () => {
     }
     expect(() =>
       decodeSyncManifest({ files: { 'skill/SKILL.md': A }, targets: outOfRangeTargets }, 'skills'),
-    ).toThrow();
+    ).toThrow(/sync manifest v1 targets must be a dense data array/);
     expect(hiddenAccessor).not.toHaveBeenCalled();
   });
 });

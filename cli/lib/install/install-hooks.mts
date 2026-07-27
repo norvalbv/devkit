@@ -181,8 +181,11 @@ export function syncHookScripts(
       for (const name of oldNames) {
         if (kept.has(name)) continue;
         for (const target of cleanupTargets) {
-          const dest = join(root, agentAssetDir(target, 'hooks'), name);
-          if (!dryRun && existsSync(dest)) rmSync(dest, { force: true });
+          const rel = `${agentAssetDir(target, 'hooks')}/${name}`;
+          if (skipTracked?.(rel)) continue;
+          const dest = join(root, rel);
+          if (dryRun || !existsSync(dest) || !isSafeAgentAssetPath(root, rel, true)) continue;
+          rmSync(dest, { force: true });
         }
       }
     }
