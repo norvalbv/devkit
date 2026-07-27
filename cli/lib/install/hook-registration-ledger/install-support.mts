@@ -4,7 +4,7 @@ import { writeFileAtomic } from '../../atomic-write.mts';
 import { readJson } from '../../fs-helpers.mts';
 import { isTracked } from '../../git-tracked.mts';
 import { isSafeAgentAssetPath } from '../agent-asset-manifest/lifecycle.mts';
-import { type AgentProvider, LEGACY_AGENT_PROVIDERS } from '../agent-providers.mts';
+import { type AgentProvider, LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mts';
 import {
   encodeHookRegistrationLedger,
   HOOK_REGISTRATION_LEDGER_REL,

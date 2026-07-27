@@ -1,4 +1,4 @@
-import { isAgentProvider } from "../agent-providers.mjs";
+import { isAgentProvider } from "../agent-assets/agent-providers.mjs";
 import { decodeHookRegistrationLedger, hookRegistrationDestination, } from "./codec.mjs";
 import { dataRecord, exactData } from "./plain-data.mjs";
 import { HOOK_REGISTRATIONS } from "./registrations.mjs";

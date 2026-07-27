@@ -2,8 +2,8 @@ import { lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mts';
 import { writeFileAtomic } from '../../atomic-write.mts';
-import { isWellFormedUnicode } from '../agent-assets.mts';
-import { type AgentProvider, isAgentProvider } from '../agent-providers.mts';
+import { isWellFormedUnicode } from '../agent-assets/agent-assets.mts';
+import { type AgentProvider, isAgentProvider } from '../agent-assets/agent-providers.mts';
 import { readBoundedRegularFile } from '../strict-bounded-file-read.mts';
 
 export const HOOK_REGISTRATION_LEDGER_REL =

@@ -20,8 +20,8 @@ import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest
 import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "./agent-asset-manifest/compatibility.mjs";
 import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from "./agent-asset-manifest/lifecycle.mjs";
 import { readAgentAssetManifest } from "./agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "./agent-assets.mjs";
-import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from "./agent-providers.mjs";
+import { agentAssetDir } from "./agent-assets/agent-assets.mjs";
+import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from "./agent-assets/agent-providers.mjs";
 import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from "./hook-registration-ledger/codec.mjs";
 import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, } from "./hook-registration-ledger/install-support.mjs";
 import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from "./hook-registration-ledger/lifecycle.mjs";

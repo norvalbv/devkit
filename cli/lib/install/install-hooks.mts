@@ -35,8 +35,8 @@ import {
   syncProviderNativeAssets,
 } from './agent-asset-manifest/lifecycle.mts';
 import { readAgentAssetManifest } from './agent-asset-manifest/reader.mts';
-import { agentAssetDir } from './agent-assets.mts';
-import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from './agent-providers.mts';
+import { agentAssetDir } from './agent-assets/agent-assets.mts';
+import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from './agent-assets/agent-providers.mts';
 import {
   HOOK_REGISTRATION_LEDGER_REL,
   type HookInstallScope,

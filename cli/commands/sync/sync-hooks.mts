@@ -23,7 +23,7 @@ import {
   isAgentProvider,
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
-} from '../../lib/install/agent-providers.mts';
+} from '../../lib/install/agent-assets/agent-providers.mts';
 import {
   DECISION_EDIT_HOOK,
   hookScriptsFor,

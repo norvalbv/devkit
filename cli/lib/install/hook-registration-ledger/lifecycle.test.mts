@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentProvider } from '../agent-providers.mts';
+import type { AgentProvider } from '../agent-assets/agent-providers.mts';
 import {
   HOOK_REGISTRATION_LEDGER_REL,
   type HookRegistrationLedgerV1,

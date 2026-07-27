@@ -21,7 +21,7 @@ import { removeGuardBlock } from '../lib/husky/husky-block.mts';
 import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
-} from '../lib/install/agent-providers.mts';
+} from '../lib/install/agent-assets/agent-providers.mts';
 import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { removeSearchCode } from '../lib/install/install-search-code.mts';

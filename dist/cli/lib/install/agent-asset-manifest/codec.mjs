@@ -1,6 +1,6 @@
 import { types as utilTypes } from 'node:util';
-import { isWellFormedUnicode, projectedAssetRel } from "../agent-assets.mjs";
-import { isAgentProvider, LEGACY_AGENT_PROVIDERS, SUPPORTED_AGENT_PROVIDERS, } from "../agent-providers.mjs";
+import { isWellFormedUnicode, projectedAssetRel } from "../agent-assets/agent-assets.mjs";
+import { isAgentProvider, LEGACY_AGENT_PROVIDERS, SUPPORTED_AGENT_PROVIDERS, } from "../agent-assets/agent-providers.mjs";
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const WINDOWS_ABSOLUTE_RE = /^[A-Za-z]:\//;
 const ASSET_KINDS = new Set(['skills', 'agents', 'hooks']);

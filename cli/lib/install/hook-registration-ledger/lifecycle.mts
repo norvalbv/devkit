@@ -1,4 +1,4 @@
-import { type AgentProvider, isAgentProvider } from '../agent-providers.mts';
+import { type AgentProvider, isAgentProvider } from '../agent-assets/agent-providers.mts';
 import {
   decodeHookRegistrationLedger,
   type HookInstallScope,

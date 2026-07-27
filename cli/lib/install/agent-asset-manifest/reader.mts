@@ -1,5 +1,5 @@
 import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mts';
-import type { AgentAssetKind } from '../agent-providers.mts';
+import type { AgentAssetKind } from '../agent-assets/agent-providers.mts';
 import { readBoundedRegularFile } from '../strict-bounded-file-read.mts';
 import { type DecodedSyncManifest, decodeSyncManifest } from './codec.mts';
 

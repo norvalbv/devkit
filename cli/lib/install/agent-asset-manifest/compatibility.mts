@@ -1,4 +1,4 @@
-import { type AgentAssetKind, LEGACY_AGENT_PROVIDERS } from '../agent-providers.mts';
+import { type AgentAssetKind, LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mts';
 import type { DecodedSyncManifest } from './codec.mts';
 
 type LegacyDecodedSyncManifest = Extract<DecodedSyncManifest, { version: 1 }> | null;

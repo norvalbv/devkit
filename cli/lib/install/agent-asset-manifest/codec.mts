@@ -1,12 +1,12 @@
 import { types as utilTypes } from 'node:util';
-import { isWellFormedUnicode, projectedAssetRel } from '../agent-assets.mts';
+import { isWellFormedUnicode, projectedAssetRel } from '../agent-assets/agent-assets.mts';
 import {
   type AgentAssetKind,
   type AgentProvider,
   isAgentProvider,
   LEGACY_AGENT_PROVIDERS,
   SUPPORTED_AGENT_PROVIDERS,
-} from '../agent-providers.mts';
+} from '../agent-assets/agent-providers.mts';
 
 export interface SyncManifestV2 {
   schemaVersion: 2;

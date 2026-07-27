@@ -18,7 +18,7 @@ import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.m
 import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
-} from '../lib/install/agent-providers.mts';
+} from '../lib/install/agent-assets/agent-providers.mts';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';

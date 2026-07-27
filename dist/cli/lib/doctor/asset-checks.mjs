@@ -15,7 +15,7 @@ import { detectGitRoot } from "../detect-git-root.mjs";
 import { packageDir, readJson, sha256 } from "../fs-helpers.mjs";
 import { isSafeAgentAssetPath } from "../install/agent-asset-manifest/lifecycle.mjs";
 import { readAgentAssetManifest } from "../install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir, projectedAssetRel } from "../install/agent-assets.mjs";
+import { agentAssetDir, projectedAssetRel } from "../install/agent-assets/agent-assets.mjs";
 import { checkHookRegistrations } from "../install/install-hooks.mjs";
 import { bundledNames } from "../sync-manifest.mjs";
 import { check } from "./check-result.mjs";

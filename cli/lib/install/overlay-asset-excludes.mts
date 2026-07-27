@@ -1,6 +1,6 @@
 import type { SyncManifestV2 } from './agent-asset-manifest/codec.mts';
-import { agentAssetDir } from './agent-assets.mts';
-import { type AgentAssetKind, SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
+import { agentAssetDir } from './agent-assets/agent-assets.mts';
+import { type AgentAssetKind, SUPPORTED_AGENT_PROVIDERS } from './agent-assets/agent-providers.mts';
 
 type AssetManifest = { schemaVersion?: never; files: Record<string, string> } | SyncManifestV2;
 

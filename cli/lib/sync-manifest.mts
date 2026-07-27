@@ -21,8 +21,8 @@ import {
   withAgentAssetLifecycleLock,
 } from './install/agent-asset-manifest/lifecycle.mts';
 import { readAgentAssetManifest } from './install/agent-asset-manifest/reader.mts';
-import { agentAssetDir } from './install/agent-assets.mts';
-import { LEGACY_AGENT_PROVIDERS } from './install/agent-providers.mts';
+import { agentAssetDir } from './install/agent-assets/agent-assets.mts';
+import { LEGACY_AGENT_PROVIDERS } from './install/agent-assets/agent-providers.mts';
 
 export {
   decodeSyncManifest,

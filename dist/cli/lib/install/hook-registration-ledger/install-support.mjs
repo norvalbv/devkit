@@ -4,7 +4,7 @@ import { writeFileAtomic } from "../../atomic-write.mjs";
 import { readJson } from "../../fs-helpers.mjs";
 import { isTracked } from "../../git-tracked.mjs";
 import { isSafeAgentAssetPath } from "../agent-asset-manifest/lifecycle.mjs";
-import { LEGACY_AGENT_PROVIDERS } from "../agent-providers.mjs";
+import { LEGACY_AGENT_PROVIDERS } from "../agent-assets/agent-providers.mjs";
 import { encodeHookRegistrationLedger, HOOK_REGISTRATION_LEDGER_REL, } from "./codec.mjs";
 import { checkProjectedHookRegistrations, projectHookRegistrations, writeHookRegistrationLedger, } from "./lifecycle.mjs";
 export const ledgerOf = (entries = []) => ({

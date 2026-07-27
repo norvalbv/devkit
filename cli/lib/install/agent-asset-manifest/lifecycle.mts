@@ -3,13 +3,17 @@ import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } f
 import { dirname, join } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
 import { writeIfAbsent } from '../../fs-helpers.mts';
-import { agentAssetDir, projectAgentAsset, projectedAssetRel } from '../agent-assets.mts';
+import {
+  agentAssetDir,
+  projectAgentAsset,
+  projectedAssetRel,
+} from '../agent-assets/agent-assets.mts';
 import {
   type AgentAssetKind,
   type AgentProvider,
   requireAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
-} from '../agent-providers.mts';
+} from '../agent-assets/agent-providers.mts';
 import { type DecodedSyncManifest, encodeSyncManifestV2, type SyncManifestV2 } from './codec.mts';
 import { AGENT_ASSET_MANIFESTS } from './compatibility.mts';
 import { withAgentAssetLifecycleLock } from './lock.mts';

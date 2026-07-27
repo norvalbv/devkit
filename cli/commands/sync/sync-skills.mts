@@ -25,8 +25,8 @@ import {
   withAgentAssetLifecycleLock,
 } from '../../lib/install/agent-asset-manifest/lifecycle.mts';
 import { readAgentAssetManifest } from '../../lib/install/agent-asset-manifest/reader.mts';
-import { agentAssetDir } from '../../lib/install/agent-assets.mts';
-import { resolveExistingAgentProviders } from '../../lib/install/agent-providers.mts';
+import { agentAssetDir } from '../../lib/install/agent-assets/agent-assets.mts';
+import { resolveExistingAgentProviders } from '../../lib/install/agent-assets/agent-providers.mts';
 import { findConflicts, type SyncManifest } from '../../lib/sync-manifest.mts';
 
 // The manifest devkit writes for a synced asset set: the SyncManifest ownership shape (files +

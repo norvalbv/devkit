@@ -22,7 +22,7 @@ import { runSelfHostDoctor } from "../lib/doctor/self-host-doctor.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { checkCommitMsgHook, commitMsgGuards } from "../lib/husky/commit-msg-block.mjs";
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../lib/husky/husky-block.mjs";
-import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-providers.mjs";
+import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-assets/agent-providers.mjs";
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from "../lib/overlay.mjs";
 import { globalHookInstalled, globalInitPath } from "../lib/overlay-global-hook.mjs";

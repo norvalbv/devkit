@@ -1,5 +1,5 @@
-import { agentAssetDir } from "./agent-assets.mjs";
-import { SUPPORTED_AGENT_PROVIDERS } from "./agent-providers.mjs";
+import { agentAssetDir } from "./agent-assets/agent-assets.mjs";
+import { SUPPORTED_AGENT_PROVIDERS } from "./agent-assets/agent-providers.mjs";
 /** Git-exclude paths for exactly the provider outputs represented by an asset manifest. */
 export function overlayAssetExcludes(manifest, kind, targets) {
     const excludes = new Set();

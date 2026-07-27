@@ -45,7 +45,7 @@ import {
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/husky/self-host.mts';
-import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-surfaces.mts';
+import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-assets/agent-surfaces.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
 import {

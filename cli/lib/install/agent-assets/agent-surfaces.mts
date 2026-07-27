@@ -1,18 +1,18 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from '../../commands/sync/sync-agents.mts';
-import { syncSkills } from '../../commands/sync/sync-skills.mts';
-import { AGENT_TARGETS, type Selection } from '../components.mts';
-import { removeAgents, removeSkills } from '../sync-manifest.mts';
-import { agentAssetDir } from './agent-assets.mts';
-import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
-import { selectedHookAssets } from './hook-registration-ledger/selection.mts';
+import { syncAgents } from '../../../commands/sync/sync-agents.mts';
+import { syncSkills } from '../../../commands/sync/sync-skills.mts';
+import { AGENT_TARGETS, type Selection } from '../../components.mts';
+import { removeAgents, removeSkills } from '../../sync-manifest.mts';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mts';
 import {
   reconcileHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
   syncHookScripts,
-} from './install-hooks.mts';
+} from '../install-hooks.mts';
+import { agentAssetDir } from './agent-assets.mts';
+import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
 
 type OverrideAsset = (kind: string, name: string) => boolean;
 

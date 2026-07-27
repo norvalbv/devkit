@@ -28,7 +28,7 @@ import { INIT_HELP } from "../lib/help/init-help.mjs";
 import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
-import { installAgentSurfaces as syncSurfaces } from "../lib/install/agent-surfaces.mjs";
+import { installAgentSurfaces as syncSurfaces } from "../lib/install/agent-assets/agent-surfaces.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from "../lib/install/install-fallow.mjs";

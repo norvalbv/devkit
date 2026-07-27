@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { AGENT_TARGETS } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { readJson } from "../../lib/fs-helpers.mjs";
-import { isAgentProvider, resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../../lib/install/agent-providers.mjs";
+import { isAgentProvider, resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../../lib/install/agent-assets/agent-providers.mjs";
 import { DECISION_EDIT_HOOK, hookScriptsFor, } from "../../lib/install/hook-registration-ledger/selection.mjs";
 import { syncHookScripts } from "../../lib/install/install-hooks.mjs";
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).

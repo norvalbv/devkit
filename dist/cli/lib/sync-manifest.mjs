@@ -15,8 +15,8 @@ import { isTracked } from "./git-tracked.mjs";
 import { AGENT_ASSET_MANIFESTS, assertLegacyAssetWriterCompatible, } from "./install/agent-asset-manifest/compatibility.mjs";
 import { removeProviderNativeAssets, withAgentAssetLifecycleLock, } from "./install/agent-asset-manifest/lifecycle.mjs";
 import { readAgentAssetManifest } from "./install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "./install/agent-assets.mjs";
-import { LEGACY_AGENT_PROVIDERS } from "./install/agent-providers.mjs";
+import { agentAssetDir } from "./install/agent-assets/agent-assets.mjs";
+import { LEGACY_AGENT_PROVIDERS } from "./install/agent-assets/agent-providers.mjs";
 export { decodeSyncManifest, encodeSyncManifestV2, } from "./install/agent-asset-manifest/codec.mjs";
 // ── ownership inference (forward: sync-time conflict detection) ───────────────────────────────
 // A consumer may author their OWN skill/agent/hook under a name devkit bundles. These tell the sync

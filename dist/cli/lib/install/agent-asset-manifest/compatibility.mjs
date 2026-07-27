@@ -1,4 +1,4 @@
-import { LEGACY_AGENT_PROVIDERS } from "../agent-providers.mjs";
+import { LEGACY_AGENT_PROVIDERS } from "../agent-assets/agent-providers.mjs";
 const LEGACY_TARGETS = new Set(LEGACY_AGENT_PROVIDERS);
 export const AGENT_ASSET_MANIFESTS = [
     { filename: 'skills-manifest.json', kind: 'skills' },

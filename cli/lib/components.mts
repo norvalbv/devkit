@@ -11,7 +11,7 @@
 import {
   FRESH_DEFAULT_AGENT_PROVIDERS,
   normalizeAgentProviders,
-} from './install/agent-providers.mts';
+} from './install/agent-assets/agent-providers.mts';
 
 /** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
 export const RECOMMENDED_GUARD_IDS = [

@@ -17,7 +17,7 @@ import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { isTracked, trackedPathPredicate } from "../lib/git-tracked.mjs";
 import { removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { removeGuardBlock } from "../lib/husky/husky-block.mjs";
-import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-providers.mjs";
+import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-assets/agent-providers.mjs";
 import { pruneDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { removeHookRegistrations, removeHookScripts } from "../lib/install/install-hooks.mjs";
 import { removeSearchCode } from "../lib/install/install-search-code.mjs";
