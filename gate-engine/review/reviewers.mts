@@ -61,6 +61,7 @@ export interface ChecklistItem {
   status?: string;
   name?: string;
   path?: string;
+  issues?: string[]; // failure reasons; checkItem clears them on a recovery pass, so a pass has none
 }
 
 /** Parsed checklist state-file artifact the judge's workflow leaves behind. */

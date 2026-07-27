@@ -19,3 +19,4 @@ created: 2026-07-25
 **Revisit-when:** The default sink becomes per-repo rather than per-machine (making the repo field redundant), or a consumer needs hit rate at a granularity finer than the judge label.
 **Scope:** gate-engine/judge/gate-events.mts,gate-engine/judge/run-context.mts
 **Source:** shortcut · sc-1239
+- 2026-07-27 — Extended to INPUTS and non-runs, not only outcomes — see [[gate-verdict-attribution]]: review_scope names what a reviewer covered (and lands for a cached PASS, which emits no review_result), review_skipped names the reviewers that never ran, and verdicts carry prompt_identity so a production rate is comparable to a bench baseline.
