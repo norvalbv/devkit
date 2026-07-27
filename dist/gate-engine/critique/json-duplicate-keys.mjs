@@ -27,7 +27,7 @@ export function firstDuplicateJsonKey(raw) {
         if (index >= raw.length)
             return null;
         let cursor = index + 1;
-        while (' \t\r\n'.includes(raw[cursor] ?? ''))
+        while (cursor < raw.length && ' \t\r\n'.includes(raw[cursor]))
             cursor += 1;
         const keys = containers.at(-1);
         if (raw[cursor] !== ':' || !(keys instanceof Set))

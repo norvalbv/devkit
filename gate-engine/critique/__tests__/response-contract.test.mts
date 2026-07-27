@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { firstDuplicateJsonKey } from '../json-duplicate-keys.mts';
 import { parsePlanCritiqueResponse } from '../response-contract.mts';
 import { REVIEWED_RESPONSE } from './response-fixture.mts';
 
@@ -14,6 +15,13 @@ const NEUTRAL_ANALYSIS = {
   configurationRows: [],
   missingConsiderations: [],
 } as const;
+
+describe('firstDuplicateJsonKey', () => {
+  it('terminates when a quoted string reaches the end of the input', () => {
+    expect(firstDuplicateJsonKey('"a"')).toBeNull();
+    expect(firstDuplicateJsonKey('{"a":"b"')).toBeNull();
+  });
+});
 
 describe('parsePlanCritiqueResponse', () => {
   it('accepts the exact reviewed V1 contract and reconstructs documented key order', () => {
