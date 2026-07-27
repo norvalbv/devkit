@@ -49,22 +49,49 @@ const BASELINE = path.join(here, 'results.baseline.json');
  * cases where it should say "nothing rules on this", it answers anyway). Hiding a known-bad axis
  * would make the dashboard an advertisement rather than an instrument.
  */
-export function baselineOf(sum: ReturnType<typeof summarize>) {
-  const contain = {
-    hit: sum.containment.SINGLE.hit + sum.containment.MULTI.hit,
-    total: sum.containment.SINGLE.total + sum.containment.MULTI.total,
-  };
+export function baselineOf(
+  sum: ReturnType<typeof summarize>,
+  hybrid?: ReturnType<typeof summarize>,
+) {
+  const contain = (s: ReturnType<typeof summarize>) => ({
+    hit: s.containment.SINGLE.hit + s.containment.MULTI.hit,
+    total: s.containment.SINGLE.total + s.containment.MULTI.total,
+  });
+  const lex = contain(sum);
+  // Hybrid FIRST when it ran: it is the mode a user actually gets (`query` uses meaning-matching
+  // whenever Ollama answers, and only falls back to word-matching when it does not), so it belongs
+  // in the dashboard headline. Publishing only the fallback understated real behaviour — measured
+  // 2/4 vs 3/4 on multi-axis and 11/12 vs 12/12 on containment. The lexical figures stay published
+  // underneath as the FLOOR: they are what CI reproduces with no model available, so a reader can
+  // always tell which number their environment will see.
+  const hybridMetrics = hybrid
+    ? [
+        {
+          id: 'containment-hybrid',
+          label: 'Gold axis retrieved',
+          k: contain(hybrid).hit,
+          n: contain(hybrid).total,
+        },
+        {
+          id: 'set-recall-hybrid',
+          label: 'Multi-axis set recall',
+          k: hybrid.multi.setRecall.hit,
+          n: hybrid.multi.setRecall.total,
+        },
+      ]
+    : [];
   return {
     metrics: [
+      ...hybridMetrics,
       {
         id: 'containment',
-        label: 'Gold axis retrieved (lexical tier)',
-        k: contain.hit,
-        n: contain.total,
+        label: 'Gold axis retrieved (word-matching floor)',
+        k: lex.hit,
+        n: lex.total,
       },
       {
         id: 'set-recall',
-        label: 'Multi-axis set recall',
+        label: 'Multi-axis set recall (word-matching floor)',
         k: sum.multi.setRecall.hit,
         n: sum.multi.setRecall.total,
       },
@@ -384,7 +411,23 @@ export async function main(argv: string[]) {
   const scored = await runCases(corpus, cases);
   const sum = summarize(scored);
   if (args.has('--baseline')) {
-    const baseline = baselineOf(sum);
+    // Measure BOTH modes: the word-matching floor above, then meaning-matching if a model answers.
+    // A missing/erroring model degrades to the floor rather than failing the run — CI must be able to
+    // regenerate a baseline with no Ollama, it just publishes fewer metrics.
+    let hybrid: ReturnType<typeof summarize> | undefined;
+    try {
+      process.env.BENCH_RETRIEVAL = 'hybrid';
+      delete process.env.DECISIONS_NO_EMBED; // set by the lexical pass; must not leak into this one
+      const h = summarize(await runCases(corpus, cases));
+      if (h.errors === 0) hybrid = h;
+    } catch {
+      hybrid = undefined;
+    }
+    if (!hybrid)
+      console.error(
+        'decisions-recall: no embedding tier available — publishing the word-matching floor only',
+      );
+    const baseline = baselineOf(sum, hybrid);
     writeFileSync(BASELINE, `${JSON.stringify(baseline, null, 2)}\n`);
     console.log(`decisions-recall: wrote ${path.basename(BASELINE)}`);
     // The file is written either way — a failing run is evidence and has to be recordable. The

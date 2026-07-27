@@ -137,7 +137,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
-| Decision-log retrieval recall | experimental | accepted | current | quality | ? unknown | Gold axis retrieved (lexical tier): 11/12 (91.7%) · Multi-axis set recall: 2/4 (50.0%) |
+| Decision-log retrieval recall | experimental | accepted | current | methodology-reset | ? unknown | Gold axis retrieved (lexical tier): 11/12 (91.7%) · Multi-axis set recall: 2/4 (50.0%) |
 | Decision-log save quality | experimental | accepted | current | quality | ? unknown | Defect recall (perturbation corpus): 13/13 (100.0%) · False-positive rate at R80: 0/18 (0.0%) |
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
