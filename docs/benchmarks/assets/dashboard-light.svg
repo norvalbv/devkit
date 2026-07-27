@@ -10,7 +10,7 @@
 <text class="title" x="32" y="52">Benchmark evidence, not benchmark vibes</text>
 <text class="summary" x="32" y="82">6 accepted suites · 4 shipped-agent evidence gaps · growth curve: insufficient evidence</text>
 <text class="summary" x="32" y="112">✓ accepted   ! stale   × no-ship   ? missing — status never relies on color alone</text>
-<g transform="translate(32 150)"><text class="suite" y="0">Feature critique</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold finding recall: 23/24 (95.8%) · Clean-pl…</text></g>
+<g transform="translate(32 150)"><text class="suite" y="0">Feature critique</text><text class="status good" x="300" y="0">✓ accepted</text><text class="metric" x="470" y="0">Gold finding recall: 23/25 (92.0%) · Clean-pl…</text></g>
 <g transform="translate(32 188)"><text class="suite" y="0">Feature completeness</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold gap recall: 25/35 (71.4%) · Decoy false-…</text></g>
 <g transform="translate(32 226)"><text class="suite" y="0">Repository conventions</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold gap recall: 18/18 (100.0%) · Decoy false…</text></g>
 <g transform="translate(32 264)"><text class="suite" y="0">Domain and correctness reviewers</text><text class="status info" x="300" y="0">· evidence-only</text><text class="metric" x="470" y="0">Gold rows before catalog refresh: 24 · Gold r…</text></g>
