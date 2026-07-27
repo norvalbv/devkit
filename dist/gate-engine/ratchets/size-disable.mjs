@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { stageBaseline, stagedSet } from "./git-index.mjs";
+import { hasStagedFiles, stageBaseline, stagedSet } from "./git-index.mjs";
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/size.json';
 // Raw-line cap baseline (the `maxLines` gate): grandfathered over-cap source files, shrink-only.
@@ -203,7 +203,7 @@ function runLinesGate(root, cfg, linesBaselineFile) {
         ? JSON.parse(readFileSync(linesBaselineFile, 'utf8')).files
         : {};
     const staged = stagedSet(root);
-    const inCommit = staged !== null && staged.size > 0;
+    const inCommit = staged !== null && hasStagedFiles(root);
     // Scope to the committing files; with nothing staged, fall back to the whole tree (CI).
     const scoped = inCommit ? over.filter((o) => staged?.has(o.file)) : over;
     // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
@@ -271,7 +271,7 @@ function runDisableGate(root, baselineFile, current) {
     const { grandfathered, legacy } = readDisableBaseline(baselineFile);
     const cur = current.perFile;
     const staged = stagedSet(root);
-    const inCommit = staged !== null && staged.size > 0;
+    const inCommit = staged !== null && hasStagedFiles(root);
     const ceil = (f) => grandfathered[f] ?? { file: 0, fn: 0 };
     // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). Scope to
     // the committing files; with nothing staged, the whole tree (CI). A LEGACY baseline is always

@@ -40,19 +40,33 @@ export function hasStagedFiles(root) {
     }
 }
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
-// Returns null when git is unavailable (temp-dir tests, a non-git checkout) so the caller falls back
-// to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized file to
-// re-check) to files that still exist. For "is a commit in progress?" use hasStagedFiles instead.
+// During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
+// intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH
+// parents. Returns null when git is unavailable (temp-dir tests, a non-git checkout) so the caller
+// falls back to whole-tree. Excludes deletions by design — callers scope per-file work (an oversized
+// file to re-check) to files that still exist. For "is a commit in progress?" use hasStagedFiles.
 export function stagedSet(root) {
     try {
         const out = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
             cwd: root,
             encoding: 'utf8',
         });
-        return new Set(out
+        const staged = new Set(out
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean));
+        try {
+            const mergeOut = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR', 'MERGE_HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+            const changedFromMergeHead = new Set(mergeOut
+                .split('\n')
+                .map((l) => l.trim())
+                .filter(Boolean));
+            return new Set([...staged].filter((file) => changedFromMergeHead.has(file)));
+        }
+        catch {
+            // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
+            return staged;
+        }
     }
     catch {
         return null;
