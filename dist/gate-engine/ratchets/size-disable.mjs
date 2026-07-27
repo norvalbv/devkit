@@ -34,7 +34,7 @@ const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
 const RE_MAX_LINES_PER_FN = /max-lines-per-function/g;
 const RE_MAX_LINES = /max-lines\b/g;
 // `match` = the cfg.sourceExtensions matchers (TS by default; a JS/MJS repo sets ["mjs","js"]).
-function walk(root, dir, files, match) {
+function walk(root, dir, files, match, includeTests = false) {
     let entries;
     try {
         entries = readdirSync(join(root, dir), { withFileTypes: true });
@@ -46,9 +46,9 @@ function walk(root, dir, files, match) {
         const rel = `${dir}/${e.name}`;
         if (e.isDirectory()) {
             if (!SKIP_DIRS.has(e.name))
-                walk(root, rel, files, match);
+                walk(root, rel, files, match, includeTests);
         }
-        else if (match.isSource(e.name) && !match.isTest(e.name)) {
+        else if (match.isSource(e.name) && (includeTests || !match.isTest(e.name))) {
             files.push(rel);
         }
     }
@@ -81,20 +81,20 @@ export function countDisables(root = process.cwd(), scanRoots) {
     const fnDisables = Object.values(perFile).reduce((s, c) => s + c.fn, 0);
     return { fileDisables, fnDisables, perFile, scannedFiles: files.length };
 }
-// Raw-line cap: source (non-test) files whose line count exceeds `maxLines`. Counts ALL lines (matches
-// eslint's max-lines with skipBlankLines/skipComments false). Returns a sorted [{file, lines}] list;
-// empty when the cap is off (`maxLines` 0). This is what lets size be ratchet-owned — no eslint rule.
-export function countOversized(root = process.cwd(), scanRoots, maxLines, match) {
+// Raw-line caps: implementation files use maxLines; tests use the looser maxTestLines.
+export function countOversized(root = process.cwd(), scanRoots, maxLines, match, maxTestLines) {
     const cfg = resolveGuardConfig(root);
-    const cap = maxLines ?? cfg.maxLines;
-    if (!cap)
+    const sourceCap = maxLines ?? cfg.maxLines;
+    const testCap = maxTestLines ?? cfg.maxTestLines;
+    if (!sourceCap && !testCap)
         return [];
     const m = match ?? sourceMatchers(cfg.sourceExtensions);
-    const files = (scanRoots ?? cfg.scanRoots).flatMap((r) => walk(root, r, [], m));
+    const files = (scanRoots ?? cfg.scanRoots).flatMap((r) => walk(root, r, [], m, testCap > 0));
     const over = [];
     for (const f of files) {
+        const cap = m.isTest(f) ? testCap : sourceCap;
         const lines = readFileSync(join(root, f), 'utf8').split('\n').length;
-        if (lines > cap)
+        if (cap > 0 && lines > cap)
             over.push({ file: f, lines });
     }
     return over.sort((a, b) => a.file.localeCompare(b.file));
@@ -104,10 +104,10 @@ export function countOversized(root = process.cwd(), scanRoots, maxLines, match)
 // count back in. Writes ONLY the line baseline; it NEVER touches the disable-count baseline
 // (size.json), so an already-adopted repo can turn the cap on without re-snapshotting (and possibly
 // laundering) its disable debt. Returns the number of files over the cap; deletes a stale baseline
-// when none remain. No-op (returns 0) when the cap is off (`maxLines` 0).
+// when none remain. No-op when both caps are off.
 export function freezeLines(root = process.cwd()) {
     const cfg = resolveGuardConfig(root);
-    if (!cfg.maxLines)
+    if (!cfg.maxLines && !cfg.maxTestLines)
         return 0;
     const linesBaselineFile = join(root, LINES_BASELINE);
     const over = countOversized(root);
@@ -117,7 +117,7 @@ export function freezeLines(root = process.cwd()) {
     const files = Object.fromEntries(over.map((o) => [o.file, o.file in prev ? Math.min(prev[o.file], o.lines) : o.lines]));
     if (Object.keys(files).length > 0) {
         mkdirSync(dirname(linesBaselineFile), { recursive: true });
-        writeFileSync(linesBaselineFile, `${JSON.stringify({ maxLines: cfg.maxLines, files }, null, 2)}\n`);
+        writeFileSync(linesBaselineFile, `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files }, null, 2)}\n`);
     }
     else {
         rmSync(linesBaselineFile, { force: true });
@@ -132,27 +132,33 @@ export function freezeLines(root = process.cwd()) {
 // The default raw-line cap written when the block is enabled. Fixed — a consumer tunes it by
 // hand-editing guard.config.json (setMaxLines preserves an existing positive value).
 export const LINE_CAP = 500;
+export const TEST_LINE_CAP = 2000;
 // The //-comment sibling written next to `maxLines` (guard.config.json keeps guidance in "//" keys).
 const MAXLINES_DOC = 'Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.';
-/** Does guard.config.json already declare a positive `maxLines` cap? */
+const MAXTESTLINES_DOC = 'Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.';
+/** Does guard.config.json explicitly configure both line caps, including 0 = off? */
 export function hasLineCap(cwd) {
     const cfgPath = join(cwd, 'guard.config.json');
     if (!existsSync(cfgPath))
         return false;
     try {
         const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
-        return typeof cfg.maxLines === 'number' && cfg.maxLines > 0;
+        return (typeof cfg.maxLines === 'number' &&
+            Number.isFinite(cfg.maxLines) &&
+            cfg.maxLines >= 0 &&
+            typeof cfg.maxTestLines === 'number' &&
+            Number.isFinite(cfg.maxTestLines) &&
+            cfg.maxTestLines >= 0);
     }
     catch {
         return false;
     }
 }
 /**
- * Write `maxLines` (+ its doc sibling) into guard.config.json when it isn't already a positive cap.
- * Add-only — never overwrites a consumer's tuned value. No-op (returns false) when guard.config.json
- * wasn't written (no guards/structure selected) or a cap is already set. Returns true when it wrote.
+ * Add missing source/test caps to guard.config.json without overwriting tuned positive values.
+ * Returns true when it writes either cap.
  */
-export function setMaxLines(cwd, cap = LINE_CAP) {
+export function setMaxLines(cwd, cap = LINE_CAP, testCap = TEST_LINE_CAP) {
     const cfgPath = join(cwd, 'guard.config.json');
     if (!existsSync(cfgPath))
         return false;
@@ -165,10 +171,16 @@ export function setMaxLines(cwd, cap = LINE_CAP) {
         // crash init/upgrade; the gates surface the JSON error separately when they run.
         return false;
     }
-    if (typeof cfg.maxLines === 'number' && cfg.maxLines > 0)
+    const hasSource = typeof cfg.maxLines === 'number' && Number.isFinite(cfg.maxLines) && cfg.maxLines >= 0;
+    const hasTest = typeof cfg.maxTestLines === 'number' &&
+        Number.isFinite(cfg.maxTestLines) &&
+        cfg.maxTestLines >= 0;
+    if (hasSource && hasTest)
         return false;
-    cfg['//maxLines'] = MAXLINES_DOC;
-    cfg.maxLines = cap;
+    if (!hasSource)
+        Object.assign(cfg, { '//maxLines': MAXLINES_DOC, maxLines: cap });
+    if (!hasTest)
+        Object.assign(cfg, { '//maxTestLines': MAXTESTLINES_DOC, maxTestLines: testCap });
     writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
     return true;
 }
@@ -186,9 +198,9 @@ export function enableLineGrowth(cwd) {
         return { enabled: false, grandfathered: 0 };
     return { enabled: true, grandfathered: freezeLines(cwd) };
 }
-/** How many source files WOULD be grandfathered at the default cap — for `--dry-run`; writes nothing. */
+/** How many files WOULD be grandfathered at the default caps — for `--dry-run`; writes nothing. */
 export function previewGrandfather(cwd) {
-    return countOversized(cwd, undefined, LINE_CAP).length;
+    return countOversized(cwd, undefined, LINE_CAP, undefined, TEST_LINE_CAP).length;
 }
 // The maxLines gate as a per-file, per-commit shrink-only ratchet. When files are staged (a
 // commit in progress) it evaluates ONLY those files, so a parallel agent's unstaged edits can
@@ -204,14 +216,16 @@ function runLinesGate(root, cfg, linesBaselineFile) {
         : {};
     const staged = stagedSet(root);
     const inCommit = staged !== null && hasStagedFiles(root);
+    const match = sourceMatchers(cfg.sourceExtensions);
+    const cap = (f) => (match.isTest(f) ? cfg.maxTestLines : cfg.maxLines);
     // Scope to the committing files; with nothing staged, fall back to the whole tree (CI).
     const scoped = inCommit ? over.filter((o) => staged?.has(o.file)) : over;
     // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
-    const grew = scoped.filter((o) => o.lines > Math.max(cfg.maxLines, grandfathered[o.file] ?? 0));
+    const grew = scoped.filter((o) => o.lines > Math.max(cap(o.file), grandfathered[o.file] ?? 0));
     if (grew.length) {
         console.error(`🚫 ${grew.length} file(s) exceed their line limit — split them:`);
         for (const o of grew) {
-            console.error(`   ${o.file}: ${o.lines} lines (max ${Math.max(cfg.maxLines, grandfathered[o.file] ?? 0)})`);
+            console.error(`   ${o.file}: ${o.lines} lines (max ${Math.max(cap(o.file), grandfathered[o.file] ?? 0)})`);
         }
         process.exit(1);
     }
@@ -243,7 +257,7 @@ function runLinesGate(root, cfg, linesBaselineFile) {
             console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
         }
         else {
-            writeFileSync(linesBaselineFile, `${JSON.stringify({ maxLines: cfg.maxLines, files: next }, null, 2)}\n`);
+            writeFileSync(linesBaselineFile, `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`);
             stageBaseline(root, LINES_BASELINE);
             console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
         }
@@ -364,11 +378,11 @@ function runCli(cmd) {
             rmSync(baselineFile, { force: true });
             console.log(`✓ ${BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`);
         }
-        if (cfg.maxLines) {
+        if (cfg.maxLines || cfg.maxTestLines) {
             const over = freezeLines(root);
             console.log(over > 0
-                ? `✓ ${LINES_BASELINE}: ${over} file(s) over ${cfg.maxLines} lines grandfathered (shrink-only)`
-                : `✓ ${LINES_BASELINE}: no file over ${cfg.maxLines} lines — no baseline written`);
+                ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) grandfathered (shrink-only)`
+                : `✓ ${LINES_BASELINE}: no oversized files — no baseline written`);
         }
         process.exit(0);
     }
@@ -386,8 +400,8 @@ function runCli(cmd) {
         }
         // Disable ratchet: per-file, per-commit shrink-only (auto-lowers as disables are removed).
         runDisableGate(root, baselineFile, current);
-        // Raw-line cap (the maxLines gate): a per-file, per-COMMIT shrink-only ratchet.
-        if (cfg.maxLines)
+        // Raw-line caps: a per-file, per-COMMIT shrink-only ratchet.
+        if (cfg.maxLines || cfg.maxTestLines)
             runLinesGate(root, cfg, linesBaselineFile);
         process.exit(0);
     }
