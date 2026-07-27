@@ -37,6 +37,7 @@ const cwd = process.cwd();
 const command = process.argv[2];
 const argv = process.argv.slice(3);
 const ALL_ZERO_RE = /^0+$/;
+const UNTRACKED_PUBLISH_LOCK_STATUS = '?? docs/benchmarks/.publish.lock';
 
 function options(args: string[]) {
   return parseArgs({
@@ -281,17 +282,23 @@ export function parsePublishBaseline(suiteId: string, adapter: string, raw: stri
   return baseline;
 }
 
+export function assertCleanPublishWorktree(root: string): void {
+  const dirty = gitOutput(root, ['status', '--porcelain=v1', '--untracked-files=all'])
+    .split('\n')
+    .filter((line) => line && line !== UNTRACKED_PUBLISH_LOCK_STATUS);
+  if (dirty.length) {
+    throw new Error(
+      `WORKTREE publication requires a completely clean working tree:\n${dirty.join('\n')}`,
+    );
+  }
+}
+
 function publishLocked(args: string[], append: LockedAppend): void {
   const parsed = options(args);
   const suiteId = parsed.values.suite;
   if (!suiteId) throw new Error('publish requires --suite <id>');
   const tree = parsed.values.tree ?? 'HEAD';
-  if (
-    tree === 'WORKTREE' &&
-    gitOutput(cwd, ['status', '--porcelain=v1', '--untracked-files=all']).trim()
-  ) {
-    throw new Error('WORKTREE publication requires a completely clean working tree');
-  }
+  if (tree === 'WORKTREE') assertCleanPublishWorktree(cwd);
   const source = repositorySource(
     cwd,
     tree === 'WORKTREE' ? 'working' : 'tree',

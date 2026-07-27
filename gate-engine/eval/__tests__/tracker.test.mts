@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { baselinePublicationErrors, loadCatalog, validateCatalog } from '../catalog.mts';
 import {
   aggregateMetricAssessment,
+  assertCleanPublishWorktree,
   comparisons,
   defaultPredecessor,
   metricAssessment,
@@ -28,6 +30,10 @@ import type { BenchmarkEvent, MetricObservation } from '../types.mts';
 import { trackerFixture as fixture, memory, readableSnapshot } from './tracker-fixtures.mts';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
+
+function git(cwd: string, ...args: string[]) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
 
 describe('immutable evidence', () => {
   it('canonicalizes checkpoint content and validates its content address', () => {
@@ -157,6 +163,34 @@ describe('immutable evidence', () => {
       expect(readFileSync(join(root, 'docs/benchmarks/history.jsonl'), 'utf8')).toContain(event.id);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts a clean linked worktree while holding the publish lock and names real dirt', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'benchmark-publish-worktree-'));
+    const root = join(parent, 'repo');
+    const linked = join(parent, 'linked');
+    try {
+      mkdirSync(root);
+      git(root, 'init', '-q', '-b', 'main');
+      git(root, 'config', 'user.email', 'tracker@example.invalid');
+      git(root, 'config', 'user.name', 'Tracker Test');
+      writeFileSync(join(root, 'tracked.txt'), 'base\n');
+      git(root, 'add', 'tracked.txt');
+      git(root, 'commit', '-qm', 'base');
+      git(root, 'worktree', 'add', '-q', '-b', 'publish-regression', linked, 'HEAD');
+
+      withPublishLock(linked, () => expect(() => assertCleanPublishWorktree(linked)).not.toThrow());
+      writeFileSync(join(linked, 'docs/benchmarks/.publish.lock.backup'), 'not internal\n');
+      writeFileSync(join(linked, 'dirty.txt'), 'dirty\n');
+      withPublishLock(linked, () => {
+        expect(() => assertCleanPublishWorktree(linked)).toThrow(/\?\? dirty\.txt/);
+        expect(() => assertCleanPublishWorktree(linked)).toThrow(/\.publish\.lock\.backup/);
+      });
+    } finally {
+      if (git(root, 'worktree', 'list', '--porcelain').includes(linked))
+        git(root, 'worktree', 'remove', '--force', linked);
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 
