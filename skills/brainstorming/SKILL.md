@@ -21,6 +21,12 @@ Start by understanding the current project context, then ask questions one at a 
 - Focus on understanding: purpose, constraints, success criteria
 
 **Exploring approaches:**
+- **Find what has already been ruled on, before posing any options:** `guard-decisions query "<the
+  topic>"` (skip silently if the decisions guard is not installed). If an axis already governs this
+  fork, `guard-decisions show <slug>` and put its current ruling **inside** the options you pose — a
+  settled question must be re-opened deliberately, never by accident. `list` is not a substitute: it
+  dumps every axis instead of finding the relevant one, so it stops being readable the moment a repo
+  has more than a handful.
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why

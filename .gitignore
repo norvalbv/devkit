@@ -26,6 +26,9 @@ node_modules
 .codex/
 # decision-log embedding cache (query); rebuildable via `guard-decisions reindex`. docs/decisions/ IS committed.
 .decisions/
+# Derived embedding cache the recall bench writes beside its corpus (DECISIONS_INDEX). Rebuildable
+# from the corpus, ~330KB of float vectors, and it changes on every hybrid run — never evidence.
+.vec-bench.json
 # decisions-eval baseline: no baseline ships — each consumer generates theirs with --baseline
 gate-engine/decisions/eval/results.baseline.json
 # decisions-eval run ledger (local telemetry; the anti-Goodhart record of runs against the corpus)
