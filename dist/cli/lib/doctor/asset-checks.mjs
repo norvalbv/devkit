@@ -228,7 +228,7 @@ export function checkRegistrations(cwd, hookComponents, targets, overlay = false
         result = checkHookRegistrations(gitRoot, hookComponents, {
             targets,
             overlay,
-            legacyOwnedComponentIds: hookComponents,
+            legacyOwnedComponentIds: hookComponents.filter((component) => component === 'searchSteering' || component === 'agentHooks'),
         });
     }
     catch (error) {

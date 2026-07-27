@@ -309,7 +309,9 @@ export function checkRegistrations(
     result = checkHookRegistrations(gitRoot, hookComponents, {
       targets,
       overlay,
-      legacyOwnedComponentIds: hookComponents,
+      legacyOwnedComponentIds: hookComponents.filter(
+        (component) => component === 'searchSteering' || component === 'agentHooks',
+      ),
     });
   } catch (error) {
     return check(

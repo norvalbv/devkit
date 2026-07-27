@@ -195,6 +195,30 @@ describe('plan critique evidence store', () => {
     expect(listPlanCritiqueRecords({ root })).toEqual([record]);
   });
 
+  it('rejects a stored unnecessary-recheck claim when its parent required a retry', () => {
+    const root = temporaryRoot();
+    const exact = bytes('{}');
+    const parent = recordFor(exact);
+    parent.contract.verdict = 'RETHINK';
+    parent.contract.criticalCount = 1;
+    parent.contract.eligibility = { eligible: false, reason: 'blocking_verdict' };
+    parent.critiqueId = derivePlanCritiqueId(parent);
+    persistPlanCritiqueRecord(parent, { exactResponse: exact }, { root });
+
+    const child = recordFor(exact);
+    child.lineage = { pass: 2, parentCritiqueId: parent.critiqueId };
+    child.contract.eligibility = { eligible: false, reason: 'unnecessary_recheck' };
+    child.critiqueId = derivePlanCritiqueId(child);
+    writeFileSync(
+      path.join(root, 'records', `${child.critiqueId}.json`),
+      canonicalPlanCritiqueRecordJson(child),
+      { mode: 0o600 },
+    );
+
+    expect(readPlanCritiqueRecord(child.critiqueId, { root })).toBeNull();
+    expect(listPlanCritiqueRecords({ root })).toEqual([parent]);
+  });
+
   it('rejects callback replays that change work identity', () => {
     const root = temporaryRoot();
     const exact = bytes('{}');

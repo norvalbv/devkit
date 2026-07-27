@@ -58,6 +58,16 @@ describe('doctor provider lifecycle', () => {
     expect(readFileSync(ledger, 'utf8')).toBe('{not-json');
   });
 
+  it('does not infer decision-hook ownership when the legacy ledger is absent', () => {
+    const root = tmpRepo();
+    expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
+    rmSync(join(root, '.devkit', 'agent-hook-registrations-manifest.json'));
+
+    const result = devkit(root, 'doctor');
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/hook registrations: DRIFT/);
+  });
+
   it('does not accept a same-byte symlink as a healthy provider output', () => {
     const root = tmpRepo();
     expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);

@@ -23,6 +23,7 @@ import {
   hasDurableRecordBlobs,
   persistPlanCritiqueRecordAtRoot,
   readStoredBlob,
+  validatePersistedParent,
 } from './evidence-store-internal.mts';
 import { listPrivateFiles, managedPath, readPrivateFile } from './immutable-file.mts';
 import {
@@ -412,7 +413,6 @@ export function persistPlanCritiqueRecord(
   };
   return withPlanCritiquePersistenceLock(options, publish);
 }
-
 export function readPlanCritiqueRecord(
   critiqueId: string,
   options: { root?: string } = {},
@@ -421,28 +421,39 @@ export function readPlanCritiqueRecord(
   if (!record) return null;
   return hasDurableRecordBlobs(record, options) ? record : null;
 }
-
 function readPlanCritiqueRecordMetadata(
   critiqueId: string,
   options: { root?: string } = {},
+  ancestors = new Set<string>(),
 ): PlanCritiqueRecordV1 | null {
-  if (!ID.test(critiqueId)) return null;
+  if (!ID.test(critiqueId) || ancestors.has(critiqueId)) return null;
   const base = resolvePlanCritiqueEvidenceRoot(options, false);
   const records = base && managedPath(base, ['records'], false);
   if (!records) return null;
   const raw = readPrivateFile(records, `${critiqueId}.json`);
   if (!raw) return null;
+  ancestors.add(critiqueId);
   try {
     const record: unknown = JSON.parse(raw.toString('utf8'));
     validatePlanCritiqueRecord(record);
     const canonical = Buffer.from(canonicalPlanCritiqueRecordJson(record));
     if (record.critiqueId !== critiqueId || !raw.equals(canonical)) return null;
+    const parent =
+      record.lineage.pass === 1
+        ? null
+        : readPlanCritiqueRecordMetadata(
+            record.lineage.parentCritiqueId as string,
+            options,
+            ancestors,
+          );
+    validatePersistedParent(record, parent);
     return record;
   } catch {
     return null;
+  } finally {
+    ancestors.delete(critiqueId);
   }
 }
-
 /** @internal Includes valid metadata whose durable blobs may be missing. */
 export function listPlanCritiqueRecordMetadata(
   options: { root?: string } = {},
@@ -455,7 +466,6 @@ export function listPlanCritiqueRecordMetadata(
     .map((name) => readPlanCritiqueRecordMetadata(name.slice(0, -5), options))
     .filter((record): record is PlanCritiqueRecordV1 => record !== null);
 }
-
 export function readPlanCritiqueExactResponse(
   critiqueId: string,
   options: { root?: string } = {},
@@ -463,7 +473,6 @@ export function readPlanCritiqueExactResponse(
   const record = readPlanCritiqueRecord(critiqueId, options);
   return record ? readStoredBlob(record.exactResponse, options) : null;
 }
-
 export function readPlanCritiqueProjection(
   critiqueId: string,
   options: { root?: string } = {},
@@ -471,7 +480,6 @@ export function readPlanCritiqueProjection(
   const record = readPlanCritiqueRecord(critiqueId, options);
   return record?.sanitizedProjection ? readStoredBlob(record.sanitizedProjection, options) : null;
 }
-
 export function readPlanCritiqueTranscript(
   critiqueId: string,
   options: { root?: string } = {},
