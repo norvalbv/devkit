@@ -531,6 +531,24 @@ describe('runIntrinsicRow', () => {
       }),
     ).rejects.toMatchObject({ code: 2 });
   });
+
+  it('treats too few semantic trials as an outage', async () => {
+    const outs = [
+      'not a critique',
+      'still not a critique',
+      response('RETHINK', 'BANDAID', 'valid'),
+    ];
+    let k = 0;
+    const r = await runIntrinsicRow(baseRow, {
+      ...noDeps,
+      critic,
+      runs: 3,
+      execIntrinsic: (async () => outs[k++]) as never,
+    });
+    expect(r.contract?.semanticRuns).toBe(1);
+    expect(r.verdict.got).toBe('NULL');
+    expect(r.outage).toBe(true);
+  });
 });
 
 describe('runWorkflowRow', () => {
@@ -683,6 +701,7 @@ describe('runWorkflowRow', () => {
     expect(r.falseAlarm).toBeNull();
     expect(r.slots).toEqual({});
     expect(r.ok).toBe(false);
+    expect(r.outage).toBe(true);
   });
 
   it('scores NULL when completed trials fall below the K-majority minimum', async () => {

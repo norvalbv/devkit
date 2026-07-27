@@ -23,7 +23,7 @@ import { readAgentAssetManifest } from "./agent-asset-manifest/reader.mjs";
 import { agentAssetDir } from "./agent-assets/agent-assets.mjs";
 import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from "./agent-assets/agent-providers.mjs";
 import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from "./hook-registration-ledger/codec.mjs";
-import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, } from "./hook-registration-ledger/install-support.mjs";
+import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, stripRetiredRegistrations, } from "./hook-registration-ledger/install-support.mjs";
 import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from "./hook-registration-ledger/lifecycle.mjs";
 import { HOOK_REGISTRATIONS } from "./hook-registration-ledger/registrations.mjs";
 import { bundledHookNames } from "./hook-registration-ledger/selection.mjs";
@@ -210,6 +210,7 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
         !legacyOwnedComponentIds?.length)
         return { wrote: [] };
     const scope = overlay ? 'overlay' : 'shared';
+    const reconciliationIds = [...new Set([...componentIds, ...(legacyOwnedComponentIds ?? [])])];
     return withAgentAssetLifecycleLock(root, dryRun, () => {
         const initial = readHookRegistrationLedger(root) ?? ledgerOf();
         let entries = [...initial.entries];
@@ -221,6 +222,8 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
             if (skipProvider(root, provider, rel, overlay))
                 continue;
             let document = providerDocument(root, provider, rel);
+            const retired = stripRetiredRegistrations(document, reconciliationIds, provider);
+            document = retired.document;
             entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
             entries = transferHookRegistrationScope(entries, provider, scope);
             const removed = removeLedgerAuthorizedHookRegistrations(document, projectHookRegistrations(obsoleteIds, [provider], scope), ledgerOf(entries), provider, scope);
@@ -238,8 +241,8 @@ export function installHookRegistrations(root, componentIds, { dryRun = false, t
                 provider,
                 rel,
                 document: installed.document,
-                changed: removed.changed || installed.changed,
-                report: removed.changed || installed.ownershipEntries.length > 0,
+                changed: retired.changed || removed.changed || installed.changed,
+                report: retired.changed || removed.changed || installed.ownershipEntries.length > 0,
             };
             published = publishPlan(root, plan, entries, published, dryRun);
             if (plan.report)
@@ -263,6 +266,7 @@ export function reconcileHookRegistrations(root, componentIds, previouslyOwnedCo
 }
 export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_TARGETS, overlay = false, legacyOwnedComponentIds, } = {}) {
     const scope = overlay ? 'overlay' : 'shared';
+    const reconciliationIds = legacyOwnedComponentIds ?? Object.keys(HOOK_REGISTRATIONS);
     withAgentAssetLifecycleLock(root, dryRun, () => {
         const storedLedger = readHookRegistrationLedger(root);
         if (!storedLedger && !legacyOwnedComponentIds) {
@@ -277,13 +281,20 @@ export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_
             const rel = hookRegistrationDestination(provider, scope);
             if (skipProvider(root, provider, rel, overlay))
                 continue;
-            const document = providerDocument(root, provider, rel);
+            let document = providerDocument(root, provider, rel);
+            const retired = stripRetiredRegistrations(document, reconciliationIds, provider);
+            document = retired.document;
             entries = adoptExactLegacy(entries, document, legacyOwnedComponentIds, provider, scope);
             entries = transferHookRegistrationScope(entries, provider, scope);
             const removed = removeLedgerAuthorizedHookRegistrations(document, projectHookRegistrations(Object.keys(HOOK_REGISTRATIONS), [provider], scope), ledgerOf(entries), provider, scope);
             entries = release(entries, [...removed.removed, ...removed.alreadyAbsent]);
             entries = entries.filter((entry) => storedKeys.has(ownedKey(entry)));
-            const plan = { provider, rel, document: removed.document, changed: removed.changed };
+            const plan = {
+                provider,
+                rel,
+                document: removed.document,
+                changed: retired.changed || removed.changed,
+            };
             published = publishPlan(root, plan, entries, published, dryRun);
         }
         console.log(`  ${dryRun ? '[dry-run] remove' : '✓ removed'} hook registrations`);

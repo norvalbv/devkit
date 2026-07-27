@@ -189,6 +189,40 @@ describe('Claude plan critique runtime wrapper', () => {
     expect(listPlanCritiqueRecordMetadata({ root })).toEqual([]);
   });
 
+  it('clears a prior continuation quarantine when the same work completes', () => {
+    const repository = createRepository();
+    const repositoryContext = context(repository);
+    const home = temporaryDirectory('critique-wrapper-quarantine-clear-home-');
+    const continuation = runHook(
+      repository,
+      home,
+      JSON.stringify(
+        payload({
+          stop_hook_active: true,
+          agent_id: undefined,
+          last_assistant_message: undefined,
+        }),
+      ),
+    );
+    expectSilentSuccess(continuation);
+
+    expectSilentSuccess(runHook(repository, home, JSON.stringify(payload())));
+
+    const root = evidenceRoot(home);
+    const workId = deriveClaudePlanCritiqueWorkId('session-1', 'prompt-1');
+    expect(
+      getPlanCritiqueWorkQuarantine(
+        {
+          provider: 'claude',
+          repositoryFingerprint: repositoryContext.fingerprint,
+          workId,
+        },
+        { root },
+      ),
+    ).toEqual({ status: 'clear' });
+    expect(listPlanCritiqueRecordMetadata({ root })).toHaveLength(1);
+  });
+
   it.each([
     { name: 'unsupported callback', input: JSON.stringify(payload({ agent_type: 'other' })) },
     { name: 'malformed JSON', input: '{' },

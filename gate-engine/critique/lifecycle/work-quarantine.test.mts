@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { temporaryRoot } from '../__tests__/evidence-store-fixture.mts';
 import { sha256Bytes } from '../evidence-record.mts';
 import {
+  clearPlanCritiqueWorkQuarantine,
   getPlanCritiqueWorkQuarantine,
   persistPlanCritiqueWorkQuarantine,
 } from './work-quarantine.mts';
@@ -67,6 +68,15 @@ describe('plan critique work quarantine', () => {
     ).toEqual({ status: 'clear' });
   });
 
+  it('clears only an exact quarantine and remains idempotent', () => {
+    const root = temporaryRoot();
+    persistPlanCritiqueWorkQuarantine(identity(), { root });
+
+    expect(clearPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({ state: 'removed' });
+    expect(getPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({ status: 'clear' });
+    expect(clearPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({ state: 'absent' });
+  });
+
   it('does not create storage while reading a clear identity', () => {
     const root = temporaryRoot();
     expect(getPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({ status: 'clear' });
@@ -82,6 +92,9 @@ describe('plan critique work quarantine', () => {
   ])('rejects an invalid identity before publication', (invalid) => {
     const root = temporaryRoot();
     expect(() => persistPlanCritiqueWorkQuarantine(invalid as never, { root })).toThrow(
+      /invalid plan critique work quarantine identity/,
+    );
+    expect(() => clearPlanCritiqueWorkQuarantine(invalid as never, { root })).toThrow(
       /invalid plan critique work quarantine identity/,
     );
     expect(getPlanCritiqueWorkQuarantine(invalid as never, { root })).toEqual({
@@ -130,6 +143,9 @@ describe('plan critique work quarantine', () => {
       status: 'unavailable',
       reason: 'malformed_quarantine',
     });
+    expect(() => clearPlanCritiqueWorkQuarantine(identity(), { root })).toThrow(
+      /malformed plan critique work quarantine|immutable evidence/,
+    );
   });
 
   it('fails closed for non-private persisted evidence', () => {

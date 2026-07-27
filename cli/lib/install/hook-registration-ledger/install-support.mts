@@ -17,6 +17,7 @@ import {
   projectHookRegistrations,
   writeHookRegistrationLedger,
 } from './lifecycle.mts';
+import { dataRecord } from './plain-data.mts';
 
 export interface HookRegistrationOptions {
   dryRun?: boolean;
@@ -43,6 +44,77 @@ export const ledgerOf = (
 
 export const ownedKey = (entry: HookRegistrationOwnershipV1) =>
   JSON.stringify([entry.provider, entry.destinationRel, entry.registrationId]);
+
+const RETIRED_COMMANDS: Partial<Record<string, Partial<Record<AgentProvider, readonly string[]>>>> =
+  {
+    fallow: {
+      claude: [
+        'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+        'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+      ],
+      cursor: ['.cursor/hooks/fallow-gate.sh'],
+    },
+  };
+
+/**
+ * Reclaim exact commands written by pre-ledger releases after their live registration disappears.
+ * These are strip-only and remain scoped to components the previous install explicitly owned.
+ */
+export function stripRetiredRegistrations(
+  document: unknown,
+  componentIds: readonly string[],
+  provider: AgentProvider,
+): { document: unknown; changed: boolean } {
+  const commands = new Set(
+    [...new Set(componentIds)].flatMap(
+      (componentId) => RETIRED_COMMANDS[componentId]?.[provider] ?? [],
+    ),
+  );
+  if (!commands.size || provider === 'codex') return { document, changed: false };
+  const root = dataRecord(document);
+  const hooks = dataRecord(root?.hooks);
+  if (!root || !hooks) return { document, changed: false };
+  const nextHooks = { ...hooks };
+  let changed = false;
+  for (const [event, rawList] of Object.entries(hooks)) {
+    if (!Array.isArray(rawList)) continue;
+    if (provider === 'cursor') {
+      const list = rawList.filter(
+        (entry) => !commands.has(String(dataRecord(entry)?.command ?? '')),
+      );
+      if (list.length === rawList.length) continue;
+      changed = true;
+      if (list.length) nextHooks[event] = list;
+      else delete nextHooks[event];
+      continue;
+    }
+    const list: unknown[] = [];
+    let eventChanged = false;
+    for (const rawGroup of rawList) {
+      const group = dataRecord(rawGroup);
+      const handlers = Array.isArray(group?.hooks) ? group.hooks : null;
+      if (!group || !handlers) {
+        list.push(rawGroup);
+        continue;
+      }
+      const kept = handlers.filter(
+        (handler) => !commands.has(String(dataRecord(handler)?.command ?? '')),
+      );
+      if (kept.length === handlers.length) {
+        list.push(rawGroup);
+        continue;
+      }
+      eventChanged = true;
+      const onlyScaffold = Object.keys(group).every((key) => key === 'matcher' || key === 'hooks');
+      if (kept.length || !onlyScaffold) list.push({ ...group, hooks: kept });
+    }
+    if (!eventChanged) continue;
+    changed = true;
+    if (list.length) nextHooks[event] = list;
+    else delete nextHooks[event];
+  }
+  return changed ? { document: { ...root, hooks: nextHooks }, changed } : { document, changed };
+}
 
 export function providerDocument(root: string, provider: AgentProvider, rel: string): unknown {
   const path = join(root, rel);

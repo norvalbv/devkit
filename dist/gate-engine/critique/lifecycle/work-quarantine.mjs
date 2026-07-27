@@ -1,7 +1,9 @@
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { types as utilTypes } from 'node:util';
 import { canonicalPlanCritiqueRecordJson, PLAN_CRITIQUE_PROVIDERS, sha256Bytes, } from "../evidence-record.mjs";
 import { managedPath, publishImmutable, readPrivateFileBounded } from "../immutable-file.mjs";
-import { resolvePlanCritiqueEvidenceRoot, withPlanCritiquePersistenceLock, } from "../persistence-lock.mjs";
+import { resolvePlanCritiqueEvidenceRoot, withExistingPlanCritiquePersistenceLock, withPlanCritiquePersistenceLock, } from "../persistence-lock.mjs";
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_TEXT_BYTES = 4 * 1024;
 const QUARANTINE_PATH = ['work-quarantines'];
@@ -83,6 +85,28 @@ export function persistPlanCritiqueWorkQuarantine(value, options = {}) {
         return { state, quarantine };
     };
     return withPlanCritiquePersistenceLock(options, persist);
+}
+export function clearPlanCritiqueWorkQuarantine(value, options = {}) {
+    const identity = parseIdentity(value);
+    if (!identity)
+        throw new Error('invalid plan critique work quarantine identity');
+    const clear = (root) => {
+        const directory = managedPath(root, QUARANTINE_PATH, false);
+        if (!directory)
+            return { state: 'absent' };
+        const quarantine = quarantineFor(identity);
+        const expected = canonicalQuarantine(quarantine);
+        const filename = quarantineFilename(identity);
+        const raw = readPrivateFileBounded(directory, filename, expected.byteLength);
+        if (raw === null)
+            return { state: 'absent' };
+        if (!raw.equals(expected))
+            throw new Error('malformed plan critique work quarantine');
+        rmSync(join(directory, filename), { force: true });
+        return { state: 'removed' };
+    };
+    const result = withExistingPlanCritiquePersistenceLock(options, clear);
+    return result.status === 'absent' ? { state: 'absent' } : result.value;
 }
 export function getPlanCritiqueWorkQuarantine(value, options = {}) {
     const identity = parseIdentity(value);

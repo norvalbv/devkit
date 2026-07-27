@@ -46,6 +46,41 @@ function claudeCommands(root) {
     gs.flatMap((g) => g.hooks.map((h) => h.command)),
   );
 }
+function writeRetiredFallowHooks(root) {
+  mkdirSync(join(root, '.claude'), { recursive: true });
+  mkdirSync(join(root, '.cursor'), { recursive: true });
+  writeFileSync(
+    join(root, '.claude', 'settings.json'),
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [
+              {
+                type: 'command',
+                command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+              },
+              { type: 'command', command: 'echo mine' },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, '.cursor', 'hooks.json'),
+    JSON.stringify({
+      version: 1,
+      hooks: {
+        beforeShellExecution: [
+          { command: '.cursor/hooks/fallow-gate.sh' },
+          { command: 'echo mine' },
+        ],
+      },
+    }),
+  );
+}
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -232,6 +267,30 @@ describe('installHookRegistrations', () => {
     });
   });
 
+  it('reclaims retired pre-ledger commands while preserving consumer hooks', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+
+    installHookRegistrations(root, ['fallow'], {
+      targets: ['claude', 'cursor'],
+      legacyOwnedComponentIds: ['fallow'],
+    });
+
+    expect(claudeCommands(root)).toContain('echo mine');
+    expect(claudeCommands(root)).toContain(
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
+    );
+    expect(claudeCommands(root)).not.toContain(
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    );
+    const cursorCommands = Object.values(cursor(root).hooks)
+      .flat()
+      .map((entry) => entry.command);
+    expect(cursorCommands).toContain('echo mine');
+    expect(cursorCommands).toContain('.cursor/hooks/fallow-staged-gate.sh');
+    expect(cursorCommands).not.toContain('.cursor/hooks/fallow-gate.sh');
+  });
+
   it('does not infer exact unledgered registrations without explicit legacy authority', () => {
     const root = tmpRepo();
     const targets = ['claude', 'cursor'];
@@ -356,6 +415,20 @@ describe('removeHookRegistrations', () => {
     expect(claudeCommands(root)).toEqual([]);
     expect(Object.keys(cursor(root).hooks)).toEqual([]);
     expect(Object.keys(codex(root).hooks)).toHaveLength(2);
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
+
+  it('reclaims retired pre-ledger commands during explicitly authorized removal', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+
+    removeHookRegistrations(root, {
+      targets: ['claude', 'cursor'],
+      legacyOwnedComponentIds: ['fallow'],
+    });
+
+    expect(claudeCommands(root)).toEqual(['echo mine']);
+    expect(cursor(root).hooks.beforeShellExecution).toEqual([{ command: 'echo mine' }]);
     expect(existsSync(ledgerPath(root))).toBe(false);
   });
 

@@ -2,7 +2,10 @@ import { readSync } from 'node:fs';
 import { isatty } from 'node:tty';
 import { TextDecoder } from 'node:util';
 import { capturePlanCritiqueCompletedCallback } from '../capture-normalizer.mts';
-import { persistPlanCritiqueWorkQuarantine } from '../lifecycle/work-quarantine.mts';
+import {
+  clearPlanCritiqueWorkQuarantine,
+  persistPlanCritiqueWorkQuarantine,
+} from '../lifecycle/work-quarantine.mts';
 import { adaptClaudeFeatureCritiqueSubagentStop } from '../provider-adapters/claude-subagent-stop.mts';
 import { getPlanCritiqueRepositoryContext } from '../repository-context.mts';
 
@@ -34,6 +37,11 @@ function captureHookPayload(payload: unknown): void {
     repository: repositoryEvidence,
   });
   if (adapted.kind === 'ready') {
+    clearPlanCritiqueWorkQuarantine({
+      provider: 'claude',
+      repositoryFingerprint: repositoryEvidence.fingerprint,
+      workId: adapted.callback.workId,
+    });
     capturePlanCritiqueCompletedCallback(adapted.callback);
     return;
   }

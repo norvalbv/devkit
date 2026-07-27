@@ -346,7 +346,7 @@ export async function runIntrinsicRow(row: Row, deps: RunDeps): Promise<RowResul
       contract,
       fabricatedPerRun: [],
       findingCount: 0,
-      outage: false,
+      outage: true,
       ok: false,
     };
   }
@@ -462,7 +462,7 @@ export async function runWorkflowRow(row: Row, deps: RunDeps): Promise<RowResult
       contract,
       fabricatedPerRun,
       findingCount: 0,
-      outage: completed < minCompleted,
+      outage: true,
       ok: false,
     };
   }
