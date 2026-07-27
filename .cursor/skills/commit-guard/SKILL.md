@@ -18,7 +18,28 @@ Dispatch the `commit-guard` agent before committing. It runs semantic search que
 
 ## Scripts
 
-`.claude/skills/commit-guard/scripts/`:
+The scripts live beside this skill, but the containing provider directory varies:
+`.agents/skills` (Codex), `.claude/skills`, or `.cursor/skills`. Resolve a complete copy before
+invoking either script:
+
+```bash
+COMMIT_GUARD_SKILL=""
+for candidate in \
+  .agents/skills/commit-guard \
+  .claude/skills/commit-guard \
+  .cursor/skills/commit-guard
+do
+  if [ -f "$candidate/scripts/checklist.mjs" ] &&
+    [ -f "$candidate/scripts/co-occurrence.mjs" ]; then
+    COMMIT_GUARD_SKILL="$candidate"
+    break
+  fi
+done
+if [ -z "$COMMIT_GUARD_SKILL" ]; then
+  echo "commit-guard scripts unavailable: run devkit sync-skills" >&2
+  exit 2
+fi
+```
 
 | Script | Purpose |
 |--------|---------|

@@ -51,8 +51,27 @@ is unset, treat all staged source files as in scope.
 - The repo's naming + folder-structure config (e.g. `biome.jsonc`, `eslint.config.mjs`) for the
   conventions a staged file must follow.
 
-SCRIPT=".claude/skills/commit-guard/scripts/checklist.mjs"
-CO=".claude/skills/commit-guard/scripts/co-occurrence.mjs"
+# Provider projections install this skill under `.agents` (Codex), `.claude`, or `.cursor`.
+# Require BOTH scripts so an obsolete/incomplete projection cannot win merely because its
+# directory exists.
+COMMIT_GUARD_SKILL=""
+for candidate in \
+  .agents/skills/commit-guard \
+  .claude/skills/commit-guard \
+  .cursor/skills/commit-guard
+do
+  if [ -f "$candidate/scripts/checklist.mjs" ] &&
+    [ -f "$candidate/scripts/co-occurrence.mjs" ]; then
+    COMMIT_GUARD_SKILL="$candidate"
+    break
+  fi
+done
+if [ -z "$COMMIT_GUARD_SKILL" ]; then
+  echo "commit-guard scripts unavailable: run devkit sync-skills" >&2
+  exit 2
+fi
+SCRIPT="$COMMIT_GUARD_SKILL/scripts/checklist.mjs"
+CO="$COMMIT_GUARD_SKILL/scripts/co-occurrence.mjs"
 CLONE="scripts/co-occurrence/clone-detector.mjs"
 
 ## 2. Setup

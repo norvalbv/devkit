@@ -1,0 +1,11 @@
+{
+  "devkitRef": "v0.45.0",
+  "generatedAt": "2026-07-27T17:05:50.199Z",
+  "targets": [
+    "claude",
+    "cursor"
+  ],
+  "files": {
+    "decision-edit-guard.mjs": "041da116c296a2104f181c285e2cb40343d5e0e20c6265417f734079e16c494d"
+  }
+}

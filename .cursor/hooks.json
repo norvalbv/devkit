@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/decision-edit-guard.mjs",
+        "matcher": "Write|Delete",
+        "failClosed": false
+      },
+      {
+        "command": ".cursor/hooks/decision-scope-brief.mjs",
+        "matcher": "Write",
+        "failClosed": false
+      }
+    ]
+  }
+}
