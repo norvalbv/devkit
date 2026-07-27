@@ -189,7 +189,10 @@ export function renderTarget(date: string, options: TargetOptions) {
   lines.push(
     `**Source:** ${[options.source || 'manual', options.ref].filter(Boolean).join(' · ')}`,
   );
-  if (options.evidenceChange) lines.push(`**Evidence-change:** ${options.evidenceChange}`);
+  // Trimmed on both sides of the test: a whitespace-only value must not render a hollow
+  // `**Evidence-change:**` line, which parseTargetFields reads back as an empty (not absent) field.
+  if (options.evidenceChange?.trim())
+    lines.push(`**Evidence-change:** ${options.evidenceChange.trim()}`);
   return lines.join('\n');
 }
 

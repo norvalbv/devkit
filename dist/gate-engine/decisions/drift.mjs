@@ -1,5 +1,5 @@
 /**
- * Drift: has a decision record lost its grip on the code it governs?
+ * Drift: has a decision record lost its grip on the code — or the ruling — it governs?
  *
  * A decision RECORD does not rot. It is append-only, one file per axis, and its content reads the
  * same in a century. What rots is ENFORCEMENT. `check-alignment` only judges a Target whose
@@ -16,10 +16,16 @@
  * Deliberately mechanical. It answers "does this glob still match anything?", never "does this code
  * still honour this ruling" — traceability-link recovery is brittle even with a model in the loop,
  * and a false block on a legitimate commit is how a gate gets switched off for good.
+ *
+ * Also mechanical, and just as load-bearing: a `**Supersedes:** <id>` that names no real block is a
+ * dangling pointer nobody reads twice, and an axis with more than one un-superseded Target block is
+ * exactly the two-live-rulings-no-tiebreak state Supersedes exists to prevent (recall/supersession.mts
+ * resolves both, read-time, over the whole corpus).
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { loadScopedTargets, matchScope } from "./check-alignment.mjs";
+import { resolveSupersession } from "./recall/supersession.mjs";
 // Filesystem walks yield OS-native separators; scope globs are ALWAYS authored repo-root-relative
 // with forward slashes. Without this, every scoped axis misreports as drifted on Windows — the same
 // normalization clone-detector.mts already applies to walk-produced paths.
@@ -82,22 +88,36 @@ export function findDrift(root, decisionsDir) {
         .filter((t) => t.scopeGlobs.length && !matchScope(files, t.scopeGlobs))
         .map((t) => ({ slug: t.slug, globs: t.scopeGlobs }));
 }
-/** `guard-decisions drift` — exit 1 when any ruling has silently stopped being enforced. */
+/** `guard-decisions drift` — exit 1 when any ruling has silently stopped being enforced, a
+ * `**Supersedes:**` id resolves to nothing, or an axis carries more than one un-superseded Target. */
 export function runDrift(root, decisionsDir) {
     if (!existsSync(root)) {
         console.error(`guard-decisions drift: no such directory ${root}`);
         return 2;
     }
     const drifted = findDrift(root, decisionsDir);
-    if (!drifted.length) {
+    const { unresolved, multipleLive } = resolveSupersession(decisionsDir);
+    if (!drifted.length && !unresolved.length && !multipleLive.length) {
         console.log('decision drift: every scoped ruling still matches code ✓');
         return 0;
     }
-    console.error(`🚫 ${drifted.length} decision record(s) scope code that no longer exists — these rulings are ` +
-        'NO LONGER ENFORCED (check-alignment free-skips a Target whose scope matches nothing):');
-    for (const d of drifted)
-        console.error(`   ${d.slug}\n     Scope: ${d.globs.join(',')}`);
-    console.error('\n   Fix the Scope to the paths that exist now — `guard-decisions amend <slug> --target … ' +
-        '--scope "…"` when the ruling is unchanged and only the code moved.');
+    if (drifted.length) {
+        console.error(`🚫 ${drifted.length} decision record(s) scope code that no longer exists — these rulings are ` +
+            'NO LONGER ENFORCED (check-alignment free-skips a Target whose scope matches nothing):');
+        for (const d of drifted)
+            console.error(`   ${d.slug}\n     Scope: ${d.globs.join(',')}`);
+        console.error('\n   Fix with `guard-decisions rescope <slug> --scope "<live-glob>" --reason "<why>"` — an ' +
+            'append-only correction that leaves the original Scope line untouched.');
+    }
+    if (unresolved.length) {
+        console.error(`🚫 ${unresolved.length} **Supersedes:** reference(s) resolve to no real entry:`);
+        for (const u of unresolved)
+            console.error(`   ${u.slug}: Supersedes: ${u.raw}`);
+    }
+    if (multipleLive.length) {
+        console.error(`🚫 ${multipleLive.length} axis(es) carry more than one un-superseded Target block — which one is live?`);
+        for (const m of multipleLive)
+            console.error(`   ${m.slug}: ${m.ids.join(', ')}`);
+    }
     return 1;
 }
