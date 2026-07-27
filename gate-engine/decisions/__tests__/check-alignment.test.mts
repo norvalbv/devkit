@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ALIGNMENT_JUDGE_TIMEOUT_MS,
   gateExit,
   judge,
   judgeDetailed,
@@ -93,6 +94,13 @@ describe('parseDepthVerdict', () => {
     expect(parseDepthVerdict('thin.')).toBe('THIN');
     expect(parseDepthVerdict('PASS but THIN')).toBeNull();
     expect(parseDepthVerdict('')).toBeNull();
+  });
+});
+
+describe('alignment judge timeout budget', () => {
+  it('gives each pass one uninterrupted 240s budget instead of killing haiku at 120s', () => {
+    expect(ALIGNMENT_JUDGE_TIMEOUT_MS).toBe(240_000);
+    expect(ALIGNMENT_JUDGE_TIMEOUT_MS).toBeGreaterThan(120_000);
   });
 });
 
