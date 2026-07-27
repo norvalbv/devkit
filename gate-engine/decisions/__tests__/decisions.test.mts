@@ -957,6 +957,85 @@ describe('draft amendments', () => {
     expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
   });
 
+  it('surgically replaces one substring in a long draft note and preserves every other byte', () => {
+    run(target('axis'));
+    commitAll();
+    const oldText = 'the restart path always resumes the original run';
+    const newText = 'the restart path creates a successor run';
+    const longNote = `${'unchanged context '.repeat(300)}${oldText}${' unchanged tail'.repeat(100)}`;
+    expect(run(['add', 'axis', '--note', longNote]).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+    const beforeIndex = readFileSync(join(dir, 'INDEX.md'), 'utf8');
+
+    const amended = run(['amend', 'axis', '--note-replace', oldText, newText]);
+
+    expect(amended.status, amended.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(before.replace(oldText, newText));
+    expect(readFileSync(join(dir, 'INDEX.md'), 'utf8')).toBe(beforeIndex);
+  });
+
+  it('refuses a missing or ambiguous note substring atomically', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'repeat me once, then repeat me twice']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+
+    const missing = run(['amend', 'axis', '--note-replace', 'axis-ruling', 'changed']);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('does not occur in the newest draft note');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+
+    const ambiguous = run(['amend', 'axis', '--note-replace', 'repeat me', 'changed']);
+    expect(ambiguous.status).toBe(1);
+    expect(ambiguous.stderr).toContain('occurs 2 times in the newest draft note');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('requires exactly one amendment mode and complete replacement arguments', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+
+    const mixed = run([
+      'amend',
+      'axis',
+      '--note',
+      'whole replacement',
+      '--note-replace',
+      'draft',
+      'corrected',
+    ]);
+    expect(mixed.status).toBe(1);
+    expect(mixed.stderr).toContain('Usage: guard-decisions amend');
+
+    const missingNew = run(['amend', 'axis', '--note-replace', 'draft']);
+    expect(missingNew.status).toBe(1);
+    expect(missingNew.stderr).toContain('requires both');
+
+    const emptyOld = run(['amend', 'axis', '--note-replace', '', 'corrected']);
+    expect(emptyOld.status).toBe(1);
+    expect(emptyOld.stderr).toContain('requires a non-empty');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('refuses surgical replacement in a committed note', () => {
+    run(target('axis'));
+    expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+    commitAll();
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+
+    const blocked = run(['amend', 'axis', '--note-replace', 'draft', 'corrected']);
+
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain('already committed');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
   it('refuses a committed newest entry without changing either file', () => {
     run(target('axis'));
     commitAll();
