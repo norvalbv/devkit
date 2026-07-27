@@ -493,9 +493,12 @@ export function parseDeterministic(input: Json): ParsedBaseline {
       metrics.push(scalar(m.id, label, m.value, direction, 'ratio', { inferenceUnit: 'case' }));
   }
   const rowsIn = input.rows && typeof input.rows === 'object' ? (input.rows as Json) : {};
-  // A failed floor is reported, never silently dropped: publishing exists so a regression shows up
-  // as a number moving the wrong way, not as a row quietly going missing.
-  const floorsMet = input.floorsMet !== false;
+  // Explicit `=== true`, not `!== false`: acceptance here is sufficient for publishing, so an
+  // omitted or non-boolean field must fail CLOSED. Otherwise a baseline that never declared its
+  // gate status — a malformed emitter, a hand-written file, a future schema change — publishes as
+  // accepted without ever claiming its floors passed, which is the same "an empty run must not read
+  // as a pass" rule this adapter states below, applied to the field that decides it.
+  const floorsMet = input.floorsMet === true;
   const accepted = metrics.length > 0 && Object.keys(rowsIn).length > 0 && floorsMet;
   return {
     metrics,

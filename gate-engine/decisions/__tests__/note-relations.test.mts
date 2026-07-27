@@ -225,6 +225,18 @@ describe('validateAxisAmends', () => {
     expect(f[0].detail).toContain('names no note in axis "other"');
   });
 
+  // A POPULATED map comes from a whole-corpus scan, so an axis it does not contain does not exist.
+  // Staying silent there let a typo'd slug pass integrity check #8 entirely.
+  it('flags a cross-axis reference to an axis that is not in the corpus', () => {
+    const f = validateAxisAmends(
+      'my-axis',
+      axis([note('2026-02-02', '**Amends:** wrong-axsi#note:2026-01-01 — typo in the slug.')]),
+      new Map([['other', new Set(['note:2026-01-01'])]]),
+    );
+    expect(f).toHaveLength(1);
+    expect(f[0].detail).toContain('is not in the corpus');
+  });
+
   // Reporting a reference as broken because the CALLER never loaded the other file would block
   // correct work — the precise way a gate earns a reputation for crying wolf and gets switched off.
   it('stays silent on a cross-axis reference when the other axis was not loaded', () => {

@@ -162,8 +162,19 @@ export function validateAxisAmends(
     }
 
     if (ref.slug && ref.slug !== slug) {
+      // An EMPTY map means the caller loaded one axis and cannot judge cross-axis references at all
+      // (stay silent — reporting those would be the gate crying wolf). A POPULATED map comes from a
+      // whole-corpus scan, so an absent slug is not "unknown", it is a slug that does not exist:
+      // a typo like `wrong-axsi#note:2026-01-01` must not pass just because nothing answers to it.
+      if (!foreignIds.size) continue;
       const known = foreignIds.get(ref.slug);
-      if (known && !known.has(ref.id))
+      if (!known)
+        out.push({
+          slug,
+          noteId: note.id,
+          detail: `Amends "${note.amends}" names axis "${ref.slug}", which is not in the corpus`,
+        });
+      else if (!known.has(ref.id))
         out.push({
           slug,
           noteId: note.id,
