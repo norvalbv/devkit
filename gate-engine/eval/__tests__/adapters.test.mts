@@ -25,13 +25,28 @@ describe('benchmark adapters', () => {
     expect(parsed.acceptance.accepted).toBe(true);
     expect(parsed.metrics.find((metric) => metric.id === 'recall')).toMatchObject({
       numerator: 23,
-      denominator: 24,
+      denominator: 25,
       direction: 'higher',
     });
     expect(parsed.metrics.find((metric) => metric.id === 'decoy-flag-rate')).toMatchObject({
       numerator: 2,
       denominator: 20,
       direction: 'lower',
+    });
+  });
+
+  it('reports critique transport and semantic observability as separate metrics', () => {
+    const baseline = json('gate-engine/critique/eval/results.baseline.json');
+    baseline.critique.contract.responseValid = { ok: 1, total: 3 };
+    baseline.critique.contract.semanticUsable = { ok: 2, total: 3 };
+    const metrics = parseCritique(baseline).metrics;
+    expect(metrics.find((metric) => metric.id === 'response-contract')).toMatchObject({
+      numerator: 1,
+      denominator: 3,
+    });
+    expect(metrics.find((metric) => metric.id === 'semantic-input')).toMatchObject({
+      numerator: 2,
+      denominator: 3,
     });
   });
 

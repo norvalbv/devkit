@@ -1,16 +1,18 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from '../../commands/sync/sync-agents.mts';
-import { syncSkills } from '../../commands/sync/sync-skills.mts';
-import { AGENT_TARGETS, type Selection } from '../components.mts';
-import { removeAgents, removeSkills } from '../sync-manifest.mts';
-import { selectedHookAssets } from './agent-hook-selection.mts';
+import { syncAgents } from '../../../commands/sync/sync-agents.mts';
+import { syncSkills } from '../../../commands/sync/sync-skills.mts';
+import { AGENT_TARGETS, type Selection } from '../../components.mts';
+import { removeAgents, removeSkills } from '../../sync-manifest.mts';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mts';
 import {
   reconcileHookRegistrations,
   removeHookRegistrations,
   removeHookScripts,
   syncHookScripts,
-} from './install-hooks.mts';
+} from '../install-hooks.mts';
+import { agentAssetDir } from './agent-assets.mts';
+import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
 
 type OverrideAsset = (kind: string, name: string) => boolean;
 
@@ -21,15 +23,19 @@ function pruneDeselectedSurfaces(
   hookScripts: string[],
   dryRun: boolean,
 ) {
-  const prunedTargets = AGENT_TARGETS.filter((target) => !agentTargets.includes(target));
+  const prunedTargets = SUPPORTED_AGENT_PROVIDERS.filter(
+    (target) => !agentTargets.includes(target),
+  );
   const settingsFile: Record<string, string> = {
     claude: '.claude/settings.json',
+    codex: '.codex/hooks.json',
     cursor: '.cursor/hooks.json',
   };
   const hasContent = prunedTargets.some(
     (target) =>
-      ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, `.${target}`, kind))) ||
-      existsSync(join(gitRoot, settingsFile[target])),
+      (['skills', 'agents', 'hooks'] as const).some((kind) =>
+        existsSync(join(gitRoot, agentAssetDir(target, kind))),
+      ) || existsSync(join(gitRoot, settingsFile[target])),
   );
   if (!prunedTargets.length || !hasContent) return;
   console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -92,7 +98,7 @@ export function installAgentSurfaces(
     hooks.previouslyOwnedComponents.length &&
     targets.some((target) =>
       existsSync(
-        join(gitRoot, target === 'claude' ? '.claude/settings.json' : '.cursor/hooks.json'),
+        join(gitRoot, target === 'claude' ? '.claude/settings.json' : `.${target}/hooks.json`),
       ),
     )
   ) {
