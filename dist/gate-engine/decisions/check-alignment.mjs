@@ -59,8 +59,10 @@ const DEPTH_RE = { PASS: /\bPASS\b/, THIN: /\bTHIN\b/ };
 // Read-only investigation surface for the judge. `git diff` (pattern-scoped Bash) is how it reads
 // STAGED hunks — worktree Reads alone would miss partial staging.
 const JUDGE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*)';
-const HAIKU_TIMEOUT_MS = 120000;
-const OPUS_TIMEOUT_MS = 240000; // escalation only fires pre-block; cold-start headroom
+// One uninterrupted 240s budget for either alignment pass. The old 120s haiku cap killed 9/288
+// observed runs while healthy completions reached 116s (sc-1195). A timeout is deliberately not
+// retried: restarting would discard the first run's investigation for the same 240s worst case.
+export const ALIGNMENT_JUDGE_TIMEOUT_MS = 240_000;
 const ALIGN_PROMPT = (ruling, vision, files) => 'You are judging whether STAGED code changes contradict a recorded architectural decision.\n' +
     `Target ruling: ${ruling}\n` +
     `Target vision: ${vision}\n` +
@@ -195,7 +197,7 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel =
     if (cfg.noLlm || files.length === 0)
         return null;
     const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files]);
-    const first = runJudge(cwd, firstModel, ALIGN_PROMPT(target.ruling, target.vision, files), stat, HAIKU_TIMEOUT_MS);
+    const first = runJudge(cwd, firstModel, ALIGN_PROMPT(target.ruling, target.vision, files), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
     if (first === null)
         return {
             firstRaw: null,
@@ -213,7 +215,7 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel =
             finalVerdict: firstVerdict,
             escalated: false,
         };
-    const second = runJudge(cwd, escalateModel, ESCALATE_PROMPT(target.ruling, target.vision, files, first), stat, OPUS_TIMEOUT_MS);
+    const second = runJudge(cwd, escalateModel, ESCALATE_PROMPT(target.ruling, target.vision, files, first), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
     return {
         firstRaw: first,
         firstVerdict,

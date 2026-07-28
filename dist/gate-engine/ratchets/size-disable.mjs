@@ -5,26 +5,16 @@
 // and refuse to let them GROW. Existing giants are grandfathered; the count can only
 // shrink (split a file, delete its disable).
 //
-// This is the mechanism that makes another 5k-LOC monolith un-birthable: max-lines is
-// already enforced at commit, so without a new disable a fresh oversized file fails
-// lint — and this gate blocks the new disable.
-//
 //   bunx guard-size freeze   # re-count + write the consumer's baseline
 //   bunx guard-size gate     # fail if counts grew (pre-commit)
 //
-// PARAMETERIZED (W-3): scanRoots come from resolveGuardConfig(cwd) — the CONSUMER's
-// guard.config.json + GUARD_* env, never hardcoded. The baseline
-// (eslint/baselines/size.json) is per-repo STATE: read/written under the CONSUMER cwd,
-// never the package dir. Per the "never hard-code a count" rule, freeze re-walks the
-// tree and writes whatever it finds — never a literal.
+// W-3: config and baselines always resolve against the consumer cwd, never the package dir.
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
 import { hasStagedFiles, stageBaseline, stagedSet } from "./git-index.mjs";
-// Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = 'eslint/baselines/size.json';
-// Raw-line cap baseline (the `maxLines` gate): grandfathered over-cap source files, shrink-only.
 const LINES_BASELINE = 'eslint/baselines/size-lines.json';
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '_shared']);
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
@@ -33,7 +23,6 @@ const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
 // Disable-directive counters, hoisted (devkit lint: useTopLevelRegex) — matched per source line.
 const RE_MAX_LINES_PER_FN = /max-lines-per-function/g;
 const RE_MAX_LINES = /max-lines\b/g;
-// `match` = the cfg.sourceExtensions matchers (TS by default; a JS/MJS repo sets ["mjs","js"]).
 function walk(root, dir, files, match, includeTests = false) {
     let entries;
     try {
@@ -124,11 +113,7 @@ export function freezeLines(root = process.cwd()) {
     }
     return over.length;
 }
-// ── line-growth block enablement (onboarding + upgrade back-fill) ───────────────────────────────
-// Turning the maxLines cap ON is a config write (guard.config.json) — the mirror of the gate below
-// that ENFORCES it. Kept here so the cap value + its grandfather freeze share one home. `devkit init`
-// writes the cap on first adoption (its own freeze grandfathers giants); `devkit upgrade` calls
-// enableLineGrowth to set the cap AND grandfather in one step on an already-adopted repo.
+// ── line-growth onboarding + upgrade back-fill ─────────────────────────────────────────────────
 // The default raw-line cap written when the block is enabled. Fixed — a consumer tunes it by
 // hand-editing guard.config.json (setMaxLines preserves an existing positive value).
 export const LINE_CAP = 500;
