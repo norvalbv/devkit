@@ -27,6 +27,7 @@ export interface AddOptions {
   isTarget?: boolean;
   isNew?: boolean;
   note?: string;
+  noteReplace?: [oldText: string | undefined, newText: string | undefined];
   title?: string;
   context?: string;
   ruling?: string;

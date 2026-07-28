@@ -6,7 +6,7 @@
  * resolveGuardConfig(process.cwd()) — i.e. against the CONSUMER repo, never the package dir (W-3):
  *
  *   guard-decisions add <slug> --target …| --note …   record a Target / append a note
- *   guard-decisions amend <slug> --target …| --note … replace only the newest uncommitted entry
+ *   guard-decisions amend <slug> --target …| --note …| --note-replace OLD NEW  correct newest draft
  *   guard-decisions rescope <slug> --scope … --reason …  append-only Scope correction (a tagged note)
  *   guard-decisions query "<text>" [--top K] [--json|--full]  rank axes (semantic → lexical floor)
  *   guard-decisions reindex | list | show <slug> | check <slug>

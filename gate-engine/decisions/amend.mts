@@ -27,6 +27,7 @@ const TRAILING_WS_RE = /\s*$/;
 const TIMELINE_ENTRY_RE = /^(?:## Target · \d{4}-\d{2}-\d{2}\b.*|- \d{4}-\d{2}-\d{2}\s+—\s+.*)$/gm;
 const ENTRY_DATE_RE = /^(?:## Target · |- )(\d{4}-\d{2}-\d{2})\b/;
 const TARGET_DATE_RE = /^## Target · (\d{4}-\d{2}-\d{2})\b/;
+const NOTE_PREFIX_RE = /^- \d{4}-\d{2}-\d{2}\s+—\s+/;
 
 interface Timeline {
   prefix: string;
@@ -151,9 +152,25 @@ function regenerateIndex(paths: DecisionPaths) {
 
 /** Replace the single newest draft entry after proving all earlier history equals HEAD. */
 export function amendDecision(slug: string, options: AddOptions, paths: DecisionPaths) {
-  if (!slug || Boolean(options.isTarget) === Boolean(options.note)) {
-    throw new Error('Usage: guard-decisions amend <slug> --target … | --note "…"');
+  const modeCount =
+    Number(Boolean(options.isTarget)) +
+    Number(options.note !== undefined) +
+    Number(options.noteReplace !== undefined);
+  if (!slug || modeCount !== 1) {
+    throw new Error(
+      'Usage: guard-decisions amend <slug> --target … | --note "…" | --note-replace "<old>" "<new>"',
+    );
   }
+  if (
+    options.noteReplace &&
+    (options.noteReplace[0] === undefined || options.noteReplace[1] === undefined)
+  ) {
+    throw new Error('amend --note-replace requires both "<old>" and "<new>" arguments');
+  }
+  if (options.noteReplace?.[0] === '') {
+    throw new Error('amend --note-replace requires a non-empty "<old>" substring');
+  }
+  if (options.note === '') throw new Error('amend --note requires a non-empty note');
   if (options.isTarget && !hasTargetFields(options)) {
     throw new Error(
       'amend --target requires --context, --ruling, --consequences, --tradeoff, and --vision-fit',
@@ -174,6 +191,35 @@ export function amendDecision(slug: string, options: AddOptions, paths: Decision
     !options.evidenceChange?.trim()
   ) {
     throw new Error('amending an appended Target requires --evidence-change "<what shifted>"');
+  }
+  if (options.noteReplace) {
+    const [oldText, newText] = options.noteReplace as [string, string];
+    const prefix = latest.text.match(NOTE_PREFIX_RE)?.[0];
+    if (!prefix) throw new Error('newest draft note has an invalid date prefix');
+    const noteText = latest.text.slice(prefix.length);
+    const matches = [];
+    for (
+      let index = noteText.indexOf(oldText);
+      index !== -1;
+      index = noteText.indexOf(oldText, index + 1)
+    ) {
+      matches.push(index);
+    }
+    if (matches.length === 0) {
+      throw new Error(`"${oldText}" does not occur in the newest draft note`);
+    }
+    if (matches.length > 1) {
+      throw new Error(`"${oldText}" occurs ${matches.length} times in the newest draft note`);
+    }
+    const bodyOffset = current.length - workingParsed.body.length;
+    const start = bodyOffset + latest.start + prefix.length + matches[0];
+    const replacement = sanitizeCell(newText);
+    writeFileAtomic(
+      file,
+      `${current.slice(0, start)}${replacement}${current.slice(start + oldText.length)}`,
+    );
+    console.log(`Amended draft note on "${slug}" (${date}).`);
+    return;
   }
   const replacement =
     options.isTarget && hasTargetFields(options)
