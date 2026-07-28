@@ -1022,6 +1022,34 @@ describe('draft amendments', () => {
     expect(readFileSync(file, 'utf8')).toBe(before);
   });
 
+  it('does not consume following option flags as replacement arguments', () => {
+    run(target('axis'));
+    commitAll();
+    expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);
+    const file = join(dir, 'axis.md');
+    const before = readFileSync(file, 'utf8');
+
+    const missingNew = run(['amend', 'axis', '--note-replace', 'draft', '--title', 'ignored']);
+    expect(missingNew.status).toBe(1);
+    expect(missingNew.stderr).toContain('requires both');
+
+    const missingOld = run(['amend', 'axis', '--note-replace', '--title', 'ignored']);
+    expect(missingOld.status).toBe(1);
+    expect(missingOld.stderr).toContain('requires both');
+    expect(readFileSync(file, 'utf8')).toBe(before);
+
+    expect(run(['amend', 'axis', '--note', 'draft draft']).status).toBe(0);
+    const ambiguousBefore = readFileSync(file, 'utf8');
+    const ambiguous = run(['amend', 'axis', '--note-replace', 'draft', '--title', 'ignored']);
+    expect(ambiguous.status).toBe(1);
+    expect(ambiguous.stderr).toContain('requires both');
+    expect(readFileSync(file, 'utf8')).toBe(ambiguousBefore);
+
+    const dashPrefixed = run(['amend', 'axis', '--note', '--legacy flag removed']);
+    expect(dashPrefixed.status, dashPrefixed.stderr).toBe(0);
+    expect(readFileSync(file, 'utf8')).toContain('--legacy flag removed');
+  });
+
   it('refuses surgical replacement in a committed note', () => {
     run(target('axis'));
     expect(run(['add', 'axis', '--note', 'draft note']).status).toBe(0);

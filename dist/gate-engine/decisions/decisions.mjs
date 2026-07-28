@@ -253,9 +253,10 @@ export async function cmdReindex(cwd = process.cwd()) {
     console.log(`Reindexed ${done}/${total} axes${done < total ? ' (some embeds unavailable — lexical still covers them)' : ''}.`);
 }
 // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
+const OPTION_TOKEN = /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
 function flag(rest, name, offset = 1) {
     const i = rest.indexOf(name);
-    return i !== -1 ? rest[i + offset] : undefined;
+    return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
 }
 function optionsFromFlags(rest) {
     return {

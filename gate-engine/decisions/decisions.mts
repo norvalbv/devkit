@@ -382,7 +382,6 @@ export async function cmdQuery(
   }
   printRanked(rows, source);
 }
-
 export async function cmdReindex(cwd = process.cwd()) {
   const { done, total } = await reindexAll(paths(cwd));
   console.log(
@@ -390,10 +389,11 @@ export async function cmdReindex(cwd = process.cwd()) {
   );
 }
 // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
-
+const OPTION_TOKEN =
+  /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
 function flag(rest: string[], name: string, offset = 1): string | undefined {
   const i = rest.indexOf(name);
-  return i !== -1 ? rest[i + offset] : undefined;
+  return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
 }
 function optionsFromFlags(rest: string[]): AddOptions {
   return {
