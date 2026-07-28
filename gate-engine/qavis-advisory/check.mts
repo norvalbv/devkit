@@ -97,7 +97,7 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
   // qavis printed its own reason to stderr; add the remedy + the exit-code decision.
   console.error('qavis-advisory: UI-affecting change with no qavis QA on this staged tree.');
   console.error(
-    '   Run:  qavis qa --staged --repo .    (a pass writes a receipt that clears this)',
+    '   Run:  qavis qa --staged --route vision --repo .    (a pass writes a receipt that clears this)',
   );
   console.error('   Skip: export GUARD_QAVIS_OK=1, or disable with GUARD_NO_QAVIS_ADVISORY=1.');
   return envFlag('AI_STRICT') ? 3 : 0; // ship blocks; a normal commit is advisory-only

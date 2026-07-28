@@ -52,6 +52,7 @@ describe('runQavisAdvisory exit contract', () => {
   it('ADVISE under a strict ship → 3 (block until QA or override)', () => {
     process.env.GUARD_AI_STRICT = '1';
     expect(runQavisAdvisory('/r', advise)).toBe(3);
+    expect(stderr()).toContain('qavis qa --staged --route vision --repo .');
   });
 
   it('GUARD_QAVIS_OK short-circuits ADVISE under strict → 0, never shells qavis', () => {
