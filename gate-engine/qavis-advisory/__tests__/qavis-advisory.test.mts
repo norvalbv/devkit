@@ -1,4 +1,5 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,7 +53,42 @@ describe('runQavisAdvisory exit contract', () => {
   it('ADVISE under a strict ship → 3 (block until QA or override)', () => {
     process.env.GUARD_AI_STRICT = '1';
     expect(runQavisAdvisory('/r', advise)).toBe(3);
-    expect(stderr()).toContain('qavis qa --staged --route vision --repo .');
+  });
+
+  it('the emitted remediation runs forced vision and its receipt clears the next strict gate', () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = mkdtempSync(path.join(tmpdir(), 'qavis-advisory-contract-'));
+    const binDir = mkdtempSync(path.join(tmpdir(), 'qavis-advisory-bin-'));
+    const receipt = path.join(repo, 'pass-receipt');
+    const qavis = path.join(binDir, 'qavis');
+    writeFileSync(
+      qavis,
+      `#!/usr/bin/env node
+const { writeFileSync } = require('node:fs');
+const expected = ['qa', '--staged', '--route', 'vision', '--repo', '.'];
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(2);
+writeFileSync(process.env.QAVIS_CONTRACT_RECEIPT, 'pass');
+`,
+    );
+    chmodSync(qavis, 0o755);
+    const route = (): RouteResult =>
+      existsSync(receipt) ? { verdict: 'SILENT' } : { verdict: 'ADVISE' };
+
+    expect(runQavisAdvisory(repo, { hasRecipe: () => true, route })).toBe(3);
+    const command = stderr().match(/Run:\s+(qavis qa.*?)\s+\(a pass writes/)?.[1];
+    expect(command).toBeDefined();
+    const [executable, ...args] = command?.split(/\s+/) ?? [];
+    execFileSync(executable as string, args, {
+      cwd: repo,
+      env: {
+        ...process.env,
+        PATH: [binDir, process.env.PATH].filter(Boolean).join(path.delimiter),
+        QAVIS_CONTRACT_RECEIPT: receipt,
+      },
+    });
+
+    expect(existsSync(receipt)).toBe(true);
+    expect(runQavisAdvisory(repo, { hasRecipe: () => true, route })).toBe(0);
   });
 
   it('GUARD_QAVIS_OK short-circuits ADVISE under strict → 0, never shells qavis', () => {
