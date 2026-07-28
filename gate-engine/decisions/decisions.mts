@@ -36,6 +36,7 @@
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
  *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
+ *   amend <slug> --note-replace OLD NEW  replace one unique substring in that draft note
  *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
  *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
  *     body in rank order instead of the truncated ruling (exclusive with --json)
@@ -381,25 +382,26 @@ export async function cmdQuery(
   }
   printRanked(rows, source);
 }
-
 export async function cmdReindex(cwd = process.cwd()) {
   const { done, total } = await reindexAll(paths(cwd));
   console.log(
     `Reindexed ${done}/${total} axes${done < total ? ' (some embeds unavailable — lexical still covers them)' : ''}.`,
   );
 }
-
 // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
-
-function flag(rest: string[], name: string): string | undefined {
+const OPTION_TOKEN =
+  /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
+function flag(rest: string[], name: string, offset = 1): string | undefined {
   const i = rest.indexOf(name);
-  return i !== -1 ? rest[i + 1] : undefined;
+  return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
 }
-
 function optionsFromFlags(rest: string[]): AddOptions {
   return {
     isTarget: rest.includes('--target'),
     note: flag(rest, '--note'),
+    noteReplace: rest.includes('--note-replace')
+      ? [flag(rest, '--note-replace'), flag(rest, '--note-replace', 2)]
+      : undefined,
     title: flag(rest, '--title'),
     context: flag(rest, '--context'),
     ruling: flag(rest, '--ruling'),
@@ -419,7 +421,6 @@ function optionsFromFlags(rest: string[]): AddOptions {
     isNew: rest.includes('--new'),
   };
 }
-
 export async function main(argv: string[]) {
   const [cmd, ...args] = argv;
   switch (cmd) {
@@ -435,7 +436,6 @@ export async function main(argv: string[]) {
     }
     case 'rescope': {
       // Append-only Scope correction: reuses addNote's append path (never touches the Target's own
-      // Scope line), so no --evidence-change — that guard protects the RULING, not a glob fix.
       const [slug, ...rest] = args;
       const scope = flag(rest, '--scope');
       const reason = flag(rest, '--reason');
@@ -489,7 +489,6 @@ export async function main(argv: string[]) {
       process.exit(1);
   }
 }
-
 const invokedDirectly =
   process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
 if (invokedDirectly) {

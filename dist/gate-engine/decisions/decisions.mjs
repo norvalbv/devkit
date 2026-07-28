@@ -35,6 +35,7 @@
  *   add <slug> --note "..."          cheap convergence note under the current Target (INDEX untouched)
  *   rescope <slug> --scope "glob,glob" --reason "..."  append-only Scope correction (a tagged note)
  *   amend <slug> --target …|--note … replace only the newest entry when it is absent from HEAD
+ *   amend <slug> --note-replace OLD NEW  replace one unique substring in that draft note
  *   query "<text>" [--top K] [--json] [--full]  rank axes — semantic (Ollama), lexical floor on
  *     fallback; --json emits the bench's envelope; --full prints each matched axis's whole file
  *     body in rank order instead of the truncated ruling (exclusive with --json)
@@ -252,14 +253,18 @@ export async function cmdReindex(cwd = process.cwd()) {
     console.log(`Reindexed ${done}/${total} axes${done < total ? ' (some embeds unavailable — lexical still covers them)' : ''}.`);
 }
 // ─── Dispatch (run-as-main only, so tests can import the pure helpers) ───────────
-function flag(rest, name) {
+const OPTION_TOKEN = /^--(?:anchored-bet|category|consequences|context|evidence-change|full|json|new|note|note-replace|reason|ref|rejected|researched|revisit-when|ruling|scope|source|supersedes|target|title|top|tradeoff|vision-fit)$/;
+function flag(rest, name, offset = 1) {
     const i = rest.indexOf(name);
-    return i !== -1 ? rest[i + 1] : undefined;
+    return i !== -1 && !OPTION_TOKEN.test(rest[i + offset] ?? '') ? rest[i + offset] : undefined;
 }
 function optionsFromFlags(rest) {
     return {
         isTarget: rest.includes('--target'),
         note: flag(rest, '--note'),
+        noteReplace: rest.includes('--note-replace')
+            ? [flag(rest, '--note-replace'), flag(rest, '--note-replace', 2)]
+            : undefined,
         title: flag(rest, '--title'),
         context: flag(rest, '--context'),
         ruling: flag(rest, '--ruling'),
@@ -294,7 +299,6 @@ export async function main(argv) {
         }
         case 'rescope': {
             // Append-only Scope correction: reuses addNote's append path (never touches the Target's own
-            // Scope line), so no --evidence-change — that guard protects the RULING, not a glob fix.
             const [slug, ...rest] = args;
             const scope = flag(rest, '--scope');
             const reason = flag(rest, '--reason');
