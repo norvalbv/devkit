@@ -5,7 +5,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AdvisoryDeps, qavisOnPath, type RouteResult, runQavisAdvisory } from '../check.mts';
 
-const ENV_KEYS = ['GUARD_AI_STRICT', 'GUARD_QAVIS_OK', 'GUARD_NO_QAVIS_ADVISORY'];
+const ENV_KEYS = [
+  'GUARD_AI_STRICT',
+  'GUARD_QAVIS_OK',
+  'GUARD_NO_QAVIS_ADVISORY',
+  'PATH',
+  'QAVIS_CONTRACT_RECEIPT',
+  'QAVIS_CONTRACT_REPO',
+];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -56,7 +63,6 @@ describe('runQavisAdvisory exit contract', () => {
   });
 
   it('the emitted remediation runs forced vision and its receipt clears the next strict gate', () => {
-    process.env.GUARD_AI_STRICT = '1';
     const repo = mkdtempSync(path.join(tmpdir(), 'qavis-advisory-contract-'));
     const binDir = mkdtempSync(path.join(tmpdir(), 'qavis-advisory-bin-'));
     const receipt = path.join(repo, 'pass-receipt');
@@ -64,31 +70,36 @@ describe('runQavisAdvisory exit contract', () => {
     writeFileSync(
       qavis,
       `#!/usr/bin/env node
-const { writeFileSync } = require('node:fs');
-const expected = ['qa', '--staged', '--route', 'vision', '--repo', '.'];
-if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(2);
-writeFileSync(process.env.QAVIS_CONTRACT_RECEIPT, 'pass');
+const { existsSync, writeFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+const receipt = process.env.QAVIS_CONTRACT_RECEIPT;
+const route = ['route', '--staged', '--gate', '--repo', process.env.QAVIS_CONTRACT_REPO];
+const qa = ['qa', '--staged', '--route', 'vision', '--repo', '.'];
+if (JSON.stringify(args) === JSON.stringify(route)) {
+  process.stdout.write(existsSync(receipt) ? 'SILENT\\n' : 'ADVISE\\n');
+  process.exit(0);
+}
+if (JSON.stringify(args) === JSON.stringify(qa)) {
+  writeFileSync(receipt, 'pass');
+  process.exit(0);
+}
+process.exit(2);
 `,
     );
     chmodSync(qavis, 0o755);
-    const route = (): RouteResult =>
-      existsSync(receipt) ? { verdict: 'SILENT' } : { verdict: 'ADVISE' };
+    process.env.GUARD_AI_STRICT = '1';
+    process.env.PATH = [binDir, saved.PATH].filter(Boolean).join(path.delimiter);
+    process.env.QAVIS_CONTRACT_RECEIPT = receipt;
+    process.env.QAVIS_CONTRACT_REPO = repo;
 
-    expect(runQavisAdvisory(repo, { hasRecipe: () => true, route })).toBe(3);
+    expect(runQavisAdvisory(repo, { hasRecipe: () => true })).toBe(3);
     const command = stderr().match(/Run:\s+(qavis qa.*?)\s+\(a pass writes/)?.[1];
     expect(command).toBeDefined();
     const [executable, ...args] = command?.split(/\s+/) ?? [];
-    execFileSync(executable as string, args, {
-      cwd: repo,
-      env: {
-        ...process.env,
-        PATH: [binDir, process.env.PATH].filter(Boolean).join(path.delimiter),
-        QAVIS_CONTRACT_RECEIPT: receipt,
-      },
-    });
+    execFileSync(executable as string, args, { cwd: repo });
 
     expect(existsSync(receipt)).toBe(true);
-    expect(runQavisAdvisory(repo, { hasRecipe: () => true, route })).toBe(0);
+    expect(runQavisAdvisory(repo, { hasRecipe: () => true })).toBe(0);
   });
 
   it('GUARD_QAVIS_OK short-circuits ADVISE under strict → 0, never shells qavis', () => {
