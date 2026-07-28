@@ -72,7 +72,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 
 | Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Feature critique | shipped | accepted | stale | quality | ↑ improved | Gold finding recall: 23/24 (95.8%) · Clean-plan pass rate: 4/5 (80.0%) |
+| Feature critique | shipped | accepted | stale | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
 | Domain and correctness reviewers | shipped | evidence-only | unknown | coverage | → flat | Gold rows before catalog refresh: 24 · Gold rows after catalog refresh: 29 |

@@ -29,6 +29,7 @@ import {
   voteSlot,
 } from '../../judge/matcher-core.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
+import { parsePlanCritiqueResponse } from '../response-contract.mts';
 
 export type { MatcherOptions, SlotOutcome };
 export { kappa, MATCH_TIMEOUT_MS, mapPool, parseSlotReply, voteSlot };
@@ -113,6 +114,22 @@ export function parseReportFindings(report: string): Finding[] {
     }
   }
   return findings;
+}
+
+/** Project the closed JSON response into the unchanged findings matcher. */
+export function parseCritiqueFindings(raw: string): Finding[] {
+  const response = parsePlanCritiqueResponse(raw);
+  if (!response.ok || response.value.status !== 'reviewed') return [];
+  return response.value.findings.map((finding) => ({
+    severity: finding.severity,
+    desc: finding.claim,
+    body: [
+      `Lens: ${finding.lens}`,
+      `Evidence: ${finding.evidence}`,
+      `Impact: ${finding.impact}`,
+      `Recommendation: ${finding.recommendation}`,
+    ].join('\n'),
+  }));
 }
 
 // ─── Per-slot forced-choice prompts ───────────────────────────────────────────────

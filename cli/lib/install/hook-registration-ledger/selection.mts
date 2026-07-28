@@ -1,5 +1,38 @@
-import type { Selection } from '../components.mts';
-import { hookScriptsFor } from './install-hooks.mts';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Selection } from '../../components.mts';
+import { packageDir } from '../../fs-helpers.mts';
+
+export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+export const FALLOW_STAGED_GATE = 'fallow-staged-gate.sh';
+
+export function bundledHookNames(): string[] {
+  return readdirSync(join(packageDir(), 'agents-hooks'), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+}
+
+/** The exact hook-script set implied by Devkit component selection. */
+export function hookScriptsFor({
+  agentHooks,
+  decisions,
+  fallow,
+}: {
+  agentHooks: boolean;
+  decisions: boolean;
+  fallow: boolean;
+}): string[] {
+  const all = bundledHookNames();
+  const independentlyOwned = new Set([DECISION_EDIT_HOOK, FALLOW_STAGED_GATE]);
+  return all.filter(
+    (name) =>
+      (agentHooks && !independentlyOwned.has(name)) ||
+      (decisions && name === DECISION_EDIT_HOOK) ||
+      (fallow && name === FALLOW_STAGED_GATE),
+  );
+}
 
 export interface SelectedHookAssets {
   components: string[];

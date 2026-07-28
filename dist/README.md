@@ -20,7 +20,7 @@ The package and agent assets use the same release tag. A prompt or skill cannot 
 - Git
 - [Bun](https://bun.sh/) for installation and repository development
 - Node.js 23.6 or newer when running the emitted JavaScript directly
-- A supported agent host when using the optional Claude/Cursor agent surfaces
+- A supported Claude, Codex, or Cursor host when using the optional agent surfaces
 
 ## Quick start
 
@@ -32,7 +32,9 @@ bunx devkit init
 bunx devkit doctor
 ```
 
-`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Use `--yes` for defaults or `--dry-run` to preview.
+`devkit init` detects the current stack, lets you choose components and gates, writes the selected assets, and records that selection in `.devkit/config.json`. Fresh installs target Claude, Codex, and Cursor; pass `--no-claude`, `--no-codex`, or `--no-cursor` to narrow the set. Existing installs keep their recorded provider selection during sync, upgrade, and repair. Use `--yes` for defaults or `--dry-run` to preview.
+
+When optional project hooks are selected for Codex, open `/hooks` once to review and trust their exact definitions. Codex skips new or changed project hooks until that trust review is complete.
 
 Extend the stable, extension-free package exports:
 
@@ -125,14 +127,14 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 6 suites have accepted checkpoints, 2 are current, and 4 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 6 suites have accepted checkpoints, 3 are current, and 4 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
 
 | Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Feature critique | shipped | accepted | stale | quality | ↑ improved | Gold finding recall: 23/24 (95.8%) · Clean-plan pass rate: 4/5 (80.0%) |
+| Feature critique | shipped | accepted | current | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
 | Domain and correctness reviewers | shipped | evidence-only | unknown | coverage | → flat | Gold rows before catalog refresh: 24 · Gold rows after catalog refresh: 29 |

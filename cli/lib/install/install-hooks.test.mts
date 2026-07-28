@@ -4,8 +4,10 @@
  * console.log is silenced. Covers: merge shape, both surfaces, idempotency (re-run does not
  * duplicate), preservation of a foreign hook, the Cursor event mapping, and removal.
  */
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,9 +19,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  projectHookRegistrations,
+  writeHookRegistrationLedger,
+} from './hook-registration-ledger/lifecycle.mts';
+import {
   checkHookRegistrations,
-  FALLOW_STAGED_GATE,
-  hookScriptsFor,
   installHookRegistrations,
   removeHookRegistrations,
   syncHookScripts,
@@ -32,11 +36,49 @@ function tmpRepo() {
   return root;
 }
 const claude = (root) => JSON.parse(readFileSync(join(root, '.claude', 'settings.json'), 'utf8'));
+const codex = (root) => JSON.parse(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8'));
 const cursor = (root) => JSON.parse(readFileSync(join(root, '.cursor', 'hooks.json'), 'utf8'));
+const ledgerPath = (root) => join(root, '.devkit', 'agent-hook-registrations-manifest.json');
+const ledger = (root) => JSON.parse(readFileSync(ledgerPath(root), 'utf8'));
 // Every command across every Claude event/matcher group, flattened.
 function claudeCommands(root) {
   return Object.values(claude(root).hooks).flatMap((gs) =>
     gs.flatMap((g) => g.hooks.map((h) => h.command)),
+  );
+}
+function writeRetiredFallowHooks(root) {
+  mkdirSync(join(root, '.claude'), { recursive: true });
+  mkdirSync(join(root, '.cursor'), { recursive: true });
+  writeFileSync(
+    join(root, '.claude', 'settings.json'),
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [
+              {
+                type: 'command',
+                command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+              },
+              { type: 'command', command: 'echo mine' },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, '.cursor', 'hooks.json'),
+    JSON.stringify({
+      version: 1,
+      hooks: {
+        beforeShellExecution: [
+          { command: '.cursor/hooks/fallow-gate.sh' },
+          { command: 'echo mine' },
+        ],
+      },
+    }),
   );
 }
 
@@ -58,8 +100,6 @@ describe('installHookRegistrations', () => {
     expect(preToolUse.matcher).toBe('Edit|Write|MultiEdit|Delete');
     expect(preToolUse.hooks[0].command).toContain('decision-edit-guard.mjs');
 
-    // Two pre-edit hooks, one per direction: the guard DENIES a hand-write to a record, the brief
-    // INFORMS before a governed source file is edited. Both are fail-open on the Cursor surface.
     expect(cursor(root).hooks.preToolUse).toEqual([
       {
         command: '.cursor/hooks/decision-edit-guard.mjs',
@@ -90,7 +130,7 @@ describe('installHookRegistrations', () => {
     expect(checkHookRegistrations(root, ['decisions'], { targets: ['claude'] }).ok).toBe(false);
   });
 
-  it('writes both surfaces for searchSteering (PreToolUse guard + PostToolUse counter)', () => {
+  it('writes native Claude, Codex, and Cursor registrations plus exact ownership', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['searchSteering']);
     const cmds = claudeCommands(root);
@@ -101,6 +141,11 @@ describe('installHookRegistrations', () => {
     const cur = cursor(root).hooks;
     expect(cur.beforeShellExecution).toHaveLength(1);
     expect(cur.afterShellExecution).toHaveLength(1);
+    const codexHooks = codex(root).hooks;
+    expect(codexHooks.PreToolUse[0].matcher).toBe('Bash');
+    expect(codexHooks.PreToolUse[0].hooks[0].command).toContain('$(git rev-parse --show-toplevel)');
+    expect(ledger(root).entries).toHaveLength(6);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('trust it with /hooks'));
   });
 
   it('registers all six agentHooks across the correct Claude events', () => {
@@ -110,171 +155,76 @@ describe('installHookRegistrations', () => {
     expect(h.UserPromptSubmit).toHaveLength(1);
     expect(h.Stop[0].hooks).toHaveLength(3); // decision + lint + knip
     expect(h.PreCompact).toHaveLength(1);
-    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1);
-    // UserPromptSubmit dropped.
+    // Cursor: Stop→stop (3), Edit|Write→afterFileEdit (1), PreCompact→preCompact (1); UserPromptSubmit dropped.
     const cur = cursor(root).hooks;
     expect(cur.stop).toHaveLength(3);
     expect(cur.afterFileEdit).toHaveLength(1);
     expect(cur.preCompact).toHaveLength(1);
     expect(cur.UserPromptSubmit).toBeUndefined();
+    expect(codex(root).hooks.Stop[0]).not.toHaveProperty('matcher');
   });
 
-  it('reduces every agentHooks command to a bare .cursor/hooks path', () => {
-    // toCursorCommand strips a LEADING `node`/`bash` only, so a registration carrying an env-var
-    // prefix (`VAR=1 bash …`) silently mirrors to Cursor as an unrunnable string. Asserting the
-    // shape of every command catches that for any future entry, not just today's.
-    const root = tmpRepo();
-    installHookRegistrations(root, ['agentHooks']);
-    const commands = Object.values(cursor(root).hooks)
-      .flat()
-      .flatMap((group) => group.hooks ?? [group])
-      .map((hook) => hook.command);
-    expect(commands.length).toBeGreaterThan(0);
-    for (const command of commands) {
-      expect(command).toMatch(/^\.cursor\/hooks\/[\w.-]+$/);
-    }
-  });
-
-  it('is idempotent — a re-run does not duplicate', () => {
+  it('is byte-idempotent across provider configs and the ledger', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     const first = claudeCommands(root).length;
+    const paths = [
+      join(root, '.claude', 'settings.json'),
+      join(root, '.codex', 'hooks.json'),
+      join(root, '.cursor', 'hooks.json'),
+      ledgerPath(root),
+    ];
+    const bytes = paths.map((path) => readFileSync(path, 'utf8'));
     installHookRegistrations(root, ['searchSteering', 'agentHooks']);
     expect(claudeCommands(root).length).toBe(first);
     expect(first).toBe(8);
+    expect(paths.map((path) => readFileSync(path, 'utf8'))).toEqual(bytes);
   });
 
-  it('preserves registrations owned by a deselected component', () => {
+  it.each([
+    'codex',
+    'cursor',
+  ])('transfers same-destination ownership across %s mode changes', (provider) => {
     const root = tmpRepo();
-    installHookRegistrations(root, ['agentHooks']);
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
+    installHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true });
+    expect(
+      checkHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true }).ok,
+    ).toBe(true);
+    expect(ledger(root).entries.every((entry) => entry.installScope === 'overlay')).toBe(true);
 
-    installHookRegistrations(root, ['decisions']);
-
-    const claudeHooks = claudeCommands(root);
-    expect(claudeHooks).toContain(
-      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/claude-rules-reminder.mjs"',
-    );
-    expect(claudeHooks).toContain(
-      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
-    );
-    const cursorHooks = cursor(root).hooks;
-    expect(cursorHooks.stop).toHaveLength(3);
-    expect(cursorHooks.preCompact).toEqual([{ command: '.cursor/hooks/strategic-compactor.sh' }]);
-    expect(cursorHooks.preToolUse).toEqual([
-      {
-        command: '.cursor/hooks/decision-edit-guard.mjs',
-        matcher: 'Write|Delete',
-        failClosed: false,
-      },
-      {
-        command: '.cursor/hooks/decision-scope-brief.mjs',
-        matcher: 'Write',
-        failClosed: false,
-      },
-    ]);
+    installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
+    expect(checkHookRegistrations(root, ['agentHooks'], { targets: [provider] }).ok).toBe(true);
+    expect(ledger(root).entries.every((entry) => entry.installScope === 'shared')).toBe(true);
   });
 
-  it('reclaims a RETIRED devkit command only when its owning component is selected', () => {
-    // devkit briefly registered its own .claude/hooks/fallow-gate.sh. The strip set is derived from
-    // the LIVE registry, so deleting that entry also deleted devkit's ability to remove it — the
-    // consumer would keep a dead hook forever, double-firing alongside the entry fallow's own
-    // installer writes for the same path. RETIRED_CLAUDE_COMMANDS keeps it strip-only.
+  it('recovers when added ownership was published before its provider config', () => {
     const root = tmpRepo();
-    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
-    const settings = claude(root);
-    settings.hooks.PreToolUse.push({
-      matcher: 'Bash',
-      hooks: [
-        { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"' },
-      ],
-    });
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
-
-    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
-    expect(claudeCommands(root)).toContain(
-      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-    );
-
-    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
-
-    expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
-  });
-
-  it("reclaims fallow's OWN generated agent-gate registration only when fallow is selected", () => {
-    // devkit briefly installed it via `fallow hooks install --target agent`. It resolves its base
-    // as the merge-base against the remote default, so left in place it fires beside devkit's
-    // staged-scope wrapper and re-blocks on the unstaged work the wrapper exists to exclude.
-    const root = tmpRepo();
-    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
-    const settings = claude(root);
-    settings.hooks.PreToolUse.push({
-      matcher: 'Bash',
-      hooks: [
-        {
-          type: 'command',
-          command:
-            'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-        },
-      ],
-    });
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
-
-    installHookRegistrations(root, ['decisions'], { targets: ['claude'] });
-    expect(claudeCommands(root)).toContain(
-      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-    );
-
-    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
-
-    expect(claudeCommands(root).some((c) => c.includes('fallow-gate.sh'))).toBe(false);
-  });
-
-  it('reclaims the CURSOR mirror of a retired registration only when fallow is selected', () => {
-    // The retired Claude entry was mirrored to Cursor, and the script it points at is deleted by
-    // the generic sync — so without a Cursor reclaim the consumer keeps a beforeShellExecution
-    // entry aimed at a file that no longer exists, with no code path able to remove it.
-    const root = tmpRepo();
-    installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
-    const settings = cursor(root);
-    settings.hooks.beforeShellExecution = [{ command: '.cursor/hooks/fallow-gate.sh' }];
-    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(settings));
-
-    installHookRegistrations(root, ['decisions'], { targets: ['cursor'] });
-    expect(cursor(root).hooks.beforeShellExecution).toContainEqual({
-      command: '.cursor/hooks/fallow-gate.sh',
+    const projected = projectHookRegistrations(['agentHooks'], ['codex'], 'shared');
+    writeHookRegistrationLedger(root, {
+      schemaVersion: 1,
+      kind: 'agent_hook_registration_ownership',
+      entries: [...projected.entries],
     });
 
-    installHookRegistrations(root, ['fallow'], { targets: ['cursor'] });
-
-    const commands = Object.values(cursor(root).hooks)
-      .flat()
-      .map((hook) => hook.command);
-    expect(commands).not.toContain('.cursor/hooks/fallow-gate.sh');
+    installHookRegistrations(root, ['agentHooks'], { targets: ['codex'] });
+    expect(checkHookRegistrations(root, ['agentHooks'], { targets: ['codex'] }).ok).toBe(true);
   });
 
-  it("leaves devkit's LIVE staged gate alone when reclaiming the retired one", () => {
-    // devkit's live gate is a DIFFERENT script (fallow-staged-gate.sh) owned by the FALLOW
-    // component. Reclaiming the retired fallow-gate.sh strings must not touch it, or every init
-    // would disable the gate it just wired.
+  it('recovers when removed config was published before final ownership', () => {
     const root = tmpRepo();
-    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
-    const liveGate = 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"';
-    expect(claudeCommands(root)).toContain(liveGate);
+    const finalRoot = tmpRepo();
+    installHookRegistrations(root, ['searchSteering', 'agentHooks'], { targets: ['codex'] });
+    installHookRegistrations(finalRoot, ['agentHooks'], { targets: ['codex'] });
+    writeFileSync(
+      join(root, '.codex', 'hooks.json'),
+      readFileSync(join(finalRoot, '.codex', 'hooks.json')),
+    );
 
-    const settings = claude(root);
-    settings.hooks.PreToolUse.push({
-      matcher: 'Bash',
-      hooks: [
-        { type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"' },
-      ],
-    });
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
-
-    installHookRegistrations(root, ['fallow'], { targets: ['claude'] });
-
-    const commands = claudeCommands(root);
-    expect(commands).toContain(liveGate); // the live gate survives...
-    expect(commands.some((c) => c.endsWith('/fallow-gate.sh"'))).toBe(false); // ...the retired one does not
+    installHookRegistrations(root, ['agentHooks'], { targets: ['codex'] });
+    expect(checkHookRegistrations(root, ['agentHooks'], { targets: ['codex'] }).ok).toBe(true);
+    expect(ledger(root).entries.every((entry) => entry.ownerId === 'agentHooks')).toBe(true);
   });
 
   it('preserves a foreign (non-devkit) hook command on merge', () => {
@@ -316,6 +266,93 @@ describe('installHookRegistrations', () => {
       failClosed: true,
     });
   });
+
+  it('reclaims retired pre-ledger commands while preserving consumer hooks', () => {
+    const root = tmpRepo();
+    writeRetiredFallowHooks(root);
+
+    installHookRegistrations(root, ['fallow'], {
+      targets: ['claude', 'cursor'],
+      legacyOwnedComponentIds: ['fallow'],
+    });
+
+    expect(claudeCommands(root)).toContain('echo mine');
+    expect(claudeCommands(root)).toContain(
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-staged-gate.sh"',
+    );
+    expect(claudeCommands(root)).not.toContain(
+      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    );
+    const cursorCommands = Object.values(cursor(root).hooks)
+      .flat()
+      .map((entry) => entry.command);
+    expect(cursorCommands).toContain('echo mine');
+    expect(cursorCommands).toContain('.cursor/hooks/fallow-staged-gate.sh');
+    expect(cursorCommands).not.toContain('.cursor/hooks/fallow-gate.sh');
+  });
+
+  it('does not infer exact unledgered registrations without explicit legacy authority', () => {
+    const root = tmpRepo();
+    const targets = ['claude', 'cursor'];
+    installHookRegistrations(root, ['searchSteering'], { targets });
+    rmSync(ledgerPath(root));
+    expect(() => installHookRegistrations(root, ['searchSteering'], { targets })).toThrow(
+      /hook registration conflicts require resolution/,
+    );
+    expect(existsSync(ledgerPath(root))).toBe(false);
+
+    installHookRegistrations(root, ['searchSteering'], {
+      targets,
+      legacyOwnedComponentIds: ['searchSteering'],
+    });
+    expect(
+      ledger(root)
+        .entries.map((entry) => entry.provider)
+        .sort(),
+    ).toEqual(['claude', 'claude', 'cursor', 'cursor']);
+  });
+
+  it('surfaces an exact unledgered Codex collision without claiming it', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['searchSteering'], { targets: ['codex'] });
+    const before = readFileSync(join(root, '.codex', 'hooks.json'), 'utf8');
+    rmSync(ledgerPath(root));
+
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['codex'] }),
+    ).toThrow(/hook registration conflicts require resolution/);
+    expect(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8')).toBe(before);
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
+
+  it('skips tracked Codex and Cursor overlay configs', () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+    for (const provider of ['codex', 'cursor']) {
+      mkdirSync(join(root, `.${provider}`));
+      writeFileSync(join(root, `.${provider}`, 'hooks.json'), '{"foreign":true}\n');
+    }
+    execFileSync('git', ['add', '.codex/hooks.json', '.cursor/hooks.json'], { cwd: root });
+    const result = installHookRegistrations(root, ['searchSteering'], {
+      overlay: true,
+      targets: ['codex', 'cursor'],
+    });
+    expect(result.wrote).toEqual([]);
+    expect(codex(root)).toEqual({ foreign: true });
+    expect(cursor(root)).toEqual({ foreign: true });
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
+
+  it('rejects a JSON-null provider config without replacing it or publishing ownership', () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.codex'));
+    writeFileSync(join(root, '.codex', 'hooks.json'), 'null\n');
+    expect(() =>
+      installHookRegistrations(root, ['searchSteering'], { targets: ['codex'] }),
+    ).toThrow(/must contain a provider hook object/);
+    expect(readFileSync(join(root, '.codex', 'hooks.json'), 'utf8')).toBe('null\n');
+    expect(existsSync(ledgerPath(root))).toBe(false);
+  });
 });
 
 describe('checkHookRegistrations', () => {
@@ -326,7 +363,32 @@ describe('checkHookRegistrations', () => {
     removeHookRegistrations(root);
     const after = checkHookRegistrations(root, ['searchSteering']);
     expect(after.ok).toBe(false);
-    expect(after.missing).toHaveLength(4);
+    expect(after.missing).toHaveLength(6);
+  });
+
+  it('checks every requested provider', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['searchSteering']);
+    rmSync(join(root, '.codex', 'hooks.json'));
+    expect(checkHookRegistrations(root, ['searchSteering'], { targets: ['claude'] }).ok).toBe(true);
+    const all = checkHookRegistrations(root, ['searchSteering']);
+    expect(all.ok).toBe(false);
+    expect(all.missing.every((item) => item.startsWith('codex:'))).toBe(true);
+  });
+
+  it('recognizes exact legacy registrations only with explicit legacy authority', () => {
+    const root = tmpRepo();
+    const targets = ['claude', 'cursor'];
+    installHookRegistrations(root, ['searchSteering'], { targets });
+    rmSync(ledgerPath(root));
+
+    expect(checkHookRegistrations(root, ['searchSteering'], { targets }).ok).toBe(false);
+    expect(
+      checkHookRegistrations(root, ['searchSteering'], {
+        targets,
+        legacyOwnedComponentIds: ['searchSteering'],
+      }).ok,
+    ).toBe(true);
   });
 });
 
@@ -335,51 +397,39 @@ describe('removeHookRegistrations', () => {
     const root = tmpRepo();
     installHookRegistrations(root, ['agentHooks']);
     const s = claude(root);
-    s.hooks.Stop[0].hooks.push({ type: 'command', command: 'echo mine' });
+    s.hooks.Stop[0].hooks.push({ type: 'command', command: 'echo .claude/hooks/mine.sh' });
     writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(s));
     removeHookRegistrations(root);
     const cmds = claudeCommands(root);
-    expect(cmds).toEqual(['echo mine']);
+    expect(cmds).toEqual(['echo .claude/hooks/mine.sh']);
   });
 
-  it('strips retired registrations during an explicit remove-all', () => {
+  it('preserves pre-ledger configs unless exact legacy ownership is explicitly supplied', () => {
     const root = tmpRepo();
-    installHookRegistrations(root, ['decisions']);
-    const claudeSettings = claude(root);
-    claudeSettings.hooks.PreToolUse.push({
-      matcher: 'Bash',
-      hooks: [
-        {
-          type: 'command',
-          command:
-            'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
-        },
-      ],
-    });
-    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(claudeSettings));
-    const cursorSettings = cursor(root);
-    cursorSettings.hooks.beforeShellExecution = [{ command: '.cursor/hooks/fallow-gate.sh' }];
-    writeFileSync(join(root, '.cursor', 'hooks.json'), JSON.stringify(cursorSettings));
-
+    installHookRegistrations(root, ['searchSteering']);
+    rmSync(ledgerPath(root));
     removeHookRegistrations(root);
+    expect(claudeCommands(root)).toHaveLength(2);
 
+    removeHookRegistrations(root, { legacyOwnedComponentIds: ['searchSteering'] });
     expect(claudeCommands(root)).toEqual([]);
-    expect(Object.values(cursor(root).hooks).flat()).toEqual([]);
+    expect(Object.keys(cursor(root).hooks)).toEqual([]);
+    expect(Object.keys(codex(root).hooks)).toHaveLength(2);
+    expect(existsSync(ledgerPath(root))).toBe(false);
   });
 
-  it('can remove one component without touching another component registration', () => {
+  it('reclaims retired pre-ledger commands during explicitly authorized removal', () => {
     const root = tmpRepo();
-    installHookRegistrations(root, ['decisions', 'agentHooks']);
+    writeRetiredFallowHooks(root);
 
-    removeHookRegistrations(root, { componentIds: ['decisions'] });
+    removeHookRegistrations(root, {
+      targets: ['claude', 'cursor'],
+      legacyOwnedComponentIds: ['fallow'],
+    });
 
-    const commands = claudeCommands(root);
-    expect(commands).not.toContain(
-      'node "$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs"',
-    );
-    expect(commands).toContain('bash "$CLAUDE_PROJECT_DIR/.claude/hooks/lint-check.sh"');
-    expect(cursor(root).hooks.preToolUse).toBeUndefined();
-    expect(cursor(root).hooks.stop).toHaveLength(3);
+    expect(claudeCommands(root)).toEqual(['echo mine']);
+    expect(cursor(root).hooks.beforeShellExecution).toEqual([{ command: 'echo mine' }]);
+    expect(existsSync(ledgerPath(root))).toBe(false);
   });
 
   it('does not strip consumer commands merely because they live in agent hook directories', () => {
@@ -409,6 +459,17 @@ describe('removeHookRegistrations', () => {
     const root = tmpRepo();
     expect(() => removeHookRegistrations(root)).not.toThrow();
     expect(existsSync(join(root, '.claude', 'settings.json'))).toBe(false);
+  });
+
+  it('preserves an unsafe provider-config symlink and publishes no ownership', () => {
+    const root = tmpRepo();
+    const foreign = join(root, 'foreign-hooks.json');
+    writeFileSync(foreign, '{"foreign":true}\n');
+    mkdirSync(join(root, '.cursor'));
+    symlinkSync(foreign, join(root, '.cursor', 'hooks.json'));
+    installHookRegistrations(root, ['searchSteering'], { targets: ['cursor'] });
+    expect(readFileSync(foreign, 'utf8')).toBe('{"foreign":true}\n');
+    expect(existsSync(ledgerPath(root))).toBe(false);
   });
 });
 
@@ -485,62 +546,48 @@ describe('syncHookScripts --only / --targets', () => {
     expect(Object.keys(manifest(root).files)).toEqual(['lint-check.sh']);
   });
 
-  it('keeps the fallow gate for a fallow:true repo — it is not part of the agentHooks bundle', () => {
-    // The gate belongs to the FALLOW component. A caller that computes `desired` without the
-    // fallow flag omits an INSTALLED gate, and exact reconciliation then prunes it as deselected —
-    // silently disabling it. hookScriptsFor's `fallow` param is required so no caller can forget.
+  it('preserves a tracked hook when exact desired reconciliation drops it', () => {
     const root = tmpRepo();
-    const withFallow = hookScriptsFor({ agentHooks: false, decisions: false, fallow: true });
-    expect(withFallow).toContain(FALLOW_STAGED_GATE);
-    syncHookScripts(root, { desired: withFallow, targets: ['claude'] });
-    expect(hookExists(root, FALLOW_STAGED_GATE)).toBe(true);
+    const oldHook = '.claude/hooks/decision-edit-guard.mjs';
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
 
-    // A later full sync for the SAME selection must not remove it.
-    syncHookScripts(root, { desired: withFallow, targets: ['claude'] });
-    expect(hookExists(root, FALLOW_STAGED_GATE)).toBe(true);
+    syncHookScripts(root, {
+      desired: ['lint-check.sh'],
+      targets: ['claude'],
+      skipTracked: (rel) => rel === oldHook,
+    });
 
-    // And the agentHooks bundle alone must not carry it.
-    expect(hookScriptsFor({ agentHooks: true, decisions: false, fallow: false })).not.toContain(
-      FALLOW_STAGED_GATE,
-    );
+    expect(existsSync(join(root, oldHook))).toBe(true);
   });
 
-  it('does NOT prune a deselected hook the consumer has since edited', () => {
-    // Manifest membership records that devkit WROTE the file, not that the file is still devkit's.
-    // A consumer repo that turned a component off after customising its hook would otherwise have
-    // that work deleted — while the write path refuses the same clobber (findConflicts). Real
-    // instance: a repo with agentHooks:false lost three hooks it had authored changes in.
+  it('preserves a modified hook when exact desired reconciliation drops it', () => {
     const root = tmpRepo();
-    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
-    const hook = join(root, '.claude', 'hooks', 'decision-stop-check.sh');
-    writeFileSync(hook, `${readFileSync(hook, 'utf8')}\n# frink-local tweak\n`);
+    const oldHook = join(root, '.claude/hooks/decision-edit-guard.mjs');
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
+    writeFileSync(oldHook, 'consumer edit');
 
     syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
-    expect(existsSync(hook)).toBe(true);
-    expect(readFileSync(hook, 'utf8')).toContain('# frink-local tweak');
+
+    expect(readFileSync(oldHook, 'utf8')).toBe('consumer edit');
   });
 
-  it('keeps a deselected hook replaced by a symlink, without crashing the sync', () => {
-    // sha256 FOLLOWS the link: a hook swapped for a link to a directory throws EISDIR and aborts
-    // the whole sync instead of preserving it. Same hazard sync-manifest's entryMatches guards.
+  it.each(['directory', 'symlink'])('preserves a stale hook %s collision', (kind) => {
     const root = tmpRepo();
-    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
-    const hook = join(root, '.claude', 'hooks', 'decision-stop-check.sh');
-    const linkTarget = join(root, 'link-target-dir');
-    mkdirSync(linkTarget, { recursive: true });
-    rmSync(hook);
-    symlinkSync(linkTarget, hook);
+    const oldHook = join(root, '.claude/hooks/decision-edit-guard.mjs');
+    syncHookScripts(root, { desired: ['decision-edit-guard.mjs'], targets: ['claude'] });
+    rmSync(oldHook);
+    if (kind === 'directory') mkdirSync(oldHook);
+    else {
+      const foreign = join(root, 'foreign-hook.mjs');
+      writeFileSync(foreign, 'foreign');
+      symlinkSync(foreign, oldHook);
+    }
 
     expect(() =>
       syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] }),
     ).not.toThrow();
-    expect(existsSync(hook)).toBe(true);
-  });
-
-  it('still prunes a deselected hook left pristine', () => {
-    const root = tmpRepo();
-    syncHookScripts(root, { desired: ['decision-stop-check.sh'], targets: ['claude'] });
-    syncHookScripts(root, { desired: ['lint-check.sh'], targets: ['claude'] });
-    expect(hookExists(root, 'decision-stop-check.sh')).toBe(false);
+    expect(
+      kind === 'directory' ? lstatSync(oldHook).isDirectory() : lstatSync(oldHook).isSymbolicLink(),
+    ).toBe(true);
   });
 });
