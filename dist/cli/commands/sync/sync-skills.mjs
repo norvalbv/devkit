@@ -9,7 +9,7 @@
  */
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AGENT_TARGETS } from "../../lib/components.mjs";
+import { AGENT_TARGETS, skillNamesForSelection, } from "../../lib/components.mjs";
 import { detectGitRoot } from "../../lib/detect-git-root.mjs";
 import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
 import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "../../lib/install/agent-asset-manifest/compatibility.mjs";
@@ -73,9 +73,6 @@ function walk(dir, base = dir) {
     }
     return out;
 }
-export function skillNamesForGuards(allNames, guards = []) {
-    return allNames.filter((name) => name !== 'decisions' || guards.includes('decisions'));
-}
 /**
  * Sync devkit's bundled skills into the consumer's agent surfaces + write the manifest.
  *
@@ -90,16 +87,16 @@ export function skillNamesForGuards(allNames, guards = []) {
  *
  * Returns the manifest (for init to embed in its log).
  */
-export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false, guards = [] } = {}) {
+export function syncSkills(args, cwd, targets = AGENT_TARGETS, { skipTracked, override = () => false, selection = {} } = {}) {
     const dryRun = args.includes('--dry-run');
-    return withAgentAssetLifecycleLock(cwd, dryRun, () => syncSkillsLocked(args, cwd, targets, { skipTracked, override, guards }));
+    return withAgentAssetLifecycleLock(cwd, dryRun, () => syncSkillsLocked(args, cwd, targets, { skipTracked, override, selection }));
 }
-function syncSkillsLocked(args, cwd, targets, { skipTracked, override = () => false, guards = [] }) {
+function syncSkillsLocked(args, cwd, targets, { skipTracked, override = () => false, selection = {} }) {
     const dryRun = args.includes('--dry-run');
     const targetDirs = targets.map((t) => `.${t}/skills`);
     const skillsSrc = join(packageDir(), 'skills');
     const allRels = walk(skillsSrc);
-    const selectedNames = new Set(skillNamesForGuards([...new Set(allRels.map((rel) => rel.split('/')[0]))], guards));
+    const selectedNames = new Set(skillNamesForSelection([...new Set(allRels.map((rel) => rel.split('/')[0]))], selection));
     const rels = allRels.filter((rel) => selectedNames.has(rel.split('/')[0]));
     const devkitPkg = readJson(join(packageDir(), 'package.json'));
     const devkitRef = devkitPkg ? `v${devkitPkg.version}` : null;
@@ -230,9 +227,9 @@ function syncSkillsLocked(args, cwd, targets, { skipTracked, override = () => fa
  * `root` is the git root; `targets` are the surfaces to check (default both). Returns colliding
  * skill names.
  */
-export function detectSkillConflicts(root, targets = AGENT_TARGETS, guards = []) {
+export function detectSkillConflicts(root, targets = AGENT_TARGETS, selected = {}) {
     const skillsSrc = join(packageDir(), 'skills');
-    const names = skillNamesForGuards([...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))], guards);
+    const names = skillNamesForSelection([...new Set(walk(skillsSrc).map((r) => r.split('/')[0]))], selected);
     const decoded = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
     if (requiresProviderNativeLifecycle(decoded, targets)) {
         const selected = new Set(names);
@@ -279,9 +276,6 @@ export default function run(args, cwd) {
     const targets = cfg
         ? resolveExistingAgentProviders(gitRoot, cfg.components?.agentTargets, ['skills'])
         : AGENT_TARGETS;
-    syncSkills(args, gitRoot, targets, {
-        override,
-        guards: cfg?.components?.guards ?? [],
-    });
+    syncSkills(args, gitRoot, targets, { override, selection: cfg?.components ?? {} });
     return 0;
 }
