@@ -355,7 +355,7 @@ function installOverlayAgentSurfaces(gitRoot, sel, dryRun, force = false, legacy
         const m = syncSkills(args, gitRoot, targets, {
             skipTracked,
             override,
-            guards: sel.guards ?? [],
+            selection: sel,
         });
         excl.push(...overlayAssetExcludes(m, 'skills', targets));
         // The manifest is always written, even if every asset is preserved.

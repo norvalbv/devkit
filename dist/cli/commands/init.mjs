@@ -16,9 +16,9 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { confirm, isCancel, multiselect, outro } from '@clack/prompts';
+import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, setMaxLines, } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, defaultSelection, GUARD_IDS, normalizeReviewProfile, structureCmdFor, } from "../lib/components.mjs";
+import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, defaultSelection, dropUndecided, GUARD_IDS, normalizeReviewProfile, structureCmdFor, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson, writeIfAbsent } from "../lib/fs-helpers.mjs";
@@ -29,10 +29,9 @@ import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
 import { installAgentSurfaces as syncSurfaces } from "../lib/install/agent-assets/agent-surfaces.mjs";
+import { resolveAssetConflicts } from "../lib/install/agent-assets/asset-conflict-picker.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
-import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
 import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHooks, } from "../lib/install/install-fallow.mjs";
-import { detectHookConflicts } from "../lib/install/install-hooks.mjs";
 import { installSearchCode } from "../lib/install/install-search-code.mjs";
 import { patchPackageJson } from "../lib/install/package-json.mjs";
 import { parseReviewFlags, reviewPlanFromFlags, } from "../lib/install/review-profile.mjs";
@@ -41,8 +40,6 @@ import { installGlobalHook } from "../lib/overlay-global-hook.mjs";
 import { installStandaloneConfigs, installStandaloneHook } from "../lib/standalone.mjs";
 import { removeAgents, removeSkills } from "../lib/sync-manifest.mjs";
 import { runWizard } from "../lib/wizard.mjs";
-import { detectAgentConflicts } from "./sync/sync-agents.mjs";
-import { detectSkillConflicts } from "./sync/sync-skills.mjs";
 import { repoUrl } from "./update.mjs";
 const INIT_VERSION = 2;
 // Stacks with structure-lint presets; omitted stacks have no shipped template yet.
@@ -86,6 +83,7 @@ function parseFlags(args) {
         searchSteering: false,
         agentHooks: false,
         searchCode: false,
+        adhd: false,
         standalone: false,
         overlay: false,
         baselinesOnly: false,
@@ -112,6 +110,8 @@ function parseFlags(args) {
             flags.agentHooks = true;
         else if (a === '--search-code')
             flags.searchCode = true;
+        else if (a === '--adhd')
+            flags.adhd = true;
         else if (a === '--standalone')
             flags.standalone = true;
         else if (a === '--overlay')
@@ -156,6 +156,8 @@ function selectionFromFlags(flags) {
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');
+    // The vendored i-have-adhd skill: opt-in even under --yes (an output-style preference).
+    sel.adhd = flags.adhd && !flags.no.has('adhd');
     // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
     sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
     return sel;
@@ -178,6 +180,7 @@ function detectInstalled(cwd) {
             'agentHooks',
             'husky',
             'structure',
+            'adhd',
         ]) {
             if (recorded[id])
                 installed.add(id);
@@ -445,54 +448,6 @@ async function subConfirm(message, { interactive, fallback }) {
     const v = await confirm({ message, initialValue: fallback });
     return isCancel(v) ? fallback : v;
 }
-// Resolve the non-devkit-collision policy → an `override(kind, name)` predicate the sync step
-// consults. A collision is a same-named asset the consumer authored (on disk, unmanifested, content
-// DIVERGES from the bundle). DEFAULT is to PRESERVE it (never silently clobber a user asset): force
-// → adopt all; non-interactive → preserve all (loud, with a --force hint); interactive → a per-asset
-// multiselect (none ticked = preserve all). Keyed by `${kind}:${name}` so kinds never alias.
-// Reason: flat policy resolver: the branches ARE the four resolution modes (none / force / non-interactive / interactive-pick), each a single guarded return; no nesting
-// fallow-ignore-next-line complexity
-async function resolveAssetConflicts(gitRoot, selection, { interactive, force }) {
-    const targets = selection.agentTargets ?? AGENT_TARGETS;
-    const found = [];
-    if (selection.skills)
-        for (const name of detectSkillConflicts(gitRoot, targets, selection.guards ?? []))
-            found.push({ kind: 'skill', name });
-    if (selection.agents)
-        for (const name of detectAgentConflicts(gitRoot, targets))
-            found.push({ kind: 'agent', name });
-    // ONE derivation of the hook set (selectedHookAssets), not a second copy of the rules here —
-    // the duplicate is how a caller ended up omitting `fallow` and pruning an installed gate.
-    const desiredHooks = selectedHookAssets(selection).scripts;
-    if (desiredHooks.length)
-        for (const name of detectHookConflicts(gitRoot, targets, desiredHooks))
-            found.push({ kind: 'agent-hook', name });
-    if (!found.length)
-        return () => false;
-    const list = found.map((c) => `${c.kind}:${c.name}`).join(', ');
-    if (force) {
-        console.log(`  overriding ${found.length} non-devkit collision(s) with devkit's version: ${list}`);
-        return () => true;
-    }
-    if (!interactive) {
-        console.log(`  ! preserving ${found.length} non-devkit asset(s) that collide with devkit's: ${list}`);
-        console.log("    (re-run with --force to overwrite them with devkit's versions)");
-        return () => false;
-    }
-    const picked = await multiselect({
-        message: 'These assets already exist and were NOT installed by devkit. Select any to OVERWRITE with devkit’s version (unselected are kept):',
-        options: found.map((c) => ({
-            value: `${c.kind}:${c.name}`,
-            label: `${c.kind}: ${c.name}`,
-        })),
-        initialValues: [],
-        required: false,
-    });
-    if (isCancel(picked))
-        return () => false;
-    const set = new Set(picked);
-    return (kind, name) => set.has(`${kind}:${name}`);
-}
 // Does the repo carry fallow debt? `fallow audit` exits non-zero when it finds NEW issues
 // against (absent) baselines — i.e. there's something to grandfather. Fail-open: any throw
 // (missing binary, etc.) is treated as "no debt" so we never save empty baselines.
@@ -741,6 +696,19 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         console.log('  global pre-commit gate (opt-in — survives husky reclaim on a plain `git commit`)');
         installGlobalHook({ dryRun });
     }
+    // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the ACTUAL
+    // outcome (fallowWired) — an aborted install (no binary) records false. dropUndecided keeps an
+    // un-asked optional component absent, exactly as the package writer does.
+    const overlayComponents = dropUndecided({
+        guards: [...(selection.guards ?? [])],
+        skills: Boolean(selection.skills),
+        agents: Boolean(selection.agents),
+        agentHooks: Boolean(selection.agentHooks),
+        searchSteering: false, // never wired in overlay (no resolvable bin without the package)
+        fallow: fallowWired,
+        adhd: Boolean(selection.adhd),
+        agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
+    }, plan.undecided, prevConfig?.components);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit'), { recursive: true });
         writeFileSync(join(cwd, '.devkit', 'config.json'), `${JSON.stringify({
@@ -751,17 +719,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
             pkgRel,
             origHooksPath, // what core.hooksPath was before — `devkit clean` restores it
             globalCommitGate, // opt-in machine-global init.sh shim wired (so doctor can report it)
-            // Record what was actually wired so clean/doctor are selection-aware. fallow reflects the
-            // ACTUAL outcome (fallowWired) — an aborted install (no binary) records false.
-            components: {
-                guards: [...(selection.guards ?? [])],
-                skills: Boolean(selection.skills),
-                agents: Boolean(selection.agents),
-                agentHooks: Boolean(selection.agentHooks),
-                searchSteering: false, // never wired in overlay (no resolvable bin without the package)
-                fallow: fallowWired,
-                agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
-            },
+            components: overlayComponents,
             review,
         }, null, 2)}\n`);
         console.log('  ✓ wrote .devkit/config.json (git-ignored)');
@@ -797,7 +755,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
 // Reason: flat top-level init pipeline: numbered sequential steps (1 configs → 2 package.json → 3 husky → 4 freeze → 5/6 structure → 7 surfaces → 8 fallow → 9 config), each gated by a selection flag and delegated to a named installer; the branch COUNT is the step count, near-zero nesting
 // fallow-ignore-next-line complexity
 export async function applyInit(cwd, plan) {
-    const { stack, selection, remove = [], force = false, dryRun = false, interactive = false, scanRoots = null, standalone = false, overlay = false, selfHost = false, regenStructureBaselines = true, } = plan;
+    const { stack, selection, remove = [], force = false, dryRun = false, interactive = false, scanRoots = null, standalone = false, overlay = false, selfHost = false, regenStructureBaselines = true, undecided = [], } = plan;
     // Structure-lint: config-driven stacks (react-app, component-lib) run via devkit's own eslint (the
     // `guard-structure` bin), so they work even in standalone (no consumer eslint/plugin). Electron's
     // preset needs consumer-side eslint/parser/plugin, so it stays package-only.
@@ -922,6 +880,14 @@ export async function applyInit(cwd, plan) {
         console.log('8b. search-code (opt-in semantic search)');
         installSearchCode(cwd, dryRun);
     }
+    // The vendored i-have-adhd skill has no installer of its own — syncSurfaces above already wrote it
+    // (skillNamesForSelection admits it iff selection.adhd). It can only ride IN on the skills sync, so
+    // say so plainly when skills are off rather than recording a selection that silently did nothing.
+    // Deliberately NOT auto-enabling skills: that would install a dozen unrequested assets.
+    if (selection.adhd && !selection.skills) {
+        console.log('8c. i-have-adhd');
+        console.log('  ! Agent skills is off — nothing written. Re-run with skills selected to sync the skill.');
+    }
     // Removals (deselected + present).
     applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
     // .devkit/config.json with the component selection.
@@ -938,6 +904,9 @@ export async function applyInit(cwd, plan) {
         fallow: Boolean(selection.fallow),
         searchCode: Boolean(selection.searchCode),
         lineGrowth: Boolean(selection.lineGrowth),
+        // Always written, including `false` — an ABSENT key is what marks a repo as never-offered, so
+        // recording the decline is what stops `devkit upgrade` re-asking (see unofferedComponents).
+        adhd: Boolean(selection.adhd),
         agentTargets: [...agentTargets],
         // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
         // owns an agent pre-edit hook, so it remains authoritative in config even without husky.
@@ -945,6 +914,8 @@ export async function applyInit(cwd, plan) {
             ? [...selection.guards]
             : selection.guards.filter((guard) => guard === 'decisions'),
     };
+    // Keep an un-asked optional component ABSENT — see InitPlan.undecided.
+    dropUndecided(components, undecided, prevConfig?.components);
     // Record pkgRel (monorepo: '' for a root install) so doctor finds the git-root hook + skills,
     // and standalone (no-package mode) so doctor doesn't flag a missing devkit pin / deps.
     // devkitRef ALSO doubles as the init-version stamp doctor's checkVersion reads (it's `v<version>`).

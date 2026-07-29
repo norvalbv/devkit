@@ -18,8 +18,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { confirm, isCancel, multiselect } from '@clack/prompts';
-import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from "../../gate-engine/ratchets/size-disable.mjs";
+import { isCancel, multiselect } from '@clack/prompts';
 import { applyOverlayConstraints, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
@@ -27,6 +26,7 @@ import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { selfHostSelection } from "../lib/husky/self-host.mjs";
 import { resolveExistingAgentProviders } from "../lib/install/agent-assets/agent-providers.mjs";
 import { adoptAgentAssetCollisions } from "../lib/install/agent-assets/agent-surfaces.mjs";
+import { offerLineGrowth, offerOptionalComponents } from "../lib/install/upgrade-offers.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
 import { computeMigration } from "./migrate-config.mjs";
@@ -43,6 +43,11 @@ Reads .devkit/config.json and composes the slices: reconcile the devkit pin + de
 emitted configs (eslint.config.mjs / guard.config.json), refresh skills/agents/agent-hooks + the
 husky guard block for the RECORDED selection (honours agentTargets — never re-adds a deselected
 surface), then run doctor.
+
+Also offers, ONCE, any gate or optional component devkit has shipped since this repo's last install.
+Your answer is recorded, so a decline is never re-asked. On a non-TTY run gates and optional
+components are REPORTED only, never added; the line-growth block is the one exception — it is a
+recommended ratchet on a guard you already selected, so it heals itself there (--dry-run to preview).
 
   --dry-run  print every action; write nothing.
   --force    adopt consumer-authored skill/agent/hook collisions (tuned configs are NEVER overwritten).
@@ -169,10 +174,15 @@ export default async function upgrade(args, cwd) {
         if (force) {
             console.log('  • --force: tuned overlay configs are never overwritten by upgrade — run `devkit init --overlay --force` to refresh them.');
         }
+        // Overlay repos get the SAME one-time offer as package repos — and, critically, the same
+        // `undecided` pass-through: applyOverlay writes its own components block, so without it an
+        // overlay upgrade records a decline nobody made and the offer never fires again.
+        const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun);
         await applyInit(cwd, {
             stack,
             selection: sel,
             overlay: true,
+            undecided: undecidedOverlay,
             devkitRef: `v${target}`,
             // Preserve an opted-in machine-global commit gate: applyOverlay reads plan.globalCommitGate (NOT
             // the existing config) and rewrites the flag from it — omitting it would silently un-wire the shim.
@@ -324,39 +334,9 @@ export default async function upgrade(args, cwd) {
             }
         }
     }
-    // ── 3b. line-growth block: back-fill the per-file maxLines cap for repos that predate it ───
-    // It's a CONFIG KNOB on the already-selected `size` guard (not a guard id), so newBundledGates never
-    // surfaces it. Offer it when size runs but guard.config.json has no cap. `sel.lineGrowth` defaults
-    // true (a legacy repo never recorded it) → the offer fires once; declining records false (no re-nag),
-    // enabling writes the cap. Enabling here ALSO grandfathers current giants (lines-only freeze), since
-    // upgrade's init pass never re-freezes an adopted repo — without it their over-cap files hard-error.
-    if (sel.husky &&
-        sel.guards.includes('size') &&
-        sel.lineGrowth &&
-        existsSync(join(cwd, 'guard.config.json')) &&
-        !hasLineCap(cwd)) {
-        console.log('\n3b. line-growth block');
-        if (dryRun) {
-            console.log(`  [dry-run] would enable per-file line-growth block (maxLines ${LINE_CAP}; grandfathers ${previewGrandfather(cwd)} file(s))`);
-        }
-        else if (process.stdout.isTTY && process.stdin.isTTY) {
-            const yes = await confirm({
-                message: `Enable the per-file line-growth block? Caps source files at ${LINE_CAP} lines; current giants are grandfathered (shrink-only), new growth is blocked.`,
-                initialValue: true,
-            });
-            if (isCancel(yes) || !yes) {
-                sel.lineGrowth = false; // record the decline so upgrade never re-nags
-                console.log('  • line-growth block not enabled');
-            }
-            else {
-                reportLineGrowth(enableLineGrowth(cwd));
-            }
-        }
-        else {
-            // Non-TTY: auto-enable + freeze (heal like a recommended gate).
-            reportLineGrowth(enableLineGrowth(cwd));
-        }
-    }
+    // ── 3b/3c. what upgrade OFFERS a repo that predates a feature (see upgrade-offers.mts) ─────
+    await offerLineGrowth(cwd, sel, dryRun);
+    const undecided = await offerOptionalComponents(cfg.components, sel, dryRun);
     // ── 4. broad refresh (idempotent; never clobbers consumer configs) ─────────
     // applyInit(force:false): configs via writeIfAbsent (existing preserved), package.json devDeps,
     // husky guard block refreshed only if changed, ratchet baselines frozen only if missing,
@@ -373,6 +353,7 @@ export default async function upgrade(args, cwd) {
         force: false,
         dryRun,
         regenStructureBaselines: false,
+        undecided,
     });
     // ── 5. --force asset adoption (assets only — never configs) ─────────────────
     // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected
@@ -411,11 +392,4 @@ function repinStalePin(cwd, target, dryRun) {
     }
     writeFileSync(pkgPath, repinned);
     console.log(`  ✓ re-pinned devkit → #v${target}`);
-}
-// Print the outcome of a line-growth enable — honest when an unreadable guard.config.json meant the
-// cap was NOT written (enableLineGrowth skips rather than crashing on a corrupt file).
-function reportLineGrowth({ enabled, grandfathered, }) {
-    console.log(enabled
-        ? `  ✓ line-growth block enabled (maxLines ${LINE_CAP}); grandfathered ${grandfathered} file(s)`
-        : '  • could not enable line-growth block — guard.config.json unreadable; skipped');
 }

@@ -11,6 +11,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { skillNamesForSelection } from "../components.mjs";
 import { detectGitRoot } from "../detect-git-root.mjs";
 import { packageDir, readJson, sha256 } from "../fs-helpers.mjs";
 import { isSafeAgentAssetPath } from "../install/agent-asset-manifest/lifecycle.mjs";
@@ -29,7 +30,10 @@ function assetExistsOnAnyProvider(gitRoot, providers, kind, logicalRel) {
     return providers.some((provider) => existsSync(join(gitRoot, agentAssetDir(provider, kind), projectedAssetRel(provider, kind, logicalRel))));
 }
 /** Verify every selected provider projection, including Codex TOML agents and v2 manifests. */
-export function checkAgentAssets(cwd, kind, providers, { guards = [], expected } = {}) {
+export function checkAgentAssets(cwd, kind, providers, 
+// Takes the recorded selection whole (a `Partial<Selection>` satisfies SkillSelection), so the
+// reader stays in step with the writer as gated skills are added — see skillNamesForSelection.
+{ expected, ...selection } = {}) {
     const [name, manifestFilename, remediation, countLabel] = AGENT_ASSET_CHECKS[kind];
     const { gitRoot } = detectGitRoot(cwd);
     let decoded;
@@ -75,7 +79,9 @@ export function checkAgentAssets(cwd, kind, providers, { guards = [], expected }
     }
     const expectedUnits = expected ??
         (kind === 'skills'
-            ? bundledNames('skills', (entry) => entry.isDirectory()).filter((unit) => unit !== 'decisions' || guards.includes('decisions'))
+            ? // Same filter the WRITER uses (syncSkills), not a second copy of the rules — a reader that
+                // expects a skill the writer was told to skip reports a permanent false DRIFT.
+                skillNamesForSelection(bundledNames('skills', (entry) => entry.isDirectory()), selection)
             : kind === 'agents'
                 ? bundledNames('agents', (entry) => entry.isFile() && entry.name.endsWith('.md'))
                 : []);
