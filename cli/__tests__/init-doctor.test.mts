@@ -9,6 +9,25 @@ import { CLI, readConfig as config, tmpRepos } from './_helpers.mts';
 const { tmpRepo, devkit, cleanup } = tmpRepos('init-');
 afterEach(cleanup);
 
+function retiredFallowClaudeSettings() {
+  return {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: [
+            {
+              type: 'command',
+              command:
+                'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 describe('init --yes (all recommended)', () => {
   it('persists an explicit review profile from CLI flags', () => {
     const root = tmpRepo();
@@ -584,6 +603,28 @@ describe('doctor — selection-aware', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/hook registrations: DRIFT/);
   });
+
+  it('init heals retired hook registrations when no hook component is selected', () => {
+    const root = tmpRepo();
+    const initArgs = ['init', '--stack', 'generic', '--yes', '--guards', 'size'];
+    expect(devkit(root, ...initArgs).status).toBe(0);
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify(retiredFallowClaudeSettings()),
+    );
+
+    const drifted = devkit(root, 'doctor');
+    expect(drifted.status).toBe(1);
+    expect(drifted.stdout).toMatch(/hook registrations: DRIFT/);
+
+    const healed = devkit(root, ...initArgs);
+    expect(healed.status, healed.stderr).toBe(0);
+    expect(readFileSync(join(root, '.claude', 'settings.json'), 'utf8')).not.toContain(
+      'FALLOW_GATE_COMMIT_ONLY',
+    );
+    expect(devkit(root, 'doctor').status).toBe(0);
+  });
 });
 
 // Unit-cover the doctor dispatch (extracted from run() so it's testable without the subprocess).
@@ -603,6 +644,27 @@ describe('doctor collectResults dispatch', () => {
     expect(n).not.toContain('skills');
     expect(n).not.toContain('.husky/pre-commit');
     expect(n).toContain('devkit pin'); // non-standalone always checks the pin
+  });
+
+  it('checks retired registrations when no hook-owning component remains selected', async () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify(retiredFallowClaudeSettings()),
+    );
+    const cfg = {
+      components: {
+        agentTargets: ['claude'],
+        agentHooks: false,
+        fallow: false,
+        guards: [],
+      },
+    };
+
+    const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
+
+    expect(results.find((result) => result.name === 'hook registrations')?.status).toBe('DRIFT');
   });
 
   it('skips the pin check in standalone mode', async () => {

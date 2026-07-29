@@ -4,6 +4,7 @@ import { syncAgents } from '../../../commands/sync/sync-agents.mts';
 import { syncSkills } from '../../../commands/sync/sync-skills.mts';
 import { AGENT_TARGETS, type Selection } from '../../components.mts';
 import { removeAgents, removeSkills } from '../../sync-manifest.mts';
+import { hookRegistrationDestination } from '../hook-registration-ledger/codec.mts';
 import { selectedHookAssets } from '../hook-registration-ledger/selection.mts';
 import {
   reconcileHookRegistrations,
@@ -12,7 +13,7 @@ import {
   syncHookScripts,
 } from '../install-hooks.mts';
 import { agentAssetDir } from './agent-assets.mts';
-import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
+import { type AgentProvider, SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mts';
 
 type OverrideAsset = (kind: string, name: string) => boolean;
 
@@ -26,16 +27,11 @@ function pruneDeselectedSurfaces(
   const prunedTargets = SUPPORTED_AGENT_PROVIDERS.filter(
     (target) => !agentTargets.includes(target),
   );
-  const settingsFile: Record<string, string> = {
-    claude: '.claude/settings.json',
-    codex: '.codex/hooks.json',
-    cursor: '.cursor/hooks.json',
-  };
   const hasContent = prunedTargets.some(
     (target) =>
       (['skills', 'agents', 'hooks'] as const).some((kind) =>
         existsSync(join(gitRoot, agentAssetDir(target, kind))),
-      ) || existsSync(join(gitRoot, settingsFile[target])),
+      ) || existsSync(join(gitRoot, hookRegistrationDestination(target, 'shared'))),
   );
   if (!prunedTargets.length || !hasContent) return;
   console.log(`7d. prune deselected agent surface(s): ${prunedTargets.join(', ')}`);
@@ -58,7 +54,7 @@ export function installAgentSurfaces(
   override: OverrideAsset = () => false,
   previousSelection: Partial<Selection> = {},
 ) {
-  const targets = selection.agentTargets ?? AGENT_TARGETS;
+  const targets = (selection.agentTargets ?? AGENT_TARGETS) as AgentProvider[];
   if (selection.skills) {
     console.log('7. skills');
     syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, targets, {
@@ -88,21 +84,15 @@ export function installAgentSurfaces(
     removeHookScripts(gitRoot, { dryRun });
   }
 
-  if (hooks.components.length) {
+  const hasProviderConfig = targets.some((target) =>
+    existsSync(join(gitRoot, hookRegistrationDestination(target, 'shared'))),
+  );
+  if (hooks.components.length || hooks.previouslyOwnedComponents.length || hasProviderConfig) {
     console.log('7c. agent hook registrations');
     reconcileHookRegistrations(gitRoot, hooks.components, hooks.previouslyOwnedComponents, {
       dryRun,
       targets,
     });
-  } else if (
-    hooks.previouslyOwnedComponents.length &&
-    targets.some((target) =>
-      existsSync(
-        join(gitRoot, target === 'claude' ? '.claude/settings.json' : `.${target}/hooks.json`),
-      ),
-    )
-  ) {
-    reconcileHookRegistrations(gitRoot, [], hooks.previouslyOwnedComponents, { dryRun, targets });
   }
   pruneDeselectedSurfaces(gitRoot, selection, targets, hooks.scripts, dryRun);
   return targets;
