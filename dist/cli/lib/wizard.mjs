@@ -9,7 +9,7 @@
  * Ctrl-C / Esc at any prompt aborts cleanly via clack's isCancel (nothing is written).
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
+import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, OPTIONAL_COMPONENTS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
 // The components that sync into an agent surface. Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
@@ -45,6 +45,15 @@ const SEARCHCODE_OPTION = {
     id: 'search-code',
     label: 'search-code',
     hint: 'opt this repo in to the semantic search index (optional, off by default)',
+};
+// i-have-adhd: a VENDORED third-party skill (MIT, pinned by upstream commit — see
+// cli/lib/install/vendored-skills.mts). Same opt-in shape as fallow/search-code, and kept out of
+// COMPONENTS for the same reason: it must stay off under --yes. It reshapes how the assistant
+// writes, so it only ever arrives because someone ticked this box.
+const ADHD_OPTION = {
+    id: 'adhd',
+    label: 'i-have-adhd',
+    hint: 'ADHD-friendly output style — /i-have-adhd (optional, off by default; needs Agent skills)',
 };
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
 // selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
@@ -110,6 +119,10 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
     // always on (applyOverlayConstraints enforces this). Standalone omits structure-lint. Structure
     // is only offered in PACKAGE mode where a template exists.
     const structAvail = mode === 'package' && structureAvailable;
+    // Opt-in components are never `recommended`, so nothing pre-ticks them — but on a RE-RUN that
+    // would silently DROP one the repo already has: accepting the defaults records `false`, and the
+    // asset is pruned. Seed the ones already installed so "keep what I have" is the default answer.
+    const installedOptional = OPTIONAL_COMPONENTS.filter((c) => installed.has(c.id)).map((c) => c.id);
     // Built up incrementally (component flags + guards/agentTargets), so it's a Partial until the
     // apply layer normalises it — the wizard sets the fields the chosen mode touches.
     const selection = { guards: [] };
@@ -117,8 +130,15 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         const choices = COMPONENT_OPTIONS.filter((c) => OVERLAY_PICKABLE.has(c.id));
         const picked = await multiselect({
             message: 'Select components to install (overlay — all git-ignored)',
-            options: [...choices.map(componentOption), componentOption(FALLOW_OPTION)],
-            initialValues: choices.filter((c) => c.recommended).map((c) => c.id),
+            options: [
+                ...choices.map(componentOption),
+                componentOption(FALLOW_OPTION),
+                componentOption(ADHD_OPTION),
+            ],
+            initialValues: [
+                ...choices.filter((c) => c.recommended).map((c) => c.id),
+                ...installedOptional,
+            ],
             required: false,
         });
         if (bail(picked))
@@ -127,6 +147,8 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         for (const c of choices)
             selection[c.id] = chosen.has(c.id);
         selection.fallow = chosen.has('fallow');
+        // Overlay syncs skills too, so the vendored skill works here unchanged.
+        selection.adhd = chosen.has('adhd');
         selection.husky = true; // overlay's local hook is the delivery mechanism — always on
     }
     else {
@@ -137,8 +159,12 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                 ...componentChoices.map(componentOption),
                 componentOption(FALLOW_OPTION),
                 componentOption(SEARCHCODE_OPTION),
+                componentOption(ADHD_OPTION),
             ],
-            initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
+            initialValues: [
+                ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
+                ...installedOptional,
+            ],
             required: false,
         });
         if (bail(picked))
@@ -148,6 +174,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
             selection[c.id] = chosen.has(c.id);
         selection.fallow = chosen.has('fallow');
         selection.searchCode = chosen.has('search-code');
+        selection.adhd = chosen.has('adhd');
         if (!structAvail)
             selection.structure = false;
     }
@@ -276,6 +303,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
             `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
             `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
             `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
+            `${on('adhd')} ${ADHD_OPTION.label} skill`,
         ].join('\n');
     }
     const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map((c) => {
@@ -285,6 +313,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
     });
     lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
     lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
+    lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label} skill`);
     lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
