@@ -7,7 +7,7 @@
  * consumer has since made of it, while the WRITE path in the same file refuses that exact clobber
  * (findConflicts → "preserving non-devkit skill"). Same defect the hooks path carried (#209).
  *
- * `decisions` is the guard-gated skill (skillNamesForGuards), so dropping the `decisions` guard is
+ * `decisions` is the guard-gated skill (skillNamesForSelection), so dropping the `decisions` guard is
  * the real deselection a consumer performs. A skill is removed as a UNIT, so any edited or added
  * file has to protect the whole directory.
  */
@@ -31,20 +31,20 @@ afterEach(() => {
 describe('syncSkills — pruning a deselected skill', () => {
   it('still prunes a deselected skill left pristine', () => {
     const root = tmpRepo();
-    syncSkills([], root, ['claude'], { guards: ['decisions'] });
+    syncSkills([], root, ['claude'], { selection: { guards: ['decisions'] } });
     expect(existsSync(decisionsDir(root))).toBe(true);
 
-    syncSkills([], root, ['claude'], { guards: [] });
+    syncSkills([], root, ['claude'], { selection: { guards: [] } });
     expect(existsSync(decisionsDir(root))).toBe(false);
   });
 
   it('keeps a deselected skill whose file the consumer edited', () => {
     const root = tmpRepo();
-    syncSkills([], root, ['claude'], { guards: ['decisions'] });
+    syncSkills([], root, ['claude'], { selection: { guards: ['decisions'] } });
     const file = join(decisionsDir(root), 'SKILL.md');
     writeFileSync(file, `${readFileSync(file, 'utf8')}\n<!-- consumer tweak -->\n`);
 
-    syncSkills([], root, ['claude'], { guards: [] });
+    syncSkills([], root, ['claude'], { selection: { guards: [] } });
 
     expect(existsSync(decisionsDir(root))).toBe(true);
     expect(readFileSync(file, 'utf8')).toContain('<!-- consumer tweak -->');
@@ -55,7 +55,7 @@ describe('syncSkills — pruning a deselected skill', () => {
     // plain walk hands it to sha256 — which follows the link and throws EISDIR, aborting the whole
     // run instead of preserving the very skill the guard exists to protect.
     const root = tmpRepo();
-    syncSkills([], root, ['claude'], { guards: ['decisions'] });
+    syncSkills([], root, ['claude'], { selection: { guards: ['decisions'] } });
     // REPLACE a manifest-owned file with a link to a directory: the file count still matches, so
     // the scan reaches sha256 — which is where the EISDIR fires. An ADDED symlink would trip the
     // count check first and never exercise this path.
@@ -65,17 +65,17 @@ describe('syncSkills — pruning a deselected skill', () => {
     rmSync(join(decisionsDir(root), 'SKILL.md'));
     symlinkSync(target, join(decisionsDir(root), 'SKILL.md'));
 
-    expect(() => syncSkills([], root, ['claude'], { guards: [] })).not.toThrow();
+    expect(() => syncSkills([], root, ['claude'], { selection: { guards: [] } })).not.toThrow();
     expect(existsSync(decisionsDir(root))).toBe(true);
   });
 
   it('keeps a deselected skill the consumer added a file to', () => {
     const root = tmpRepo();
-    syncSkills([], root, ['claude'], { guards: ['decisions'] });
+    syncSkills([], root, ['claude'], { selection: { guards: ['decisions'] } });
     mkdirSync(join(decisionsDir(root), 'references'), { recursive: true });
     writeFileSync(join(decisionsDir(root), 'references', 'ours.md'), 'our notes\n');
 
-    syncSkills([], root, ['claude'], { guards: [] });
+    syncSkills([], root, ['claude'], { selection: { guards: [] } });
 
     expect(existsSync(join(decisionsDir(root), 'references', 'ours.md'))).toBe(true);
   });

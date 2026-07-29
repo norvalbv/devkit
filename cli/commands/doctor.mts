@@ -307,6 +307,7 @@ function selectionFlags(sel: Partial<Selection>): string[] {
     ['searchSteering', '--search-steering'],
     ['agentHooks', '--agent-hooks'],
     ['searchCode', '--search-code'],
+    ['adhd', '--adhd'],
   ] as const)
     if (sel[id]) flags.push(flag);
   if (!sel.guards?.length) flags.push('--no-guards');
@@ -495,8 +496,7 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   const advise = (r: CheckResult) =>
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
   const hooks = selectedHookAssets(sel, { searchSteering: false });
-  if (sel.skills && surfaces.length)
-    advise(checkAgentAssets(cwd, 'skills', surfaces, { guards: sel.guards ?? [] }));
+  if (sel.skills && surfaces.length) advise(checkAgentAssets(cwd, 'skills', surfaces, sel));
   if (sel.agents && surfaces.length) advise(checkAgentAssets(cwd, 'agents', surfaces));
   if (hooks.scripts.length && surfaces.length)
     advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
@@ -565,8 +565,7 @@ async function collectResults(
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
   const hooks = selectedHookAssets(sel);
-  if (sel.skills && surfaces.length)
-    results.push(checkAgentAssets(cwd, 'skills', surfaces, { guards: sel.guards ?? [] }));
+  if (sel.skills && surfaces.length) results.push(checkAgentAssets(cwd, 'skills', surfaces, sel));
   if (sel.agents && surfaces.length) results.push(checkAgentAssets(cwd, 'agents', surfaces));
   if (hooks.scripts.length && surfaces.length)
     results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
