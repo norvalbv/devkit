@@ -22,6 +22,8 @@ Usage:
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).
   --search-code          Opt this repo in to the semantic search index (off by default).
+  --adhd                 Also sync the i-have-adhd output-style skill, invoked with
+                         /i-have-adhd (off by default; needs skills selected).
   --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
                          bins; add nothing to package.json. Requires \`bun add -g\` devkit.
   --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the

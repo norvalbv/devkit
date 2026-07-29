@@ -63,7 +63,7 @@ export function installAgentSurfaces(
     console.log('7. skills');
     syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, targets, {
       override,
-      guards: selection.guards ?? [],
+      selection,
     });
   } else if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) {
     console.log('7. remove deselected skills');
@@ -115,7 +115,7 @@ export function adoptAgentAssetCollisions(gitRoot: string, selection: Selection,
   if (selection.skills)
     syncSkills(dryRun ? ['--dry-run'] : [], gitRoot, targets, {
       override,
-      guards: selection.guards ?? [],
+      selection,
     });
   if (selection.agents) syncAgents(dryRun ? ['--dry-run'] : [], gitRoot, targets, { override });
   const scripts = selectedHookAssets(selection).scripts;

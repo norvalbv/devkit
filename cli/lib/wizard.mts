@@ -76,6 +76,16 @@ const SEARCHCODE_OPTION = {
   hint: 'opt this repo in to the semantic search index (optional, off by default)',
 };
 
+// i-have-adhd: a VENDORED third-party skill (MIT, pinned by upstream commit — see
+// cli/lib/install/vendored-skills.mts). Same opt-in shape as fallow/search-code, and kept out of
+// COMPONENTS for the same reason: it must stay off under --yes. It reshapes how the assistant
+// writes, so it only ever arrives because someone ticked this box.
+const ADHD_OPTION = {
+  id: 'adhd',
+  label: 'i-have-adhd',
+  hint: 'ADHD-friendly output style — /i-have-adhd (optional, off by default; needs Agent skills)',
+};
+
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
 // selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
 const LINE_GROWTH_ID = 'line-growth';
@@ -191,7 +201,11 @@ export async function runWizard({
     const choices = COMPONENT_OPTIONS.filter((c) => OVERLAY_PICKABLE.has(c.id));
     const picked = await multiselect({
       message: 'Select components to install (overlay — all git-ignored)',
-      options: [...choices.map(componentOption), componentOption(FALLOW_OPTION)],
+      options: [
+        ...choices.map(componentOption),
+        componentOption(FALLOW_OPTION),
+        componentOption(ADHD_OPTION),
+      ],
       initialValues: choices.filter((c) => c.recommended).map((c) => c.id),
       required: false,
     });
@@ -199,6 +213,8 @@ export async function runWizard({
     const chosen = new Set(picked);
     for (const c of choices) selection[c.id] = chosen.has(c.id);
     selection.fallow = chosen.has('fallow');
+    // Overlay syncs skills too, so the vendored skill works here unchanged.
+    selection.adhd = chosen.has('adhd');
     selection.husky = true; // overlay's local hook is the delivery mechanism — always on
   } else {
     const componentChoices = COMPONENT_OPTIONS.filter((c) => c.id !== 'structure' || structAvail);
@@ -208,6 +224,7 @@ export async function runWizard({
         ...componentChoices.map(componentOption),
         componentOption(FALLOW_OPTION),
         componentOption(SEARCHCODE_OPTION),
+        componentOption(ADHD_OPTION),
       ],
       initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
       required: false,
@@ -217,6 +234,7 @@ export async function runWizard({
     for (const c of COMPONENT_OPTIONS) selection[c.id] = chosen.has(c.id);
     selection.fallow = chosen.has('fallow');
     selection.searchCode = chosen.has('search-code');
+    selection.adhd = chosen.has('adhd');
     if (!structAvail) selection.structure = false;
   }
 
@@ -358,6 +376,7 @@ function summarize(
       `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
       `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
       `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
+      `${on('adhd')} ${ADHD_OPTION.label} skill`,
     ].join('\n');
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(
@@ -369,6 +388,7 @@ function summarize(
   );
   lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
+  lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label} skill`);
   lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
     lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
