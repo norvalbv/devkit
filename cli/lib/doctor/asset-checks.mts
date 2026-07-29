@@ -12,6 +12,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { type SkillSelection, skillNamesForSelection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { packageDir, readJson, sha256 } from '../fs-helpers.mts';
 import { isSafeAgentAssetPath } from '../install/agent-asset-manifest/lifecycle.mts';
@@ -52,7 +53,9 @@ export function checkAgentAssets(
   cwd: string,
   kind: AgentAssetKind,
   providers: readonly AgentProvider[],
-  { guards = [], expected }: { guards?: string[]; expected?: string[] } = {},
+  // Takes the recorded selection whole (a `Partial<Selection>` satisfies SkillSelection), so the
+  // reader stays in step with the writer as gated skills are added — see skillNamesForSelection.
+  { expected, ...selection }: SkillSelection & { expected?: string[] } = {},
 ): CheckResult {
   const [name, manifestFilename, remediation, countLabel] = AGENT_ASSET_CHECKS[kind];
   const { gitRoot } = detectGitRoot(cwd);
@@ -111,8 +114,11 @@ export function checkAgentAssets(
   const expectedUnits =
     expected ??
     (kind === 'skills'
-      ? bundledNames('skills', (entry) => entry.isDirectory()).filter(
-          (unit) => unit !== 'decisions' || guards.includes('decisions'),
+      ? // Same filter the WRITER uses (syncSkills), not a second copy of the rules — a reader that
+        // expects a skill the writer was told to skip reports a permanent false DRIFT.
+        skillNamesForSelection(
+          bundledNames('skills', (entry) => entry.isDirectory()),
+          selection,
         )
       : kind === 'agents'
         ? bundledNames('agents', (entry) => entry.isFile() && entry.name.endsWith('.md'))

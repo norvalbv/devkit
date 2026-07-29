@@ -179,9 +179,21 @@ export interface Selection {
    * the `size` guard, not a husky fragment — the apply layer writes the cap iff `size` is also selected.
    */
   lineGrowth: boolean;
+  /**
+   * The vendored `i-have-adhd` output-style skill (cli/lib/install/vendored-skills.mts). Not a
+   * component with its own installer — it RIDES the skills sync, which filters the bundled set by
+   * this flag (skillNamesForSelection), so it needs `skills` on to reach the repo at all. Opt-in
+   * even under --yes: it reshapes how the assistant writes, which is a personal preference.
+   */
+  adhd: boolean;
   agentTargets: string[];
   guards: string[];
 }
+
+/** The `Selection` keys that are plain on/off components (excludes the guards/agentTargets arrays). */
+export type ComponentToggleId = {
+  [K in keyof Selection]: Selection[K] extends boolean ? K : never;
+}[keyof Selection];
 
 /**
  * The all-recommended selection: every component on, every guard on. This is the EXACT
@@ -206,6 +218,8 @@ export function defaultSelection(): Selection {
     // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
     // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
     lineGrowth: true,
+    // Output-style preference — never arrives uninvited. See Selection.adhd.
+    adhd: false,
     agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
@@ -262,4 +276,101 @@ export function newBundledGates(recorded: string[]): { recommended: string[]; op
     recommended: missing.filter((g) => RECOMMENDED_GUARD_IDS.includes(g)),
     optIn: missing.filter((g) => !RECOMMENDED_GUARD_IDS.includes(g)),
   };
+}
+
+/** The selection inputs that decide WHICH bundled skills a repo gets — see {@link skillNamesForSelection}. */
+export interface SkillSelection {
+  guards?: string[];
+  adhd?: boolean;
+}
+
+/**
+ * Narrow the bundled skill set to the ones this repo's selection actually asked for. Everything
+ * unnamed here ships unconditionally; a skill appears in this filter only when it is tied to a
+ * component the consumer can decline:
+ *   - `decisions` — companion to the `decisions` guard; useless without the gate that runs it.
+ *   - `i-have-adhd` — the vendored opt-in output style (Selection.adhd).
+ *
+ * Lives here, beside the Selection it reads, because it has TWO consumers that must agree: the
+ * writer (syncSkills, which decides what to copy) and the reader (doctor's checkAgentAssets, which
+ * decides what SHOULD be there). They drifted apart once already — doctor kept its own inline copy
+ * of the decisions rule — and a repo that declines a skill the reader still expects gets a false
+ * DRIFT on every run.
+ *
+ * Deselecting a skill is also what makes syncSkills' manifest reclamation delete its directory, so
+ * this filter is the removal path too — there is no separate uninstall step.
+ */
+export function skillNamesForSelection(
+  allNames: string[],
+  { guards = [], adhd = false }: SkillSelection = {},
+): string[] {
+  return allNames.filter((name) => {
+    if (name === 'decisions') return guards.includes('decisions');
+    if (name === 'i-have-adhd') return adhd;
+    return true;
+  });
+}
+
+/** An opt-in component `upgrade` can offer once to a repo that predates it. */
+export interface OptionalComponent {
+  id: ComponentToggleId;
+  label: string;
+  hint: string;
+  /** The `devkit init` flag that enables it — printed in the non-TTY notice. */
+  flag: string;
+  /** devkit version that first shipped it (documentation for the reader of this table). */
+  since: string;
+}
+
+/**
+ * Opt-in components `devkit upgrade` offers ONCE to repos that predate them. The analog of
+ * {@link newBundledGates} for the component half, and the reason a new optional component no longer
+ * needs its own bespoke `upgrade` step (the line-growth block, step 3b, is the one that predates this).
+ *
+ * Only genuinely OPTIONAL components belong here — never a recommended one. A recommended component
+ * arrives through the ordinary init/upgrade refresh; this table exists for the things a repo must
+ * actively choose.
+ */
+export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
+  {
+    id: 'adhd',
+    label: 'i-have-adhd',
+    hint: 'ADHD-friendly output style — invoke with /i-have-adhd (needs Agent skills)',
+    flag: '--adhd',
+    since: '0.47.0',
+  },
+];
+
+/**
+ * The optional components this repo has never been ASKED about — an ABSENT recorded key, not a
+ * falsy one. That distinction is the whole mechanism: `applyInit` writes every component key on
+ * every run, so a repo that answered — yes OR no — carries the key and is never asked again, while
+ * a repo whose config predates the component has no key at all. No per-repo "offers made" state to
+ * maintain, and a decline is durable (the same no-re-nag guarantee as upgrade's line-growth step).
+ *
+ * MUST be handed the RAW recorded `components` block. `normalizeSelection` fills defaults, which
+ * would make every repo look like it had already declined.
+ */
+export function unofferedComponents(recorded: Partial<Selection> | undefined): OptionalComponent[] {
+  return OPTIONAL_COMPONENTS.filter((c) => recorded?.[c.id] === undefined);
+}
+
+/**
+ * Strip the components nobody was actually ASKED about from a `components` block about to be
+ * written, so an absent key stays absent (see {@link unofferedComponents}). Only drops a key that
+ * was already missing — once a repo has answered, its recorded value is preserved and rewritten.
+ *
+ * Every config writer must run this, not just the one that happens to prompt: `devkit upgrade`
+ * refreshes package AND overlay repos through different writers, and a writer that skips it records
+ * the normalized `false` as a decision nobody made, permanently suppressing the offer.
+ */
+export function dropUndecided<T extends Record<string, unknown>>(
+  components: T,
+  undecided: string[] = [],
+  previous: Partial<Selection> | undefined,
+): T {
+  for (const id of undecided) {
+    if (previous?.[id as ComponentToggleId] === undefined) delete components[id];
+  }
+  return components;
 }
