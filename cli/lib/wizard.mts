@@ -15,6 +15,7 @@ import {
   COMPONENTS,
   DEFAULT_REVIEW_DECISIONS_DIR,
   GUARD_OPTIONS,
+  OPTIONAL_COMPONENTS,
   RECOMMENDED_GUARD_IDS,
   REVIEWABLE_GUARD_IDS,
   type ReviewProfile,
@@ -194,6 +195,10 @@ export async function runWizard({
   // always on (applyOverlayConstraints enforces this). Standalone omits structure-lint. Structure
   // is only offered in PACKAGE mode where a template exists.
   const structAvail = mode === 'package' && structureAvailable;
+  // Opt-in components are never `recommended`, so nothing pre-ticks them — but on a RE-RUN that
+  // would silently DROP one the repo already has: accepting the defaults records `false`, and the
+  // asset is pruned. Seed the ones already installed so "keep what I have" is the default answer.
+  const installedOptional = OPTIONAL_COMPONENTS.filter((c) => installed.has(c.id)).map((c) => c.id);
   // Built up incrementally (component flags + guards/agentTargets), so it's a Partial until the
   // apply layer normalises it — the wizard sets the fields the chosen mode touches.
   const selection: WizardSelection = { guards: [] };
@@ -206,7 +211,10 @@ export async function runWizard({
         componentOption(FALLOW_OPTION),
         componentOption(ADHD_OPTION),
       ],
-      initialValues: choices.filter((c) => c.recommended).map((c) => c.id),
+      initialValues: [
+        ...choices.filter((c) => c.recommended).map((c) => c.id),
+        ...installedOptional,
+      ],
       required: false,
     });
     if (bail(picked)) return null;
@@ -226,7 +234,10 @@ export async function runWizard({
         componentOption(SEARCHCODE_OPTION),
         componentOption(ADHD_OPTION),
       ],
-      initialValues: componentChoices.filter((c) => c.recommended).map((c) => c.id),
+      initialValues: [
+        ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
+        ...installedOptional,
+      ],
       required: false,
     });
     if (bail(picked)) return null;

@@ -53,8 +53,9 @@ husky guard block for the RECORDED selection (honours agentTargets — never re-
 surface), then run doctor.
 
 Also offers, ONCE, any gate or optional component devkit has shipped since this repo's last install.
-Nothing is ever auto-added: on a non-TTY run they are reported only, and your answer is recorded so a
-decline is never re-asked.
+Your answer is recorded, so a decline is never re-asked. On a non-TTY run gates and optional
+components are REPORTED only, never added; the line-growth block is the one exception — it is a
+recommended ratchet on a guard you already selected, so it heals itself there (--dry-run to preview).
 
   --dry-run  print every action; write nothing.
   --force    adopt consumer-authored skill/agent/hook collisions (tuned configs are NEVER overwritten).
