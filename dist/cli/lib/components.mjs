@@ -231,19 +231,23 @@ export function skillNamesForSelection(allNames, { guards = [], adhd = false } =
     });
 }
 /**
- * Opt-in components `devkit upgrade` offers ONCE to repos that predate them. The analog of
- * {@link newBundledGates} for the component half, and the reason a new optional component no longer
- * needs its own bespoke `upgrade` step (the line-growth block, step 3b, is the one that predates this).
+ * The opt-in ADD-ONS `devkit upgrade` offers ONCE to repos that predate them — currently skills.
+ * The analog of {@link newBundledGates} for the non-gate half, and the reason a new opt-in add-on no
+ * longer needs its own bespoke `upgrade` step (the line-growth block, step 3b, predates this).
  *
- * Only genuinely OPTIONAL components belong here — never a recommended one. A recommended component
- * arrives through the ordinary init/upgrade refresh; this table exists for the things a repo must
- * actively choose.
+ * Each entry is a selectable `Selection` toggle — a "component" in devkit's internal vocabulary —
+ * but that word describes the MECHANISM, not the thing. `kind` carries the thing, and all copy is
+ * rendered from it, so a user is never told they are installing a "component".
+ *
+ * Only genuinely OPTIONAL entries belong here — never a recommended one. A recommended component
+ * arrives through the ordinary init/upgrade refresh; this table is for what a repo must choose.
  */
 export const OPTIONAL_COMPONENTS = [
     {
         id: 'adhd',
+        kind: 'skill',
         label: 'i-have-adhd',
-        hint: 'ADHD-friendly output style — invoke with /i-have-adhd (needs Agent skills)',
+        hint: 'ADHD-friendly output style — a vendored MIT skill, invoked with /i-have-adhd; needs the Agent skills component',
         flag: '--adhd',
         since: '0.47.0',
     },

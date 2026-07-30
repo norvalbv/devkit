@@ -206,9 +206,6 @@ export function removeHookScripts(root, { dryRun = false, targets, dropManifest 
     });
 }
 export function installHookRegistrations(root, componentIds, { dryRun = false, targets = AGENT_TARGETS, overlay = false, legacyOwnedComponentIds, } = {}) {
-    if (!componentIds.some((id) => HOOK_REGISTRATIONS[id]?.length) &&
-        !legacyOwnedComponentIds?.length)
-        return { wrote: [] };
     const scope = overlay ? 'overlay' : 'shared';
     const reconciliationIds = [...new Set([...componentIds, ...(legacyOwnedComponentIds ?? [])])];
     return withAgentAssetLifecycleLock(root, dryRun, () => {
@@ -301,8 +298,6 @@ export function removeHookRegistrations(root, { dryRun = false, targets = AGENT_
     });
 }
 export function checkHookRegistrations(root, componentIds, { overlay = false, targets = AGENT_TARGETS, legacyOwnedComponentIds, } = {}) {
-    if (!componentIds.some((id) => HOOK_REGISTRATIONS[id]?.length))
-        return { ok: true, missing: [] };
     const scope = overlay ? 'overlay' : 'shared';
     const ledger = readHookRegistrationLedger(root);
     const missing = [];
@@ -313,6 +308,8 @@ export function checkHookRegistrations(root, componentIds, { overlay = false, ta
             continue;
         }
         const document = providerDocument(root, provider, rel);
+        if (stripRetiredRegistrations(document, componentIds, provider).changed)
+            missing.push(`${provider}:retired-registration`);
         const effectiveLedger = legacyOwnedComponentIds?.length
             ? ledgerOf(adoptExactLegacy([...(ledger?.entries ?? [])], document, legacyOwnedComponentIds, provider, scope))
             : ledger;
