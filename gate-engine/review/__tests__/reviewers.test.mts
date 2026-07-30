@@ -371,6 +371,8 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
     expect(p).toContain('src/main/a.ts');
     expect(p).toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(p).toContain('check-item <name> --pass');
+    expect(p).toContain('`--fail` means the finding must block THIS commit');
+    expect(p).toContain('Non-blocking observations MUST be marked `--pass`');
     expect(p).toContain('Do NOT run the `cleanup` step');
   });
   it('lets the packaged brief own enumeration and rewrites its skill paths in review mode', () => {

@@ -323,6 +323,84 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(Object.keys(loadCache(repo))).toHaveLength(5);
   });
 
+  it('ordinary commit retries a broken checklist contract once when synced assets exist', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-contract-retry';
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label, args }) => {
+      const attempt = (attempts.get(label) ?? 0) + 1;
+      attempts.set(label, attempt);
+      if (label === 'review:api-security-reviewer' && attempt === 1) {
+        writeArtifact(repo, label, { pending: 1 });
+        return 'first pass skipped one checklist item\nVERDICT: PASS';
+      }
+      if (label === 'review:api-security-reviewer') {
+        expect(args[1]).toContain('CHECKLIST-CONTRACT RETRY');
+        expect(existsSync(join(repo, reviewerFromLabel(label).stateFile))).toBe(false);
+      }
+      writeArtifact(repo, label);
+      return 'verified pass\nVERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(attempts.get('review:api-security-reviewer')).toBe(2);
+    expect(Object.keys(loadCache(repo))).toHaveLength(5);
+    const apiResult = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find(
+        (event) => event.type === 'review_result' && event.reviewer === 'api-security-reviewer',
+      );
+    expect(apiResult.status).toBe('pass');
+    expect(apiResult.item_tally).toEqual({ pass: 1 });
+    expect(readFileSync(join(repo, apiResult.transcript_ref), 'utf8')).toContain(
+      'CHECKLIST-CONTRACT RETRY',
+    );
+  });
+
+  it('ordinary commit preserves asset-sync inconclusive handling when a checklist asset is absent', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    rmSync(join(repo, '.claude', 'skills', 'api-security', 'scripts', 'checklist.mjs'), {
+      force: true,
+    });
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label }) => {
+      attempts.set(label, (attempts.get(label) ?? 0) + 1);
+      if (label !== 'review:api-security-reviewer') writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(attempts.get('review:api-security-reviewer')).toBe(1);
+    expect(Object.keys(loadCache(repo))).toHaveLength(4);
+  });
+
+  it('ordinary commit keeps a persistent PASS/failed-item mismatch inconclusive after one retry', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label }) => {
+      attempts.set(label, (attempts.get(label) ?? 0) + 1);
+      if (label === 'review:api-security-reviewer') writeArtifact(repo, label, { failed: 1 });
+      else writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(attempts.get('review:api-security-reviewer')).toBe(2);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('api-security-reviewer — INCONCLUSIVE');
+    expect(out).toContain('FAILED item(s) but the verdict says PASS');
+    expect(out).not.toContain('api-security-reviewer REVIEW ERROR');
+    expect(Object.keys(loadCache(repo))).toHaveLength(4);
+  });
+
   it('review mode reports a repeated checklist-contract violation as an error, never inconclusive', async () => {
     const repo = consumerRepo({ backend: true });
     const assets = reviewAssets();

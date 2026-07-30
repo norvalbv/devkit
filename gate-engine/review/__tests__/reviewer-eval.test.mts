@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   BENCH_REVIEWERS,
   compareReviewer,
+  enforceCorpusMinimums,
   lintRows,
   makeSpyExec,
   runRow,
@@ -90,6 +91,28 @@ describe('lintRows', () => {
     ['missing repo', [goldRow({ repo: { base: {} } })]],
   ])('rejects %s', (_name, rows) => {
     expect(() => lintRows(rows, 'api-security-reviewer')).toThrow();
+  });
+});
+
+describe('enforceCorpusMinimums', () => {
+  const corpus = () =>
+    Array.from({ length: 25 }, (_, i) =>
+      i < 13
+        ? goldRow({ id: `gold-${i}`, holdout: i < 3 })
+        : decoyRow({ id: `decoy-${i}`, holdout: i < 16 }),
+    );
+
+  it('requires 25 rows with at least three held-out golds and decoys', () => {
+    expect(() => enforceCorpusMinimums(corpus(), 'api-security-reviewer')).not.toThrow();
+    expect(() => enforceCorpusMinimums(corpus().slice(0, 24), 'api-security-reviewer')).toThrow(
+      /at least 25 rows/,
+    );
+    expect(() =>
+      enforceCorpusMinimums(
+        corpus().map((row) => ({ ...row, holdout: row.expected === 'PASS' && row.holdout })),
+        'api-security-reviewer',
+      ),
+    ).toThrow(/held-out FAIL/);
   });
 });
 

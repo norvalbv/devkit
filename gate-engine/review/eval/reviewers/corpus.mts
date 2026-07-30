@@ -70,10 +70,30 @@ export function lintRows(rows, reviewerName) {
   return rows;
 }
 
+export function enforceCorpusMinimums(rows, reviewerName) {
+  if (rows.length < 25)
+    throw new BenchAbort(
+      2,
+      `${reviewerName}: corpus needs at least 25 rows (found ${rows.length})`,
+    );
+  for (const expected of ['FAIL', 'PASS']) {
+    const heldOut = rows.filter((row) => row.holdout && row.expected === expected).length;
+    if (heldOut < 3)
+      throw new BenchAbort(
+        2,
+        `${reviewerName}: corpus needs at least 3 held-out ${expected} rows (found ${heldOut})`,
+      );
+  }
+  return rows;
+}
+
 export function loadRows(reviewer, { dev = false, only = null } = {}) {
   const file = casesFile(reviewer);
   if (!existsSync(file)) throw new BenchAbort(2, `reviewer-eval: missing ${path.basename(file)}`);
-  let rows = lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name);
+  let rows = enforceCorpusMinimums(
+    lintRows(parseCasesText(readFileSync(file, 'utf8')), reviewer.name),
+    reviewer.name,
+  );
   if (dev) rows = rows.filter((r) => !r.holdout);
   if (only) rows = rows.filter((r) => r.id.startsWith(only));
   return rows;

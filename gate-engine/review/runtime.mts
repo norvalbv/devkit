@@ -270,6 +270,21 @@ export function cleanupChecklistState(cwd: string, reviewer: Reviewer): void {
   if (reviewer.stateFile) rmSync(path.resolve(cwd, reviewer.stateFile), { force: true });
 }
 
+function hasReadableChecklistAsset(
+  cwd: string,
+  reviewer: Reviewer,
+  assetRoot: string | undefined,
+): boolean {
+  if (!hasChecklist(reviewer)) return false;
+  const root = assetRoot ?? path.join(cwd, '.claude');
+  try {
+    readFileSync(path.join(root, checklistAssetPath(reviewer)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Review-mode packaged assets make a missing checklist an execution-contract error, not a sync gap. */
 export async function enforceChecklistContract(
   selection: ReviewerSelection,
@@ -285,19 +300,21 @@ export async function enforceChecklistContract(
   if (initial.status !== 'pass' || !selection.reviewer.stateFile) return initial;
   let result = initial;
   let hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
-  if (hole && assetRoot) {
+  if (hole && hasReadableChecklistAsset(cwd, selection.reviewer, assetRoot)) {
     console.error(
       `guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`,
     );
     cleanupChecklistState(cwd, selection.reviewer);
     result = await retry(hole);
-    if (initial.transcript && result.transcript)
-      result.transcript = `${initial.transcript}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript}`;
+    if (initial.transcript || result.transcript)
+      result.transcript = `${initial.transcript ?? ''}\n\n───── CHECKLIST-CONTRACT RETRY ─────\n${result.transcript ?? ''}`;
     if (result.status === 'pass') {
       hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
       if (hole) {
-        result.status = 'error';
-        result.reason = `reviewer checklist contract failed after one retry — ${hole}`;
+        result.status = assetRoot ? 'error' : 'inconclusive';
+        result.reason = assetRoot
+          ? `reviewer checklist contract failed after one retry — ${hole}`
+          : hole;
       }
     }
   } else if (hole) {

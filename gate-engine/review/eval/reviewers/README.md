@@ -56,14 +56,12 @@ BENCH_MODEL=opus node bench.mts run                            # opus ceiling, r
 
 ## Corpus
 
-One JSONL file per reviewer (`cases-<skill>.jsonl`). The four **domain** reviewers carry 13–14
-rows each (api-security 14, the rest 13): the original 12 — 6 gold seeded-bugs (distinct catalog
-items; 3 clear / 2 borderline / 1 adversarial), 3 clean decoys (trigger ≥2 checklist items,
-genuinely fine), 2 near-miss decoys (look vulnerable, provably safe), 1 minimal pair (`variantOf`:
-the fixed twin of a gold row, expected PASS) — plus gold rows for the licensed-source catalog
-refresh items (`mass-assignment`, `object-level-authz`, `sync-io`, `layout-thrash`,
-`postmessage-origin`; `command-injection` reuses its retagged original row). 2 rows per file are
-`holdout: true` (excluded by `--dev`, included in baselines). Dataset-card fields per row:
+One JSONL file per reviewer (`cases-<skill>.jsonl`). Each of the four **domain** reviewers carries
+25 rows spanning gold bugs, clean decoys, near misses, and fixed minimal pairs. The July 2026
+calibration expansion adds production-derived frontend-performance false-positive decoys,
+the bounded backend cache-stampede decoy, and labeled coverage for the highest-frequency
+previously uncovered lenses. Every domain file has at least 3 held-out golds and 3 held-out decoys
+(`holdout: true`, excluded by `--dev`, included in baselines). Dataset-card fields per row:
 `note` (mandatory why), `difficulty`, `provenance` (`authored`/`mined`/`adapted` — mined rows are
 anonymized adaptations of real CodeRabbit/Macroscope findings from our PR history), `variantOf`.
 
@@ -257,4 +255,6 @@ Notes:
   frontend-performance SKILL.md softened the memoize-expensive-computation bar and
   `feperf-sku-rank-per-render` went caught → stable-missed (2-of-2); the bar was sharpened and
   the row recovered 2-of-2 (final re-baseline 13/13).
-- Corpus growth toward absolute-recall claims (≥25 rows/reviewer, mined-real, K=3) is sc-1147.
+- Domain corpus size and holdout floors are now ≥25 rows/reviewer with ≥3 held-out golds and
+  ≥3 held-out decoys. K=3 stability runs and continued mined-real growth remain required before
+  making absolute-recall claims (sc-1147).

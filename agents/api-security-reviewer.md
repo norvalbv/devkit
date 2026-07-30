@@ -35,6 +35,8 @@ Skip if only files outside those roots (e.g. `review.frontendRoots`) are modifie
 - Skip node_modules, generated files, config files
 - Minimal output - let scripts report results
 - Read skill file for detailed rules
+- Checklist `--fail` means the finding must block this commit. Mark non-blocking observations
+  `--pass` (you may mention them in prose); never return PASS with a failed checklist item.
 - **Issue tracking (opt-in, default OFF):** Only when `guard.config.json` has `review.shortcutTracking: true` — before reporting FAIL, check the configured tracker for an existing tracking story. If the finding is already tracked, do not FAIL; report as TRACKED: &lt;brief&gt; | story:&lt;id&gt;. When the toggle is absent or false, skip this and report findings normally.
 </general_rules>
 

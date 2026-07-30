@@ -314,6 +314,7 @@ export function wrapPrompt(
     (checklistRecoveryReason
       ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
       : '') +
+    'CHECKLIST STATUS CONTRACT: `--fail` means the finding must block THIS commit. Non-blocking observations MUST be marked `--pass`; record them in prose if useful. PASS requires all items passed; FAIL requires a blocking failed item.\n' +
     'Do NOT run the `cleanup` step: the gate reads the checklist artifact after you finish (an ' +
     'incomplete or deleted checklist VOIDS a PASS verdict — skipping or cleaning only wastes the ' +
     'run) and removes it itself.\n' +
@@ -457,7 +458,6 @@ export function parseReviewVerdict(raw: string): ReviewVerdict {
 export function cacheKey(reviewerName: string, diffText: string, identitySalt = ''): string {
   return `${reviewerName}:${createHash('sha256').update(identitySalt).update('\0').update(diffText).digest('hex')}`;
 }
-
 function injectedRoots(value: string | undefined, name: string): string[] | null {
   if (value === undefined) return null;
   try {

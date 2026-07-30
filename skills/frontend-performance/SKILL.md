@@ -27,6 +27,12 @@ and the condition that makes the item a FAIL — pass anything that doesn't meet
 findings by where they run: a hot list row or scroll handler is held to a stricter bar than a
 settings page.
 
+`--fail` is a blocking performance finding, not a generic code-quality marker. State the hot/load
+path and the concrete repeated work, latency, memory, network, bundle, or rendering consequence.
+If the staged delta instead causes stale behavior, an incompatible signature, or another
+functional regression without a demonstrated performance cost, mark the performance item PASS;
+that belongs to correctness/completeness review.
+
 ## Images (`image-optimization`)
 
 ```html
@@ -74,8 +80,9 @@ settings page.
   change anyway" is not a pass: wrap it in `useMemo` keyed on its actual inputs, and consider
   `useDeferredValue`/debounce when an input is keystroke-driven. Memoizing a cheap downstream
   value (a count label) while the expensive call above it stays bare is still a FAIL. Also FAIL
-  effect dependency arrays that re-fire every render for stable work, and `useMemo`/`useCallback`
-  spam on trivial values only when the diff adds many.
+  effect dependency arrays that re-fire every render for stable work and cause repeated I/O or
+  expensive computation. A missing dependency that merely makes behavior stale is correctness,
+  not performance. FAIL `useMemo`/`useCallback` spam on trivial values only when the diff adds many.
 - `list-rendering`: FAIL `key={index}` on reorderable/mutable lists; FAIL rendering unbounded
   lists (hundreds+) with no virtualization when the repo has a virtual list primitive.
 
