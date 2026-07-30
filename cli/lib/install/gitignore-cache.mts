@@ -25,6 +25,10 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/review-runs/',
   '.devkit/last-ship-gates-*.log',
   '.devkit/reconcile-manifest.json',
+  // Not a cache — a LOCAL preference (adhd-session-start.mjs reads it as the durable off switch).
+  // Ignored for the same reason the caches are: committing it would impose one reader's output
+  // preference on everyone who clones the repo.
+  '.devkit/adhd-off',
 ];
 
 // Append any missing cache-ignore line to <cwd>/.gitignore (idempotent). Mirrors ensureFallowGitignore.
