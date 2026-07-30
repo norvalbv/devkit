@@ -58,16 +58,18 @@ const RETIRED_COMMANDS: Partial<Record<string, Partial<Record<AgentProvider, rea
 
 /**
  * Reclaim exact commands written by pre-ledger releases after their live registration disappears.
- * These are strip-only and remain scoped to components the previous install explicitly owned.
+ * The exact retired command is itself the ownership proof: pre-ledger configs can contain one even
+ * when their later component selection never recorded its owner (sc-1321). Keep the component-id
+ * parameter for caller compatibility, but do not let a deselected component strand its old command.
  */
 export function stripRetiredRegistrations(
   document: unknown,
-  componentIds: readonly string[],
+  _componentIds: readonly string[],
   provider: AgentProvider,
 ): { document: unknown; changed: boolean } {
   const commands = new Set(
-    [...new Set(componentIds)].flatMap(
-      (componentId) => RETIRED_COMMANDS[componentId]?.[provider] ?? [],
+    Object.values(RETIRED_COMMANDS).flatMap(
+      (commandsByProvider) => commandsByProvider?.[provider] ?? [],
     ),
   );
   if (!commands.size || provider === 'codex') return { document, changed: false };

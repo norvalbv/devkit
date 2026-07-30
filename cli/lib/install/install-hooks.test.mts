@@ -291,6 +291,71 @@ describe('installHookRegistrations', () => {
     expect(cursorCommands).not.toContain('.cursor/hooks/fallow-gate.sh');
   });
 
+  it('reclaims a retired fallow command after fallow was deselected', () => {
+    const root = tmpRepo();
+    installHookRegistrations(root, ['agentHooks'], { targets: ['claude'] });
+    const settings = claude(root);
+    settings.hooks.PreToolUse = [
+      {
+        matcher: 'Bash',
+        hooks: [
+          {
+            type: 'command',
+            command:
+              'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+          },
+        ],
+      },
+    ];
+    writeFileSync(join(root, '.claude', 'settings.json'), JSON.stringify(settings));
+
+    const stale = checkHookRegistrations(root, ['agentHooks'], { targets: ['claude'] });
+    expect(stale.ok).toBe(false);
+    expect(stale.missing).toContain('claude:retired-registration');
+
+    installHookRegistrations(root, ['agentHooks'], {
+      targets: ['claude'],
+      legacyOwnedComponentIds: ['agentHooks'],
+    });
+
+    expect(claudeCommands(root)).not.toContain(
+      'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+    );
+    expect(checkHookRegistrations(root, ['agentHooks'], { targets: ['claude'] }).ok).toBe(true);
+  });
+
+  it('reclaims a retired fallow command when no hook component remains selected', () => {
+    const root = tmpRepo();
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(
+      join(root, '.claude', 'settings.json'),
+      JSON.stringify({
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'Bash',
+              hooks: [
+                {
+                  type: 'command',
+                  command:
+                    'FALLOW_GATE_COMMIT_ONLY=1 bash "$CLAUDE_PROJECT_DIR/.claude/hooks/fallow-gate.sh"',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).missing).toContain(
+      'claude:retired-registration',
+    );
+
+    installHookRegistrations(root, [], { targets: ['claude'] });
+
+    expect(checkHookRegistrations(root, [], { targets: ['claude'] }).ok).toBe(true);
+  });
+
   it('does not infer exact unledgered registrations without explicit legacy authority', () => {
     const root = tmpRepo();
     const targets = ['claude', 'cursor'];
