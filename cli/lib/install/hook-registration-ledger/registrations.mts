@@ -7,7 +7,7 @@
  *
  * Each registration:
  *   registrationId — stable identity shared by future provider-native projections
- *   event    — a Claude hook event (UserPromptSubmit | PreToolUse | PostToolUse | Stop | PreCompact)
+ *   event    — a Claude hook event (SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | PreCompact)
  *   matcher  — the Claude matcher string ('' = all)
  *   command  — the shell command (uses $CLAUDE_PROJECT_DIR; the consumer's repo root)
  *
@@ -75,6 +75,18 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       event: 'PostToolUse',
       matcher: 'Bash',
       command: `node "$CLAUDE_PROJECT_DIR"/${PKG}/gate-engine/search-tool/search-tool-counter${SELF_EXT}`,
+    },
+  ],
+  // The i-have-adhd output style is ALWAYS-ON by selection: the skill sets
+  // disable-model-invocation, so nothing but this hook can start it. `compact` is in the matcher
+  // deliberately — the style's "rest of the session" persistence is instruction text, not
+  // enforcement, so it has to be re-asserted after a compaction or it silently decays.
+  adhd: [
+    {
+      registrationId: 'adhd:session-start',
+      event: 'SessionStart',
+      matcher: 'startup|resume|clear|compact',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-session-start.mjs"',
     },
   ],
   // story 17 — agent-hooks: synced scripts under the consumer's .claude/hooks/ (self-skip when
