@@ -69,6 +69,22 @@ describe('adhd SessionStart hook', () => {
     expect(ctx.trimStart().startsWith('# i-have-adhd')).toBe(true);
   });
 
+  it('strips CRLF frontmatter too — a Windows checkout must not leak YAML into context', () => {
+    // The LF-only pattern silently fails to match under core.autocrlf, and the frontmatter then
+    // rides into every session as noise. ponytail-frink's injector has the same shape, so this is
+    // a class of bug rather than a one-off.
+    const root = mkTmp('adhd-crlf-');
+    const dir = join(root, '.claude', 'skills', 'i-have-adhd');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'SKILL.md'),
+      '---\r\nname: i-have-adhd\r\nlicense: MIT\r\n---\r\n# i-have-adhd\r\n\r\nLead with the next action.\r\n',
+    );
+    const ctx = JSON.parse(run(root).stdout).hookSpecificOutput.additionalContext;
+    expect(ctx).not.toContain('license: MIT');
+    expect(ctx.trimStart().startsWith('# i-have-adhd')).toBe(true);
+  });
+
   it("appends devkit's footer without touching the vendored file", () => {
     // The vendored SKILL.md must stay byte-identical to its pinned upstream (vendored-skills.test),
     // so anything devkit adds has to be composed at inject time.

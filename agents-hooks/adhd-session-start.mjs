@@ -31,7 +31,11 @@ let body;
 try {
   // Inject the BODY only: the YAML frontmatter is skill-loader metadata (name/description/license),
   // not instructions, and shipping it as context would just be noise.
-  body = readFileSync(skillPath, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  // \r?\n throughout: a Windows checkout (core.autocrlf) yields CRLF, and an LF-only pattern
+  // would silently fail to match — leaking the YAML frontmatter into the injected context.
+  body = readFileSync(skillPath, 'utf8')
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
+    .trim();
 } catch {
   process.exit(0); // skill not synced here — say nothing
 }
