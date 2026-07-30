@@ -70,11 +70,25 @@ describe('devkit upgrade — optional component offer', () => {
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
 
-    expect(up.stdout).toContain('3c. new optional components');
-    expect(up.stdout).toMatch(/devkit bundles adhd/i);
+    expect(up.stdout).toContain('3c. newly bundled optional skills');
+    expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
     expect(up.stdout).toContain('--adhd');
     // Reported, not applied.
     expect(existsSync(join(root, '.claude', 'skills', 'i-have-adhd'))).toBe(false);
+  });
+
+  it('names WHAT is on offer, never devkit\'s internal word "component"', () => {
+    // `component` is the Selection-toggle mechanism; a user told they can install a "component"
+    // learns nothing. The copy is rendered from OptionalComponent.kind for exactly this reason.
+    const root = legacyFixture();
+    const out = run(root, 'upgrade').stdout;
+    expect(out).toMatch(/i-have-adhd skill/);
+    const offerSection = out.slice(out.indexOf('3c.'), out.indexOf('4.'));
+    // Bans describing the OFFERED thing as a component. "the Agent skills component" is fine and
+    // deliberate — that names a real prerequisite by the label the wizard shows.
+    expect(offerSection).not.toMatch(/optional components/i);
+    expect(offerSection).not.toMatch(/adhd component/i);
+    expect(offerSection).not.toMatch(/component selection/i);
   });
 
   it('leaves the key ABSENT on a non-TTY run, so a real offer still happens later', () => {
@@ -86,7 +100,7 @@ describe('devkit upgrade — optional component offer', () => {
     expect(config(root).components.adhd).toBeUndefined();
 
     // Still offered on the next run — the notice is not a one-shot.
-    expect(run(root, 'upgrade').stdout).toMatch(/devkit bundles adhd/i);
+    expect(run(root, 'upgrade').stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
   });
 
   it('does NOT re-nag once the component was answered', () => {
@@ -97,8 +111,8 @@ describe('devkit upgrade — optional component offer', () => {
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toContain('none — component selection unchanged');
-    expect(up.stdout).not.toMatch(/devkit bundles adhd/i);
+    expect(up.stdout).toContain('none — selection unchanged');
+    expect(up.stdout).not.toMatch(/devkit bundles the i-have-adhd skill/i);
   });
 
   it('preserves an accepted component across upgrade', () => {
@@ -127,7 +141,7 @@ describe('devkit upgrade — optional component offer', () => {
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toMatch(/devkit bundles adhd/i);
+    expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
     expect(config(root).components.adhd).toBeUndefined();
   });
 
@@ -135,7 +149,7 @@ describe('devkit upgrade — optional component offer', () => {
     const root = legacyFixture();
     const up = run(root, 'upgrade', '--dry-run');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toMatch(/\[dry-run\] would offer: adhd/);
+    expect(up.stdout).toMatch(/\[dry-run\] would offer the i-have-adhd skill/);
     expect(config(root).components.adhd).toBeUndefined();
   });
 });

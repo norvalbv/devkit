@@ -83,8 +83,8 @@ const SEARCHCODE_OPTION = {
 // writes, so it only ever arrives because someone ticked this box.
 const ADHD_OPTION = {
   id: 'adhd',
-  label: 'i-have-adhd',
-  hint: 'ADHD-friendly output style — /i-have-adhd (optional, off by default; needs Agent skills)',
+  label: 'i-have-adhd skill',
+  hint: 'ADHD-friendly output style, invoked with /i-have-adhd (off by default; needs Agent skills)',
 };
 
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
@@ -387,7 +387,7 @@ function summarize(
       `${on('skills')} skills · ${on('agents')} agents → ${surfaces} (skipping anything git tracks)`,
       `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
       `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
-      `${on('adhd')} ${ADHD_OPTION.label} skill`,
+      `${on('adhd')} ${ADHD_OPTION.label}`,
     ].join('\n');
   }
   const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map(
@@ -399,7 +399,7 @@ function summarize(
   );
   lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
-  lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label} skill`);
+  lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
   lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
     lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
