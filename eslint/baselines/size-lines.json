@@ -2,11 +2,11 @@
   "maxLines": 500,
   "maxTestLines": 0,
   "files": {
-    "cli/commands/doctor.mts": 643,
+    "cli/commands/doctor.mts": 641,
     "cli/commands/init.mts": 1283,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
     "cli/lib/husky/husky-block.mts": 527,
-    "cli/lib/overlay.mts": 559,
+    "cli/lib/overlay.mts": 558,
     "gate-engine/co-occurrence/matcher.mts": 543,
     "gate-engine/critique/eval/bench.mts": 1165,
     "gate-engine/decisions/detect.mts": 543,

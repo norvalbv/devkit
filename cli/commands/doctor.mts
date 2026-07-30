@@ -500,8 +500,7 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   if (sel.agents && surfaces.length) advise(checkAgentAssets(cwd, 'agents', surfaces));
   if (hooks.scripts.length && surfaces.length)
     advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
-  if (hooks.components.length && surfaces.length)
-    advise(checkRegistrations(cwd, hooks.components, surfaces, true));
+  if (surfaces.length) advise(checkRegistrations(cwd, hooks.components, surfaces, true));
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   if (sel.fallow) {
     const wired =
@@ -570,8 +569,7 @@ async function collectResults(
   if (hooks.scripts.length && surfaces.length)
     results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
   if (sel.searchSteering) results.push(checkSearchToolBins());
-  if (hooks.components.length && surfaces.length)
-    results.push(checkRegistrations(cwd, hooks.components, surfaces));
+  if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
   if (!standalone) results.push(checkPin(cwd));
