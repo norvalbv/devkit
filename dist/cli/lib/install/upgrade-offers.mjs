@@ -77,28 +77,33 @@ export async function offerLineGrowth(cwd, sel, dryRun) {
  * as a decision nobody made and suppresses the offer permanently.
  */
 export async function offerOptionalComponents(recorded, sel, dryRun) {
-    console.log('\n3c. new optional components');
     const unoffered = unofferedComponents(recorded);
+    // Name what these ARE (skills, …) rather than "components" — that is the internal word for the
+    // selection toggle, and telling a user they can install a "component" says nothing. See
+    // OptionalComponent.kind.
+    const kinds = [...new Set(unoffered.map((c) => `${c.kind}s`))].join(' / ') || 'add-ons';
+    console.log(`\n3c. newly bundled optional ${kinds}`);
     if (!unoffered.length) {
-        console.log('  • none — component selection unchanged');
+        console.log('  • none — selection unchanged');
         return [];
     }
     const ids = unoffered.map((c) => c.id);
+    const describe = (c) => `the ${c.label} ${c.kind}`;
     if (dryRun) {
         for (const c of unoffered)
-            console.log(`  [dry-run] would offer: ${c.id} (${c.hint})`);
+            console.log(`  [dry-run] would offer ${describe(c)} (${c.hint})`);
         return ids;
     }
     if (!interactive()) {
         // Non-TTY: REPORT, never auto-add — the same policy as step 3. Deliberately leaves the keys
         // absent so the repo still gets a real offer the next time someone upgrades interactively.
         for (const c of unoffered)
-            console.log(`  • devkit bundles ${c.id} (${c.hint}) — enable with 'devkit init ${c.flag}'`);
+            console.log(`  • devkit bundles ${describe(c)} (${c.hint}) — enable with 'devkit init ${c.flag}'`);
         return ids;
     }
     const picked = await multiselect({
-        message: 'New optional components available since your last install — select any to add',
-        options: unoffered.map((c) => ({ value: c.id, label: c.label, hint: c.hint })),
+        message: `New optional ${kinds} available since your last install — select any to add`,
+        options: unoffered.map((c) => ({ value: c.id, label: `${c.label} ${c.kind}`, hint: c.hint })),
         // Nothing pre-checked: these are opt-in by definition, so Enter must mean "no thanks".
         initialValues: [],
         required: false,

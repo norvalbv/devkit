@@ -886,7 +886,7 @@ export async function applyInit(cwd, plan) {
     // Deliberately NOT auto-enabling skills: that would install a dozen unrequested assets.
     if (selection.adhd && !selection.skills) {
         console.log('8c. i-have-adhd');
-        console.log('  ! Agent skills is off — nothing written. Re-run with skills selected to sync the skill.');
+        console.log('  ! Agent skills is off — the i-have-adhd skill has no surface to sync into (nothing written).');
     }
     // Removals (deselected + present).
     applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);

@@ -2,6 +2,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageDir } from "../../fs-helpers.mjs";
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+export const ADHD_SESSION_HOOK = 'adhd-session-start.mjs';
 export const FALLOW_STAGED_GATE = 'fallow-staged-gate.sh';
 export function bundledHookNames() {
     return readdirSync(join(packageDir(), 'agents-hooks'), {
@@ -11,12 +12,15 @@ export function bundledHookNames() {
         .map((entry) => entry.name);
 }
 /** The exact hook-script set implied by Devkit component selection. */
-export function hookScriptsFor({ agentHooks, decisions, fallow, }) {
+export function hookScriptsFor({ agentHooks, decisions, fallow, adhd, }) {
     const all = bundledHookNames();
-    const independentlyOwned = new Set([DECISION_EDIT_HOOK, FALLOW_STAGED_GATE]);
+    // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
+    // in, and deselecting agent hooks must not prune them.
+    const independentlyOwned = new Set([DECISION_EDIT_HOOK, FALLOW_STAGED_GATE, ADHD_SESSION_HOOK]);
     return all.filter((name) => (agentHooks && !independentlyOwned.has(name)) ||
         (decisions && name === DECISION_EDIT_HOOK) ||
-        (fallow && name === FALLOW_STAGED_GATE));
+        (fallow && name === FALLOW_STAGED_GATE) ||
+        (adhd && name === ADHD_SESSION_HOOK));
 }
 function hookComponents(selection, searchSteering) {
     const decisions = selection.guards?.includes('decisions') ?? false;
@@ -25,6 +29,7 @@ function hookComponents(selection, searchSteering) {
         selection.agentHooks && 'agentHooks',
         decisions && 'decisions',
         selection.fallow && 'fallow',
+        selection.adhd && 'adhd',
     ].filter((value) => Boolean(value));
 }
 /** Derive the hook-owning components and exact script set from one recorded selection. */
@@ -37,6 +42,7 @@ export function selectedHookAssets(selection, { searchSteering = true } = {}, pr
             agentHooks: Boolean(selection.agentHooks),
             decisions,
             fallow: Boolean(selection.fallow),
+            adhd: Boolean(selection.adhd),
         }),
     };
 }

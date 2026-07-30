@@ -393,7 +393,7 @@ async function runOverlayDoctor(cwd, cfg, fix) {
         advise(checkAgentAssets(cwd, 'agents', surfaces));
     if (hooks.scripts.length && surfaces.length)
         advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
-    if (hooks.components.length && surfaces.length)
+    if (surfaces.length)
         advise(checkRegistrations(cwd, hooks.components, surfaces, true));
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     if (sel.fallow) {
@@ -447,7 +447,7 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
     if (sel.searchSteering)
         results.push(checkSearchToolBins());
-    if (hooks.components.length && surfaces.length)
+    if (surfaces.length)
         results.push(checkRegistrations(cwd, hooks.components, surfaces));
     if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
         results.push(checkBaselines(cwd));
