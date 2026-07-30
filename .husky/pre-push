@@ -1,3 +1,4 @@
+#!/usr/bin/env sh
 # Heavier checks before sharing — kept off pre-commit so commits stay fast.
-bun run typecheck || exit 1
-bun run test:run || exit 1
+devkit_root=$(git rev-parse --show-toplevel)
+exec bash "$devkit_root/cli/lib/husky/pre-push-validation.sh" "$@"
