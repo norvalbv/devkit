@@ -1076,7 +1076,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   if (selection.adhd && !selection.skills) {
     console.log('8c. i-have-adhd');
     console.log(
-      '  ! Agent skills is off — nothing written. Re-run with skills selected to sync the skill.',
+      '  ! Agent skills is off — the i-have-adhd skill has no surface to sync into (nothing written).',
     );
   }
 

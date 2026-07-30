@@ -311,9 +311,15 @@ export function skillNamesForSelection(
   });
 }
 
-/** An opt-in component `upgrade` can offer once to a repo that predates it. */
+/** An opt-in add-on `upgrade` can offer once to a repo that predates it. */
 export interface OptionalComponent {
   id: ComponentToggleId;
+  /**
+   * WHAT the consumer actually gets. `component` is devkit's internal word for a selection toggle;
+   * it says nothing about the thing being installed, so every user-facing string is rendered from
+   * this instead ("the i-have-adhd skill", not "the adhd component").
+   */
+  kind: 'skill';
   label: string;
   hint: string;
   /** The `devkit init` flag that enables it — printed in the non-TTY notice. */
@@ -323,19 +329,23 @@ export interface OptionalComponent {
 }
 
 /**
- * Opt-in components `devkit upgrade` offers ONCE to repos that predate them. The analog of
- * {@link newBundledGates} for the component half, and the reason a new optional component no longer
- * needs its own bespoke `upgrade` step (the line-growth block, step 3b, is the one that predates this).
+ * The opt-in ADD-ONS `devkit upgrade` offers ONCE to repos that predate them — currently skills.
+ * The analog of {@link newBundledGates} for the non-gate half, and the reason a new opt-in add-on no
+ * longer needs its own bespoke `upgrade` step (the line-growth block, step 3b, predates this).
  *
- * Only genuinely OPTIONAL components belong here — never a recommended one. A recommended component
- * arrives through the ordinary init/upgrade refresh; this table exists for the things a repo must
- * actively choose.
+ * Each entry is a selectable `Selection` toggle — a "component" in devkit's internal vocabulary —
+ * but that word describes the MECHANISM, not the thing. `kind` carries the thing, and all copy is
+ * rendered from it, so a user is never told they are installing a "component".
+ *
+ * Only genuinely OPTIONAL entries belong here — never a recommended one. A recommended component
+ * arrives through the ordinary init/upgrade refresh; this table is for what a repo must choose.
  */
 export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
   {
     id: 'adhd',
+    kind: 'skill',
     label: 'i-have-adhd',
-    hint: 'ADHD-friendly output style — invoke with /i-have-adhd (needs Agent skills)',
+    hint: 'ADHD-friendly output style — a vendored MIT skill, invoked with /i-have-adhd; needs the Agent skills component',
     flag: '--adhd',
     since: '0.47.0',
   },
