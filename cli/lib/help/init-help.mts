@@ -22,9 +22,11 @@ Usage:
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).
   --search-code          Opt this repo in to the semantic search index (off by default).
-  --adhd                 Also sync the i-have-adhd SKILL — an ADHD-friendly output style
-                         invoked with /i-have-adhd (off by default; needs --skills).
-                         --no-adhd keeps it off, and removes it on a re-run.
+  --adhd                 Sync the i-have-adhd SKILL — an ADHD-friendly output style — and
+                         keep it ALWAYS ON via a SessionStart hook (off by default;
+                         needs --skills). Turn it off for this session by saying "stop
+                         adhd mode", durably with .devkit/adhd-off, or drop it with
+                         --no-adhd (which also removes it on a re-run).
   --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
                          bins; add nothing to package.json. Requires \`bun add -g\` devkit.
   --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the
