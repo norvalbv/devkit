@@ -488,4 +488,56 @@ describe('catalog and generated views', () => {
     expect(offsetPreferred['README.md']).toContain('Newer UTC metric');
     expect(offsetPreferred['README.md']).not.toContain('Older offset metric');
   });
+
+  it('expands reviewer cohort metrics into per-reviewer suite sub-rows', () => {
+    const source = repositorySource(ROOT, 'working');
+    const catalog = loadCatalog(source);
+    const history = (source.read('docs/benchmarks/history.jsonl') ?? '')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as BenchmarkEvent);
+    const template = history.find((event) => event.evidence === 'accepted');
+    if (!template) throw new Error('missing accepted fixture event');
+    const cohortMetric = (section: string, suffix: string, label: string): MetricObservation => ({
+      id: `${section}:${suffix}`,
+      label: `${section} ${label}`,
+      value: 1,
+      unit: 'ratio',
+      direction: 'higher',
+      numerator: 9,
+      denominator: 9,
+      inferenceUnit: 'row',
+    });
+    const fleet: BenchmarkEvent = {
+      ...template,
+      id: 'evt-reviewer-fleet-cohorts',
+      suiteId: 'reviewer-fleet',
+      recordedAt: '2099-01-02T00:00:00Z',
+      metrics: [
+        cohortMetric(
+          'frontend-security-reviewer@sonnet@cascade-on',
+          'first-fail-recall',
+          'first-pass FAIL recall',
+        ),
+        cohortMetric('frontend-security-reviewer@sonnet@cascade-on', 'clean-pass', 'clean pass'),
+        cohortMetric(
+          'backend-performance-reviewer@sonnet@cascade-on',
+          'first-fail-recall',
+          'first-pass FAIL recall',
+        ),
+      ],
+    };
+    const outputs = generatedOutputs(source, catalog, [...history, fleet]);
+    const readme = outputs['README.md'];
+    expect(readme).toContain('↳ frontend-security-reviewer (sonnet, cascade-on)');
+    expect(readme).toContain('↳ backend-performance-reviewer (sonnet, cascade-on)');
+    expect(readme).toContain('first-pass FAIL recall: 9/9 (100.0%)');
+    // A single-section or sectionless suite stays a flat row: the critique line keeps its
+    // original headline and gains no arrow prefix anywhere before the reviewer-fleet block.
+    const critiqueLine = readme.split('\n').find((line) => line.startsWith('| Feature critique '));
+    expect(critiqueLine).toBeDefined();
+    const arrowRows = readme.split('\n').filter((line) => line.startsWith('| ↳'));
+    expect(arrowRows).toHaveLength(2); // exactly the two cohort sections, nothing else
+    expect(outputs['docs/benchmarks/README.md']).toContain('↳ frontend-security-reviewer');
+  });
 });
