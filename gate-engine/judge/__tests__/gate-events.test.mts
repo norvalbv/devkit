@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../devkit-version.mts';
-import { emitCacheHit, emitGateEvent } from '../gate-events.mts';
+import { emitCacheHit, emitGateEvent, emitGateTiming } from '../gate-events.mts';
 
 const SHIP_ENV = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'DEVKIT_SHIP_REPO', 'DEVKIT_SHIP_BRANCH'];
 
@@ -73,7 +73,7 @@ describe('emitGateEvent', () => {
   it('emitCacheHit rides the judge_exec label, so hit rate needs no join', () => {
     const sink = path.join(dir, 'gate-events.jsonl');
     process.env.DEVKIT_GATE_EVENTS = sink;
-    emitCacheHit('review:correctness-reviewer', 'sonnet');
+    emitCacheHit('review:correctness-reviewer', 'sonnet', 12_345);
     emitCacheHit('decision-alignment'); // that store records the verdict, not the judge
     const [hit, modelless] = readFileSync(sink, 'utf8')
       .trim()
@@ -83,9 +83,24 @@ describe('emitGateEvent', () => {
       type: 'cache_hit',
       judge: 'review:correctness-reviewer',
       model: 'sonnet',
+      duration_ms: 12345,
     });
     expect(modelless).toMatchObject({ type: 'cache_hit', judge: 'decision-alignment' });
     expect('model' in modelless).toBe(false); // absent, never an empty-string placeholder
+  });
+
+  it('emits a normalized cache-aware stage timing summary', () => {
+    const sink = path.join(dir, 'gate-events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    emitGateTiming('review', 125.4, 9_876.6, 'partial', 2.9);
+    expect(JSON.parse(readFileSync(sink, 'utf8').trim())).toMatchObject({
+      type: 'gate_timing',
+      gate: 'review',
+      actual_duration_ms: 125,
+      effective_duration_ms: 9877,
+      cache_state: 'partial',
+      parallelism: 2,
+    });
   });
 
   it('is a no-op when the sink env is unset (ad-hoc commit, not a ship)', () => {

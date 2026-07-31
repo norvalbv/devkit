@@ -17,6 +17,7 @@ import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '..
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
+import { parallelMakespan } from '../telemetry/timing.mts';
 
 // Env hygiene: the gate reads GUARD_*/FRINK_* — a developer's real env must not steer assertions.
 const ENV_KEYS = [
@@ -445,9 +446,21 @@ describe('runReviewGate — cascade + exit contract', () => {
     ]);
     // The model of the verdict being REUSED (pin-aware), not the cascade default.
     expect(hits.find((e) => e.judge === 'review:correctness-reviewer').model).toBe('sonnet');
+    expect(hits.every((e) => typeof e.duration_ms === 'number')).toBe(true);
+    expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
+      gate: 'review',
+      cache_state: 'full',
+      parallelism: 2,
+    });
     // A synthetic pass row would inflate review_result's fail-rate denominator and flatten the
     // duration percentiles that any judgement-cache change has to be sized against.
     expect(events.filter((e) => e.type === 'review_result')).toEqual([]);
+  });
+
+  it('models reviewer duration as the bounded scheduler makespan, not summed agent time', () => {
+    expect(parallelMakespan([10_000, 4_000, 8_000, 3_000], 2)).toBe(13_000);
+    expect(parallelMakespan([10_000, 4_000, 8_000, 3_000], 1)).toBe(25_000);
+    expect(parallelMakespan([10_000, 4_000, 8_000, 3_000], 9)).toBe(10_000);
   });
 
   // ── review_scope / review_skipped ────────────────────────────────────────────────────────────

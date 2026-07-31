@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { checkPrefix, clearPrefix, computeKey, recordPrefix } from '../prefix-cache.mts';
+import {
+  checkPrefix,
+  clearPrefix,
+  computeKey,
+  prefixEntry,
+  recordPrefix,
+} from '../prefix-cache.mts';
 
 const CLI = fileURLToPath(new URL('../cli.mts', import.meta.url));
 
@@ -68,6 +74,11 @@ describe('checkPrefix / recordPrefix', () => {
     writeFileSync(join(repo, 'a.txt'), 'two');
     execSync('git add .', { cwd: repo });
     expect(checkPrefix(repo)).toBe(false);
+  });
+  it('retains the uncached prefix duration as additive metadata', () => {
+    const repo = gitRepo();
+    recordPrefix(repo, { durationMs: 12_345 });
+    expect(prefixEntry(repo)).toMatchObject({ duration_ms: 12345 });
   });
   it('no-ops without DEVKIT_SHIP (non-ship commits neither trust nor write keys)', () => {
     const repo = gitRepo();

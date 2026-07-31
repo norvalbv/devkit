@@ -90,12 +90,16 @@ export function computeKey(cwd, { hookPath, scope = 'devkit-guards', versionSalt
 }
 /** True when the exact staged tree already ran all-green (ship runs only). */
 export function checkPrefix(cwd, opts = {}) {
+    return Boolean(prefixEntry(cwd, opts));
+}
+/** Metadata for the exact all-green prefix, or null when it must run. */
+export function prefixEntry(cwd, opts = {}) {
     if (!shipScoped())
-        return false;
+        return null;
     const key = computeKey(cwd, opts);
     if (!key)
-        return false;
-    return Boolean(loadEntries(devkitDataFile(cwd, STORE_FILE))[key]);
+        return null;
+    return loadEntries(devkitDataFile(cwd, STORE_FILE))[key] ?? null;
 }
 /** Record the current staged tree as all-green (ship runs only; best-effort). */
 export function recordPrefix(cwd, opts = {}) {
@@ -104,7 +108,14 @@ export function recordPrefix(cwd, opts = {}) {
     const key = computeKey(cwd, opts);
     if (!key)
         return;
-    saveEntries(devkitDataFile(cwd, STORE_FILE), { [key]: { at: new Date().toISOString() } });
+    saveEntries(devkitDataFile(cwd, STORE_FILE), {
+        [key]: {
+            at: new Date().toISOString(),
+            ...(typeof opts.durationMs === 'number' && Number.isFinite(opts.durationMs)
+                ? { duration_ms: Math.max(0, Math.round(opts.durationMs)) }
+                : {}),
+        },
+    });
 }
 /** Drop every cached prefix key (the escape hatch for gitignored-input staleness). */
 export function clearPrefix(cwd) {

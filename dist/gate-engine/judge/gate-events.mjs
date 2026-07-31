@@ -36,8 +36,32 @@ import { runEnvelope, telemetrySink } from "./run-context.mjs";
  * that would inflate the fail-rate denominator and flatten the duration percentiles read off the
  * very same rows any follow-up has to size itself against.
  */
-export function emitCacheHit(judge, model) {
-    emitGateEvent({ type: 'cache_hit', judge, ...(model ? { model } : {}) });
+export function emitCacheHit(judge, model, durationMs) {
+    emitGateEvent({
+        type: 'cache_hit',
+        judge,
+        ...(model ? { model } : {}),
+        ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+            ? { duration_ms: Math.max(0, Math.round(durationMs)) }
+            : {}),
+    });
+}
+/** Cache-aware wall-clock summary for one serial or bounded-parallel gate stage. */
+export function emitGateTiming(gate, actualDurationMs, effectiveDurationMs, cacheState, parallelism = 1) {
+    emitGateEvent({
+        type: 'gate_timing',
+        gate,
+        actual_duration_ms: Math.max(0, Math.round(actualDurationMs)),
+        effective_duration_ms: Math.max(0, Math.round(effectiveDurationMs)),
+        cache_state: cacheState,
+        parallelism: Math.max(1, Math.floor(parallelism)),
+    });
+}
+/** Emit a serial gate's timing and preserve its caller's exit-code contract. */
+export function finishGateTiming(gate, startedAt, code, cacheState = 'none', effectiveDurationMs) {
+    const actualDurationMs = Date.now() - startedAt;
+    emitGateTiming(gate, actualDurationMs, Math.max(actualDurationMs, effectiveDurationMs ?? actualDurationMs), cacheState);
+    return code;
 }
 export function emitGateEvent(ev) {
     const file = telemetrySink();

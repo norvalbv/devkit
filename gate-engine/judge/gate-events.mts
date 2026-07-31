@@ -37,8 +37,51 @@ import { runEnvelope, telemetrySink } from './run-context.mts';
  * that would inflate the fail-rate denominator and flatten the duration percentiles read off the
  * very same rows any follow-up has to size itself against.
  */
-export function emitCacheHit(judge: string, model?: unknown): void {
-  emitGateEvent({ type: 'cache_hit', judge, ...(model ? { model } : {}) });
+export function emitCacheHit(judge: string, model?: unknown, durationMs?: unknown): void {
+  emitGateEvent({
+    type: 'cache_hit',
+    judge,
+    ...(model ? { model } : {}),
+    ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+      ? { duration_ms: Math.max(0, Math.round(durationMs)) }
+      : {}),
+  });
+}
+
+/** Cache-aware wall-clock summary for one serial or bounded-parallel gate stage. */
+export function emitGateTiming(
+  gate: string,
+  actualDurationMs: number,
+  effectiveDurationMs: number,
+  cacheState: 'none' | 'partial' | 'full',
+  parallelism = 1,
+): void {
+  emitGateEvent({
+    type: 'gate_timing',
+    gate,
+    actual_duration_ms: Math.max(0, Math.round(actualDurationMs)),
+    effective_duration_ms: Math.max(0, Math.round(effectiveDurationMs)),
+    cache_state: cacheState,
+    parallelism: Math.max(1, Math.floor(parallelism)),
+  });
+}
+
+/** Emit a serial gate's timing and preserve its caller's exit-code contract. */
+export function finishGateTiming(
+  gate: string,
+  startedAt: number,
+  code: number,
+  cacheState: 'none' | 'full' = 'none',
+  effectiveDurationMs?: number,
+): number {
+  const actualDurationMs = Date.now() - startedAt;
+  emitGateTiming(
+    gate,
+    actualDurationMs,
+    Math.max(actualDurationMs, effectiveDurationMs ?? actualDurationMs),
+    cacheState,
+  );
+  return code;
 }
 
 export function emitGateEvent(ev: Record<string, unknown>): void {

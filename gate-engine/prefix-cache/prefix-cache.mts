@@ -68,6 +68,8 @@ interface KeyOpts {
   versionSalt?: string;
 }
 
+type RecordOpts = KeyOpts & { durationMs?: number };
+
 /**
  * The cache key for the current staged index, or null when it cannot be computed (not a
  * repo, unmerged index, unreadable hook file) — null always means "run the gates".
@@ -104,18 +106,30 @@ export function computeKey(
 
 /** True when the exact staged tree already ran all-green (ship runs only). */
 export function checkPrefix(cwd: string, opts: KeyOpts = {}) {
-  if (!shipScoped()) return false;
+  return Boolean(prefixEntry(cwd, opts));
+}
+
+/** Metadata for the exact all-green prefix, or null when it must run. */
+export function prefixEntry(cwd: string, opts: KeyOpts = {}) {
+  if (!shipScoped()) return null;
   const key = computeKey(cwd, opts);
-  if (!key) return false;
-  return Boolean(loadEntries(devkitDataFile(cwd, STORE_FILE))[key]);
+  if (!key) return null;
+  return loadEntries(devkitDataFile(cwd, STORE_FILE))[key] ?? null;
 }
 
 /** Record the current staged tree as all-green (ship runs only; best-effort). */
-export function recordPrefix(cwd: string, opts: KeyOpts = {}) {
+export function recordPrefix(cwd: string, opts: RecordOpts = {}) {
   if (!shipScoped()) return;
   const key = computeKey(cwd, opts);
   if (!key) return;
-  saveEntries(devkitDataFile(cwd, STORE_FILE), { [key]: { at: new Date().toISOString() } });
+  saveEntries(devkitDataFile(cwd, STORE_FILE), {
+    [key]: {
+      at: new Date().toISOString(),
+      ...(typeof opts.durationMs === 'number' && Number.isFinite(opts.durationMs)
+        ? { duration_ms: Math.max(0, Math.round(opts.durationMs)) }
+        : {}),
+    },
+  });
 }
 
 /** Drop every cached prefix key (the escape hatch for gitignored-input staleness). */
