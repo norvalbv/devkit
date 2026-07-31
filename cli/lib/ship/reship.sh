@@ -87,10 +87,12 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
-# Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
+# Body: --body "<text>" wins (explicit, no temp file); else use the same bounded stdin contract as
+# new-ship so an inherited, open-but-idle background-task pipe cannot block re-ship forever.
+. "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
-else BODY=$(cat); fi
+else ship_read_stdin_body; fi
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
