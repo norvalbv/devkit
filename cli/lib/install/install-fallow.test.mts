@@ -44,8 +44,8 @@ afterEach(() => {
 });
 
 describe('FALLOW_PINNED_VERSION', () => {
-  it('is a concrete semver, never a floating tag', () => {
-    expect(FALLOW_PINNED_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  it('pins the approved fallow release exactly, never a floating tag', () => {
+    expect(FALLOW_PINNED_VERSION).toBe('3.10.0');
   });
 });
 
