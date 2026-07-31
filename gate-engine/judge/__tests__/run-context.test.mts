@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../devkit-version.mts';
 import {
   _resetRunContextForTests,
   originatingAgent,
@@ -75,6 +76,7 @@ describe('run-context', () => {
       repo: 'devkit',
       branch: 'fix/sc-1239',
       source: 'unknown',
+      devkit_version: devkitVersion(),
     });
     expect(telemetrySink()).toBe('/tmp/x/gate-events.jsonl');
   });
@@ -86,6 +88,7 @@ describe('run-context', () => {
       repo: '',
       branch: '',
       source: 'unknown',
+      devkit_version: devkitVersion(),
     });
   });
 
@@ -100,6 +103,7 @@ describe('run-context', () => {
       repo: 'owners-web',
       branch: 'feature/pr',
       source: 'unknown',
+      devkit_version: devkitVersion(),
     });
   });
 
@@ -116,6 +120,7 @@ describe('run-context', () => {
     expect(typeof env.repo).toBe('string');
     expect(typeof env.branch).toBe('string');
     expect(env.source).toBe('unknown'); // agent vars cleared → unknown
+    expect(env.devkit_version).toBe(devkitVersion());
     expect(telemetrySink()).toMatch(/\.devkit[/\\]telemetry[/\\]gate-events\.jsonl$/);
   });
 

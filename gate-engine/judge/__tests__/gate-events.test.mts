@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../devkit-version.mts';
 import { emitCacheHit, emitGateEvent } from '../gate-events.mts';
 
 const SHIP_ENV = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'DEVKIT_SHIP_REPO', 'DEVKIT_SHIP_BRANCH'];
@@ -41,6 +42,7 @@ describe('emitGateEvent', () => {
       reviewer: 'correctness-reviewer',
       status: 'fail',
       ship_id: 'ship-1',
+      devkit_version: devkitVersion(),
     });
     expect(typeof first.ts).toBe('string');
     expect(JSON.parse(lines[1]).gate).toBe('size');

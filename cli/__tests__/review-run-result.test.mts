@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const RUN_RESULT = fileURLToPath(
@@ -55,6 +56,7 @@ describe('review terminal telemetry', () => {
       run_mode: 'review',
       repo: 'consumer',
       branch: 'feature/review',
+      devkit_version: devkitVersion(),
     });
     expect(events.some(({ type }) => type === 'ship_attempt' || type === 'ship_result')).toBe(
       false,
