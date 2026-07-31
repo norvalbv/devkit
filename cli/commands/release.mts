@@ -1,21 +1,23 @@
 /**
  * devkit release — MAINTAINER-ONLY. Run INSIDE the @norvalbv/devkit repo to cut a release:
- * bump the version → run tests → commit → tag vX.Y.Z → push the current branch + tag.
+ * bump the version → run tests → build dist → open a release PR. After its squash merge, tag the
+ * merge commit (never the release branch commit, which does not land on main).
  *
  *   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]
  *
  * Refuses outside the devkit repo (it would bump a consumer's package.json) and refuses on a
- * dirty tree (feature work must be committed first — release only bumps the version + tags).
+ * dirty tree (feature work must be committed first — release only bumps the version + dist).
  *
- * Source is real TypeScript (.mts); this command compiles it to the shipped .mjs `dist/` and commits
- * that dist ON the release commit only (dist is gitignored on working branches). A node smoke gate
- * verifies the built bin runs before the tag lands, so a git-installed consumer at the tag gets
- * prebuilt .mjs with no consumer-side build.
+ * Source is real TypeScript (.mts); this command compiles it to the shipped .mjs `dist/` and ships
+ * that dist in the release PR (dist is gitignored on working branches). A node smoke gate verifies
+ * the built bin runs before the PR opens, so the eventual tag carries prebuilt .mjs with no
+ * consumer-side build.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cancel, confirm, isCancel } from '@clack/prompts';
+import ship from './ship.mts';
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
@@ -41,19 +43,22 @@ function git(args: string[], cwd: string): string {
 
 export const meta = {
   name: 'release',
-  summary: 'MAINTAINER-ONLY: bump version, test, commit, tag, push.',
-  help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, commit, tag, push.
+  summary: 'MAINTAINER-ONLY: bump version, test, and open a release PR.',
+  help: `devkit release — MAINTAINER-ONLY (run inside the devkit repo): bump version, test, build, and open a release PR.
 
 Usage:
   devkit release [patch|minor|major|<x.y.z>] [--dry-run] [--yes]
 
   --dry-run   Print the plan; change nothing.
-  --yes       Skip the confirm prompt.
+  --yes       Skip the release-PR confirm prompt.
 
-Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists.`,
+Refuses outside the devkit repo, on a dirty tree, or if the target tag already exists. The tag is
+created only after the PR is squash-merged; the command prints the exact post-merge steps. Release
+files remain in the working tree until \`devkit reconcile --apply\` after the PR merges.`,
 };
 
-// Reason: flat release orchestration: a sequence of independent guard early-returns (no package.json / not devkit repo / dirty tree / bad bump / tag exists / non-TTY / tests fail) then trivial sequential steps (bump · commit · tag · push); high branch COUNT from stacked guards, each trivial with near-zero nesting
+// Reason: flat release orchestration: independent guard early-returns followed by sequential
+// test · bump · build · ship steps; high branch COUNT comes from stacked shallow guards.
 // fallow-ignore-next-line complexity
 export default async function release(args: string[], cwd: string): Promise<number> {
   const dryRun = args.includes('--dry-run');
@@ -68,7 +73,7 @@ export default async function release(args: string[], cwd: string): Promise<numb
   const pkgRaw = readFileSync(pkgPath, 'utf8');
   const pkg = JSON.parse(pkgRaw) as { name: string; version: string };
 
-  // Guard 1 — this is the devkit repo (not a consumer; release bumps + tags + pushes devkit itself).
+  // Guard 1 — this is the devkit repo (not a consumer; release bumps + ships devkit itself).
   if (pkg.name !== '@norvalbv/devkit') {
     console.error(`devkit release runs only in the devkit repo (found "${pkg.name}").`);
     return 1;
@@ -88,26 +93,34 @@ export default async function release(args: string[], cwd: string): Promise<numb
     return 1;
   }
   const tag = `v${target}`;
-  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const baseBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  if (baseBranch === 'HEAD') {
+    console.error(
+      'devkit release: detached HEAD — run from the branch the release PR should target.',
+    );
+    return 1;
+  }
   if (git(['tag', '--list', tag], cwd)) {
     console.error(`devkit release: tag ${tag} already exists.`);
     return 1;
   }
+  const releaseBranch = `release/${tag}`;
 
   console.log(`devkit release: ${current} → ${target} (${bump})`);
   console.log(
-    `  bump package.json + README pins · run tests · commit · tag ${tag} · push origin ${branch} + ${tag}`,
+    `  bump package.json + README pins · run tests · build dist · open PR ${releaseBranch} → ${baseBranch}`,
   );
+  console.log(`  tag ${tag} only after the PR is squash-merged`);
   if (dryRun) {
     console.log('  --dry-run: nothing written.');
     return 0;
   }
   if (!yes) {
     if (!process.stdout.isTTY) {
-      console.error('devkit release: non-interactive — pass --yes to confirm the push.');
+      console.error('devkit release: non-interactive — pass --yes to confirm the release PR.');
       return 1;
     }
-    const ok = await confirm({ message: `Release ${tag} and push to origin?` });
+    const ok = await confirm({ message: `Build ${tag} and open its release PR?` });
     if (isCancel(ok) || !ok) {
       cancel('Aborted.');
       return 0;
@@ -130,14 +143,13 @@ export default async function release(args: string[], cwd: string): Promise<numb
   }
   writeFileSync(pkgPath, bumped);
 
-  const filesToCommit = ['package.json'];
+  const releaseFiles = ['package.json'];
   const readmePath = join(cwd, 'README.md');
   if (existsSync(readmePath)) {
     writeFileSync(readmePath, bumpReadmePins(readFileSync(readmePath, 'utf8'), target));
-    filesToCommit.push('README.md');
+    releaseFiles.push('README.md');
   }
-
-  // Build the shipped dist (real .mts → .mjs + asset copy) and smoke-test it before it can be tagged.
+  // Build the shipped dist (real .mts → .mjs + asset copy) and smoke-test it before opening the PR.
   console.log('Building dist…');
   try {
     execFileSync('bun', ['run', 'build'], { cwd, stdio: 'inherit' });
@@ -160,15 +172,49 @@ export default async function release(args: string[], cwd: string): Promise<numb
     return 1;
   }
 
-  git(['add', ...filesToCommit], cwd);
-  // dist/ is gitignored on working branches (diffs stay source-only); force-add it for THIS release
-  // commit so the tag carries prebuilt .mjs.
-  git(['add', '-f', 'dist'], cwd);
-  git(['commit', '-m', `release: ${tag}`], cwd);
-  git(['tag', '-a', tag, '-m', `devkit ${tag}`], cwd);
-  git(['push', 'origin', branch], cwd);
-  git(['push', 'origin', tag], cwd);
+  const trackedDistFiles = git(['ls-files', '--', 'dist'], cwd).split('\n').filter(Boolean);
+  const ignoredDistAfter = git(['ls-files', '-o', '-i', '--exclude-standard', '--', 'dist'], cwd)
+    .split('\n')
+    .filter(Boolean);
+  releaseFiles.push(...trackedDistFiles, ...ignoredDistAfter);
 
-  console.log(`✓ Released ${tag} → origin/${branch} + ${tag}`);
+  const prBody = [
+    `Automated release PR for ${tag}.`,
+    '',
+    'The version bump, README pins, full test suite, rebuilt dist, and dist smoke check completed',
+    'before this PR was opened.',
+    '',
+    `Do not tag the release branch commit. After squash-merging, tag the merge commit as ${tag}.`,
+  ].join('\n');
+  const publishCode = ship(
+    [
+      releaseBranch,
+      `release: ${tag}`,
+      '--base',
+      baseBranch,
+      '--body',
+      prBody,
+      '--',
+      ...releaseFiles,
+    ],
+    cwd,
+  );
+  if (publishCode !== 0) {
+    console.error(
+      `devkit release: could not publish ${releaseBranch}; release files remain in the working tree for recovery.`,
+    );
+    return publishCode;
+  }
+
+  console.log(`✓ Opened release PR ${releaseBranch} → ${baseBranch}; no tag created.`);
+  console.log('Release files remain in this working tree; after the PR merges, run:');
+  console.log('  devkit reconcile --apply');
+  console.log('After the PR is squash-merged, tag its merge commit:');
+  console.log(
+    `  merge_sha=$(gh pr view ${releaseBranch} --json state,mergeCommit --jq 'select(.state == "MERGED") | .mergeCommit.oid')`,
+  );
+  console.log(`  test -n "$merge_sha" || { echo "${releaseBranch} is not merged"; exit 1; }`);
+  console.log(`  git tag -a ${tag} "$merge_sha" -m "devkit ${tag}"`);
+  console.log(`  git push origin ${tag}`);
   return 0;
 }
