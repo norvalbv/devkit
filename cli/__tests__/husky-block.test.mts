@@ -454,6 +454,8 @@ describe('buildCommitMsgHook + installCommitMsgHook (the managed .husky/commit-m
     const hook = buildCommitMsgHook({ guards: ['review', 'sentry'] });
     expect(hook.startsWith('#!/bin/sh')).toBe(true);
     expect(hook).toContain('export PATH');
+    expect(hook).toContain('git rev-parse --git-path devkit-commit-attempt');
+    expect(hook).toContain("trap '__dk_clear_commit_state' EXIT");
     expect(hook.trimEnd().endsWith('exit 0')).toBe(true); // fail-open exit 2 must never propagate
   });
 
@@ -509,6 +511,9 @@ describe('buildCommitMsgHook + installCommitMsgHook (the managed .husky/commit-m
 describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 1 → 1)', () => {
   const runCommitMsgHook = (stubExit) => {
     const home = mkdtempSync(join(tmpdir(), 'dk-commit-msg-exec-'));
+    execFileSync('git', ['init', '-q'], { cwd: home });
+    const commitState = join(home, '.git', 'devkit-commit-attempt');
+    writeFileSync(commitState, `commit-run-test\n${'0'.repeat(40)}\n`);
     const bin = join(home, '.bun', 'bin');
     mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, 'bunx'), `#!/bin/sh\nexit ${stubExit}\n`);
@@ -517,28 +522,38 @@ describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 
     writeFileSync(hookPath, buildCommitMsgHook({ guards: ['review', 'sentry'] }));
     try {
       const stdout = execFileSync('sh', ['-e', hookPath, 'COMMIT_EDITMSG'], {
+        cwd: home,
         env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      return { status: 0, stdout };
+      return { status: 0, stdout, stateExists: existsSync(commitState) };
     } catch (e) {
-      return { status: e.status, stdout: `${e.stdout ?? ''}` };
+      return {
+        status: e.status,
+        stdout: `${e.stdout ?? ''}`,
+        stateExists: existsSync(commitState),
+      };
     }
   };
 
   it('both judges clean (exit 0) → the hook exits 0', () => {
-    expect(runCommitMsgHook(0).status).toBe(0);
+    const r = runCommitMsgHook(0);
+    expect(r.status).toBe(0);
+    expect(r.stateExists).toBe(false);
   });
 
   it('fail-open (exit 2) never propagates — the explicit exit 0 wins', () => {
-    expect(runCommitMsgHook(2).status).toBe(0);
+    const r = runCommitMsgHook(2);
+    expect(r.status).toBe(0);
+    expect(r.stateExists).toBe(false);
   });
 
   it('a confirmed block (exit 1) blocks the commit with the guidance echoed', () => {
     const r = runCommitMsgHook(1);
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('Confirmed completeness gap');
+    expect(r.stateExists).toBe(false);
   });
 });
 

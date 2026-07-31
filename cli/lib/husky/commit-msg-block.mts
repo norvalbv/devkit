@@ -41,6 +41,16 @@ const TESTED_STATUS_COMMENT = `# \`|| var=$?\` makes each judge's exit a TESTED 
 # fail-open would BLOCK the commit (inverting the fail-open invariant) and the exit-1 guidance
 # would never print. (Same guard the pre-commit AI fragments use: \`rc=0; … || rc=$?\`.)`;
 
+// The pre-commit and commit-msg hooks are separate Git child processes, so environment exports do
+// not cross the boundary. Pre-commit leaves a tree-bound attempt id in this worktree's Git metadata;
+// run-context reads it for the message judges, and this trap removes it on every commit-msg exit.
+const COMMIT_ATTEMPT_HANDOFF = `# Rejoin this hook to pre-commit's telemetry attempt, then clear the handoff on exit.
+__dk_commit_state="$(git rev-parse --git-path devkit-commit-attempt 2>/dev/null || true)"
+__dk_clear_commit_state() {
+    [ -n "$__dk_commit_state" ] && rm -f "$__dk_commit_state" 2>/dev/null || true
+}
+trap '__dk_clear_commit_state' EXIT`;
+
 // One judge invocation line. Package mode runs the bundled bin via bunx; standalone runs the
 // GLOBAL bin, command -v-guarded so a machine without devkit is never blocked (the standalone
 // pre-commit precedent). Both capture the exit into `rcVar` (see TESTED_STATUS_COMMENT).
@@ -122,7 +132,7 @@ export function buildCommitMsgBlock(
 ): string | null {
   const selected = commitMsgGuards(selection.guards);
   if (!selected.length) return null;
-  const pieces = [TESTED_STATUS_COMMENT];
+  const pieces = [COMMIT_ATTEMPT_HANDOFF, TESTED_STATUS_COMMENT];
   if (selected.includes('review')) pieces.push(completenessFragment(standalone));
   if (selected.includes('sentry')) pieces.push(sentryFragment(standalone));
   const body = pieces.join('\n\n');

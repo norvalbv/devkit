@@ -9,6 +9,7 @@
  * `# devkit:<id>` / `# /devkit:<id>` sentinels so removal is an exact slice, never a
  * brittle regex against shell prose.
  */
+import { buildCommitTerminalFragment } from "./commit-terminal.mjs";
 import { markEnd, markStart } from "./husky.mjs";
 import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from "./review-fragments.mjs";
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
@@ -79,30 +80,6 @@ const standaloneQavisLines = `if command -v guard-qavis-advisory >/dev/null 2>&1
     qarc=0; __dk_no_git_env guard-qavis-advisory --gate || qarc=$?
     [ "$qarc" -eq 3 ] && exit 1
 fi`;
-// Plain commits lack ship's wrapper terminal, so the hook emits `commit_result` on EXIT. Compute the
-// tree at emit time because biome may restage files; ships stay silent and emit `ship_result` instead.
-// This claims the shell's EXIT trap (no other devkit fragment defines one).
-const COMMIT_TERMINAL_FRAGMENT = `# devkit:commit-terminal
-if [ -z "\${DEVKIT_SHIP_ID:-}" ] && [ -z "\${DEVKIT_REVIEW_ID:-}" ] && [ -z "\${DEVKIT_NO_TELEMETRY:-}" ]; then
-    __dk_t0="$(date +%s)"
-    __dk_esc() { printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
-    __dk_commit_result() {
-        [ -n "\${__dk_done:-}" ] && return 0
-        __dk_done=1
-        __dk_tree="$(git write-tree 2>/dev/null)" || return 0
-        [ -n "$__dk_tree" ] || return 0
-        __dk_events="\${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
-        mkdir -p "$(dirname "$__dk_events")" 2>/dev/null || return 0
-        printf '{"type":"commit_result","ship_id":"commit-%s","run_mode":"commit","repo":"%s","branch":"%s","exit_code":%d,"duration_s":%d,"ts":"%s"}\\n' \\
-            "$__dk_tree" \\
-            "$(__dk_esc "$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")")" \\
-            "$(__dk_esc "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)")" \\
-            "\${1:-0}" "$(( $(date +%s) - __dk_t0 ))" \\
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$__dk_events" 2>/dev/null || true
-    }
-    trap '__dk_commit_result "$?"' EXIT
-fi
-# /devkit:commit-terminal`;
 // The biome format-staged-files step (only when the `biome` component is selected).
 const BIOME_FRAGMENT = `# devkit:biome-format
 # Format staged files with biome, then re-stage exactly those (scoped — never a blanket
@@ -164,7 +141,12 @@ function wantsDeterministic(selection) {
  * because package-relative `git add` paths would be wrong. `structureCmd` is stack-resolved.
  */
 export function buildGuardBlock(selection, pkgRel = '') {
-    const pieces = [COMMIT_TERMINAL_FRAGMENT, ...DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER];
+    const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
+    const pieces = [
+        buildCommitTerminalFragment(handoff),
+        ...DK_HOOK_HELPERS,
+        DK_REVIEW_BASELINE_HELPER,
+    ];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
     if (!pkgRel && selection.biome)
         pieces.push(BIOME_FRAGMENT);
@@ -212,9 +194,10 @@ const DK_GATE_AI_HELPER = '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || r
  * structure joins via `--structure`, and `pkgRel` scopes monorepos.
  */
 export function buildStandaloneBlock(selection, pkgRel = '') {
+    const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
     const pieces = [
         '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
-        COMMIT_TERMINAL_FRAGMENT,
+        buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
         DK_GATE_AI_HELPER,
     ];
@@ -280,8 +263,9 @@ fi`;
  * audit that the overlay hooksPath would otherwise shadow.
  */
 export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false } = {}) {
+    const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
     const gates = [
-        COMMIT_TERMINAL_FRAGMENT,
+        buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
         DK_GATE_AI_HELPER,
         DK_REVIEW_BASELINE_HELPER,
