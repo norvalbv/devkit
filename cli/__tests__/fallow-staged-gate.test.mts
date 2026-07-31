@@ -199,6 +199,24 @@ describe('fallow-staged-gate.sh', () => {
     expect(existsSync(join(dir, 'argv.log'))).toBe(false);
   });
 
+  it('fails OPEN before fallow when the staged diff exceeds its 10 MiB stdin cap', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    writeFileSync(join(dir, 'a.ts'), `export const payload = '${'x'.repeat(10 * 1024 * 1024)}';\n`);
+    spawnSync('git', ['add', 'a.ts'], { cwd: dir });
+    const binDir = stubFallow(
+      dir,
+      '{"verdict":"fail","attribution":{"duplication_introduced":0}}',
+      { version: '3.10.0' },
+    );
+
+    const r = run(dir, binDir);
+
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/staged diff is .* bytes \(cap 10485760\).*skipping/i);
+    expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
   it('fails OPEN on a fallow older than the floor (an unknown flag is indistinguishable from a real error)', () => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
