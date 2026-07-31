@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 /** Stage `content` in a fixture repo, run `generate`, return the enumerated item names. */
-function generatedItems(skill, content) {
+function generatedItems(skill, content, filename = 'staged.ts') {
   const repo = mkdtempSync(join(tmpdir(), 'catalog-trigger-'));
   dirs.push(repo);
   const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -36,7 +36,7 @@ function generatedItems(skill, content) {
     JSON.stringify({ review: { backendRoots: ['src'], frontendRoots: ['src'] } }),
   );
   mkdirSync(join(repo, 'src'), { recursive: true });
-  writeFileSync(join(repo, 'src', 'staged.ts'), content);
+  writeFileSync(join(repo, 'src', filename), content);
   git(['add', '.']);
   const r = spawnSync('node', [skillScript(skill), 'generate'], { cwd: repo, encoding: 'utf8' });
   expect(r.status).toBe(0);
@@ -115,15 +115,140 @@ const CASES = [
     fires: "window.addEventListener('message', (e) => apply(e.data));\n",
     quiet: "window.addEventListener('click', (e) => apply(e.detail));\n",
   },
+  // Always-fire trigger tightening: each quiet twin is the exact false-positive class that made
+  // the item fire on virtually every ship in telemetry while never once failing.
+  {
+    skill: 'frontend-security',
+    item: 'oauth-security',
+    fires: "const target = AUTH_BASE + '?redirect_uri=' + encodeURIComponent(cb);\n",
+    quiet: 'const [state, setState] = useState(initialScope);\n',
+  },
+  {
+    skill: 'frontend-security',
+    item: 'input-validation',
+    fires: 'const field = <input value={name} onChange={setName} />;\n',
+    quiet: 'const value = computeTotal(rows);\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'oauth-security',
+    fires: "const url = base + '?client_id=' + CLIENT_ID + '&response_type=code';\n",
+    // `state`/`scope` words and an ordinary bearer Authorization header are not OAuth evidence.
+    quiet: 'const state = machine.state; const bearer = req.headers.authorization;\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'sql-injection',
+    fires: "const q = 'SELECT id FROM users WHERE org_id = 1';\n",
+    // Bare `query`, and a non-database `.execute()` call, must both stay quiet.
+    quiet: 'const me = useQuery(); await command.execute();\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'input-validation',
+    fires: 'const parsed = schema.parse(req.body);\n',
+    quiet: 'const tab = router.query.tab;\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'error-handling',
+    fires: 'try { await run(); } catch (err) { respond(500); }\n',
+    quiet: 'const error = lastRun.error; respond(error);\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'logging-security',
+    fires: "logger.info({ userId }, 'session started');\n",
+    quiet: 'const loginState = validateLogic(payload);\n',
+  },
+  {
+    skill: 'api-security',
+    item: 'processing-security',
+    fires: "app.post('/upload', handleUpload);\n",
+    quiet: 'const file = resolvePath(dir, name); copy(file);\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'db-query-optimization',
+    fires: 'const rows = await prisma.user.findMany({ orgId });\n',
+    quiet: 'const result = client.query(text);\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'pagination',
+    fires: 'return paginate(items, { offset });\n',
+    quiet: 'const limit = MAX_ITEMS; loadPage(page, limit);\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'indexing',
+    // Same filename for both halves: proves the a/src/index.ts diff-header path alone no
+    // longer trips the item, while real index work in that same file still does.
+    file: 'index.ts',
+    fires: "const rows = await db.findMany({ orderBy: { createdAt: 'desc' } });\n",
+    quiet: 'export const noop = () => {};\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'async-handling',
+    fires: 'for (const sub of subs) { await deliver(sub); }\n',
+    quiet: 'const user = await getUser(id); return toJson(user);\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'connection-pooling',
+    fires: 'const pool = new Pool({ connectionString });\n',
+    quiet: 'const opts = { max: 5, idle: 30, timeout: 1000 };\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'logging-overhead',
+    fires: "logger.debug({ payload }, 'delivering');\n",
+    quiet: 'const loginError = await login(user);\n',
+  },
+  {
+    skill: 'backend-performance',
+    item: 'n-plus-one',
+    fires: 'const users = ids.map((id) => repo.find(id));\n',
+    // A .map( far from an unrelated await: the bounded gap must not couple them.
+    quiet: `const ids = rows.map((r) => r.id);\n// ${'x'.repeat(400)}\nawait flush(ids);\n`,
+  },
+  {
+    skill: 'frontend-performance',
+    item: 'bundle-size',
+    // A runtime import split across diff lines is still one added package dependency.
+    fires: "import {\n  BarChart,\n} from 'recharts';\n",
+    quiet: "import type { Props } from 'react';\nimport { helper } from './helper';\n",
+  },
+  {
+    skill: 'frontend-performance',
+    item: 'dependency-size',
+    fires: "import { chart } from 'd3';\n",
+    // A multi-line `import type` must not fire on its own from-clause line.
+    quiet: "import type {\n  Props,\n} from 'react';\nimport { helper } from './helper';\n",
+  },
+  {
+    skill: 'frontend-performance',
+    item: 'css-optimization',
+    fires: "import './theme.css';\n",
+    quiet: "const row = <div className={cx('row')} />;\n",
+  },
+  {
+    skill: 'frontend-performance',
+    item: 'hooks-optimization',
+    // Regression pin: this trigger holds real catches — tightening elsewhere must not touch it.
+    fires: 'useEffect(() => { sync(); }, [deps]);\n',
+    quiet: 'const effect = buildEffect();\n',
+  },
 ];
 
 describe('catalog trigger regexes (fires / stays quiet pairs)', () => {
-  for (const { skill, item, fires, quiet } of CASES) {
+  for (const { skill, item, fires, quiet, file } of CASES) {
     it(`${skill}/${item} fires on its construct`, () => {
-      expect(generatedItems(skill, fires)).toContain(item);
+      expect(generatedItems(skill, fires, file)).toContain(item);
     });
     it(`${skill}/${item} stays quiet on the safe twin`, () => {
-      expect(generatedItems(skill, quiet)).not.toContain(item);
+      expect(generatedItems(skill, quiet, file)).not.toContain(item);
     });
   }
 });
