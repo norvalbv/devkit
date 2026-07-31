@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,10 +206,16 @@ describe('update — command-level (mode detection, comparison basis, install br
     expect(ranInstall()).toBe(false);
   });
 
-  it('global mode names devkit with its git tag so Bun replaces the installed global dependency', async () => {
-    const dir = makeRepo({ dep: null }); // package.json without the dep
+  it('global mode works without a package.json and names devkit so Bun replaces the installed dependency', async () => {
+    const dir = makeRepo({}); // no package.json: the documented neutral-directory global path
     silence();
     expect(await update([], dir)).toBe(0);
+    const cacheCall = bunCalls().find(
+      (call) => (call[1] as string[] | undefined)?.join(' ') === 'pm cache rm',
+    );
+    const cacheCwd = (cacheCall?.[2] as { cwd?: string } | undefined)?.cwd;
+    expect(cacheCwd).not.toBe(dir);
+    expect(existsSync(join(cacheCwd ?? '', 'package.json'))).toBe(true);
     expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
       'bun',
       ['add', '-g', `@norvalbv/devkit@${REF}#v9.9.9`],

@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from '../lib/fs-helpers.mts';
+import { packageDir, readJson } from '../lib/fs-helpers.mts';
 
 export const DEP = '@norvalbv/devkit';
 
@@ -194,7 +194,9 @@ export default async function update(args: string[], cwd: string): Promise<numbe
     return 0;
   }
 
-  run('bun', ['pm', 'cache', 'rm'], cwd);
+  // Global mode is deliberately runnable outside a project, but `bun pm cache rm` requires a
+  // package.json in its cwd. Devkit's own package root is controlled and always has one.
+  run('bun', ['pm', 'cache', 'rm'], packageDir());
   if (mode === 'package') {
     // `mode === 'package'` is only ever set after pkgRaw was read from disk, so `?? ''` is a
     // never-taken fallback that lets TS see a string without changing any reachable behavior.

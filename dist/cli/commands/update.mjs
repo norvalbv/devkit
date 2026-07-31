@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from "../lib/fs-helpers.mjs";
+import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 export const DEP = '@norvalbv/devkit';
 /**
  * The devkit git remote for `git ls-remote` + `bun add`. Defaults to git+https: the repo is public,
@@ -170,7 +170,9 @@ export default async function update(args, cwd) {
         console.log('  --dry-run: nothing installed.');
         return 0;
     }
-    run('bun', ['pm', 'cache', 'rm'], cwd);
+    // Global mode is deliberately runnable outside a project, but `bun pm cache rm` requires a
+    // package.json in its cwd. Devkit's own package root is controlled and always has one.
+    run('bun', ['pm', 'cache', 'rm'], packageDir());
     if (mode === 'package') {
         // `mode === 'package'` is only ever set after pkgRaw was read from disk, so `?? ''` is a
         // never-taken fallback that lets TS see a string without changing any reachable behavior.
