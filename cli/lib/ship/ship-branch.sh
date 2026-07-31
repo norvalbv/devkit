@@ -175,12 +175,13 @@ WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat — a piped/here-doc
-# body still works). Guard the TTY case: invoked interactively with no piped body, a bare `cat` would
-# block on terminal input. (Empty stdin already yields ""; no `|| true`, so a genuine read error
-# fails loud instead of silently shipping an empty body — nothing is created yet, so aborting is clean.)
+# body still works). TTY means no body; non-TTY uses a bounded read so an inherited, open-but-idle
+# background-task pipe fails loud instead of blocking forever. Nothing is created yet, so aborting is
+# clean.
+. "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
-else BODY=$(cat); fi
+else ship_read_stdin_body; fi
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
