@@ -12,8 +12,11 @@ duration averages.
 
 The generated pre-commit hook will create one unique identifier when an ordinary commit attempt
 starts and export it as `DEVKIT_COMMIT_ID`. Every gate process spawned by that hook inherits the same
-identifier, and the hook's `commit_result` terminal emits it unchanged. Ship and explicit review runs
-continue to use their existing authoritative identifiers.
+identifier, and the hook's `commit_result` terminal emits it unchanged. When commit-message judges
+are selected, pre-commit also writes the identifier and staged tree to a worktree-local Git metadata
+handoff. The separately launched commit-msg hook validates the tree, reuses the identifier, and
+removes the handoff on exit. Ship and explicit review runs continue to use their existing
+authoritative identifiers.
 
 The staged tree hash remains telemetry metadata (`commit_tree`) because it is useful for correlating
 retries of the same content. It is no longer the primary key for new hook-driven commit attempts.

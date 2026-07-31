@@ -233,7 +233,8 @@ describe('assembled hook — shell/OS variants', () => {
 // ── commit-terminal telemetry ──────────────────────────────────────────────────────────────
 // The hook is the only process that knows the whole chain's outcome, so it emits the
 // `commit_result` terminal for the every-commit telemetry run (run-context.mts contract).
-// These run the ASSEMBLED hook inside a real temp git repo so `git write-tree` correlates.
+// These run the ASSEMBLED hook inside a real temp git repo so attempt identity and tree correlation
+// are both exercised.
 describe('commit-terminal telemetry (real temp git repo)', () => {
   function runHookInRepo(env = {}, selection = { biome: false, guards: ALL_GUARDS }) {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-terminal-'));
@@ -256,7 +257,7 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     writeFileSync(
       join(bin, 'bunx'),
       // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional shell ${VAR:-default} expansion in the stubbed bunx script
-      '#!/bin/sh\ntool="$1"; shift\ncase "$tool" in\n  guard-deterministic) exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n',
+      '#!/bin/sh\ntool="$1"; shift\ncase "$tool" in\n  guard-deterministic) [ "${MUTATE_TREE:-0}" = 1 ] && { printf \'later\\n\' > telemetry-restaged.txt; git add telemetry-restaged.txt; }; printf \'%s\' "$DEVKIT_COMMIT_ID" > "$HOME/gate-id"; exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n',
     );
     chmodSync(join(bin, 'bunx'), 0o755);
     const hookPath = join(home, 'pre-commit');
@@ -284,7 +285,12 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     let events = [];
     if (existsSync(sink))
       events = readFileSync(sink, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
-    return { status, events, tree };
+    const gateId = existsSync(join(home, 'gate-id'))
+      ? readFileSync(join(home, 'gate-id'), 'utf8')
+      : null;
+    const commitStatePath = join(repo, '.git', 'devkit-commit-attempt');
+    const commitState = existsSync(commitStatePath) ? readFileSync(commitStatePath, 'utf8') : null;
+    return { status, events, tree, gateId, commitState };
   }
 
   function expectNoCommitTerminal(result: { status: number; events: Array<{ type?: string }> }) {
@@ -292,13 +298,16 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     expect(result.events.filter((event) => event.type === 'commit_result')).toEqual([]);
   }
 
-  it('a passing chain emits ONE commit_result correlated to the staged write-tree', () => {
+  it('a passing chain gives the gate and terminal one attempt id and retains the staged tree', () => {
     const r = runHookInRepo();
     expect(r.status).toBe(0);
     const terminals = r.events.filter((e) => e.type === 'commit_result');
     expect(terminals.length).toBe(1);
     const t = terminals[0];
-    expect(t.ship_id).toBe(`commit-${r.tree}`); // same id the gates' run-context derives
+    expect(t.ship_id).toMatch(/^commit-run-[A-Za-z0-9-]+$/);
+    expect(r.gateId).toBe(t.ship_id);
+    expect(t.commit_tree).toBe(r.tree);
+    expect(r.commitState).toBe(`${t.ship_id}\n${r.tree}\n`);
     expect(t.run_mode).toBe('commit');
     expect(t.exit_code).toBe(0);
     expect(t.repo).toBe('consumer-repo');
@@ -307,12 +316,33 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     expect(t.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
+  it('two attempts with identical staged content receive distinct ids', () => {
+    const first = runHookInRepo();
+    const second = runHookInRepo();
+    expect(second.tree).toBe(first.tree);
+    expect(second.events[0].ship_id).not.toBe(first.events[0].ship_id);
+  });
+
+  it('refreshes the handoff tree after a gate restages content', () => {
+    const r = runHookInRepo({ MUTATE_TREE: '1' });
+    const terminal = r.events.find((event) => event.type === 'commit_result');
+    expect(terminal.commit_tree).not.toBe(r.tree);
+    expect(r.commitState).toBe(`${terminal.ship_id}\n${terminal.commit_tree}\n`);
+  });
+
   it('a gate-blocked chain (deterministic exit 1) emits commit_result exit_code 1', () => {
     const r = runHookInRepo({ DET_RC: '1' });
     expect(r.status).toBe(1);
     const t = r.events.filter((e) => e.type === 'commit_result');
     expect(t.length).toBe(1);
     expect(t[0].exit_code).toBe(1);
+    expect(r.commitState).toBeNull();
+  });
+
+  it('does not leave a handoff when no commit-msg judge is selected', () => {
+    const r = runHookInRepo({}, { biome: false, guards: ['size'] });
+    expect(r.status).toBe(0);
+    expect(r.commitState).toBeNull();
   });
 
   it('inside a ship (DEVKIT_SHIP_ID set) the hook stays silent — ship_result is that terminal', () => {
