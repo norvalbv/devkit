@@ -99,6 +99,16 @@ describe('fallow-staged-gate.sh', () => {
     'echo alive',
     'bun test',
     'devkit ship codex/example "example" -- a.ts',
+    'git --version commit',
+    'git -v commit',
+    'git --help commit',
+    'git -h commit',
+    'git -C . --version commit',
+    'git --exec-path commit',
+    'git --html-path commit',
+    'git --man-path commit',
+    'git --info-path commit',
+    'git --list-cmds=main commit',
     'echo git commit',
     'echo "git commit -m quoted-prose"',
     'echo "; git commit -m quoted-prose"',
@@ -108,6 +118,18 @@ describe('fallow-staged-gate.sh', () => {
     const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
     expect(run(dir, binDir, { command }).status).toBe(0);
     expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
+  it.each([
+    'git -C . commit -m "test"',
+    'git -c commit.gpgsign=false commit -m "test"',
+    'command git --git-dir=.git commit -m "test"',
+    'git --exec-path=/usr/lib/git-core commit -m "test"',
+  ])('audits commits after supported Git global options: %s', (command) => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    expect(run(dir, binDir, { command }).status).toBe(2);
   });
 
   it('recognises Cursor beforeShellExecution command payloads', () => {

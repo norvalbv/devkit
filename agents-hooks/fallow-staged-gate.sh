@@ -71,8 +71,15 @@ const nonWs = "[^\\x20\\t\\r\\n\\f\\v]";
 const flag = `-${nonWs}+`;
 const arg = `[^-]${nonWs}*`;
 const unit = `${flag}${ws}+(${arg}${ws}+)?`;
-const commit = new RegExp(`^${ws}*(command${ws}+)?(${nonWs}*/)?git${ws}+(${unit})*commit(${ws}|$)`);
-if (segments.some((candidate) => commit.test(candidate))) process.stdout.write("COMMIT");
+const gitPrefix = `^${ws}*(command${ws}+)?(${nonWs}*/)?git${ws}+(${unit})*`;
+// These top-level actions exit before Git dispatches a subcommand, even if "commit" follows.
+const action = new RegExp(
+  `${gitPrefix}(-v|--version|-h|--help|--exec-path|--html-path|--man-path|--info-path|--list-cmds=${nonWs}+)(${ws}|$)`,
+);
+const commit = new RegExp(`${gitPrefix}commit(${ws}|$)`);
+if (segments.some((candidate) => !action.test(candidate) && commit.test(candidate))) {
+  process.stdout.write("COMMIT");
+}
 '
 )" || exit 0
 [ "$SCOPE" = "COMMIT" ] || exit 0
