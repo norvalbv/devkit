@@ -2,10 +2,11 @@
  * Per-run identity + telemetry-sink resolution shared by the gate-events and transcript-store
  * side-channels. A `devkit ship` exports DEVKIT_SHIP_ID + DEVKIT_GATE_EVENTS and every in-chain gate
  * correlates under that ship. OFF a ship, EVERY commit is captured BY DEFAULT: the sink defaults to
- * ~/.devkit/telemetry/gate-events.jsonl and the run is correlated by the staged tree hash
- * (`git write-tree`), which is identical across a single commit's decisions + review gate processes
- * and unique per staged content — no shared env and no hook change required. The reviewers already
- * run on every commit, so this only PERSISTS output they already produce.
+ * ~/.devkit/telemetry/gate-events.jsonl. The generated hook exports one DEVKIT_COMMIT_ID per attempt
+ * so its decisions + review gate processes and terminal event correlate without conflating a retry
+ * of identical staged content. The staged tree remains correlation metadata; older/direct gate
+ * invocations without the hook env retain the tree-derived id fallback. The reviewers already run
+ * on every commit, so this only PERSISTS output they already produce.
  *
  * Opt out with `DEVKIT_NO_TELEMETRY=1` — that disables ONLY the automatic every-commit capture; an
  * explicit ship (DEVKIT_SHIP_ID / DEVKIT_GATE_EVENTS set by the ship script) still emits.
@@ -16,9 +17,11 @@
  * never a broken commit.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { devkitVersion } from "../devkit-version.mjs";
+const LINE_SPLIT_RE = /\r?\n/;
 function truthy(v) {
     if (v === undefined)
         return false;
@@ -60,21 +63,38 @@ function git(args) {
         return null;
     }
 }
+/** Reuse pre-commit's attempt id in the separately launched commit-msg hook, but only for the same tree. */
+function handedOffCommitId(tree) {
+    const statePath = git(['rev-parse', '--git-path', 'devkit-commit-attempt']);
+    if (!statePath)
+        return undefined;
+    try {
+        const [id, handedOffTree] = readFileSync(statePath, 'utf8').split(LINE_SPLIT_RE);
+        if (id?.startsWith('commit-run-') && handedOffTree === tree)
+            return id;
+    }
+    catch {
+        // Best-effort telemetry: a missing/malformed handoff falls back to the staged tree id.
+    }
+    return undefined;
+}
 // Memoised per process — each of a commit's gates computes it once; a ship never reaches here.
 let commitCtx;
 function commitRunContext() {
     if (commitCtx !== undefined)
         return commitCtx;
-    // write-tree = the staged content's tree oid: identical across this commit's gate processes,
-    // unique per staged content (so an amend with new content is a distinct run). Read-only re: index.
+    // write-tree remains useful correlation metadata. It is not an attempt id: retries with unchanged
+    // staged content have the same tree and must stay separate runs downstream.
     const tree = git(['write-tree']);
     if (!tree) {
         commitCtx = null;
         return commitCtx;
     }
     const top = git(['rev-parse', '--show-toplevel']);
+    const attemptId = process.env.DEVKIT_COMMIT_ID?.trim() || handedOffCommitId(tree);
     commitCtx = {
-        id: `commit-${tree}`,
+        id: attemptId || `commit-${tree}`,
+        tree,
         repo: top ? path.basename(top) : '',
         branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
     };
@@ -133,6 +153,7 @@ export function runEnvelope() {
     return {
         ship_id: ctx.id,
         run_mode: 'commit',
+        commit_tree: ctx.tree,
         repo: ctx.repo,
         branch: ctx.branch,
         source,

@@ -22,6 +22,7 @@ const ENV = [
   'DEVKIT_REVIEW_BRANCH',
   'DEVKIT_SHIP_REPO',
   'DEVKIT_SHIP_BRANCH',
+  'DEVKIT_COMMIT_ID',
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_NO_TELEMETRY',
   'CLAUDECODE',
@@ -107,7 +108,7 @@ describe('run-context', () => {
     });
   });
 
-  it('off-ship, capture ON by default: runId = commit-<write-tree>, envelope has run_mode/repo/branch', () => {
+  it('off-ship without hook env keeps the legacy tree-derived fallback', () => {
     const repo = gitRepo();
     process.chdir(repo);
     _resetRunContextForTests();
@@ -117,6 +118,7 @@ describe('run-context', () => {
     const env = runEnvelope();
     expect(env.ship_id).toBe(id);
     expect(env.run_mode).toBe('commit');
+    expect(env.commit_tree).toMatch(/^[0-9a-f]{40}$/);
     expect(typeof env.repo).toBe('string');
     expect(typeof env.branch).toBe('string');
     expect(env.source).toBe('unknown'); // agent vars cleared → unknown
@@ -132,7 +134,44 @@ describe('run-context', () => {
     expect(telemetrySink()).toBeUndefined();
   });
 
-  it('the commit runId is STABLE for identical staged content (tree-hash based)', () => {
+  it('the generated hook attempt id wins while the staged tree remains metadata', () => {
+    const repo = gitRepo();
+    process.chdir(repo);
+    process.env.DEVKIT_COMMIT_ID = 'commit-run-attempt-123';
+    _resetRunContextForTests();
+    expect(runId()).toBe('commit-run-attempt-123');
+    expect(runEnvelope()).toMatchObject({
+      ship_id: 'commit-run-attempt-123',
+      run_mode: 'commit',
+      commit_tree: expect.stringMatching(/^[0-9a-f]{40}$/),
+    });
+  });
+
+  it('commit-msg reuses a matching pre-commit handoff id', () => {
+    const repo = gitRepo();
+    process.chdir(repo);
+    const tree = execSync('git write-tree', { encoding: 'utf8' }).trim();
+    writeFileSync(join(repo, '.git', 'devkit-commit-attempt'), `commit-run-handoff-123\n${tree}\n`);
+    _resetRunContextForTests();
+    expect(runId()).toBe('commit-run-handoff-123');
+    expect(runEnvelope()).toMatchObject({
+      ship_id: 'commit-run-handoff-123',
+      commit_tree: tree,
+    });
+  });
+
+  it('ignores a stale handoff for different staged content', () => {
+    const repo = gitRepo();
+    process.chdir(repo);
+    writeFileSync(
+      join(repo, '.git', 'devkit-commit-attempt'),
+      `commit-run-stale\n${'0'.repeat(40)}\n`,
+    );
+    _resetRunContextForTests();
+    expect(runId()).toMatch(/^commit-[0-9a-f]{40}$/);
+  });
+
+  it('the legacy fallback is stable for identical staged content', () => {
     const repo = gitRepo();
     process.chdir(repo);
     _resetRunContextForTests();
