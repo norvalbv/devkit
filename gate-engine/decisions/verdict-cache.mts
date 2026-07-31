@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mts';
 
 const STORE_FILE = 'decisions-verdict-cache.json';
@@ -40,10 +41,22 @@ export function verdictKey(judgeId: string, ...evidenceParts: unknown[]) {
 
 /** True when this exact evidence already earned its non-blocking verdict. */
 export function hasVerdict(cwd: string, key: string) {
-  return Boolean(loadEntries(devkitDataFile(cwd, STORE_FILE))[key]);
+  return Boolean(verdictMeta(cwd, key));
+}
+
+/** Metadata for an earned verdict; legacy entries simply lack duration_ms. */
+export function verdictMeta(cwd: string, key: string): VerdictMeta | null {
+  return loadEntries(devkitDataFile(cwd, STORE_FILE))[key] ?? null;
 }
 
 /** Remember an earned non-blocking verdict (best-effort). */
-export function saveVerdict(cwd: string, key: string) {
-  saveEntries(devkitDataFile(cwd, STORE_FILE), { [key]: { at: new Date().toISOString() } });
+export function saveVerdict(cwd: string, key: string, durationMs?: number) {
+  saveEntries(devkitDataFile(cwd, STORE_FILE), {
+    [key]: {
+      at: new Date().toISOString(),
+      ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+        ? { duration_ms: Math.max(0, Math.round(durationMs)) }
+        : {}),
+    },
+  });
 }

@@ -35,9 +35,20 @@ export function verdictKey(judgeId, ...evidenceParts) {
 }
 /** True when this exact evidence already earned its non-blocking verdict. */
 export function hasVerdict(cwd, key) {
-    return Boolean(loadEntries(devkitDataFile(cwd, STORE_FILE))[key]);
+    return Boolean(verdictMeta(cwd, key));
+}
+/** Metadata for an earned verdict; legacy entries simply lack duration_ms. */
+export function verdictMeta(cwd, key) {
+    return loadEntries(devkitDataFile(cwd, STORE_FILE))[key] ?? null;
 }
 /** Remember an earned non-blocking verdict (best-effort). */
-export function saveVerdict(cwd, key) {
-    saveEntries(devkitDataFile(cwd, STORE_FILE), { [key]: { at: new Date().toISOString() } });
+export function saveVerdict(cwd, key, durationMs) {
+    saveEntries(devkitDataFile(cwd, STORE_FILE), {
+        [key]: {
+            at: new Date().toISOString(),
+            ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+                ? { duration_ms: Math.max(0, Math.round(durationMs)) }
+                : {}),
+        },
+    });
 }

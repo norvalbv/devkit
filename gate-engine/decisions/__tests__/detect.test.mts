@@ -461,8 +461,19 @@ describe('--gate (integration, real git repo)', () => {
       },
     });
     expect(r.status).toBe(0);
-    const ev = JSON.parse(readFileSync(sink, 'utf8').trim());
-    expect(ev).toMatchObject({ type: 'gate_result', gate: 'decisions', status: 'pass' });
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.find((event) => event.type === 'gate_result')).toMatchObject({
+      gate: 'decisions',
+      status: 'pass',
+    });
+    expect(events.find((event) => event.type === 'gate_timing')).toMatchObject({
+      gate: 'decisions',
+      cache_state: 'none',
+      parallelism: 1,
+    });
   });
 
   it('blocks (1) on a large legacy deletion', () => {
@@ -586,7 +597,11 @@ describe('--gate (integration, real git repo)', () => {
         DEVKIT_SHIP_ID: 'ship-1',
       });
       expect(r.status).toBe(0);
-      const ev = JSON.parse(readFileSync(sink, 'utf8').trim().split('\n').pop() as string);
+      const ev = readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .find((event) => event.type === 'gate_result');
       expect(ev).toMatchObject({ gate: 'decisions', status: 'pass' });
       expect(typeof ev.transcript_ref).toBe('string');
       const abs = join(repo, ev.transcript_ref);

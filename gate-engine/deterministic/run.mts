@@ -34,8 +34,8 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { coverageBypassed } from '../config.mts';
-import { emitGateEvent } from '../judge/gate-events.mts';
-import { checkPrefix, recordPrefix } from '../prefix-cache/prefix-cache.mts';
+import { emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
+import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
@@ -232,6 +232,9 @@ function commandGate(label: string, cmd?: string): Gate {
  * Returns the single exit code the hook propagates.
  */
 export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts = {}) {
+  const startedAt = Date.now();
+  const finish = (code: number, cacheState: 'none' | 'full' = 'none', effectiveMs?: number) =>
+    finishGateTiming('deterministic', startedAt, code, cacheState, effectiveMs);
   const { exec = execFileSync } = opts;
   // `--only` is an execution narrowing request, never an authority grant. Validate it before cache
   // lookup, then intersect it with review's positive allowlist so a crafted hook cannot re-enable a
@@ -243,7 +246,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       console.error(
         `✗ guard-deterministic --only: ${why} (known: ${ALL_IDS.join(', ')}) — refusing to run.`,
       );
-      return 1;
+      return finish(1);
     }
   }
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
@@ -255,7 +258,7 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       console.error(
         `✗ guard-deterministic --only: gate id(s) not enabled for review: ${[...new Set(disallowed)].join(', ')} — refusing to run.`,
       );
-      return 1;
+      return finish(1);
     }
   }
   const effectiveIds = canonicalIds(opts.only ?? allowed);
@@ -264,7 +267,8 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   const cacheScope = prefixCacheScope(opts.scope, effectiveIds);
   // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
   // every gate. checkPrefix returns true = skip, false = run.
-  const skip = checkPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
+  const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
+  const skip = Boolean(cachedPrefix);
   const fails = [];
   if (!skip) {
     const ids = new Set(effectiveIds);
@@ -313,12 +317,18 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
       );
       console.error('   above for where each one actually resolved to.');
     }
-    return 1;
+    return finish(1);
   }
   // All green (or a prefix-skip, already recorded): record the key so an identical staged tree skips
   // next time (ship only — recordPrefix is a no-op otherwise).
-  if (!skip) recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope });
-  return 0;
+  if (!skip) {
+    const durationMs = Date.now() - startedAt;
+    recordPrefix(cwd, { hookPath: opts.hookPath, scope: cacheScope, durationMs });
+    return finish(0);
+  }
+  const cachedDuration =
+    typeof cachedPrefix?.duration_ms === 'number' ? cachedPrefix.duration_ms : undefined;
+  return finish(0, 'full', cachedDuration);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

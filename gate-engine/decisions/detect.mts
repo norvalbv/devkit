@@ -29,12 +29,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../config.mts';
 import { splitDiffByFile } from '../judge/diff-focus.mts';
-import { emitGateEvent } from '../judge/gate-events.mts';
+import { emitCacheHit, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { git, stagedFiles } from './git-io.mts';
-import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mts';
+import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mts';
 
 // 'cached' = staged vs HEAD (the gate); 'working' = whole tree vs HEAD (the Stop reminder).
 type DiffMode = 'cached' | 'working';
@@ -400,14 +400,15 @@ function strictShip() {
 function decisionStaged(cwd: string, decisionFileMatcher: RegExp): boolean {
   return stagedFiles(cwd).some((n) => decisionFileMatcher.test(n));
 }
-
-// ─── Dispatch ─────────────────────────────────────────────────────────────────
-
 function runGate() {
+  const startedAt = Date.now();
+  const finish = (
+    code: number,
+    cacheState: 'none' | 'full' = 'none',
+    effectiveMs?: number,
+  ): never => process.exit(finishGateTiming('decisions', startedAt, code, cacheState, effectiveMs));
   const cwd = process.cwd();
   const cfg = resolveGuardConfig(cwd);
-  // Whole body in the fail-open guard: ANY throw (git unavailable, a regression in the
-  // pure logic, a git/fs read error) must exit 2, never 1 — infra must never brick a commit.
   try {
     const decisionMatcher = decisionFileRe(cfg.decisionsDir);
     const entries = gatherEntries(cwd);
@@ -415,9 +416,7 @@ function runGate() {
     const staged = decisionStaged(cwd, decisionMatcher);
     const verdict = gateVerdict({ bypass: cfg.noLog, decisionStaged: staged, smells });
     if (verdict === 0) {
-      // Announce the pass (parity with the reviewer gate, which prints a line per reviewer) so a
-      // clean run is visibly RUN, not silently absent — under the hook's "🧭 Decision-log gate…"
-      // header, and as a telemetry pass event the dashboard can surface.
+      // Announce clean runs visibly and emit their pass telemetry.
       const detail = cfg.noLog
         ? 'bypassed (GUARD_NO_LOG)'
         : smells.length === 0
@@ -425,12 +424,10 @@ function runGate() {
           : `decision recorded ✓ (${smells.join(', ')})`;
       console.error(`decision-gate: ${detail}`);
       emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail });
-      process.exit(0);
+      finish(0);
     }
     // Regex says block — let the LLM try to clear a false positive (dep bump, sync, etc.).
-    // Evidence-only input: the smelled files' hunks, never the whole diff (see buildDetectJudgeInput).
-    // Prefixes forced OFF-config: a consumer's diff.noprefix/mnemonicPrefix must not change the
-    // segment-header format the extractor matches against (W-3: consumer git config is theirs).
+    // Evidence-only hunks; force stable prefixes despite consumer git config.
     const input = buildDetectJudgeInput(
       git(cwd, [
         '-c',
@@ -443,14 +440,17 @@ function runGate() {
       entries,
       cfg.boundaries,
     );
-    // An earned ROUTINE is cached on the exact evidence bytes: an identical re-run (a ship
-    // retry after an unrelated gate/timeout failure) clears without re-spending the judge.
+    // Cache earned ROUTINE verdicts on exact evidence bytes across ship retries.
     const key = verdictKey('detect', input);
-    if (hasVerdict(cwd, key)) {
+    const cachedVerdict = verdictMeta(cwd, key);
+    if (cachedVerdict) {
       const detail = 'cached ROUTINE (identical evidence) — cleared';
       console.error(`decision-gate: ${detail}`);
       emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail });
-      process.exit(0);
+      const cachedDuration =
+        typeof cachedVerdict.duration_ms === 'number' ? cachedVerdict.duration_ms : undefined;
+      emitCacheHit('decision-detect', undefined, cachedDuration);
+      finish(0, 'full', cachedDuration);
     }
     const { verdict: judged, raw } = judgeWithClaude(cwd, cfg.noLlm, input);
     // Persist the judge's evidence (the diff) + its verdict as a fetchable transcript (no-op off-run).
@@ -460,11 +460,11 @@ function runGate() {
         : null;
     const ref = transcriptRef ? { transcript_ref: transcriptRef } : {};
     if (judged === 'ROUTINE') {
-      saveVerdict(cwd, key);
+      saveVerdict(cwd, key, Date.now() - startedAt);
       const detail = `judge cleared as ROUTINE ✓ (was: ${smells.join(', ')})`;
       console.error(`decision-gate: ${detail}`);
       emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail, ...ref });
-      process.exit(0);
+      finish(0);
     }
     if (judged === 'OUTAGE') {
       // Fail-closed toward recording, but say so honestly: the smell below was NOT judge-confirmed.
@@ -486,7 +486,7 @@ function runGate() {
           detail: smells.join(', '),
           ...ref,
         });
-        process.exit(3);
+        finish(3);
       }
     }
     console.error(`decision smells: ${smells.join(', ')}`);
@@ -497,11 +497,11 @@ function runGate() {
       detail: smells.join(', '),
       ...ref,
     });
-    process.exit(1);
+    finish(1);
   } catch (e: unknown) {
     const reason = e instanceof Error ? e.message : String(e);
     console.error(`decision-gate: could not run — ${reason}`);
-    process.exit(2); // fail-open
+    finish(2); // fail-open
   }
 }
 

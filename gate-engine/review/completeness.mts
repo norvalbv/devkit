@@ -35,7 +35,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from '../config.mts';
 import { scopedTargets } from '../decisions/scoped-targets.mts';
-import { emitCacheHit } from '../judge/gate-events.mts';
+import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
@@ -118,12 +118,15 @@ export async function runCompleteness(
   cwd = process.cwd(),
   { exec = execJudgeAsync }: { exec?: typeof execJudgeAsync } = {},
 ): Promise<number> {
-  if (envFlag('NO_COMPLETENESS')) return 0;
+  const startedAt = Date.now();
+  const finish = (code: number, cacheState: 'none' | 'full' = 'none', effectiveMs?: number) =>
+    finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
+  if (envFlag('NO_COMPLETENESS')) return finish(0);
   let prompt: string;
   let diff: string;
   try {
     const cfg = resolveGuardConfig(cwd);
-    if (cfg.noLlm) return 0;
+    if (cfg.noLlm) return finish(0);
     const message = readFileSync(
       path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile),
       'utf8',
@@ -132,7 +135,7 @@ export async function runCompleteness(
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean);
-    if (files.length === 0) return 0;
+    if (files.length === 0) return finish(0);
     const dir = cfg.review.agentsDir;
     let body: string;
     try {
@@ -142,7 +145,7 @@ export async function runCompleteness(
       );
     } catch {
       console.error(`guard-review: ${AGENT_NAME}.md not found under ${dir} — completeness skipped`);
-      return 0;
+      return finish(0);
     }
     const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(
       () => [],
@@ -170,7 +173,7 @@ export async function runCompleteness(
     console.error(
       `guard-review: completeness could not run — ${e instanceof Error ? e.message : String(e)}${envFlag('AI_STRICT') ? ' (strict ship mode: failing closed)' : ''}`,
     );
-    return envFlag('AI_STRICT') ? 3 : 2;
+    return finish(envFlag('AI_STRICT') ? 3 : 2);
   }
 
   // PASS cache, same store and shape as the domain reviewers (.devkit/review-cache.json): an
@@ -185,8 +188,9 @@ export async function runCompleteness(
   if (hit) {
     console.error('guard-review: completeness — cached PASS (identical judgement)');
     // The most expensive entry in this store (~7min of opus): its hit rate is the one that pays.
-    emitCacheHit('review:completeness', hit.model);
-    return 0;
+    const cachedDuration = typeof hit.duration_ms === 'number' ? hit.duration_ms : undefined;
+    emitCacheHit('review:completeness', hit.model, cachedDuration);
+    return finish(0, 'full', cachedDuration);
   }
 
   let outage: 'timeout' | 'transient' | 'empty' | undefined;
@@ -211,24 +215,30 @@ export async function runCompleteness(
         `guard-review: completeness SKIPPED (${timedOut ? 'judge timed out' : 'judge outage'}) — strict ship mode fails closed.\n` +
           `   Remedy: ${strictRemedy(timedOut ? 'timeout' : 'outage')} (an earned PASS is cached).`,
       );
-      return 3;
+      return finish(3);
     }
-    return 2; // fail-open on a normal commit
+    return finish(2); // fail-open on a normal commit
   }
   const { verdict, reason } = parseReviewVerdict(raw);
   // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
   // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
   // FAIL the judge did make; caching it would make one softened run silence every later re-run).
   if (verdict === 'PASS')
-    savePasses(cwd, { [key]: { at: new Date().toISOString(), model: 'opus' } });
-  if (verdict !== 'FAIL') return 0;
+    savePasses(cwd, {
+      [key]: {
+        at: new Date().toISOString(),
+        model: 'opus',
+        duration_ms: Date.now() - startedAt,
+      },
+    });
+  if (verdict !== 'FAIL') return finish(0);
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());
   // Hard unless explicitly softened for this one commit (GUARD_COMPLETENESS_HARD=0); unset → block.
-  if (envBool('COMPLETENESS_HARD') ?? true) return 1;
+  if (envBool('COMPLETENESS_HARD') ?? true) return finish(1);
   console.error(
     'guard-review: WARN-only (commit proceeds; GUARD_COMPLETENESS_HARD=0 softened this run). ' +
       'Skip entirely with GUARD_NO_COMPLETENESS=1.',
   );
-  return 0;
+  return finish(0);
 }
