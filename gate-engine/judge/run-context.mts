@@ -18,6 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { devkitVersion } from '../devkit-version.mts';
 
 function truthy(v: string | undefined): boolean {
   if (v === undefined) return false;
@@ -108,6 +109,7 @@ export function runId(): string | null {
  */
 export function runEnvelope(): Record<string, unknown> {
   const source = originatingAgent();
+  const runningVersion = devkitVersion();
   const ship = process.env.DEVKIT_SHIP_ID;
   if (ship)
     return {
@@ -115,6 +117,7 @@ export function runEnvelope(): Record<string, unknown> {
       repo: process.env.DEVKIT_SHIP_REPO ?? '',
       branch: process.env.DEVKIT_SHIP_BRANCH ?? '',
       source,
+      devkit_version: runningVersion,
     };
   const review = process.env.DEVKIT_REVIEW_ID;
   if (review)
@@ -124,10 +127,18 @@ export function runEnvelope(): Record<string, unknown> {
       repo: process.env.DEVKIT_REVIEW_REPO ?? '',
       branch: process.env.DEVKIT_REVIEW_BRANCH ?? '',
       source,
+      devkit_version: runningVersion,
     };
   const ctx = telemetryEnabled() ? commitRunContext() : null;
   if (!ctx) return {}; // capture off (or not a git repo) — emit is a no-op anyway (no sink + no id)
-  return { ship_id: ctx.id, run_mode: 'commit', repo: ctx.repo, branch: ctx.branch, source };
+  return {
+    ship_id: ctx.id,
+    run_mode: 'commit',
+    repo: ctx.repo,
+    branch: ctx.branch,
+    source,
+    devkit_version: runningVersion,
+  };
 }
 
 /** Test seam: drop the memoised commit context so a test can switch git state between assertions. */

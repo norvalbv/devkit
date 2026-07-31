@@ -86,8 +86,9 @@ commit_with_gate_capture() {
   # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
   # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
   local dur_start; dur_start=$(date +%s)
-  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
+  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
     "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
+    "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
     "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
@@ -128,8 +129,9 @@ commit_with_gate_capture() {
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
   else blocked_json='"unknown"'; timed_out=false
   fi
-  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
-    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" "$rc" "$timed_out" "$blocked_json" \
+  printf '{"type":"ship_result","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","exit_code":%d,"timed_out":%s,"blocked_gate":%s,"duration_s":%d,"log_path":"%s","ts":"%s"}\n' \
+    "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
+    "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" "$rc" "$timed_out" "$blocked_json" \
     "$(( $(date +%s) - dur_start ))" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 

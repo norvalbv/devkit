@@ -6,7 +6,7 @@ The usage dashboard can group agent and ship activity by `devkit_version`, but c
 
 ## Contract
 
-Every newly emitted telemetry record carries the version of the devkit package that produced it as an additive JSON field:
+Every newly emitted gate, reviewer, cache, review-terminal, and ship lifecycle record carries the version of the devkit package that produced it as an additive JSON field:
 
 ```json
 { "devkit_version": "0.47.1" }
@@ -19,7 +19,7 @@ The value comes from the installed `@norvalbv/devkit` package's `package.json`; 
 1. Add a memoised Node resolver that walks upward from the executing module until it finds the `@norvalbv/devkit` package manifest. This works both from the source tree and from compiled `dist/` without hard-coding their different depths.
 2. Stamp the resolved version in `runEnvelope()`. That covers every gate, reviewer, cache, and review-terminal record emitted through `emitGateEvent()`.
 3. Resolve and export the same manifest version in the shared ship telemetry shell helper. Stamp it on `ship_attempt`, `ship_result`, and `ship_pr`.
-4. Embed the package version in generated pre-commit hook terminal telemetry so standalone `commit_result` records are attributable even when no gate event was emitted.
+4. Keep generated pre-commit hook text version-agnostic. Its bytes are drift-checked against the current generator; embedding a generator version would falsely report drift after every upgrade. Plain commit agent activity is attributed through its gate/reviewer/cache records, while the non-agent `commit_result` remains unchanged.
 5. Keep telemetry best-effort: inability to read a manifest must never block a commit or ship. The resolver returns a bounded legacy marker only in that exceptional case; normal source and packaged paths are covered by tests.
 
 ## Alternatives considered
@@ -32,6 +32,5 @@ The value comes from the installed `@norvalbv/devkit` package's `package.json`; 
 
 - Unit-test source-tree manifest resolution.
 - Assert ship, review, and commit envelopes carry the package version.
-- Execute a generated hook in a real temporary git repository and inspect `commit_result`.
 - Exercise the ship harness and assert `ship_attempt`, `ship_result`, and `ship_pr` all carry the same version.
 - Run focused tests, typecheck, and the production build so compiled-path resolution is covered.
