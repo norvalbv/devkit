@@ -110,11 +110,46 @@ function markdownCell(value: string): string {
     .replaceAll(/\r?\n/g, ' ');
 }
 
+// The reviewer adapter emits one metric set per cohort section (metric ids shaped
+// "<section>:first-fail-recall" where section is e.g. "frontend-security-reviewer@sonnet@cascade-on").
+// A suite whose latest event carries two or more such sections gets one indented sub-row per
+// section, so each reviewer's own numbers are readable without splitting the suite's single
+// acceptance event. The id suffixes below are the reviewer adapter's metric vocabulary — other
+// adapters never produce them, so no other suite grows sub-rows.
+const COHORT_METRIC = /^(.+):(first-fail-recall|first-clean-pass|block-recall|clean-pass)$/;
+
+function cohortRows(event?: BenchmarkEvent): string[] {
+  if (!event) return [];
+  const sections = new Map<string, MetricObservation[]>();
+  for (const metric of event.metrics) {
+    const section = COHORT_METRIC.exec(metric.id)?.[1];
+    if (section) sections.set(section, [...(sections.get(section) ?? []), metric]);
+  }
+  if (sections.size < 2) return [];
+  return [...sections.entries()].map(([section, metrics]) => {
+    const [name, ...cohort] = section.split('@');
+    const label = cohort.length ? `${name} (${cohort.join(', ')})` : name;
+    const cells = metrics
+      .slice(0, 3)
+      .map((metric) => {
+        const short = metric.label.startsWith(`${section} `)
+          ? metric.label.slice(section.length + 1)
+          : metric.label;
+        return `${short}: ${formatMetric(metric)}`;
+      })
+      .join(' · ');
+    return `| ↳ ${markdownCell(label)} | | | | | | ${markdownCell(cells)} |`;
+  });
+}
+
 function suiteTable(views: SuiteView[]): string {
-  const rows = views.map(({ suite, event, evidence, freshness }) => {
+  const rows = views.flatMap(({ suite, event, evidence, freshness }) => {
     const change = event?.changeType ?? '—';
     const assessment = event ? ASSESSMENT_MARK[event.assessment] : '? unknown';
-    return `| ${markdownCell(suite.label)} | ${suite.lifecycle} | ${evidence} | ${freshness} | ${change} | ${assessment} | ${markdownCell(headline(event))} |`;
+    return [
+      `| ${markdownCell(suite.label)} | ${suite.lifecycle} | ${evidence} | ${freshness} | ${change} | ${assessment} | ${markdownCell(headline(event))} |`,
+      ...cohortRows(event),
+    ];
   });
   return [
     '| Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |',
