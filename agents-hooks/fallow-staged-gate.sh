@@ -19,9 +19,9 @@ set -euo pipefail
 #
 # Exit 0 = allow, exit 2 = block (Claude Code's PreToolUse block signal).
 # Fail-OPEN on non-commit shell commands, malformed hook input, tooling absence (no fallow, no node,
-# no config, fallow too old), and unreadable audit output; fail-CLOSED only on a real verdict for a
-# `git commit`. Scoping here is essential: a failing staged set must never block the `git reset` /
-# `git restore --staged` commands that can make it recoverable.
+# no config, fallow too old), oversized staged diffs, and unreadable audit output; fail-CLOSED only
+# on a real verdict for a `git commit`. Scoping here is essential: a failing staged set must never
+# block the `git reset` / `git restore --staged` commands that can make it recoverable.
 
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 if [ -z "$ROOT" ]; then
@@ -117,6 +117,24 @@ if [ ! -s "$DIFF_FILE" ]; then
   # Nothing staged: a `git push`, or a deletion-only / pure-rename / binary-only commit. fallow
   # would return pass anyway, after paying for a full audit — say so rather than imply a clean audit.
   echo "fallow-staged-gate: no staged added lines to audit — skipping." >&2
+  exit 0
+fi
+
+# fallow 3.7.0+ reads at most 10 MiB from --diff-stdin. Above that cap it silently disables
+# diff filtering under --quiet and falls back to whole-project attribution — exactly the
+# cross-agent over-blocking this staged wrapper exists to prevent. Match the vendor's byte cap and
+# fail OPEN rather than hand fallow a payload it will not scope. An unavailable/invalid byte count
+# also fails open: without a proven scoped input, there is no safe blockable verdict.
+FALLOW_DIFF_STDIN_MAX_BYTES=10485760
+DIFF_BYTES="$(wc -c <"$DIFF_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+case "$DIFF_BYTES" in
+  '' | *[!0-9]*)
+    echo "fallow-staged-gate: could not size the staged diff — skipping (fail-open)." >&2
+    exit 0
+    ;;
+esac
+if [ "$DIFF_BYTES" -gt "$FALLOW_DIFF_STDIN_MAX_BYTES" ]; then
+  echo "fallow-staged-gate: staged diff is $DIFF_BYTES bytes (cap $FALLOW_DIFF_STDIN_MAX_BYTES) — skipping; fallow would disable staged filtering." >&2
   exit 0
 fi
 
