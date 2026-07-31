@@ -16,11 +16,13 @@
 #
 # The checks are deliberately EXACT, never heuristic — a ship that flaps is a ship nobody trusts:
 #   · preflight   the index must be byte-identical to what staging produced (nothing has run yet)
-#   · post-commit every path staging put in the index must still be in the commit, and unbriefed
-#                 DELETIONS must not outnumber the briefed set
+#   · post-commit every path staging put in the index must still be in the commit or have been
+#                 normalized exactly back to its base state, and unbriefed DELETIONS must not
+#                 outnumber the briefed set
 # The post-commit check cannot demand exact equality: the biome step reformats and re-stages briefed
 # files, and the ratchet gates stage a lowered baseline so it rides the same commit (see
-# gate-engine/ratchets/git-index.mts). Both ADD to the commit; neither can remove a briefed path.
+# gate-engine/ratchets/git-index.mts). Both may add to the commit; a formatter may also turn a
+# briefed tracked path into a legitimate no-op by restoring its base content.
 
 # ship_record_staged_state <worktree> <state-file>
 # Snapshot the index the instant staging finishes: tree oid on line 1, staged paths after it.
@@ -35,6 +37,17 @@ ship_record_staged_state() {
 
 _ship_state_tree() { head -n 1 "$1"; }
 _ship_state_paths() { tail -n +2 "$1"; }
+
+# A missing commit path is a legitimate formatter no-op only when it existed in the base and the
+# post-hook worktree is clean for that path. Requiring base membership keeps a clobbered newly-added
+# file from passing as a no-op; including ignored/untracked status keeps force-added files visible.
+_ship_path_matches_base() {
+  local wt=$1 base=$2 path=$3 status
+  git -C "$wt" cat-file -e "$base:$path" 2>/dev/null || return 1
+  status=$(git -C "$wt" status --porcelain=v1 --untracked-files=all --ignored=matching -- "$path") \
+    || return 2
+  [ -z "$status" ]
+}
 
 # ship_assert_staged_unchanged <worktree> <state-file>
 # Preflight, run immediately before the commit: nothing between staging and here may touch the index
@@ -60,23 +73,41 @@ ship_assert_staged_unchanged() {
 # ship_assert_commit_scope <worktree> <base> <state-file>
 # Post-commit, run BEFORE the push: the commit must still contain the work that was staged.
 ship_assert_commit_scope() {
-  local wt=$1 base=$2 state=$3 changed missing briefed_n del_extra_n
+  local wt=$1 base=$2 state=$3 changed missing lost path rc briefed_n del_extra_n
   changed=$(git -C "$wt" diff --no-renames --name-only "$base" HEAD) || {
     echo "🛑 ship: could not diff the ship commit against its base ($base)." >&2
     return 1
   }
 
-  # (1) Every path staging put in the index must still be in the commit. A gate may reformat a
-  # briefed file or add a baseline beside it; none may make a briefed path vanish.
+  # (1) Every path staging put in the index must still be in the commit unless a formatter restored
+  # an existing base path exactly to its base state. Index clobbers leave the intended worktree
+  # change behind (including force-added ignored files), so they remain distinguishable and fatal.
   missing=$(comm -23 \
     <(_ship_state_paths "$state" | sort -u) \
     <(printf '%s\n' "$changed" | sort -u))
   if [ -n "$missing" ]; then
+    lost=
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      if _ship_path_matches_base "$wt" "$base" "$path"; then
+        echo "↳ ship: $path normalized to its base content during pre-commit; treating it as a no-op." >&2
+        continue
+      else
+        rc=$?
+      fi
+      if [ "$rc" -gt 1 ]; then
+        echo "🛑 ship: could not verify the post-commit state of $path." >&2
+        return 1
+      fi
+      lost+="${lost:+$'\n'}$path"
+    done <<< "$missing"
+  fi
+  if [ -n "$lost" ]; then
     {
       echo "🛑 ship: ABORTED — the commit is missing work that was staged. Nothing pushed."
       echo "   The gate chain ran for minutes with this worktree's index reachable via \$GIT_INDEX_FILE;"
       echo "   something replaced it. Staged paths absent from the commit:"
-      printf '%s\n' "$missing" | sed 's/^/     /'
+      printf '%s\n' "$lost" | sed 's/^/     /'
     } >&2
     return 1
   fi
