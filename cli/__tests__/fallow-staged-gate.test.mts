@@ -9,6 +9,8 @@
  *     verdict=warn (measured) — gating on verdict alone silently stops blocking clone groups;
  *   - it degrades OPEN on every tooling condition (no fallow, old fallow, unreadable output,
  *     nothing staged) and CLOSED only on a real verdict;
+ *   - it is inert for every non-commit shell command, especially commands that recover a failing
+ *     staged set (`git reset`, `git restore --staged`);
  *   - a block prints fallow's own explanation, never a bare exit code (sc-1192's lesson).
  */
 import { spawnSync } from 'node:child_process';
@@ -65,11 +67,23 @@ function repoWithStaged(dir: string) {
   git('add a.ts');
 }
 
-function run(dir: string, binDir: string, env: Record<string, string> = {}) {
+interface RunOptions {
+  command?: string;
+  input?: string;
+  cursor?: boolean;
+  env?: Record<string, string>;
+}
+
+function run(
+  dir: string,
+  binDir: string,
+  { command = 'git commit -m "test"', input, cursor = false, env = {} }: RunOptions = {},
+) {
   const PATH = [binDir, '/usr/bin', '/bin'].join(':');
   const r = spawnSync('bash', [GATE], {
     cwd: dir,
     encoding: 'utf8',
+    input: input ?? JSON.stringify(cursor ? { command } : { tool_input: { command } }),
     env: { ...process.env, PATH, CLAUDE_PROJECT_DIR: dir, ...env },
   });
   return { status: r.status, stderr: r.stderr ?? '' };
@@ -78,6 +92,42 @@ function run(dir: string, binDir: string, env: Record<string, string> = {}) {
 const PASS = '{"verdict":"pass","attribution":{"duplication_introduced":0}}';
 
 describe('fallow-staged-gate.sh', () => {
+  it.each([
+    'git reset',
+    'git restore --staged a.ts',
+    'git stash',
+    'echo alive',
+    'bun test',
+    'devkit ship codex/example "example" -- a.ts',
+    'echo git commit',
+    'echo "git commit -m quoted-prose"',
+    'echo "; git commit -m quoted-prose"',
+  ])('does not audit a staged failure before non-commit command: %s', (command) => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    expect(run(dir, binDir, { command }).status).toBe(0);
+    expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
+  it('recognises Cursor beforeShellExecution command payloads', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    expect(
+      run(dir, binDir, { command: 'cd . && git -C . commit -m "test"', cursor: true }).status,
+    ).toBe(2);
+  });
+
+  it('fails OPEN when hook input is missing or malformed', () => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    expect(run(dir, binDir, { input: '' }).status).toBe(0);
+    expect(run(dir, binDir, { input: 'not-json' }).status).toBe(0);
+    expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
   it('hands fallow the STAGED diff via --diff-stdin, never a bare audit', () => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
