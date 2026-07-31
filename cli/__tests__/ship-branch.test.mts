@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import {
   testExecFileSync as execFileSync,
   hasAnyCommand,
@@ -788,11 +789,15 @@ describe('ship-branch.sh — worktree integration', () => {
       .split('\n')
       .map((l) => JSON.parse(l));
     const attempt = events.find((e) => e.type === 'ship_attempt');
+    const resultEvent = events.find((e) => e.type === 'ship_result');
     const prEvent = events.find((e) => e.type === 'ship_pr');
+    expect(attempt.devkit_version).toBe(devkitVersion());
+    expect(resultEvent.devkit_version).toBe(devkitVersion());
     expect(prEvent).toBeTruthy();
     expect(prEvent.pr_url).toBe('https://github.com/acme/app/pull/42');
     expect(prEvent.pr_number).toBe(42); // a bare JSON number, not a string
     expect(prEvent.ship_id).toBe(attempt.ship_id); // same attempt the gate events correlate under
+    expect(prEvent.devkit_version).toBe(devkitVersion());
   });
 
   // A 0-exit `gh pr create` that prints no parseable URL (e.g. it writes the URL to stderr) must NOT be
