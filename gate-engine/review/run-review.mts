@@ -66,6 +66,7 @@ import {
   readChecklistState,
   reviewJudgeEnv,
 } from './runtime.mts';
+import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
 /** One reviewer's cascade outcome. `transcript` rides along on EVERY judged outcome (pass/fail/
  * no-VERDICT) — the FAIL loop prints it (a block whose evidence was discarded is undebuggable) and
@@ -135,18 +136,6 @@ async function mapLimit<T, R>(
   const n = Math.max(1, Math.min(limit, items.length));
   await Promise.all(Array.from({ length: n }, worker));
   return results;
-}
-
-// Max judge cascades in flight (GUARD_REVIEW_CONCURRENCY / FRINK_ alias). Default 2 — enough to keep
-// wall-clock down while leaving each judge the CPU + subscription slots to finish under its 300s
-// timeout on a loaded box. Garbage / 0 / negative / float-below-1 → default; floor 1 (=1 serializes).
-const DEFAULT_REVIEW_CONCURRENCY = 2;
-function reviewConcurrency() {
-  const n = Number.parseInt(
-    process.env.GUARD_REVIEW_CONCURRENCY ?? process.env.FRINK_REVIEW_CONCURRENCY ?? '',
-    10,
-  );
-  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_REVIEW_CONCURRENCY;
 }
 
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
@@ -375,9 +364,11 @@ export async function runReviewGate(
   cwd = process.cwd(),
   { exec = execJudgeAsync }: { exec?: typeof execJudgeAsync } = {},
 ): Promise<number> {
+  const timing = new ReviewGateTiming();
+  const finish = (code: number) => timing.finish(code);
   if (envFlag('NO_REVIEW')) {
     emitReviewSkipped(null, 'gate_disabled');
-    return 0;
+    return finish(0);
   }
   const strict = envFlag('AI_STRICT'); // the ship path sets this: retry once, then fail CLOSED
   const reviewMode = process.env.DEVKIT_RUN_MODE === 'review';
@@ -390,7 +381,7 @@ export async function runReviewGate(
     cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) {
       emitReviewSkipped(null, 'no_llm');
-      return 0;
+      return finish(0);
     }
     if (reviewMode) cfg = effectiveReviewConfig(cfg);
     selected = selectReviewers(stagedFiles(cwd), cfg);
@@ -408,7 +399,7 @@ export async function runReviewGate(
     // Before the early return: a run where nothing was selected is still a run, and "this reviewer
     // did not look at this commit" is the fact that stops a later miss-analysis mislabelling it.
     emitUnselected(selected, knobDropped);
-    if (selected.length === 0) return 0;
+    if (selected.length === 0) return finish(0);
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;
       identitySalts = preflightReviewAssets(assetRoot, selected, cfg);
@@ -420,17 +411,21 @@ export async function runReviewGate(
       console.error(
         `guard-review: review setup failure — ${e instanceof Error ? e.message : String(e)}`,
       );
-      return 1;
+      return finish(1);
     }
     console.error(
       `guard-review: could not run — ${e instanceof Error ? e.message : String(e)}${strict ? ' (strict ship mode: failing closed)' : ''}`,
     );
-    return strict ? 3 : 2; // fail-open, except on a ship
+    return finish(strict ? 3 : 2); // fail-open, except on a ship
   }
 
   const cache = loadCache(cwd);
   const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
   const concurrency = reviewConcurrency();
+  timing.configure(
+    selected.map((selection) => selection.reviewer.name),
+    concurrency,
+  );
   const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
   const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
   // Prompt-version identity for this run. Review mode already computed it over the PACKAGED assets
@@ -448,22 +443,20 @@ export async function runReviewGate(
     // PASS leaves behind that names the files and bytes it covered.
     emitReviewScope(selected[i], diffs[i], promptIdentity(selected[i]), cached);
     if (cached) {
+      const cachedDuration =
+        typeof cache[key].duration_ms === 'number' ? cache[key].duration_ms : 0;
+      timing.cacheHit(name, cachedDuration);
       console.error(`guard-review: ${name} — cached PASS (identical diff)`);
-      emitCacheHit(`review:${name}`, cache[key].model); // else this saving is invisible downstream
+      emitCacheHit(`review:${name}`, cache[key].model, cachedDuration);
     } else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
   }
-  if (toRun.length === 0) return 0;
+  if (toRun.length === 0) return finish(0);
   console.error(
     `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`,
   );
-  // Each cascade CHECKPOINTS as it lands: its PASS is persisted per-completion (not after the
-  // barrier), so a run killed by the ship timeout keeps every finished verdict and the retry
-  // re-runs only the unfinished reviewers. On a ship (DEVKIT_REVIEW_PROGRESS set by the ship's
-  // commit-with-gate-capture.sh) each completion is ALSO recorded to that progress JSON — the
-  // STRUCTURED contract the timeout banner reads to name unfinished reviewers (`progress.mjs
-  // unfinished`), replacing the old awk-parse of these stderr heartbeat lines. The lines below stay,
-  // but for humans only. The .catch keeps one cascade's throw from rejecting the whole mapLimit run
-  // (a worker rejection would abandon its siblings' still-pending completions — see mapLimit).
+  // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
+  // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
+  // rejected cascade from abandoning its siblings (see mapLimit).
   const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
   // `running` = every reviewer to run, recorded up front. Under the concurrency cap some are QUEUED,
   // not yet started, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names
@@ -492,17 +485,23 @@ export async function runReviewGate(
       )
       .then((outcome) => {
         const res = verifyAssets(outcome, t.sel);
+        const durationMs = Date.now() - t0;
+        timing.observed(res.name, durationMs);
         if (res.status === 'pass')
           // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
           // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
           savePasses(cwd, {
-            [t.key]: { at: new Date().toISOString(), model: res.model ?? firstModel },
+            [t.key]: {
+              at: new Date().toISOString(),
+              model: res.model ?? firstModel,
+              duration_ms: durationMs,
+            },
           });
         if (progressFile) {
           completed.push(res.name);
           writeProgress(progressFile, { running, completed });
         }
-        const secs = Math.round((Date.now() - t0) / 1000);
+        const secs = Math.round(durationMs / 1000);
         // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
         // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
         // the ref + one-liner. No-op off-run (see run-context.mts).
@@ -551,7 +550,7 @@ export async function runReviewGate(
     console.error(`guard-review: ${r.name} REVIEW ERROR — ${r.reason}`);
     if (r.transcript) console.error(r.transcript.trim());
   }
-  if (fails.length > 0 || errors.length > 0) return 1;
+  if (fails.length > 0 || errors.length > 0) return finish(1);
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
   for (const r of inconclusive) {
     // The remedy must match the CAUSE (wording: judge/run-judge strictRemedy). A missing brief
@@ -573,8 +572,8 @@ export async function runReviewGate(
         : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
     );
   }
-  if (inconclusive.length > 0) return strict ? 3 : 2;
-  return 0;
+  if (inconclusive.length > 0) return finish(strict ? 3 : 2);
+  return finish(0);
 }
 
 /** `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. */

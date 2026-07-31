@@ -1,0 +1,73 @@
+import { emitGateTiming } from '../../judge/gate-events.mts';
+
+const DEFAULT_REVIEW_CONCURRENCY = 2;
+
+/** Max judge cascades in flight; invalid settings preserve the two-worker default. */
+export function reviewConcurrency(): number {
+  const n = Number.parseInt(
+    process.env.GUARD_REVIEW_CONCURRENCY ?? process.env.FRINK_REVIEW_CONCURRENCY ?? '',
+    10,
+  );
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_REVIEW_CONCURRENCY;
+}
+
+/** Order-preserving bounded-pool makespan used by the live scheduler and effective telemetry. */
+export function parallelMakespan(durationsMs: number[], limit: number): number {
+  if (durationsMs.length === 0) return 0;
+  const slots = Array.from(
+    { length: Math.max(1, Math.min(Math.floor(limit), durationsMs.length)) },
+    () => 0,
+  );
+  for (const raw of durationsMs) {
+    let next = 0;
+    for (let i = 1; i < slots.length; i++) if (slots[i] < slots[next]) next = i;
+    slots[next] += Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  }
+  return Math.max(...slots);
+}
+
+/** Tracks cached and live reviewer work without serialising bounded-parallel durations. */
+export class ReviewGateTiming {
+  private readonly startedAt = Date.now();
+  private names: string[] = [];
+  private concurrency = 1;
+  private cachedCount = 0;
+  private readonly observedDurations = new Map<string, number>();
+  private readonly effectiveDurations = new Map<string, number>();
+
+  configure(names: string[], concurrency: number): void {
+    this.names = names;
+    this.concurrency = concurrency;
+  }
+
+  cacheHit(name: string, durationMs: number): void {
+    this.cachedCount++;
+    this.effectiveDurations.set(name, durationMs);
+  }
+
+  observed(name: string, durationMs: number): void {
+    this.observedDurations.set(name, durationMs);
+    this.effectiveDurations.set(name, durationMs);
+  }
+
+  finish(code: number): number {
+    const actualDurationMs = Date.now() - this.startedAt;
+    const makespan = (durations: Map<string, number>) =>
+      parallelMakespan(
+        this.names.map((name) => durations.get(name) ?? 0),
+        this.concurrency,
+      );
+    const observedWorkMs = makespan(this.observedDurations);
+    const effectiveWorkMs = makespan(this.effectiveDurations);
+    const cacheState =
+      this.cachedCount === 0 ? 'none' : this.cachedCount === this.names.length ? 'full' : 'partial';
+    emitGateTiming(
+      'review',
+      actualDurationMs,
+      actualDurationMs + Math.max(0, effectiveWorkMs - observedWorkMs),
+      cacheState,
+      this.concurrency,
+    );
+    return code;
+  }
+}
