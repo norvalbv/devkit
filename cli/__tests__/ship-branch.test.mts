@@ -1644,6 +1644,33 @@ describe('ship-branch.sh — staged-set invariants (index clobber)', () => {
   // git would refuse to write.
   const emptyIndexHook = 'git read-tree --empty\nexit 0';
 
+  it('allows a formatter to normalize a briefed path back to its base content', () => {
+    const { dir, env, git } = seedShipRepo({
+      hookBody: "printf 'base\\n' > format-me.txt\ngit add -- format-me.txt\nexit 0",
+    });
+    writeFileSync(join(dir, 'format-me.txt'), 'base\n');
+    git(['add', 'format-me.txt'], { stdio: 'ignore' });
+    git(['commit', '-qm', 'formatted base'], { stdio: 'ignore' });
+    writeFileSync(join(dir, 'format-me.txt'), 'needs formatting\n');
+    writeFileSync(join(dir, 'note.txt'), 'real change\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/format-noop', 't', 'format-me.txt', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      },
+    );
+
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/format-me\.txt.*normalized to its base content/);
+    expect(r.stderr).toMatch(/DRY: committed locally/);
+  });
+
   it('aborts before the push when the gate chain empties the staged index', () => {
     const { dir, env, git } = seedShipRepo({ hookBody: emptyIndexHook });
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
