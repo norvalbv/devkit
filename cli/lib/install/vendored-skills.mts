@@ -5,8 +5,9 @@
  * Why vendor at all: the alternative (shelling out to the upstream installer, e.g.
  * `claude plugin install`) is Claude-only, writes to the user's GLOBAL config instead of the repo,
  * needs the network at install time, and sits outside devkit's manifest/doctor/clean ownership
- * model. A vendored copy rides the existing syncSkills pipeline into all three agent surfaces,
- * works offline, and is removable by deselecting its component.
+ * model. A vendored copy installs offline from devkit's own bundle and is removable by deselecting
+ * its component. It is delivered to `.devkit/vendored-skills/` (install/adhd-skill.mts) rather than
+ * the consumer's `.claude/skills/`, which belongs to their own hand-authored skills.
  *
  * Why a COMMIT pin and not a version: these upstreams publish no tags or releases, so a SHA is the
  * only thing that identifies "the bytes we reviewed". `sha256` is the content hash of the vendored
@@ -15,7 +16,7 @@
  */
 
 export interface VendoredSkill {
-  /** The skill dir under `skills/` — also the name syncSkills gates on. */
+  /** The skill dir under `skills/`, in devkit's bundle and in the consumer repo alike. */
   name: string;
   repo: string;
   /** The upstream commit the vendored copy was taken from. */

@@ -184,10 +184,10 @@ export interface Selection {
    */
   lineGrowth: boolean;
   /**
-   * The vendored `i-have-adhd` output-style skill (cli/lib/install/vendored-skills.mts). Not a
-   * component with its own installer — it RIDES the skills sync, which filters the bundled set by
-   * this flag (skillNamesForSelection), so it needs `skills` on to reach the repo at all. Opt-in
-   * even under --yes: it reshapes how the assistant writes, which is a personal preference.
+   * The vendored `i-have-adhd` output-style skill (cli/lib/install/vendored-skills.mts), delivered
+   * to `.devkit/vendored-skills/` by its own installer (install/adhd-skill.mts). Independent of the
+   * `skills` component, since it never writes to the agent skills dirs. Opt-in even under --yes: it
+   * reshapes how the assistant writes, which is a personal preference.
    */
   adhd: boolean;
   agentTargets: string[];
@@ -285,7 +285,6 @@ export function newBundledGates(recorded: string[]): { recommended: string[]; op
 /** The selection inputs that decide WHICH bundled skills a repo gets — see {@link skillNamesForSelection}. */
 export interface SkillSelection {
   guards?: string[];
-  adhd?: boolean;
 }
 
 /**
@@ -293,7 +292,11 @@ export interface SkillSelection {
  * unnamed here ships unconditionally; a skill appears in this filter only when it is tied to a
  * component the consumer can decline:
  *   - `decisions` — companion to the `decisions` guard; useless without the gate that runs it.
- *   - `i-have-adhd` — the vendored opt-in output style (Selection.adhd).
+ *   - `i-have-adhd` — NEVER synced here. It is vendored third-party content devkit owns and pins,
+ *     so it ships to `.devkit/vendored-skills/` (install/adhd-skill.mts) instead of the consumer's
+ *     `.claude/skills/`, which is where their OWN hand-authored skills live. The constant `false`
+ *     is load-bearing twice over: it keeps the skill out of the agent surfaces, and it is what
+ *     drives the reclamation below to delete the copy earlier releases wrote there.
  *
  * Lives here, beside the Selection it reads, because it has TWO consumers that must agree: the
  * writer (syncSkills, which decides what to copy) and the reader (doctor's checkAgentAssets, which
@@ -306,11 +309,11 @@ export interface SkillSelection {
  */
 export function skillNamesForSelection(
   allNames: string[],
-  { guards = [], adhd = false }: SkillSelection = {},
+  { guards = [] }: SkillSelection = {},
 ): string[] {
   return allNames.filter((name) => {
     if (name === 'decisions') return guards.includes('decisions');
-    if (name === 'i-have-adhd') return adhd;
+    if (name === 'i-have-adhd') return false;
     return true;
   });
 }
@@ -349,7 +352,7 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     id: 'adhd',
     kind: 'skill',
     label: 'i-have-adhd',
-    hint: 'ADHD-friendly output style — a vendored MIT skill, invoked with /i-have-adhd; needs the Agent skills component',
+    hint: 'ADHD-friendly output style — a vendored MIT skill, always-on via a SessionStart hook',
     flag: '--adhd',
     since: '0.47.0',
   },

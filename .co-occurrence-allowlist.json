@@ -5,11 +5,11 @@
       "fileA": "cli/lib/overlay-global-hook.mts",
       "symbolB": "installOverlayHook",
       "fileB": "cli/lib/overlay.mts",
-      "description": "Local overlay and global bootstrap intentionally mirror core.hooksPath installation while owning different persistence and recovery flows.",
-      "date": "2026-07-23",
+      "description": "Two hook installers at different scopes that share only an idempotent write skeleton. installGlobalHook maintains a devkit block inside the machine-global init.sh (single file, strip-then-reinsert, no git config). installOverlayHook writes a repo's .devkit/hooks/pre-commit plus pass-through wrappers for every other existing hook, chmods them, and sets core.hooksPath. Matched as drifted (code 0.87, description 0.90) because both read as 'install a devkit hook idempotently'; merging them would couple machine-global state with per-repo git config. Pre-existing pair, surfaced when an unrelated change staged overlay.mts.",
+      "date": "2026-07-31",
       "rangeA": "85-105",
-      "rangeB": "308-347",
-      "similarity": 0.8751
+      "rangeB": "283-324",
+      "similarity": 0.8698
     },
     {
       "symbolA": "removeHookRegistrations",

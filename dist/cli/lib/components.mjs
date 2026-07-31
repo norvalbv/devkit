@@ -215,7 +215,11 @@ export function newBundledGates(recorded) {
  * unnamed here ships unconditionally; a skill appears in this filter only when it is tied to a
  * component the consumer can decline:
  *   - `decisions` — companion to the `decisions` guard; useless without the gate that runs it.
- *   - `i-have-adhd` — the vendored opt-in output style (Selection.adhd).
+ *   - `i-have-adhd` — NEVER synced here. It is vendored third-party content devkit owns and pins,
+ *     so it ships to `.devkit/vendored-skills/` (install/adhd-skill.mts) instead of the consumer's
+ *     `.claude/skills/`, which is where their OWN hand-authored skills live. The constant `false`
+ *     is load-bearing twice over: it keeps the skill out of the agent surfaces, and it is what
+ *     drives the reclamation below to delete the copy earlier releases wrote there.
  *
  * Lives here, beside the Selection it reads, because it has TWO consumers that must agree: the
  * writer (syncSkills, which decides what to copy) and the reader (doctor's checkAgentAssets, which
@@ -226,12 +230,12 @@ export function newBundledGates(recorded) {
  * Deselecting a skill is also what makes syncSkills' manifest reclamation delete its directory, so
  * this filter is the removal path too — there is no separate uninstall step.
  */
-export function skillNamesForSelection(allNames, { guards = [], adhd = false } = {}) {
+export function skillNamesForSelection(allNames, { guards = [] } = {}) {
     return allNames.filter((name) => {
         if (name === 'decisions')
             return guards.includes('decisions');
         if (name === 'i-have-adhd')
-            return adhd;
+            return false;
         return true;
     });
 }
@@ -252,7 +256,7 @@ export const OPTIONAL_COMPONENTS = [
         id: 'adhd',
         kind: 'skill',
         label: 'i-have-adhd',
-        hint: 'ADHD-friendly output style — a vendored MIT skill, invoked with /i-have-adhd; needs the Agent skills component',
+        hint: 'ADHD-friendly output style — a vendored MIT skill, always-on via a SessionStart hook',
         flag: '--adhd',
         since: '0.47.0',
     },
