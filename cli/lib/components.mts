@@ -71,7 +71,11 @@ export const CONFIG_DRIVEN_STRUCTURE = new Set(['react-app', 'component-lib']);
 
 /** The structure-lint command emitted by init and checked by doctor/review preflight. */
 export function structureCmdFor(stack: string): string {
-  return CONFIG_DRIVEN_STRUCTURE.has(stack) ? 'guard-structure gate' : 'bunx eslint src';
+  if (CONFIG_DRIVEN_STRUCTURE.has(stack)) return 'guard-structure gate';
+  // The Electron preset's plugin derives its project root from its own __filename. Ship symlinks
+  // node_modules into an ephemeral worktree, so preserve that logical path or the plugin silently
+  // roots itself in the source checkout and skips every worktree file.
+  return 'node --preserve-symlinks node_modules/eslint/bin/eslint.js src';
 }
 
 /**

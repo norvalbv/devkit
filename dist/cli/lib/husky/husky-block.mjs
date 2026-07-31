@@ -15,8 +15,8 @@ import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from ".
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
 // code — the hook just propagates it. `--structure "<cmd>"` joins the stack-resolved structure
-// lint to the same aggregated set (config-driven stacks: `guard-structure gate`; electron:
-// `bunx eslint src`). The old hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
+// lint to the same aggregated set (config-driven stacks: `guard-structure gate`; electron: its
+// consumer-side ESLint command). The old hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
 const deterministicFragment = (structureCmd, extras = []) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
 __dk_no_git_env bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1

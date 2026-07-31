@@ -70,8 +70,8 @@ function checkConfig(cwd: string): CheckResult {
 // Structure-lint check (only when `structure` is selected). `structure` is NOT a guard, so
 // checkHusky never verifies it. Structure joins the deterministic orchestrator via a `--structure
 // "<cmd>"` arg on the `guard-deterministic` line: config-driven stacks run devkit's own
-// `guard-structure gate` (no consumer eslint dep); electron keeps its consumer-side `bunx eslint
-// src`. Match that exact arg — its absence means structure-lint is not wired.
+// `guard-structure gate` (no consumer eslint dep); electron keeps its consumer-side ESLint command.
+// Match that exact arg — its absence means structure-lint is not wired.
 function checkStructureLint(cwd: string, stack: string): CheckResult {
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');

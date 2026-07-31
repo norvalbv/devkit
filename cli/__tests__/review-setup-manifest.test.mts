@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSy
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { normalizeSelection } from '../lib/components.mts';
+import { normalizeSelection, structureCmdFor } from '../lib/components.mts';
 import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
 import {
   captureReviewSetup,
@@ -150,7 +150,7 @@ describe('review setup manifest', () => {
     delete legacyConfig.components;
     writeFileSync(
       join(legacy.root, '.husky/pre-commit'),
-      buildStandaloneHook({ ...normalizeSelection(), structureCmd: 'bunx eslint src' }),
+      buildStandaloneHook({ ...normalizeSelection(), structureCmd: structureCmdFor('generic') }),
       { mode: 0o755 },
     );
     writeFileSync(
@@ -164,7 +164,7 @@ describe('review setup manifest', () => {
     const partial = setup('partial-components');
     const selected = {
       ...normalizeSelection({ guards: ['decisions'] }),
-      structureCmd: 'bunx eslint src',
+      structureCmd: structureCmdFor('generic'),
     };
     writeFileSync(join(partial.root, '.husky/pre-commit'), buildStandaloneHook(selected), {
       mode: 0o755,
