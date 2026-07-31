@@ -38,8 +38,8 @@ interface HookSelection {
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
 // code — the hook just propagates it. `--structure "<cmd>"` joins the stack-resolved structure
-// lint to the same aggregated set (config-driven stacks: `guard-structure gate`; electron:
-// `bunx eslint src`). The old hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
+// lint to the same aggregated set (config-driven stacks: `guard-structure gate`; electron: its
+// consumer-side ESLint command). The old hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
 const deterministicFragment = (
   structureCmd?: string,
   extras: Array<{ label: string; cmd: string }> = [],
