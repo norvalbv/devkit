@@ -17,9 +17,11 @@ set -euo pipefail
 # script, which `fallow hooks install` overwrites on every run. A same-named devkit file would be
 # silently replaced.
 #
-# Exit 0 = allow, exit 2 = block (Claude Code's PreToolUse block signal, and a code husky can test).
-# Fail-OPEN on tooling absence (no fallow, no node, no config, fallow too old); fail-CLOSED only on
-# a fallow run that actually produced a verdict.
+# Exit 0 = allow, exit 2 = block (Claude Code's PreToolUse block signal).
+# Fail-OPEN on non-commit shell commands, malformed hook input, tooling absence (no fallow, no node,
+# no config, fallow too old), and unreadable audit output; fail-CLOSED only on a real verdict for a
+# `git commit`. Scoping here is essential: a failing staged set must never block the `git reset` /
+# `git restore --staged` commands that can make it recoverable.
 
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 if [ -z "$ROOT" ]; then
@@ -32,6 +34,56 @@ if [ ! -f .fallowrc.jsonc ] && [ ! -f .fallowrc.json ]; then
   exit 0
 fi
 command -v node >/dev/null 2>&1 || exit 0
+
+# Claude/Codex provide the shell command as tool_input.command; Cursor's beforeShellExecution hook
+# provides command at the top level. Run only for a real `git ... commit` invocation: git must begin
+# an unquoted shell command segment, global git flags are allowed, and commit must be the first
+# non-flag positional. Prose such as `echo git commit` or `echo "; git commit"` therefore stays
+# inert. Missing/malformed/unterminated input fails OPEN.
+SCOPE="$(
+  node -e '
+const fs = require("node:fs");
+let payload;
+try { payload = JSON.parse(fs.readFileSync(0, "utf8")); } catch { process.exit(0); }
+const command = payload?.tool_input?.command ?? payload?.command;
+if (typeof command !== "string") process.exit(0);
+const segments = [];
+let segment = "";
+let quote = "";
+let escaped = false;
+for (const ch of command) {
+  if (escaped) { segment += " "; escaped = false; continue; }
+  if (quote) {
+    if (ch === quote) quote = "";
+    else if (ch === "\\" && quote === "\"") escaped = true;
+    segment += " ";
+    continue;
+  }
+  if (ch === "\"" || ch === "\x27") { quote = ch; segment += " "; continue; }
+  if (ch === "\\") { escaped = true; segment += " "; continue; }
+  if (";&|()\x60\n".includes(ch)) { segments.push(segment); segment = ""; continue; }
+  segment += ch;
+}
+if (quote || escaped) process.exit(0);
+segments.push(segment);
+const ws = "[\\x20\\t\\r\\n\\f\\v]";
+const nonWs = "[^\\x20\\t\\r\\n\\f\\v]";
+const flag = `-${nonWs}+`;
+const arg = `[^-]${nonWs}*`;
+const unit = `${flag}${ws}+(${arg}${ws}+)?`;
+const gitPrefix = `^${ws}*(command${ws}+)?(${nonWs}*/)?git${ws}+(${unit})*`;
+// These top-level actions exit before Git dispatches a subcommand, even if "commit" follows.
+const action = new RegExp(
+  `${gitPrefix}(-v|--version|-h|--help|--exec-path|--html-path|--man-path|--info-path|--list-cmds=${nonWs}+)(${ws}|$)`,
+);
+const commit = new RegExp(`${gitPrefix}commit(${ws}|$)`);
+if (segments.some((candidate) => !action.test(candidate) && commit.test(candidate))) {
+  process.stdout.write("COMMIT");
+}
+'
+)" || exit 0
+[ "$SCOPE" = "COMMIT" ] || exit 0
+
 command -v fallow >/dev/null 2>&1 || {
   echo "fallow-staged-gate: fallow not on PATH, skipping." >&2
   exit 0
