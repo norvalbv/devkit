@@ -133,13 +133,15 @@ const CASES = [
     skill: 'api-security',
     item: 'oauth-security',
     fires: "const url = base + '?client_id=' + CLIENT_ID + '&response_type=code';\n",
-    quiet: 'const state = machine.state; const scope = currentScope();\n',
+    // `state`/`scope` words and an ordinary bearer Authorization header are not OAuth evidence.
+    quiet: 'const state = machine.state; const bearer = req.headers.authorization;\n',
   },
   {
     skill: 'api-security',
     item: 'sql-injection',
     fires: "const q = 'SELECT id FROM users WHERE org_id = 1';\n",
-    quiet: 'const me = useQuery(); const tab = routerQuery.tab;\n',
+    // Bare `query`, and a non-database `.execute()` call, must both stay quiet.
+    quiet: 'const me = useQuery(); await command.execute();\n',
   },
   {
     skill: 'api-security',
@@ -214,15 +216,16 @@ const CASES = [
   {
     skill: 'frontend-performance',
     item: 'bundle-size',
-    fires: "import { chart } from 'd3';\n",
+    // A runtime import split across diff lines is still one added package dependency.
+    fires: "import {\n  BarChart,\n} from 'recharts';\n",
     quiet: "import type { Props } from 'react';\nimport { helper } from './helper';\n",
   },
   {
     skill: 'frontend-performance',
     item: 'dependency-size',
-    // Multi-line import: the from-clause line still counts as an added package dependency.
-    fires: "import {\n  BarChart,\n} from 'recharts';\n",
-    quiet: "import type { Props } from 'react';\nimport { helper } from './helper';\n",
+    fires: "import { chart } from 'd3';\n",
+    // A multi-line `import type` must not fire on its own from-clause line.
+    quiet: "import type {\n  Props,\n} from 'react';\nimport { helper } from './helper';\n",
   },
   {
     skill: 'frontend-performance',

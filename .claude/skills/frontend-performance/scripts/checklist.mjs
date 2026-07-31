@@ -23,9 +23,11 @@ const RE_IMAGE_FILE = /\.(png|jpg|jpeg|gif|webp|svg|avif)/;
 // Bare `className` matched every TSX diff without being CSS-cost evidence.
 const RE_CSS = /\b(import.*\.css|style=|tailwind|styled)/i;
 const RE_INLINE_STYLE = /style\s*=\s*\{/i;
-// Bundle size only moves when an ADDED line imports a bare (package) specifier; relative
-// imports and `import type` (erased at build) cost zero bytes.
-const RE_IMPORT = /^\+(?!.*\bimport\s+type\b).*\bimport\b[^'"\n]*['"][^.'"]/m;
+// Bundle size only moves when ADDED code imports a bare (package) specifier; relative imports
+// and `import type` (erased at build) cost zero bytes. Matched against the joined added lines
+// (addedText) so a declaration split across diff lines is seen whole: the type-exclusion sits
+// on the `import` token, and the gap stops at `;` so it cannot span into a later declaration.
+const RE_PKG_IMPORT = /\bimport\s+(?!type\b)(['"][^.'"]|[^;]{0,300}?\bfrom\s+['"][^.'"])/;
 const RE_SCRIPT = /<script/i;
 const RE_IFRAME = /<iframe/i;
 const RE_COMPONENT = /\b(function\s+\w+|const\s+\w+\s*=.*=>).*return.*</i;
@@ -37,8 +39,6 @@ const RE_SW = /\b(serviceWorker|navigator\.serviceWorker|workbox)/i;
 const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
-// Same rule as RE_IMPORT but on the from-clause, so multi-line import statements still count.
-const RE_DEPS = /^\+(?!.*\bimport\s+type\b).*\bfrom\s+['"][^.'"]/m;
 // Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
 // reads that force reflow, and animation of layout-affecting properties.
 const RE_LAYOUT_READ =
@@ -101,9 +101,20 @@ function getFileDiff(file) {
   }
 }
 
+// Reconstruct just the ADDED code from the diff blob so declaration-level patterns (imports)
+// can match across the newlines a multi-line statement splits into.
+function addedText(fullDiff) {
+  return fullDiff
+    .split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.slice(1))
+    .join('\n');
+}
+
 function detectPerformancePatterns(files, diffs) {
   const items = [];
   const fullDiff = diffs.join('\n');
+  const added = addedText(fullDiff);
 
   if (RE_IMAGE_DIFF.test(fullDiff) || files.some((f) => RE_IMAGE_FILE.test(f))) {
     items.push({
@@ -124,7 +135,7 @@ function detectPerformancePatterns(files, diffs) {
   if (RE_INLINE_STYLE.test(fullDiff)) {
     items.push({ name: 'inline-styles', category: 'High Priority', status: 'pending', issues: [] });
   }
-  if (RE_IMPORT.test(fullDiff)) {
+  if (RE_PKG_IMPORT.test(added)) {
     items.push({ name: 'bundle-size', category: 'High Priority', status: 'pending', issues: [] });
   }
   if (RE_SCRIPT.test(fullDiff)) {
@@ -216,7 +227,7 @@ function detectPerformancePatterns(files, diffs) {
       issues: [],
     });
   }
-  if (RE_DEPS.test(fullDiff)) {
+  if (RE_PKG_IMPORT.test(added)) {
     items.push({
       name: 'dependency-size',
       category: 'Low Priority',

@@ -18,9 +18,10 @@ import {
 const CHECKLIST_PATH = '.claude/.backend-performance-review.json';
 
 // Top-level regex patterns for performance
-// Statement-shaped SQL or ORM/raw markers — bare `query`/`select` matched nearly every diff.
+// Statement-shaped SQL or qualified ORM/raw invocations — bare `query`/`select` matched nearly
+// every diff, and unqualified `execute`/`sql` matched non-database calls like command.execute().
 const RE_DB_QUERY =
-  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$queryRaw|\b(findMany|findUnique|findFirst|execute|executeRaw|queryRaw|sql)\b/i;
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$(query|execute)Raw|\.(query|execute)Raw\s*\(|\.execute\s*\(\s*['"`]|\bsql\s*[`(]|\b(findMany|findUnique|findFirst)\b/i;
 const RE_SELECT_STAR = /select\s*\*/i;
 // Gaps are bounded: the diffs of ALL staged files are joined into one blob, so an unbounded
 // [\s\S]*? couples a loop in one file with a find/await in an unrelated file.

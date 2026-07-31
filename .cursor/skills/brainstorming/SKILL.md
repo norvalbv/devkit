@@ -56,18 +56,9 @@ record it now, while the *why* is live in this conversation (it is never recover
 Do NOT author a new `docs/plans/` design doc — that store is deprecating in favour of `docs/decisions/`.
 
 **Implementation (if continuing):**
-- Create a decision-complete implementation plan.
-- Immediately before presenting/exiting that plan, invoke one fresh `feature-critique` subagent with
-  the finalized draft. If the first response is `aborted`, `wrong_phase`, or invalid JSON, surface it
-  rather than treating it as approval. Apply warning-only `PROCEED_WITH_CHANGES` feedback. On
-  `RETHINK`, `REJECT`, or any CRITICAL finding, you—the parent/root planning agent—revise the plan
-  and run one fresh recheck by invoking a new critic; if that pass still blocks, aborts, or is
-  invalid, surface the unresolved issue instead of looping.
 - Ask: "Ready to set up for implementation?"
-- Create an isolated worktree for the work.
-
-Do not run periodic critique against unstable drafts. Post-implementation review belongs to a
-separate implementation reviewer; `feature-critique` returns `wrong_phase` for that request.
+- Create an isolated worktree for the work
+- Create a detailed implementation plan
 
 ## Key Principles
 

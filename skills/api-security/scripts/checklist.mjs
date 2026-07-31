@@ -20,15 +20,17 @@ const CHECKLIST_PATH = '.claude/.api-security-review.json';
 // Top-level regex patterns for performance
 const RE_AUTH = /\b(auth|login|signin|signup|password|credential|encryption|encrypt|decrypt|hash)/i;
 const RE_JWT = /\b(jwt|jsonwebtoken|token|sign|verify|bearer|expiresIn|algorithm)/i;
-// `state`/`scope` as bare words matched nearly every diff (state machines, block scope).
-const RE_OAUTH = /\b(oauth|redirect_uri|authorization|client_id|client_secret|response_type)/i;
+// `state`/`scope` as bare words matched nearly every diff (state machines, block scope), and
+// `authorization` matched ordinary bearer-auth headers that RE_AUTH already covers.
+const RE_OAUTH = /\b(oauth|redirect_uri|client_id|client_secret|response_type)/i;
 // Bare `query` matched router.query/useQuery and any path containing "queries"; `req\.`
 // already covers req.query.
 const RE_INPUT = /\b(body|params|input|req\.|request\.|zod|schema|validate)/i;
-// Statement-shaped SQL or ORM/raw markers — bare verbs (`query`, `update`, `delete`, `where`)
-// matched nearly every backend diff.
+// Statement-shaped SQL or qualified ORM/raw invocations — bare verbs (`query`, `update`,
+// `delete`, `where`) matched nearly every backend diff, and unqualified `execute`/`sql`
+// matched non-database calls like command.execute().
 const RE_SQL =
-  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$queryRaw|\b(findMany|findUnique|findFirst|execute|executeRaw|queryRaw|sql)\b/i;
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$(query|execute)Raw|\.(query|execute)Raw\s*\(|\.execute\s*\(\s*['"`]|\bsql\s*[`(]|\b(findMany|findUnique|findFirst)\b/i;
 const RE_XXE = /\b(xml|yaml|parseXML|DOMParser|yaml\.load)/i;
 const RE_ENDPOINT = /\b(router|handler|endpoint|route|get|post|put|patch|delete)\s*[.(]/i;
 const RE_RATE_LIMIT = /\b(rate|limit|throttle|rateLimit)/i;
