@@ -20,18 +20,26 @@ const CHECKLIST_PATH = '.claude/.api-security-review.json';
 // Top-level regex patterns for performance
 const RE_AUTH = /\b(auth|login|signin|signup|password|credential|encryption|encrypt|decrypt|hash)/i;
 const RE_JWT = /\b(jwt|jsonwebtoken|token|sign|verify|bearer|expiresIn|algorithm)/i;
+// `state`/`scope` as bare words matched nearly every diff (state machines, block scope).
 const RE_OAUTH =
-  /\b(oauth|redirect_uri|authorization|scope|state|client_id|client_secret|response_type)/i;
-const RE_INPUT = /\b(body|params|query|input|req\.|request\.|zod|schema|validate)/i;
-const RE_SQL = /\b(query|select|insert|update|delete|where|findMany|findUnique|execute|raw|sql)/i;
+  /\b(oauth|redirect_uri|authorization|client_id|client_secret|response_type)/i;
+// Bare `query` matched router.query/useQuery and any path containing "queries"; `req\.`
+// already covers req.query.
+const RE_INPUT = /\b(body|params|input|req\.|request\.|zod|schema|validate)/i;
+// Statement-shaped SQL or ORM/raw markers — bare verbs (`query`, `update`, `delete`, `where`)
+// matched nearly every backend diff.
+const RE_SQL =
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$queryRaw|\b(findMany|findUnique|findFirst|execute|executeRaw|queryRaw|sql)\b/i;
 const RE_XXE = /\b(xml|yaml|parseXML|DOMParser|yaml\.load)/i;
 const RE_ENDPOINT = /\b(router|handler|endpoint|route|get|post|put|patch|delete)\s*[.(]/i;
 const RE_RATE_LIMIT = /\b(rate|limit|throttle|rateLimit)/i;
 const RE_RESPONSE = /\b(res\.|response\.|json\(|send\(|return.*Response)/i;
 const RE_HEADERS = /\b(header|X-Content-Type|X-Frame|Content-Security-Policy|HSTS|X-Powered-By)/i;
-const RE_ERROR = /\b(catch|error|throw|exception|stack)/i;
-const RE_PROCESSING = /\b(debug|DEBUG|NODE_ENV|upload|multer|stream|file)/i;
-const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|audit|monitor)/i;
+// Bare `error`/`stack` matched any variable; `file` matched any path; `\blog` matched
+// login/logic and `info|warn|error` any prose — keep only handler/logger constructs.
+const RE_ERROR = /\b(catch|throw|exception)/i;
+const RE_PROCESSING = /\b(debug|DEBUG|NODE_ENV|upload|multer|stream)/i;
+const RE_LOGGING = /\b(logger|console\.|audit|monitor)/i;
 // Injection/authz surfaces beyond SQL (coverage from OWASP ASVS v5 V1/V2/V4/V8 — see SKILL.md
 // Provenance). Two-regex items AND a sink pattern with a request-input marker so the item only
 // fires when both halves are present in the staged diff.

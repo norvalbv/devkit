@@ -25,7 +25,8 @@ const RE_URL = /\b(href|src|url|link)[\s]*[=:]/i;
 const RE_LOCALSTORAGE = /\b(localStorage|sessionStorage)\.setItem/i;
 const RE_TOKEN = /\b(token|credential|password|secret|apiKey|api_key|API_KEY)/i;
 const RE_FETCH = /\b(fetch|axios|\.post|\.put|\.delete|\.patch)\s*\(/i;
-const RE_INPUT = /\b(input|onChange|onSubmit|value|formData|useForm)/i;
+// Bare `value` matched every React diff; only the attribute form is form-input evidence.
+const RE_INPUT = /\b(input|onChange|onSubmit|formData|useForm)|\bvalue\s*=\s*[{"']/i;
 const RE_BLANK = /target\s*=\s*["']_blank/i;
 const RE_WINDOW_OPEN = /window\.open/i;
 const RE_EVAL = /\b(eval\s*\(|new\s+Function\s*\(|setTimeout\s*\(\s*["']|setInterval\s*\(\s*["'])/i;
@@ -33,7 +34,8 @@ const RE_URL_PARAMS = /\b(window\.location|searchParams|URLSearchParams|queryStr
 const RE_SANITIZE = /\b(DOMPurify|sanitize|xss)/i;
 const RE_COOKIE = /\b(document\.cookie|Cookies\.|cookie)/i;
 const RE_JWT = /\b(jwt|jsonwebtoken|expiresIn|decode|verify|sign)\b/i;
-const RE_OAUTH = /\b(oauth|authorize|redirect_uri|state|scope|grant_type)\b/i;
+// `state`/`scope` as bare words matched every React diff (useState, block scope).
+const RE_OAUTH = /\b(oauth|authorize|redirect_uri|grant_type|client_id)\b/i;
 const RE_HARDCODED = /\b(users|pass|key|secret|token)\s*[:=]\s*["'][^"']{8,}["']/i;
 const RE_DEBUG_LOG = /\bconsole\.(log|debug|info|warn|error)\s*\(/i;
 // Cross-origin messaging (coverage from OWASP ASVS v5 V3 — see SKILL.md Provenance).

@@ -20,9 +20,12 @@ const CHECKLIST_PATH = '.claude/.frontend-performance-review.json';
 // Top-level regex patterns for performance
 const RE_IMAGE_DIFF = /\b(img|image|src=|srcset|loading|width=|height=)/i;
 const RE_IMAGE_FILE = /\.(png|jpg|jpeg|gif|webp|svg|avif)/;
-const RE_CSS = /\b(import.*\.css|className|style=|tailwind|styled)/i;
+// Bare `className` matched every TSX diff without being CSS-cost evidence.
+const RE_CSS = /\b(import.*\.css|style=|tailwind|styled)/i;
 const RE_INLINE_STYLE = /style\s*=\s*\{/i;
-const RE_IMPORT = /\bimport\s+/i;
+// Bundle size only moves when an ADDED line imports a bare (package) specifier; relative
+// imports and `import type` (erased at build) cost zero bytes.
+const RE_IMPORT = /^\+(?!.*\bimport\s+type\b).*\bimport\b[^'"\n]*['"][^.'"]/m;
 const RE_SCRIPT = /<script/i;
 const RE_IFRAME = /<iframe/i;
 const RE_COMPONENT = /\b(function\s+\w+|const\s+\w+\s*=.*=>).*return.*</i;
@@ -34,7 +37,8 @@ const RE_SW = /\b(serviceWorker|navigator\.serviceWorker|workbox)/i;
 const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
-const RE_DEPS = /\b(from\s+['"][^'"]+['"])/i;
+// Same rule as RE_IMPORT but on the from-clause, so multi-line import statements still count.
+const RE_DEPS = /^\+(?!.*\bimport\s+type\b).*\bfrom\s+['"][^.'"]/m;
 // Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
 // reads that force reflow, and animation of layout-affecting properties.
 const RE_LAYOUT_READ =
