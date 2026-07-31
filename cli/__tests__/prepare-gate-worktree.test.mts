@@ -310,6 +310,21 @@ describe('prepare_gate_worktree — the worktree must have a hook chain git will
     expect(r.status, `stderr: ${r.stderr}`).toBe(0);
   });
 
+  it('accepts the committed standalone hook without requiring a husky runner', () => {
+    const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
+    rmSync(join(main, '.husky/_'), { recursive: true, force: true });
+    const hook = join(main, '.husky/pre-commit');
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    git(['-C', main, 'add', '.husky/pre-commit']);
+    git(['-C', main, 'commit', '-qm', 'standalone hook']);
+    git(['-C', main, 'config', 'core.hooksPath', '.husky']);
+
+    const r = prepareInRepo(wt, linked, main, git);
+
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(linkTarget(join(wt, '.husky/pre-commit'))).toBeNull();
+  });
+
   it('does not newly fail a repo that configures no hooksPath at all', () => {
     const { main, linked, wt, git } = seedRepoWithLinkedWorktree();
 
