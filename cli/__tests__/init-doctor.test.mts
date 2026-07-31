@@ -343,7 +343,7 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies['@norvalbv/devkit'].startsWith(`${override}#`)).toBe(true);
   });
 
-  it('electron package mode KEEPS eslint/parser/plugin + runs bunx eslint src', () => {
+  it('electron package mode KEEPS eslint/parser/plugin + preserves worktree symlinks', () => {
     const root = tmpRepo({
       name: 'fx',
       version: '0',
@@ -355,7 +355,9 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('--structure "bunx eslint src"');
+    expect(hook).toContain(
+      '--structure "node --preserve-symlinks node_modules/eslint/bin/eslint.js src"',
+    );
     expect(hook).not.toContain('guard-structure');
   });
 });
