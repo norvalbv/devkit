@@ -41,6 +41,16 @@ const ROW_ENUMS = {
   expected: ['FAIL', 'PASS'],
   difficulty: ['clear', 'borderline', 'adversarial'],
   provenance: ['authored', 'mined', 'adapted'],
+  // Optional provenance/labeling fields (mined-corpus tooling) — absent is fine, present-but-wrong
+  // is a lint failure like every other enum here.
+  outcomeEvidence: [
+    'addressed-marker',
+    'resolved+line-touched',
+    'human-rebuttal',
+    'bot-withdrawal',
+    'outdated-only',
+  ],
+  scopeConfirmed: ['confirmed', 'out-of-scope', 'unverifiable'],
 };
 
 /** Structural corpus lint — throws BenchAbort on the first malformed row. Cheap and always on:
@@ -56,6 +66,10 @@ export function lintRows(rows, reviewerName) {
     for (const [field, allowed] of Object.entries(ROW_ENUMS))
       if (row[field] !== undefined && !allowed.includes(row[field]))
         throw new BenchAbort(2, `${where}: ${field}=${row[field]} not in ${allowed.join('|')}`);
+    if (row.caseId !== undefined && typeof row.caseId !== 'string')
+      throw new BenchAbort(2, `${where}: caseId must be a string`);
+    if (row.sourcePr !== undefined && typeof row.sourcePr !== 'number')
+      throw new BenchAbort(2, `${where}: sourcePr must be a number`);
     if (!row.expected) throw new BenchAbort(2, `${where}: missing expected`);
     if (row.expected === 'FAIL' && !(Array.isArray(row.expectItems) && row.expectItems.length > 0))
       throw new BenchAbort(2, `${where}: expected FAIL needs expectItems`);
@@ -138,4 +152,32 @@ export function benchGateHash(reviewer) {
   );
 }
 
-export const corpusHash = (reviewer) => sha12(readFileSync(casesFile(reviewer), 'utf8'));
+// Canonical (recursively key-sorted) JSON — deterministic regardless of a row's literal key
+// insertion order, so an author reordering fields in a hand-edited .jsonl line is a no-op for
+// hashing. Arrays keep their order (order is meaningful there — e.g. expectItems).
+function canonicalJSON(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJSON).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJSON(value[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Per-row content hash — the unit comparisons pair on. Independent of every other row in the
+ * corpus, so appending/removing sibling rows never changes a retained row's hash. */
+export const rowHash = (row) => sha12(canonicalJSON(row));
+
+/** ROW-SET hash: sha12 of the sorted list of per-row hashes, not the raw file text — reordering
+ * rows in the .jsonl (e.g. an editor re-save) is a no-op, and this is the value baseline sections
+ * still carry as `corpusHash` (comparability bookkeeping). Row-level comparability now runs on
+ * `rowHash` instead — see compareReviewer in bench.mts, which pairs by row id and excludes shared
+ * rows whose rowHash changed rather than hard-skipping the whole section. */
+export function corpusHashFromRows(rows) {
+  return sha12(rows.map(rowHash).sort().join('\n'));
+}
+
+export const corpusHash = (reviewer) =>
+  corpusHashFromRows(parseCasesText(readFileSync(casesFile(reviewer), 'utf8')));

@@ -25,9 +25,12 @@
  * verifyChecklist never scrutinizes FAILs.
  *
  * House conventions (decisions-eval): NULL is a verdict — an inconclusive row costs its expected
- * class. Baselines embed gateHash (brief + checklist + gate source) + corpusHash and comparison
- * mechanically SKIPS on mismatch. --fail = hard floors + per-row McNemar flip table (stable flips
- * only), never raw aggregate deltas. Every run appends one line to runs.log.
+ * class. Baselines embed gateHash (brief + checklist + gate source) — a mismatch there mechanically
+ * SKIPS comparison. Corpus growth is NOT a skip: rows carry a content `rowHash`, so compareReviewer
+ * pairs on the row-id intersection and only excludes the shared rows whose rowHash actually changed
+ * (appending/removing rows never invalidates the retained ones). --fail = hard floors + per-row
+ * McNemar flip table (stable flips only, pooled + gold-only + decoy-only + clustered-by-case),
+ * never raw aggregate deltas. Every run appends one line to runs.log.
  *
  * Cost (48 rows, concurrency 2): haiku cascade-off --dev ≈ 25–35 min · sonnet cascade-on ≈ 1.5–2 h ·
  * haiku cascade-on ≈ 1–1.5 h · opus cascade-on ≈ 2.5–3 h. A budget line prints before any spend.
@@ -41,14 +44,7 @@ import { appendFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveGuardConfig } from '../../../config.mts';
-import {
-  BenchAbort,
-  cleanBenchEnv,
-  materializeFixture,
-  mcnemarMidP,
-  parseCasesText,
-  wilson,
-} from '../../../decisions/eval/bench.mts';
+import { BenchAbort, cleanBenchEnv, materializeFixture } from '../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
 import {
   checklistScript,
@@ -58,10 +54,25 @@ import {
 } from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
 
-// Corpus + fixture-asset layer (split out to keep this file within its size ratchet).
+// Corpus + fixture-asset layer, checkpoint/salvage/baseline IO, and flip-table statistics (split
+// out to keep this file within its size ratchet).
 export * from './corpus.mts';
+export * from './progress.mts';
+export * from './stats.mts';
 
-import { benchGateHash, buildAssets, corpusHash, loadRows } from './corpus.mts';
+import { benchGateHash, buildAssets, corpusHash, loadRows, rowHash } from './corpus.mts';
+import { loadAgainstFile, loadProgress, progressFile, RETRYABLE, salvageMap } from './progress.mts';
+import {
+  buildCompareReport,
+  extractCommentLines,
+  fmtCi,
+  jaccard,
+  printSummary,
+  rowUnchanged,
+  subcause,
+  VERDICT_INJECTION_RE,
+  wordsOf,
+} from './stats.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/reviewers → repo root is four levels up.
@@ -74,15 +85,8 @@ const CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENCY ??
 const BASELINE_FILE = path.join(here, 'results.baseline.json');
 const RUNS_LOG = path.join(here, 'runs.log');
 
-// Checkpoint/resume: every completed row is appended to a per-config progress file the moment it
-// lands, so a run killed by a rate limit / account switch loses NOTHING — re-running the same
-// command auto-resumes (rows with matching config+hashes and a non-outage result are reused;
-// --fresh discards). After OUTAGE_TRIP consecutive judge outages the run pauses itself early:
-// under a drained credit pool every further row would burn its attempt and score as an outage.
-const progressFile = (model, cascade) =>
-  path.join(here, `progress-${model}-${cascade ? 'on' : 'off'}.jsonl`);
+// Consecutive judge outages before a run pauses itself (see pause-on-drained-pool below).
 const OUTAGE_TRIP = 3;
-const RETRYABLE = new Set(['outage', 'engine-error']);
 
 /** The reviewers this bench covers — the 4 domain reviewers. commit-guard is deferred: its
  * allowlist appends the consumer's semantic-search MCP tool, which cannot resolve inside a bare
@@ -97,11 +101,6 @@ const EST_FIRST_SECS = { haiku: 70, sonnet: 135, opus: 270 };
 const EST_ESCALATE_SECS = 210;
 
 // ─── Small helpers ────────────────────────────────────────────────────────────────
-
-const fmtCi = (k, n) => {
-  const { lo, hi } = wilson(k, n);
-  return `${k}/${n}${n ? ` = ${(k / n).toFixed(2)}` : ''} [${lo.toFixed(2)}, ${hi.toFixed(2)}]`;
-};
 
 // Bounded-concurrency map (run-review's pool shape; not exported there). fn must not reject —
 // callers wrap row bodies in try/catch so one broken fixture cannot abandon its siblings.
@@ -162,18 +161,7 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
 }
 
 // ─── Row scoring ──────────────────────────────────────────────────────────────────
-
-const OUTAGE_RE = /outage/i;
-const NO_VERDICT_RE = /no VERDICT/i;
-const CHECKLIST_RE = /checklist/i;
-const VERDICT_INJECTION_RE = /VERDICT:/i;
-
-function subcause(reason) {
-  if (OUTAGE_RE.test(reason)) return 'outage';
-  if (NO_VERDICT_RE.test(reason)) return 'no-verdict';
-  if (CHECKLIST_RE.test(reason)) return 'checklist-void';
-  return 'other';
-}
+// subcause/VERDICT_INJECTION_RE (pure regex classifiers) now live in stats.mts.
 
 /**
  * Deterministic adjudication of one cascade against its row label.
@@ -210,6 +198,8 @@ export function scoreRow(row, capture, cas) {
     reviewer: row.reviewer,
     expected: row.expected,
     holdout: !!row.holdout,
+    caseId: row.caseId ?? null,
+    rowHash: rowHash(row),
     firstVerdict,
     okFirst,
     finalStatus: cas.status,
@@ -248,6 +238,8 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
         reviewer: row.reviewer,
         expected: row.expected,
         holdout: !!row.holdout,
+        caseId: row.caseId ?? null,
+        rowHash: rowHash(row),
         firstVerdict: null,
         okFirst: false,
         finalStatus: 'not-selected',
@@ -283,6 +275,12 @@ export function summarize(results, { cascade = CASCADE } = {}) {
   for (const r of results)
     if (r.subcause) inconclusive[r.subcause] = (inconclusive[r.subcause] ?? 0) + 1;
   const liveEscalations = results.filter((r) => r.escalateLive);
+  // Gold rows the FIRST pass already caught, then the opus escalation flipped to a pass:
+  // overturns are opus taking back a correct first FAIL. Decoy rows the first pass wrongly
+  // failed, then opus rescued: rescues are opus fixing a first-pass false-block. Both only mean
+  // something once a cascade actually ran, so they're cascade-only like blockRecall/cleanPass.
+  const goldFirstFail = gold.filter((r) => r.firstVerdict === 'FAIL');
+  const decoyFirstFail = decoys.filter((r) => r.firstVerdict === 'FAIL');
   return {
     rows: results.length,
     gold: gold.length,
@@ -293,6 +291,11 @@ export function summarize(results, { cascade = CASCADE } = {}) {
       ? {
           blockRecall: { k: blocked.length, n: gold.length },
           cleanPass: { k: count(decoys, (r) => r.okFinal), n: decoys.length },
+          overturnRate: {
+            k: count(goldFirstFail, (r) => !r.okFinal && r.escalateLive),
+            n: goldFirstFail.length,
+          },
+          rescueRate: { k: count(decoyFirstFail, (r) => r.okFinal), n: decoyFirstFail.length },
         }
       : {}),
     escalations: liveEscalations.length,
@@ -306,27 +309,7 @@ export function summarize(results, { cascade = CASCADE } = {}) {
   };
 }
 
-function printSummary(name, s, { cascade }) {
-  console.log(`\n${name} (${s.rows} rows: ${s.gold} gold / ${s.decoys} decoys)`);
-  console.log(`  first-pass FAIL-recall   ${fmtCi(s.firstFailRecall.k, s.firstFailRecall.n)}`);
-  console.log(`  first-pass clean-pass    ${fmtCi(s.firstCleanPass.k, s.firstCleanPass.n)}`);
-  if (cascade) {
-    console.log(`  end-to-end block recall  ${fmtCi(s.blockRecall.k, s.blockRecall.n)}`);
-    console.log(`  end-to-end clean-pass    ${fmtCi(s.cleanPass.k, s.cleanPass.n)}`);
-  }
-  const reasons =
-    Object.entries(s.reasons)
-      .map(([k, v]) => `${k}:${v}`)
-      .join(' ') || '—';
-  console.log(`  right-reason split       ${reasons}`);
-  console.log(
-    `  live escalations         ${s.escalations}${s.escalations ? ` (mean ${s.escalateMeanSecs}s)` : ''}`,
-  );
-  const inc = Object.entries(s.inconclusive)
-    .map(([k, v]) => `${k}:${v}`)
-    .join(' ');
-  if (inc) console.log(`  inconclusive             ${inc}`);
-}
+// printSummary now lives in stats.mts alongside fmtCi (formatting-only, pure).
 
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
@@ -347,26 +330,22 @@ function loadBaseline() {
   }
 }
 
-// --against: the explicit "before" snapshot for a prompt A/B. Unlike loadBaseline (a missing
-// baseline is fine → null), a bad --against path is a hard error — the user asked for a comparison.
-function loadAgainstFile(p) {
-  try {
-    return JSON.parse(readFileSync(p, 'utf8'));
-  } catch (e) {
-    throw new BenchAbort(2, `reviewer-eval: --against file unreadable (${p}): ${e?.message ?? e}`);
-  }
-}
-
 // Floors are POOLED (48 rows is a tripwire, not a per-reviewer detector). firstFailRecall floors
 // only on the production model — for haiku/opus sweeps it is the decision INPUT, not a gate.
 const FLOORS = { blockRecall: 0.75, cleanPass: 0.85, firstFailRecallSonnetOnly: 0.6 };
 
 /**
- * Regression verdict for one reviewer section vs baseline. Preconditions first (hash/config
- * mismatch → comparison SKIPPED, loudly), then the per-row flip table under mid-p McNemar.
+ * Regression verdict for one reviewer section vs baseline. Preconditions first (gateHash mismatch
+ * → comparison SKIPPED, loudly), then row-set-aware pairing: the flip table runs over the
+ * INTERSECTION of row ids present in both the baseline section and the current run (corpus growth
+ * — appending rows — is no longer a hard skip), excluding shared ids whose `rowHash` changed
+ * (a hand-edited row is not the same fixture, so it cannot be paired) as "changed". A baseline
+ * written before rowHash existed (old format) can't tell changed from unchanged — every shared row
+ * is treated as unchanged and the report says so, loudly, once.
+ *
  * Flips use okFinal when both runs had the cascade, else okFirst. Returns {skipped, regressed,
- * detail}. Stability: rows the caller re-ran and that flipped BACK are not counted (caller
- * filters via `stable`).
+ * improved, detail}. Stability: rows the caller re-ran and that flipped BACK are not counted
+ * (caller filters via `stable`).
  */
 export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = false } = {}) {
   const key = sectionKey(name, nowMeta.model, nowMeta.cascade);
@@ -374,54 +353,88 @@ export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = fals
   if (!section) return { skipped: `no baseline section ${key}` };
   // crossGate (--against A/B): a deliberate brief/checklist edit is EXPECTED to change gateHash,
   // so bypass that guard — the flip table pairs purely by row.id and is meaningful across the edit.
-  // corpusHash stays a HARD skip in EVERY mode: paired rows must be the identical fixtures, so an
-  // A/B must re-baseline the "before" on the frozen corpus first.
   if (!crossGate && section.gateHash !== nowMeta.gateHash)
     return {
       skipped: `gate code / brief / checklist changed (${key}) — regenerate with --baseline`,
     };
-  if (section.corpusHash !== nowMeta.corpusHash)
-    return {
-      skipped: `corpus changed (${key}) — re-baseline the "before" on the frozen corpus first`,
-    };
-  let b = 0;
-  let c = 0;
-  const flips = [];
-  for (const row of nowRows) {
-    const baseRow = section.rows[row.id];
-    if (!baseRow || row.stable === false) continue;
-    const wasOk = nowMeta.cascade ? baseRow.okFinal : baseRow.okFirst;
-    const isOk = nowMeta.cascade ? row.okFinal : row.okFirst;
-    if (wasOk && !isOk) {
-      b += 1;
-      flips.push(`${row.id} ↓`);
-    } else if (!wasOk && isOk) {
-      c += 1;
-      flips.push(`${row.id} ↑`);
+  const baseRows = section.rows ?? {};
+  const nowById = new Map(nowRows.map((r) => [r.id, r]));
+  const nowIds = [...nowById.keys()];
+  const baseIds = Object.keys(baseRows);
+  const sharedIds = nowIds.filter((id) => Object.hasOwn(baseRows, id));
+  const added = nowIds.filter((id) => !Object.hasOwn(baseRows, id)).length;
+  const removed = baseIds.filter((id) => !nowById.has(id)).length;
+  const hasRowHash = sharedIds.some((id) => baseRows[id].rowHash !== undefined);
+  let changed = 0;
+  const pairs = [];
+  for (const id of sharedIds) {
+    const baseRow = baseRows[id];
+    const row = nowById.get(id);
+    if (row.stable === false) continue;
+    if (hasRowHash && row.rowHash !== undefined && row.rowHash !== baseRow.rowHash) {
+      changed += 1;
+      continue;
     }
+    pairs.push({
+      id,
+      expected: row.expected,
+      caseId: row.caseId ?? row.id,
+      wasOk: nowMeta.cascade ? baseRow.okFinal : baseRow.okFirst,
+      isOk: nowMeta.cascade ? row.okFinal : row.okFirst,
+    });
   }
-  const p = mcnemarMidP(b, c);
-  const regressed = b > c && p < 0.05;
-  const improved = c > b && p < 0.05;
   return {
     skipped: null,
-    regressed,
-    improved,
-    detail: `${crossGate ? 'A/B (directional, not a regression gate) ' : ''}flips ↓${b} ↑${c} (mid-p ${p.toFixed(3)})${flips.length ? ` — ${flips.join(', ')}` : ''}`,
+    ...buildCompareReport({
+      pairs,
+      crossGate,
+      shared: sharedIds.length,
+      changed,
+      added,
+      removed,
+      hasRowHash,
+    }),
   };
 }
 
 // ─── validate / coverage (0 LLM calls) ────────────────────────────────────────────
 
+// extractCommentLines/wordsOf/jaccard (comment-leakage heuristics, see validateRow below) live in stats.mts.
+
 /** Corpus linter: selection fires the target reviewer, expectItems ⊆ what the REAL checklist
- * generate enumerates, no VERDICT prompt-injection in staged content, per-row item counts. */
+ * generate enumerates, no VERDICT prompt-injection in staged content, per-row item counts.
+ *
+ * Two classes of finding: `problems` are HARD FAILs (validate exits 1) — a malformed reasonPattern
+ * regex belongs here, because a row whose pattern can't even compile silently scores every FAIL as
+ * `fail-unattributed`/`unattributed` forever. `warnings` are comment-leakage tells — a
+ * `reasonPattern` or `note` that echoes a comment left in the fixture text COULD mean the row is
+ * scoreable for the wrong reason — but corpus rows legitimately reuse plain-English vocabulary
+ * ("sql injection", "race condition") between prose and code comments, so these are printed and
+ * never fail validate. */
 export function validateRow(row) {
   const problems = [];
+  const warnings = [];
   const reviewer = BENCH_REVIEWERS.find((r) => r.name === row.reviewer);
-  if (!reviewer) return { problems: [`unknown reviewer ${row.reviewer}`], itemCount: 0 };
+  if (!reviewer) return { problems: [`unknown reviewer ${row.reviewer}`], warnings, itemCount: 0 };
+  let compiled = null;
+  if (row.reasonPattern) {
+    try {
+      compiled = new RegExp(row.reasonPattern, 'i');
+    } catch (e) {
+      problems.push(`reasonPattern is not a valid regex: ${e?.message ?? e}`);
+    }
+  }
   for (const content of Object.values(row.repo.staged))
     if (content && VERDICT_INJECTION_RE.test(content))
       problems.push('staged content contains "VERDICT:" (prompt-injection hazard)');
+  const commentLines = extractCommentLines({ ...row.repo.base, ...row.repo.staged });
+  if (compiled && commentLines.length && compiled.test(commentLines.join('\n')))
+    warnings.push('⚠ possible leakage: reasonPattern matches fixture comment text');
+  if (row.note) {
+    const noteWords = wordsOf(row.note);
+    if (commentLines.some((line) => jaccard(noteWords, wordsOf(line)) > 0.5))
+      warnings.push('⚠ possible leakage: note overlaps fixture comment');
+  }
   const assets = buildAssets(reviewer);
   const fx = materializeFixture({
     repo: { base: { ...row.repo.base, ...assets }, staged: row.repo.staged },
@@ -449,7 +462,7 @@ export function validateRow(row) {
   } finally {
     fx.cleanup();
   }
-  return { problems, itemCount };
+  return { problems, warnings, itemCount };
 }
 
 function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
@@ -459,7 +472,7 @@ function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
     const rows = loadRows(reviewer, { dev });
     console.log(`\n${reviewer.name} — ${rows.length} rows`);
     for (const row of rows) {
-      const { problems, itemCount } = validateRow(row);
+      const { problems, warnings, itemCount } = validateRow(row);
       const fat = itemCount > 6 ? '  ⚠ fat row (cost)' : '';
       if (problems.length === 0)
         console.log(`  ${row.id.padEnd(36)} OK    ${itemCount} items${fat}`);
@@ -467,6 +480,7 @@ function validate({ dev = false, targets = [...BENCH_REVIEWERS] } = {}) {
         bad += 1;
         console.log(`  ${row.id.padEnd(36)} BAD   ${problems.join(' | ')}`);
       }
+      for (const w of warnings) console.log(`  ${row.id.padEnd(36)} ${w}`);
     }
   }
   if (bad > 0) throw new BenchAbort(1, `reviewer-eval: validate found ${bad} bad row(s)`);
@@ -506,31 +520,7 @@ function coverage() {
 }
 
 // ─── run ──────────────────────────────────────────────────────────────────────────
-
-function loadProgress(model, cascade) {
-  try {
-    return parseCasesText(readFileSync(progressFile(model, cascade), 'utf8'));
-  } catch {
-    return [];
-  }
-}
-
-/** Checkpointed rows reusable for THIS reviewer + gate + corpus: retryable outcomes
- * (outage/engine-error) re-run; a hash mismatch simply never matches — stale checkpoints are
- * inert, not dangerous. */
-export function salvageMap(progress, reviewerName, meta) {
-  return new Map(
-    progress
-      .filter(
-        (p) =>
-          p.reviewer === reviewerName &&
-          p.gateHash === meta.gateHash &&
-          p.corpusHash === meta.corpusHash &&
-          !RETRYABLE.has(p.res.subcause),
-      )
-      .map((p) => [p.res.id, p.res]),
-  );
-}
+// loadProgress/salvageMap (checkpoint reuse across a killed run) now live in progress.mts.
 
 async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, against }) {
   cleanBenchEnv();
@@ -596,7 +586,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       gateHash: benchGateHash(reviewer),
       corpusHash: corpusHash(reviewer),
     };
-    const salvage = salvageMap(progress, reviewer.name, meta);
+    const salvage = salvageMap(progress, reviewer.name, meta, rows);
     console.log(
       `\n── ${reviewer.name} (${rows.length} rows${salvage.size ? `, ${salvage.size} salvaged` : ''}) ──`,
     );
@@ -612,6 +602,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
           reviewer: row.reviewer,
           expected: row.expected,
           holdout: !!row.holdout,
+          caseId: row.caseId ?? null,
+          rowHash: rowHash(row),
           firstVerdict: null,
           okFirst: false,
           finalStatus: 'paused-skipped',
@@ -637,6 +629,8 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
           reviewer: row.reviewer,
           expected: row.expected,
           holdout: !!row.holdout,
+          caseId: row.caseId ?? null,
+          rowHash: rowHash(row),
           firstVerdict: null,
           okFirst: false,
           finalStatus: 'engine-error',
@@ -650,7 +644,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       }
       appendFileSync(
         progressFile(MODEL, CASCADE),
-        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, corpusHash: meta.corpusHash, res })}\n`,
+        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, rowHash: rowHash(row), res })}\n`,
       );
       if (RETRYABLE.has(res.subcause)) {
         consecutiveOutages += 1;
@@ -670,16 +664,18 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     const key = sectionKey(reviewer.name, meta.model, meta.cascade);
     const section = baseline?.sections?.[key];
     // Stability rerun fires for --fail (same-gate regression check) AND for A/B (--against,
-    // cross-gate). corpusHash must match in both; gateHash must match ONLY outside A/B mode.
-    if (
-      (failMode || abMode) &&
-      section &&
-      section.corpusHash === meta.corpusHash &&
-      (abMode || section.gateHash === meta.gateHash)
-    ) {
+    // cross-gate). gateHash must match ONLY outside A/B mode. corpusHash is NOT checked here —
+    // it is a row-SET hash that changes whenever the corpus gains/loses/edits any row, which
+    // would defeat the whole point of row-level pairing (appending rows must not invalidate
+    // comparisons over retained rows). Instead each row is paired individually below via
+    // `rowHash`, mirroring compareReviewer's row-level pairing.
+    if ((failMode || abMode) && section && (abMode || section.gateHash === meta.gateHash)) {
       for (const res of results) {
         const baseRow = section.rows[res.id];
-        if (!baseRow) continue;
+        // A hand-edited/replaced row is not the same fixture — skip it rather than pairing
+        // stale content with a fresh run (rowUnchanged treats hash-less old baselines as safe
+        // to pair, since drift can't be detected there — matches compareReviewer's fallback).
+        if (!rowUnchanged(baseRow, res.rowHash)) continue;
         const wasOk = meta.cascade ? baseRow.okFinal : baseRow.okFirst;
         const isOk = meta.cascade ? res.okFinal : res.okFirst;
         if (wasOk !== isOk) {
@@ -747,7 +743,10 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         if (!abMode) failed = true;
       }
     }
-    if (MODEL === 'sonnet') {
+    // sonnet-only floor: gates on what actually RAN, not the env default — a per-reviewer model
+    // pin (correctness) or a BENCH_MODEL override must not silently apply/skip this floor.
+    const allSonnet = perReviewer.every(({ reviewer }) => effModel(reviewer) === 'sonnet');
+    if (allSonnet) {
       const fr = pooled.firstFailRecall;
       if (fr.n && fr.k / fr.n < FLOORS.firstFailRecallSonnetOnly) {
         console.error(
@@ -801,6 +800,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               okFirst: r.okFirst,
               okFinal: r.okFinal,
               finalStatus: r.finalStatus,
+              rowHash: r.rowHash,
             },
           ]),
         ),
