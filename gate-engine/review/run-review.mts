@@ -39,6 +39,7 @@ import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts
 import { loadCache, savePasses } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
+import { archiveFailedDiff } from './evidence/diff-archive.mts';
 import { attachItems, itemFields } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
 import { applyOverrideValve } from './overrides.mts';
@@ -107,7 +108,6 @@ interface CascadeOpts {
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
 // (judge/run-judge.mts), as does the commit-msg completeness judge; the 30-min rationale lives with
 // the constant. Three same-valued locals here is exactly how it drifted from completeness (sc-1227).
-//
 // Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
 // prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate + completeness on the same
 // cap. PER-CASCADE worst ≈ 1800 (first) + 1800 (escalate) = 3600s; under the concurrency cap (default
@@ -458,9 +458,8 @@ export async function runReviewGate(
   // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
   // rejected cascade from abandoning its siblings (see mapLimit).
   const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
-  // `running` = every reviewer to run, recorded up front. Under the concurrency cap some are QUEUED,
-  // not yet started, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names
-  // never-started reviewers. Correct for the banner's purpose — they're uncached and WILL be retried.
+  // `running` = every reviewer to run, recorded up front — some are QUEUED (not yet started) under the
+  // concurrency cap, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names never-started reviewers; correct for the banner, since they're uncached and WILL be retried.
   const running = toRun.map((t) => t.sel.reviewer.name);
   const completed: string[] = [];
   if (progressFile) writeProgress(progressFile, { running, completed });
@@ -497,6 +496,7 @@ export async function runReviewGate(
               duration_ms: durationMs,
             },
           });
+        if (res.status === 'fail') archiveFailedDiff(t.diffText);
         if (progressFile) {
           completed.push(res.name);
           writeProgress(progressFile, { running, completed });

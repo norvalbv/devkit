@@ -3,9 +3,14 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BENCH_REVIEWERS,
+  clusteredFlipCounts,
   compareReviewer,
+  corpusHashFromRows,
+  flipCounts,
   lintRows,
   makeSpyExec,
+  rowHash,
+  rowUnchanged,
   runRow,
   salvageMap,
   scoreRow,
@@ -240,11 +245,94 @@ describe('compareReviewer', () => {
     expect(cmp.detail).toMatch(/A\/B/);
   });
 
-  it('crossGate still HARD-skips on corpusHash mismatch', () => {
-    const base = baseWith({}, { gateHash: 'BEFORE', corpusHash: 'OTHER' });
-    expect(
-      compareReviewer('api-security-reviewer', [], meta, base, { crossGate: true }).skipped,
-    ).toMatch(/corpus changed/);
+  it('no longer hard-skips on corpusHash mismatch (row-set-aware pairing supersedes it)', () => {
+    // corpusHash is stale/absent-in-meaning now — a diverged corpusHash must not block a compare
+    // that would otherwise pair fine on shared row ids.
+    const base = baseWith(
+      { r0: { okFinal: true, okFirst: true, rowHash: 'h0' } },
+      { corpusHash: 'OTHER' },
+    );
+    const now = [{ id: 'r0', okFinal: true, okFirst: true, rowHash: 'h0', expected: 'FAIL' }];
+    expect(compareReviewer('api-security-reviewer', now, meta, base).skipped).toBeNull();
+  });
+
+  it('pairs over the row-id intersection: excludes changed rowHashes, counts added/removed', () => {
+    const base = baseWith({
+      r1: { okFinal: true, okFirst: true, rowHash: 'hashA' },
+      r2: { okFinal: true, okFirst: true, rowHash: 'hashB' },
+      r3: { okFinal: false, okFirst: false, rowHash: 'hashC' }, // absent from "now" → removed
+    });
+    const now = [
+      { id: 'r1', okFinal: true, okFirst: true, rowHash: 'hashA', expected: 'FAIL' }, // unchanged
+      { id: 'r2', okFinal: false, okFirst: false, rowHash: 'DIFFERENT', expected: 'PASS' }, // edited fixture → excluded
+      { id: 'r4', okFinal: true, okFirst: true, rowHash: 'hashD', expected: 'FAIL' }, // new row → added
+    ];
+    const cmp = compareReviewer('api-security-reviewer', now, meta, base);
+    expect(cmp.skipped).toBeNull();
+    // shared = {r1, r2} (2); of those, r2's rowHash differs → 1 changed/excluded; added = {r4} (1);
+    // removed = {r3} (1).
+    expect(cmp.detail).toMatch(/rows: shared 2 \(1 changed, excluded\), added 1, removed 1/);
+  });
+
+  it('old-format baseline (no rowHash anywhere) treats every shared row as unchanged and warns', () => {
+    const base = {
+      sections: {
+        'api-security-reviewer@sonnet@cascade-on': {
+          gateHash: 'g1',
+          corpusHash: 'c1',
+          rows: { r1: { okFinal: true, okFirst: true } }, // no rowHash field at all
+        },
+      },
+    };
+    const now = [{ id: 'r1', okFinal: false, okFirst: false, rowHash: 'x', expected: 'FAIL' }];
+    const cmp = compareReviewer('api-security-reviewer', now, meta, base);
+    expect(cmp.detail).toMatch(/rows: shared 1 \(0 changed, excluded\)/);
+    expect(cmp.detail).toMatch(/rowHash/i);
+  });
+
+  it('class-splits the flip table: gold-only and decoy-only b/c reported alongside pooled', () => {
+    const base = baseWith({
+      g1: { okFinal: true, okFirst: true, rowHash: 'h1' },
+      d1: { okFinal: true, okFirst: true, rowHash: 'h2' },
+    });
+    const now = [
+      { id: 'g1', okFinal: false, okFirst: false, rowHash: 'h1', expected: 'FAIL' },
+      { id: 'd1', okFinal: false, okFirst: false, rowHash: 'h2', expected: 'PASS' },
+    ];
+    const cmp = compareReviewer('api-security-reviewer', now, meta, base);
+    expect(cmp.detail).toMatch(/flips ↓2 ↑0/);
+    expect(cmp.detail).toMatch(/gold\s+↓1 ↑0/);
+    expect(cmp.detail).toMatch(/decoy ↓1 ↑0/);
+  });
+
+  it('clusters flips by caseId: a case whose rows flip together is ONE discordant unit', () => {
+    const base = baseWith({
+      a1: { okFinal: true, okFirst: true, rowHash: 'h1' },
+      a2: { okFinal: true, okFirst: true, rowHash: 'h2' },
+    });
+    const now = [
+      {
+        id: 'a1',
+        okFinal: false,
+        okFirst: false,
+        rowHash: 'h1',
+        expected: 'FAIL',
+        caseId: 'case-A',
+      },
+      {
+        id: 'a2',
+        okFinal: false,
+        okFirst: false,
+        rowHash: 'h2',
+        expected: 'FAIL',
+        caseId: 'case-A',
+      },
+    ];
+    const cmp = compareReviewer('api-security-reviewer', now, meta, base);
+    // naive: 2 discordant rows both down
+    expect(cmp.detail).toMatch(/flips ↓2 ↑0/);
+    // clustered by case: same case, both down → ONE unit
+    expect(cmp.detail).toMatch(/clustered by case ↓1 ↑0/);
   });
 
   it('flags a significant one-directional regression, ignores unstable flips', () => {
@@ -264,6 +352,36 @@ describe('compareReviewer', () => {
     expect(compareReviewer('api-security-reviewer', shaky, meta, baseWith(rows)).regressed).toBe(
       false,
     );
+  });
+});
+
+describe('rowUnchanged (stability-rerun row pairing, not gated on whole-corpus corpusHash)', () => {
+  it('pairs when rowHash matches', () => {
+    expect(rowUnchanged({ rowHash: 'h1' }, 'h1')).toBe(true);
+  });
+
+  it('excludes a hand-edited row (rowHash mismatch) even though corpusHash is not consulted', () => {
+    expect(rowUnchanged({ rowHash: 'h1' }, 'h2')).toBe(false);
+  });
+
+  it('treats an old-format baseline row (no rowHash) as pairable — drift cannot be detected', () => {
+    expect(rowUnchanged({ okFinal: true }, 'h1')).toBe(true);
+  });
+
+  it('treats a missing current rowHash as pairable', () => {
+    expect(rowUnchanged({ rowHash: 'h1' }, undefined)).toBe(true);
+  });
+
+  it('rejects a row with no baseline counterpart', () => {
+    expect(rowUnchanged(undefined, 'h1')).toBe(false);
+  });
+
+  it('a sibling row appended elsewhere in the corpus (whole-corpus corpusHash drift) does not', () => {
+    // Regression guard for the blocker: the stability rerun used to hard-gate on
+    // `section.corpusHash === meta.corpusHash`, a row-SET hash that changes whenever ANY row is
+    // added/removed/edited anywhere in the corpus — defeating row-level pairing entirely once the
+    // corpus grew even by one row. rowUnchanged only ever looks at the two rows being paired.
+    expect(rowUnchanged({ rowHash: 'h1' }, 'h1')).toBe(true);
   });
 });
 
@@ -410,14 +528,57 @@ describe('validateRow (real checklist generate, no LLM)', () => {
     const { problems } = validateRow(row);
     expect(problems.some((p) => p.includes('prompt-injection'))).toBe(true);
   });
+
+  it('a reasonPattern that fails to compile is a HARD FAIL (bad row)', () => {
+    const row = goldRow({ reasonPattern: '(unterminated[' });
+    const { problems } = validateRow(row);
+    expect(problems.some((p) => p.includes('reasonPattern'))).toBe(true);
+  });
+
+  it('reasonPattern matching fixture comment text is a non-fatal leakage WARNING', () => {
+    const row = goldRow({
+      repo: {
+        base: { 'api/users.ts': 'export function listUsers() {\n  return [];\n}\n' },
+        staged: {
+          'api/users.ts':
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${id} is the fixture's vulnerable-SQL text, not a template
+            "// TODO fix parameterized injection concat bug\nimport { db } from './db';\nexport function getUser(id: string) {\n  return db.query(`SELECT * FROM users WHERE id = ${id}`);\n}\n",
+        },
+      },
+    });
+    const { problems, warnings } = validateRow(row);
+    expect(problems).toEqual([]); // never fails
+    expect(warnings.some((w) => w.includes('leakage') && w.includes('reasonPattern'))).toBe(true);
+  });
+
+  it('a note that overlaps fixture comment text is a non-fatal leakage WARNING', () => {
+    const note = 'string concatenated sql query built from raw user request input';
+    const staged =
+      `// ${note}\n` +
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${id} is the fixture's vulnerable-SQL text, not a template
+      "import { db } from './db';\nexport function getUser(id: string) {\n  return db.query(`SELECT * FROM users WHERE id = ${id}`);\n}\n";
+    const row = goldRow({
+      note,
+      repo: {
+        base: { 'api/users.ts': 'export function listUsers() {\n  return [];\n}\n' },
+        staged: { 'api/users.ts': staged },
+      },
+    });
+    const { problems, warnings } = validateRow(row);
+    expect(problems).toEqual([]); // never fails
+    expect(warnings.some((w) => w.includes('leakage') && w.includes('note overlaps'))).toBe(true);
+  });
 });
 
-describe('salvageMap (checkpoint resume)', () => {
-  const meta = { gateHash: 'g1', corpusHash: 'c1' };
+describe('salvageMap (checkpoint resume, per-row rowHash matching)', () => {
+  const meta = { gateHash: 'g1' };
+  // Distinct content per id → distinct rowHash per id, so per-row matching is actually exercised.
+  const rows = ['r1', 'r2', 'r3', 'r4'].map((id) => ({ id, note: id }));
+  const hashOf = (id) => rowHash(rows.find((r) => r.id === id));
   const entry = (id, over = {}) => ({
     reviewer: 'api-security-reviewer',
     gateHash: 'g1',
-    corpusHash: 'c1',
+    rowHash: hashOf(id),
     res: { id, subcause: null, okFinal: true },
     ...over,
   });
@@ -432,18 +593,25 @@ describe('salvageMap (checkpoint resume)', () => {
       ],
       'api-security-reviewer',
       meta,
+      rows,
     );
     // outage/engine-error re-run; a deterministic inconclusive (checklist-void) is a real result
     expect([...map.keys()].sort()).toEqual(['r1', 'r4']);
   });
 
-  it('ignores checkpoints from another reviewer, gate version, or corpus version', () => {
+  it('ignores checkpoints from another reviewer, gate version, or an edited row (rowHash changed)', () => {
     const stale = [
       entry('r1', { reviewer: 'frontend-security-reviewer' }),
       entry('r2', { gateHash: 'OTHER' }),
-      entry('r3', { corpusHash: 'OTHER' }),
+      entry('r3', { rowHash: 'OTHER' }),
     ];
-    expect(salvageMap(stale, 'api-security-reviewer', meta).size).toBe(0);
+    expect(salvageMap(stale, 'api-security-reviewer', meta, rows).size).toBe(0);
+  });
+
+  it('a sibling row appended to the corpus does not invalidate an untouched row checkpoint', () => {
+    const grown = [...rows, { id: 'r5', note: 'new gold row' }];
+    const map = salvageMap([entry('r1')], 'api-security-reviewer', meta, grown);
+    expect(map.has('r1')).toBe(true);
   });
 
   it('last checkpoint wins for a re-run row', () => {
@@ -454,6 +622,7 @@ describe('salvageMap (checkpoint resume)', () => {
       ],
       'api-security-reviewer',
       meta,
+      rows,
     );
     expect(map.get('r1').okFinal).toBe(true);
   });
@@ -512,5 +681,139 @@ describe('summarize', () => {
     expect(s.escalateMeanSecs).toBe(240);
     expect(s.reasons).toEqual({ 'right-item': 1 });
     expect(s.inconclusive).toEqual({ outage: 1 });
+  });
+
+  const overturnRescueRows = [
+    // gold, first FAIL, escalation CONFIRMS (still fails) → not overturned.
+    {
+      expected: 'FAIL',
+      firstVerdict: 'FAIL',
+      okFirst: true,
+      okFinal: true,
+      escalateLive: true,
+      reasonClass: 'right-item',
+      subcause: null,
+      ms: { first: 1, escalate: 1 },
+    },
+    // gold, first FAIL, escalation OVERTURNS to pass → overturned.
+    {
+      expected: 'FAIL',
+      firstVerdict: 'FAIL',
+      okFirst: true,
+      okFinal: false,
+      escalateLive: true,
+      reasonClass: null,
+      subcause: null,
+      ms: { first: 1, escalate: 1 },
+    },
+    // gold, first PASS (a miss, not an overturn) → excluded from the overturn denominator.
+    {
+      expected: 'FAIL',
+      firstVerdict: 'PASS',
+      okFirst: false,
+      okFinal: false,
+      escalateLive: false,
+      reasonClass: null,
+      subcause: null,
+      ms: { first: 1, escalate: 0 },
+    },
+    // decoy, first FAIL, escalation RESCUES to pass → rescued.
+    {
+      expected: 'PASS',
+      firstVerdict: 'FAIL',
+      okFirst: false,
+      okFinal: true,
+      escalateLive: true,
+      reasonClass: null,
+      subcause: null,
+      ms: { first: 1, escalate: 1 },
+    },
+    // decoy, first FAIL, escalation confirms fail (a real block) → not rescued.
+    {
+      expected: 'PASS',
+      firstVerdict: 'FAIL',
+      okFirst: false,
+      okFinal: false,
+      escalateLive: true,
+      reasonClass: null,
+      subcause: null,
+      ms: { first: 1, escalate: 1 },
+    },
+    // decoy, first PASS → excluded from the rescue denominator.
+    {
+      expected: 'PASS',
+      firstVerdict: 'PASS',
+      okFirst: true,
+      okFinal: true,
+      escalateLive: false,
+      reasonClass: null,
+      subcause: null,
+      ms: { first: 1, escalate: 0 },
+    },
+  ];
+
+  it('computes overturn/rescue tallies from first-vs-final verdict deltas (cascade on)', () => {
+    const s = summarize(overturnRescueRows, { cascade: true });
+    expect(s.overturnRate).toEqual({ k: 1, n: 2 }); // 2 gold first-FAIL rows, 1 overturned
+    expect(s.rescueRate).toEqual({ k: 1, n: 2 }); // 2 decoy first-FAIL rows, 1 rescued
+  });
+
+  it('omits overturn/rescue tallies when cascade is off', () => {
+    const s = summarize(overturnRescueRows, { cascade: false });
+    expect(s.overturnRate).toBeUndefined();
+    expect(s.rescueRate).toBeUndefined();
+  });
+});
+
+describe('rowHash / corpusHash (row-set hashing)', () => {
+  it('rowHash is stable regardless of object key order (canonical JSON)', () => {
+    const a = { id: 'x', expected: 'FAIL', nested: { z: 1, y: 2 } };
+    const b = { nested: { y: 2, z: 1 }, expected: 'FAIL', id: 'x' };
+    expect(rowHash(a)).toBe(rowHash(b));
+  });
+
+  it('rowHash changes when row content actually changes', () => {
+    expect(rowHash(goldRow())).not.toBe(rowHash(goldRow({ note: 'a different reason' })));
+  });
+
+  it('a retained row keeps its rowHash when a sibling row is appended to the corpus', () => {
+    const row = goldRow();
+    const before = rowHash(row);
+    // Appending decoyRow() to the in-memory corpus must not touch goldRow()'s own hash — rowHash
+    // is computed purely from the row itself, never from its siblings.
+    const rows = [row, decoyRow()];
+    expect(rowHash(rows[0])).toBe(before);
+  });
+
+  it('corpusHashFromRows is a row-SET hash: order-independent, but changes when the set changes', () => {
+    const rows = [goldRow(), decoyRow()];
+    expect(corpusHashFromRows(rows)).toBe(corpusHashFromRows([...rows].reverse()));
+    expect(corpusHashFromRows(rows)).not.toBe(
+      corpusHashFromRows([...rows, goldRow({ id: 'extra' })]),
+    );
+  });
+});
+
+describe('flip-table helpers (flipCounts / clusteredFlipCounts)', () => {
+  it('flipCounts: b = was-ok→now-wrong, c = the reverse', () => {
+    const pairs = [
+      { id: 'a', wasOk: true, isOk: false },
+      { id: 'b', wasOk: false, isOk: true },
+      { id: 'c', wasOk: true, isOk: true }, // concordant, not counted
+    ];
+    expect(flipCounts(pairs)).toMatchObject({ b: 1, c: 1 });
+  });
+
+  it('clusteredFlipCounts: a caseId whose rows flip in opposite directions cancels to net zero', () => {
+    const pairs = [
+      { id: 'a', caseId: 'case-1', wasOk: true, isOk: false }, // down
+      { id: 'b', caseId: 'case-1', wasOk: false, isOk: true }, // up — net 0, no discordant unit
+    ];
+    expect(clusteredFlipCounts(pairs)).toMatchObject({ b: 0, c: 0 });
+  });
+
+  it('clusteredFlipCounts: an unclustered row (no caseId) is its own one-row case', () => {
+    const pairs = [{ id: 'solo', wasOk: true, isOk: false }];
+    expect(clusteredFlipCounts(pairs)).toMatchObject({ b: 1, c: 0 });
   });
 });
