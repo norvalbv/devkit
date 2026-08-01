@@ -15,6 +15,7 @@ import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mts';
+import { checkAdhdSkill } from '../lib/install/adhd-skill.mts';
 import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
@@ -547,20 +548,12 @@ async function collectResults(
   if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []), checkHookRunner(cwd));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
-  if (sel.biome)
-    results.push(
-      checkExtends(cwd, 'biome.jsonc', expected.biome, 'extends', overrides.has('biome.jsonc')),
-    );
-  if (sel.tsconfig)
-    results.push(
-      checkExtends(
-        cwd,
-        'tsconfig.json',
-        expected.tsconfig,
-        'extends',
-        overrides.has('tsconfig.json'),
-      ),
-    );
+  // biome and tsconfig differ only by filename and expected pointer.
+  for (const [on, file, want] of [
+    [sel.biome, 'biome.jsonc', expected.biome],
+    [sel.tsconfig, 'tsconfig.json', expected.tsconfig],
+  ] as const)
+    if (on) results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
   if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
   const hooks = selectedHookAssets(sel);
@@ -568,6 +561,7 @@ async function collectResults(
   if (sel.agents && surfaces.length) results.push(checkAgentAssets(cwd, 'agents', surfaces));
   if (hooks.scripts.length && surfaces.length)
     results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
+  if (sel.adhd) results.push(checkAdhdSkill(cwd));
   if (sel.searchSteering) results.push(checkSearchToolBins());
   if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))

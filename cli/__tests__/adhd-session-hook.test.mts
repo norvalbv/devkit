@@ -15,6 +15,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ADHD_SKILL_DIR } from '../lib/install/adhd-skill.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
   ADHD_SESSION_HOOK,
@@ -37,7 +38,7 @@ const SKILL_BODY = '# i-have-adhd\n\nLead with the next action. Number multi-ste
 function repoWithSkill(body: string | null = SKILL_BODY) {
   const root = mkTmp('adhd-hook-');
   if (body !== null) {
-    const dir = join(root, '.claude', 'skills', 'i-have-adhd');
+    const dir = join(root, ADHD_SKILL_DIR);
     mkdirSync(dir, { recursive: true });
     // Frontmatter present, exactly as the vendored file ships it.
     writeFileSync(join(dir, 'SKILL.md'), `---\nname: i-have-adhd\nlicense: MIT\n---\n${body}`);
@@ -74,7 +75,7 @@ describe('adhd SessionStart hook', () => {
     // rides into every session as noise. ponytail-frink's injector has the same shape, so this is
     // a class of bug rather than a one-off.
     const root = mkTmp('adhd-crlf-');
-    const dir = join(root, '.claude', 'skills', 'i-have-adhd');
+    const dir = join(root, ADHD_SKILL_DIR);
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'SKILL.md'),
@@ -103,7 +104,7 @@ describe('adhd SessionStart hook', () => {
     expect(r.stdout).toBe('');
   });
 
-  it('stays silent when the skill is not synced (skills deselected)', () => {
+  it('stays silent when the skill is not installed (adhd deselected)', () => {
     const r = run(repoWithSkill(null));
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');

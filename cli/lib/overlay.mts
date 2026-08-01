@@ -23,6 +23,7 @@ import { detectGitRoot } from './detect-git-root.mts';
 import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mts';
 import { trackedPathPredicate } from './git-tracked.mts';
 import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mts';
+import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mts';
 import { selectedHookAssets } from './install/hook-registration-ledger/selection.mts';
 import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mts';
 import {
@@ -413,17 +414,16 @@ function installOverlayAgentSurfaces(
   const excl = [];
   if (sel.skills) {
     console.log('  skills');
-    const m = syncSkills(args, gitRoot, targets, {
-      skipTracked,
-      override,
-      selection: sel,
-    });
+    const m = syncSkills(args, gitRoot, targets, { skipTracked, override, selection: sel });
     excl.push(...overlayAssetExcludes(m, 'skills', targets));
     // The manifest is always written, even if every asset is preserved.
     excl.push('.devkit/skills-manifest.json');
   } else if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) {
     removeSkills(gitRoot, dryRun);
   }
+  // Independent of `skills` — its own tree. Always called: false reclaims an earlier copy.
+  syncAdhdSkill(gitRoot, Boolean(sel.adhd), dryRun);
+  if (sel.adhd) excl.push(`${ADHD_SKILL_DIR}/`);
   if (sel.agents) {
     console.log('  agents');
     const m = syncAgents(args, gitRoot, targets, { skipTracked, override });

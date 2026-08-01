@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OPTIONAL_COMPONENTS, type Selection, unofferedComponents } from '../lib/components.mts';
+import { ADHD_SKILL_DIR } from '../lib/install/adhd-skill.mts';
 import { CLI, tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, cleanup } = tmpRepos('upgrade-optional-');
@@ -122,7 +123,7 @@ describe('devkit upgrade — optional component offer', () => {
     );
     expect(run(root, 'upgrade').status).toBe(0);
     expect(config(root).components.adhd).toBe(true);
-    expect(existsSync(join(root, '.claude', 'skills', 'i-have-adhd', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(root, ADHD_SKILL_DIR, 'SKILL.md'))).toBe(true);
   });
 
   it('leaves the key absent for an OVERLAY repo too', () => {
