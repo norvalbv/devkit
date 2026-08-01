@@ -43,7 +43,7 @@ import { emitReviewScope, emitReviewSkipped, emitUnselected } from "./evidence/s
 import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
 import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, consumerReviewerIdentity, enforceChecklistContract, passAssetVerifier, preflightReviewAssets, readChecklistState, reviewJudgeEnv, } from "./runtime.mjs";
+import { agentBody, cleanupChecklistState, consumerReviewerIdentity, enforceChecklistContract, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, reviewJudgeEnv, } from "./runtime.mjs";
 import { ReviewGateTiming, reviewConcurrency } from "./telemetry/timing.mjs";
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
@@ -116,22 +116,23 @@ function stagedFiles(cwd) {
 export async function runCascade(sel, opts) {
     const { cwd } = opts;
     cleanupChecklistState(cwd, sel.reviewer);
-    let res = await cascadeVerdict(sel, opts);
-    res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, (reason) => cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason }));
-    // Override valve: all failed lenses waived → PASS; any unwaived finding remains a named FAIL. Runs
-    // BEFORE the cleanup below — the fingerprint needs the failed lens names off the artifact. Returns
-    // what the gate decided about each failing lens, which the item vector records: an out-of-charter
-    // drop and a waiver both leave a PASS behind, and only the disposition tells them apart.
-    const disposition = applyOverrideValve(sel, res, cwd, {
-        readState: () => readChecklistState(cwd, sel.reviewer),
-        stagedDiff: () => gitCached(cwd, [], sel.files),
-    });
-    // LAST read before the artifact is destroyed, and for EVERY status — not just the failing pinned
-    // path the valve above covers. This is the vector that answers "did this reviewer's lenses ever
-    // fire", which four of the domain reviewers currently cannot be asked at all.
-    attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
-    cleanupChecklistState(cwd, sel.reviewer);
-    return res;
+    try {
+        initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
+        let res = await cascadeVerdict(sel, opts);
+        res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, async (reason) => {
+            initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
+            return cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason });
+        });
+        const disposition = applyOverrideValve(sel, res, cwd, {
+            readState: () => readChecklistState(cwd, sel.reviewer),
+            stagedDiff: () => gitCached(cwd, [], sel.files),
+        });
+        attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
+        return res;
+    }
+    finally {
+        cleanupChecklistState(cwd, sel.reviewer);
+    }
 }
 async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, }) {
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
@@ -189,6 +190,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         // Colon (not " — ") on purpose: the ship timeout banner's awk reads `<name> — ` as COMPLETED.
         console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
+        initializeCommitGuardChecklist(cwd, reviewer, assetRoot, judgeEnv);
         first = await exec(firstOpts);
     }
     if (first === null)

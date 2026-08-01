@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { checklistAssetPath, hasChecklist, REVIEWERS, verifyChecklist, } from "./reviewers.mjs";
+import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, verifyChecklist, } from "./reviewers.mjs";
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 /** Entrypoint selected by the generated hook from a frozen review package runtime. */
 export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-gate';
@@ -153,6 +154,33 @@ export function readChecklistState(cwd, reviewer) {
 export function cleanupChecklistState(cwd, reviewer) {
     if (reviewer.stateFile)
         rmSync(path.resolve(cwd, reviewer.stateFile), { force: true });
+}
+/**
+ * Deterministically seed commit-guard's per-file checklist before the headless judge runs.
+ * Domain reviewers reliably generate their small fixed-lens checklists themselves; commit-guard's
+ * longer interactive brief has repeatedly returned a prose PASS without executing `init`, leaving
+ * strict ship permanently inconclusive. The gate owns enumeration, while the judge still owns every
+ * per-file pass/fail mark and `finalize` — a pre-seeded all-pending artifact grants no authority.
+ */
+export function initializeCommitGuardChecklist(cwd, reviewer, assetRoot, env = process.env) {
+    if (reviewer.name !== 'commit-guard' || !hasChecklist(reviewer))
+        return;
+    const script = checklistScriptAt(reviewer, assetRoot);
+    try {
+        execFileSync(process.execPath, [script, reviewer.cmds.gen], {
+            cwd,
+            encoding: 'utf8',
+            env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+    }
+    catch (cause) {
+        const stderr = cause && typeof cause === 'object' && 'stderr' in cause ? String(cause.stderr).trim() : '';
+        throw new Error(`commit-guard checklist initialization failed${stderr ? ` — ${stderr}` : ''}`);
+    }
+    const files = readChecklistState(cwd, reviewer)?.files;
+    if (!Array.isArray(files) || files.length === 0)
+        throw new Error('commit-guard checklist initialization produced no staged files');
 }
 /** Review-mode packaged assets make a missing checklist an execution-contract error, not a sync gap. */
 export async function enforceChecklistContract(selection, initial, cwd, assetRoot, retry) {
