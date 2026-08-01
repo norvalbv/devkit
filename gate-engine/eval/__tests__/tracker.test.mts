@@ -427,6 +427,8 @@ describe('catalog and generated views', () => {
       ...first,
     });
     expect(generatedOutputs(virtual, catalog, history)).toEqual(first);
+    const currentGrammar = first['README.md'].match(/(\d+) (is|are) current/);
+    expect(currentGrammar?.[2]).toBe(currentGrammar?.[1] === '1' ? 'is' : 'are');
     expect(first['docs/benchmarks/assets/dashboard-light.svg']).toContain('role="img"');
     expect(first['docs/benchmarks/assets/dashboard-dark.svg']).toContain('<desc id="desc">');
     expect(first['docs/benchmarks/assets/dashboard-light.svg']).toContain('…</text></g>');
