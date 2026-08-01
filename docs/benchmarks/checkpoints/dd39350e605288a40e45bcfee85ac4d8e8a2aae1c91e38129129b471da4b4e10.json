@@ -1,0 +1,180 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-01T11:18:47.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:b426f8dd7b93adf3f79876f6c7e2fcc6962e01ef083c7430f9fa91a1357aa4cf",
+    "implementation": "sha256:374599ed9af9c41276afda550a1a760953a6f7cc42e2c975e323c0640ed040e8",
+    "runner": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a",
+    "scorer": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a"
+  },
+  "metrics": [
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "api-security-reviewer@haiku@cascade-on:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6755924351161198,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "api-security-reviewer@haiku@cascade-on first-pass FAIL recall",
+      "numerator": 8,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 6,
+      "direction": "higher",
+      "id": "api-security-reviewer@haiku@cascade-on:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.43649717781352987,
+        "method": "wilson-95",
+        "upper": 0.9699466302516935
+      },
+      "label": "api-security-reviewer@haiku@cascade-on first-pass clean pass",
+      "numerator": 5,
+      "unit": "ratio",
+      "value": 0.8333333333333334
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "api-security-reviewer@haiku@cascade-on:block-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6755924351161198,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "api-security-reviewer@haiku@cascade-on block recall",
+      "numerator": 8,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 6,
+      "direction": "higher",
+      "id": "api-security-reviewer@haiku@cascade-on:clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6096657120978346,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "api-security-reviewer@haiku@cascade-on clean pass",
+      "numerator": 6,
+      "unit": "ratio",
+      "value": 1
+    }
+  ],
+  "rows": {
+    "api-security-reviewer@haiku@cascade-on:apisec-authed-route-clean": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-command-injection": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-endpoint-auth": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-error-leak": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-idor-lookup": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-jwt-unrestricted": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-jwt-verify-clean": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-log-credentials": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-mass-assignment": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-orm-search-clean": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-safe-path-nearmiss": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-sql-injection": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-sql-injection-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "api-security-reviewer@haiku@cascade-on:apisec-tagged-sql-nearmiss": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "d686014bb210189bbd493234f0577152e9c14998",
+  "suiteId": "reviewer-api-security"
+}

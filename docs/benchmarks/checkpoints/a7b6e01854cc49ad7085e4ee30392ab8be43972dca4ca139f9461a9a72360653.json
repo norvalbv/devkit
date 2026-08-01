@@ -1,0 +1,215 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-01T11:19:03.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:9818efd6009cb8f6080a56ecc00d2a7f47c78e59d2d268d63d4303d370e66f43",
+    "implementation": "sha256:c23535aa1da64b761dbf2b614e8f3f1dc7b7508f585ea83f870a2f1692fa48d4",
+    "runner": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a",
+    "scorer": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a"
+  },
+  "metrics": [
+    {
+      "denominator": 11,
+      "direction": "higher",
+      "id": "frontend-performance-reviewer@haiku@cascade-on:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6226415635484043,
+        "method": "wilson-95",
+        "upper": 0.9837678271141151
+      },
+      "label": "frontend-performance-reviewer@haiku@cascade-on first-pass FAIL recall",
+      "numerator": 10,
+      "unit": "ratio",
+      "value": 0.9090909090909091
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "frontend-performance-reviewer@haiku@cascade-on:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5291118177871464,
+        "method": "wilson-95",
+        "upper": 0.9775825085499433
+      },
+      "label": "frontend-performance-reviewer@haiku@cascade-on first-pass clean pass",
+      "numerator": 7,
+      "unit": "ratio",
+      "value": 0.875
+    },
+    {
+      "denominator": 11,
+      "direction": "higher",
+      "id": "frontend-performance-reviewer@haiku@cascade-on:block-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6226415635484043,
+        "method": "wilson-95",
+        "upper": 0.9837678271141151
+      },
+      "label": "frontend-performance-reviewer@haiku@cascade-on block recall",
+      "numerator": 10,
+      "unit": "ratio",
+      "value": 0.9090909090909091
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "frontend-performance-reviewer@haiku@cascade-on:clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5291118177871464,
+        "method": "wilson-95",
+        "upper": 0.9775825085499433
+      },
+      "label": "frontend-performance-reviewer@haiku@cascade-on clean pass",
+      "numerator": 7,
+      "unit": "ratio",
+      "value": 0.875
+    }
+  ],
+  "rows": {
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-activity-refetch-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-activity-refetch-storm": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-audit-feed-index-keys": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-case-gallery-clean": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-customer-lookup-clean": {
+      "expected": "PASS",
+      "finalStatus": "inconclusive",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-entry-lodash-moment": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-export-dialog-inline-handlers": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-head-blocking-script": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-integrations-table-clean": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-member-avatar-fullsize": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-per-method-lodash": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-relative-time-named-import": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-scroll-reflow": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-sku-rank-per-render": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-status-icons-namespace-import": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-status-icons-namespace-import-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-task-row-inline-style": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-transcript-memo-defeated": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-performance-reviewer@haiku@cascade-on:feperf-universal-transition-css": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "1fb073f3612a7bbf9cb58e6c0372abc1f7fe7311",
+  "suiteId": "reviewer-frontend-performance"
+}

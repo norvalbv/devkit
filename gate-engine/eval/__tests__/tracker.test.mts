@@ -489,7 +489,7 @@ describe('catalog and generated views', () => {
     expect(offsetPreferred['README.md']).not.toContain('Older offset metric');
   });
 
-  it('expands reviewer cohort metrics into per-reviewer suite sub-rows', () => {
+  it('keeps every cohort of a reviewer suite in the text alternative', () => {
     const source = repositorySource(ROOT, 'working');
     const catalog = loadCatalog(source);
     const history = (source.read('docs/benchmarks/history.jsonl') ?? '')
@@ -508,36 +508,44 @@ describe('catalog and generated views', () => {
       denominator: 9,
       inferenceUnit: 'row',
     });
-    const fleet: BenchmarkEvent = {
+    // A re-bench at another model MERGES into the shared baseline, so one reviewer's suite can
+    // publish two cohorts at once. Neither may be truncated out of the tables.
+    const reviewer: BenchmarkEvent = {
       ...template,
-      id: 'evt-reviewer-fleet-cohorts',
-      suiteId: 'reviewer-fleet',
+      id: 'evt-reviewer-cohorts',
+      suiteId: 'reviewer-frontend-security',
       recordedAt: '2099-01-02T00:00:00Z',
       metrics: [
+        cohortMetric(
+          'frontend-security-reviewer@haiku@cascade-on',
+          'first-fail-recall',
+          'first-pass FAIL recall',
+        ),
+        cohortMetric('frontend-security-reviewer@haiku@cascade-on', 'clean-pass', 'clean pass'),
         cohortMetric(
           'frontend-security-reviewer@sonnet@cascade-on',
           'first-fail-recall',
           'first-pass FAIL recall',
         ),
         cohortMetric('frontend-security-reviewer@sonnet@cascade-on', 'clean-pass', 'clean pass'),
-        cohortMetric(
-          'backend-performance-reviewer@sonnet@cascade-on',
-          'first-fail-recall',
-          'first-pass FAIL recall',
-        ),
       ],
     };
-    const outputs = generatedOutputs(source, catalog, [...history, fleet]);
+    const outputs = generatedOutputs(source, catalog, [...history, reviewer]);
     const readme = outputs['README.md'];
-    expect(readme).toContain('↳ frontend-security-reviewer (sonnet, cascade-on)');
-    expect(readme).toContain('↳ backend-performance-reviewer (sonnet, cascade-on)');
-    expect(readme).toContain('first-pass FAIL recall: 9/9 (100.0%)');
-    // A single-section or sectionless suite stays a flat row: the critique line keeps its
-    // original headline and gains no arrow prefix anywhere before the reviewer-fleet block.
-    const critiqueLine = readme.split('\n').find((line) => line.startsWith('| Feature critique '));
-    expect(critiqueLine).toBeDefined();
-    const arrowRows = readme.split('\n').filter((line) => line.startsWith('| ↳'));
-    expect(arrowRows).toHaveLength(2); // exactly the two cohort sections, nothing else
-    expect(outputs['docs/benchmarks/README.md']).toContain('↳ frontend-security-reviewer');
+    const row = readme.split('\n').find((line) => line.startsWith('| Frontend security reviewer '));
+    expect(row).toBeDefined();
+    // Both cohorts, tagged, with every metric each carries — nothing sliced away.
+    expect(row).toContain('haiku/cascade-on');
+    expect(row).toContain('sonnet/cascade-on');
+    expect(row).toContain('first-pass FAIL recall: 9/9 (100.0%)');
+    expect(row).toContain('clean pass: 9/9 (100.0%)');
+    // The namespacing key itself is noise once the cohort is named.
+    expect(row).not.toContain('frontend-security-reviewer@haiku');
+    // The graphic summarises, but must admit the cohorts it does not show.
+    expect(outputs['docs/benchmarks/assets/dashboard-light.svg']).toContain('+1 more cohorts');
+    // A suite with no cohort structure keeps its two-metric headline.
+    expect(readme.split('\n').find((line) => line.startsWith('| Feature critique '))).toContain(
+      'Gold finding recall',
+    );
   });
 });

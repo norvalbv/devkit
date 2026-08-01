@@ -79,18 +79,56 @@ function formatMetric(metric: MetricObservation): string {
   return Number.isInteger(metric.value) ? String(metric.value) : metric.value.toFixed(3);
 }
 
-function headline(event?: BenchmarkEvent): string {
-  if (!event || event.metrics.length === 0) return 'No accepted local checkpoint';
-  return event.metrics
-    .slice(0, 2)
-    .map((metric) => `${metric.label}: ${formatMetric(metric)}`)
-    .join(' · ');
+// A reviewer bench MERGES each run into its shared baseline, so one suite can hold several
+// model × cascade cohorts at once (haiku today, sonnet after a re-bench). Metric ids carry the
+// cohort that produced them; other adapters emit no such prefix and are unaffected.
+const COHORT_METRIC = /^(.+):(first-fail-recall|first-clean-pass|block-recall|clean-pass)$/;
+const cohortOf = (metric: MetricObservation) => COHORT_METRIC.exec(metric.id)?.[1];
+
+/** Metric label without the cohort key the adapter namespaces it with. */
+function shortMetric(metric: MetricObservation): string {
+  const key = cohortOf(metric);
+  return key && metric.label.startsWith(`${key} `)
+    ? metric.label.slice(key.length + 1)
+    : metric.label;
 }
 
+const cell = (metric: MetricObservation) => `${shortMetric(metric)}: ${formatMetric(metric)}`;
+
+function cohorts(event: BenchmarkEvent): Map<string, MetricObservation[]> {
+  const grouped = new Map<string, MetricObservation[]>();
+  for (const metric of event.metrics) {
+    const key = cohortOf(metric);
+    if (key) grouped.set(key, [...(grouped.get(key) ?? []), metric]);
+  }
+  return grouped;
+}
+
+/**
+ * The table's evidence cell. A cohort-structured suite lists EVERY metric of EVERY cohort, tagged
+ * once there is more than one: these tables are the graphic's complete text alternative, so a
+ * truncated cell would hide a regression in whichever cohort fell outside the cut.
+ */
+function headline(event?: BenchmarkEvent): string {
+  if (!event || event.metrics.length === 0) return 'No accepted local checkpoint';
+  const grouped = cohorts(event);
+  if (grouped.size === 0) return event.metrics.slice(0, 2).map(cell).join(' · ');
+  return [...grouped.entries()]
+    .map(([key, metrics]) => {
+      const cells = metrics.map(cell).join(' · ');
+      return grouped.size > 1 ? `${key.split('@').slice(1).join('/')} — ${cells}` : cells;
+    })
+    .join(' | ');
+}
+
+/** The graphic summarises; the table beside it carries the complete set. */
 function svgHeadline(event?: BenchmarkEvent): string {
-  const value = headline(event);
+  if (!event || event.metrics.length === 0) return 'No accepted local checkpoint';
+  const extra = cohorts(event).size;
+  const value = event.metrics.slice(0, 2).map(cell).join(' · ');
   const limit = 46;
-  return value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
+  const clipped = value.length > limit ? `${value.slice(0, limit - 1).trimEnd()}…` : value;
+  return extra > 1 ? `${clipped} (+${extra - 1} more cohorts)` : clipped;
 }
 
 const ASSESSMENT_MARK: Record<string, string> = {
@@ -110,46 +148,11 @@ function markdownCell(value: string): string {
     .replaceAll(/\r?\n/g, ' ');
 }
 
-// The reviewer adapter emits one metric set per cohort section (metric ids shaped
-// "<section>:first-fail-recall" where section is e.g. "frontend-security-reviewer@sonnet@cascade-on").
-// A suite whose latest event carries two or more such sections gets one indented sub-row per
-// section, so each reviewer's own numbers are readable without splitting the suite's single
-// acceptance event. The id suffixes below are the reviewer adapter's metric vocabulary — other
-// adapters never produce them, so no other suite grows sub-rows.
-const COHORT_METRIC = /^(.+):(first-fail-recall|first-clean-pass|block-recall|clean-pass)$/;
-
-function cohortRows(event?: BenchmarkEvent): string[] {
-  if (!event) return [];
-  const sections = new Map<string, MetricObservation[]>();
-  for (const metric of event.metrics) {
-    const section = COHORT_METRIC.exec(metric.id)?.[1];
-    if (section) sections.set(section, [...(sections.get(section) ?? []), metric]);
-  }
-  if (sections.size < 2) return [];
-  return [...sections.entries()].map(([section, metrics]) => {
-    const [name, ...cohort] = section.split('@');
-    const label = cohort.length ? `${name} (${cohort.join(', ')})` : name;
-    const cells = metrics
-      .slice(0, 3)
-      .map((metric) => {
-        const short = metric.label.startsWith(`${section} `)
-          ? metric.label.slice(section.length + 1)
-          : metric.label;
-        return `${short}: ${formatMetric(metric)}`;
-      })
-      .join(' · ');
-    return `| ↳ ${markdownCell(label)} | | | | | | ${markdownCell(cells)} |`;
-  });
-}
-
 function suiteTable(views: SuiteView[]): string {
-  const rows = views.flatMap(({ suite, event, evidence, freshness }) => {
+  const rows = views.map(({ suite, event, evidence, freshness }) => {
     const change = event?.changeType ?? '—';
     const assessment = event ? ASSESSMENT_MARK[event.assessment] : '? unknown';
-    return [
-      `| ${markdownCell(suite.label)} | ${suite.lifecycle} | ${evidence} | ${freshness} | ${change} | ${assessment} | ${markdownCell(headline(event))} |`,
-      ...cohortRows(event),
-    ];
+    return `| ${markdownCell(suite.label)} | ${suite.lifecycle} | ${evidence} | ${freshness} | ${change} | ${assessment} | ${markdownCell(headline(event))} |`;
   });
   return [
     '| Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |',

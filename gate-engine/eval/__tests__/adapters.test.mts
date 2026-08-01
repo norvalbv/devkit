@@ -93,6 +93,38 @@ describe('benchmark adapters', () => {
     });
   });
 
+  it('reads end-to-end ratios past the row counts a real cascade section carries', () => {
+    // Shape of an actual bench baseline: `gold`/`decoys` are ROW COUNTS sitting alongside the
+    // blockRecall/cleanPass ratios. Key-order resolution binds the count, emits no end-to-end
+    // metric, and leaves the cohort tallies at n=0 — failing the cascade floors it never read.
+    const parsed = parseReviewer({
+      sections: {
+        'api-security-reviewer@haiku@cascade-on': {
+          model: 'haiku',
+          cascade: true,
+          rows: { gold1: { expected: 'FAIL', okFirst: true, okFinal: true } },
+          metrics: {
+            rows: 14,
+            gold: 8,
+            decoys: 6,
+            firstFailRecall: { k: 8, n: 8 },
+            firstCleanPass: { k: 5, n: 6 },
+            blockRecall: { k: 8, n: 8 },
+            cleanPass: { k: 6, n: 6 },
+            inconclusive: {},
+          },
+        },
+      },
+    });
+    expect(parsed.metrics.map((metric) => metric.id)).toEqual([
+      'api-security-reviewer@haiku@cascade-on:first-fail-recall',
+      'api-security-reviewer@haiku@cascade-on:first-clean-pass',
+      'api-security-reviewer@haiku@cascade-on:block-recall',
+      'api-security-reviewer@haiku@cascade-on:clean-pass',
+    ]);
+    expect(parsed.acceptance.accepted).toBe(true);
+  });
+
   it('parses native decisions, sentry, and a locked edge-case no-ship result', () => {
     const decisions = parseDecisions({
       detect: {

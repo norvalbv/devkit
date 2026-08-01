@@ -1,0 +1,514 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-01T11:19:03.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:db96ac3d606bde78aa3555707727076d1375c79401ca32e8f2bf36197c6b6b2f",
+    "implementation": "sha256:c1483e0a07cb5f2cf5eddcd13edb8efb3d38a556f6120a2bae13787ea5167d71",
+    "runner": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a",
+    "scorer": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a"
+  },
+  "metrics": [
+    {
+      "denominator": 38,
+      "direction": "higher",
+      "id": "correctness-reviewer@sonnet@cascade-off:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.7920062854222853,
+        "method": "wilson-95",
+        "upper": 0.9727854044930122
+      },
+      "label": "correctness-reviewer@sonnet@cascade-off first-pass FAIL recall",
+      "numerator": 35,
+      "unit": "ratio",
+      "value": 0.9210526315789473
+    },
+    {
+      "denominator": 28,
+      "direction": "higher",
+      "id": "correctness-reviewer@sonnet@cascade-off:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.685101978364747,
+        "method": "wilson-95",
+        "upper": 0.9430099468025059
+      },
+      "label": "correctness-reviewer@sonnet@cascade-off first-pass clean pass",
+      "numerator": 24,
+      "unit": "ratio",
+      "value": 0.8571428571428571
+    }
+  ],
+  "rows": {
+    "correctness-reviewer@sonnet@cascade-off:corr-asymmetric-flip-classifier": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-broadcast-fanout-no-dedup": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-broadcast-targeted": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-cas-guarded-write": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-catch-rethrows": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-clears-stale-artifact": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-conditional-update": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-early-exit-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-empty-recompute-clears": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-exit-code-fail-closed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-fs-recursive-mkdir": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-lock-finally": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-loop-break-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-only-validated": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-outage-exit-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-parses-json-string-result": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-reset-failure-reasons": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-retry-clears-error": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-retry-reset-counter": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-return-checked-fails-closed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-select-for-update": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-signature-callsite-updated": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-targeted-broadcast": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-tight-anchor-classifier": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-timer-debounce-clears": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-worktree-finally": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-discarded-resume-return": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-early-exit-loop-break-dropped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-early-exit-status-bypassed": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-empty-recompute-keeps-stale": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-execfile-cmd-shim-swallowed": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-exit-code-only-one-fails": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-field-validated-wrong-state": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-fs-check-then-act-race": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-group-map-last-write-wins": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-guarded-result-ignored-mode-flip": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-json-string-result-dropped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-lock-not-released-on-throw": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-lock-timeout-runs-unlocked": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-loose-cmd-classifier-anchor": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-loose-json-error-classifier": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-manifest-unknown-version-wiped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-nearexpiry-permanent-reauth": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-only-selector-silent-drop": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-outage-exit-code-downgraded": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-persist-unnormalized-signal": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-read-then-write-clobber-terminal": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-reminder-ignores-plan-mode": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-reopen-before-cas-strands": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-broadcast-double-fire": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-leaves-stale-error": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-stuck-unclaimable": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-revive-user-cancelled": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-signature-change-callsite-missed": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-stale-checklist-artifact": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-stale-failure-reasons": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-submit-latch-stuck": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-swallowed-config-parse-bypass": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-sync-source-target-divergence": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-timer-debounce-double-fire": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-unguarded-unpark-clobber": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-worktree-leak-no-finally": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-nplusone": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-render": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-sqli": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-xss": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "4125ff02cfb655df76272edbb48b0fd7bfcafd33",
+  "suiteId": "reviewer-correctness"
+}

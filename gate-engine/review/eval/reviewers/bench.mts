@@ -12,9 +12,9 @@
  *   node bench.mts validate          # 0 LLM calls: corpus linter (selection + expectItems + injection)
  *   node bench.mts coverage          # 0 LLM calls: catalog/type coverage of the corpus
  *
- * Knobs: BENCH_MODEL first-pass model (default sonnet = production) · BENCH_CASCADE=off skips the
- * opus escalation (first-pass metrics only, zero opus spend) · BENCH_CONCURRENCY rows in flight
- * (default 2, the gate's own judge-contention default).
+ * Knobs: BENCH_MODEL first-pass model (default sonnet; the SHIPPED first pass is haiku — see
+ * GUARD_REVIEW_MODEL in run-review.mts — and a model-pinned reviewer ignores this knob) ·
+ * BENCH_CASCADE=off skips the opus escalation (first-pass only, zero opus spend) · BENCH_CONCURRENCY.
  *
  * Scoring is DETERMINISTIC (no LLM matcher): expected verdict vs the captured first-pass verdict +
  * the end-to-end cascade outcome + the checklist state-file artifact snapshotted per judge pass
