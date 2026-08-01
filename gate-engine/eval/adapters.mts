@@ -153,6 +153,14 @@ function parseOpenEnded(input: Json, key: 'completeness' | 'conventions'): Parse
 export const parseCompleteness = (input: Json) => parseOpenEnded(input, 'completeness');
 export const parseConventions = (input: Json) => parseOpenEnded(input, 'conventions');
 
+/** One reviewer tally as {k,n} across k/n · hit/total · clean/total. A bare row COUNT (a number,
+ *  e.g. `metrics.gold`) yields undefined, so it can't be mistaken for the ratio beside it. */
+function tally(c: Json | number | undefined): { k: number; n: number } | undefined {
+  if (typeof c !== 'object' || c === null) return undefined;
+  const [k, n] = [c.k ?? c.hit ?? c.clean, c.n ?? c.total];
+  return k === undefined || n === undefined ? undefined : { k: Number(k), n: Number(n) };
+}
+
 export function parseReviewer(input: Json): ParsedBaseline {
   const entries = Object.entries(input.sections ?? input.reviewers ?? input).filter(
     ([, value]) => value && typeof value === 'object',
@@ -174,8 +182,10 @@ export function parseReviewer(input: Json): ParsedBaseline {
   for (const [key, raw] of entries) {
     const value = raw as Json;
     const summary = (value.metrics ?? value) as Json;
-    const gold = summary.gold ?? summary.blockRecall ?? summary.endToEnd?.gold;
-    const decoy = summary.decoys ?? summary.cleanPass ?? summary.endToEnd?.decoys;
+    // Order is a preference, not a binding — `gold`/`decoys` are row COUNTS in a native baseline.
+    const gold = tally(summary.gold) ?? tally(summary.blockRecall) ?? tally(summary.endToEnd?.gold);
+    const decoy =
+      tally(summary.decoys) ?? tally(summary.cleanPass) ?? tally(summary.endToEnd?.decoys);
     const firstFail = summary.firstFailRecall;
     const firstClean = summary.firstCleanPass;
     const cascade = value.cascade === true || key.endsWith('@cascade-on');
@@ -213,26 +223,16 @@ export function parseReviewer(input: Json): ParsedBaseline {
       );
       sectionMetrics += 1;
     }
-    if (gold?.hit !== undefined && gold?.total !== undefined) {
-      metrics.push(ratio(`${key}:block-recall`, `${key} block recall`, gold.hit, gold.total));
-      cohort.blockRecall.k += Number(gold.hit);
-      cohort.blockRecall.n += Number(gold.total);
-      sectionMetrics += 1;
-    } else if (gold?.k !== undefined && gold?.n !== undefined) {
+    if (gold) {
       metrics.push(ratio(`${key}:block-recall`, `${key} block recall`, gold.k, gold.n));
-      cohort.blockRecall.k += Number(gold.k);
-      cohort.blockRecall.n += Number(gold.n);
+      cohort.blockRecall.k += gold.k;
+      cohort.blockRecall.n += gold.n;
       sectionMetrics += 1;
     }
-    if (decoy?.clean !== undefined && decoy?.total !== undefined) {
-      metrics.push(ratio(`${key}:clean-pass`, `${key} clean pass`, decoy.clean, decoy.total));
-      cohort.cleanPass.k += Number(decoy.clean);
-      cohort.cleanPass.n += Number(decoy.total);
-      sectionMetrics += 1;
-    } else if (decoy?.k !== undefined && decoy?.n !== undefined) {
+    if (decoy) {
       metrics.push(ratio(`${key}:clean-pass`, `${key} clean pass`, decoy.k, decoy.n));
-      cohort.cleanPass.k += Number(decoy.k);
-      cohort.cleanPass.n += Number(decoy.n);
+      cohort.cleanPass.k += decoy.k;
+      cohort.cleanPass.n += decoy.n;
       sectionMetrics += 1;
     }
     cohorts.set(cohortKey, cohort);
