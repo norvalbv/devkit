@@ -3,7 +3,9 @@
 > **Standing use:** this document is the house reference for DESIGNING AND UPGRADING ALL agent
 > benchmarks (sentry-eval, claude-md-eval, correctness-bench, reviewer-eval, decisions-eval,
 > search-tool-eval, qavis, edge-cases-eval, and future ones). Read the retrofit checklist first;
-> read the full audit report when a checklist item needs its evidence.
+> read the full audit report when a checklist item needs its evidence. The OPERATIONAL runbook
+> for the reviewer corpus-growth loop (tools, cadence, capture points, current state) is
+> [`corpus-growth.md`](corpus-growth.md).
 >
 > **Provenance:** the checklist distills a 2026-07-13 methodology audit produced by a 23-agent
 > research/audit workflow (run `wf_158e979b-388`, 6 literature sweeps over 2024-26 arXiv +

@@ -9,7 +9,8 @@ answer two questions with numbers instead of vibes:
 
 It drives the **real gate** (`runCascade` from `../../run-review.mts`) over disposable fixture
 repos, so bench and gate cannot drift. The **correctness reviewer** (`cases-correctness.jsonl`,
-domain `all`, single-pass haiku) is in the cohort. commit-guard is out of scope (its allowlist
+domain `all`, PINNED single-pass sonnet — `reviewers.mts` `model: 'sonnet'`; it ignores
+`BENCH_MODEL`) is in the cohort. commit-guard is out of scope (its allowlist
 needs the consumer's semantic-search MCP tool, unresolvable in a bare fixture); a further reviewer
 joins by adding its `cases-<skill>.jsonl` + REVIEWERS entry.
 
@@ -136,10 +137,10 @@ is exactly a `gateHash` change, so it can never measure the edit it was made for
 the opt-in paired A/B for that case:
 
 ```bash
-BENCH_MODEL=haiku node bench.mts run correctness-reviewer --baseline   # baseline the CURRENT brief
-cp results.baseline.json before-hunt.json                              # snapshot the "before"
+node bench.mts run correctness-reviewer --baseline   # baseline the CURRENT brief (pin ⇒ sonnet)
+cp results.baseline.json before-hunt.json            # snapshot the "before"
 # … edit agents/correctness-reviewer.md (+ skills/correctness/SKILL.md) …
-BENCH_MODEL=haiku node bench.mts run correctness-reviewer --against before-hunt.json
+node bench.mts run correctness-reviewer --against before-hunt.json
 ```
 
 It reruns the (edited) brief and prints a **directional** per-row flip table vs the snapshot,
