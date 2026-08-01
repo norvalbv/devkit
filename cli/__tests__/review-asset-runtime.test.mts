@@ -125,8 +125,10 @@ describe('packaged reviewer asset runtime', () => {
       expect(source).toContain('.claude/skills/commit-guard');
       expect(source).toContain('.cursor/skills/commit-guard');
       expect(source).toContain('[ -f "$candidate/scripts/checklist.mjs" ]');
-      expect(source).toContain('[ -f "$candidate/scripts/co-occurrence.mjs" ]');
-      expect(source).toContain('commit-guard scripts unavailable: run devkit sync-skills');
+      expect(source).not.toContain('scripts/co-occurrence.mjs');
+      expect(source).toContain('guard-dup-allowlist');
+      expect(source).toContain('guard-clone');
+      expect(source).toContain('commit-guard checklist unavailable: run devkit sync-skills');
     }
   });
 
