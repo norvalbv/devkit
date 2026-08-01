@@ -88,6 +88,15 @@ export const HOOK_REGISTRATIONS: Record<string, HookRegistration[]> = {
       matcher: 'startup|resume|clear|compact',
       command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-session-start.mjs"',
     },
+    // The body above enters context once, then sits at a fixed early position while the conversation
+    // grows — adherence falls with that distance, and proximity to the point of generation is what
+    // recovers it. This re-states only the rules that decay first, immediately before each response.
+    {
+      registrationId: 'adhd:prompt-anchor',
+      event: 'UserPromptSubmit',
+      matcher: '',
+      command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-prompt-anchor.mjs"',
+    },
   ],
   // story 17 — agent-hooks: synced scripts under the consumer's .claude/hooks/ (self-skip when
   // their tool/config is absent). UserPromptSubmit nudge, Stop QA trio, format-after-edit, compactor.
