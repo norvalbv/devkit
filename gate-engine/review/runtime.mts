@@ -56,6 +56,9 @@ export interface ReviewItem {
   status: string;
   disposition?: 'blocking' | 'waived' | 'dropped_out_of_charter';
   issues?: string[];
+  /** The waiver rationale, capped for the event (attachItems), when `disposition` is 'waived' —
+   * present so a consumer reads it off the lens directly, no join against top-level `waivers[]`. */
+  rationale?: string;
 }
 
 export interface ReviewOutcome {
