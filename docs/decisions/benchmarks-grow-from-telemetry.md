@@ -17,3 +17,4 @@ created: 2026-08-01
 **Scope:** gate-engine/review/eval/**,gate-engine/review/run-review.mts
 **Category:** benchmarking
 **Source:** manual
+- 2026-08-01 — **Scope:** gate-engine/review/eval/**,gate-engine/review/run-review.mts,gate-engine/review/evidence/diff-archive.mts — CodeRabbit PR #295: the ruling covers the FAIL diff-byte archive enabler, but evidence/diff-archive.mts wasn't in the path-glob scope so alignment checks never matched it

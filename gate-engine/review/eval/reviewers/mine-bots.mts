@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,7 +90,8 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
         nodes {
           isResolved
           isOutdated
-          comments(first: 50) {
+          comments(first: 100) {
+            pageInfo { hasNextPage }
             nodes { databaseId author { login } createdAt body }
           }
         }
@@ -99,11 +100,17 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
   }
 }`;
 
+// Hard cap on outer-page fetches — an unbounded-loop guard. reviewThreads(first: 100) means a PR
+// would need 5000+ review threads to hit this legitimately; a run that does is almost certainly
+// stuck on a cursor that isn't advancing (a `gh`/API quirk), so stop and say so rather than burning
+// rate limit until killed.
+const MAX_THREAD_PAGES = 50;
+
 function fetchReviewThreads(repo, pr) {
   const [owner, name] = repo.split('/');
   const byDatabaseId = new Map();
   let cursor = null;
-  for (;;) {
+  for (let page = 0; page < MAX_THREAD_PAGES; page += 1) {
     const args = [
       'api',
       'graphql',
@@ -122,10 +129,17 @@ function fetchReviewThreads(repo, pr) {
     if (!conn) break;
     for (const thread of conn.nodes ?? []) {
       const comments = (thread.comments?.nodes ?? []).filter(Boolean);
+      if (thread.comments?.pageInfo?.hasNextPage) {
+        console.error(
+          `mine-bots: ${repo}#${pr} — a review thread has >100 comments; reply signals may be incomplete`,
+        );
+      }
       for (const c of comments) byDatabaseId.set(c.databaseId, { thread, comments });
     }
     if (!conn.pageInfo?.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
+    if (page === MAX_THREAD_PAGES - 1)
+      console.error(`mine-bots: ${repo}#${pr} — hit the ${MAX_THREAD_PAGES}-page thread cap`);
   }
   return byDatabaseId;
 }
@@ -169,6 +183,10 @@ function fetchPrCommits(repo, pr) {
   ]);
 }
 
+// GitHub's single-commit endpoint caps `files` at 300/page (unfollowed here) — at the cap the
+// comment's path may be silently absent, so `truncated` lets callers distrust an absence.
+const COMMIT_FILES_PAGE_CAP = 300;
+
 function commitFiles(repo, sha, cache) {
   if (cache.has(sha)) return cache.get(sha);
   let files = [];
@@ -179,18 +197,21 @@ function commitFiles(repo, sha, cache) {
       `mine-bots: ${repo}@${sha.slice(0, 8)} — commit fetch failed (${e.message?.split('\n')[0]})`,
     );
   }
-  cache.set(sha, files);
-  return files;
+  const result = { files, truncated: files.length >= COMMIT_FILES_PAGE_CAP };
+  cache.set(sha, result);
+  return result;
 }
 
-// Resolves commits (with files hydrated) to only those after `afterIso`, so a PR whose bot
-// comments all pre-date the last push doesn't pay for every commit's file list.
+// Commits (files hydrated) after `afterIso` only — pre-dated bot comments don't pay for file lists.
 function commitsAfter(repo, prCommits, afterIso, fileCache) {
   const cutoff = Date.parse(afterIso);
   const later = prCommits.filter(
     (c) => Number.isFinite(cutoff) && Date.parse(c.committedDate) > cutoff,
   );
-  return later.map((c) => ({ ...c, files: commitFiles(repo, c.sha, fileCache) }));
+  return later.map((c) => {
+    const { files, truncated } = commitFiles(repo, c.sha, fileCache);
+    return { ...c, files, truncated };
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -213,8 +234,8 @@ function sqliteJson(dbPath, sql) {
   return raw ? JSON.parse(raw) : [];
 }
 
-function scopeForPr(dbPath, cache, repoShort, prNumber) {
-  const key = `${repoShort}#${prNumber}`;
+function scopeForPr(dbPath, cache, repoFull, repoShort, prNumber) {
+  const key = `${repoFull}#${prNumber}`;
   if (cache.has(key)) return cache.get(key);
   let scopeRows = [];
   try {
@@ -266,7 +287,14 @@ function collectCorpusUrls(dir) {
   }
   for (const name of entries) {
     if (!CORPUS_CASES_FILE_RE.test(name)) continue;
-    for (const line of readFileSync(path.join(dir, name), 'utf8').split('\n')) {
+    let content = '';
+    try {
+      content = readFileSync(path.join(dir, name), 'utf8');
+    } catch (e) {
+      console.error(`mine-bots: corpus read failed for ${name} (${e.message?.split('\n')[0]})`);
+      continue;
+    }
+    for (const line of content.split('\n')) {
       if (!line.trim()) continue;
       try {
         const row = JSON.parse(line);
@@ -355,6 +383,11 @@ for (const repo of repos) {
 
       const later = commitsAfter(repo, prCommits, c.created_at, fileCache);
       const lineTouchedLater = isLineTouchedLater(later, c.path, c.created_at);
+      // lineTouchedLater is real evidence only (true ⇒ some later commit's file list actually
+      // contained the path). If it's false but a later commit's file list was capped at 300 by
+      // the GitHub API, the absence is not trustworthy — flag it so downstream labeling can
+      // distrust a 'resolved+line-touched' outcome built on a false negative.
+      const lineTouchedTruncated = !lineTouchedLater && later.some((commit) => commit.truncated);
 
       const { outcome, outcomeEvidence } = classifyOutcome({
         addressedMarker,
@@ -368,7 +401,7 @@ for (const repo of repos) {
       let scopeConfirmed = 'unverifiable';
       let scopedReviewers = [];
       if (scopeDb) {
-        const scopeRows = scopeForPr(scopeDb, scopeCache, repoShort, number);
+        const scopeRows = scopeForPr(scopeDb, scopeCache, repo, repoShort, number);
         ({ scopeConfirmed, scopedReviewers } = computeScopeConfirmed(scopeRows, c.path));
       }
 
@@ -401,6 +434,7 @@ for (const repo of repos) {
         threadOutdated,
         replies: repliesOut,
         lineTouchedLater,
+        lineTouchedTruncated,
         outcome,
         outcomeEvidence,
         scopeConfirmed,
@@ -420,7 +454,13 @@ for (const repo of repos) {
 // Merge: new data wins by url, but rows we didn't re-sweep this run (other repos/PRs not passed
 // via --repo, or a PR gh failed to fetch this time) are preserved rather than dropped.
 const merged = readExistingCandidates();
-for (const row of newRows) merged.set(row.url, row);
+for (const row of newRows) {
+  if (!row.url) {
+    console.error(`mine-bots: dropping comment ${row.id} — no html_url to key on`);
+    continue;
+  }
+  merged.set(row.url, row);
+}
 
 const corpusUrls = collectCorpusUrls(here);
 const rows = [...merged.values()].map((row) => ({
@@ -428,7 +468,11 @@ const rows = [...merged.values()].map((row) => ({
   alreadyInCorpus: corpusUrls.has(row.url),
 }));
 
-writeFileSync(OUT, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+// Atomic write: candidates.jsonl is also the merge source read above, so a crash/full-disk mid-write
+// must never leave a truncated file that silently loses the accumulated candidate pool.
+const tmpOut = `${OUT}.tmp`;
+writeFileSync(tmpOut, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+renameSync(tmpOut, OUT);
 
 function histogram(items, keyFn) {
   const counts = {};

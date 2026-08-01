@@ -335,17 +335,13 @@ function loadBaseline() {
 const FLOORS = { blockRecall: 0.75, cleanPass: 0.85, firstFailRecallSonnetOnly: 0.6 };
 
 /**
- * Regression verdict for one reviewer section vs baseline. Preconditions first (gateHash mismatch
- * → comparison SKIPPED, loudly), then row-set-aware pairing: the flip table runs over the
- * INTERSECTION of row ids present in both the baseline section and the current run (corpus growth
- * — appending rows — is no longer a hard skip), excluding shared ids whose `rowHash` changed
- * (a hand-edited row is not the same fixture, so it cannot be paired) as "changed". A baseline
- * written before rowHash existed (old format) can't tell changed from unchanged — every shared row
- * is treated as unchanged and the report says so, loudly, once.
- *
- * Flips use okFinal when both runs had the cascade, else okFirst. Returns {skipped, regressed,
- * improved, detail}. Stability: rows the caller re-ran and that flipped BACK are not counted
- * (caller filters via `stable`).
+ * Regression verdict for one reviewer section vs baseline. gateHash mismatch → SKIPPED loudly;
+ * then row-set-aware pairing: the flip table runs over the INTERSECTION of row ids in both runs
+ * (corpus growth is not a skip), excluding shared ids whose `rowHash` changed ("changed" — a
+ * hand-edited row is not the same fixture). Old-format baselines without rowHash can't detect
+ * drift: every shared row pairs, and the report warns once. Flips use okFinal when both runs had
+ * the cascade, else okFirst. Returns {skipped, regressed, improved, detail}; unstable rows
+ * (2-of-2 rerun flip-backs) are excluded and counted.
  */
 export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = false } = {}) {
   const key = sectionKey(name, nowMeta.model, nowMeta.cascade);
@@ -366,11 +362,15 @@ export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = fals
   const removed = baseIds.filter((id) => !nowById.has(id)).length;
   const hasRowHash = sharedIds.some((id) => baseRows[id].rowHash !== undefined);
   let changed = 0;
+  let unstable = 0;
   const pairs = [];
   for (const id of sharedIds) {
     const baseRow = baseRows[id];
     const row = nowById.get(id);
-    if (row.stable === false) continue;
+    if (row.stable === false) {
+      unstable += 1;
+      continue;
+    }
     if (hasRowHash && row.rowHash !== undefined && row.rowHash !== baseRow.rowHash) {
       changed += 1;
       continue;
@@ -390,6 +390,7 @@ export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = fals
       crossGate,
       shared: sharedIds.length,
       changed,
+      unstable,
       added,
       removed,
       hasRowHash,
@@ -663,15 +664,13 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
     // 2-of-2 to count in the McNemar table (alignment-bench convention — K=1 rows are noisy).
     const key = sectionKey(reviewer.name, meta.model, meta.cascade);
     const section = baseline?.sections?.[key];
-    // Stability rerun fires for --fail (same-gate regression check) AND for A/B (--against,
-    // cross-gate). gateHash must match ONLY outside A/B mode. corpusHash is NOT checked here —
-    // it is a row-SET hash that changes whenever the corpus gains/loses/edits any row, which
-    // would defeat the whole point of row-level pairing (appending rows must not invalidate
-    // comparisons over retained rows). Instead each row is paired individually below via
-    // `rowHash`, mirroring compareReviewer's row-level pairing.
+    // Stability rerun fires for --fail AND for A/B (--against); gateHash must match ONLY outside
+    // A/B mode. corpusHash is deliberately NOT checked: it is a row-SET hash that changes on any
+    // corpus growth, which would defeat row-level pairing — each row pairs individually below via
+    // `rowHash`, mirroring compareReviewer.
     if ((failMode || abMode) && section && (abMode || section.gateHash === meta.gateHash)) {
       for (const res of results) {
-        const baseRow = section.rows[res.id];
+        const baseRow = section.rows?.[res.id];
         // A hand-edited/replaced row is not the same fixture — skip it rather than pairing
         // stale content with a fresh run (rowUnchanged treats hash-less old baselines as safe
         // to pair, since drift can't be detected there — matches compareReviewer's fallback).

@@ -40,8 +40,9 @@ Distilled from the report + its sources; each item names the failure it prevents
 5. **Keep raw LLM proposals immutable; human audit edits live in an overlay.** In-place edits
    destroy the ability to distinguish rubber-stamping from correction (anchoring: 2507.15821).
 6. **Blind-relabel a uniform random subset (40-60 items) and report κ/α (target α ≥ 0.667)**
-   next to every results table. Audit-only-the-decisive-classes leaves the majority stratum
-   carrying unquantified labeler priors.
+   next to every results table; for suites smaller than the 40-60 window, relabel min(rows, 40)
+   — i.e. the whole suite — and say so next to the κ figure. Audit-only-the-decisive-classes
+   leaves the majority stratum carrying unquantified labeler priors.
 7. **No forced label mappings in the labeler prompt** without measuring them: every
    heuristic mapping (here: green-first-run → "false", dismissed → "noise") is a hand-rolled
    heuristic inside an LLM gate — the no-handrolled-heuristics rule applies to LABELING too.
@@ -103,7 +104,9 @@ discard the evidence. Target labeled-row *throughput*, not row count.
 **Three capture points (planned devkit work), one enabler.** Enabler: archive the staged diff
 BYTES on every reviewer FAIL (telemetry keeps only `diff_sha256`; without bytes a fail can't be
 replayed as a row except via the leakage-prone reconstruction blocker F1 documents — capturing at
-gate time satisfies item 13 by construction). Then:
+gate time satisfies item 13 by construction). *(Amended at commit time: the archive is best-effort
+and fail-open — capped at 8 MiB, active only when telemetry is on — so a FAIL that exceeds the cap,
+runs telemetry-off, or hits an archive error keeps only `diff_sha256` and stays unreplayable.)* Then:
 
 1. **Fail → fix**: collector correlates consecutive ship attempts; next attempt's diff touches the
    flagged lines → gold candidate, zero human steps.

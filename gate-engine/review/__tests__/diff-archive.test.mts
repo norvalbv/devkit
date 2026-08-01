@@ -22,6 +22,7 @@ describe('archiveFailedDiff', () => {
   afterEach(() => {
     if (saved.file === undefined) delete process.env.DEVKIT_GATE_EVENTS;
     else process.env.DEVKIT_GATE_EVENTS = saved.file;
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('writes <telemetry-dir>/diffs/<sha256>.diff.gz, gzipped, and returns the relative ref', () => {

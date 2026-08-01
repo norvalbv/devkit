@@ -66,6 +66,7 @@ export function buildCompareReport({
   crossGate,
   shared,
   changed,
+  unstable = 0,
   added,
   removed,
   hasRowHash,
@@ -82,7 +83,7 @@ export function buildCompareReport({
       ? ' — WARNING: baseline predates rowHash, row-level drift detection unavailable'
       : '';
   const lines = [
-    `${crossGate ? 'A/B (directional, not a regression gate) ' : ''}rows: shared ${shared} (${changed} changed, excluded), added ${added}, removed ${removed}${warn}`,
+    `${crossGate ? 'A/B (directional, not a regression gate) ' : ''}rows: shared ${shared} (${changed} changed, excluded), added ${added}, removed ${removed}, unstable ${unstable} (excluded)${warn}`,
     `  flips ↓${naive.b} ↑${naive.c} (mid-p ${p.toFixed(3)})${naive.flips.length ? ` — ${naive.flips.join(', ')}` : ''}`,
     `  gold  ↓${gold.b} ↑${gold.c} (mid-p ${mcnemarMidP(gold.b, gold.c).toFixed(3)})`,
     `  decoy ↓${decoy.b} ↑${decoy.c} (mid-p ${mcnemarMidP(decoy.b, decoy.c).toFixed(3)})`,
