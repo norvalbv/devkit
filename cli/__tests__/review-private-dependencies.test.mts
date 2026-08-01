@@ -27,6 +27,12 @@ const CLI = join(
   '../lib/ship/review/dependency-runtime.mts',
 );
 const PREPARE = join(dirname(CLI), '../prepare-gate-worktree.sh');
+const PACKAGED_AGENT = fileURLToPath(
+  new URL('../../agents/api-security-reviewer.md', import.meta.url),
+);
+const PACKAGED_CHECKLIST = fileURLToPath(
+  new URL('../../skills/api-security/scripts/checklist.mjs', import.meta.url),
+);
 const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(cleanup);
@@ -373,23 +379,48 @@ describe('private review dependency runtime', () => {
     expect(existsSync(strictManifest)).toBe(false);
   });
 
-  it.each([
-    'ship',
-    'reship',
-    'review-extra',
-  ])('preserves existing %s dependency and Claude projection links', (purpose) => {
-    const { source, destination } = fixture(`prepare-${purpose}`);
+  it('preserves the shipping dependency link and refreshes packaged reviewer assets', () => {
+    const { source, destination } = fixture('prepare-shipping');
     write(source, '.husky/_/pre-commit', 'runner\n');
     write(source, 'node_modules/pkg/index.js');
-    write(source, '.claude/agents/reviewer.md');
-    write(source, '.claude/skills/reviewer/SKILL.md');
+    write(source, '.claude/agents/api-security-reviewer.md', 'stale agent\n');
+    write(source, '.claude/skills/api-security/scripts/checklist.mjs', 'stale checklist\n');
 
-    const result = prepare(source, destination, purpose);
+    const result = prepare(source, destination, 'shipping');
 
     expect(result.status, result.stderr).toBe(0);
     expect(lstatSync(join(destination, 'node_modules')).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(destination, '.claude/agents')).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(destination, '.claude/skills')).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(destination, '.claude/agents')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(destination, '.claude/skills')).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(destination, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+      readFileSync(PACKAGED_AGENT, 'utf8'),
+    );
+    expect(
+      readFileSync(join(destination, '.claude/skills/api-security/scripts/checklist.mjs'), 'utf8'),
+    ).toBe(readFileSync(PACKAGED_CHECKLIST, 'utf8'));
+    expect(readFileSync(join(source, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+      'stale agent\n',
+    );
+    expect(
+      readFileSync(join(source, '.claude/skills/api-security/scripts/checklist.mjs'), 'utf8'),
+    ).toBe('stale checklist\n');
+  });
+
+  it('projects packaged reviewer assets when the ship caller has no .claude projection', () => {
+    const { source, destination } = fixture('prepare-ship-without-projection');
+    write(source, '.husky/_/pre-commit', 'runner\n');
+    write(source, 'node_modules/pkg/index.js');
+
+    const result = prepare(source, destination, 'shipping');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(source, '.claude'))).toBe(false);
+    expect(readFileSync(join(destination, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+      readFileSync(PACKAGED_AGENT, 'utf8'),
+    );
+    expect(
+      readFileSync(join(destination, '.claude/skills/api-security/scripts/checklist.mjs'), 'utf8'),
+    ).toBe(readFileSync(PACKAGED_CHECKLIST, 'utf8'));
   });
 
   it('fails closed when review has no caller-owned dependency manifest', () => {

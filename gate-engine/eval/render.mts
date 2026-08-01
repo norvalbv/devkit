@@ -202,6 +202,7 @@ function auditTable(events: BenchmarkEvent[]): string {
 function rootBlock(catalog: BenchmarkCatalog, views: SuiteView[]): string {
   const accepted = views.filter((view) => view.event?.evidence === 'accepted').length;
   const current = views.filter((view) => view.freshness === 'current').length;
+  const currentVerb = current === 1 ? 'is' : 'are';
   const unbenchmarked = catalog.subjects.filter(
     (subject) => subject.kind === 'agent' && subject.evidence === 'none',
   ).length;
@@ -209,7 +210,7 @@ function rootBlock(catalog: BenchmarkCatalog, views: SuiteView[]): string {
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: ${accepted} suites have accepted checkpoints, ${current} are current, and ${unbenchmarked} shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: ${accepted} suites have accepted checkpoints, ${current} ${currentVerb} current, and ${unbenchmarked} shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.

@@ -75,11 +75,11 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Feature critique | shipped | accepted | stale | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
-| API security reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 8/8 (100.0%) · first-pass clean pass: 5/6 (83.3%) · block recall: 8/8 (100.0%) · clean pass: 6/6 (100.0%) |
-| Backend performance reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 7/7 (100.0%) · first-pass clean pass: 3/6 (50.0%) · block recall: 7/7 (100.0%) · clean pass: 6/6 (100.0%) |
-| Frontend security reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
-| Frontend performance reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
-| Correctness reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 35/38 (92.1%) · first-pass clean pass: 24/28 (85.7%) |
+| API security reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 8/8 (100.0%) · first-pass clean pass: 5/6 (83.3%) · block recall: 8/8 (100.0%) · clean pass: 6/6 (100.0%) |
+| Backend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 7/7 (100.0%) · first-pass clean pass: 3/6 (50.0%) · block recall: 7/7 (100.0%) · clean pass: 6/6 (100.0%) |
+| Frontend security reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
+| Frontend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
+| Correctness reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 35/38 (92.1%) · first-pass clean pass: 24/28 (85.7%) |
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |

@@ -28,6 +28,12 @@ import {
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const packagedApiSecurityAgent = fileURLToPath(
+  new URL('../../agents/api-security-reviewer.md', import.meta.url),
+);
+const packagedApiSecurityChecklist = fileURLToPath(
+  new URL('../../skills/api-security/scripts/checklist.mjs', import.meta.url),
+);
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const REPO_RE = /REPO=(.*)/;
 const BASE_REF_RE = /BASE_REF=(.*)/;
@@ -1185,14 +1191,13 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
   });
 });
 
-// .claude/{agents,skills} are devkit sync artifacts — git-ignored in an overlay consumer, so a fresh
-// worktree lacks them and guard-review can't load reviewer briefs / run the judge checklist (every
-// reviewer INCONCLUSIVEs → strict ship fails closed). ship must symlink the two SUBDIRS in, leave
-// .claude itself a real worktree dir (per-run checklist state stays local, not leaked to the shared
-// tree), and NOT clobber a .claude a repo TRACKS (already checked out → a symlink onto it nests
-// .../agents/agents).
-describe('ship — links .claude/{agents,skills} into the worktree', () => {
-  /** Seed git-ignored (untracked) devkit-synced .claude artifacts in `dir`. */
+// .claude/{agents,skills} are devkit sync projections and can lag the running package whether they
+// are tracked or ignored (sc-1300). A strict ship that trusts those stale bytes can fail closed with
+// "checklist artifact missing" until someone mutates the shared checkout by hand. Ship/reship must
+// refresh only the throwaway worktree from the running package, while keeping .claude itself real so
+// per-run checklist state stays local and the refreshed assets never enter the commit.
+describe('ship — refreshes .claude reviewer assets inside the worktree', () => {
+  /** Seed deliberately stale, git-ignored devkit-synced .claude artifacts in `dir`. */
   function seedClaudeArtifacts(dir, git) {
     writeFileSync(join(dir, '.gitignore'), '.claude/\n');
     git(['add', '.gitignore'], { stdio: 'ignore' });
@@ -1203,7 +1208,7 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     writeFileSync(join(dir, '.claude/skills/api-security/scripts/checklist.mjs'), '// noop\n');
   }
 
-  it('symlinks the two subdirs (agents + skills), keeps .claude itself a real dir', () => {
+  it('replaces ignored stale assets from the running package and keeps .claude worktree-local', () => {
     const { dir, env, git } = seedShipRepo();
     seedClaudeArtifacts(dir, git);
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
@@ -1217,14 +1222,16 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     try {
       expect(r.status, r.stderr).toBe(0);
       expect(wt, r.stderr).toBeTruthy();
-      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(true);
-      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(true);
-      expect(lstatSync(join(wt, '.claude')).isSymbolicLink()).toBe(false); // real dir → per-run state stays local
-      // resolves back into ROOT, so the brief is actually readable from the worktree cwd
-      expect(readFileSync(join(wt, '.claude/agents/api-security-reviewer.md'), 'utf8')).toMatch(
-        /# brief/,
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(false);
+      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(false);
+      expect(lstatSync(join(wt, '.claude')).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(wt, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+        readFileSync(packagedApiSecurityAgent, 'utf8'),
       );
-      expect(realpathSync(join(wt, '.claude/agents'))).toBe(
+      expect(
+        readFileSync(join(wt, '.claude/skills/api-security/scripts/checklist.mjs'), 'utf8'),
+      ).toBe(readFileSync(packagedApiSecurityChecklist, 'utf8'));
+      expect(realpathSync(join(wt, '.claude/agents'))).not.toBe(
         realpathSync(join(dir, '.claude/agents')),
       );
     } finally {
@@ -1232,7 +1239,7 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     }
   });
 
-  it('does NOT clobber a TRACKED .claude already checked out (no nested .claude/agents/agents)', () => {
+  it('replaces tracked stale assets for the gate run without adding them to the commit', () => {
     const { dir, env, git } = seedShipRepo();
     mkdirSync(join(dir, '.claude/agents'), { recursive: true });
     writeFileSync(join(dir, '.claude/agents/api-security-reviewer.md'), '# tracked\n');
@@ -1248,14 +1255,24 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     const wt = WT_RE.exec(r.stderr)?.[1];
     try {
       expect(r.status, r.stderr).toBe(0);
-      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(false); // real git checkout
-      expect(existsSync(join(wt, '.claude/agents/agents'))).toBe(false); // no bogus nested symlink
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(wt, '.claude/agents/agents'))).toBe(false);
+      expect(readFileSync(join(wt, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+        readFileSync(packagedApiSecurityAgent, 'utf8'),
+      );
+      expect(
+        execFileSync('git', ['show', 'HEAD:.claude/agents/api-security-reviewer.md'], {
+          cwd: wt,
+          encoding: 'utf8',
+          env: { ...process.env, ...GIT_ENV },
+        }),
+      ).toBe('# tracked\n');
     } finally {
       dropWorktree(git, r.stderr);
     }
   });
 
-  it('reship.sh links the subdirs into the detached re-ship worktree too', () => {
+  it('reship.sh refreshes the detached re-ship worktree too', () => {
     const { dir, env, git } = seedReshipRepo();
     seedClaudeArtifacts(dir, git);
     writeFileSync(join(dir, 'note.txt'), 'delta\n'); // a delta vs origin/pr-open so the commit isn't empty
@@ -1269,8 +1286,11 @@ describe('ship — links .claude/{agents,skills} into the worktree', () => {
     try {
       expect(r.status, r.stderr).toBe(0);
       expect(wt, r.stderr).toBeTruthy();
-      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(true);
-      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(wt, '.claude/agents')).isSymbolicLink()).toBe(false);
+      expect(lstatSync(join(wt, '.claude/skills')).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(wt, '.claude/agents/api-security-reviewer.md'), 'utf8')).toBe(
+        readFileSync(packagedApiSecurityAgent, 'utf8'),
+      );
     } finally {
       dropWorktree(git, r.stderr);
     }

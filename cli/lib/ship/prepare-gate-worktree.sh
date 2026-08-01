@@ -27,6 +27,49 @@ materialize_private_review_dependencies() {
   fi
 }
 
+# The running CLI's package root. Source runs place this script under cli/lib/ship; published runs
+# place it under dist/cli/lib/ship, and packageDir() treats that dist directory as the package root.
+gate_package_root() {
+  local script_dir package_root
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || return 1
+  package_root=$(cd "$script_dir/../../.." && pwd) || return 1
+  [ -d "$package_root/agents" ] && [ -d "$package_root/skills" ] || return 1
+  printf '%s\n' "$package_root"
+}
+
+# Refresh only the throwaway ship worktree from the CURRENT running devkit package. The caller's
+# synced .claude projection may lag the installed package (sc-1300); trusting it makes a clean ship
+# fail closed as "checklist artifact missing" until the shared checkout is manually mutated.
+refresh_ship_reviewer_assets() {
+  local wt=$1 root=$2 purpose=$3 package_root physical_wt physical_root sub
+  physical_wt=$(cd -P "$wt" && pwd) || return 1
+  physical_root=$(cd -P "$root" && pwd) || return 1
+  [ "$physical_wt" != "$physical_root" ] || {
+    echo "devkit ship: refusing to refresh reviewer assets in the caller checkout" >&2
+    return 1
+  }
+  package_root=$(gate_package_root) || {
+    echo "devkit ship: running package is missing reviewer agents/skills — reinstall or rebuild devkit" >&2
+    return 1
+  }
+
+  # .claude itself stays a real worktree-local directory so checklist state files never leak back to
+  # the caller. A tracked symlink at the directory boundary is removed as a LEAF before any child is
+  # touched, so the refresh cannot traverse into an external/shared target.
+  if [ -L "$physical_wt/.claude" ]; then
+    rm -f -- "$physical_wt/.claude"
+  elif [ -e "$physical_wt/.claude" ] && [ ! -d "$physical_wt/.claude" ]; then
+    echo "devkit ship: $physical_wt/.claude is not a directory" >&2
+    return 1
+  fi
+  mkdir -p "$physical_wt/.claude"
+  for sub in agents skills; do
+    rm -rf -- "$physical_wt/.claude/$sub"
+    cp -R "$package_root/$sub" "$physical_wt/.claude/$sub"
+  done
+  echo "  ↳ $purpose: refreshed reviewer agents + skills from running devkit package" >&2
+}
+
 # The repo's MAIN worktree — `git worktree list` reports it first, by definition.
 gate_main_worktree() {
   local root=$1 main
@@ -283,15 +326,11 @@ prepare_gate_worktree() {
     return 1
   fi
 
-  # Reviewer briefs/checklists may be ignored projection artifacts. Link only their subdirectories:
-  # checklist state files written directly under .claude stay isolated in the ephemeral worktree.
-  if [ -d "$root/.claude/agents" ] || [ -d "$root/.claude/skills" ]; then
-    mkdir -p "$wt/.claude"
-    local sub
-    for sub in agents skills; do
-      if [ -e "$root/.claude/$sub" ] && [ ! -e "$wt/.claude/$sub" ]; then
-        ln -s "$root/.claude/$sub" "$wt/.claude/$sub"
-      fi
-    done
+  # Reviewer briefs/checklists may be absent, tracked, or ignored projection artifacts. All three
+  # states can lag the running package, so refresh every throwaway release-gate worktree instead of
+  # trusting the caller copy (or treating its absence as an opt-out). Tag validation shares this
+  # preparation helper but does not run the reviewer gate, so keep its minimal worktree unchanged.
+  if [ "$purpose" = shipping ]; then
+    refresh_ship_reviewer_assets "$wt" "$root" "$purpose"
   fi
 }

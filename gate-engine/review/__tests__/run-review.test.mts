@@ -54,6 +54,14 @@ const ENV_KEYS = [
   'DEVKIT_SHIP_ID',
 ];
 const saved = {};
+const COMMIT_GUARD_INIT_SCRIPT = `
+import { mkdirSync, writeFileSync } from 'node:fs';
+mkdirSync('.claude', { recursive: true });
+writeFileSync(
+  '.claude/.pre-commit-review.json',
+  JSON.stringify({ files: [{ path: 'src/fixture.ts', status: 'pending', issues: [] }] }),
+);
+`;
 beforeEach(() => {
   for (const k of ENV_KEYS) {
     saved[k] = process.env[k];
@@ -98,6 +106,16 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
   ]) {
     writeFileSync(join(agents, `${name}.md`), `---\nname: ${name}\n---\nBrief for ${name}.`);
   }
+  const commitGuardScript = join(
+    repo,
+    '.claude',
+    'skills',
+    'commit-guard',
+    'scripts',
+    'checklist.mjs',
+  );
+  mkdirSync(join(repo, '.claude', 'skills', 'commit-guard', 'scripts'), { recursive: true });
+  writeFileSync(commitGuardScript, COMMIT_GUARD_INIT_SCRIPT);
   if (backend) {
     mkdirSync(join(repo, 'src', 'main'), { recursive: true });
     writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 1;\n');
@@ -126,7 +144,7 @@ function reviewAssets(): string {
     writeFileSync(join(root, 'skills', reviewer.skill, 'SKILL.md'), `# ${reviewer.skill}\n`);
     writeFileSync(
       join(root, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
-      '#!/usr/bin/env node\n',
+      reviewer.name === 'commit-guard' ? COMMIT_GUARD_INIT_SCRIPT : '#!/usr/bin/env node\n',
     );
   }
   return root;
@@ -486,7 +504,7 @@ describe('runReviewGate — cascade + exit contract', () => {
       writeFileSync(join(repo, '.claude', 'skills', skill, 'SKILL.md'), `# ${skill}\n`);
       writeFileSync(
         join(repo, '.claude', 'skills', skill, 'scripts', 'checklist.mjs'),
-        `// ${skill} checklist\n`,
+        skill === 'commit-guard' ? COMMIT_GUARD_INIT_SCRIPT : `// ${skill} checklist\n`,
       );
     }
   }
@@ -924,6 +942,22 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('skipped the checklist workflow');
   });
 
+  it('pre-seeds commit-guard pending files before the judge runs', async () => {
+    const repo = consumerRepo({ backend: true });
+    let seeded = null;
+    const exec = mkExec(async ({ label }) => {
+      if (label === 'review:commit-guard')
+        seeded = JSON.parse(readFileSync(join(repo, '.claude/.pre-commit-review.json'), 'utf8'));
+      writeArtifact(repo, label);
+      return 'VERDICT: PASS';
+    });
+
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(seeded).toEqual({
+      files: [{ path: 'src/fixture.ts', status: 'pending', issues: [] }],
+    });
+  });
+
   it('PASS verdict with pending checklist items → inconclusive, names the unresolved items', async () => {
     const repo = consumerRepo({ backend: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1264,15 +1298,23 @@ describe('runReviewGate — strict ship mode (GUARD_AI_STRICT)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     process.env.GUARD_AI_STRICT = '1';
     const failedOnce = new Set();
+    let commitGuardRetrySeeded = false;
     const exec = mkExec(async ({ label }) => {
       if (!failedOnce.has(label)) {
         failedOnce.add(label);
         return null;
       }
+      if (label === 'review:commit-guard') {
+        const state = JSON.parse(
+          readFileSync(join(repo, '.claude/.pre-commit-review.json'), 'utf8'),
+        );
+        commitGuardRetrySeeded = state.files?.[0]?.status === 'pending';
+      }
       writeArtifact(repo, label);
       return 'VERDICT: PASS';
     });
     expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(commitGuardRetrySeeded).toBe(true);
     expect(Object.keys(loadCache(repo)).length).toBe(5);
   });
 
