@@ -18,18 +18,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ADHD_SKILL_DIR } from '../lib/install/adhd-skill.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
+  ADHD_ANCHOR_HOOK,
   ADHD_SESSION_HOOK,
   hookScriptsFor,
 } from '../lib/install/hook-registration-ledger/selection.mts';
 import { rootRegistry } from './_helpers.mts';
 
-const HOOK = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'agents-hooks',
-  ADHD_SESSION_HOOK,
-);
+const hookPath = (name: string) =>
+  join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'agents-hooks', name);
+const HOOK = hookPath(ADHD_SESSION_HOOK);
 const { mkTmp, cleanup } = rootRegistry();
 afterEach(cleanup);
 
@@ -117,23 +114,91 @@ describe('adhd SessionStart hook', () => {
   });
 });
 
+/**
+ * The per-turn anchor — one line restating the rules that decay first, injected immediately before
+ * each response. The SessionStart body is what the style IS; this is what keeps it attended to as
+ * the conversation grows away from it, so its failure mode is silent (output slowly stops being
+ * ADHD-shaped) and nothing else in the suite would catch it.
+ */
+describe('adhd prompt anchor hook', () => {
+  const runAnchor = (root: string) =>
+    spawnSync(process.execPath, [hookPath(ADHD_ANCHOR_HOOK)], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    });
+
+  it('emits a UserPromptSubmit anchor naming the rules that decay first', () => {
+    const r = runAnchor(repoWithSkill());
+    expect(r.status, r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.hookSpecificOutput.hookEventName).toBe('UserPromptSubmit');
+    const ctx = out.hookSpecificOutput.additionalContext;
+    expect(ctx).toMatch(/next action/i);
+    expect(ctx).toMatch(/no preamble/i);
+    // The explain carve-out: without it a terse anchor pulls explanatory answers short, the one
+    // case the skill itself says to break its rules for.
+    expect(ctx).toMatch(/explain/i);
+  });
+
+  it('stays one line — a full re-injection would cost more than the drift it fixes', () => {
+    // Repetition that reinforces one instruction measurably degrades adherence to others, so the
+    // anchor restates rules rather than re-sending the body (which is ~6.4KB).
+    const ctx = JSON.parse(runAnchor(repoWithSkill()).stdout).hookSpecificOutput.additionalContext;
+    expect(ctx).not.toContain('\n');
+    expect(ctx.length).toBeLessThan(400);
+  });
+
+  it('emits no systemMessage — it fires every turn, so a notice would be pure noise', () => {
+    expect(JSON.parse(runAnchor(repoWithSkill()).stdout).systemMessage).toBeUndefined();
+  });
+
+  it('honours the durable off switch', () => {
+    const root = repoWithSkill();
+    mkdirSync(join(root, '.devkit'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'adhd-off'), '');
+    const r = runAnchor(root);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  });
+
+  it('says nothing when the skill is not installed', () => {
+    // A hook script can outlive its component; anchoring a style whose body never loaded would
+    // shape output against instructions the model was never given.
+    const r = runAnchor(repoWithSkill(null));
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  });
+});
+
 describe('adhd hook wiring', () => {
   it('registers on SessionStart including compact', () => {
     // `compact` is the load-bearing matcher: the style's "rest of the session" persistence is
     // instruction text, so without re-firing after a compaction it silently decays.
-    const [reg] = HOOK_REGISTRATIONS.adhd;
-    expect(reg.event).toBe('SessionStart');
-    expect(reg.matcher).toContain('compact');
-    expect(reg.command).toContain(ADHD_SESSION_HOOK);
+    const reg = HOOK_REGISTRATIONS.adhd.find((r) => r.registrationId === 'adhd:session-start');
+    expect(reg?.event).toBe('SessionStart');
+    expect(reg?.matcher).toContain('compact');
+    expect(reg?.command).toContain(ADHD_SESSION_HOOK);
   });
 
-  it('is owned by adhd alone — agentHooks neither installs nor prunes it', () => {
+  it('registers the anchor on every prompt, unmatched', () => {
+    // An empty matcher is the point: the style governs every response, so the anchor has to reach
+    // every turn rather than a subset.
+    const reg = HOOK_REGISTRATIONS.adhd.find((r) => r.registrationId === 'adhd:prompt-anchor');
+    expect(reg?.event).toBe('UserPromptSubmit');
+    expect(reg?.matcher).toBe('');
+    expect(reg?.command).toContain(ADHD_ANCHOR_HOOK);
+  });
+
+  it('both hooks are owned by adhd alone — agentHooks neither installs nor prunes them', () => {
     const base = { agentHooks: true, decisions: false, fallow: false };
-    expect(hookScriptsFor({ ...base, adhd: false })).not.toContain(ADHD_SESSION_HOOK);
-    expect(hookScriptsFor({ ...base, adhd: true })).toContain(ADHD_SESSION_HOOK);
-    // …and it arrives with agent hooks OFF, since the component owns it independently.
+    for (const hook of [ADHD_SESSION_HOOK, ADHD_ANCHOR_HOOK]) {
+      expect(hookScriptsFor({ ...base, adhd: false })).not.toContain(hook);
+      expect(hookScriptsFor({ ...base, adhd: true })).toContain(hook);
+    }
+    // …and they arrive with agent hooks OFF, since the component owns them independently.
     expect(
-      hookScriptsFor({ agentHooks: false, decisions: false, fallow: false, adhd: true }),
-    ).toEqual([ADHD_SESSION_HOOK]);
+      hookScriptsFor({ agentHooks: false, decisions: false, fallow: false, adhd: true }).sort(),
+    ).toEqual([ADHD_ANCHOR_HOOK, ADHD_SESSION_HOOK].sort());
   });
 });
