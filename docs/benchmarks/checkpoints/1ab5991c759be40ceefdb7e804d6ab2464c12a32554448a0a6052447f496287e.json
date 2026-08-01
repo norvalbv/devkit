@@ -1,0 +1,215 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-01T11:19:02.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:a31b51b7343edce031dd43d79a0703118e8e5e96735a78cea2720c6cb5c38a14",
+    "implementation": "sha256:39f7131d35dc539e202d801bb6d2bd9e21064dad02c37b11d4348ced301df8d7",
+    "runner": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a",
+    "scorer": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a"
+  },
+  "metrics": [
+    {
+      "denominator": 11,
+      "direction": "higher",
+      "id": "frontend-security-reviewer@haiku@cascade-on:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.7411670330319684,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "frontend-security-reviewer@haiku@cascade-on first-pass FAIL recall",
+      "numerator": 11,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "frontend-security-reviewer@haiku@cascade-on:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.5291118177871464,
+        "method": "wilson-95",
+        "upper": 0.9775825085499433
+      },
+      "label": "frontend-security-reviewer@haiku@cascade-on first-pass clean pass",
+      "numerator": 7,
+      "unit": "ratio",
+      "value": 0.875
+    },
+    {
+      "denominator": 11,
+      "direction": "higher",
+      "id": "frontend-security-reviewer@haiku@cascade-on:block-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6226415635484043,
+        "method": "wilson-95",
+        "upper": 0.9837678271141151
+      },
+      "label": "frontend-security-reviewer@haiku@cascade-on block recall",
+      "numerator": 10,
+      "unit": "ratio",
+      "value": 0.9090909090909091
+    },
+    {
+      "denominator": 8,
+      "direction": "higher",
+      "id": "frontend-security-reviewer@haiku@cascade-on:clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6755924351161198,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "frontend-security-reviewer@haiku@cascade-on clean pass",
+      "numerator": 8,
+      "unit": "ratio",
+      "value": 1
+    }
+  ],
+  "rows": {
+    "frontend-security-reviewer@haiku@cascade-on:fesec-auth-callback-console-token": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-changelog-dompurify": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-comment-richbody-raw-html": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-event-reporter-redaction": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-expiry-hint-storage": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-footer-external-links": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-invite-post-no-csrf": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-log-filter-user-regexp": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-log-filter-user-regexp-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-marketplace-window-open": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-postmessage-wildcard": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-profile-website-href": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-profile-website-href-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-refresh-token-localstorage": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-release-notes-target-blank": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-report-formula-new-function": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-theme-preference-storage": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-toast-innerhtml-reset": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "frontend-security-reviewer@haiku@cascade-on:fesec-widget-identity-secret": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "d855b7b0de8524021905688b617ac836fb652b4f",
+  "suiteId": "reviewer-frontend-security"
+}

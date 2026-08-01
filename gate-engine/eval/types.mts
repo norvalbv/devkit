@@ -114,6 +114,13 @@ export interface BenchmarkSuite {
   subjectIds: string[];
   runner?: string;
   baseline?: string;
+  /**
+   * Sections of a shared baseline file this suite owns, when one runner scores several suites in
+   * one pass (the reviewer bench writes every reviewer into one file). Publishing keeps only these
+   * sections, so re-running ONE subject republishes only its own suite and never restates — or
+   * silently drops — the evidence of the others.
+   */
+  sections?: string[];
   lifecycle: Lifecycle;
   acceptance: string;
   hashes: {

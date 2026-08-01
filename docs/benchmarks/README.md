@@ -75,7 +75,11 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Feature critique | shipped | accepted | stale | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
-| Domain and correctness reviewers | shipped | evidence-only | unknown | coverage | → flat | Gold rows before catalog refresh: 24 · Gold rows after catalog refresh: 29 |
+| API security reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 8/8 (100.0%) · first-pass clean pass: 5/6 (83.3%) · block recall: 8/8 (100.0%) · clean pass: 6/6 (100.0%) |
+| Backend performance reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 7/7 (100.0%) · first-pass clean pass: 3/6 (50.0%) · block recall: 7/7 (100.0%) · clean pass: 6/6 (100.0%) |
+| Frontend security reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
+| Frontend performance reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
+| Correctness reviewer | shipped | accepted | current | coverage | ? unknown | first-pass FAIL recall: 35/38 (92.1%) · first-pass clean pass: 24/28 (85.7%) |
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |
@@ -90,17 +94,17 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 
 | Subject | Kind | Lifecycle | Evidence | Suite(s) |
 | --- | --- | --- | --- | --- |
-| API security agent | agent | shipped | evidence-only | reviewer-fleet |
-| Backend performance agent | agent | shipped | evidence-only | reviewer-fleet |
+| API security agent | agent | shipped | evidence-only | reviewer-api-security |
+| Backend performance agent | agent | shipped | evidence-only | reviewer-backend-performance |
 | Commit guard agent | agent | shipped | evidence-only | commit-guard-retrieval |
 | Conventions agent | agent | shipped | accepted | conventions |
-| Correctness agent | agent | shipped | evidence-only | reviewer-fleet |
+| Correctness agent | agent | shipped | evidence-only | reviewer-correctness |
 | Feature completeness agent | agent | shipped | accepted | completeness |
 | Feature critique agent | agent | shipped | accepted | critique |
 | Upstream-fix agent | agent | shipped | none | — |
 | Frontend accessibility agent | agent | shipped | none | — |
-| Frontend performance agent | agent | shipped | evidence-only | reviewer-fleet |
-| Frontend security agent | agent | shipped | evidence-only | reviewer-fleet |
+| Frontend performance agent | agent | shipped | evidence-only | reviewer-frontend-performance |
+| Frontend security agent | agent | shipped | evidence-only | reviewer-frontend-security |
 | Testing agent | agent | shipped | none | — |
 | Testing reviewer agent | agent | shipped | none | — |
 | devkit CLI | bin | shipped | none | — |
@@ -113,16 +117,16 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Folder fan-out ratchet | bin | shipped | none | — |
 | Prefix cache gate | bin | shipped | none | — |
 | qavis advisory gate | bin | shipped | external-required | qavis |
-| Reviewer gate | bin | shipped | accepted | completeness, conventions, reviewer-fleet |
+| Reviewer gate | bin | shipped | accepted | completeness, conventions, reviewer-api-security, reviewer-backend-performance, reviewer-frontend-security, reviewer-frontend-performance, reviewer-correctness |
 | Sentry judge gate | bin | shipped | evidence-only | sentry |
 | Size ratchet | bin | shipped | none | — |
 | Structure gate | bin | shipped | none | — |
-| API security reviewer | reviewer | shipped | evidence-only | reviewer-fleet |
-| Backend performance reviewer | reviewer | shipped | evidence-only | reviewer-fleet |
-| Frontend security reviewer | reviewer | shipped | evidence-only | reviewer-fleet |
-| Frontend performance reviewer | reviewer | shipped | evidence-only | reviewer-fleet |
+| API security reviewer | reviewer | shipped | evidence-only | reviewer-api-security |
+| Backend performance reviewer | reviewer | shipped | evidence-only | reviewer-backend-performance |
+| Frontend security reviewer | reviewer | shipped | evidence-only | reviewer-frontend-security |
+| Frontend performance reviewer | reviewer | shipped | evidence-only | reviewer-frontend-performance |
 | Commit guard reviewer | reviewer | shipped | evidence-only | commit-guard-retrieval |
-| Correctness reviewer | reviewer | shipped | evidence-only | reviewer-fleet |
+| Correctness reviewer | reviewer | shipped | evidence-only | reviewer-correctness |
 | Conventions reviewer | reviewer | shipped | accepted | conventions |
 | Feature critique judge | judge | shipped | accepted | critique |
 | Completeness judge | judge | shipped | accepted | completeness |

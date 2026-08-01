@@ -270,10 +270,27 @@ function readCheckpoint(
   return raw ? (JSON.parse(raw) as CheckpointEnvelope) : undefined;
 }
 
-export function parsePublishBaseline(suiteId: string, adapter: string, raw: string) {
+/** Keep only the sections a suite owns; a section key's leading segment names its subject. */
+function ownedSections(raw: string, suiteId: string, sections?: string[]): unknown {
+  const parsed = JSON.parse(raw) as { sections?: Record<string, unknown> };
+  if (!sections?.length || !parsed.sections) return parsed;
+  const owned = Object.entries(parsed.sections).filter(([key]) =>
+    sections.includes(key.split('@')[0]),
+  );
+  if (!owned.length)
+    throw new Error(`Baseline carries no section for ${suiteId} (expected ${sections.join(', ')})`);
+  return { ...parsed, sections: Object.fromEntries(owned) };
+}
+
+export function parsePublishBaseline(
+  suiteId: string,
+  adapter: string,
+  raw: string,
+  sections?: string[],
+) {
   let baseline: ReturnType<typeof parseBaseline>;
   try {
-    baseline = parseBaseline(adapter, JSON.parse(raw));
+    baseline = parseBaseline(adapter, ownedSections(raw, suiteId, sections));
   } catch (error) {
     throw new Error(`Adapter rejected ${suiteId}: ${(error as Error).message}`);
   }
@@ -315,7 +332,7 @@ function publishLocked(args: string[], append: LockedAppend): void {
   if (!baselinePath) throw new Error(`Suite ${suiteId} has no baseline path; pass --baseline`);
   const raw = source.read(baselinePath);
   if (!raw) throw new Error(`Missing baseline ${baselinePath} at ${tree}`);
-  const baseline = parsePublishBaseline(suiteId, suite.adapter, raw);
+  const baseline = parsePublishBaseline(suiteId, suite.adapter, raw, suite.sections);
   const requestedChangeType =
     parsed.values['change-type'] ?? (suite.lifecycle === 'no-ship' ? 'no-ship' : 'quality');
   if (!(CHANGE_TYPES as readonly string[]).includes(requestedChangeType))
