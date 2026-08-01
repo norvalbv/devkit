@@ -1,0 +1,173 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-01T11:19:02.000Z",
+  "comparisons": [],
+  "hashes": {
+    "corpus": "sha256:3186dcbf61807e7383f820bb74e519c4add0c399839107b2281b09255b7aefab",
+    "implementation": "sha256:a2be7c48718a353822f985e89713f0b475ce3e383891b3b9e92228409fd4c556",
+    "runner": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a",
+    "scorer": "sha256:546a99e7239d201b9e017abd4b1662f133b387cb4bf553f1b40d6eaf7123045a"
+  },
+  "metrics": [
+    {
+      "denominator": 7,
+      "direction": "higher",
+      "id": "backend-performance-reviewer@haiku@cascade-on:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6456695649333126,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "backend-performance-reviewer@haiku@cascade-on first-pass FAIL recall",
+      "numerator": 7,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 6,
+      "direction": "higher",
+      "id": "backend-performance-reviewer@haiku@cascade-on:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.18761630648265054,
+        "method": "wilson-95",
+        "upper": 0.8123836935173494
+      },
+      "label": "backend-performance-reviewer@haiku@cascade-on first-pass clean pass",
+      "numerator": 3,
+      "unit": "ratio",
+      "value": 0.5
+    },
+    {
+      "denominator": 7,
+      "direction": "higher",
+      "id": "backend-performance-reviewer@haiku@cascade-on:block-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6456695649333126,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "backend-performance-reviewer@haiku@cascade-on block recall",
+      "numerator": 7,
+      "unit": "ratio",
+      "value": 1
+    },
+    {
+      "denominator": 6,
+      "direction": "higher",
+      "id": "backend-performance-reviewer@haiku@cascade-on:clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.6096657120978346,
+        "method": "wilson-95",
+        "upper": 1
+      },
+      "label": "backend-performance-reviewer@haiku@cascade-on clean pass",
+      "numerator": 6,
+      "unit": "ratio",
+      "value": 1
+    }
+  ],
+  "rows": {
+    "backend-performance-reviewer@haiku@cascade-on:beperf-cache-key-never-hits": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-decoy-batched-member-lookup": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-decoy-bounded-startup-loop": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-decoy-cache-aside-settings": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-decoy-keyset-list": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-decoy-lazy-singleton-pool": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-nplusone-statement-loop": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-nplusone-statement-loop-fixed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": false
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-pagination-dropped-audit": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-per-request-pg-client": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-select-star-wide-table": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-serial-webhook-fanout": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    },
+    "backend-performance-reviewer@haiku@cascade-on:beperf-sync-io-handler": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "72abca9d81e84b8bbc15f75d1f85cfba1e624394",
+  "suiteId": "reviewer-backend-performance"
+}
