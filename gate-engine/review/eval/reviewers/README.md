@@ -33,8 +33,8 @@ Knobs: `BENCH_MODEL` (first-pass model, default `sonnet` = production) · `BENCH
 
 **Checkpoint/resume (rate-limit safe).** Every completed row is appended to
 `progress-<model>-<cascade>.jsonl` the moment it lands. Re-running the **same command**
-auto-resumes: rows checkpointed under the same (model, cascade, gateHash, corpusHash) are
-salvaged instead of re-run; outage/engine-error rows always re-run; `--fresh` discards the
+auto-resumes: a row checkpointed under the same (model, cascade, gateHash) AND an unchanged
+per-row `rowHash` is salvaged instead of re-run; outage/engine-error rows always re-run; `--fresh` discards the
 checkpoint. After 3 consecutive judge outages (drained credit pool / rate limit) the run pauses
 itself — completed rows are safe, partial numbers are labelled PARTIAL and never gate or become
 a baseline — switch accounts and re-run the same command. The checkpoint file is deleted when a
@@ -116,15 +116,18 @@ Pooled + per reviewer, every rate with a Wilson 95% interval:
 Plus: right-reason split, live escalation count + mean opus seconds, inconclusive by sub-cause.
 
 `--fail` = floors + a per-row **flip table vs baseline** under two-sided mid-p McNemar (p<0.05
-with net-negative flips). Rows discordant with the baseline are re-run once; a flip counts only
-when 2-of-2 confirmed. Baselines are keyed `<reviewer>@<model>@<cascade>` and embed
-`gateHash` (run-review.mts + reviewers.mts + corpus.mts (the fixture layer hashes its own
-source) + brief + checklist + SKILL.md — the brief IS gate
-code, and SKILL.md ships into fixtures) + `corpusHash`; any mismatch **skips** comparison loudly
-instead of lying. Regenerate with
-`--baseline` after deliberate changes. Even at this size (53 domain rows; 66 correctness) each
-cohort is a **large-effect tripwire, not a 5pp detector** — intervals print so nobody over-reads a
-point estimate.
+with net-negative flips) — printed pooled, gold-only, decoy-only, and clustered-by-case (rows
+sharing a `caseId` net to ONE discordant unit, so a minimal-pair set can't inflate the count). Rows
+discordant with the baseline are re-run once; a flip counts only when 2-of-2 confirmed. Baselines
+are keyed `<reviewer>@<model>@<cascade>` and embed `gateHash` (run-review.mts + reviewers.mts +
+corpus.mts (the fixture layer hashes its own source) + brief + checklist + SKILL.md — the brief IS
+gate code, and SKILL.md ships into fixtures); a mismatch **skips** comparison loudly instead of
+lying. Regenerate with `--baseline` after deliberate changes. Corpus growth is **not** a skip: every
+row carries a content `rowHash`, so the flip table pairs on the row-id **intersection** of baseline
+and current run — appending or removing rows never invalidates the retained ones, and a shared row
+whose `rowHash` changed is excluded from pairing and reported as "changed", not silently flipped.
+Even at this size (53 domain rows; 66 correctness) each cohort is a **large-effect tripwire, not a
+5pp detector** — intervals print so nobody over-reads a point estimate.
 
 ## A/B a deliberate prompt edit — `--against <before.json>`
 
