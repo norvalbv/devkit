@@ -28,6 +28,7 @@ import { INIT_HELP } from "../lib/help/init-help.mjs";
 import { installCommitMsgHook, removeCommitMsgBlock } from "../lib/husky/commit-msg-block.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, hasFragment, removeFragment, removeGuardBlock, replaceGuardBlock, } from "../lib/husky/husky-block.mjs";
 import { installSelfHostHook, isDevkitRepo, selfHostSelection } from "../lib/husky/self-host.mjs";
+import { ADHD_SKILL_DIR, syncAdhdSkill } from "../lib/install/adhd-skill.mjs";
 import { installAgentSurfaces as syncSurfaces } from "../lib/install/agent-assets/agent-surfaces.mjs";
 import { resolveAssetConflicts } from "../lib/install/agent-assets/asset-conflict-picker.mjs";
 import { ensureDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
@@ -880,14 +881,13 @@ export async function applyInit(cwd, plan) {
         console.log('8b. search-code (opt-in semantic search)');
         installSearchCode(cwd, dryRun);
     }
-    // The vendored i-have-adhd skill has no installer of its own — syncSurfaces above already wrote it
-    // (skillNamesForSelection admits it iff selection.adhd). It can only ride IN on the skills sync, so
-    // say so plainly when skills are off rather than recording a selection that silently did nothing.
-    // Deliberately NOT auto-enabling skills: that would install a dozen unrequested assets.
-    if (selection.adhd && !selection.skills) {
-        console.log('8c. i-have-adhd');
-        console.log('  ! Agent skills is off — the i-have-adhd skill has no surface to sync into (nothing written).');
-    }
+    // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
+    // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
+    // previously-installed copy, and syncSurfaces above has already reclaimed the `.claude/skills/`
+    // copy older releases wrote (skillNamesForSelection now excludes it), which is the whole migration.
+    if (selection.adhd)
+        console.log(`8c. i-have-adhd → ${ADHD_SKILL_DIR}/`);
+    syncAdhdSkill(gitRoot, Boolean(selection.adhd), dryRun);
     // Removals (deselected + present).
     applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
     // .devkit/config.json with the component selection.

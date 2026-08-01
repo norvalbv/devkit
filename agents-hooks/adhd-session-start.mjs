@@ -11,10 +11,9 @@
 // silently decays. Re-firing on compact/resume/clear restores it exactly when context pressure
 // would have eroded it. Same mechanism frink's ponytail-frink plugin uses.
 //
-// Portable (W-3): reads the SYNCED skill from the consumer repo, never __dirname/packageDir, so a
+// Portable (W-3): reads the installed skill from the consumer repo, never __dirname/packageDir, so a
 // consumer who edits their copy gets THEIR copy injected. Self-skips silently whenever the skill
-// is absent (skills deselected, or a surface that never received it) — a hook must never be the
-// thing that breaks a session start.
+// is absent (adhd deselected) — a hook must never be the thing that breaks a session start.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -26,7 +25,9 @@ const projectDir = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
 const OFF_FLAG = join(projectDir, '.devkit', 'adhd-off');
 if (existsSync(OFF_FLAG)) process.exit(0);
 
-const skillPath = join(projectDir, '.claude', 'skills', 'i-have-adhd', 'SKILL.md');
+// devkit's own vendored-asset tree, NOT .claude/skills — that dir is where the consumer's
+// hand-authored skills live, and a pinned third-party copy devkit owns does not belong in it.
+const skillPath = join(projectDir, '.devkit', 'vendored-skills', 'i-have-adhd', 'SKILL.md');
 let body;
 try {
   // Inject the BODY only: the YAML frontmatter is skill-loader metadata (name/description/license),
