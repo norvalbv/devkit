@@ -58,6 +58,7 @@ gate-engine/review/eval/transcripts/
 gate-engine/review/eval/reviewers/*.log
 gate-engine/review/eval/reviewers/results.baseline.json
 gate-engine/review/eval/reviewers/candidates.jsonl
+gate-engine/review/eval/reviewers/raw/
 gate-engine/review/eval/reviewers/progress-*.jsonl
 
 # conventions-eval: ledger + per-run transcripts are local telemetry (mirrors critique-eval).
