@@ -86,7 +86,7 @@ runner); freshness goes stale exactly when one moves.
    CR-Bench arXiv 2603.11078 "filtered to TS/JS") is not viable**: both are Python-derived
    (c-CRAB builds on SWE-CARE, CR-Bench transforms SWE-Bench — neither contains any TS/JS
    instances to filter), c-CRAB's artifact repo (github.com/c-CRAB-Benchmark/dataset) carries no
-   license, and CR-Bench has published no artifact at all. Proposed replacements, unratified:
+   license, and CR-Bench has no publicly released artifact. Proposed replacements, unratified:
    (a) mine GHSA/npm advisories with fix commits directly — public known-answer facts,
    re-expressed as anonymized fixtures like every other row, the natural api-security /
    frontend-security source (SecBench.js catalogs ~600 such vulns but is itself unlicensed —
@@ -136,8 +136,9 @@ runner); freshness goes stale exactly when one moves.
   above — that figure is the blind relabel's measurement and stays as measured.
 - Yield funnel from the first mining pass: 749 candidates → 479 fixed / 34 rebutted / 236
   unresolved → hard drops (232 unresolved-outcome, 179 out-of-charter, 113 truncated-hunk, 27
-  already-in-corpus) → 23 gold+pair sets landed across two batches. Rebutted threads mostly fail
-  extraction (no line anchors) — relaxing that path is the next miner improvement.
+  already-in-corpus) → 23 gold+pair sets landed across two batches. (The "rebutted threads mostly
+  fail extraction" premise was falsified 2026-08-02: 25 of 34 already survived; #306 waived the
+  two hunk drops for rebutted rows, freeing the remaining viable 3 — none die on line anchors.)
 
 ## Pending work, in order
 
@@ -149,6 +150,9 @@ runner); freshness goes stale exactly when one moves.
    probabilities from a bench run, not another labeler.
 3. Calibration slice (localized vs full-context delta).
 4. Domain-suite cascade re-bench (needs opus) now that api-security has 30 rows.
-5. c-CRAB / CR-Bench known-answer import for absolute recall (security suites especially).
+5. Known-answer import for absolute recall (security suites especially): ratify and build one of
+   the replacements in measurement-rule 2 (GHSA/npm advisory mining, or the CR-Bench recipe over
+   SWE-Bench Multimodal) — the original c-CRAB / CR-Bench TS/JS import was scoped 2026-08-02 and
+   is not viable.
 6. Mine the override-valve history + human review comments (decoy/gold sources already banked).
 7. Optional: weekly scheduled routine (mine → propose → adapt → draft corpus PR).
