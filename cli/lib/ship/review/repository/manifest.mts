@@ -7,6 +7,7 @@ import {
   hasValidManifestRoots,
   isSafeManifestAbsolutePath,
 } from '../manifest/validation.mts';
+import { errorMessage, fail, objectValue } from '../shared/common.mts';
 
 export const REVIEW_REPOSITORY_STATE_VERSION = 1 as const;
 export const REVIEW_REPOSITORY_OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -38,21 +39,6 @@ export interface ReviewRepositoryStateManifest {
   gitDir: string;
   state: ReviewRepositoryState;
   selfHash: string;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
-
-function objectValue(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    fail(`repository state manifest ${label} is invalid.`);
-  }
-  return value as Record<string, unknown>;
 }
 
 function canonicalBase64(value: unknown): value is string {
@@ -93,8 +79,11 @@ export function reviewRepositoryManifestHash(value: unknown): string {
 
 /** Read, authenticate, and deeply validate a repository-state manifest. */
 export function parseReviewRepositoryStateManifest(path: string): ReviewRepositoryStateManifest {
-  const manifest = objectValue(readManifestValue(path), 'shape');
-  const state = objectValue(manifest.state, 'state');
+  const manifest = objectValue(
+    readManifestValue(path),
+    'repository state manifest shape is invalid.',
+  );
+  const state = objectValue(manifest.state, 'repository state manifest state is invalid.');
   if (!hasValidManifestRoots(manifest, MANIFEST_KEYS, REVIEW_REPOSITORY_STATE_VERSION)) {
     fail('repository state manifest has an invalid shape.');
   }

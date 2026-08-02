@@ -27,6 +27,7 @@ import {
   parseReviewSetupProfile,
   type RawReviewConfig,
 } from './setup-profile.mts';
+import { errorMessage, fail } from './shared/common.mts';
 import { type ReviewSourceResolution, resolveReviewSource } from './source-projection.mts';
 
 const HUSKY_RUNNER_PATHS = [
@@ -88,14 +89,6 @@ export interface ReviewSetupManifest {
 export interface CaptureReviewSetupOptions {
   /** Deterministic mutation seam for integration tests and callers coordinating a frozen target. */
   afterFirstCapture?: () => void;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function manifestDestination(path: string, gitRoot: string): string {

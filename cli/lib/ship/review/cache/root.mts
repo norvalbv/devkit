@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from '../run-direct.mts';
 import { reviewPathWithin } from '../runtime-paths.mts';
+import { errorMessage, fail, gitEnvironment } from '../shared/common.mts';
 
 const REVIEW_CACHE_NAMESPACE = 'devkit-review-cache-v1';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -16,14 +17,6 @@ export interface ReviewCacheRootOptions {
   environment?: NodeJS.ProcessEnv;
   homeDirectory?: string;
   platform?: NodeJS.Platform;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function assertPhysicalDirectory(path: string, label: string): string {
@@ -66,22 +59,9 @@ function ensurePhysicalDirectory(path: string, label: string): string {
   return assertPhysicalDirectory(requested, label);
 }
 
-function gitEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (name.startsWith('GIT_')) delete env[name];
-  }
-  return {
-    ...env,
-    GIT_NO_LAZY_FETCH: '1',
-    GIT_OPTIONAL_LOCKS: '0',
-    GIT_TERMINAL_PROMPT: '0',
-  };
-}
-
 function gitOutput(targetRoot: string, args: string[], label: string): Buffer {
   const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', targetRoot, ...args], {
-    env: gitEnvironment(),
+    env: gitEnvironment({ GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0' }),
     maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0) {
