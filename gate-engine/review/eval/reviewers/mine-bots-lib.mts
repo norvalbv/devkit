@@ -59,18 +59,35 @@ export function hasAddressedMarker(texts) {
 }
 
 const WITHDRAWAL_RE = /withdraw|does not apply|you're right|you are right|agreed[—,-]/i;
-const CODERABBIT_LOGIN = 'coderabbitai[bot]';
+// REST comment authors carry a '[bot]' suffix ('coderabbitai[bot]'); GraphQL thread-reply
+// authors do NOT ('coderabbitai'). Every author comparison must normalize, or GraphQL-sourced
+// replies pass as humans — which silently killed bot-withdrawal detection (never fired) and
+// minted false 'human-rebuttal' outcomes from CodeRabbit's own replies.
+const BOT_BASE_LOGINS = new Set(['coderabbitai', 'macroscopeapp']);
+const BOT_SUFFIX_RE = /\[bot\]$/;
+const baseLogin = (login) => String(login ?? '').replace(BOT_SUFFIX_RE, '');
+export function isBotLogin(login) {
+  return typeof login === 'string' && BOT_BASE_LOGINS.has(baseLogin(login));
+}
 
 // replies: [{author, body}] full (untruncated) bodies.
 export function hasWithdrawal(replies) {
   return (replies ?? []).some(
-    (r) => r?.author === CODERABBIT_LOGIN && WITHDRAWAL_RE.test(String(r?.body ?? '')),
+    (r) => baseLogin(r?.author) === 'coderabbitai' && WITHDRAWAL_RE.test(String(r?.body ?? '')),
+  );
+}
+
+/** Withdrawal by the COMMENT AUTHOR themself — the human-authored analog of hasWithdrawal,
+ * where retraction can only come from whoever raised the concern. */
+export function hasAuthorWithdrawal(replies, author) {
+  return (replies ?? []).some(
+    (r) => r?.author === author && WITHDRAWAL_RE.test(String(r?.body ?? '')),
   );
 }
 
 export function hasHumanReply(replies, botAuthors) {
-  const bots = botAuthors ?? new Set([CODERABBIT_LOGIN, 'macroscopeapp[bot]']);
-  return (replies ?? []).some((r) => r?.author && !bots.has(r.author));
+  const extra = botAuthors ?? new Set();
+  return (replies ?? []).some((r) => r?.author && !extra.has(r.author) && !isBotLogin(r.author));
 }
 
 // ---------------------------------------------------------------------------------------------

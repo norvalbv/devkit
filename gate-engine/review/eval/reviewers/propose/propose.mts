@@ -56,6 +56,18 @@ function routeSuite(candidate) {
     return FRONTEND_PATH_RE.test(candidate.path ?? '')
       ? 'frontend-performance'
       : 'backend-performance';
+  // Human-authored comments carry no CodeRabbit marker (crCategory is null) — route by the cheap
+  // keyword guess instead; docs/style/other stay out of charter exactly like bot rows.
+  if (candidate.authorKind === 'human') {
+    if (candidate.category === 'correctness' || candidate.category === 'error-handling')
+      return 'correctness';
+    if (candidate.category === 'security')
+      return FRONTEND_PATH_RE.test(candidate.path ?? '') ? 'frontend-security' : 'api-security';
+    if (candidate.category === 'performance')
+      return FRONTEND_PATH_RE.test(candidate.path ?? '')
+        ? 'frontend-performance'
+        : 'backend-performance';
+  }
   return null;
 }
 
