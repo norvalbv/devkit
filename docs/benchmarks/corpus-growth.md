@@ -82,8 +82,18 @@ runner); freshness goes stale exactly when one moves.
    The planned calibration slice (replay ~10 scope-confirmed misses at FULL context, locally,
    never committed) turns this caveat into a number.
 2. **Mined gold = precision + relative recall only** (item 17). Absolute recall needs
-   known-answer imports — c-CRAB (arXiv 2603.23448) and CR-Bench (arXiv 2603.11078), filtered to
-   TS/JS. This is the only realistic absolute-recall path for the security suites.
+   known-answer imports. **Scoped 2026-08-02 — the original plan (c-CRAB arXiv 2603.23448 /
+   CR-Bench arXiv 2603.11078 "filtered to TS/JS") is not viable**: both are Python-derived
+   (c-CRAB builds on SWE-CARE, CR-Bench transforms SWE-Bench — neither contains any TS/JS
+   instances to filter), c-CRAB's artifact repo (github.com/c-CRAB-Benchmark/dataset) carries no
+   license, and CR-Bench has published no artifact at all. Proposed replacements, unratified:
+   (a) mine GHSA/npm advisories with fix commits directly — public known-answer facts,
+   re-expressed as anonymized fixtures like every other row, the natural api-security /
+   frontend-security source (SecBench.js catalogs ~600 such vulns but is itself unlicensed —
+   use it as an index, not a source); (b) apply CR-Bench's transformation recipe (blame →
+   PR lookup → detectability filter, Alg. 1 of the paper) to SWE-Bench Multimodal's JS/TS
+   repos for correctness-suite known-answer rows. Absolute-recall numbers stay blocked until
+   one of these is ratified and built.
 3. **No delta is believed before the noise floor** (item 4): κ blind-relabel (40–60 rows, labeler
    must be non-Claude or human, sees ONLY repo.base/staged) + cleanlab confident-learning floor.
    Delta < (floor + paired CI) = unresolved, not a win.
