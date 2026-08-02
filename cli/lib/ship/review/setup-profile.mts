@@ -12,6 +12,7 @@ import {
 } from '../../components.mts';
 import { reviewGuardIssues } from '../../install/review-profile.mts';
 import { normalizeSafeReviewRelativePath } from './runtime-paths.mts';
+import { fail, objectValue } from './shared/common.mts';
 
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
 
@@ -27,17 +28,6 @@ export interface ParsedReviewSetupProfile {
   raw: RawReviewConfig;
   overlay: boolean;
   profile: ReviewProfile;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function objectValue(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return fail(`${label} must be a JSON object — ${REVIEW_SETUP_DOCTOR}`);
-  }
-  return value as Record<string, unknown>;
 }
 
 function booleanField(value: unknown, label: string): boolean | undefined {
@@ -72,7 +62,10 @@ function parseConfigJson(raw: Buffer): RawReviewConfig {
     const message = cause instanceof Error ? cause.message : String(cause);
     return fail(`could not parse .devkit/config.json (${message}) — ${REVIEW_SETUP_DOCTOR}`);
   }
-  return objectValue(parsed, '.devkit/config.json') as RawReviewConfig;
+  return objectValue(
+    parsed,
+    `.devkit/config.json must be a JSON object — ${REVIEW_SETUP_DOCTOR}`,
+  ) as RawReviewConfig;
 }
 
 function parseOverlayMode(config: RawReviewConfig): boolean {
@@ -90,7 +83,10 @@ function parseInstalledSelection(config: RawReviewConfig): Selection {
   const components =
     config.components === undefined
       ? {}
-      : objectValue(config.components, '.devkit/config.json components');
+      : objectValue(
+          config.components,
+          `.devkit/config.json components must be a JSON object — ${REVIEW_SETUP_DOCTOR}`,
+        );
   const recordedGuards =
     components.guards === undefined
       ? undefined
@@ -126,7 +122,12 @@ function parseRequestedGuards(settings: Record<string, unknown>, installed: stri
 
 function parseReviewProfile(config: RawReviewConfig, installed: string[]): ReviewProfile {
   const settings =
-    config.review === undefined ? {} : objectValue(config.review, '.devkit/config.json review');
+    config.review === undefined
+      ? {}
+      : objectValue(
+          config.review,
+          `.devkit/config.json review must be a JSON object — ${REVIEW_SETUP_DOCTOR}`,
+        );
   const enabled = booleanField(settings.enabled, '.devkit/config.json review.enabled') ?? true;
   if (!enabled) fail("disabled by .devkit/config.json — run 'devkit init --review'.");
   const requested = parseRequestedGuards(settings, installed);

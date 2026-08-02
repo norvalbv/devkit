@@ -17,6 +17,7 @@ import {
   canonicalReviewLeaf,
   reviewPathWithin,
 } from '../runtime-paths.mts';
+import { errorMessage, fail, gitEnvironment } from '../shared/common.mts';
 import {
   parseReviewRepositoryStateManifest,
   REVIEW_REPOSITORY_OBJECT_ID,
@@ -42,24 +43,6 @@ interface RepositoryContext {
 interface ConfigFileState {
   readable: boolean;
   parts: Buffer[];
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function errorMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
-}
-
-function gitEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const name of Object.keys(env)) {
-    if (name.startsWith('GIT_')) delete env[name];
-  }
-  // These commands are read-only; forbid opportunistic lock-taking such as index refreshes too.
-  env.GIT_OPTIONAL_LOCKS = '0';
-  return env;
 }
 
 function spawnGit(root: string, args: string[]): SpawnSyncReturns<Buffer> {
