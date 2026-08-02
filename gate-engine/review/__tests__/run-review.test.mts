@@ -18,6 +18,7 @@ import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mt
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { parallelMakespan } from '../telemetry/timing.mts';
+import { runWaive } from '../valve/waive.mts';
 
 // Env hygiene: the gate reads GUARD_*/FRINK_* — a developer's real env must not steer assertions.
 const ENV_KEYS = [
@@ -856,6 +857,76 @@ describe('runReviewGate — cascade + exit contract', () => {
       },
     ]);
   });
+
+  it(
+    'the FAIL output names the `guard-review waive` affordance, and `guard-review waive` itself ' +
+      'writes an override the NEXT gate run consumes — the event carries disposition + rationale ' +
+      'on the lens itself, not just the top-level waivers[]',
+    async () => {
+      const repo = consumerRepo({ backend: true });
+      const sink = join(repo, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      process.env.DEVKIT_SHIP_ID = 'ship-waiver-cli';
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const exec = mkExec(async ({ label }) => {
+        if (label === 'review:correctness-reviewer') {
+          writeArtifact(repo, label, { failed: 1 });
+          return 'race\nVERDICT: FAIL — CAS clobber';
+        }
+        writeArtifact(repo, label);
+        return 'VERDICT: PASS';
+      });
+      // 1. blocks, and the block names the guard-review waive command with a copy-pasteable fp
+      expect(await runReviewGate(repo, { exec })).toBe(1);
+      const out = err.mock.calls.flat().join('\n');
+      const m = out.match(/guard-review waive correctness-reviewer:check-fail-1 ([0-9a-f]{12})/);
+      expect(m).toBeTruthy();
+      const fp = (m as RegExpMatchArray)[1];
+      // 2. record the waive via the CLI writer (no gate re-run yet)
+      expect(
+        runWaive(
+          [
+            'correctness-reviewer:check-fail-1',
+            fp,
+            'writer holds the shard lock — not a real race',
+          ],
+          repo,
+          () => 'Ada Lovelace',
+        ),
+      ).toBe(0);
+      // 3. the NEXT gate run consumes it via the same reconcile()/loadOverrides() merge an env
+      // override already uses — no new consumption path.
+      expect(await runReviewGate(repo, { exec })).toBe(0);
+      const waived = readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter(
+          (event) =>
+            event.type === 'review_result' &&
+            event.reviewer === 'correctness-reviewer' &&
+            event.status === 'pass',
+        )
+        .at(-1);
+      expect(waived.waivers).toEqual([
+        {
+          fingerprint: fp,
+          lens: 'check-fail-1',
+          rationale: 'writer holds the shard lock — not a real race',
+          recorded_at: expect.any(String),
+          recorded_by: 'cli',
+          author: 'Ada Lovelace',
+        },
+      ]);
+      // The lens's own item[] entry carries disposition + rationale inline — a consumer reading
+      // items[] never needs to join against the top-level waivers[] to know WHY it was waived.
+      const waivedItem = waived.items.find((i) => i.lens === 'check-fail-1');
+      expect(waivedItem).toMatchObject({
+        disposition: 'waived',
+        rationale: 'writer holds the shard lock — not a real race',
+      });
+    },
+  );
 
   it('a model-pinned reviewer (correctness) runs SINGLE-PASS — its first-pass FAIL blocks, never escalates', async () => {
     const repo = consumerRepo({ backend: true });

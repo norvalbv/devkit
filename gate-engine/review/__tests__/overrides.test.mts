@@ -168,7 +168,71 @@ describe('blockingNote', () => {
     expect(note).toContain('OVERRIDE_a1b2c3d4e5f6_RATIONALE=');
     expect(note).toContain('.devkit/correctness-overrides.json');
   });
+  it('also prints the `guard-review waive` affordance with the exact reviewer:lens/fp to copy', () => {
+    const note = blockingNote('correctness-reviewer', [{ lens: 'json-shape', fp: 'a1b2c3d4e5f6' }]);
+    expect(note).toContain('guard-review waive correctness-reviewer:json-shape a1b2c3d4e5f6');
+  });
   it('empty for no findings', () => {
     expect(blockingNote('correctness-reviewer', [])).toBe('');
+  });
+});
+
+describe('reconcile — author pass-through', () => {
+  it('carries a file-store `author` field into the RecordedWaiver (the waive CLI sets it)', () => {
+    const cwd = repo();
+    const fp = fingerprint('correctness-reviewer', 'state-transitions', 'D');
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.devkit/correctness-overrides.json'),
+      JSON.stringify({
+        [fp]: { rationale: 'writer holds a lock', by: 'cli', author: 'Ada Lovelace' },
+      }),
+    );
+    const r = reconcile(cwd, 'correctness-reviewer', ['state-transitions'], 'D', NOW);
+    expect(r.suppressed[0]).toMatchObject({ recorded_by: 'cli', author: 'Ada Lovelace' });
+  });
+  it('omits `author` entirely (not `undefined`/`null`) when the entry never set one', () => {
+    const cwd = repo();
+    const fp = fingerprint('correctness-reviewer', 'state-transitions', 'D');
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.devkit/correctness-overrides.json'),
+      JSON.stringify({ [fp]: { rationale: 'writer holds a lock', by: 'file' } }),
+    );
+    const r = reconcile(cwd, 'correctness-reviewer', ['state-transitions'], 'D', NOW);
+    expect('author' in r.suppressed[0]).toBe(false);
+  });
+  it('a later env override MERGES onto a CLI-recorded entry — author/reviewer/lens/itemId survive', () => {
+    const cwd = repo();
+    const fp = fingerprint('correctness-reviewer', 'state-transitions', 'D');
+    mkdirSync(join(cwd, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.devkit/correctness-overrides.json'),
+      JSON.stringify({
+        [fp]: {
+          rationale: 'cli rationale',
+          by: 'cli',
+          author: 'Ada Lovelace',
+          reviewer: 'correctness-reviewer',
+          lens: 'state-transitions',
+          itemId: fp,
+        },
+      }),
+    );
+    const env = { [`OVERRIDE_${fp}_RATIONALE`]: 'a different env rationale' } as NodeJS.ProcessEnv;
+    const r = reconcile(cwd, 'correctness-reviewer', ['state-transitions'], 'D', NOW, env);
+    expect(r.suppressed[0]).toMatchObject({
+      rationale: 'a different env rationale',
+      author: 'Ada Lovelace',
+    });
+    const stored = loadOverrides(cwd)[fp];
+    expect(stored).toMatchObject({
+      rationale: 'a different env rationale',
+      by: 'env',
+      author: 'Ada Lovelace',
+      reviewer: 'correctness-reviewer',
+      lens: 'state-transitions',
+      itemId: fp,
+    });
   });
 });

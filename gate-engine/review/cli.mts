@@ -7,6 +7,8 @@
  *   guard-review completeness --gate <msg-file>  feature-completeness judge (commit-msg, warn-only)
  *   guard-review scan                            reviewer→files mapping + cache status (no judges)
  *   guard-review clear-cache                     drop cached PASS verdicts
+ *   guard-review waive <reviewer>[:<lens>] <id> "<why>"   record an override (see valve/waive.mts)
+ *   guard-review waive --list                    show active waives
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
@@ -18,6 +20,7 @@ import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
 import { runReviewGate, scanReview } from './run-review.mts';
+import { runWaive } from './valve/waive.mts';
 
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
@@ -28,6 +31,7 @@ async function run(argv: string[]): Promise<number> {
     clearCache(process.cwd());
     return 0;
   }
+  if (cmd === 'waive' && rest.length >= 1) return runWaive(rest);
   // The local "API" behind a transcript_ref: cat any persisted agent transcript (review-* OR
   // decisions) the telemetry stream referenced, so a human can read the full reasoning on demand.
   if (cmd === 'transcript' && rest[0]) {
@@ -40,7 +44,8 @@ async function run(argv: string[]): Promise<number> {
     return 0;
   }
   console.error(
-    'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | transcript <ref>',
+    'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | ' +
+      'waive <reviewer>[:<lens>] <id> "<why>" | waive --list | transcript <ref>',
   );
   return 2;
 }
