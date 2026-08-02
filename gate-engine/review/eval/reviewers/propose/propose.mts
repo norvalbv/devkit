@@ -22,13 +22,16 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { formatDrops, makeDropCounter, readJsonl, slugify, uniqueId } from './propose-common.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CANDIDATES_FILE = path.join(here, 'candidates.jsonl');
-const RAW_DIR = path.join(here, 'raw');
+// This script lives in propose/ — candidates + raw/ live one level up, beside the corpora.
+const reviewersDir = path.join(here, '..');
+const CANDIDATES_FILE = path.join(reviewersDir, 'candidates.jsonl');
+const RAW_DIR = path.join(reviewersDir, 'raw');
 
 const MAX_HUNK_LEN = 4000;
 
@@ -135,18 +138,6 @@ function fetchBaseFileContent(repo, filePath, ref) {
 
 // ─── queueId slug ───────────────────────────────────────────────────────────────────
 
-function slugify(text, maxWords = 5) {
-  return (
-    String(text ?? '')
-      .toLowerCase()
-      .replace(/`/g, '')
-      .match(/[a-z0-9]+/g)
-      ?.slice(0, maxWords)
-      .join('-')
-      ?.slice(0, 40) || 'finding'
-  );
-}
-
 /** A short kebab defect hint from the bot comment's bolded headline (CodeRabbit always leads with
  * one), falling back to the crCategory when no bold text is present. */
 const BOLD_HEADLINE_RE = /\*\*([^*]{3,90})\*\*/;
@@ -155,17 +146,8 @@ function defectHint(candidate) {
   return slugify(m ? m[1] : candidate.crCategory);
 }
 
-function makeQueueId(suite, candidate, seen) {
-  const base = `${SUITE_PREFIX[suite]}-pr${candidate.pr}-${defectHint(candidate)}`;
-  let id = base;
-  let n = 2;
-  while (seen.has(id)) {
-    id = `${base}-${n}`;
-    n += 1;
-  }
-  seen.add(id);
-  return id;
-}
+const makeQueueId = (suite, candidate, seen) =>
+  uniqueId(`${SUITE_PREFIX[suite]}-pr${candidate.pr}-${defectHint(candidate)}`, seen);
 
 // ─── Main ───────────────────────────────────────────────────────────────────────────
 
@@ -204,15 +186,8 @@ async function main() {
   }
   preflightGh();
 
-  const candidates = readFileSync(CANDIDATES_FILE, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((l) => JSON.parse(l));
-
-  const drops = {};
-  const bump = (reason, n = 1) => {
-    drops[reason] = (drops[reason] ?? 0) + n;
-  };
+  const candidates = readJsonl(CANDIDATES_FILE);
+  const { drops, bump } = makeDropCounter();
 
   const routed = [];
   for (const c of candidates) {
@@ -266,13 +241,8 @@ async function main() {
   console.error(
     [
       `propose: ${candidates.length} candidates → ${routed.length} routed to ${suite} (of which ${enriched.length} enriched, ${enrichFailures} enrich failures)`,
-      `  drops: ${
-        Object.entries(drops)
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `${k}:${v}`)
-          .join(', ') || '—'
-      }`,
-      `  → ${path.relative(here, outFile)}`,
+      `  drops: ${formatDrops(drops)}`,
+      `  → ${path.relative(reviewersDir, outFile)}`,
     ].join('\n'),
   );
 }
