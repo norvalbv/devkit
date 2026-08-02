@@ -107,8 +107,20 @@ runner); freshness goes stale exactly when one moves.
   bundle — raw κ 0.662 (agreement 0.833). Disagreement triage (item 19): 6 of 8 stored labels
   stood; **2 were genuine fixture errors** (an empty BUNDLED_RULES array gutting a validation
   gate in a PASS row; an unvalidated shell-interpolated branch name in another) — both repaired.
-  **First empirical label-noise floor: ~2/48 ≈ 4%** — deltas below ~4pp + paired CI are
-  unresolved, not wins (item 4). Post-triage effective agreement ≈ 0.87.
+  **First empirical label-noise floor: 2/48 ≈ 4.2%, Wilson 95% CI [1.2%, 13.9%]** — the interval
+  is wide at n=48 and its upper bound is ~3× the point estimate, so 4.2% is a working lower bound,
+  not a settled figure; re-estimate as the corpus grows. Item 4's rule is
+  `Delta < (floor + paired CI)`, and the floor carries its own sampling uncertainty on top of the
+  benchmark delta's — a 6pp delta is not automatically a win. Excluding the 2 defective items,
+  κ = 0.735 (above the 0.667 bar); post-triage effective agreement ≈ 0.87.
+- **House rule the triage established, now enforced across minimal pairs**: within a pair, only the
+  labeled defect may differ, and a PASS twin may carry no unlabeled defect of its own. A PASS row
+  that splices request-derived data into a shell string is a false-FAIL magnet — the reviewer that
+  reports it is right and gets scored wrong. Three rows were normalized under this rule beyond the
+  two the relabel caught (`corr-pr21` gold twin to argv; both `apisec-masked-pipe-failure-approval`
+  twins shape-check the uuid, holding `runShell` constant so the pipe stays the only delta). These
+  came from review, **not** from the blind bundle, so they do not enter the 2/48 floor above — that
+  figure is the blind relabel's measurement and stays as measured.
 - Yield funnel from the first mining pass: 749 candidates → 479 fixed / 34 rebutted / 236
   unresolved → hard drops (232 unresolved-outcome, 179 out-of-charter, 113 truncated-hunk, 27
   already-in-corpus) → 23 gold+pair sets landed across two batches. Rebutted threads mostly fail
@@ -118,7 +130,10 @@ runner); freshness goes stale exactly when one moves.
 
 1. `guard-review waive` + collector attempt-correlation (capture points 1–2) — makes the loop
    fully CodeRabbit-independent.
-2. κ relabel + cleanlab floor (preconditions for any Phase-5/pin decision).
+2. cleanlab confident-learning floor (the remaining precondition for any Phase-5/pin decision —
+   the κ blind relabel landed 2026-08-02, see "State as of 2026-08-01"). cleanlab multiannotator
+   was uninformative at 2 raters without model `pred_probs`; it needs per-row predicted
+   probabilities from a bench run, not another labeler.
 3. Calibration slice (localized vs full-context delta).
 4. Domain-suite cascade re-bench (needs opus) now that api-security has 30 rows.
 5. c-CRAB / CR-Bench known-answer import for absolute recall (security suites especially).
