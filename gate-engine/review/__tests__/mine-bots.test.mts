@@ -4,8 +4,10 @@ import {
   classifyOutcome,
   computeScopeConfirmed,
   hasAddressedMarker,
+  hasAuthorWithdrawal,
   hasHumanReply,
   hasWithdrawal,
+  isBotLogin,
   isLineTouchedLater,
   isPathInFilesJson,
   parseCoderabbitMarker,
@@ -106,6 +108,38 @@ describe('mine-bots-lib: hasAddressedMarker / hasWithdrawal / hasHumanReply', ()
     ];
     expect(hasHumanReply(replies)).toBe(false);
     expect(hasHumanReply([])).toBe(false);
+  });
+
+  it('normalizes GraphQL (suffixless) and REST ([bot]) login forms', () => {
+    // GraphQL thread-reply authors have NO [bot] suffix; REST comment authors do. The un-normalized
+    // comparisons never matched GraphQL replies: bot-withdrawal never fired, and CodeRabbit's own
+    // replies counted as human pushback (false 'human-rebuttal' outcomes).
+    expect(isBotLogin('coderabbitai')).toBe(true);
+    expect(isBotLogin('coderabbitai[bot]')).toBe(true);
+    expect(isBotLogin('macroscopeapp')).toBe(true);
+    expect(isBotLogin('norvalbv')).toBe(false);
+    expect(hasWithdrawal([{ author: 'coderabbitai', body: 'Agreed, this does not apply.' }])).toBe(
+      true,
+    );
+    expect(hasHumanReply([{ author: 'coderabbitai', body: 'analysis chain' }])).toBe(false);
+    expect(hasHumanReply([{ author: 'a-human-dev', body: 'fixed' }])).toBe(true);
+  });
+
+  it('hasAuthorWithdrawal fires only on the comment author retracting their own concern', () => {
+    const author = 'norvalbv';
+    // The author themself withdrawing — the human analog of a bot withdrawal.
+    expect(
+      hasAuthorWithdrawal([{ author, body: "You're right, this does not apply here." }], author),
+    ).toBe(true);
+    // A withdrawal-shaped reply from someone ELSE is agreement/pushback, not a retraction.
+    expect(
+      hasAuthorWithdrawal([{ author: 'someone-else', body: 'Agreed, withdraw it.' }], author),
+    ).toBe(false);
+    // The author's ordinary follow-up is not a withdrawal.
+    expect(
+      hasAuthorWithdrawal([{ author, body: 'Bumping this — still needs the guard.' }], author),
+    ).toBe(false);
+    expect(hasAuthorWithdrawal([], author)).toBe(false);
   });
 });
 
