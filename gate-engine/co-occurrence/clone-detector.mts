@@ -63,8 +63,10 @@ const DEFAULTS = {
   ignore: ['**/*.test.*', '**/*.spec.*', '**/__tests__/**', '**/__mocks__/**'],
 };
 
-// jscpd auto-detects formats by extension; we keep only source code clones.
-const CODE_EXT = /\.(tsx?|jsx?)$/;
+// jscpd auto-detects formats by extension; we keep only source code clones. Must cover the
+// module-suffixed extensions (.mts/.cts/.mjs/.cjs — jscpd tokenizes all of them): devkit's own
+// scanRoots are pure .mts, so excluding them made this gate report 0 repo-wide (vacuous).
+const CODE_EXT = /\.([cm]?[tj]s|[tj]sx)$/;
 
 // jscpd bin resolution lives in the side-effect-free ./jscpd-bin.mts (shared with the prefix-cache
 // config-fingerprint, which folds the SAME resolution into the cache key). Read JSCPD_BIN here (not as
