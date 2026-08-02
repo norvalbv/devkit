@@ -1,11 +1,12 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { types as utilTypes } from 'node:util';
 import {
   canonicalPlanCritiqueRecordJson,
   PLAN_CRITIQUE_PROVIDERS,
   type PlanCritiqueProvider,
+  plainRecord,
   sha256Bytes,
+  validText,
 } from '../evidence-record.mts';
 import { managedPath, publishImmutable, readPrivateFileBounded } from '../immutable-file.mts';
 import {
@@ -15,7 +16,6 @@ import {
 } from '../persistence-lock.mts';
 
 const SHA256 = /^[0-9a-f]{64}$/;
-const MAX_TEXT_BYTES = 4 * 1024;
 const QUARANTINE_PATH = ['work-quarantines'] as const;
 
 export interface PlanCritiqueWorkQuarantineV1 {
@@ -38,37 +38,23 @@ export type PlanCritiqueWorkQuarantineIdentityV1 = Pick<
 >;
 
 function exactObject(value: unknown, fields: readonly string[]): Record<string, unknown> | null {
-  if (value === null || typeof value !== 'object') return null;
+  const record = plainRecord(value);
+  if (record === null) return null;
   try {
-    if (utilTypes.isProxy(value) || Array.isArray(value)) return null;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return null;
-    const keys = Reflect.ownKeys(value);
+    const keys = Reflect.ownKeys(record);
     if (
       keys.length !== fields.length ||
       keys.some((key) => typeof key !== 'string' || !fields.includes(key))
     )
       return null;
     for (const key of keys) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      const descriptor = Object.getOwnPropertyDescriptor(record, key);
       if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) return null;
     }
-    return value as Record<string, unknown>;
+    return record;
   } catch {
     return null;
   }
-}
-
-function validText(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-    ![...value].some((character) => {
-      const code = character.charCodeAt(0);
-      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-    })
-  );
 }
 
 function parseIdentity(value: unknown): PlanCritiqueWorkQuarantineIdentityV1 | null {
