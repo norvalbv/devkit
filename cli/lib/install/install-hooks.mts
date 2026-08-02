@@ -34,9 +34,12 @@ import {
   requiresProviderNativeLifecycle,
   syncProviderNativeAssets,
 } from './agent-asset-manifest/lifecycle.mts';
-import { readAgentAssetManifest } from './agent-asset-manifest/reader.mts';
+import {
+  readAgentAssetManifest,
+  resolveLegacyProviderTargets,
+} from './agent-asset-manifest/reader.mts';
 import { agentAssetDir } from './agent-assets/agent-assets.mts';
-import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from './agent-assets/agent-providers.mts';
+import { requireAgentProviders } from './agent-assets/agent-providers.mts';
 import {
   HOOK_REGISTRATION_LEDGER_REL,
   type HookInstallScope,
@@ -291,11 +294,7 @@ export function removeHookScripts(
       join(root, '.devkit', 'agent-hooks-manifest.json'),
       'hooks',
     );
-    const inferredTargets =
-      decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-    const legacyTargets = (targets ?? inferredTargets).filter((target) =>
-      LEGACY_AGENT_PROVIDERS.includes(target as (typeof LEGACY_AGENT_PROVIDERS)[number]),
-    );
+    const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
     if (!legacyTargets.length) return;
     removeManifested(
       root,
