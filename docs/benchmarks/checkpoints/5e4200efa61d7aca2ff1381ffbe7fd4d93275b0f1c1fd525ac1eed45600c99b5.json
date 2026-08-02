@@ -1,0 +1,1085 @@
+{
+  "acceptance": {
+    "accepted": true,
+    "reason": "Complete reviewer cohorts with row evidence, zero outages, and suite floors met"
+  },
+  "adapter": "reviewer",
+  "capturedAt": "2026-08-02T19:16:52.000Z",
+  "comparisons": [
+    {
+      "method": "shared-row outcome comparison",
+      "negativeDiscordant": 5,
+      "positiveDiscordant": 5,
+      "predecessorEventId": "evt-2026-08-01-reviewer-correctness-b0dc29a7d531",
+      "sharedRows": 90,
+      "verdict": "mixed"
+    }
+  ],
+  "hashes": {
+    "corpus": "sha256:c58965f25e63c3f4bb1e93b3a2e5697b88111f6176ed68a4105877dc71243199",
+    "implementation": "sha256:39f934cad948e1489a05e182884012a966cd19200cf3ff1f158aa7259c9bd57b",
+    "runner": "sha256:83b2d4f6c548c25f061ed5c75592fbf08b7521fb6ccfa5955f67af7fafc0226c",
+    "scorer": "sha256:83b2d4f6c548c25f061ed5c75592fbf08b7521fb6ccfa5955f67af7fafc0226c"
+  },
+  "metrics": [
+    {
+      "denominator": 69,
+      "direction": "higher",
+      "id": "correctness-reviewer@sonnet@cascade-off:first-fail-recall",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.7038706411837159,
+        "method": "wilson-95",
+        "upper": 0.8864525167564403
+      },
+      "label": "correctness-reviewer@sonnet@cascade-off first-pass FAIL recall",
+      "numerator": 56,
+      "unit": "ratio",
+      "value": 0.8115942028985508
+    },
+    {
+      "denominator": 59,
+      "direction": "higher",
+      "id": "correctness-reviewer@sonnet@cascade-off:first-clean-pass",
+      "inferenceUnit": "row",
+      "interval": {
+        "lower": 0.71536779263512,
+        "method": "wilson-95",
+        "upper": 0.9052416065081895
+      },
+      "label": "correctness-reviewer@sonnet@cascade-off first-pass clean pass",
+      "numerator": 49,
+      "unit": "ratio",
+      "value": 0.8305084745762712
+    }
+  ],
+  "rows": {
+    "correctness-reviewer@sonnet@cascade-off:corr-asymmetric-flip-classifier": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "6de9cfbf2954"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-broadcast-fanout-no-dedup": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "47c008601f5a"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-broadcast-targeted": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e938d8dfd98f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-cas-guarded-write": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "78f68c681a4b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-catch-rethrows": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e8f30a7b534c"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-clears-stale-artifact": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "6b1d08fe1cda"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-conditional-update": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "2bdf6d299d0f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-early-exit-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "f0e7c45072f7"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-empty-recompute-clears": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "3bd72383bd3a"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-exit-code-fail-closed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "21bd92d728ef"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-fs-recursive-mkdir": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "eb96bfed4c42"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-lock-finally": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e11d0cbad3ba"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-loop-break-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "c2c122dff0af"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-only-validated": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "323fff96a42c"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-outage-exit-preserved": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "ab4b076ebb7b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-parses-json-string-result": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "44a17ae0e114"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-reset-failure-reasons": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d1aa3924919d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-retry-clears-error": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "c3a89e627c9d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-retry-reset-counter": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d1986643add2"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-return-checked-fails-closed": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b0212aaba7aa"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-select-for-update": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "14a0f0b1e50a"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-signature-callsite-updated": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8f24ea6cab36"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-targeted-broadcast": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "d98ec7291153"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-tight-anchor-classifier": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "32273403766b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-timer-debounce-clears": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "f6b1ee659889"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-decoy-worktree-finally": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b7d85baf480b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-discarded-resume-return": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "ff1b6eaaf1ad"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-early-exit-loop-break-dropped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "0d411082e3fc"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-early-exit-status-bypassed": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "bb1655183df9"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-empty-recompute-keeps-stale": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "97ecde7284e1"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-execfile-cmd-shim-swallowed": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "203e6fa03e0e"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-exit-code-only-one-fails": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d145d1ad9a98"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-field-validated-wrong-state": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "ef5656e35718"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-fs-check-then-act-race": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e14b7efdc4ba"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-group-map-last-write-wins": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8884e07c6d1b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-guarded-result-ignored-mode-flip": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5779051bc2d1"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-json-string-result-dropped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "cb0d1314d164"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-lock-not-released-on-throw": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "7f9f3d490d13"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-lock-timeout-runs-unlocked": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "ba399eec3288"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-loose-cmd-classifier-anchor": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "6396f1f3b278"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-loose-json-error-classifier": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "9d6d1a732721"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-manifest-unknown-version-wiped": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d49452801030"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-nearexpiry-permanent-reauth": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5cbfcd319951"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-only-selector-silent-drop": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "15e6fb189b63"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-outage-exit-code-downgraded": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8d4201a5cf5d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-persist-unnormalized-signal": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "54e6d945cb0f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-clear-persisted-checklist-state-before": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "cc618183d930"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-clear-persisted-checklist-state-before-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "5b480ac3330b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-preserve-the-guard-exit-code": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "57cf8af3523a"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-preserve-the-guard-exit-code-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "a67e025ecbd2"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-return-exit-3-for-detect": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "533cc72e788a"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr1-return-exit-3-for-detect-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "da83b8954b18"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr138-ci-breaking-gate-engine-coverage": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "bbaa0d63b28f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr138-ci-breaking-gate-engine-coverage-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "03b109856fa8"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr172-duplicate-let-spawnoptions-declaration": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "2460b5333d56"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr172-duplicate-let-spawnoptions-declaration-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "58955fb31aea"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr200-important": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5b4be62121e1"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr200-important-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "c0ae2bb9ba5b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr200-ref-mutated-during-render-move": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "7b4f10bd7c1f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr200-ref-mutated-during-render-move-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "87332a189081"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr21-fail-closed-when-the-remote": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b5efdb08286f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr21-fail-closed-when-the-remote-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "61e01ab552b4"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr21-validate-the-parsed-github-repo": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "22ae6cef1ae3"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr21-validate-the-parsed-github-repo-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8d5b3f778d2c"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr23-keep-init-aligned-with-the": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "fb56e47724c1"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr23-keep-init-aligned-with-the-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "1612e1096721"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-block-parked-answer-sends-when": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5d8390cf7224"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-block-parked-answer-sends-when-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b9f8e5aa5799"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-cover-the-restart-interrupted-flow": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "64bb8db9a785"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-cover-the-restart-interrupted-flow-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d5b2d88ce1a4"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-do-not-let-terminal-signals": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "b41cbf30d2f3"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-do-not-let-terminal-signals-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "d8e6c3754a03"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-keep-the-mcp-inputschema-in": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "7e174420f714"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr26-keep-the-mcp-inputschema-in-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "cd3e2928584d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr28-include-bun-lock-in-the": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "8a183354253f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr28-include-bun-lock-in-the-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "1dfbcaa727f8"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr38-check-the-full-r2-credential": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "3b141c8643d2"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr38-check-the-full-r2-credential-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "a327217fc231"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr38-require-the-full-azure-signing": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "4ea330953efb"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr38-require-the-full-azure-signing-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "50cf11f113c3"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr48-cn-ts-src": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "58f9cd6e3788"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr48-cn-ts-src-pair": {
+      "expected": "PASS",
+      "finalStatus": "inconclusive",
+      "ok": true,
+      "okFinal": false,
+      "okFirst": true,
+      "rowHash": "920c44fa7a20"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr52-don-t-down-rank-recorded": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "70de61675b0d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr52-don-t-down-rank-recorded-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "de04c83a5690"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr52-use-frink-no-log-in": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b3943aeb29aa"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr52-use-frink-no-log-in-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d804030bed7e"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-expand-knip-config-detection": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "a6f92d68ce06"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-expand-knip-config-detection-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8d39787d91a6"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-guard-config-json": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d27f9cc76bb3"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-guard-config-json-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "1da10c9d3a79"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-use-a-portable-whitespace-class": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "090e2bae3776"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr59-use-a-portable-whitespace-class-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "83c0633419a6"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-avoid-leaving-the-member-in": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "2c3193a77f66"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-avoid-leaving-the-member-in-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "1e9cf43a9101"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-make-the-batch-reopen-atomic": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "f00aab1a93a2"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-make-the-batch-reopen-atomic-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "d026dbcbe1eb"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-node-modules": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "3a7834ffe077"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr60-node-modules-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "0296839c326d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr61-keep-the-carry-on-state": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "50679e292e64"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-pr61-keep-the-carry-on-state-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "290bbef9ca45"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-read-then-write-clobber-terminal": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "85ac72a96350"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-reminder-ignores-plan-mode": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "71d93cd6e657"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-reopen-before-cas-strands": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "918e6e35a29f"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-broadcast-double-fire": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "f55d220196ab"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-leaves-stale-error": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "c05976dd01fd"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-retry-stuck-unclaimable": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "0640a8b18d1b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-revive-user-cancelled": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "b2a0d733679e"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-signature-change-callsite-missed": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "16d916a93384"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-stale-checklist-artifact": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e90eb005ef97"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-stale-failure-reasons": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "09f050fde84d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-submit-latch-stuck": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "8183fa0b5781"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-swallowed-config-parse-bypass": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5929d8e219fe"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-sync-source-target-divergence": {
+      "expected": "FAIL",
+      "finalStatus": "pass",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "48bd49378904"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-append-uniqueness-check-unlocked": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "bd9feafc5289"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-append-uniqueness-check-unlocked-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "101e9c1b1fcc"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-floor-flips-assigned-flag": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "2868a4909011"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-floor-flips-assigned-flag-pair": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "69caf588fe00"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-shared-merge-key-unfiltered-writer": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "53b1eb901177"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-shared-merge-key-unfiltered-writer-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "e7541580404d"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-validate-after-lint-rejected-shape": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "e52f0a3569fb"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-tel-validate-after-lint-rejected-shape-pair": {
+      "expected": "PASS",
+      "finalStatus": "fail",
+      "ok": false,
+      "okFinal": false,
+      "okFirst": false,
+      "rowHash": "96107cfcfdb2"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-timer-debounce-double-fire": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "ee84f73cfeb3"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-unguarded-unpark-clobber": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "868c6ced4079"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-worktree-leak-no-finally": {
+      "expected": "FAIL",
+      "finalStatus": "fail",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "844bffb4162b"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-nplusone": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "a0bccc3e0faf"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-render": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "a2babcecd2d6"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-sqli": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "2ddabe1e3884"
+    },
+    "correctness-reviewer@sonnet@cascade-off:corr-xdomain-xss": {
+      "expected": "PASS",
+      "finalStatus": "pass",
+      "ok": true,
+      "okFinal": true,
+      "okFirst": true,
+      "rowHash": "5562a8a8edb3"
+    }
+  },
+  "schemaVersion": 1,
+  "sourceCommit": "b0b55f706005b92323359f9282aed6f8993a26b0",
+  "suiteId": "reviewer-correctness"
+}
