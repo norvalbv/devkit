@@ -95,7 +95,7 @@ runner); freshness goes stale exactly when one moves.
 5. **A bench the reviewer aces has gone stale.** The gap is the signal; the loop's job is to keep
    regenerating it, not to be driven to 1.0.
 
-## State as of 2026-08-01
+## State as of 2026-08-02
 
 - Corpus: correctness 66→120 (65 gold / 55 decoy), api-security 14→30 (first mined domain rows).
   Backend-perf 13, frontend pair 31 each — untouched this cycle.
@@ -117,10 +117,13 @@ runner); freshness goes stale exactly when one moves.
   labeled defect may differ, and a PASS twin may carry no unlabeled defect of its own. A PASS row
   that splices request-derived data into a shell string is a false-FAIL magnet — the reviewer that
   reports it is right and gets scored wrong. Three rows were normalized under this rule beyond the
-  two the relabel caught (`corr-pr21` gold twin to argv; both `apisec-masked-pipe-failure-approval`
-  twins shape-check the uuid, holding `runShell` constant so the pipe stays the only delta). These
-  came from review, **not** from the blind bundle, so they do not enter the 2/48 floor above — that
-  figure is the blind relabel's measurement and stays as measured.
+  two the relabel caught. In the `corr-pr21` pair, both twins now execute via argv-based
+  `execFileSync`, leaving the gold twin's missing `TARGET_RE` shape check as the sole behavioral
+  difference. In the `apisec-masked-pipe-failure-approval` pair, both twins shape-check the uuid
+  and both keep `runShell` — the gold defect is a masked pipe exit status and a pipe needs a shell,
+  so holding the mechanism constant is what keeps `| head -1` the sole behavioral difference.
+  These three came from review, **not** from the blind bundle, so they do not enter the 2/48 floor
+  above — that figure is the blind relabel's measurement and stays as measured.
 - Yield funnel from the first mining pass: 749 candidates → 479 fixed / 34 rebutted / 236
   unresolved → hard drops (232 unresolved-outcome, 179 out-of-charter, 113 truncated-hunk, 27
   already-in-corpus) → 23 gold+pair sets landed across two batches. Rebutted threads mostly fail
@@ -131,7 +134,7 @@ runner); freshness goes stale exactly when one moves.
 1. `guard-review waive` + collector attempt-correlation (capture points 1–2) — makes the loop
    fully CodeRabbit-independent.
 2. cleanlab confident-learning floor (the remaining precondition for any Phase-5/pin decision —
-   the κ blind relabel landed 2026-08-02, see "State as of 2026-08-01"). cleanlab multiannotator
+   the κ blind relabel landed 2026-08-02, see "State as of 2026-08-02"). cleanlab multiannotator
    was uninformative at 2 raters without model `pred_probs`; it needs per-row predicted
    probabilities from a bench run, not another labeler.
 3. Calibration slice (localized vs full-context delta).
