@@ -153,6 +153,24 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     expect(run(['scan', '--gate', '--paths', tmp], {}).status).toBe(1);
   });
 
+  it('exit 1 — a clone in .mts files blocks (regression: CODE_EXT dropped module-suffixed exts)', () => {
+    // devkit's own scanRoots are pure .mts; the old /\.(tsx?|jsx?)$/ filter discarded every
+    // jscpd hit in .mts/.mjs, so the gate reported 0 repo-wide — a silently vacuous gate.
+    const mts = mkdtempSync(join(tmpdir(), 'clone-mts-'));
+    writeFileSync(join(mts, 'a.mts'), `${SHARED}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(mts, 'b.mts'), `${SHARED}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', mts], {}).status).toBe(1);
+    rmSync(mts, { recursive: true, force: true });
+  });
+
+  it('exit 1 — a clone in .mjs files blocks (jscpd tokenizes mjs/cjs as javascript)', () => {
+    const mjs = mkdtempSync(join(tmpdir(), 'clone-mjs-'));
+    writeFileSync(join(mjs, 'a.mjs'), `${SHARED}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(mjs, 'b.mjs'), `${SHARED}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', mjs], {}).status).toBe(1);
+    rmSync(mjs, { recursive: true, force: true });
+  });
+
   it('exit 0 — no cross-file clone (clean)', () => {
     const clean = mkdtempSync(join(tmpdir(), 'clone-clean-'));
     writeFileSync(join(clean, 'solo.ts'), `${SHARED}\nexport const SOLO = 1;\n`);
