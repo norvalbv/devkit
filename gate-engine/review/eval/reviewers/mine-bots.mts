@@ -36,6 +36,12 @@ import {
   parseCoderabbitMarker,
   sqlString,
 } from './mine-bots-lib.mts';
+import {
+  collectRepoArgs,
+  readCandidatesFile,
+  sqlite3Available,
+  sqliteJson,
+} from './mine-common.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'candidates.jsonl');
@@ -221,17 +227,8 @@ function commitsAfter(repo, prCommits, afterIso, fileCache) {
 function resolveScopeDb() {
   const dbPath = process.env.USAGE_DB || path.join(os.homedir(), '.claude-usage', 'usage.db');
   if (!existsSync(dbPath)) return null;
-  try {
-    execFileSync('sqlite3', ['-version'], { stdio: 'ignore' });
-  } catch {
-    return null;
-  }
+  if (!sqlite3Available()) return null;
   return dbPath;
-}
-
-function sqliteJson(dbPath, sql) {
-  const raw = execFileSync('sqlite3', [dbPath, '-json', sql], { encoding: 'utf8' }).trim();
-  return raw ? JSON.parse(raw) : [];
 }
 
 function scopeForPr(dbPath, cache, repoFull, repoShort, prNumber) {
@@ -261,21 +258,6 @@ function scopeForPr(dbPath, cache, repoFull, repoShort, prNumber) {
 // ---------------------------------------------------------------------------------------------
 // Merge / dedupe against existing candidates.jsonl and the promoted corpus.
 // ---------------------------------------------------------------------------------------------
-
-function readExistingCandidates() {
-  const map = new Map();
-  if (!existsSync(OUT)) return map;
-  for (const line of readFileSync(OUT, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const row = JSON.parse(line);
-      if (row.url) map.set(row.url, row);
-    } catch {
-      // skip malformed line rather than aborting the whole merge
-    }
-  }
-  return map;
-}
 
 function collectCorpusUrls(dir) {
   const urls = new Set();
@@ -312,14 +294,7 @@ function collectCorpusUrls(dir) {
 // Main sweep.
 // ---------------------------------------------------------------------------------------------
 
-const repoArgs = [];
-const argv = process.argv.slice(2);
-for (let i = 0; i < argv.length; i += 1) {
-  if (argv[i] === '--repo' && argv[i + 1]) {
-    i += 1;
-    repoArgs.push(argv[i]);
-  }
-}
+const repoArgs = collectRepoArgs(process.argv.slice(2));
 const repos = repoArgs.length > 0 ? repoArgs : DEFAULT_REPOS;
 
 const scopeDb = resolveScopeDb();
@@ -453,7 +428,7 @@ for (const repo of repos) {
 
 // Merge: new data wins by url, but rows we didn't re-sweep this run (other repos/PRs not passed
 // via --repo, or a PR gh failed to fetch this time) are preserved rather than dropped.
-const merged = readExistingCandidates();
+const merged = readCandidatesFile(OUT);
 for (const row of newRows) {
   if (!row.url) {
     console.error(`mine-bots: dropping comment ${row.id} — no html_url to key on`);
