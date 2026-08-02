@@ -30,8 +30,10 @@ import {
   classifyOutcome,
   computeScopeConfirmed,
   hasAddressedMarker,
+  hasAuthorWithdrawal,
   hasHumanReply,
   hasWithdrawal,
+  isBotLogin,
   isLineTouchedLater,
   parseCoderabbitMarker,
   sqlString,
@@ -47,6 +49,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(here, 'candidates.jsonl');
 
 const BOT_AUTHORS = new Set(['coderabbitai[bot]', 'macroscopeapp[bot]']);
+// Human reviewers whose own PR comments are mined as label sources (sc-1409). A human comment
+// that later got a fix is recall-miss evidence the pre-PR gate lacked; a retracted one is decoy
+// material. Outcome signals are author-aware (see below) — bot semantics don't transfer as-is.
+const HUMAN_AUTHORS = new Set(['norvalbv']);
 const DEFAULT_REPOS = ['benord-labs/frink', 'norvalbv/devkit'];
 const TRUNCATE_LEN = 4000;
 const EXCERPT_LEN = 500;
@@ -80,7 +86,7 @@ function botComments(repo, pr) {
     '--paginate',
     '--jq',
     '.[] | {id, in_reply_to_id, user: .user.login, path, line, original_line, start_line, side, commit_id, original_commit_id, created_at, body, diff_hunk, html_url}',
-  ]).filter((c) => BOT_AUTHORS.has(c.user));
+  ]).filter((c) => BOT_AUTHORS.has(c.user) || HUMAN_AUTHORS.has(c.user));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -351,10 +357,21 @@ for (const repo of repos) {
         threadsById,
         c.id,
       );
+      const authorKind = HUMAN_AUTHORS.has(c.user) ? 'human' : 'bot';
       const { crCategory, crSeverity } = parseCoderabbitMarker(c.body);
       const addressedMarker = hasAddressedMarker([c.body, ...repliesFull.map((r) => r.body)]);
-      const withdrawal = hasWithdrawal(repliesFull);
-      const humanReplyPresent = hasHumanReply(repliesFull, BOT_AUTHORS);
+      // Author-aware signals: for a human-authored comment, a withdrawal can only come from the
+      // author themself, and pushback must come from ANOTHER human — not the author's own
+      // follow-ups, and not a bot reply (a CodeRabbit "agreed/resolved" post on the thread is
+      // concession or noise, never a rebuttal of the human's concern).
+      const withdrawal =
+        authorKind === 'human'
+          ? hasAuthorWithdrawal(repliesFull, c.user)
+          : hasWithdrawal(repliesFull);
+      const humanReplyPresent =
+        authorKind === 'human'
+          ? repliesFull.some((r) => r?.author && r.author !== c.user && !isBotLogin(r.author))
+          : hasHumanReply(repliesFull, BOT_AUTHORS);
 
       const later = commitsAfter(repo, prCommits, c.created_at, fileCache);
       const lineTouchedLater = isLineTouchedLater(later, c.path, c.created_at);
@@ -390,6 +407,7 @@ for (const repo of repos) {
         prState: state,
         prMergedAt: mergedAt ?? null,
         id: c.id,
+        authorKind,
         inReplyToId: c.in_reply_to_id ?? null,
         createdAt: c.created_at,
         commitId: c.commit_id ?? null,
