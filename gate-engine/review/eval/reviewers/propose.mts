@@ -74,6 +74,10 @@ function hardDropReason(c) {
   if (!c.originalCommitId) return 'missing-original-commit';
   if (c.line === null && c.originalLine === null) return 'no-line';
   if (c.outcomeEvidence === 'outdated-only') return 'outdated-only';
+  // Rebutted candidates mint DECOYS — the scarce corpus resource. Their fixture is built from
+  // baseFileContent + the bot's (rebutted) claim, not from the diff hunk, so hunk absence/size
+  // must not drop them. Golds (fixed) still need the hunk to locate the defect being fixed.
+  if (c.outcome === 'rebutted') return null;
   if (!c.diffHunk || c.diffHunk.length === 0) return 'empty-hunk';
   if ((c.hunkLen ?? c.diffHunk.length) > MAX_HUNK_LEN) return 'hunk-too-long';
   return null;
