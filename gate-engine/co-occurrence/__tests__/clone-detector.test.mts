@@ -171,6 +171,55 @@ describe.skipIf(!HAS_JSCPD)('clone-detector --gate exit-code contract', () => {
     rmSync(mjs, { recursive: true, force: true });
   });
 
+  it('exit 0 — an identical import preamble alone is not a clone (module-system forced)', () => {
+    // Big enough to clear jscpd's 50-token floor on its own — the exact shape that false-blocked
+    // sibling CLI commands sharing the same libs. Imports are ignore-pattern'd out at the
+    // tokenizer, so no fragment can even contain them.
+    const imports = Array.from(
+      { length: 14 },
+      (_, i) => `import { helperNumber${i}, otherThing${i} } from './lib/module-${i}.ts';`,
+    ).join('\n');
+    const dir = mkdtempSync(join(tmpdir(), 'clone-imports-'));
+    writeFileSync(join(dir, 'a.ts'), `${imports}\nconst runA = () => helperNumber0(1);\n`);
+    writeFileSync(
+      join(dir, 'b.ts'),
+      `${imports}\nfunction makeB() {\n  return otherThing3(2, 3);\n}\n`,
+    );
+    expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('exit 1 — a real duplicated body behind an identical import preamble still blocks', () => {
+    // The whole reason the ignore-pattern approach won over a post-hoc fragment classifier: six
+    // reviewer-verified classifier holes each let some duplicated statement hide behind imports.
+    // With imports gone from the token stream, the shared body must trip the floor on its own.
+    const imports = Array.from(
+      { length: 6 },
+      (_, i) => `import { helperNumber${i} } from './lib/module-${i}.ts';`,
+    ).join('\n');
+    const dir = mkdtempSync(join(tmpdir(), 'clone-imports-body-'));
+    writeFileSync(join(dir, 'a.ts'), `${imports}\n${SHARED}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(dir, 'b.ts'), `${imports}\n${SHARED}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('exit 1 — a duplicated dynamic-import block is runtime code and still blocks', () => {
+    // Dynamic import(...) deliberately matches none of the ignore patterns.
+    const block = `export function loadWidgetPlugin(registry) {
+  return import('./widget-plugin').then((mod) => {
+    registry.register(mod.widgetName, mod.createWidget);
+    registry.enable(mod.widgetName, { eager: true, retries: 3 });
+    return mod.initialize(registry, { verbose: false, timeoutMs: 5000 });
+  });
+}`;
+    const dir = mkdtempSync(join(tmpdir(), 'clone-dynimport-'));
+    writeFileSync(join(dir, 'a.ts'), `${block}\nexport const A_ONLY = 1;\n`);
+    writeFileSync(join(dir, 'b.ts'), `${block}\nexport const B_ONLY = 2;\n`);
+    expect(run(['scan', '--gate', '--paths', dir], {}).status).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('exit 0 — no cross-file clone (clean)', () => {
     const clean = mkdtempSync(join(tmpdir(), 'clone-clean-'));
     writeFileSync(join(clean, 'solo.ts'), `${SHARED}\nexport const SOLO = 1;\n`);
