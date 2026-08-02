@@ -19,6 +19,10 @@ const ITEM_CAP = 40;
 const ISSUE_CHARS = 200;
 const ISSUES_PER_ITEM = 3;
 const LENS_CHARS = 200; // a commit-guard lens is a repo path; deep trees make these long
+// A waiver rationale is free text a human wrote — unbounded in the overrides file, but an element
+// cap alone is not a byte bound (see module docstring), so the copy riding the event is capped here.
+// The overrides file keeps the full text; this is only the telemetry copy.
+const WAIVER_RATIONALE_CHARS = 500;
 // Matches scope.mts's budget. The rest of a review_result (reason, waivers, envelope) shares the same
 // 4KB line, so the vector gets half of it rather than all of it.
 const ITEMS_INLINE_BUDGET = 2000;
@@ -55,17 +59,25 @@ export function attachItems(
     (a, b) => Number(a.status === 'pass') - Number(b.status === 'pass'),
   );
   res.itemCount = ordered.length;
+  // lens → rationale for whatever fired the valve this run, so a 'waived' item can carry its own
+  // reason inline — the decoy-minting signal a consumer would otherwise need a waivers[] join for.
+  const rationaleByLens = new Map((res.waivers ?? []).map((w) => [w.lens, w.rationale]));
   const capped = ordered.slice(0, ITEM_CAP).map((it): ReviewItem => {
     const lens = String(it.name ?? it.path ?? '(finding)').slice(0, LENS_CHARS);
     // checkItem clears issues on a pass, so this only ever carries text for a non-pass.
     const issues = (it.issues ?? [])
       .slice(0, ISSUES_PER_ITEM)
       .map((issue: unknown) => String(issue).slice(0, ISSUE_CHARS));
+    const lensDisposition = disposition.get(lens);
+    const rationale = rationaleByLens.get(lens);
     return {
       lens,
       status: String(it.status),
-      ...(disposition.has(lens) ? { disposition: disposition.get(lens) } : {}),
+      ...(lensDisposition ? { disposition: lensDisposition } : {}),
       ...(issues.length > 0 ? { issues } : {}),
+      ...(lensDisposition === 'waived' && rationale
+        ? { rationale: rationale.slice(0, WAIVER_RATIONALE_CHARS) }
+        : {}),
     };
   });
   // The tally is always inline: it is the cheap answer to "did these lenses fire", and it must
