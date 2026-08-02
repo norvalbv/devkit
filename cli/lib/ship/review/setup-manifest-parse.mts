@@ -15,16 +15,7 @@ import {
   REVIEW_SETUP_VERSION,
   reviewSetupHash,
 } from './setup-manifest-format.mts';
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
-}
-
-function objectValue(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return fail(`${label} must be a JSON object.`);
-  return value as Record<string, unknown>;
-}
+import { fail, objectValue } from './shared/common.mts';
 
 function manifestString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value || value.includes('\0'))
@@ -41,7 +32,7 @@ function manifestRelativePath(value: unknown, label: string): string {
 }
 
 function parseProfile(value: unknown): ReviewProfile {
-  const profile = objectValue(value, 'review setup manifest profile');
+  const profile = objectValue(value, 'review setup manifest profile must be a JSON object.');
   if (
     !exactKeys(profile, ['enabled', 'guards', 'decisionsDir']) ||
     typeof profile.enabled !== 'boolean' ||
@@ -65,7 +56,7 @@ function parseProfile(value: unknown): ReviewProfile {
 
 function parseChain(value: unknown): ReviewSetupState['chain'] {
   if (value === null) return null;
-  const chain = objectValue(value, 'review setup manifest chain');
+  const chain = objectValue(value, 'review setup manifest chain must be a JSON object.');
   if (!exactKeys(chain, ['path', 'sourcePath']))
     return fail('review setup manifest chain has an invalid shape.');
   const path = manifestRelativePath(chain.path, 'chain path');
@@ -76,7 +67,7 @@ function parseChain(value: unknown): ReviewSetupState['chain'] {
 }
 
 function parsePath(value: unknown, index: number): ReviewSetupPath {
-  const path = objectValue(value, `review setup manifest path ${index}`);
+  const path = objectValue(value, `review setup manifest path ${index} must be a JSON object.`);
   if (
     !exactKeys(path, ['id', 'root', 'relativePath', 'fingerprint', 'required', 'executable']) ||
     (path.root !== 'target' && path.root !== 'git') ||
@@ -99,7 +90,7 @@ function parsePath(value: unknown, index: number): ReviewSetupPath {
 }
 
 function parseSetup(value: unknown): ReviewSetupState {
-  const setup = objectValue(value, 'review setup manifest setup');
+  const setup = objectValue(value, 'review setup manifest setup must be a JSON object.');
   if (
     !exactKeys(setup, ['overlay', 'hooksPath', 'profile', 'chain', 'paths']) ||
     typeof setup.overlay !== 'boolean' ||
@@ -132,7 +123,7 @@ export function parseReviewSetupManifest(path: string): ReviewSetupManifest {
     const message = cause instanceof Error ? cause.message : String(cause);
     return fail(`could not read review setup manifest (${message}).`);
   }
-  const manifest = objectValue(value, 'review setup manifest');
+  const manifest = objectValue(value, 'review setup manifest must be a JSON object.');
   if (
     !hasValidManifestRoots(
       manifest,

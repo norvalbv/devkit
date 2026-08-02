@@ -3,6 +3,7 @@
 import { lstatSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { canonicalReviewDirectory, isSafeReviewRelativePath } from './runtime-paths.mts';
+import { reviewSetupStat } from './setup/setup-runtime-copy.mts';
 
 export interface ReviewSourceProjection {
   /** Lexical path of the one projected link, relative to the captured source root. */
@@ -21,16 +22,6 @@ export interface ReviewSourceResolution {
 
 function fail(message: string): never {
   throw new Error(`devkit review: ${message}`);
-}
-
-function safeStat(path: string) {
-  try {
-    return lstatSync(path, { throwIfNoEntry: false });
-  } catch (cause) {
-    const code = (cause as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined;
-    throw cause;
-  }
 }
 
 interface SourceTraversal {
@@ -89,7 +80,7 @@ function traverseSegment(
     lexical: join(traversal.lexical, segment),
     physical: join(traversal.physical, segment),
   };
-  const stat = safeStat(next.lexical);
+  const stat = reviewSetupStat(next.lexical);
   if (stat === undefined) return { traversal: next, exists: false };
   if (stat.isSymbolicLink()) {
     return {
