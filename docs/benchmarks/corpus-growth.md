@@ -103,6 +103,12 @@ runner); freshness goes stale exactly when one moves.
   outages): first-pass FAIL-recall 44/50 = 0.88 [0.76, 0.94], clean-pass 32/40 = 0.80 [0.65, 0.90].
   The mined rows hardened the suite (0.92 → 0.88 vs the 66-row checkpoint); 5 of 8 false FAILs
   were minimal-pair decoys — the predicted precision weakness, now measurable.
+- **κ blind relabel (2026-08-02, cross-family per item 12)**: Codex labeled the 48-item blind
+  bundle — raw κ 0.662 (agreement 0.833). Disagreement triage (item 19): 6 of 8 stored labels
+  stood; **2 were genuine fixture errors** (an empty BUNDLED_RULES array gutting a validation
+  gate in a PASS row; an unvalidated shell-interpolated branch name in another) — both repaired.
+  **First empirical label-noise floor: ~2/48 ≈ 4%** — deltas below ~4pp + paired CI are
+  unresolved, not wins (item 4). Post-triage effective agreement ≈ 0.87.
 - Yield funnel from the first mining pass: 749 candidates → 479 fixed / 34 rebutted / 236
   unresolved → hard drops (232 unresolved-outcome, 179 out-of-charter, 113 truncated-hunk, 27
   already-in-corpus) → 23 gold+pair sets landed across two batches. Rebutted threads mostly fail
