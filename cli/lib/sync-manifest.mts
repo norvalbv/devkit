@@ -20,9 +20,11 @@ import {
   removeProviderNativeAssets,
   withAgentAssetLifecycleLock,
 } from './install/agent-asset-manifest/lifecycle.mts';
-import { readAgentAssetManifest } from './install/agent-asset-manifest/reader.mts';
+import {
+  readAgentAssetManifest,
+  resolveLegacyProviderTargets,
+} from './install/agent-asset-manifest/reader.mts';
 import { agentAssetDir } from './install/agent-assets/agent-assets.mts';
-import { LEGACY_AGENT_PROVIDERS } from './install/agent-assets/agent-providers.mts';
 
 export {
   decodeSyncManifest,
@@ -258,11 +260,7 @@ export function removeSkills(
       return;
     }
     const decoded = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
-    const inferredTargets =
-      decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-    const legacyTargets = (targets ?? inferredTargets).filter((target) =>
-      LEGACY_AGENT_PROVIDERS.includes(target as (typeof LEGACY_AGENT_PROVIDERS)[number]),
-    );
+    const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
     if (!legacyTargets.length) return;
     const dirs = legacyTargets.map((target) => agentAssetDir(target, 'skills'));
     const fallback = bundledNames('skills', (e) => e.isDirectory());
@@ -303,11 +301,7 @@ export function removeAgents(
       return;
     }
     const decoded = readAgentAssetManifest(join(root, '.devkit', 'agents-manifest.json'), 'agents');
-    const inferredTargets =
-      decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-    const legacyTargets = (targets ?? inferredTargets).filter((target) =>
-      LEGACY_AGENT_PROVIDERS.includes(target as (typeof LEGACY_AGENT_PROVIDERS)[number]),
-    );
+    const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
     if (!legacyTargets.length) return;
     const dirs = legacyTargets.map((target) => agentAssetDir(target, 'agents'));
     const fallback = bundledNames('agents', (e) => e.isFile() && e.name.endsWith('.md'));
