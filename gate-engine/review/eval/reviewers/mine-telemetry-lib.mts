@@ -166,6 +166,35 @@ export function findNextLensOutcome(
   return { kind: 'no-fix-found', nextShipId: null };
 }
 
+/** Decide which lens rows a reviewer-level FAIL mints fail→fix candidates for.
+ *
+ * Only a BLOCKING failed lens qualifies (allowlist — LensDisposition is 'blocking' | 'waived' |
+ * 'dropped_out_of_charter', items.mts): a waived lens is a human-labeled false positive that the
+ * waived-decoy loop owns (colliding here would silently win the merge), and a
+ * dropped_out_of_charter lens was dismissed by the gate's own cross-domain valve, so correlating
+ * a "fix" for either is meaningless. Null/absent disposition (pre-disposition-era rows) counts as
+ * blocking.
+ *
+ * Three cases, and the middle one is the trap — "no blocking lens failed" is NOT the same fact as
+ * "no lens breakdown exists", even though both leave the blocking filter empty:
+ *   · breakdown with blocking failed lenses → those lenses, correlated per-lens
+ *   · breakdown whose failed lenses are ALL waived/dropped → SKIP (`rows: []` + a skip reason).
+ *     Falling through to the reviewer-level scan here would mint a gold from exactly the lenses
+ *     the allowlist just excluded.
+ *   · no lens breakdown recorded at all → `[null]`, the reviewer-level scan
+ *
+ * The caller counts `skipped` in its drop histogram rather than dropping the fail silently. */
+export function selectFailLensRows(lenses) {
+  const recorded = lenses ?? [];
+  const blocking = recorded.filter(
+    (l) => l.status === 'fail' && (l.disposition == null || l.disposition === 'blocking'),
+  );
+  if (blocking.length > 0) return { rows: blocking, skipped: null };
+  if (recorded.some((l) => l.status === 'fail'))
+    return { rows: [], skipped: 'all-failing-lenses-non-blocking' };
+  return { rows: [null], skipped: null }; // null lens = no per-lens breakdown recorded
+}
+
 // ---------------------------------------------------------------------------------------------
 // diff_sha256 equality — guards against mislabeling an override-valve waiver (same diff bytes,
 // reconciled to pass with no code change) as a "fix". That case belongs to the waived-decoy path

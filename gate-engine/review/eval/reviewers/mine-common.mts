@@ -26,14 +26,27 @@ export function readCandidatesFile(file) {
   return map;
 }
 
-/** Collect every `--repo <value>` pair from argv (repeatable flag, both miners). */
+/** Collect every `--repo <value>` pair from argv (repeatable flag, both miners).
+ *
+ * A missing or flag-shaped value is a hard usage error, never a silently-accepted repo. Both
+ * callers treat ANY non-empty result as an explicit scope that replaces their defaults
+ * (mine-bots' DEFAULT_REPOS, mine-telemetry's allowlist), so swallowing the following flag —
+ * `--repo --dev` storing `"--dev"` as the repository — would narrow the sweep to a repo that
+ * cannot exist and mine nothing, while reporting a clean run. Failing loudly is the only safe
+ * reading of an incomplete pair. */
 export function collectRepoArgs(argv) {
   const repoArgs = [];
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '--repo' && argv[i + 1]) {
-      i += 1;
-      repoArgs.push(argv[i]);
+    if (argv[i] !== '--repo') continue;
+    const value = argv[i + 1];
+    if (!value || value.startsWith('--')) {
+      throw new Error(
+        `--repo needs a repository name, got ${value ? `"${value}"` : 'nothing'} — ` +
+          'pass it as `--repo <name>` (repeatable).',
+      );
     }
+    i += 1;
+    repoArgs.push(value);
   }
   return repoArgs;
 }
@@ -49,9 +62,15 @@ export function sqlite3Available() {
 }
 
 /** Read-only -json SELECT via the sqlite3 CLI. maxBuffer sized for the largest expected result
- * set (mine-telemetry sweeps whole tables; mine-bots only ever joins per-PR). */
+ * set (mine-telemetry sweeps whole tables; mine-bots only ever joins per-PR).
+ *
+ * `-readonly` opens the collector db in SQLite's own read-only mode, so the boundary is enforced
+ * by the engine rather than by convention: a caller that ever passes an INSERT/UPDATE/DDL gets
+ * "attempt to write a readonly database" instead of mutating the user's telemetry. The miners are
+ * strictly read-side (the collector owns every write path) and this keeps that true by
+ * construction. */
 export function sqliteJson(dbPath, sql, maxBuffer = 256 * 1024 * 1024) {
-  const raw = execFileSync('sqlite3', [dbPath, '-json', sql], {
+  const raw = execFileSync('sqlite3', ['-readonly', '-json', dbPath, sql], {
     encoding: 'utf8',
     maxBuffer,
   }).trim();

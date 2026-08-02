@@ -75,6 +75,7 @@ import {
   mergeCandidates,
   pickFailReason,
   resolveDiffPayload,
+  selectFailLensRows,
 } from './mine-telemetry-lib.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -259,16 +260,16 @@ function main() {
     const diffSha256 = scopeByShipReviewer.get(`${fr.ship_id}::${fr.reviewer}`) ?? null;
     const archived = readArchivedDiff(telemetryDir, diffSha256);
 
-    // Only a BLOCKING failed lens is a fail→fix candidate (allowlist — LensDisposition is
-    // 'blocking' | 'waived' | 'dropped_out_of_charter', items.mts): a waived lens is a
-    // human-labeled false positive (decoy loop below owns it — colliding here would silently
-    // win the merge), and a dropped_out_of_charter lens was dismissed by the gate's own
-    // cross-domain valve, so correlating a "fix" for either is meaningless. Null/absent
-    // disposition (pre-disposition-era rows) is treated as blocking.
-    const failLenses = (lensesByShipReviewer.get(`${fr.ship_id}::${fr.reviewer}`) ?? []).filter(
-      (l) => l.status === 'fail' && (l.disposition == null || l.disposition === 'blocking'),
+    // Blocking-only allowlist, and the "all failing lenses were waived/dropped" case skips this
+    // fail outright instead of falling back to a reviewer-level candidate — see
+    // selectFailLensRows in mine-telemetry-lib.mts for the full rule.
+    const { rows, skipped } = selectFailLensRows(
+      lensesByShipReviewer.get(`${fr.ship_id}::${fr.reviewer}`),
     );
-    const rows = failLenses.length > 0 ? failLenses : [null]; // null lens = no per-lens breakdown recorded
+    if (skipped) {
+      bumpDrop(`fail-fix:${skipped}`);
+      continue;
+    }
 
     for (const lensRow of rows) {
       const lens = lensRow?.lens ?? null;

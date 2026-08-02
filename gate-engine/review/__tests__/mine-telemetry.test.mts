@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { collectRepoArgs, sqlite3Available, sqliteJson } from '../eval/reviewers/mine-common.mts';
 import {
   buildFailFixCandidate,
   buildHistogram,
@@ -14,6 +19,7 @@ import {
   mergeCandidates,
   pickFailReason,
   resolveDiffPayload,
+  selectFailLensRows,
   sortByTsStart,
   telemetryUrl,
 } from '../eval/reviewers/mine-telemetry-lib.mts';
@@ -487,5 +493,116 @@ describe('mine-telemetry-lib: histogramKey / buildHistogram', () => {
 
   it('returns an empty histogram for no rows', () => {
     expect(buildHistogram([])).toEqual([]);
+  });
+});
+
+describe('mine-telemetry-lib: selectFailLensRows', () => {
+  const lens = (l, status, disposition) => ({ lens: l, status, disposition });
+
+  it('returns the blocking failed lenses when the breakdown has them', () => {
+    const { rows, skipped } = selectFailLensRows([
+      lens('races', 'fail', 'blocking'),
+      lens('contracts', 'pass', null),
+    ]);
+    expect(rows.map((r) => r.lens)).toEqual(['races']);
+    expect(skipped).toBeNull();
+  });
+
+  it('treats a null disposition (pre-disposition-era row) as blocking', () => {
+    const { rows, skipped } = selectFailLensRows([lens('races', 'fail', null)]);
+    expect(rows.map((r) => r.lens)).toEqual(['races']);
+    expect(skipped).toBeNull();
+  });
+
+  it('falls back to the reviewer-level scan when no lens breakdown was recorded', () => {
+    for (const absent of [undefined, null, []]) {
+      const { rows, skipped } = selectFailLensRows(absent);
+      expect(rows).toEqual([null]);
+      expect(skipped).toBeNull();
+    }
+  });
+
+  // The regression this guards: an empty blocking filter used to fall through to [null], so a
+  // fail whose only failing lenses were waived/dropped minted a reviewer-level gold from exactly
+  // the lenses the allowlist had just excluded.
+  it('skips the fail entirely when every failing lens is waived or dropped', () => {
+    for (const disposition of ['waived', 'dropped_out_of_charter']) {
+      const { rows, skipped } = selectFailLensRows([
+        lens('races', 'fail', disposition),
+        lens('contracts', 'pass', null),
+      ]);
+      expect(rows).toEqual([]);
+      expect(skipped).toBe('all-failing-lenses-non-blocking');
+    }
+  });
+
+  it('skips when a mix of waived and dropped failing lenses leaves nothing blocking', () => {
+    const { rows, skipped } = selectFailLensRows([
+      lens('races', 'fail', 'waived'),
+      lens('contracts', 'fail', 'dropped_out_of_charter'),
+    ]);
+    expect(rows).toEqual([]);
+    expect(skipped).toBe('all-failing-lenses-non-blocking');
+  });
+
+  it('still falls back to reviewer-level when a breakdown exists but nothing failed in it', () => {
+    const { rows, skipped } = selectFailLensRows([lens('races', 'pass', null)]);
+    expect(rows).toEqual([null]);
+    expect(skipped).toBeNull();
+  });
+});
+
+describe('mine-common: collectRepoArgs', () => {
+  it('collects every repeated --repo value', () => {
+    expect(collectRepoArgs(['--dev', '--repo', 'devkit', '--repo', 'frink'])).toEqual([
+      'devkit',
+      'frink',
+    ]);
+  });
+
+  it('returns an empty list when --repo is absent (callers then use their defaults)', () => {
+    expect(collectRepoArgs(['--dev', '--max', '20'])).toEqual([]);
+  });
+
+  // Both callers treat a non-empty result as an EXPLICIT scope replacing their defaults, so
+  // swallowing the next flag here would silently mine a repo that cannot exist.
+  it('rejects a flag-shaped value instead of storing it as a repository', () => {
+    expect(() => collectRepoArgs(['--repo', '--dev'])).toThrow(/--repo needs a repository name/);
+  });
+
+  it('rejects a trailing --repo with no value', () => {
+    expect(() => collectRepoArgs(['--dev', '--repo'])).toThrow(/--repo needs a repository name/);
+  });
+});
+
+describe('mine-common: sqliteJson', () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'mine-common-sqlite-'));
+  const dbPath = path.join(tmp, 'usage.db');
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  const available = sqlite3Available();
+  const maybe = available ? it : it.skip;
+
+  if (available) {
+    execFileSync('sqlite3', [dbPath, 'CREATE TABLE t(a); INSERT INTO t VALUES(1);']);
+  }
+
+  maybe('reads rows as parsed JSON', () => {
+    expect(sqliteJson(dbPath, 'SELECT a FROM t;')).toEqual([{ a: 1 }]);
+  });
+
+  maybe('returns an empty array for an empty result set', () => {
+    expect(sqliteJson(dbPath, 'SELECT a FROM t WHERE a = 99;')).toEqual([]);
+  });
+
+  // The read-only boundary is enforced by SQLite itself (-readonly), not by convention: the
+  // miners are strictly read-side and the collector owns every write path.
+  maybe('refuses a write and leaves the database untouched', () => {
+    expect(() => sqliteJson(dbPath, 'INSERT INTO t VALUES(2);')).toThrow();
+    expect(sqliteJson(dbPath, 'SELECT a FROM t;')).toEqual([{ a: 1 }]);
+  });
+
+  maybe('refuses DDL as well', () => {
+    expect(() => sqliteJson(dbPath, 'CREATE TABLE evil(x);')).toThrow();
   });
 });
