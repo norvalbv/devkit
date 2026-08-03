@@ -14,33 +14,50 @@ import path from 'node:path';
 const CORPUS_CASES_FILE_RE = /^cases-.*\.jsonl$/;
 
 /** Collect every source.url already promoted into a cases-*.jsonl corpus file in `dir` —
- * the dedup key that keeps miners and proposers from re-offering landed candidates. */
+ * the dedup key that keeps miners and proposers from re-offering landed candidates.
+ *
+ * This set is treated as AUTHORITATIVE by makeHardDrop ('a landed source.url must never be
+ * re-queued'), so it fails closed: a set that is silently short re-offers work already promoted,
+ * and the re-offer looks identical to a genuine new candidate. Only ENOENT is a real empty —
+ * a corpus that does not exist yet has promoted nothing. Every other failure (EACCES, EIO, a
+ * corpus file that reads but does not parse) means we cannot know what has landed, so it throws
+ * rather than hand back a partial answer the caller cannot tell apart from a complete one. */
 export function collectCorpusUrls(dir) {
   const urls = new Set();
   let entries = [];
   try {
     entries = readdirSync(dir);
-  } catch {
-    return urls;
+  } catch (e) {
+    if (e.code === 'ENOENT') return urls;
+    throw new Error(`mine-common: cannot list corpus dir ${dir} (${e.code ?? e.message}) — \
+refusing to dedup against an unknown corpus`);
   }
   for (const name of entries) {
     if (!CORPUS_CASES_FILE_RE.test(name)) continue;
+    const file = path.join(dir, name);
     let content = '';
     try {
-      content = readFileSync(path.join(dir, name), 'utf8');
+      content = readFileSync(file, 'utf8');
     } catch (e) {
-      console.error(`mine-common: corpus read failed for ${name} (${e.message?.split('\n')[0]})`);
-      continue;
+      if (e.code === 'ENOENT') continue; // vanished between readdir and read
+      throw new Error(`mine-common: cannot read promoted corpus ${name} (${e.code ?? e.message}) — \
+refusing to dedup against an unknown corpus`);
     }
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!lines[i].trim()) continue;
+      let row = null;
       try {
-        const row = JSON.parse(line);
-        const u = row?.source?.url;
-        if (u) urls.add(u);
+        row = JSON.parse(lines[i]);
       } catch {
-        // skip malformed line
+        // A corpus row that does not parse is a URL we cannot see, i.e. the same silent
+        // under-count as an unreadable file — never the tolerated skip readCandidatesFile allows
+        // for an unlanded merge input.
+        throw new Error(`mine-common: malformed JSON in promoted corpus ${name} line ${i + 1} — \
+refusing to dedup against an unknown corpus`);
       }
+      const u = row?.source?.url;
+      if (u) urls.add(u);
     }
   }
   return urls;
