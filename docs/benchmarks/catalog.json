@@ -119,24 +119,6 @@
       "canonical": "agents/frontend-security-reviewer.md"
     },
     {
-      "id": "agent-testing-agent",
-      "label": "Testing agent",
-      "kind": "agent",
-      "lifecycle": "shipped",
-      "evidence": "none",
-      "suiteIds": [],
-      "canonical": "agents/testing-agent.md"
-    },
-    {
-      "id": "agent-testing-reviewer",
-      "label": "Testing reviewer agent",
-      "kind": "agent",
-      "lifecycle": "shipped",
-      "evidence": "none",
-      "suiteIds": [],
-      "canonical": "agents/testing-reviewer.md"
-    },
-    {
       "id": "bin-devkit",
       "label": "devkit CLI",
       "kind": "bin",

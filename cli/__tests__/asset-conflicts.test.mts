@@ -66,7 +66,7 @@ const legacyWriters = [
     kind: 'agents',
     manifest: 'agents-manifest.json',
     outputDir: 'agents',
-    codexOutput: '.codex/agents/testing-agent.toml',
+    codexOutput: '.codex/agents/correctness-reviewer.toml',
     run: (root, targets) => syncAgents([], root, targets),
   },
   {
@@ -198,7 +198,7 @@ describe('install preserves a non-devkit collision by default', () => {
 
   it('preserves a non-devkit AGENT collision; --force overrides', async () => {
     const root = tmpRepo();
-    const agent = join(root, '.claude', 'agents', 'testing-agent.md');
+    const agent = join(root, '.claude', 'agents', 'correctness-reviewer.md');
     mkdirSync(join(root, '.claude', 'agents'), { recursive: true });
     writeFileSync(agent, '# mine\n');
 
@@ -209,7 +209,7 @@ describe('install preserves a non-devkit collision by default', () => {
     });
     expect(readFileSync(agent, 'utf8')).toBe('# mine\n');
     const m = JSON.parse(readFileSync(join(root, '.devkit', 'agents-manifest.json'), 'utf8'));
-    expect(Object.keys(m.files)).not.toContain('testing-agent.md');
+    expect(Object.keys(m.files)).not.toContain('correctness-reviewer.md');
 
     await applyInit(root, {
       stack: 'generic',
@@ -219,7 +219,7 @@ describe('install preserves a non-devkit collision by default', () => {
     });
     expect(readFileSync(agent, 'utf8')).not.toBe('# mine\n');
     const m2 = JSON.parse(readFileSync(join(root, '.devkit', 'agents-manifest.json'), 'utf8'));
-    expect(Object.keys(m2.files)).toContain('testing-agent.md');
+    expect(Object.keys(m2.files)).toContain('correctness-reviewer.md');
   });
 });
 
@@ -282,8 +282,8 @@ describe('detect*Conflicts (the interactive picker source)', () => {
   it('detectAgentConflicts returns a divergent user agent', () => {
     const root = tmpRepo();
     mkdirSync(join(root, '.claude', 'agents'), { recursive: true });
-    writeFileSync(join(root, '.claude', 'agents', 'testing-agent.md'), '# mine\n');
-    expect(detectAgentConflicts(root, ['claude'])).toContain('testing-agent.md');
+    writeFileSync(join(root, '.claude', 'agents', 'correctness-reviewer.md'), '# mine\n');
+    expect(detectAgentConflicts(root, ['claude'])).toContain('correctness-reviewer.md');
   });
 });
 

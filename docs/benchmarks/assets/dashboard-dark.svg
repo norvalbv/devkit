@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="814" viewBox="0 0 1200 814" role="img" aria-labelledby="title desc">
 <title id="title">devkit benchmark evidence dashboard</title>
-<desc id="desc">11 suites have accepted evidence. 4 shipped agents have no benchmark evidence. Rows use symbols and words as well as color. Full equivalent tables are in the README.</desc>
+<desc id="desc">11 suites have accepted evidence. 2 shipped agents have no benchmark evidence. Rows use symbols and words as well as color. Full equivalent tables are in the README.</desc>
 <style>
   .title{font:700 26px ui-sans-serif,system-ui;fill:#F0F6FC} .summary{font:600 15px ui-sans-serif,system-ui;fill:#B7C3D0}
   .suite{font:600 15px ui-sans-serif,system-ui;fill:#F0F6FC} .metric{font:14px ui-sans-serif,system-ui;fill:#B7C3D0}
@@ -8,7 +8,7 @@
 </style>
 <rect width="1200" height="814" rx="18" fill="#0D1117"/><rect x="16" y="16" width="1168" height="782" rx="12" fill="#161B22" stroke="#52606D"/>
 <text class="title" x="32" y="52">Benchmark evidence, not benchmark vibes</text>
-<text class="summary" x="32" y="82">11 accepted suites · 4 shipped-agent evidence gaps · growth curve: insufficient evidence</text>
+<text class="summary" x="32" y="82">11 accepted suites · 2 shipped-agent evidence gaps · growth curve: insufficient evidence</text>
 <text class="summary" x="32" y="112">✓ accepted   ! stale   × no-ship   ? missing — status never relies on color alone</text>
 <g transform="translate(32 150)"><text class="suite" y="0">Feature critique</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold finding recall: 23/25 (92.0%) · Clean-pl…</text></g>
 <g transform="translate(32 188)"><text class="suite" y="0">Feature completeness</text><text class="status warn" x="300" y="0">! stale</text><text class="metric" x="470" y="0">Gold gap recall: 25/35 (71.4%) · Decoy false-…</text></g>
