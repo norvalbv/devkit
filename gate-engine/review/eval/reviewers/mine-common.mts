@@ -1,13 +1,50 @@
 // @ts-nocheck — BENCH-ONLY (excluded from tsc, see tsconfig.json exclude); loose types deliberate.
 
 /**
- * mine-common — the plumbing both miners (mine-bots.mts, mine-telemetry.mts) share: url-keyed
- * candidates-file reading, `--repo` argv collection, and read-only sqlite3 access. Extracted so
- * the two stay byte-identical by construction instead of by copy (commit-guard caught the copies).
+ * mine-common — the plumbing the miners (mine-bots.mts, mine-telemetry.mts) and proposers share:
+ * url-keyed candidates-file reading, `--repo` argv collection, promoted-corpus url collection,
+ * and read-only sqlite3 access. Extracted so consumers stay byte-identical by construction
+ * instead of by copy (commit-guard caught the copies).
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
+const CORPUS_CASES_FILE_RE = /^cases-.*\.jsonl$/;
+
+/** Collect every source.url already promoted into a cases-*.jsonl corpus file in `dir` —
+ * the dedup key that keeps miners and proposers from re-offering landed candidates. */
+export function collectCorpusUrls(dir) {
+  const urls = new Set();
+  let entries = [];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return urls;
+  }
+  for (const name of entries) {
+    if (!CORPUS_CASES_FILE_RE.test(name)) continue;
+    let content = '';
+    try {
+      content = readFileSync(path.join(dir, name), 'utf8');
+    } catch (e) {
+      console.error(`mine-common: corpus read failed for ${name} (${e.message?.split('\n')[0]})`);
+      continue;
+    }
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line);
+        const u = row?.source?.url;
+        if (u) urls.add(u);
+      } catch {
+        // skip malformed line
+      }
+    }
+  }
+  return urls;
+}
 
 /** Parse an existing url-keyed candidates .jsonl into a Map<url, row>; malformed lines are
  * skipped rather than aborting the whole merge. */

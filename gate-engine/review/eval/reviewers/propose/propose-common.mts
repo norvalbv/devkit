@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectCorpusUrls } from '../mine-common.mts';
 
 /** kebab slug from free text, for queue ids. */
 export function slugify(text, maxWords = 5) {
@@ -80,6 +81,14 @@ export function requireFile(file, name, hint) {
     console.error(`${name}: missing ${path.basename(file)} — ${hint}`);
     process.exit(2);
   }
+}
+
+/** Compose a suite-specific drop function with the promoted-corpus check. Telemetry and GHSA
+ * candidates carry no alreadyInCorpus flag (that's mine-bots' merge concern), so the proposers
+ * enforce it here — a landed source.url must never be re-queued. */
+export function makeHardDrop(reviewersDir, dropReason) {
+  const corpusUrls = collectCorpusUrls(reviewersDir);
+  return (c) => (corpusUrls.has(c.url) ? 'already-in-corpus' : dropReason(c));
 }
 
 /** Run the hard-drop filter over candidates, bumping the histogram; returns survivors. */
