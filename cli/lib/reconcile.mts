@@ -29,13 +29,11 @@
  * exact concurrent work this module declined to touch one step earlier.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from './atomic-write.mts';
+import { withLock, writeFileAtomic } from './atomic-write.mts';
 
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
-const LOCK_STALE_MS = 60_000;
-const LOCK_WAIT_MS = 5_000;
 
 /** A blob sha (git object id) or the ABSENT sentinel for a side where the path does not exist. */
 type Blob = string | typeof ABSENT;
@@ -163,35 +161,6 @@ export function loadManifest(mainRepo: string): ReconcileManifest {
     /* absent / torn / wrong version → no debt (a torn file is never trusted) */
   }
   return { version: 1, branches: {} };
-}
-
-/** Atomic-mkdir mutex (flock is absent on macOS) — see the manifest writer for the rationale. */
-function withLock<T>(lockDir: string, fn: () => T): T {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  let held = false;
-  while (Date.now() <= deadline) {
-    try {
-      mkdirSync(lockDir);
-      held = true;
-      break;
-    } catch (e: unknown) {
-      if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e;
-      try {
-        if (Date.now() - lstatSync(lockDir).mtimeMs > LOCK_STALE_MS)
-          rmSync(lockDir, { recursive: true, force: true });
-      } catch {
-        /* lock vanished — retry */
-      }
-    }
-  }
-  // Never run fn() unlocked: an unsynchronized read-modify-write would let a concurrent ship or
-  // reconcile clobber another branch's entry (the rename is atomic, but the read+merge is not).
-  if (!held) throw new Error(`timed out acquiring manifest lock: ${lockDir}`);
-  try {
-    return fn();
-  } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
 }
 
 /** Remove a fully-reconciled branch entry (atomic temp+rename under the lock). */

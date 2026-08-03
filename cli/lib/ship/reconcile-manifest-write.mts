@@ -36,14 +36,12 @@
  * miss only costs a manual reconcile later; it must never unwind a shipped PR.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { writeFileAtomic } from '../atomic-write.mts';
+import { withLock, writeFileAtomic } from '../atomic-write.mts';
 import type { ReconcileManifest, ReconcilePath } from '../reconcile.mts';
 
-const LOCK_STALE_MS = 60_000; // a lock dir older than this is a dead writer/reader — reap it
-const LOCK_WAIT_MS = 5_000; // total time to retry a contended lock before throwing (never write unlocked)
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns
 const PR_DIGITS = /^\d+$/; // a non-empty --pr is an integer; anything else → null
 
@@ -110,39 +108,6 @@ function classify(gitRoot: string, baseSha: string, p: string): ReconcilePath | 
   const blobSha = git(gitRoot, ['rev-parse', `${baseSha}:${p}`]);
   if (!blobSha) return null;
   return { path: p, blobSha, mode, op: 'delete' };
-}
-
-/**
- * Atomic-mkdir mutex (flock is absent on macOS — verified). The dir IS the lock; mkdir is
- * atomic create-or-fail on every POSIX fs. We only guard a sub-ms read→write→rename, so on
- * contention we retry up to LOCK_WAIT_MS; if still unheld we THROW rather than write unlocked
- * (an unlocked read-modify-write would lose a parallel ship's branch entry). A lock older than
- * 60s is a crashed holder — reap it.
- */
-function withLock<T>(lockDir: string, fn: () => T): T {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  let held = false;
-  while (Date.now() <= deadline) {
-    try {
-      mkdirSync(lockDir);
-      held = true;
-      break;
-    } catch (e: unknown) {
-      if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e;
-      try {
-        if (Date.now() - lstatSync(lockDir).mtimeMs > LOCK_STALE_MS)
-          rmSync(lockDir, { recursive: true, force: true });
-      } catch {
-        /* lock vanished under us — loop retries the mkdir */
-      }
-    }
-  }
-  if (!held) throw new Error(`timed out acquiring manifest lock: ${lockDir}`);
-  try {
-    return fn();
-  } finally {
-    rmSync(lockDir, { recursive: true, force: true });
-  }
 }
 
 /** A well-formed v1 manifest: version 1 with a plain (non-array) branches object. */
