@@ -26,9 +26,8 @@
  *
  * House conventions (decisions-eval): NULL is a verdict — an inconclusive row costs its expected
  * class. Baselines embed gateHash (brief + checklist + gate source) — a mismatch there mechanically
- * SKIPS comparison. Corpus growth is NOT a skip: rows carry a content `rowHash`, so compareReviewer
- * pairs on the row-id intersection and only excludes the shared rows whose rowHash actually changed
- * (appending/removing rows never invalidates the retained ones). --fail = hard floors + per-row
+ * SKIPS comparison. Corpus growth is NOT a skip: rows carry rowHash + behaviorHash (corpus.mts) —
+ * pairing excludes only rows whose BEHAVIOR changed. --fail = hard floors + per-row
  * McNemar flip table (stable flips only, pooled + gold-only + decoy-only + clustered-by-case),
  * never raw aggregate deltas. Every run appends one line to runs.log.
  *
@@ -60,7 +59,7 @@ export * from './corpus.mts';
 export * from './progress.mts';
 export * from './stats.mts';
 
-import { benchGateHash, buildAssets, corpusHash, loadRows, rowHash } from './corpus.mts';
+import { benchGateHash, buildAssets, corpusHash, loadRows, rowHashes } from './corpus.mts';
 import { loadAgainstFile, loadProgress, progressFile, RETRYABLE, salvageMap } from './progress.mts';
 import {
   buildCompareReport,
@@ -68,6 +67,7 @@ import {
   fmtCi,
   jaccard,
   printSummary,
+  rowChanged,
   rowUnchanged,
   subcause,
   VERDICT_INJECTION_RE,
@@ -199,7 +199,7 @@ export function scoreRow(row, capture, cas) {
     expected: row.expected,
     holdout: !!row.holdout,
     caseId: row.caseId ?? null,
-    rowHash: rowHash(row),
+    ...rowHashes(row),
     firstVerdict,
     okFirst,
     finalStatus: cas.status,
@@ -239,7 +239,7 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
         expected: row.expected,
         holdout: !!row.holdout,
         caseId: row.caseId ?? null,
-        rowHash: rowHash(row),
+        ...rowHashes(row),
         firstVerdict: null,
         okFirst: false,
         finalStatus: 'not-selected',
@@ -337,9 +337,8 @@ const FLOORS = { blockRecall: 0.75, cleanPass: 0.85, firstFailRecallSonnetOnly: 
 /**
  * Regression verdict for one reviewer section vs baseline. gateHash mismatch → SKIPPED loudly;
  * then row-set-aware pairing: the flip table runs over the INTERSECTION of row ids in both runs
- * (corpus growth is not a skip), excluding shared ids whose `rowHash` changed ("changed" — a
- * hand-edited row is not the same fixture). Old-format baselines without rowHash can't detect
- * drift: every shared row pairs, and the report warns once. Flips use okFinal when both runs had
+ * (corpus growth is not a skip), excluding shared ids whose behavior changed (rowChanged — a
+ * metadata-only edit still pairs; hash-less baselines pair all, warned). Flips use okFinal when both runs had
  * the cascade, else okFirst. Returns {skipped, regressed, improved, detail}; unstable rows
  * (2-of-2 rerun flip-backs) are excluded and counted.
  */
@@ -371,7 +370,7 @@ export function compareReviewer(name, nowRows, nowMeta, base, { crossGate = fals
       unstable += 1;
       continue;
     }
-    if (hasRowHash && row.rowHash !== undefined && row.rowHash !== baseRow.rowHash) {
+    if (hasRowHash && row.rowHash !== undefined && rowChanged(baseRow, row)) {
       changed += 1;
       continue;
     }
@@ -604,7 +603,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
           expected: row.expected,
           holdout: !!row.holdout,
           caseId: row.caseId ?? null,
-          rowHash: rowHash(row),
+          ...rowHashes(row),
           firstVerdict: null,
           okFirst: false,
           finalStatus: 'paused-skipped',
@@ -631,7 +630,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
           expected: row.expected,
           holdout: !!row.holdout,
           caseId: row.caseId ?? null,
-          rowHash: rowHash(row),
+          ...rowHashes(row),
           firstVerdict: null,
           okFirst: false,
           finalStatus: 'engine-error',
@@ -645,7 +644,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
       }
       appendFileSync(
         progressFile(MODEL, CASCADE),
-        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, rowHash: rowHash(row), res })}\n`,
+        `${JSON.stringify({ reviewer: reviewer.name, gateHash: meta.gateHash, ...rowHashes(row), res })}\n`,
       );
       if (RETRYABLE.has(res.subcause)) {
         consecutiveOutages += 1;
@@ -674,7 +673,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
         // A hand-edited/replaced row is not the same fixture — skip it rather than pairing
         // stale content with a fresh run (rowUnchanged treats hash-less old baselines as safe
         // to pair, since drift can't be detected there — matches compareReviewer's fallback).
-        if (!rowUnchanged(baseRow, res.rowHash)) continue;
+        if (!rowUnchanged(baseRow, res)) continue;
         const wasOk = meta.cascade ? baseRow.okFinal : baseRow.okFirst;
         const isOk = meta.cascade ? res.okFinal : res.okFirst;
         if (wasOk !== isOk) {
@@ -800,6 +799,7 @@ async function runBench(targets, { dev, only, writeBaseline, failMode, fresh, ag
               okFinal: r.okFinal,
               finalStatus: r.finalStatus,
               rowHash: r.rowHash,
+              behaviorHash: r.behaviorHash,
             },
           ]),
         ),
