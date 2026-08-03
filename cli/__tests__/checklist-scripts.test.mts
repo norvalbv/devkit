@@ -73,72 +73,74 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.items.length).toBeGreaterThan(0);
   });
 
-  it.each(
-    REVIEW_ROOT_CASES,
-  )('%s consumes the exact review-mode roots injected by the gate', (skill, envName, stateName) => {
-    const repo = mkdtempSync(join(tmpdir(), 'checklist-review-roots-'));
-    dirs.push(repo);
-    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
-    git(['init', '-q']);
-    writeFileSync(
-      join(repo, 'guard.config.json'),
-      JSON.stringify({ review: { backendRoots: [], frontendRoots: [] } }),
-    );
-    mkdirSync(join(repo, 'apps', 'web'), { recursive: true });
-    mkdirSync(join(repo, 'outside'), { recursive: true });
-    writeFileSync(
-      join(repo, 'apps', 'web', 'changed.tsx'),
-      'export const login = (password) => fetch("/api", { body: password });\n',
-    );
-    writeFileSync(join(repo, 'outside', 'ignored.tsx'), 'export const unrelated = true;\n');
-    git(['add', '.']);
-    const script = fileURLToPath(
-      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
-    );
-    const r = spawnSync('node', [script, 'generate'], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        DEVKIT_RUN_MODE: 'review',
-        [envName]: JSON.stringify([' apps/web ']),
-      },
-    });
-    expect(r.status, r.stderr).toBe(0);
-    const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
-    expect(state.files ?? state.items).not.toHaveLength(0);
-    expect(JSON.stringify(state)).not.toContain('outside/ignored.tsx');
-  });
+  it.each(REVIEW_ROOT_CASES)(
+    '%s consumes the exact review-mode roots injected by the gate',
+    (skill, envName, stateName) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-review-roots-'));
+      dirs.push(repo);
+      const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+      git(['init', '-q']);
+      writeFileSync(
+        join(repo, 'guard.config.json'),
+        JSON.stringify({ review: { backendRoots: [], frontendRoots: [] } }),
+      );
+      mkdirSync(join(repo, 'apps', 'web'), { recursive: true });
+      mkdirSync(join(repo, 'outside'), { recursive: true });
+      writeFileSync(
+        join(repo, 'apps', 'web', 'changed.tsx'),
+        'export const login = (password) => fetch("/api", { body: password });\n',
+      );
+      writeFileSync(join(repo, 'outside', 'ignored.tsx'), 'export const unrelated = true;\n');
+      git(['add', '.']);
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+      const r = spawnSync('node', [script, 'generate'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          DEVKIT_RUN_MODE: 'review',
+          [envName]: JSON.stringify([' apps/web ']),
+        },
+      });
+      expect(r.status, r.stderr).toBe(0);
+      const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
+      expect(state.files ?? state.items).not.toHaveLength(0);
+      expect(JSON.stringify(state)).not.toContain('outside/ignored.tsx');
+    },
+  );
 
-  it.each(
-    CHECKLIST_CASES,
-  )('%s preserves its artifact for independent review-mode verification', (skill, stateName) => {
-    const repo = mkdtempSync(join(tmpdir(), 'checklist-review-cleanup-'));
-    dirs.push(repo);
-    const stateDir = join(repo, '.claude');
-    const stateFile = join(stateDir, stateName);
-    mkdirSync(stateDir, { recursive: true });
-    writeFileSync(stateFile, '{}');
-    const script = fileURLToPath(
-      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
-    );
+  it.each(CHECKLIST_CASES)(
+    '%s preserves its artifact for independent review-mode verification',
+    (skill, stateName) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-review-cleanup-'));
+      dirs.push(repo);
+      const stateDir = join(repo, '.claude');
+      const stateFile = join(stateDir, stateName);
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(stateFile, '{}');
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
 
-    const reviewCleanup = spawnSync('node', [script, 'cleanup'], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: { ...process.env, DEVKIT_RUN_MODE: 'review' },
-    });
-    expect(reviewCleanup.status, reviewCleanup.stderr).toBe(0);
-    expect(existsSync(stateFile)).toBe(true);
+      const reviewCleanup = spawnSync('node', [script, 'cleanup'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'review' },
+      });
+      expect(reviewCleanup.status, reviewCleanup.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(true);
 
-    const normalCleanup = spawnSync('node', [script, 'cleanup'], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
-    });
-    expect(normalCleanup.status, normalCleanup.stderr).toBe(0);
-    expect(existsSync(stateFile)).toBe(false);
-  });
+      const normalCleanup = spawnSync('node', [script, 'cleanup'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
+      });
+      expect(normalCleanup.status, normalCleanup.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(false);
+    },
+  );
 
   it('correctness unions scanRoots with injected domain roots outside the static topology', () => {
     const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-review-roots-'));
@@ -179,45 +181,46 @@ describe('skill checklist script (spawned source)', () => {
     expect(JSON.stringify(state)).not.toContain('static-api/excluded.ts');
   });
 
-  it.each(
-    REVIEW_ROOT_CASES,
-  )('%s rejects unsafe injected roots before constructing a Git pathspec', (skill, envName) => {
-    const repo = repoWithCraftedFile();
-    const script = fileURLToPath(
-      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
-    );
-    for (const roots of [
-      [],
-      [''],
-      ['   '],
-      ['/outside'],
-      ['../outside'],
-      ['src/../outside'],
-      ['C:\\outside'],
-      [':(exclude)**'],
-      ['./:(exclude)**'],
-      [3],
-    ]) {
-      const r = spawnSync('node', [script, 'generate'], {
+  it.each(REVIEW_ROOT_CASES)(
+    '%s rejects unsafe injected roots before constructing a Git pathspec',
+    (skill, envName) => {
+      const repo = repoWithCraftedFile();
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+      for (const roots of [
+        [],
+        [''],
+        ['   '],
+        ['/outside'],
+        ['../outside'],
+        ['src/../outside'],
+        ['C:\\outside'],
+        [':(exclude)**'],
+        ['./:(exclude)**'],
+        [3],
+      ]) {
+        const r = spawnSync('node', [script, 'generate'], {
+          cwd: repo,
+          encoding: 'utf8',
+          env: { ...process.env, DEVKIT_RUN_MODE: 'review', [envName]: JSON.stringify(roots) },
+        });
+        expect(r.status, `${JSON.stringify(roots)}\n${r.stderr}`).not.toBe(0);
+        expect(r.stderr).toContain(envName);
+      }
+
+      const dot = spawnSync('node', [script, 'generate'], {
         cwd: repo,
         encoding: 'utf8',
-        env: { ...process.env, DEVKIT_RUN_MODE: 'review', [envName]: JSON.stringify(roots) },
+        env: {
+          ...process.env,
+          DEVKIT_RUN_MODE: 'review',
+          [envName]: JSON.stringify([' . ']),
+        },
       });
-      expect(r.status, `${JSON.stringify(roots)}\n${r.stderr}`).not.toBe(0);
-      expect(r.stderr).toContain(envName);
-    }
-
-    const dot = spawnSync('node', [script, 'generate'], {
-      cwd: repo,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        DEVKIT_RUN_MODE: 'review',
-        [envName]: JSON.stringify([' . ']),
-      },
-    });
-    expect(dot.status, dot.stderr).toBe(0);
-  });
+      expect(dot.status, dot.stderr).toBe(0);
+    },
+  );
 
   it('ignores review-only injected roots outside review mode', () => {
     const repo = repoWithCraftedFile();

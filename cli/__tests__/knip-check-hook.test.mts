@@ -54,16 +54,14 @@ const run = (dir, { stopHookActive = false, edits = ['KNIP_RAN.ts'] } = {}) => {
 describe.skipIf(!HAS_BUN)('knip-check.sh gate behaviour', () => {
   // Forms the ORIGINAL hook missed (it checked only knip.json/.jsonc/.ts/.config.ts). Parametrised
   // so dropping any arm of the detection loop regresses a test — the bug was an INCOMPLETE list.
-  it.each([
-    '.knip.json',
-    '.knip.jsonc',
-    'knip.js',
-    'knip.config.js',
-  ])('Defect C: runs knip for a %s config (a newly-supported form)', (configFile) => {
-    const r = run(fixture({ [configFile]: '{}', 'package.json': withKnipScript() }));
-    expect(r.status).toBe(2);
-    expect(r.stderr).toContain('KNIP_RAN');
-  });
+  it.each(['.knip.json', '.knip.jsonc', 'knip.js', 'knip.config.js'])(
+    'Defect C: runs knip for a %s config (a newly-supported form)',
+    (configFile) => {
+      const r = run(fixture({ [configFile]: '{}', 'package.json': withKnipScript() }));
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain('KNIP_RAN');
+    },
+  );
 
   it('Defect C: runs knip for a package.json#knip config key (no separate config file)', () => {
     const r = run(fixture({ 'package.json': withKnipScript({ knip: {} }) }));

@@ -749,55 +749,51 @@ describe('plan critique evidence bindings', () => {
     });
   });
 
-  it.each([
-    'corrupt_json',
-    'open_schema',
-    'oversized',
-    'public_mode',
-    'wrong_filename',
-  ] as const)('fails open on a %s binding', (corruption) => {
-    const repository = createRepository();
-    const root = evidenceRoot();
-    const record = storedRecord(repository, root, `binding-${corruption}`);
-    persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
-    const file = bindingFile(repository, record.workId);
-    if (corruption === 'corrupt_json') writeFileSync(file, '{');
-    if (corruption === 'open_schema') {
-      const binding = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-      binding.unexpected = true;
-      writeFileSync(file, canonicalPlanCritiqueRecordJson(binding));
-    }
-    if (corruption === 'oversized') writeFileSync(file, Buffer.alloc(16 * 1024 + 1));
-    if (corruption === 'public_mode') chmodSync(file, 0o644);
-    if (corruption === 'wrong_filename')
-      renameSync(file, path.join(path.dirname(file), `${'0'.repeat(64)}.json`));
+  it.each(['corrupt_json', 'open_schema', 'oversized', 'public_mode', 'wrong_filename'] as const)(
+    'fails open on a %s binding',
+    (corruption) => {
+      const repository = createRepository();
+      const root = evidenceRoot();
+      const record = storedRecord(repository, root, `binding-${corruption}`);
+      persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+      const file = bindingFile(repository, record.workId);
+      if (corruption === 'corrupt_json') writeFileSync(file, '{');
+      if (corruption === 'open_schema') {
+        const binding = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+        binding.unexpected = true;
+        writeFileSync(file, canonicalPlanCritiqueRecordJson(binding));
+      }
+      if (corruption === 'oversized') writeFileSync(file, Buffer.alloc(16 * 1024 + 1));
+      if (corruption === 'public_mode') chmodSync(file, 0o644);
+      if (corruption === 'wrong_filename')
+        renameSync(file, path.join(path.dirname(file), `${'0'.repeat(64)}.json`));
 
-    expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toEqual({
-      status: 'unavailable',
-      reason: 'malformed_binding',
-      candidates: 1,
-    });
-  });
+      expect(resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root })).toEqual({
+        status: 'unavailable',
+        reason: 'malformed_binding',
+        candidates: 1,
+      });
+    },
+  );
 
-  it.each([
-    'missing_record',
-    'corrupt_record',
-    'corrupt_blob',
-  ] as const)('fails open on a %s after binding', (corruption) => {
-    const repository = createRepository();
-    const root = evidenceRoot();
-    const record = storedRecord(repository, root, `record-${corruption}`);
-    persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
-    const recordFile = path.join(root, 'records', `${record.critiqueId}.json`);
-    if (corruption === 'missing_record') unlinkSync(recordFile);
-    if (corruption === 'corrupt_record') writeFileSync(recordFile, '{}\n');
-    if (corruption === 'corrupt_blob')
-      writeFileSync(path.join(root, record.exactResponse.ref), 'x');
+  it.each(['missing_record', 'corrupt_record', 'corrupt_blob'] as const)(
+    'fails open on a %s after binding',
+    (corruption) => {
+      const repository = createRepository();
+      const root = evidenceRoot();
+      const record = storedRecord(repository, root, `record-${corruption}`);
+      persistPlanCritiqueBinding(record.critiqueId, { cwd: repository, evidenceRoot: root });
+      const recordFile = path.join(root, 'records', `${record.critiqueId}.json`);
+      if (corruption === 'missing_record') unlinkSync(recordFile);
+      if (corruption === 'corrupt_record') writeFileSync(recordFile, '{}\n');
+      if (corruption === 'corrupt_blob')
+        writeFileSync(path.join(root, record.exactResponse.ref), 'x');
 
-    expect(
-      resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: record.workId }),
-    ).toEqual({ status: 'unavailable', reason: 'malformed_record', candidates: 1 });
-  });
+      expect(
+        resolvePlanCritiqueBinding({ cwd: repository, evidenceRoot: root, workId: record.workId }),
+      ).toEqual({ status: 'unavailable', reason: 'malformed_record', candidates: 1 });
+    },
+  );
 
   it('does not bind an ineligible record and rechecks eligibility during resolution', () => {
     const repository = createRepository();

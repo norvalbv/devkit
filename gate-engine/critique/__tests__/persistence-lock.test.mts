@@ -326,59 +326,57 @@ describe('plan critique persistence lock', () => {
     expect(existsSync(moved)).toBe(true);
   });
 
-  it.each([
-    'remove',
-    'remove_parent',
-    'remove_release_failure',
-    'replace',
-  ] as const)('does not authorize a root %s while waiting', async (mutation) => {
-    const scratch = temporaryDirectory(`critique-existing-root-${mutation}-`);
-    const { alias, real } = aliasRoots(scratch);
-    const canonical = resolvePlanCritiqueEvidenceRoot({ root: real }, true) as string;
-    const parent = path.dirname(canonical);
-    const entered = path.join(scratch, 'holder-entered');
-    const contenderWaiting = path.join(scratch, 'contender-waiting');
-    const mutationComplete = path.join(scratch, 'mutation-complete');
-    const holder = runChild(rootMutationHolderScript(scratch), [
-      real,
-      entered,
-      contenderWaiting,
-      mutationComplete,
-      mutation,
-    ]);
-    await waitForFile(entered);
-
-    let actionCalled = false;
-    const contend = () =>
-      signalMainLockAttempt(
+  it.each(['remove', 'remove_parent', 'remove_release_failure', 'replace'] as const)(
+    'does not authorize a root %s while waiting',
+    async (mutation) => {
+      const scratch = temporaryDirectory(`critique-existing-root-${mutation}-`);
+      const { alias, real } = aliasRoots(scratch);
+      const canonical = resolvePlanCritiqueEvidenceRoot({ root: real }, true) as string;
+      const parent = path.dirname(canonical);
+      const entered = path.join(scratch, 'holder-entered');
+      const contenderWaiting = path.join(scratch, 'contender-waiting');
+      const mutationComplete = path.join(scratch, 'mutation-complete');
+      const holder = runChild(rootMutationHolderScript(scratch), [
+        real,
+        entered,
         contenderWaiting,
         mutationComplete,
-        () =>
-          withExistingPlanCritiquePersistenceLock({ root: alias }, () => {
-            actionCalled = true;
-            return 'called';
-          }),
-        mutation === 'remove_release_failure',
-      );
-    if (mutation === 'replace')
-      expect(contend).toThrow(
-        /^plan critique evidence root changed while acquiring persistence lock$/,
-      );
-    else if (mutation === 'remove_release_failure')
-      expect(contend).toThrow(/^injected release failure$/);
-    else expect(contend()).toEqual({ status: 'absent' });
+        mutation,
+      ]);
+      await waitForFile(entered);
 
-    expect(await holder).toEqual({ code: 0, stderr: '' });
-    expect(actionCalled).toBe(false);
-    expect(existsSync(canonical)).toBe(mutation === 'replace');
-    expect(existsSync(parent)).toBe(mutation !== 'remove_parent');
-    if (existsSync(parent)) {
-      const remainingLocks = readdirSync(parent).filter((name) =>
-        name.startsWith('.plan-critique-'),
-      );
-      expect(remainingLocks).toHaveLength(mutation === 'remove_release_failure' ? 1 : 0);
-    }
-  });
+      let actionCalled = false;
+      const contend = () =>
+        signalMainLockAttempt(
+          contenderWaiting,
+          mutationComplete,
+          () =>
+            withExistingPlanCritiquePersistenceLock({ root: alias }, () => {
+              actionCalled = true;
+              return 'called';
+            }),
+          mutation === 'remove_release_failure',
+        );
+      if (mutation === 'replace')
+        expect(contend).toThrow(
+          /^plan critique evidence root changed while acquiring persistence lock$/,
+        );
+      else if (mutation === 'remove_release_failure')
+        expect(contend).toThrow(/^injected release failure$/);
+      else expect(contend()).toEqual({ status: 'absent' });
+
+      expect(await holder).toEqual({ code: 0, stderr: '' });
+      expect(actionCalled).toBe(false);
+      expect(existsSync(canonical)).toBe(mutation === 'replace');
+      expect(existsSync(parent)).toBe(mutation !== 'remove_parent');
+      if (existsSync(parent)) {
+        const remainingLocks = readdirSync(parent).filter((name) =>
+          name.startsWith('.plan-critique-'),
+        );
+        expect(remainingLocks).toHaveLength(mutation === 'remove_release_failure' ? 1 : 0);
+      }
+    },
+  );
 
   it('serializes child processes that use real and alias roots', async () => {
     const scratch = temporaryDirectory('critique-persistence-processes-');
