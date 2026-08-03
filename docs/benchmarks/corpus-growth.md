@@ -155,4 +155,7 @@ runner); freshness goes stale exactly when one moves.
    SWE-Bench Multimodal) — the original c-CRAB / CR-Bench TS/JS import was scoped 2026-08-02 and
    is not viable.
 6. Mine the override-valve history + human review comments (decoy/gold sources already banked).
-7. Optional: weekly scheduled routine (mine → propose → adapt → draft corpus PR).
+7. ~~Weekly scheduled routine~~ — DONE 2026-08-03 (sc-1415): `propose/weekly-mining.sh` runs
+   both miners + both propose stages weekly via the owner's local crontab (Mon 09:00),
+   notify-only — mine-telemetry needs this machine's collector db, so local cron, not cloud;
+   adaptation stays a judgment session and is never automated.
