@@ -1,13 +1,67 @@
 // @ts-nocheck — BENCH-ONLY (excluded from tsc, see tsconfig.json exclude); loose types deliberate.
 
 /**
- * mine-common — the plumbing both miners (mine-bots.mts, mine-telemetry.mts) share: url-keyed
- * candidates-file reading, `--repo` argv collection, and read-only sqlite3 access. Extracted so
- * the two stay byte-identical by construction instead of by copy (commit-guard caught the copies).
+ * mine-common — the plumbing the miners (mine-bots.mts, mine-telemetry.mts) and proposers share:
+ * url-keyed candidates-file reading, `--repo` argv collection, promoted-corpus url collection,
+ * and read-only sqlite3 access. Extracted so consumers stay byte-identical by construction
+ * instead of by copy (commit-guard caught the copies).
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+
+const CORPUS_CASES_FILE_RE = /^cases-.*\.jsonl$/;
+
+/** Collect every source.url already promoted into a cases-*.jsonl corpus file in `dir` —
+ * the dedup key that keeps miners and proposers from re-offering landed candidates.
+ *
+ * This set is treated as AUTHORITATIVE by makeHardDrop ('a landed source.url must never be
+ * re-queued'), so it fails closed: a set that is silently short re-offers work already promoted,
+ * and the re-offer looks identical to a genuine new candidate. Only ENOENT is a real empty —
+ * a corpus that does not exist yet has promoted nothing. Every other failure (EACCES, EIO, a
+ * corpus file that reads but does not parse) means we cannot know what has landed, so it throws
+ * rather than hand back a partial answer the caller cannot tell apart from a complete one. */
+export function collectCorpusUrls(dir) {
+  const urls = new Set();
+  let entries = [];
+  try {
+    entries = readdirSync(dir);
+  } catch (e) {
+    if (e.code === 'ENOENT') return urls;
+    throw new Error(`mine-common: cannot list corpus dir ${dir} (${e.code ?? e.message}) — \
+refusing to dedup against an unknown corpus`);
+  }
+  for (const name of entries) {
+    if (!CORPUS_CASES_FILE_RE.test(name)) continue;
+    const file = path.join(dir, name);
+    let content = '';
+    try {
+      content = readFileSync(file, 'utf8');
+    } catch (e) {
+      if (e.code === 'ENOENT') continue; // vanished between readdir and read
+      throw new Error(`mine-common: cannot read promoted corpus ${name} (${e.code ?? e.message}) — \
+refusing to dedup against an unknown corpus`);
+    }
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!lines[i].trim()) continue;
+      let row = null;
+      try {
+        row = JSON.parse(lines[i]);
+      } catch {
+        // A corpus row that does not parse is a URL we cannot see, i.e. the same silent
+        // under-count as an unreadable file — never the tolerated skip readCandidatesFile allows
+        // for an unlanded merge input.
+        throw new Error(`mine-common: malformed JSON in promoted corpus ${name} line ${i + 1} — \
+refusing to dedup against an unknown corpus`);
+      }
+      const u = row?.source?.url;
+      if (u) urls.add(u);
+    }
+  }
+  return urls;
+}
 
 /** Parse an existing url-keyed candidates .jsonl into a Map<url, row>; malformed lines are
  * skipped rather than aborting the whole merge. */

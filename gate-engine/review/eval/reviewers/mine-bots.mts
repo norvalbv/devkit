@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,7 @@ import {
   sqlString,
 } from './mine-bots-lib.mts';
 import {
+  collectCorpusUrls,
   collectRepoArgs,
   readCandidatesFile,
   sqlite3Available,
@@ -56,7 +57,6 @@ const HUMAN_AUTHORS = new Set(['norvalbv']);
 const DEFAULT_REPOS = ['benord-labs/frink', 'norvalbv/devkit'];
 const TRUNCATE_LEN = 4000;
 const EXCERPT_LEN = 500;
-const CORPUS_CASES_FILE_RE = /^cases-.*\.jsonl$/;
 
 function gh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
@@ -259,41 +259,6 @@ function scopeForPr(dbPath, cache, repoFull, repoShort, prNumber) {
   }
   cache.set(key, scopeRows);
   return scopeRows;
-}
-
-// ---------------------------------------------------------------------------------------------
-// Merge / dedupe against existing candidates.jsonl and the promoted corpus.
-// ---------------------------------------------------------------------------------------------
-
-function collectCorpusUrls(dir) {
-  const urls = new Set();
-  let entries = [];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return urls;
-  }
-  for (const name of entries) {
-    if (!CORPUS_CASES_FILE_RE.test(name)) continue;
-    let content = '';
-    try {
-      content = readFileSync(path.join(dir, name), 'utf8');
-    } catch (e) {
-      console.error(`mine-bots: corpus read failed for ${name} (${e.message?.split('\n')[0]})`);
-      continue;
-    }
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const row = JSON.parse(line);
-        const u = row?.source?.url;
-        if (u) urls.add(u);
-      } catch {
-        // skip malformed line
-      }
-    }
-  }
-  return urls;
 }
 
 // ---------------------------------------------------------------------------------------------

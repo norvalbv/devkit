@@ -105,7 +105,27 @@ runner); freshness goes stale exactly when one moves.
 5. **A bench the reviewer aces has gone stale.** The gap is the signal; the loop's job is to keep
    regenerating it, not to be driven to 1.0.
 
-## State as of 2026-08-02
+## State as of 2026-08-03
+
+- Corpus: correctness 140 (75 gold / 65 decoy), api-security 44 (23 gold), frontend-security 21
+  (12 gold). Backend-perf 13, frontend-perf 19 — untouched. **`known-answer` provenance is live**:
+  8 GHSA-derived golds (7 api-security, 1 frontend-security), the first rows whose labels are
+  public facts rather than mined judgments, so the security suites can finally report an
+  absolute-recall slice (measurement-rule 2) instead of precision + relative recall only.
+- **House rule, security suites (2026-08-03, from adversarial pair review):** a PASS twin must
+  satisfy the target suite checklist's OWN stated PASS shape — not merely be safer than its gold.
+  Six of fourteen first-draft pairs failed this. Three decoys were "fixed" in ways the checklist
+  still FAILs: better SQL escaping while still interpolating (bound parameters are the only
+  passing shape), a widened shell-metacharacter class while still handing a shell request data
+  (only `execFile` + argv passes), and origin-stripped credentials while still following the
+  cross-origin hop. Each is a guaranteed false-FAIL charged to a correct reviewer. **Corollary:
+  escaper-completeness defects can only be benchmarked as golds here — no escaping-based PASS
+  exists in these checklists.** Two further decoys carried unlabeled second defects (a dropped
+  mass-assignment allowlist; a `JSON.stringify` escaper spliced into a JSX *attribute* position,
+  where backslash is not an escape character) and one left the gold's own misclassification
+  reachable in its twin. Read the target SKILL.md's PASS clause before authoring any decoy.
+
+### Earlier: state as of 2026-08-02
 
 - Corpus: correctness 66→120 (65 gold / 55 decoy), api-security 14→30 (first mined domain rows).
   Backend-perf 13, frontend pair 31 each — untouched this cycle.
@@ -149,11 +169,12 @@ runner); freshness goes stale exactly when one moves.
    was uninformative at 2 raters without model `pred_probs`; it needs per-row predicted
    probabilities from a bench run, not another labeler.
 3. Calibration slice (localized vs full-context delta).
-4. Domain-suite cascade re-bench (needs opus) now that api-security has 30 rows.
-5. Known-answer import for absolute recall (security suites especially): ratify and build one of
-   the replacements in measurement-rule 2 (GHSA/npm advisory mining, or the CR-Bench recipe over
-   SWE-Bench Multimodal) — the original c-CRAB / CR-Bench TS/JS import was scoped 2026-08-02 and
-   is not viable.
+4. Domain-suite cascade re-bench (needs opus) now that api-security has 44 rows.
+5. ~~Known-answer import for absolute recall~~ — DONE 2026-08-03 (sc-1408): GHSA/npm advisory
+   mining was the ratified replacement in measurement-rule 2 (the original c-CRAB / CR-Bench
+   TS/JS import was scoped 2026-08-02 and is not viable). `mine-ghsa.mts` + `propose-ghsa.mts`
+   run weekly alongside the other miners; the first 8 golds (7 api-security, 1 frontend-security)
+   landed in this batch. Growing the slice is ordinary corpus work from here, not a build.
 6. Mine the override-valve history + human review comments (decoy/gold sources already banked).
 7. ~~Weekly scheduled routine~~ — DONE 2026-08-03 (sc-1415): `propose/weekly-mining.sh` runs
    both miners + both propose stages weekly via the owner's local crontab (Mon 09:00),
