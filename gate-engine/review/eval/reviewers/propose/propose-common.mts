@@ -7,7 +7,9 @@
  * clone gate flagged the duplicated drop-histogram block between them.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** kebab slug from free text, for queue ids. */
 export function slugify(text, maxWords = 5) {
@@ -59,4 +61,54 @@ export function makeDropCounter() {
     drops[reason] = (drops[reason] ?? 0) + n;
   };
   return { drops, bump };
+}
+
+/** Parse `--max N` (positive integer) or exit 2 under the script's name. */
+export function parseMaxArg(argv, name, fallback = 10) {
+  const maxIdx = argv.indexOf('--max');
+  const max = maxIdx !== -1 ? Number.parseInt(argv[maxIdx + 1], 10) : fallback;
+  if (!Number.isFinite(max) || max <= 0) {
+    console.error(`${name}: --max must be a positive integer`);
+    process.exit(2);
+  }
+  return max;
+}
+
+/** Exit 2 with a remedy hint when a required input file is absent. */
+export function requireFile(file, name, hint) {
+  if (!existsSync(file)) {
+    console.error(`${name}: missing ${path.basename(file)} — ${hint}`);
+    process.exit(2);
+  }
+}
+
+/** Run the hard-drop filter over candidates, bumping the histogram; returns survivors. */
+export function partitionDrops(candidates, hardDropReason, bump) {
+  const kept = [];
+  for (const c of candidates) {
+    const dropReason = hardDropReason(c);
+    if (dropReason) bump(dropReason);
+    else kept.push(c);
+  }
+  return kept;
+}
+
+/** Write a queue file (one JSON line per row), creating raw/ if needed. */
+export function writeQueue(outFile, rows) {
+  mkdirSync(path.dirname(outFile), { recursive: true });
+  writeFileSync(outFile, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+}
+
+/** stderr triage summary: script-specific lines + the shared drops/output-path tail. */
+export function printSummary(lines, drops, baseDir, outFile) {
+  console.error(
+    [...lines, `  drops: ${formatDrops(drops)}`, `  → ${path.relative(baseDir, outFile)}`].join(
+      '\n',
+    ),
+  );
+}
+
+/** Invoke main() only when this module is the direct CLI entrypoint. */
+export function runIfMain(metaUrl, main) {
+  if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(metaUrl)) main();
 }

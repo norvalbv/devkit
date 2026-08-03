@@ -20,10 +20,20 @@
  * extra care and usually waits).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { formatDrops, makeDropCounter, readJsonl, slugify, uniqueId } from './propose-common.mts';
+import {
+  makeDropCounter,
+  parseMaxArg,
+  partitionDrops,
+  printSummary,
+  readJsonl,
+  requireFile,
+  runIfMain,
+  slugify,
+  uniqueId,
+  writeQueue,
+} from './propose-common.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // This script lives in propose/ — candidates + raw/ live one level up, beside the corpora.
@@ -59,33 +69,13 @@ const makeQueueId = (candidate, seen) =>
   uniqueId(`corr-tel-${slugify(candidate.failReason)}`, seen);
 
 function main() {
-  const argv = process.argv.slice(2);
-  const maxIdx = argv.indexOf('--max');
-  const max = maxIdx !== -1 ? Number.parseInt(argv[maxIdx + 1], 10) : 10;
-  if (!Number.isFinite(max) || max <= 0) {
-    console.error('propose-telemetry: --max must be a positive integer');
-    process.exit(2);
-  }
-  if (!existsSync(CANDIDATES_FILE)) {
-    console.error(
-      `propose-telemetry: missing ${path.basename(CANDIDATES_FILE)} — run mine-telemetry.mts first`,
-    );
-    process.exit(2);
-  }
+  const max = parseMaxArg(process.argv.slice(2), 'propose-telemetry');
+  requireFile(CANDIDATES_FILE, 'propose-telemetry', 'run mine-telemetry.mts first');
 
   const candidates = readJsonl(CANDIDATES_FILE);
   const { drops, bump } = makeDropCounter();
 
-  const kept = [];
-  for (const c of candidates) {
-    const dropReason = hardDropReason(c);
-    if (dropReason) {
-      bump(dropReason);
-      continue;
-    }
-    kept.push(c);
-  }
-
+  const kept = partitionDrops(candidates, hardDropReason, bump);
   kept.sort(compareCandidates);
   const queued = kept.slice(0, max);
   if (kept.length > max) bump(`over-max:${kept.length - max}`);
@@ -98,21 +88,19 @@ function main() {
     candidate,
   }));
 
-  mkdirSync(RAW_DIR, { recursive: true });
-  writeFileSync(OUT_FILE, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+  writeQueue(OUT_FILE, rows);
 
   const tiers = { 0: 0, 1: 0, 2: 0 };
   for (const c of queued) tiers[evidenceTier(c)] += 1;
-  console.error(
+  printSummary(
     [
       `propose-telemetry: ${candidates.length} candidates → ${kept.length} in charter → ${rows.length} queued`,
       `  evidence tiers queued: both-diffs:${tiers[0]}, fail-diff-only:${tiers[1]}, fail-reason-only:${tiers[2]}`,
-      `  drops: ${formatDrops(drops)}`,
-      `  → ${path.relative(reviewersDir, OUT_FILE)}`,
-    ].join('\n'),
+    ],
+    drops,
+    reviewersDir,
+    OUT_FILE,
   );
 }
 
-const invokedDirectly =
-  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) main();
+runIfMain(import.meta.url, main);
