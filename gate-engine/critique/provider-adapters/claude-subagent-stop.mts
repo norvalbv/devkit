@@ -1,9 +1,12 @@
-import { types as utilTypes } from 'node:util';
 import {
   PLAN_CRITIQUE_CALLBACK_IDENTITY_MAX_BYTES,
   type PlanCritiqueCompletedCallbackV1,
 } from '../capture-normalizer.mts';
-import { PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, sha256Bytes } from '../evidence-record.mts';
+import {
+  PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES,
+  plainRecord,
+  sha256Bytes,
+} from '../evidence-record.mts';
 
 export const CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES = 1024;
 
@@ -28,18 +31,6 @@ export type ClaudePlanCritiqueSubagentStopResultV1 =
 
 export interface ClaudePlanCritiqueAdapterContextV1 {
   repository: PlanCritiqueCompletedCallbackV1['repository'];
-}
-
-function plainRecord(value: unknown): Record<string, unknown> | null {
-  if (value === null || typeof value !== 'object') return null;
-  try {
-    if (utilTypes.isProxy(value) || Array.isArray(value)) return null;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return null;
-    return value as Record<string, unknown>;
-  } catch {
-    return null;
-  }
 }
 
 function ownDataValue(record: Record<string, unknown>, key: string): unknown {

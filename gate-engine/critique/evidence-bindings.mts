@@ -2,6 +2,7 @@ import {
   canonicalPlanCritiqueRecordJson,
   type PlanCritiqueRecordV1,
   sha256Bytes,
+  validText,
 } from './evidence-record.mts';
 import { readPlanCritiqueRecord } from './evidence-store.mts';
 import {
@@ -34,7 +35,6 @@ const CRITIQUE_ID = /^pc1_[0-9a-f]{64}$/;
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const BINDING_FILE = /^[0-9a-f]{64}\.json$/;
-const MAX_TEXT_BYTES = 4 * 1024;
 const MAX_BINDING_BYTES = 16 * 1024;
 const BINDING_PATH = ['devkit', 'plan-critique-bindings', 'v1'] as const;
 
@@ -96,18 +96,6 @@ function exactObject(value: unknown, fields: readonly string[]): Record<string, 
   if (!isObject(value)) return null;
   const keys = Object.keys(value);
   return keys.length === fields.length && keys.every((key) => fields.includes(key)) ? value : null;
-}
-
-function validText(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.trim().length > 0 &&
-    Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-    ![...value].some((character) => {
-      const code = character.charCodeAt(0);
-      return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-    })
-  );
 }
 
 function canonicalBindingJson(binding: PlanCritiqueBindingV1): Buffer {
