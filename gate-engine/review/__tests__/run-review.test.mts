@@ -135,6 +135,7 @@ function reviewAssets(): string {
   mkdirSync(join(root, 'agents'), { recursive: true });
   mkdirSync(join(root, 'skills', '_devkit'), { recursive: true });
   writeFileSync(join(root, 'skills', '_devkit', 'review-roots.mjs'), '// shared support\n');
+  writeFileSync(join(root, 'skills', '_devkit', 'checklist-store.mjs'), '// shared store\n');
   for (const reviewer of REVIEWERS) {
     writeFileSync(
       join(root, 'agents', `${reviewer.name}.md`),
@@ -439,6 +440,72 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
+  // sc-1437: the commit path salts the cache key with the consumer-side reviewer identity, so an
+  // asset edit invalidates a cached PASS in the field exactly as review mode's preflight does.
+  it('commit-path cache invalidates only the reviewer whose synced brief changed (sc-1437)', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    writeFileSync(
+      join(repo, '.claude', 'agents', 'api-security-reviewer.md'),
+      '---\nname: api-security-reviewer\n---\nCONSUMER brief v2.',
+    );
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec.mock.calls.map(([opts]) => opts.label)).toEqual(['review:api-security-reviewer']);
+  });
+
+  it('commit-path cache invalidates every checklist reviewer when checklist-store.mjs changes (sc-1437)', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    writeFileSync(
+      join(repo, '.claude', 'skills', '_devkit', 'checklist-store.mjs'),
+      'export {}; // v2\n',
+    );
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    // conventions-reviewer has no checklist, so its cached PASS must survive the store edit.
+    expect(exec.mock.calls.map(([opts]) => opts.label).sort()).toEqual([
+      'review:api-security-reviewer',
+      'review:backend-performance-reviewer',
+      'review:commit-guard',
+      'review:correctness-reviewer',
+    ]);
+  });
+
+  it('commit-path cache still hits when assets are synced and unchanged (sc-1437)', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    await runReviewGate(repo, { exec: passWithArtifact(repo) });
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('an unattributable identity keeps prompt_identity null but never reuses the legacy key namespace (sc-1437)', async () => {
+    // No syncSkillAssets: every checklist reviewer's identity is null (skills unreadable), while
+    // conventions-reviewer (brief-only) resolves. Telemetry must keep the honest null — the cache
+    // key substitutes the sentinel, and both must stay deterministic across runs.
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-null-identity';
+    await runReviewGate(repo, { exec: passWithArtifact(repo) });
+    const scope = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_scope');
+    const byReviewer = Object.fromEntries(scope.map((e) => [e.reviewer, e.prompt_identity]));
+    expect(byReviewer['api-security-reviewer']).toBeNull();
+    expect(byReviewer['conventions-reviewer']).toMatch(/^[0-9a-f]{64}$/);
+    // Second run: the sentinel-salted keys must hit (deterministic), zero judge spawns.
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
   it('a cache hit reports itself as its own event type — never as a synthetic review_result', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passWithArtifact(repo) }); // warm the cache off-telemetry
@@ -493,6 +560,10 @@ describe('runReviewGate — cascade + exit contract', () => {
   function syncSkillAssets(repo) {
     mkdirSync(join(repo, '.claude', 'skills', '_devkit'), { recursive: true });
     writeFileSync(join(repo, '.claude', 'skills', '_devkit', 'review-roots.mjs'), 'export {};\n');
+    writeFileSync(
+      join(repo, '.claude', 'skills', '_devkit', 'checklist-store.mjs'),
+      'export {};\n',
+    );
     for (const skill of [
       'api-security',
       'backend-performance',

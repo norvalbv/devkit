@@ -60,13 +60,13 @@ import {
 import {
   agentBody,
   cleanupChecklistState,
-  consumerReviewerIdentity,
   enforceChecklistContract,
   initializeCommitGuardChecklist,
   passAssetVerifier,
   preflightReviewAssets,
   type ReviewOutcome,
   readChecklistState,
+  resolveReviewerIdentities,
   reviewJudgeEnv,
 } from './runtime.mts';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
@@ -142,7 +142,7 @@ async function mapLimit<T, R>(
 
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
 // JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
-function gitCached(cwd: string, args: string[], files: string[]): string {
+export function gitCached(cwd: string, args: string[], files: string[]): string {
   return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
     cwd,
     encoding: 'utf8',
@@ -150,7 +150,7 @@ function gitCached(cwd: string, args: string[], files: string[]): string {
   });
 }
 
-function stagedFiles(cwd: string): string[] {
+export function stagedFiles(cwd: string): string[] {
   return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
     .split('\n')
     .map((s) => s.trim())
@@ -429,14 +429,20 @@ export async function runReviewGate(
   );
   const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
   const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
-  // Prompt-version identity for this run. Review mode already computed it over the PACKAGED assets
-  // (and needs the throwing preflight for its cache-safety contract); the ordinary commit/ship path
-  // has no asset root, so it reads the SYNCED consumer copies best-effort — same formula, so the two
-  // are comparable, and null rather than a throw when an asset is unreadable.
+  // Prompt-version identity + cache salt, one resolution for both roles (sc-1437: the identity is
+  // no longer telemetry-only — it salts the commit-path cache key so asset edits invalidate cached
+  // PASSes in the field). Composition lives in runtime.mts's resolveReviewerIdentities.
+  const { identities, cacheSalts } = resolveReviewerIdentities(
+    reviewMode,
+    identitySalts,
+    selected,
+    cwd,
+    cfg,
+  );
   const promptIdentity = (sel: ReviewerSelection): string | null =>
-    identitySalts.get(sel.reviewer.name) ?? consumerReviewerIdentity(cwd, cfg, sel.reviewer);
+    identities.get(sel.reviewer.name) ?? null;
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
-  const plan = planReviewWork(selected, diffs, cache, identitySalts, cacheKey);
+  const plan = planReviewWork(selected, diffs, cache, cacheSalts, cacheKey);
   for (const s of plan.scope) emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached);
   for (const line of plan.cachedLines) console.error(line);
   for (const c of plan.fullyCached) {
@@ -574,20 +580,4 @@ export async function runReviewGate(
   }
   if (inconclusive.length > 0) return finish(strict ? 3 : 2);
   return finish(0);
-}
-
-/** `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. */
-export function scanReview(cwd = process.cwd()) {
-  try {
-    const cfg = resolveGuardConfig(cwd);
-    const cache = loadCache(cwd);
-    for (const s of selectReviewers(stagedFiles(cwd), cfg)) {
-      const diff = gitCached(cwd, [], s.files);
-      const hit = cache[cacheKey(s.reviewer.name, diff)] ? ' [cached PASS]' : '';
-      console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
-    }
-  } catch (e: unknown) {
-    console.error(`guard-review: scan failed — ${e instanceof Error ? e.message : String(e)}`);
-  }
-  return 0;
 }

@@ -15,12 +15,37 @@
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
  */
 
-import { envFlag } from '../config.mts';
+import { envFlag, resolveGuardConfig } from '../config.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
-import { clearCache } from './cache.mts';
+import { clearCache, loadCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
-import { runReviewGate, scanReview } from './run-review.mts';
+import { cacheKey, selectReviewers } from './reviewers.mts';
+import { gitCached, runReviewGate, stagedFiles } from './run-review.mts';
+import { resolveReviewerIdentities } from './runtime.mts';
 import { runWaive } from './valve/waive.mts';
+
+/**
+ * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Salt
+ * resolution matches the gate's COMMIT path (sc-1437), or the reported status would lie after an
+ * asset edit; scan is not authoritative under review mode (no packaged-asset preflight here).
+ */
+function scanReview(cwd = process.cwd()): number {
+  try {
+    const cfg = resolveGuardConfig(cwd);
+    const cache = loadCache(cwd);
+    const sels = selectReviewers(stagedFiles(cwd), cfg);
+    const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
+    for (const s of sels) {
+      const diff = gitCached(cwd, [], s.files);
+      const salt = cacheSalts.get(s.reviewer.name) ?? '';
+      const hit = cache[cacheKey(s.reviewer.name, diff, salt)] ? ' [cached PASS]' : '';
+      console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
+    }
+  } catch (e: unknown) {
+    console.error(`guard-review: scan failed — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  return 0;
+}
 
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;

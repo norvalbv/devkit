@@ -40,6 +40,7 @@ function assetPaths(reviewer: Reviewer): string[] {
       `skills/${reviewer.skill}/SKILL.md`,
       checklistAssetPath(reviewer),
       'skills/_devkit/review-roots.mjs',
+      'skills/_devkit/checklist-store.mjs',
     );
   return paths;
 }
