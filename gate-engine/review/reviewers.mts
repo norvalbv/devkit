@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { type GuardConfig, sourceMatchers } from '../config.mts';
+import { checklistContractFor } from './lens/split.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
  * `sourceExtensions` and `searchTool` fields). Derived from the shared loader so it never drifts. */
@@ -26,7 +27,11 @@ export interface Reviewer {
    * every checklist-driven reviewer, whose skill/stateFile/cmds always travel together. */
   skill?: string;
   stateFile?: string;
-  cmds?: { gen: string; check: string };
+  cmds?: { gen: string; check: string; fin?: string };
+  /** Set ONLY by `deriveLensReviewer` (lens-split.mts) — the lens group this judge covers. Its
+   * presence tells `wrapPrompt` the brief's own command lines carry no `--lens` and so cannot be
+   * deferred to. Never set on a REVIEWERS table entry. */
+  lens?: readonly string[];
   /** When set, the reviewer runs SINGLE-PASS at this model — no sonnet→opus cascade, its FAIL
    * blocks directly. Used by the correctness reviewer: the reviewer-eval bench measured that the
    * opus escalation OVERTURNS real correctness bugs (a "confirm or overturn" opus, handed a subtle
@@ -298,12 +303,7 @@ export function wrapPrompt(
     `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`,
   );
   const script = checklistScriptAt(reviewer, effectiveAssetRoot);
-  const checklistContract = assetRoot
-    ? 'The reviewer brief owns checklist enumeration and the exact generate/check/finalize commands. That workflow is mandatory and its resulting artifact is independently verified by the gate.\n'
-    : 'MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n' +
-      `1. \`node ${script} ${reviewer.cmds.gen}\` — enumerates the review items for this diff.\n` +
-      `2. Review each item against the brief, then mark it: \`node ${script} ${reviewer.cmds.check} <name> --pass\` or \`--fail "<reason>"\`. Every item, one at a time — no batch claims.\n` +
-      `3. \`node ${script} finalize\` — refuses if any item is unresolved.\n`;
+  const checklistContract = checklistContractFor(reviewer, script, assetRoot);
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
