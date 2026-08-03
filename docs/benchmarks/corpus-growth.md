@@ -86,7 +86,7 @@ runner); freshness goes stale exactly when one moves.
    CR-Bench arXiv 2603.11078 "filtered to TS/JS") is not viable**: both are Python-derived
    (c-CRAB builds on SWE-CARE, CR-Bench transforms SWE-Bench — neither contains any TS/JS
    instances to filter), c-CRAB's artifact repo (github.com/c-CRAB-Benchmark/dataset) carries no
-   license, and CR-Bench has no publicly released artifact. Proposed replacements, unratified:
+   license, and CR-Bench has no publicly released artifact. RATIFIED 2026-08-03 (owner): replacement (a) is BUILT — `mine-ghsa.mts` + `propose/propose-ghsa.mts` sweep npm advisories with fix-commit anchors (165 anchored candidates on the first sweep); adapted rows carry `provenance:'known-answer'`, the only provenance whose golds support absolute-recall claims. (b) stays deferred post-epic. Original options for the record:
    (a) mine GHSA/npm advisories with fix commits directly — public known-answer facts,
    re-expressed as anonymized fixtures like every other row, the natural api-security /
    frontend-security source (SecBench.js catalogs ~600 such vulns but is itself unlicensed —

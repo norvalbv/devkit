@@ -40,7 +40,9 @@ export const casesFile = (reviewer) => path.join(here, `cases-${reviewer.skill}.
 const ROW_ENUMS = {
   expected: ['FAIL', 'PASS'],
   difficulty: ['clear', 'borderline', 'adversarial'],
-  provenance: ['authored', 'mined', 'adapted'],
+  // 'known-answer' = adapted from an external ground truth (GHSA fix commit — sc-1408):
+  // the only provenance whose golds support ABSOLUTE recall claims (methodology item 17).
+  provenance: ['authored', 'mined', 'adapted', 'known-answer'],
   // Optional provenance/labeling fields (mined-corpus tooling) — absent is fine, present-but-wrong
   // is a lint failure like every other enum here.
   outcomeEvidence: [
