@@ -7,10 +7,12 @@
  * "before" snapshot loader for A/B comparisons.
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
+import { lensArmSuffix } from '../../lens/split.mts';
 import { behaviorRowHash, rowHash } from './corpus.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -23,8 +25,19 @@ export const RETRYABLE = new Set(['outage', 'engine-error']);
 // lands, so a run killed by a rate limit / account switch loses NOTHING — re-running the same
 // command auto-resumes (rows with matching config+hashes and a non-outage result are reused;
 // --fresh discards).
-export const progressFile = (model, cascade) =>
-  path.join(here, `progress-${model}-${cascade ? 'on' : 'off'}.jsonl`);
+export const progressFile = (model, cascade) => {
+  // The lens-split arm is part of a run's IDENTITY and nothing else captures it: gateHash and
+  // rowHash are both blind to GUARD_CORRECTNESS_SPLIT (an env flag, not a source edit), and
+  // salvageMap keys on exactly those. Without the arm in the filename, an INTERRUPTED control run
+  // would salvage its rows straight into the split arm and score one arm's judgments as the
+  // other's — silently, on precisely the rows the A/B exists to compare. The gate's cache key
+  // already guards the same contamination; this is the bench's half of it.
+  const suffix = lensArmSuffix('correctness-reviewer');
+  const arm = suffix
+    ? `-split${createHash('sha256').update(suffix).digest('hex').slice(0, 8)}`
+    : '';
+  return path.join(here, `progress-${model}-${cascade ? 'on' : 'off'}${arm}.jsonl`);
+};
 
 export function loadProgress(model, cascade) {
   try {
