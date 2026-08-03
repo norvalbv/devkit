@@ -38,12 +38,14 @@ import { composeTranscript, saveTranscript } from "../judge/transcript-store.mjs
 import { loadCache, savePasses } from "./cache.mjs";
 import { renderGoverningClaudeMd } from "./claude-md.mjs";
 import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
+import { archiveFailedDiff } from "./evidence/diff-archive.mjs";
 import { attachItems, itemFields } from "./evidence/items.mjs";
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from "./evidence/scope.mjs";
+import { emitMergedLensResults, holdLensPart, planReviewWork, taskLabel } from "./lens/split.mjs";
 import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
 import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, consumerReviewerIdentity, enforceChecklistContract, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, reviewJudgeEnv, } from "./runtime.mjs";
+import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, reviewJudgeEnv, } from "./runtime.mjs";
 import { ReviewGateTiming, reviewConcurrency } from "./telemetry/timing.mjs";
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
@@ -63,7 +65,6 @@ function skippedReviewers() {
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
 // (judge/run-judge.mts), as does the commit-msg completeness judge; the 30-min rationale lives with
 // the constant. Three same-valued locals here is exactly how it drifted from completeness (sc-1227).
-//
 // Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
 // prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate + completeness on the same
 // cap. PER-CASCADE worst ≈ 1800 (first) + 1800 (escalate) = 3600s; under the concurrency cap (default
@@ -91,14 +92,14 @@ async function mapLimit(items, limit, fn) {
 }
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
 // JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
-function gitCached(cwd, args, files) {
+export function gitCached(cwd, args, files) {
     return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
         cwd,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
     });
 }
-function stagedFiles(cwd) {
+export function stagedFiles(cwd) {
     return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
         .split('\n')
         .map((s) => s.trim())
@@ -350,43 +351,36 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
     const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
-    // Prompt-version identity for this run. Review mode already computed it over the PACKAGED assets
-    // (and needs the throwing preflight for its cache-safety contract); the ordinary commit/ship path
-    // has no asset root, so it reads the SYNCED consumer copies best-effort — same formula, so the two
-    // are comparable, and null rather than a throw when an asset is unreadable.
-    const promptIdentity = (sel) => identitySalts.get(sel.reviewer.name) ?? consumerReviewerIdentity(cwd, cfg, sel.reviewer);
-    const toRun = [];
-    for (let i = 0; i < selected.length; i++) {
-        const name = selected[i].reviewer.name;
-        const key = cacheKey(name, diffs[i], identitySalts.get(name) ?? '');
-        const cached = Boolean(cache[key]);
-        // Emitted for BOTH branches, before any judge runs: the scope row is the only record a cached
-        // PASS leaves behind that names the files and bytes it covered.
-        emitReviewScope(selected[i], diffs[i], promptIdentity(selected[i]), cached);
-        if (cached) {
-            const cachedDuration = typeof cache[key].duration_ms === 'number' ? cache[key].duration_ms : 0;
-            timing.cacheHit(name, cachedDuration);
-            console.error(`guard-review: ${name} — cached PASS (identical diff)`);
-            emitCacheHit(`review:${name}`, cache[key].model, cachedDuration);
-        }
-        else
-            toRun.push({ sel: selected[i], key, diffText: diffs[i] });
+    // Prompt-version identity + cache salt, one resolution for both roles (sc-1437: the identity is
+    // no longer telemetry-only — it salts the commit-path cache key so asset edits invalidate cached
+    // PASSes in the field). Composition lives in runtime.mts's resolveReviewerIdentities.
+    const { identities, cacheSalts } = resolveReviewerIdentities(reviewMode, identitySalts, selected, cwd, cfg);
+    const promptIdentity = (sel) => identities.get(sel.reviewer.name) ?? null;
+    // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
+    const plan = planReviewWork(selected, diffs, cache, cacheSalts, cacheKey);
+    for (const s of plan.scope)
+        emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached);
+    for (const line of plan.cachedLines)
+        console.error(line);
+    for (const c of plan.fullyCached) {
+        timing.cacheHit(c.name, c.duration);
+        emitCacheHit(`review:${c.name}`, c.model, c.duration);
     }
-    if (toRun.length === 0)
+    if (plan.tasks.length === 0)
         return finish(0);
-    console.error(`guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`);
+    console.error(`guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`);
     // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
     // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
     // rejected cascade from abandoning its siblings (see mapLimit).
     const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
-    // `running` = every reviewer to run, recorded up front. Under the concurrency cap some are QUEUED,
-    // not yet started, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names
-    // never-started reviewers. Correct for the banner's purpose — they're uncached and WILL be retried.
-    const running = toRun.map((t) => t.sel.reviewer.name);
+    // `running` = every reviewer to run, recorded up front — some are QUEUED (not yet started) under the
+    // concurrency cap, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names never-started reviewers; correct for the banner, since they're uncached and WILL be retried.
+    const running = plan.tasks.map(taskLabel);
     const completed = [];
+    const splitParts = plan.splitParts; // pre-seeded with groups whose PASS was already cached
     if (progressFile)
         writeProgress(progressFile, { running, completed });
-    const results = await mapLimit(toRun, concurrency, (t) => {
+    const results = await mapLimit(plan.tasks, concurrency, (t) => {
         const t0 = Date.now();
         return runCascade(t.sel, {
             cwd,
@@ -404,7 +398,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             escalated: false,
         }))
             .then((outcome) => {
-            const res = verifyAssets(outcome, t.sel);
+            const res = verifyAssets(outcome, t.base);
             const durationMs = Date.now() - t0;
             timing.observed(res.name, durationMs);
             if (res.status === 'pass')
@@ -415,16 +409,23 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
                         at: new Date().toISOString(),
                         model: res.model ?? firstModel,
                         duration_ms: durationMs,
+                        ...(t.splitOf ? { items: res.items } : {}), // resumed runs re-seed the lens vector
                     },
                 });
+            if (res.status === 'fail')
+                archiveFailedDiff(t.diffText);
             if (progressFile) {
-                completed.push(res.name);
+                completed.push(taskLabel(t));
                 writeProgress(progressFile, { running, completed });
             }
             const secs = Math.round(durationMs / 1000);
             // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
             // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
             // the ref + one-liner. No-op off-run (see run-context.mts).
+            if (t.splitOf) {
+                holdLensPart(splitParts, t.splitOf, { res, secs, diffText: t.diffText }, taskLabel(t));
+                return res;
+            }
             const transcriptRef = res.transcript
                 ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
                 : null;
@@ -455,6 +456,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     });
     if (progressFile)
         clearProgress(progressFile); // ran to completion → nothing unfinished to report
+    emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
     const fails = results.filter((r) => r.status === 'fail');
     for (const f of fails) {
         console.error(`guard-review: ${f.name} FAILED${f.escalated ? ' (opus-confirmed)' : ''} — ${f.reason || 'see findings below'}`);
@@ -489,20 +491,4 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     if (inconclusive.length > 0)
         return finish(strict ? 3 : 2);
     return finish(0);
-}
-/** `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. */
-export function scanReview(cwd = process.cwd()) {
-    try {
-        const cfg = resolveGuardConfig(cwd);
-        const cache = loadCache(cwd);
-        for (const s of selectReviewers(stagedFiles(cwd), cfg)) {
-            const diff = gitCached(cwd, [], s.files);
-            const hit = cache[cacheKey(s.reviewer.name, diff)] ? ' [cached PASS]' : '';
-            console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
-        }
-    }
-    catch (e) {
-        console.error(`guard-review: scan failed — ${e instanceof Error ? e.message : String(e)}`);
-    }
-    return 0;
 }
