@@ -464,9 +464,9 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, '.claude/skills/brainstorming/SKILL.md'))).toBe(true);
     expect(existsSync(join(root, '.agents/skills/brainstorming/SKILL.md'))).toBe(true);
     expect(existsSync(join(root, '.cursor/skills/brainstorming/SKILL.md'))).toBe(true);
-    expect(existsSync(join(root, '.claude/agents/testing-agent.md'))).toBe(true);
-    expect(existsSync(join(root, '.codex/agents/testing-agent.toml'))).toBe(true);
-    expect(existsSync(join(root, '.cursor/agents/testing-agent.md'))).toBe(true);
+    expect(existsSync(join(root, '.claude/agents/correctness-reviewer.md'))).toBe(true);
+    expect(existsSync(join(root, '.codex/agents/correctness-reviewer.toml'))).toBe(true);
+    expect(existsSync(join(root, '.cursor/agents/correctness-reviewer.md'))).toBe(true);
     expect(config(root).components.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 

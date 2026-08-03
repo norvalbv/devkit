@@ -127,7 +127,7 @@ The dashboard below is generated from an append-only event ledger and immutable,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks/assets/dashboard-dark.svg">
   <source media="(prefers-color-scheme: light)" srcset="docs/benchmarks/assets/dashboard-light.svg">
-  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 11 suites have accepted checkpoints, 1 is current, and 4 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
+  <img alt="Benchmark evidence dashboard. Equivalent detailed tables follow: 11 suites have accepted checkpoints, 1 is current, and 2 shipped agents have no benchmark evidence." src="docs/benchmarks/assets/dashboard-light.svg">
 </picture>
 
 The tracker separates lifecycle, evidence provenance, freshness, change type, and assessment. A stale score remains visible but is never presented as current. Current history is too sparse and heterogeneous to support exponential-growth or diminishing-return claims; the honest classification is **insufficient comparable evidence**.
@@ -167,8 +167,6 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Frontend accessibility agent | shipped | none | — |
 | Frontend performance agent | shipped | evidence-only | reviewer-frontend-performance |
 | Frontend security agent | shipped | evidence-only | reviewer-frontend-security |
-| Testing agent | shipped | none | — |
-| Testing reviewer agent | shipped | none | — |
 
 [Methodology, immutable checkpoints, full subject inventory, and provenance audit](docs/benchmarks/README.md)
 <!-- benchmark-dashboard:end -->
