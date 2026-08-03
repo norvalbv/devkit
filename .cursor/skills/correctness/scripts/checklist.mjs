@@ -34,23 +34,36 @@ const CHECKLIST_PATH = '.claude/.correctness-review.json';
 const RE_LEADING_DOT = /^\./;
 const RE_TEST_INFIX = /\.(test|spec)\./;
 
-// --lens <name>: ship mode runs one judge PER lens; each works a single-item checklist in its
-// own lens-scoped state file so parallel judges never collide. Parsed and stripped up front so
-// positional args (the command, the item name) stay stable. Must mirror the gate's
-// expandPinnedForStrict stateFile/lens list (gate-engine/review/reviewers.mts).
+// --lens <a[,b,...]>: split mode runs one judge PER LENS GROUP; each works a checklist holding
+// only its own lenses, in a group-scoped state file so parallel judges never collide. A group is
+// one or more lenses (the gate's default split is two groups of two — see LENS_GROUPS in
+// gate-engine/review/reviewers.mts, which this list must mirror). Parsed and stripped up front so
+// positional args (the command, the item name) stay stable.
 function extractLens(argv) {
   const i = argv.indexOf('--lens');
   if (i === -1) return { lens: null, rest: argv };
-  const lens = argv[i + 1];
+  const raw = argv[i + 1];
   const known = ALL_ITEMS.map((it) => it.name);
-  if (!lens || !known.includes(lens)) {
-    console.error(`❌ --lens must be one of: ${known.join(', ')}`);
+  const lenses = String(raw ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const unknown = lenses.filter((l) => !known.includes(l));
+  if (lenses.length === 0 || unknown.length > 0) {
+    console.error(`❌ --lens must be a comma-separated subset of: ${known.join(', ')}`);
     process.exit(1);
   }
-  return { lens, rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
+  // Duplicates would double-count an item in the generated checklist and make finalize
+  // unsatisfiable (the same name marked twice), so collapse them rather than trusting the caller.
+  return { lens: [...new Set(lenses)], rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
 }
 
-const lensPath = (lens) => (lens ? `.claude/.correctness-review-${lens}.json` : CHECKLIST_PATH);
+// Group-scoped path. Sorted so the SAME group always resolves to the same file regardless of the
+// order the caller listed its lenses — otherwise `a,b` and `b,a` would be two different runs.
+const lensPath = (lens) =>
+  lens && lens.length
+    ? `.claude/.correctness-review-${[...lens].sort().join('+')}.json`
+    : CHECKLIST_PATH;
 
 const log = console.log;
 
@@ -152,7 +165,7 @@ const ALL_ITEMS = [
 ];
 
 function detectCorrectnessItems(lens) {
-  return ALL_ITEMS.filter((it) => !lens || it.name === lens).map((it) => ({
+  return ALL_ITEMS.filter((it) => !lens || lens.includes(it.name)).map((it) => ({
     ...it,
     status: 'pending',
     issues: [],
@@ -179,7 +192,7 @@ function generate(lens) {
   const data = { generated: new Date().toISOString(), files: stagedFiles, items };
   saveChecklist(data);
   log(
-    `✅ Correctness${lens ? ` [${lens}]` : ''}: ${stagedFiles.length} files, ${items.length} checks`,
+    `✅ Correctness${lens ? ` [${lens.join(',')}]` : ''}: ${stagedFiles.length} files, ${items.length} checks`,
   );
   log('');
   log('Items to review:');
@@ -203,7 +216,7 @@ switch (cmd) {
     const failIdx = args.indexOf('--fail');
     const failReason = failIdx !== -1 ? args[failIdx + 1] : null;
     if (!name || (!pass && failIdx === -1)) {
-      log('Usage: check-item [--lens <lens>] <name> --pass OR --fail "reason"');
+      log('Usage: check-item [--lens <a[,b]>] <name> --pass OR --fail "reason"');
       process.exit(1);
     }
     checkItem(name, pass, failReason);
@@ -216,7 +229,7 @@ switch (cmd) {
     cleanup();
     break;
   default:
-    log('Correctness Review Commands (all accept --lens <lens> for a single-lens run):');
+    log('Correctness Review Commands (all accept --lens <a[,b,...]> to scope to a lens group):');
     log('  generate                    Create checklist');
     log('  status                      Show progress');
     log('  check-item <name> --pass    Mark passed');

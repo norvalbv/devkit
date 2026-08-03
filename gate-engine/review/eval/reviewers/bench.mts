@@ -2,9 +2,8 @@
 // @ts-nocheck — BENCH-ONLY (excluded from tsc, see tsconfig.json exclude); loose types deliberate.
 
 /**
- * reviewer-eval — benchmark the domain pre-commit reviewers (api-security, backend-performance,
- * frontend-security, frontend-performance) by driving the REAL gate cascade (runCascade) over
- * labeled fixture repos, sweepable across first-pass models. The bench exists to answer, with
+ * reviewer-eval — benchmark the pre-commit reviewers by driving the REAL gate cascade (runCascade)
+ * over labeled fixture repos, sweepable across first-pass models. It exists to answer, with
  * numbers: (a) can the first pass drop to haiku, (b) did a checklist/brief edit help or hurt.
  *
  *   node bench.mts run [reviewer|all] [--dev] [--only <idPrefix>] [--baseline] [--fail]
@@ -12,30 +11,24 @@
  *   node bench.mts validate          # 0 LLM calls: corpus linter (selection + expectItems + injection)
  *   node bench.mts coverage          # 0 LLM calls: catalog/type coverage of the corpus
  *
- * Knobs: BENCH_MODEL first-pass model (default sonnet; the SHIPPED first pass is haiku — see
- * GUARD_REVIEW_MODEL in run-review.mts — and a model-pinned reviewer ignores this knob) ·
- * BENCH_CASCADE=off skips the opus escalation (first-pass only, zero opus spend) · BENCH_CONCURRENCY.
+ * Knobs: BENCH_MODEL first pass (default sonnet; a model-pinned reviewer ignores it) ·
+ * BENCH_CASCADE=off skips the opus escalation · BENCH_CONCURRENCY · GUARD_CORRECTNESS_SPLIT arm.
  *
  * Scoring is DETERMINISTIC (no LLM matcher): expected verdict vs the captured first-pass verdict +
- * the end-to-end cascade outcome + the checklist state-file artifact snapshotted per judge pass
- * (runCascade deletes it afterwards, so the spy exec snapshots immediately after each pass).
- * Right-reason attribution: expectItems ⊆ failed checklist items → right-item; else reasonPattern
- * on the failure text → pattern-only; else unattributed (the seam where an LLM matcher plugs in
- * later). A FAIL verdict with an all-pass artifact is its own bucket (fail-unattributed) because
- * verifyChecklist never scrutinizes FAILs.
+ * the cascade outcome + the checklist artifact snapshotted per judge pass (runCascade deletes it
+ * afterwards, so the spy snapshots immediately). Right-reason attribution: expectItems ⊆ failed
+ * items → right-item; else reasonPattern on the failure text → pattern-only; else unattributed. A
+ * FAIL with an all-pass artifact is its own bucket (fail-unattributed) — verifyChecklist never
+ * scrutinizes FAILs. Under a split arm the per-lens-group captures merge first (lens/split.mts).
  *
  * House conventions (decisions-eval): NULL is a verdict — an inconclusive row costs its expected
- * class. Baselines embed gateHash (brief + checklist + gate source) — a mismatch there mechanically
- * SKIPS comparison. Corpus growth is NOT a skip: rows carry rowHash + behaviorHash (corpus.mts) —
- * pairing excludes only rows whose BEHAVIOR changed. --fail = hard floors + per-row
- * McNemar flip table (stable flips only, pooled + gold-only + decoy-only + clustered-by-case),
- * never raw aggregate deltas. Every run appends one line to runs.log.
+ * class. Baselines embed gateHash — a mismatch mechanically SKIPS comparison; corpus growth is NOT
+ * a skip (rowHash + behaviorHash pair per row, excluding only BEHAVIOR changes). --fail = hard
+ * floors + per-row McNemar flip table, never raw aggregate deltas. Every run appends to runs.log.
+ * Cost anchors: docs/benchmarks/corpus-growth.md; a budget line prints before any spend.
  *
- * Cost (48 rows, concurrency 2): haiku cascade-off --dev ≈ 25–35 min · sonnet cascade-on ≈ 1.5–2 h ·
- * haiku cascade-on ≈ 1–1.5 h · opus cascade-on ≈ 2.5–3 h. A budget line prints before any spend.
- *
- * BENCH-ONLY: this directory is excluded from tsc + the build (tsconfig* `**⁄eval⁄**`) and the
- * published package ships `dist` only — nothing here (bench, miner, corpus) reaches production.
+ * BENCH-ONLY: excluded from tsc + the build; the package ships `dist` only, so nothing here
+ * (bench, miner, corpus) reaches production.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -45,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { resolveGuardConfig } from '../../../config.mts';
 import { BenchAbort, cleanBenchEnv, materializeFixture } from '../../../decisions/eval/bench.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
+import { lensArmSuffix, mergeLensCaptures, runReviewerCascade } from '../../lens/split.mts';
 import {
   checklistScript,
   parseReviewVerdict,
@@ -169,8 +163,10 @@ export function makeSpyExec(capture, { reviewer, cascade, delegate = execJudgeAs
  * FAILING pass's snapshot (escalation's when it ran live, else the first pass's).
  */
 export function scoreRow(row, capture, cas) {
-  const first = capture.find((c) => c.label === `review:${row.reviewer}`);
-  const esc = capture.find((c) => c.label === `review:${row.reviewer}:escalate`);
+  // filter+merge, not find: a split arm captures one entry PER LENS GROUP under the same label.
+  const pick = (l) => mergeLensCaptures(capture.filter((c) => c.label === l));
+  const first = pick(`review:${row.reviewer}`);
+  const esc = pick(`review:${row.reviewer}:escalate`);
   const firstVerdict = first?.out ? parseReviewVerdict(first.out).verdict : null;
   const okFirst = firstVerdict === row.expected;
   const okFinal = cas.status === (row.expected === 'FAIL' ? 'fail' : 'pass');
@@ -251,8 +247,10 @@ export async function runRow(row, { model = MODEL, cascade = CASCADE, exec } = {
         ms: { first: 0, escalate: 0 },
       };
     const capture = [];
-    const spy = makeSpyExec(capture, { reviewer, cascade, delegate: exec });
-    const cas = await runCascade(sel, { cwd: fx.repo, cfg, exec: spy, firstModel: model });
+    const spy = (r) => makeSpyExec(capture, { reviewer: r, cascade, delegate: exec });
+    const cas = await runReviewerCascade(sel, (s) =>
+      runCascade(s, { cwd: fx.repo, cfg, exec: spy(s.reviewer), firstModel: model }),
+    );
     return scoreRow(row, capture, cas);
   } finally {
     fx.cleanup();
@@ -314,7 +312,7 @@ export function summarize(results, { cascade = CASCADE } = {}) {
 // ─── Baseline / compare ───────────────────────────────────────────────────────────
 
 const sectionKey = (reviewerName, model, cascade) =>
-  `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}`;
+  `${reviewerName}@${model}@${cascade ? 'cascade-on' : 'cascade-off'}${lensArmSuffix(reviewerName)}`;
 
 // A model-pinned reviewer (correctness) runs single-pass at its pinned model regardless of
 // BENCH_MODEL / BENCH_CASCADE — the gate ignores both for it. Report and key it by that reality so

@@ -42,6 +42,7 @@ import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { archiveFailedDiff } from './evidence/diff-archive.mts';
 import { attachItems, itemFields } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
+import { emitMergedLensResults, holdLensPart, planReviewWork, taskLabel } from './lens/split.mts';
 import { applyOverrideValve } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
@@ -434,25 +435,17 @@ export async function runReviewGate(
   // are comparable, and null rather than a throw when an asset is unreadable.
   const promptIdentity = (sel: ReviewerSelection): string | null =>
     identitySalts.get(sel.reviewer.name) ?? consumerReviewerIdentity(cwd, cfg, sel.reviewer);
-  const toRun: { sel: ReviewerSelection; key: string; diffText: string }[] = [];
-  for (let i = 0; i < selected.length; i++) {
-    const name = selected[i].reviewer.name;
-    const key = cacheKey(name, diffs[i], identitySalts.get(name) ?? '');
-    const cached = Boolean(cache[key]);
-    // Emitted for BOTH branches, before any judge runs: the scope row is the only record a cached
-    // PASS leaves behind that names the files and bytes it covered.
-    emitReviewScope(selected[i], diffs[i], promptIdentity(selected[i]), cached);
-    if (cached) {
-      const cachedDuration =
-        typeof cache[key].duration_ms === 'number' ? cache[key].duration_ms : 0;
-      timing.cacheHit(name, cachedDuration);
-      console.error(`guard-review: ${name} — cached PASS (identical diff)`);
-      emitCacheHit(`review:${name}`, cache[key].model, cachedDuration);
-    } else toRun.push({ sel: selected[i], key, diffText: diffs[i] });
+  // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
+  const plan = planReviewWork(selected, diffs, cache, identitySalts, cacheKey);
+  for (const s of plan.scope) emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached);
+  for (const line of plan.cachedLines) console.error(line);
+  for (const c of plan.fullyCached) {
+    timing.cacheHit(c.name, c.duration);
+    emitCacheHit(`review:${c.name}`, c.model as string, c.duration);
   }
-  if (toRun.length === 0) return finish(0);
+  if (plan.tasks.length === 0) return finish(0);
   console.error(
-    `guard-review: running ${toRun.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`,
+    `guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`,
   );
   // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
   // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
@@ -460,10 +453,11 @@ export async function runReviewGate(
   const progressFile = process.env.DEVKIT_REVIEW_PROGRESS || null;
   // `running` = every reviewer to run, recorded up front — some are QUEUED (not yet started) under the
   // concurrency cap, so on a mid-flight kill `unfinishedReviewers` (running − completed) also names never-started reviewers; correct for the banner, since they're uncached and WILL be retried.
-  const running = toRun.map((t) => t.sel.reviewer.name);
+  const running = plan.tasks.map(taskLabel);
   const completed: string[] = [];
+  const splitParts = plan.splitParts; // pre-seeded with groups whose PASS was already cached
   if (progressFile) writeProgress(progressFile, { running, completed });
-  const results = await mapLimit(toRun, concurrency, (t) => {
+  const results = await mapLimit(plan.tasks, concurrency, (t) => {
     const t0 = Date.now();
     return runCascade(t.sel, {
       cwd,
@@ -483,7 +477,7 @@ export async function runReviewGate(
         }),
       )
       .then((outcome) => {
-        const res = verifyAssets(outcome, t.sel);
+        const res = verifyAssets(outcome, t.base);
         const durationMs = Date.now() - t0;
         timing.observed(res.name, durationMs);
         if (res.status === 'pass')
@@ -494,17 +488,22 @@ export async function runReviewGate(
               at: new Date().toISOString(),
               model: res.model ?? firstModel,
               duration_ms: durationMs,
+              ...(t.splitOf ? { items: res.items } : {}), // resumed runs re-seed the lens vector
             },
           });
         if (res.status === 'fail') archiveFailedDiff(t.diffText);
         if (progressFile) {
-          completed.push(res.name);
+          completed.push(taskLabel(t));
           writeProgress(progressFile, { running, completed });
         }
         const secs = Math.round(durationMs / 1000);
         // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
         // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
         // the ref + one-liner. No-op off-run (see run-context.mts).
+        if (t.splitOf) {
+          holdLensPart(splitParts, t.splitOf, { res, secs, diffText: t.diffText }, taskLabel(t));
+          return res;
+        }
         const transcriptRef = res.transcript
           ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
           : null;
@@ -538,6 +537,7 @@ export async function runReviewGate(
   });
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
+  emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
   const fails = results.filter((r) => r.status === 'fail');
   for (const f of fails) {
     console.error(
