@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BenchAbort, parseCasesText } from '../../../decisions/eval/bench.mts';
-import { rowHash } from './corpus.mts';
+import { behaviorRowHash, rowHash } from './corpus.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,13 +41,16 @@ export function loadProgress(model, cascade) {
  * matches — stale checkpoints are inert, not dangerous. */
 export function salvageMap(progress, reviewerName, meta, rows) {
   const currentRowHash = new Map(rows.map((r) => [r.id, rowHash(r)]));
+  const currentBehaviorHash = new Map(rows.map((r) => [r.id, behaviorRowHash(r)]));
   return new Map(
     progress
       .filter(
         (p) =>
           p.reviewer === reviewerName &&
           p.gateHash === meta.gateHash &&
-          p.rowHash === currentRowHash.get(p.res.id) &&
+          (p.behaviorHash !== undefined
+            ? p.behaviorHash === currentBehaviorHash.get(p.res.id)
+            : p.rowHash === currentRowHash.get(p.res.id)) &&
           !RETRYABLE.has(p.res.subcause),
       )
       .map((p) => [p.res.id, p.res]),
