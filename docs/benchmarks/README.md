@@ -105,8 +105,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Frontend accessibility agent | agent | shipped | none | — |
 | Frontend performance agent | agent | shipped | evidence-only | reviewer-frontend-performance |
 | Frontend security agent | agent | shipped | evidence-only | reviewer-frontend-security |
-| Testing agent | agent | shipped | none | — |
-| Testing reviewer agent | agent | shipped | none | — |
 | devkit CLI | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
 | Coverage gate | bin | shipped | none | — |
