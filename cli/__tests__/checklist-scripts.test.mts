@@ -183,8 +183,18 @@ describe('skill checklist script (spawned source)', () => {
 
   it.each(REVIEW_ROOT_CASES)(
     '%s rejects unsafe injected roots before constructing a Git pathspec',
-    (skill, envName) => {
+    (skill, envName, stateName) => {
       const repo = repoWithCraftedFile();
+      // Point the CONFIGURED roots away from the crafted file. Without this, the final
+      // `' . '` case's `status === 0` also passes when the script ignores the env var
+      // entirely and falls back to the fixture's backendRoots: ['src'] — so it would
+      // prove the root was accepted, not that it actually drove the scan.
+      writeFileSync(
+        join(repo, 'guard.config.json'),
+        JSON.stringify({
+          review: { backendRoots: ['no-such-root'], frontendRoots: ['no-such-root'] },
+        }),
+      );
       const script = fileURLToPath(
         new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
       );
@@ -219,6 +229,10 @@ describe('skill checklist script (spawned source)', () => {
         },
       });
       expect(dot.status, dot.stderr).toBe(0);
+      // ...and the injected root must be what got scanned: ' . ' normalises to the repo
+      // root, so the crafted file is reached despite no configured root covering it.
+      const state = JSON.parse(readFileSync(join(repo, '.claude', stateName), 'utf8'));
+      expect(JSON.stringify(state)).toContain('src/auth$(touch INJECTED).ts');
     },
   );
 
