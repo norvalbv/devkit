@@ -70,7 +70,7 @@
     "build": "tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.6",
     "@types/node": "^25.9.3",
     "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",

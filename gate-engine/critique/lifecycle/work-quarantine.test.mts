@@ -119,34 +119,32 @@ describe('plan critique work quarantine', () => {
     expect(() => readdirSync(root)).toThrow(/ENOENT/);
   });
 
-  it.each([
-    'invalid-json',
-    'wrong-identity',
-    'non-canonical',
-    'oversized',
-  ])('fails closed for %s persisted bytes', (corruption) => {
-    const root = temporaryRoot();
-    persistPlanCritiqueWorkQuarantine(identity(), { root });
-    const file = quarantineFile(root);
-    if (corruption === 'invalid-json') writeFileSync(file, '{');
-    if (corruption === 'wrong-identity') {
-      const record = JSON.parse(readFileSync(file, 'utf8'));
-      record.workId = 'pcw1_other-work';
-      writeFileSync(file, `${JSON.stringify(record)}\n`);
-    }
-    if (corruption === 'non-canonical') {
-      const record = JSON.parse(readFileSync(file, 'utf8'));
-      writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
-    }
-    if (corruption === 'oversized') writeFileSync(file, Buffer.alloc(16 * 1024 + 1));
-    expect(getPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({
-      status: 'unavailable',
-      reason: 'malformed_quarantine',
-    });
-    expect(() => clearPlanCritiqueWorkQuarantine(identity(), { root })).toThrow(
-      /malformed plan critique work quarantine|immutable evidence/,
-    );
-  });
+  it.each(['invalid-json', 'wrong-identity', 'non-canonical', 'oversized'])(
+    'fails closed for %s persisted bytes',
+    (corruption) => {
+      const root = temporaryRoot();
+      persistPlanCritiqueWorkQuarantine(identity(), { root });
+      const file = quarantineFile(root);
+      if (corruption === 'invalid-json') writeFileSync(file, '{');
+      if (corruption === 'wrong-identity') {
+        const record = JSON.parse(readFileSync(file, 'utf8'));
+        record.workId = 'pcw1_other-work';
+        writeFileSync(file, `${JSON.stringify(record)}\n`);
+      }
+      if (corruption === 'non-canonical') {
+        const record = JSON.parse(readFileSync(file, 'utf8'));
+        writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+      }
+      if (corruption === 'oversized') writeFileSync(file, Buffer.alloc(16 * 1024 + 1));
+      expect(getPlanCritiqueWorkQuarantine(identity(), { root })).toEqual({
+        status: 'unavailable',
+        reason: 'malformed_quarantine',
+      });
+      expect(() => clearPlanCritiqueWorkQuarantine(identity(), { root })).toThrow(
+        /malformed plan critique work quarantine|immutable evidence/,
+      );
+    },
+  );
 
   it('fails closed for non-private persisted evidence', () => {
     const root = temporaryRoot();

@@ -169,56 +169,57 @@ describe('immutable private files', () => {
     }
   });
 
-  it.each([
-    0o500, 0o600,
-  ])('waits for a concurrent creator to secure a mode-%s directory', async (initialMode) => {
-    const anchor = temporaryRoot();
-    const directory = path.join(anchor, 'records');
-    mkdirSync(directory, { mode: initialMode });
-    chmodSync(directory, initialMode);
-    const contender = path.join(anchor, 'contender.mts');
-    const moduleUrl = pathToFileURL(
-      path.join(import.meta.dirname, '..', 'immutable-file.mts'),
-    ).href;
-    writeFileSync(
-      contender,
-      `import { managedPath } from ${JSON.stringify(moduleUrl)};\n` +
-        `process.stdout.write('ready\\n');\n` +
-        `process.stdout.write(String(managedPath(process.argv[2], ['records'], true)));\n`,
-    );
+  it.each([0o500, 0o600])(
+    'waits for a concurrent creator to secure a mode-%s directory',
+    async (initialMode) => {
+      const anchor = temporaryRoot();
+      const directory = path.join(anchor, 'records');
+      mkdirSync(directory, { mode: initialMode });
+      chmodSync(directory, initialMode);
+      const contender = path.join(anchor, 'contender.mts');
+      const moduleUrl = pathToFileURL(
+        path.join(import.meta.dirname, '..', 'immutable-file.mts'),
+      ).href;
+      writeFileSync(
+        contender,
+        `import { managedPath } from ${JSON.stringify(moduleUrl)};\n` +
+          `process.stdout.write('ready\\n');\n` +
+          `process.stdout.write(String(managedPath(process.argv[2], ['records'], true)));\n`,
+      );
 
-    const child = spawn(process.execPath, [contender, anchor], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let releaseScheduled = false;
-    let releaseDirectory = Promise.resolve();
-    child.stdout.on('data', (chunk) => {
-      stdout += String(chunk);
-      if (!releaseScheduled && stdout.startsWith('ready\n')) {
-        releaseScheduled = true;
-        releaseDirectory = new Promise((resolve) => {
-          setTimeout(() => {
-            chmodSync(directory, 0o700);
-            resolve();
-          }, 20);
-        });
-      }
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', resolve);
-    });
-    await releaseDirectory;
+      const child = spawn(process.execPath, [contender, anchor], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      let releaseScheduled = false;
+      let releaseDirectory = Promise.resolve();
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+        if (!releaseScheduled && stdout.startsWith('ready\n')) {
+          releaseScheduled = true;
+          releaseDirectory = new Promise((resolve) => {
+            setTimeout(() => {
+              chmodSync(directory, 0o700);
+              resolve();
+            }, 20);
+          });
+        }
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk);
+      });
+      const code = await new Promise<number | null>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', resolve);
+      });
+      await releaseDirectory;
 
-    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
-    expect(stdout.trim().split('\n').at(-1)).toBe(realpathSync(directory));
-    expect(lstatSync(directory).mode & 0o777).toBe(0o700);
-  });
+      expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+      expect(stdout.trim().split('\n').at(-1)).toBe(realpathSync(directory));
+      expect(lstatSync(directory).mode & 0o777).toBe(0o700);
+    },
+  );
 
   it('bounds immutable comparison against an oversized existing destination', () => {
     const anchor = temporaryRoot();
