@@ -166,8 +166,20 @@ export function subcause(reason) {
  * comparison (stability rerun, salvage). Old-format baselines / rows without a rowHash can't
  * express drift, so they're treated as unchanged (matches compareReviewer's fallback for
  * hash-less baselines) — the only "changed" verdict is an explicit hash mismatch on both sides. */
-export function rowUnchanged(baseRow, currentRowHash) {
+export function rowUnchanged(baseRow, current) {
   if (!baseRow) return false;
+  // Prefer the behavior hash when both sides carry one: documentation-only edits pair fine.
+  if (baseRow.behaviorHash !== undefined && current?.behaviorHash !== undefined)
+    return baseRow.behaviorHash === current.behaviorHash;
+  const currentRowHash =
+    typeof current === 'object' && current !== null ? current.rowHash : current;
   if (baseRow.rowHash === undefined || currentRowHash === undefined) return true;
   return baseRow.rowHash === currentRowHash;
+}
+
+/** Strict-precondition variant for compareReviewer: caller has verified row.rowHash exists. */
+export function rowChanged(baseRow, row) {
+  if (baseRow.behaviorHash !== undefined && row.behaviorHash !== undefined)
+    return row.behaviorHash !== baseRow.behaviorHash;
+  return row.rowHash !== baseRow.rowHash;
 }

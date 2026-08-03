@@ -170,6 +170,25 @@ function canonicalJSON(value) {
  * corpus, so appending/removing sibling rows never changes a retained row's hash. */
 export const rowHash = (row) => sha12(canonicalJSON(row));
 
+/** The behavior-bearing slice of a row: what the reviewer SEES plus how its verdict is SCORED.
+ * Documentation-only fields (note, provenance, source, outcomeEvidence, scopeConfirmed, caseId,
+ * difficulty, holdout) are deliberately excluded — an honest provenance/metadata correction
+ * (sc-1416) must not invalidate row pairing or stale a fresh checkpoint. Comparisons prefer
+ * behaviorHash when BOTH sides carry it and fall back to strict rowHash for old baselines, so
+ * this is additive: no comparability epoch break. */
+const BEHAVIOR_FIELDS = ['reviewer', 'expected', 'expectItems', 'reasonPattern', 'repo'];
+export const behaviorRowHash = (row) =>
+  sha12(
+    canonicalJSON(
+      Object.fromEntries(
+        BEHAVIOR_FIELDS.filter((k) => row[k] !== undefined).map((k) => [k, row[k]]),
+      ),
+    ),
+  );
+
+/** Both hashes for a written result row — spread in place of a bare `rowHash:` field. */
+export const rowHashes = (row) => ({ rowHash: rowHash(row), behaviorHash: behaviorRowHash(row) });
+
 /** ROW-SET hash: sha12 of the sorted list of per-row hashes, not the raw file text — reordering
  * rows in the .jsonl (e.g. an editor re-save) is a no-op, and this is the value baseline sections
  * still carry as `corpusHash` (comparability bookkeeping). Row-level comparability now runs on
