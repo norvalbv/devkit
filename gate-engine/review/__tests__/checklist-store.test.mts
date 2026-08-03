@@ -22,13 +22,18 @@ const mkRoot = () => {
 };
 
 let savedRunMode: string | undefined;
+let savedKeep: string | undefined;
 beforeEach(() => {
   savedRunMode = process.env.DEVKIT_RUN_MODE;
   delete process.env.DEVKIT_RUN_MODE;
+  savedKeep = process.env.DEVKIT_CHECKLIST_KEEP;
+  delete process.env.DEVKIT_CHECKLIST_KEEP;
 });
 afterEach(() => {
   if (savedRunMode === undefined) delete process.env.DEVKIT_RUN_MODE;
   else process.env.DEVKIT_RUN_MODE = savedRunMode;
+  if (savedKeep === undefined) delete process.env.DEVKIT_CHECKLIST_KEEP;
+  else process.env.DEVKIT_CHECKLIST_KEEP = savedKeep;
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots = [];
 });
@@ -251,6 +256,17 @@ describe('createChecklistStore — cleanup', () => {
     const h = harness();
     h.store.save({ items: items() });
     process.env.DEVKIT_RUN_MODE = 'review';
+    h.store.cleanup();
+    expect(existsSync(h.path)).toBe(true);
+  });
+
+  // sc-1438: gate runs set DEVKIT_CHECKLIST_KEEP=1 — the gate reads the artifact after the judge
+  // finishes (a missing artifact voids the PASS) and removes it itself. A judge obeying its brief's
+  // cleanup step must not be able to void its own verdict.
+  it('KEEPS the checklist under DEVKIT_CHECKLIST_KEEP=1 (gate runs, sc-1438)', () => {
+    const h = harness();
+    h.store.save({ items: items() });
+    process.env.DEVKIT_CHECKLIST_KEEP = '1';
     h.store.cleanup();
     expect(existsSync(h.path)).toBe(true);
   });

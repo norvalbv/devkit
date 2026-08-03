@@ -36,7 +36,7 @@ is unset, treat all staged source files as in scope.
   independently of your review. It can BLOCK the commit (exit 1) on a symbol pair your search missed
   (the matcher is exhaustive all-pairs; your query is best-effort recall). A **clone gate** runs right
   after it (verbatim jscpd) — same contract, blocks on a new copy-paste clone. If a commit is blocked,
-  surface the printed resolution to the human (`co-occurrence.mjs add …` for a pair, `add-clone …`
+  surface the printed resolution to the human (`guard-dup-allowlist add …` for a pair, `add-clone …`
   for a clone) or refactor — do NOT loop re-running your own review.
 - Minimal output. Let scripts report results; don't narrate.
 - **Issue tracking (opt-in, default OFF):** Only when `guard.config.json` has
@@ -52,31 +52,27 @@ is unset, treat all staged source files as in scope.
   conventions a staged file must follow.
 
 # Provider projections install this skill under `.agents` (Codex), `.claude`, or `.cursor`.
-# Require BOTH scripts so an obsolete/incomplete projection cannot win merely because its
-# directory exists.
+# The checklist is the only provider-projected script. Duplication and allowlist commands are the
+# installed devkit bins (`guard-dup`, `guard-clone`, and `guard-dup-allowlist`).
 COMMIT_GUARD_SKILL=""
 for candidate in \
   .agents/skills/commit-guard \
   .claude/skills/commit-guard \
   .cursor/skills/commit-guard
 do
-  if [ -f "$candidate/scripts/checklist.mjs" ] &&
-    [ -f "$candidate/scripts/co-occurrence.mjs" ]; then
+  if [ -f "$candidate/scripts/checklist.mjs" ]; then
     COMMIT_GUARD_SKILL="$candidate"
     break
   fi
 done
 if [ -z "$COMMIT_GUARD_SKILL" ]; then
-  echo "commit-guard scripts unavailable: run devkit sync-skills" >&2
+  echo "commit-guard checklist unavailable: run devkit sync-skills" >&2
   exit 2
 fi
 SCRIPT="$COMMIT_GUARD_SKILL/scripts/checklist.mjs"
-CO="$COMMIT_GUARD_SKILL/scripts/co-occurrence.mjs"
-CLONE="scripts/co-occurrence/clone-detector.mjs"
 
 ## 2. Setup
 ```bash
-node $CO prune
 node $SCRIPT init
 node $SCRIPT status
 ```
@@ -90,27 +86,30 @@ For each staged file under `scanRoots`:
   symbols. Example good query: "rate-limits concurrent agent executions to prevent heap exhaustion";
   bad query: "boundedExecuteHandler".
 - Filter results for hits in OTHER files with similarity >= 0.82.
-- For each hit, run `node $CO check <symA> <fileA> <symB> <fileB>` — skip (exit 0) if already allowlisted.
+- For each hit, run `guard-dup-allowlist check <symA> <fileA> <symB> <fileB>` — skip (exit 0) if already allowlisted.
 - Surface unapproved pairs (symbolA, fileA, symbolB, fileB, similarity) to the root agent — it asks
   the human to approve (enter a description) or fix.
-- If the human approves: `node $CO add <symA> <fileA> <symB> <fileB> --description "<reason>" --range-a <startA-endA> --range-b <startB-endB>` (line ranges from the search hits — findability metadata).
+- If the human approves: `guard-dup-allowlist add <symA> <fileA> <symB> <fileB> --description "<reason>" --range-a <startA-endA> --range-b <startB-endB>` (line ranges from the search hits — findability metadata).
 - Review the file against the DRY rules below.
 - Mark the file resolved: `node $SCRIPT check-file <path> --pass` or `--fail "reason"`.
 
 ## 3b. Token clones (sub-chunk + molecule dupes the semantic search misses)
+In HEADLESS COMMIT GATE mode, the deterministic matcher and clone gates already ran before this
+reviewer; skip this section there. Interactive/pre-commit review runs it as an early surface.
+
 The embedding search above is symbol-level; it can't see a block duplicated *inside* a larger symbol,
 or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim, boundary-free).
-- Run once: `node $CLONE json > /tmp/clones.json`.
+- Run once: `guard-clone json > /tmp/clones.json`.
 - Focus on clones touching a STAGED file (a clone between two untouched files isn't introduced by this commit).
-- For each: `node $CO check-clone <fragmentHash>` — skip (exit 0) if allowlisted. Pre-existing clones are baseline-frozen, so only NEW clones surface.
+- For each: `guard-dup-allowlist check-clone <fragmentHash>` — skip (exit 0) if allowlisted. Pre-existing clones are baseline-frozen, so only NEW clones surface.
 - Surface unapproved clones to root with fileA, fileB, lines — root asks the human to approve (intentional) or refactor.
-- If approved: `node $CO add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata).
+- If approved: `guard-dup-allowlist add-clone <fragmentHash> <fileA> <fileB> --description "<reason>" --lines <N> --range-a <startA-endA> --range-b <startB-endB>` (ranges from the detector output — findability metadata).
 
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
-node $SCRIPT cleanup
 ```
+`cleanup` is for interactive sessions only — in gate mode the gate reads the checklist artifact after you finish and removes it itself; deleting it yourself voids your PASS.
 `finalize` verifies every staged file was marked — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. Report the unapproved pairs/clones you surfaced (or state that none were found). No verbose summary.
 </workflow>
 
