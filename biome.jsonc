@@ -7,7 +7,7 @@
   // being linted in-place (the name maps into node_modules, which is not the working
   // tree here), so the relative path is the correct seam for self-linting. Consumers
   // still extend the bare subpath — see biome/base.jsonc's header.
-  "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
   "extends": ["./biome/base.jsonc"],
   "files": {
     "includes": [
@@ -28,7 +28,12 @@
       // templates/ holds literal emitted configs (verbatim fixtures) that may not
       // match devkit's own formatting — exclude.
       "!templates",
-      "!bun.lock"
+      "!bun.lock",
+      // dist/ is build output — already unlinted (not in the includes allowlist), but a
+      // single "!" still lets the LSP scanner index it for the module graph, and it is
+      // rewritten wholesale on every build. Force-ignore ("!!") keeps the scanner out
+      // entirely, per Biome's own guidance for output folders.
+      "!!dist"
     ]
   },
   "overrides": [

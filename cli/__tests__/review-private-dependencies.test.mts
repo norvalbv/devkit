@@ -321,27 +321,29 @@ describe('private review dependency runtime', () => {
     expect(existsSync(join(destination, 'node_modules'))).toBe(false);
   });
 
-  it.each([
-    'review',
-    'review-baseline',
-  ])('prepares %s with private dependencies and without target-owned reviewer assets', (purpose) => {
-    const { parent, source, destination } = fixture(`prepare-${purpose}`);
-    const manifest = join(parent, `${purpose}.json`);
-    write(source, '.husky/_/pre-commit', 'runner\n');
-    write(source, 'node_modules/pkg/index.js');
-    write(source, '.claude/agents/reviewer.md');
-    write(source, '.claude/skills/reviewer/SKILL.md');
+  it.each(['review', 'review-baseline'])(
+    'prepares %s with private dependencies and without target-owned reviewer assets',
+    (purpose) => {
+      const { parent, source, destination } = fixture(`prepare-${purpose}`);
+      const manifest = join(parent, `${purpose}.json`);
+      write(source, '.husky/_/pre-commit', 'runner\n');
+      write(source, 'node_modules/pkg/index.js');
+      write(source, '.claude/agents/reviewer.md');
+      write(source, '.claude/skills/reviewer/SKILL.md');
 
-    const result = prepare(source, destination, purpose, manifest);
+      const result = prepare(source, destination, purpose, manifest);
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(lstatSync(join(destination, 'node_modules')).isSymbolicLink()).toBe(false);
-    expect(readFileSync(join(destination, 'node_modules/pkg/index.js'), 'utf8')).toBe('runtime\n');
-    expect(existsSync(join(destination, '.claude'))).toBe(false);
-    expect(existsSync(manifest)).toBe(true);
-    write(destination, 'node_modules/.cache/state', 'private\n');
-    expect(existsSync(join(source, 'node_modules/.cache/state'))).toBe(false);
-  });
+      expect(result.status, result.stderr).toBe(0);
+      expect(lstatSync(join(destination, 'node_modules')).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(destination, 'node_modules/pkg/index.js'), 'utf8')).toBe(
+        'runtime\n',
+      );
+      expect(existsSync(join(destination, '.claude'))).toBe(false);
+      expect(existsSync(manifest)).toBe(true);
+      write(destination, 'node_modules/.cache/state', 'private\n');
+      expect(existsSync(join(source, 'node_modules/.cache/state'))).toBe(false);
+    },
+  );
 
   it('omits source-only workspace dependencies from the baseline while final review stays strict', () => {
     const { parent, source, destination } = fixture('prepare-new-workspace');

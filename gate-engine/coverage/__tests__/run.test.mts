@@ -223,18 +223,18 @@ describe('runCoverage — fail-closed gate', () => {
 });
 
 describe('runCoverage — GUARD_COVERAGE_OK per-run bypass', () => {
-  it.each([
-    'GUARD_COVERAGE_OK',
-    'GUARD_NO_COVERAGE',
-  ])('%s=1 + NO artifact → exit 0 (the field case: base debt, absent coverage data)', (key) => {
-    const root = makeRoot();
-    process.env[key] = '1';
-    const s = spy();
-    expect(runCoverage(root)).toBe(0);
-    expect(text(s.log)).toMatch(/BYPASSED/);
-    // Must NOT read as the repo-wide opt-out — a log reader has to tell the two apart.
-    expect(text(s.log)).not.toMatch(/guard\.config\.json/);
-  });
+  it.each(['GUARD_COVERAGE_OK', 'GUARD_NO_COVERAGE'])(
+    '%s=1 + NO artifact → exit 0 (the field case: base debt, absent coverage data)',
+    (key) => {
+      const root = makeRoot();
+      process.env[key] = '1';
+      const s = spy();
+      expect(runCoverage(root)).toBe(0);
+      expect(text(s.log)).toMatch(/BYPASSED/);
+      // Must NOT read as the repo-wide opt-out — a log reader has to tell the two apart.
+      expect(text(s.log)).not.toMatch(/guard\.config\.json/);
+    },
+  );
 
   it('bypasses a real threshold shortfall too', () => {
     const root = makeRoot();

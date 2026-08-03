@@ -164,31 +164,31 @@ describe('normalizePlanCritiqueCompletedCallback', () => {
     });
   });
 
-  it.each([
-    'wrong_phase',
-    'aborted',
-  ] as const)('preserves valid %s status without inventing reviewed facts', (status) => {
-    const root = temporaryRoot();
-    const captured = capturePlanCritiqueCompletedCallback(callback(bytes(skipResponse(status))), {
-      root,
-    });
-    expect(captured.record.contract).toMatchObject({
-      state: 'valid',
-      error: null,
-      status,
-      verdict: null,
-      criticalCount: null,
-    });
-    expect(storedProjection(captured, root).value).toMatchObject({
-      status,
-      verdict: null,
-      feasibilityStatus: null,
-      frameMeta: 'SKIP',
-      contentTrust: 'untrusted',
-      redacted: false,
-      truncated: false,
-    });
-  });
+  it.each(['wrong_phase', 'aborted'] as const)(
+    'preserves valid %s status without inventing reviewed facts',
+    (status) => {
+      const root = temporaryRoot();
+      const captured = capturePlanCritiqueCompletedCallback(callback(bytes(skipResponse(status))), {
+        root,
+      });
+      expect(captured.record.contract).toMatchObject({
+        state: 'valid',
+        error: null,
+        status,
+        verdict: null,
+        criticalCount: null,
+      });
+      expect(storedProjection(captured, root).value).toMatchObject({
+        status,
+        verdict: null,
+        feasibilityStatus: null,
+        frameMeta: 'SKIP',
+        contentTrust: 'untrusted',
+        redacted: false,
+        truncated: false,
+      });
+    },
+  );
 
   it('records malformed, fenced, and non-UTF-8 exact responses as invalid contract evidence', () => {
     const cases = [
@@ -518,18 +518,16 @@ describe('normalizePlanCritiqueCompletedCallback', () => {
     ).toBe(codex.record.execution.callbackHash);
   });
 
-  it.each([
-    '',
-    '  ',
-    'line\nbreak',
-    'x'.repeat(PLAN_CRITIQUE_CALLBACK_IDENTITY_MAX_BYTES + 1),
-  ])('rejects an unsafe callback identity', (callbackIdentity) => {
-    const input = callback(bytes(JSON.stringify(REVIEWED_RESPONSE)));
-    input.callbackIdentity = callbackIdentity;
-    expect(() => capturePlanCritiqueCompletedCallback(input, { root: temporaryRoot() })).toThrow(
-      'invalid plan critique callback identity',
-    );
-  });
+  it.each(['', '  ', 'line\nbreak', 'x'.repeat(PLAN_CRITIQUE_CALLBACK_IDENTITY_MAX_BYTES + 1)])(
+    'rejects an unsafe callback identity',
+    (callbackIdentity) => {
+      const input = callback(bytes(JSON.stringify(REVIEWED_RESPONSE)));
+      input.callbackIdentity = callbackIdentity;
+      expect(() => capturePlanCritiqueCompletedCallback(input, { root: temporaryRoot() })).toThrow(
+        'invalid plan critique callback identity',
+      );
+    },
+  );
 
   it('rejects an unsupported runtime provider before returning a callback hash', () => {
     const input = callback(bytes(JSON.stringify(REVIEWED_RESPONSE)));

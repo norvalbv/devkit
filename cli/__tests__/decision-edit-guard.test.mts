@@ -20,17 +20,15 @@ const payload = (toolName: string, filePath: string, cursor = false) => ({
 });
 
 describe('decision-edit-guard path policy', () => {
-  it.each([
-    'Edit',
-    'Write',
-    'MultiEdit',
-    'Delete',
-  ])('blocks %s inside the default decisions directory', (toolName) => {
-    const reason = decide(payload(toolName, join(root, 'docs/decisions/axis.md')), root);
-    expect(reason).toContain('docs/decisions');
-    expect(reason).toContain('guard-decisions add');
-    expect(reason).toContain('guard-decisions amend');
-  });
+  it.each(['Edit', 'Write', 'MultiEdit', 'Delete'])(
+    'blocks %s inside the default decisions directory',
+    (toolName) => {
+      const reason = decide(payload(toolName, join(root, 'docs/decisions/axis.md')), root);
+      expect(reason).toContain('docs/decisions');
+      expect(reason).toContain('guard-decisions add');
+      expect(reason).toContain('guard-decisions amend');
+    },
+  );
 
   it('honours a custom decisionsDir and Cursor path-shaped input', () => {
     writeFileSync(

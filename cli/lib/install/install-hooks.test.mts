@@ -181,23 +181,23 @@ describe('installHookRegistrations', () => {
     expect(paths.map((path) => readFileSync(path, 'utf8'))).toEqual(bytes);
   });
 
-  it.each([
-    'codex',
-    'cursor',
-  ])('transfers same-destination ownership across %s mode changes', (provider) => {
-    const root = tmpRepo();
-    execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
-    installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
-    installHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true });
-    expect(
-      checkHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true }).ok,
-    ).toBe(true);
-    expect(ledger(root).entries.every((entry) => entry.installScope === 'overlay')).toBe(true);
+  it.each(['codex', 'cursor'])(
+    'transfers same-destination ownership across %s mode changes',
+    (provider) => {
+      const root = tmpRepo();
+      execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });
+      installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
+      installHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true });
+      expect(
+        checkHookRegistrations(root, ['agentHooks'], { targets: [provider], overlay: true }).ok,
+      ).toBe(true);
+      expect(ledger(root).entries.every((entry) => entry.installScope === 'overlay')).toBe(true);
 
-    installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
-    expect(checkHookRegistrations(root, ['agentHooks'], { targets: [provider] }).ok).toBe(true);
-    expect(ledger(root).entries.every((entry) => entry.installScope === 'shared')).toBe(true);
-  });
+      installHookRegistrations(root, ['agentHooks'], { targets: [provider] });
+      expect(checkHookRegistrations(root, ['agentHooks'], { targets: [provider] }).ok).toBe(true);
+      expect(ledger(root).entries.every((entry) => entry.installScope === 'shared')).toBe(true);
+    },
+  );
 
   it('recovers when added ownership was published before its provider config', () => {
     const root = tmpRepo();

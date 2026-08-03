@@ -173,31 +173,31 @@ describe('packaged reviewer asset runtime', () => {
     ]);
   });
 
-  it.each([
-    '.mts',
-    '.mjs',
-  ] as const)('materializes a usable private package runtime from %s package modules', (extension) => {
-    const source = packageFixture('devkit-review-package-', extension);
-    const captured = materializeReviewAssetRuntime(source, destination());
-    const entrypoint = join(captured.root, `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension}`);
+  it.each(['.mts', '.mjs'] as const)(
+    'materializes a usable private package runtime from %s package modules',
+    (extension) => {
+      const source = packageFixture('devkit-review-package-', extension);
+      const captured = materializeReviewAssetRuntime(source, destination());
+      const entrypoint = join(captured.root, `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension}`);
 
-    expect(captured.paths).toEqual(expectedRuntimePaths(extension));
-    expect(existsSync(entrypoint)).toBe(true);
-    expect(
-      existsSync(
-        join(
-          captured.root,
-          `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension === '.mts' ? '.mjs' : '.mts'}`,
+      expect(captured.paths).toEqual(expectedRuntimePaths(extension));
+      expect(existsSync(entrypoint)).toBe(true);
+      expect(
+        existsSync(
+          join(
+            captured.root,
+            `${PACKAGED_REVIEW_RUNTIME_ENTRYPOINT}${extension === '.mts' ? '.mjs' : '.mts'}`,
+          ),
         ),
-      ),
-    ).toBe(false);
-    const result = spawnSync(process.execPath, [entrypoint], {
-      encoding: 'utf8',
-      env: { ...process.env, DEVKIT_REVIEW_PACKAGE_ROOT: captured.root },
-    });
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe('frozen-baseline');
-  });
+      ).toBe(false);
+      const result = spawnSync(process.execPath, [entrypoint], {
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_REVIEW_PACKAGE_ROOT: captured.root },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toBe('frozen-baseline');
+    },
+  );
 
   it('mirrors the hook extension preference and rejects an incomplete preferred module set', () => {
     const source = packageFixture();

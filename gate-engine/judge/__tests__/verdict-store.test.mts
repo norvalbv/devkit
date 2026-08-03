@@ -452,34 +452,35 @@ describe('verdict store mutations', () => {
     });
     expect(existsSync(`${file}.lock`)).toBe(false);
   }, 10_000);
-  it.each([
-    'release',
-    'reap',
-  ] as const)('preserves a replacement installed at the %s pathname gap', async (operation) => {
-    const root = tempRoot(`verdict-${operation}-replacement`);
-    const file = path.join(root, 'review-cache.json');
-    const state = markers(root, operation);
-    if (operation === 'reap') {
-      const crashed = markers(root, 'crashed');
-      await spawnWorker('crash', file, 'crashed', crashed).done;
-      expect(existsSync(`${file}.lock`)).toBe(true);
-    }
-    const worker = spawnWorker(operation, file, operation, state);
-    await waitForFile(state.loaded);
-    const replacement = replacePublishedLock(file, operation);
-    writeFileSync(state.release, 'release\n');
-    await worker.done;
-    const owner = JSON.parse(readFileSync(`${file}.lock/owner.json`, 'utf8')) as {
-      token: string;
-    };
-    expect(owner.token).toBe(replacement.token);
-    expect(existsSync(replacement.displaced)).toBe(true);
-    expect(loadEntries(file)).toEqual(
-      operation === 'release'
-        ? { release: { at: '2026-07-19T00:00:00.000Z', worker: 'release' } }
-        : {},
-    );
-  }, 10_000);
+  it.each(['release', 'reap'] as const)(
+    'preserves a replacement installed at the %s pathname gap',
+    async (operation) => {
+      const root = tempRoot(`verdict-${operation}-replacement`);
+      const file = path.join(root, 'review-cache.json');
+      const state = markers(root, operation);
+      if (operation === 'reap') {
+        const crashed = markers(root, 'crashed');
+        await spawnWorker('crash', file, 'crashed', crashed).done;
+        expect(existsSync(`${file}.lock`)).toBe(true);
+      }
+      const worker = spawnWorker(operation, file, operation, state);
+      await waitForFile(state.loaded);
+      const replacement = replacePublishedLock(file, operation);
+      writeFileSync(state.release, 'release\n');
+      await worker.done;
+      const owner = JSON.parse(readFileSync(`${file}.lock/owner.json`, 'utf8')) as {
+        token: string;
+      };
+      expect(owner.token).toBe(replacement.token);
+      expect(existsSync(replacement.displaced)).toBe(true);
+      expect(loadEntries(file)).toEqual(
+        operation === 'release'
+          ? { release: { at: '2026-07-19T00:00:00.000Z', worker: 'release' } }
+          : {},
+      );
+    },
+    10_000,
+  );
   it('orders clear after an in-flight save instead of resurrecting cleared checkpoints', async () => {
     const root = tempRoot('verdict-clear-race');
     const file = path.join(root, 'review-cache.json');

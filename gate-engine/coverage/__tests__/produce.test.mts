@@ -205,12 +205,12 @@ describe('pruneStaleRuns', () => {
 describe('reservesCoverageDir', () => {
   // vitest rejects a duplicated --coverage.reportsDirectory itself, but with a raw stack trace
   // naming our internal run directory. Catching it first is about the message, not correctness.
-  it.each([
-    ['--coverage.reportsDirectory=/tmp/elsewhere'],
-    ['--coverage.reportsDirectory'],
-  ])('spots the reserved flag in %s', (arg) => {
-    expect(reservesCoverageDir(['run', arg])).toBe(true);
-  });
+  it.each([['--coverage.reportsDirectory=/tmp/elsewhere'], ['--coverage.reportsDirectory']])(
+    'spots the reserved flag in %s',
+    (arg) => {
+      expect(reservesCoverageDir(['run', arg])).toBe(true);
+    },
+  );
 
   it('lets every other vitest argument through', () => {
     expect(reservesCoverageDir(['src/foo.test.ts', '--coverage.reporter=json', '--bail=1'])).toBe(

@@ -73,7 +73,7 @@ describe('detectMerged — DEVKIT_RECONCILE_DEBUG stderr seam', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockExec.mockReturnValue('MERGED\n');
     expect(detectMerged({ repo: 'o/r', prNumber: 1, branch: 'feat' })).toBe('MERGED');
-    expect((mockExec.mock.calls[0]?.[2] as { stdio?: unknown }).stdio).toEqual([
+    expect((mockExec.mock.calls[0]?.[2] as { stdio?: unknown } | undefined)?.stdio).toEqual([
       'ignore',
       'pipe',
       'ignore',
@@ -98,7 +98,7 @@ describe('detectMerged — DEVKIT_RECONCILE_DEBUG stderr seam', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockExec.mockReturnValue('MERGED\n');
     expect(detectMerged({ repo: 'o/r', prNumber: 1, branch: 'feat' })).toBe('MERGED');
-    expect((mockExec.mock.calls[0]?.[2] as { stdio?: unknown }).stdio).toEqual([
+    expect((mockExec.mock.calls[0]?.[2] as { stdio?: unknown } | undefined)?.stdio).toEqual([
       'ignore',
       'pipe',
       'pipe',

@@ -305,13 +305,14 @@ describe('review gate supervisor', () => {
     expect(result.status, result.stderr).toBe(127);
   });
 
-  it.each([
-    124, 129, 130, 131, 143,
-  ])('normalizes a natural reserved exit %d to an ordinary rejection', (status) => {
-    const result = supervisor('5', '--', process.execPath, '-e', `process.exit(${status})`);
+  it.each([124, 129, 130, 131, 143])(
+    'normalizes a natural reserved exit %d to an ordinary rejection',
+    (status) => {
+      const result = supervisor('5', '--', process.execPath, '-e', `process.exit(${status})`);
 
-    expect(result.status, result.stderr).toBe(1);
-  });
+      expect(result.status, result.stderr).toBe(1);
+    },
+  );
 
   it('can preserve a natural reserved exit for the synchronous test-process boundary', async () => {
     await expect(
