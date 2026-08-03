@@ -39,6 +39,7 @@ const EXPECTED_ASSETS = [
   'agents/correctness-reviewer.md',
   'agents/frontend-performance-reviewer.md',
   'agents/frontend-security-reviewer.md',
+  'skills/_devkit/checklist-store.mjs',
   'skills/_devkit/review-roots.mjs',
   'skills/api-security/SKILL.md',
   'skills/api-security/scripts/checklist.mjs',

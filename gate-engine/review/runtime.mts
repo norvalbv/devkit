@@ -16,6 +16,20 @@ import {
 } from './reviewers.mts';
 
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
+// Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
+// every checklist reviewer — the bench's gateHash already treats it that way (corpus.mts
+// SHARED_HELPERS); omitting it here once shipped a store edit that no cache key noticed.
+const CHECKLIST_STORE_HELPER = 'skills/_devkit/checklist-store.mjs';
+
+/**
+ * Cache-key salt for a reviewer whose consumer-side identity cannot be computed (an unreadable
+ * synced asset → `consumerReviewerIdentity` returns null). Deliberately NOT '' — '' is the legacy
+ * pre-salt namespace every historical PASS was keyed under, so an empty fallback would replay
+ * exactly the stale PASSes the salt exists to invalidate. A distinct sentinel gives the
+ * unattributable population its own namespace: still cached (identical diff re-runs stay free),
+ * never aliased to a verdict produced by a different prompt version.
+ */
+export const UNATTRIBUTABLE_IDENTITY_SALT = 'devkit:unattributable-v1';
 
 /** Entrypoint selected by the generated hook from a frozen review package runtime. */
 export const PACKAGED_REVIEW_RUNTIME_ENTRYPOINT = 'gate-engine/review/baseline-gate';
@@ -32,6 +46,7 @@ function reviewerAssetPaths(reviewer: Reviewer): string[] {
       `skills/${reviewer.skill}/SKILL.md`,
       checklistAssetPath(reviewer),
       REVIEW_ROOTS_HELPER,
+      CHECKLIST_STORE_HELPER,
     );
   }
   return paths;
@@ -135,6 +150,7 @@ function hashReviewerIdentity(
     hash.update(readAsset(skill as string));
     hash.update(readAsset(checklist as string));
     hash.update(readAsset(REVIEW_ROOTS_HELPER));
+    hash.update(readAsset(CHECKLIST_STORE_HELPER));
   }
   hash.update(
     JSON.stringify({
@@ -159,6 +175,7 @@ export function preflightReviewAssets(
   // Eager, before the loop: an unreadable helper is a packaging fault, and it must surface even when
   // no selected reviewer happens to carry a checklist.
   readPackagedReviewAsset(assetRoot, REVIEW_ROOTS_HELPER);
+  readPackagedReviewAsset(assetRoot, CHECKLIST_STORE_HELPER);
   const identities = new Map<string, string>();
   for (const { reviewer } of selected) {
     if (hasChecklist(reviewer)) {
@@ -191,12 +208,43 @@ function readConsumerReviewAsset(cwd: string, cfg: GuardConfig, relativePath: st
 /**
  * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
  * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
- * attributable to the prompt version that produced it.
+ * attributable to the prompt version that produced it — AND, since sc-1437, what salts the verdict
+ * cache key on this path, so editing a synced brief/checklist/SKILL.md invalidates cached PASSes in
+ * the field exactly as review mode's preflight does. Identity resolves from the RUNNING cwd while
+ * the cache file anchors to the main checkout (verdict-store) — deliberate: the key describes what
+ * the judge would actually read from here.
  *
- * Returns null on ANY unreadable asset rather than throwing: it feeds telemetry only, and telemetry
- * must never fail a gate. A genuinely missing brief is already handled upstream — `cascadeVerdict`
- * resolves it to `inconclusive` — so a null here means "unattributable", never "broken".
+ * Returns null on ANY unreadable asset rather than throwing: telemetry must never fail a gate, and
+ * the cache path substitutes UNATTRIBUTABLE_IDENTITY_SALT for null (never '', the legacy
+ * namespace). A genuinely missing brief is already handled upstream — `cascadeVerdict` resolves it
+ * to `inconclusive` — so a null here means "unattributable", never "broken".
  */
+/**
+ * Identity + cache-salt resolution for one gate run — the ONE place the salt is composed (sc-1441
+ * will fold the rendered Targets block in here).
+ *
+ * Review mode: the packaged preflight salts (throwing contract) serve both roles. Commit/ship path:
+ * the consumer identity serves telemetry with honest nulls, while the cache salt substitutes
+ * UNATTRIBUTABLE_IDENTITY_SALT for null — never '', the legacy pre-salt namespace whose reuse would
+ * replay stale PASSes for exactly the unattributable population.
+ */
+export function resolveReviewerIdentities(
+  reviewMode: boolean,
+  identitySalts: Map<string, string>,
+  selected: ReviewerSelection[],
+  cwd: string,
+  cfg: GuardConfig,
+): { identities: Map<string, string | null>; cacheSalts: Map<string, string> } {
+  if (reviewMode) return { identities: identitySalts, cacheSalts: identitySalts };
+  const identities = new Map<string, string | null>();
+  for (const s of selected)
+    identities.set(s.reviewer.name, consumerReviewerIdentity(cwd, cfg, s.reviewer));
+  const cacheSalts = new Map(
+    [...identities].map(([name, id]) => [name, id ?? UNATTRIBUTABLE_IDENTITY_SALT]),
+  );
+  return { identities, cacheSalts };
+}
+
 export function consumerReviewerIdentity(
   cwd: string,
   cfg: GuardConfig,
