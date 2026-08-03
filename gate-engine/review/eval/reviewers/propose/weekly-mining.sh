@@ -49,6 +49,7 @@ if run_stage mine-telemetry 8 bun mine-telemetry.mts; then
 else
   echo "--- propose-telemetry skipped (mine-telemetry failed) ---" >>"$LOG"
 fi
+run_stage mine-ghsa 4 bun mine-ghsa.mts
 run_stage propose-bots 4 bun propose/propose.mts --suite correctness --max 10
 echo "" >>"$LOG"
 

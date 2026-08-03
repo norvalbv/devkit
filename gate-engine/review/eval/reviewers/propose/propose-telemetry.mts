@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   makeDropCounter,
+  makeHardDrop,
   parseMaxArg,
   partitionDrops,
   printSummary,
@@ -75,7 +76,7 @@ function main() {
   const candidates = readJsonl(CANDIDATES_FILE);
   const { drops, bump } = makeDropCounter();
 
-  const kept = partitionDrops(candidates, hardDropReason, bump);
+  const kept = partitionDrops(candidates, makeHardDrop(reviewersDir, hardDropReason), bump);
   kept.sort(compareCandidates);
   const queued = kept.slice(0, max);
   if (kept.length > max) bump(`over-max:${kept.length - max}`);
