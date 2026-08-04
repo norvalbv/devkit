@@ -112,6 +112,12 @@ describe('fallow-staged-gate.sh', () => {
     'echo git commit',
     'echo "git commit -m quoted-prose"',
     'echo "; git commit -m quoted-prose"',
+    // sc-1417: a valueless global flag used to swallow the subcommand, promoting a later literal
+    // `commit` argument into subcommand position and blocking read-only queries and recovery.
+    'git --no-pager log --stat commit',
+    'git --no-pager status commit',
+    'git --no-pager reset commit',
+    'git -C /tmp --no-pager log --all commit',
   ])('does not audit a staged failure before non-commit command: %s', (command) => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
@@ -125,11 +131,29 @@ describe('fallow-staged-gate.sh', () => {
     'git -c commit.gpgsign=false commit -m "test"',
     'command git --git-dir=.git commit -m "test"',
     'git --exec-path=/usr/lib/git-core commit -m "test"',
+    'git --no-pager commit -m "test"',
   ])('audits commits after supported Git global options: %s', (command) => {
     const dir = mkTmp('staged-gate-');
     repoWithStaged(dir);
     const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
     expect(run(dir, binDir, { command }).status).toBe(2);
+  });
+
+  // Documented fail-open gap, asserted so a future change to it has to be deliberate: the anchor
+  // requires git to BEGIN the segment, so an env-assignment prefix or a wrapper binary bypasses the
+  // agent surface entirely. Those commits still meet fallow's own git hook, so the gate under-fires
+  // rather than stranding an agent — the side every classification error must land on (sc-1417).
+  it.each([
+    'FOO=1 git commit -m "test"',
+    'env FOO=1 git commit -m "test"',
+    'sudo git commit -m "test"',
+    'bash -c "git commit -m test"',
+  ])('under-fires rather than blocking on a wrapped commit: %s', (command) => {
+    const dir = mkTmp('staged-gate-');
+    repoWithStaged(dir);
+    const binDir = stubFallow(dir, '{"verdict":"fail","attribution":{"duplication_introduced":0}}');
+    expect(run(dir, binDir, { command }).status).toBe(0);
+    expect(existsSync(join(dir, 'argv.log'))).toBe(false);
   });
 
   it('recognises Cursor beforeShellExecution command payloads', () => {
