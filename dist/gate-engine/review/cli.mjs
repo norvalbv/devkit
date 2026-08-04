@@ -22,7 +22,7 @@ import { loadReviewerTargetsBlocks, reviewerTargetSalts } from "./evidence/targe
 import { planReviewWork } from "./lens/split.mjs";
 import { cacheKey, selectReviewers } from "./reviewers.mjs";
 import { runReviewGate } from "./run-review.mjs";
-import { resolveReviewerIdentities } from "./runtime.mjs";
+import { resolveReviewerIdentities, skippedReviewers } from "./runtime.mjs";
 import { runWaive } from "./valve/waive.mjs";
 /**
  * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Cache
@@ -35,7 +35,10 @@ async function scanReview(cwd = process.cwd()) {
     try {
         const cfg = resolveGuardConfig(cwd);
         const cache = loadCache(cwd);
-        const sels = selectReviewers(stagedFiles(cwd), cfg);
+        // Same GUARD_REVIEW_SKIP filter as the gate: a skipped reviewer's cached PASS must not be
+        // reported as work the gate would skip-by-cache — the gate never plans it at all.
+        const skip = skippedReviewers();
+        const sels = selectReviewers(stagedFiles(cwd), cfg).filter((s) => !skip.has(s.reviewer.name));
         const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
         // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
         // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.

@@ -2133,5 +2133,16 @@ describe('guard-review scan — cache status matches the gate planner (sc-1473)'
     // Pre-fix, scan keyed without the split suffix and could NEVER report this line as cached.
     expect(line).toContain('[cached PASS]');
     expect(after.stdout).toContain('api-security-reviewer [cached PASS]'); // unsplit path intact
+    // GUARD_REVIEW_SKIP parity: the gate never plans a skipped reviewer, so scan must not report
+    // its cached PASS as skippable work — even though the entries are sitting in the cache.
+    const skipped = spawnSync('bun', [CLI_PATH, 'scan'], {
+      cwd: repo,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, GUARD_REVIEW_SKIP: 'correctness-reviewer' },
+    });
+    expect(skipped.status, skipped.stderr).toBe(0);
+    expect(skipped.stdout).not.toContain('correctness-reviewer');
+    expect(skipped.stdout).toContain('api-security-reviewer [cached PASS]');
   });
 });
