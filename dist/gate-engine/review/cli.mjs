@@ -19,14 +19,17 @@ import { clearCache, loadCache } from "./cache.mjs";
 import { runCompleteness } from "./completeness.mjs";
 import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from "./evidence/targets-block.mjs";
+import { planReviewWork } from "./lens/split.mjs";
 import { cacheKey, selectReviewers } from "./reviewers.mjs";
 import { runReviewGate } from "./run-review.mjs";
 import { resolveReviewerIdentities } from "./runtime.mjs";
 import { runWaive } from "./valve/waive.mjs";
 /**
- * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Salt
- * resolution matches the gate's COMMIT path (sc-1437), or the reported status would lie after an
- * asset edit; scan is not authoritative under review mode (no packaged-asset preflight here).
+ * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Cache
+ * status is computed by `planReviewWork` — the gate's OWN planner — so scan can never diverge
+ * from what the commit path would actually skip (sc-1473: a hand-rolled key here missed the
+ * lens-split suffix and made a cached correctness-reviewer structurally unreportable). Scan is
+ * not authoritative under review mode (no packaged-asset preflight here).
  */
 async function scanReview(cwd = process.cwd()) {
     try {
@@ -38,11 +41,10 @@ async function scanReview(cwd = process.cwd()) {
         // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
         const { saltBlock } = await loadReviewerTargetsBlocks(cwd, stagedFiles(cwd));
         const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock);
-        for (const s of sels) {
-            const diff = gitCached(cwd, [], s.files);
-            const salt = salts.get(s.reviewer.name) ?? '';
-            const hit = cache[cacheKey(s.reviewer.name, diff, salt)] ? ' [cached PASS]' : '';
-            console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
+        const diffs = sels.map((s) => gitCached(cwd, [], s.files));
+        const plan = planReviewWork(sels, diffs, cache, salts, cacheKey);
+        for (const { sel, cached } of plan.scope) {
+            console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);
         }
     }
     catch (e) {
