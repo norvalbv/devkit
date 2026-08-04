@@ -82,6 +82,25 @@ named gate (see **A pre-commit gate blocked my commit** above) and re-commit —
 cache** means the gates that already passed won't re-run. AI gates are the exception: they stay fail-fast,
 one finding at a time, by design.
 
+## `bun install` fails: `no commit matching "<sha>" found for "@norvalbv/devkit"`
+Also seen as `error: GET https://codeload.github.com/norvalbv/devkit/legacy.tar.gz/<sha> - 404`. Two shapes,
+one fault: bun clones for a `git+ssh`/`git+https` ref and fetches a codeload tarball for the
+`github:owner/repo` shorthand. Your `bun.lock` recorded a specific object for the devkit tag it resolved,
+and that object is no longer reachable on the remote — the tag was re-pointed, or the history under it was
+rewritten. Machines that already have it cached keep working; a fresh clone or CI does not.
+
+Repair it with **`bun update @norvalbv/devkit`**, which re-resolves the pin from `package.json`.
+
+- **`devkit update` will NOT fix this.** When the repo already pins the newest tag it short-circuits with
+  "devkit is up to date" and changes nothing — you'll see success and stay broken.
+- **`bun install --force` does not re-resolve** either; it only re-extracts.
+- **Don't reach for `bun pm cache rm`.** It isn't needed, and it deletes the one local copy of the orphaned
+  object — which can break a machine that was still working.
+- If it somehow persists, delete the `@norvalbv/devkit` lines from `bun.lock` and re-run `bun install`.
+
+`devkit doctor` reports this as **devkit lock** DRIFT before it bites, so you find it on a working machine
+rather than in CI.
+
 ## I set `SHIP_COMMIT_TIMEOUT` but the ship still uses the default
 It must be **exported**, not passed inline: `export SHIP_COMMIT_TIMEOUT=2400 && devkit ship …`, not
 `SHIP_COMMIT_TIMEOUT=2400 devkit ship …`. An inline env prefix can be stripped by a command-rewriting

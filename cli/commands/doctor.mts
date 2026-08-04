@@ -11,6 +11,7 @@ import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mts';
 import { type CheckResult, check } from '../lib/doctor/check-result.mts';
 import { checkHookRunner, checkHusky } from '../lib/doctor/hook-checks.mts';
+import { checkLockPin, checkPin } from '../lib/doctor/pin-checks.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
@@ -24,9 +25,6 @@ import { selectedHookAssets } from '../lib/install/hook-registration-ledger/sele
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
 import { cmpSemver } from './update.mts';
-
-// A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
-const PINNED_TAG = /#v\d/;
 
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -206,22 +204,6 @@ function checkBaselines(cwd: string): CheckResult {
     present.length
       ? `grandfathered debt: ${present.join(' + ')}`
       : 'no grandfathered debt (enforced from config)',
-  );
-}
-
-function checkPin(cwd: string): CheckResult {
-  const pkg = readJson(join(cwd, 'package.json')) as {
-    devDependencies?: Record<string, string>;
-    dependencies?: Record<string, string>;
-  } | null;
-  const ref = pkg?.devDependencies?.['@norvalbv/devkit'] ?? pkg?.dependencies?.['@norvalbv/devkit'];
-  if (!ref) return check('devkit pin', 'MISSING', 'not a dependency', 'run `devkit init`', true);
-  if (PINNED_TAG.test(ref)) return check('devkit pin', 'OK', `pinned ${ref.split('#').pop()}`);
-  return check(
-    'devkit pin',
-    'DRIFT',
-    'not pinned to a #v* tag (bare SHA/branch)',
-    'pin to #v<version> for reproducible installs',
   );
 }
 
@@ -566,7 +548,14 @@ async function collectResults(
   if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
-  if (!standalone) results.push(checkPin(cwd));
+  // Two halves of the same signal: checkPin reads what package.json asks for, checkLockPin reads
+  // what bun.lock recorded for it. The latter is null whenever there is nothing to verify, which is
+  // what keeps doctor off the network for non-bun consumers.
+  if (!standalone) {
+    results.push(checkPin(cwd));
+    const lock = checkLockPin(cwd);
+    if (lock) results.push(lock);
+  }
   results.push(checkVersion(cwd));
   return { results, sel };
 }
