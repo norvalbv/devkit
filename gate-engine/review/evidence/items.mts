@@ -30,6 +30,49 @@ const ITEMS_INLINE_BUDGET = 2000;
  * out-of-charter drop and a waived finding both leave a PASS verdict behind. */
 export type LensDisposition = 'blocking' | 'waived' | 'dropped_out_of_charter';
 
+/**
+ * Re-derive the item fields for a vector assembled from SEVERAL runs — the lens split produces one
+ * outcome per lens group and merges them into a single `review_result`.
+ *
+ * attachItems caps, tallies and size-checks each part IN ISOLATION. Merging by spreading the worst
+ * part and concatenating `items` therefore published one part's `item_count`/`item_tally` beside
+ * every part's `items`: a four-way split reported one lens while carrying four, so "which lens
+ * fired" — the question the tally exists to answer cheaply — read as though only one ever ran. The
+ * concatenation itself also escaped both ITEM_CAP and the inline budget, since those were applied
+ * before the parts were joined.
+ *
+ * The tally SUMS the parts' own tallies rather than recounting the merged vector. Each part's tally
+ * is always inline, even when that part's items spilled to a sidecar, so summing stays accurate for
+ * a part whose vector this function cannot see.
+ *
+ * A CACHED part is the other direction: planReviewWork rebuilds it from the verdict cache with its
+ * items but no count or tally, so those are derived from the items it does carry. Keying inclusion
+ * on itemCount alone would drop a cached lens from the merged vector entirely — and on a re-run
+ * where three of four lenses hit cache, that is most of the reviewer's output.
+ */
+export function mergeItemVectors(res: ReviewOutcome, parts: readonly ReviewOutcome[]): void {
+  const withArtifact = parts.filter((p) => p.itemCount !== undefined || p.items?.length);
+  if (withArtifact.length === 0) return;
+  res.itemArtifact = withArtifact.find((p) => p.itemArtifact)?.itemArtifact;
+  res.itemCount = withArtifact.reduce((n, p) => n + (p.itemCount ?? p.items?.length ?? 0), 0);
+  res.itemTally = withArtifact.reduce<Record<string, number>>((acc, p) => {
+    const part = p.itemTally ?? tally(p.items ?? []);
+    for (const [status, n] of Object.entries(part)) acc[status] = (acc[status] ?? 0) + n;
+    return acc;
+  }, {});
+  const ordered = withArtifact
+    .flatMap((p) => p.items ?? [])
+    .sort((a, b) => Number(a.status === 'pass') - Number(b.status === 'pass'));
+  const capped = ordered.slice(0, ITEM_CAP);
+  res.items = undefined;
+  res.itemsRef = undefined;
+  if (JSON.stringify(capped).length <= ITEMS_INLINE_BUDGET) {
+    res.items = capped;
+    return;
+  }
+  res.itemsRef = saveTranscript(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
+}
+
 /** How many lenses landed in each state — the "did this reviewer's lenses fire" question, answerable
  * even when the vector itself spilled to a sidecar. */
 function tally(items: ReviewItem[]): Record<string, number> {

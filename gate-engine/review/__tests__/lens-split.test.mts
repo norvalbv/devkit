@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { mergeItemVectors } from '../evidence/items.mts';
 import {
   CORRECTNESS_LENSES,
   DEFAULT_LENS_GROUPS,
   deriveLensReviewer,
+  FOUR_WAY_LENS_GROUPS,
   lensGroupId,
   mergeLensCaptures,
   planReviewWork,
@@ -20,12 +22,26 @@ const base = correctness as typeof correctness & {
 };
 
 describe('resolveLensGroups', () => {
-  it('is OFF by default and for the explicit off spellings', () => {
-    for (const raw of [undefined, '', '0', 'off', 'OFF']) expect(resolveLensGroups(raw)).toBeNull();
+  it('is ON by default, one judge per lens', () => {
+    for (const raw of [undefined, '', '  ']) {
+      expect(resolveLensGroups(raw)).toEqual(FOUR_WAY_LENS_GROUPS);
+      expect(resolveLensGroups(raw)).toHaveLength(CORRECTNESS_LENSES.length);
+    }
   });
 
-  it('turns on the two-group default shape', () => {
+  // The monolith is no longer reachable by doing nothing, so the escape hatch is the only way back
+  // to pre-2026-08 behaviour — a consumer hitting a regression has to be able to spell it.
+  it('the explicit off spellings restore the monolith', () => {
+    for (const raw of ['0', 'off', 'OFF', 'Off']) expect(resolveLensGroups(raw)).toBeNull();
+  });
+
+  it('still addresses the registered two-group arm, so the A/B stays runnable', () => {
     for (const raw of ['1', 'on']) expect(resolveLensGroups(raw)).toEqual(DEFAULT_LENS_GROUPS);
+  });
+
+  it('the four-way groups partition all four lenses, one each', () => {
+    expect(FOUR_WAY_LENS_GROUPS.flat().sort()).toEqual([...CORRECTNESS_LENSES].sort());
+    for (const g of FOUR_WAY_LENS_GROUPS) expect(g).toHaveLength(1);
   });
 
   it('the default groups partition all four lenses, two and two', () => {
@@ -237,5 +253,82 @@ describe('mergeLensCaptures', () => {
         { ...fail, synthetic: true },
       ])?.synthetic,
     ).toBe(true);
+  });
+});
+
+describe('mergeItemVectors — per-lens attribution across a split', () => {
+  const part = (lens: string, status: string, extra: Record<string, unknown> = {}) =>
+    ({
+      name: 'correctness-reviewer',
+      itemArtifact: 'items',
+      itemCount: 1,
+      itemTally: { [status]: 1 },
+      items: [{ lens, status }],
+      ...extra,
+    }) as never;
+
+  // The bug this exists to stop: mergeLensOutcomes spreads the WORST part, so count/tally described
+  // one lens while items carried four — a four-way split read as a single-lens reviewer.
+  it('count and tally cover every part, not just the worst one', () => {
+    const merged = { name: 'correctness-reviewer' } as never;
+    mergeItemVectors(merged, [
+      part('state-transitions', 'fail'),
+      part('concurrency-races', 'pass'),
+      part('writer-reader-contracts', 'pass'),
+      part('error-and-edge-classification', 'pass'),
+    ]);
+    const m = merged as unknown as {
+      itemCount: number;
+      itemTally: Record<string, number>;
+      items: { lens: string; status: string }[];
+    };
+    expect(m.itemCount).toBe(4);
+    expect(m.itemTally).toEqual({ fail: 1, pass: 3 });
+    expect(m.items.map((i) => i.lens).sort()).toEqual([...CORRECTNESS_LENSES].sort());
+    // The failing lens sorts first so a truncation can never keep passes and drop the finding.
+    expect(m.items[0].status).toBe('fail');
+  });
+
+  // planReviewWork rebuilds a cached part from the verdict cache with items but no count/tally.
+  it('a cached part still contributes — its count and tally derive from its items', () => {
+    const merged = { name: 'correctness-reviewer' } as never;
+    mergeItemVectors(merged, [
+      part('state-transitions', 'fail'),
+      {
+        name: 'correctness-reviewer',
+        items: [{ lens: 'concurrency-races', status: 'pass' }],
+      } as never,
+    ]);
+    const m = merged as unknown as { itemCount: number; itemTally: Record<string, number> };
+    expect(m.itemCount).toBe(2);
+    expect(m.itemTally).toEqual({ fail: 1, pass: 1 });
+  });
+
+  it('re-applies the element cap the parts escaped by being capped separately', () => {
+    const many = Array.from({ length: 30 }, (_, i) => part(`lens-${i}`, 'pass'));
+    const merged = { name: 'correctness-reviewer' } as never;
+    mergeItemVectors(merged, many);
+    const m = merged as unknown as { itemCount: number; items: unknown[] };
+    expect(m.itemCount).toBe(30); // the true total is still reported
+    expect(m.items.length).toBeLessThanOrEqual(40); // ITEM_CAP
+  });
+
+  it('keeps an oversized merged vector out of the event line', () => {
+    const fat = Array.from({ length: 12 }, (_, i) =>
+      part(`lens-${i}`, 'fail', {
+        items: [{ lens: `lens-${i}`, status: 'fail', issues: ['x'.repeat(200)] }],
+      }),
+    );
+    const merged = { name: 'correctness-reviewer' } as never;
+    mergeItemVectors(merged, fat);
+    const m = merged as unknown as { items?: unknown[]; itemTally: Record<string, number> };
+    expect(m.items).toBeUndefined(); // spilled rather than inlined past the budget
+    expect(m.itemTally).toEqual({ fail: 12 }); // the tally survives the spill
+  });
+
+  it('does nothing when no part had an artifact at all', () => {
+    const merged = { name: 'correctness-reviewer' } as never;
+    mergeItemVectors(merged, [{ name: 'correctness-reviewer' } as never]);
+    expect((merged as unknown as { itemCount?: number }).itemCount).toBeUndefined();
   });
 });
