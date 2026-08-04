@@ -111,6 +111,43 @@ describe('skill checklist script (spawned source)', () => {
     },
   );
 
+  // sc-1438 follow-up: a passing finalize tidies the artifact itself (no agent-run cleanup step),
+  // while the gate/review env guards keep it where the gate must independently verify it.
+  it.each(CHECKLIST_CASES)(
+    '%s finalize auto-tidies on success, keeps the artifact under the gate env',
+    (skill, stateName) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-finalize-tidy-'));
+      dirs.push(repo);
+      const stateDir = join(repo, '.claude');
+      const stateFile = join(stateDir, stateName);
+      mkdirSync(stateDir, { recursive: true });
+      const state =
+        skill === 'commit-guard'
+          ? { files: [{ path: 'src/a.ts', status: 'pass', issues: [] }] }
+          : { items: [{ name: 'x', category: 'X', status: 'pass', issues: [] }] };
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+
+      writeFileSync(stateFile, JSON.stringify(state));
+      const gateFinalize = spawnSync('node', [script, 'finalize'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'commit', DEVKIT_CHECKLIST_KEEP: '1' },
+      });
+      expect(gateFinalize.status, gateFinalize.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(true);
+
+      const interactiveFinalize = spawnSync('node', [script, 'finalize'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
+      });
+      expect(interactiveFinalize.status, interactiveFinalize.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(false);
+    },
+  );
+
   it.each(CHECKLIST_CASES)(
     '%s preserves its artifact for independent review-mode verification',
     (skill, stateName) => {

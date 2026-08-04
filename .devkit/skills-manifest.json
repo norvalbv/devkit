@@ -7,7 +7,7 @@
   ],
   "files": {
     "_devkit/review-roots.mjs": "24b7d948fb60d0daaf317a65f24e748676cebd73633fa89e0f2d9c923c6605da",
-    "_devkit/checklist-store.mjs": "c9b7a75189f53ba432086f1c18c03361c5347702072bf6763901981d341c5596",
+    "_devkit/checklist-store.mjs": "9170a15fba2f81de4d93e0ca2af8cb071ab4dd428683d5eee02d650df82cb749",
     "_devkit/review-roots.d.mts": "3c2cdf231cd93a60c1ff0e7ef0eaf17a01f873398917e32fe4e092f947b47bc4",
     "dup-detection/SKILL.md": "31abb98a3cfab2bbf0f7cbe6aed1411cfc57919bda9d698727d5d6ff234c453e",
     "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
@@ -32,7 +32,7 @@
     "frontend-performance/SKILL.md": "6697c6583485c5eea8168437c2faee3f81f9051a0c9f85e739278d13c1c6b628",
     "api-security/scripts/checklist.mjs": "078c1495248da69c66e38b64477d0f47d3f4beab95b6347bf329b7d35da02454",
     "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
-    "commit-guard/scripts/checklist.mjs": "89df31bc28c9dc9d1041b353d394245b758fcfacbc9e485d3736e94e4662b4c3",
+    "commit-guard/scripts/checklist.mjs": "ff93645a88ae2599c67fbdc18ff8bdac0121f8179a4957a71078354a348dcb64",
     "commit-guard/SKILL.md": "12338a801510c76872b896efdc0771a677e275b229088380e9789f057937d9cf",
     "frontend-security/scripts/checklist.mjs": "8df78a03ae8c5ef7e79da232e1c48e47bdedb1ecfbd4defeb37e69d516fdb0b4",
     "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f"

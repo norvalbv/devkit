@@ -189,6 +189,40 @@ describe('createChecklistStore — finalize is the gate', () => {
     expect(h.out()).toContain('✅ Test Review: All checks passed');
   });
 
+  // sc-1438 follow-up: finalize is the mandatory terminal step in EVERY session, so a passing one
+  // tidies the scratch artifact itself — the agent never decides when cleanup applies. The env
+  // guards keep it exactly where it must survive (gate runs, review mode).
+  it('a passing finalize removes the artifact automatically (interactive tidy)', () => {
+    const h = harness();
+    h.store.save({ items: items() });
+    h.store.checkItem('alpha', true);
+    h.store.checkItem('beta', true);
+    h.store.finalize();
+    expect(h.exits).toEqual([]);
+    expect(existsSync(h.path)).toBe(false);
+  });
+
+  it('a passing finalize KEEPS the artifact under DEVKIT_CHECKLIST_KEEP=1 (gate runs)', () => {
+    const h = harness();
+    h.store.save({ items: items() });
+    h.store.checkItem('alpha', true);
+    h.store.checkItem('beta', true);
+    process.env.DEVKIT_CHECKLIST_KEEP = '1';
+    h.store.finalize();
+    expect(h.exits).toEqual([]);
+    expect(existsSync(h.path)).toBe(true);
+  });
+
+  it('a FAILING finalize leaves the artifact (both modes need the evidence)', () => {
+    const h = harness();
+    h.store.save({ items: items() });
+    h.store.checkItem('alpha', false, 'boom');
+    h.store.checkItem('beta', true);
+    h.store.finalize();
+    expect(h.exits).toEqual([1]);
+    expect(existsSync(h.path)).toBe(true);
+  });
+
   it('BLOCKS on a pending item, naming it', () => {
     const h = harness();
     h.store.save({ items: items() });

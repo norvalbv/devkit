@@ -123,6 +123,11 @@ export function createChecklistStore({
       return;
     }
     log(`✅ ${label}: All checks passed`);
+    // Automatic tidy — finalize is the mandatory terminal step in EVERY session, so a passing one
+    // removes the scratch artifact itself; the agent never decides. cleanup()'s env guards make
+    // this a no-op exactly where the artifact must survive: gate runs (DEVKIT_CHECKLIST_KEEP=1,
+    // the gate verifies then removes it) and review mode (evidence retained).
+    cleanup();
   };
 
   // Review mode keeps the checklist: the ephemeral review worktree is discarded wholesale, and the

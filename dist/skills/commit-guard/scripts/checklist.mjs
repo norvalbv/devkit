@@ -153,6 +153,8 @@ function finalize() {
   }
 
   log('✅ All checks passed');
+  // Automatic tidy — same contract as checklist-store.mjs finalize: env guards keep gate/review artifacts.
+  cleanup();
 }
 
 function cleanup() {
