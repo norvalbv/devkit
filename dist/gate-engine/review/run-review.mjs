@@ -45,7 +45,7 @@ import { emitMergedLensResults, holdLensPart, planReviewWork, taskLabel } from "
 import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
 import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, reviewJudgeEnv, } from "./runtime.mjs";
+import { agentBody, cleanupChecklistState, enforceChecklistContract, gateJudgeEnv, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, } from "./runtime.mjs";
 import { ReviewGateTiming, reviewConcurrency } from "./telemetry/timing.mjs";
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
@@ -349,7 +349,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
-    const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
+    const judgeEnv = gateJudgeEnv(reviewMode, cfg);
     const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
     // Prompt-version identity + cache salt, one resolution for both roles (sc-1437: the identity is
     // no longer telemetry-only — it salts the commit-path cache key so asset edits invalidate cached

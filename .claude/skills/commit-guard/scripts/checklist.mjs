@@ -157,6 +157,8 @@ function finalize() {
 
 function cleanup() {
   if (process.env.DEVKIT_RUN_MODE === 'review') return;
+  // Same guard as checklist-store.mjs cleanup(): in gate runs the gate owns artifact removal.
+  if (process.env.DEVKIT_CHECKLIST_KEEP === '1') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
     log('🗑️  Removed checklist');

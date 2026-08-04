@@ -132,6 +132,16 @@ describe('skill checklist script (spawned source)', () => {
       expect(reviewCleanup.status, reviewCleanup.stderr).toBe(0);
       expect(existsSync(stateFile)).toBe(true);
 
+      // sc-1438: gate runs export DEVKIT_CHECKLIST_KEEP=1 — a judge obeying its brief's cleanup
+      // step must not delete the artifact the gate reads after it finishes (voids the PASS).
+      const gateCleanup = spawnSync('node', [script, 'cleanup'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'commit', DEVKIT_CHECKLIST_KEEP: '1' },
+      });
+      expect(gateCleanup.status, gateCleanup.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(true);
+
       const normalCleanup = spawnSync('node', [script, 'cleanup'], {
         cwd: repo,
         encoding: 'utf8',
