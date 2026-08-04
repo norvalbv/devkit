@@ -39,7 +39,7 @@ import { renderGoverningClaudeMd } from "./claude-md.mjs";
 import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
 import { loadReviewerContext } from "./evidence/commit-message.mjs";
 import { archiveFailedDiff } from "./evidence/diff-archive.mjs";
-import { attachItems, itemFields } from "./evidence/items.mjs";
+import { attachItems, cachedLensFields, itemFields } from "./evidence/items.mjs";
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from "./evidence/scope.mjs";
 import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
 import { reviewerTargetSalts } from "./evidence/targets-block.mjs";
@@ -375,7 +375,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
                         at: new Date().toISOString(),
                         model: res.model ?? firstModel,
                         duration_ms: durationMs,
-                        ...(t.splitOf ? { items: res.items } : {}), // resumed runs re-seed the lens vector
+                        ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
                     },
                 });
             if (res.status === 'fail')
