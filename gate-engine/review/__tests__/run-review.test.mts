@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
@@ -2091,5 +2092,57 @@ describe('runReviewGate — the shipped four-way correctness split', () => {
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('fail');
     expect(results[0].item_tally).toEqual({ fail: 1, pass: 3 });
+  });
+});
+
+// sc-1473: scan's cache status must come from the gate's OWN planner. A hand-rolled key here
+// missed the |split:<group> suffix the gate writes by default since the four-way correctness
+// split shipped — making a fully-cached correctness-reviewer structurally unreportable.
+describe('guard-review scan — cache status matches the gate planner (sc-1473)', () => {
+  const CLI_PATH = fileURLToPath(new URL('../cli.mts', import.meta.url));
+  const scan = (repo: string) =>
+    spawnSync('bun', [CLI_PATH, 'scan'], { cwd: repo, encoding: 'utf8', timeout: 60_000 });
+
+  it('reports [cached PASS] for a lens-split correctness-reviewer only once every group is cached', async () => {
+    // The SHIPPED default (unset → four-way split): the gate writes |split:<group>-suffixed keys.
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    const before = scan(repo);
+    expect(before.status, before.stderr).toBe(0);
+    const beforeLine = before.stdout.split('\n').find((l) => l.startsWith('correctness-reviewer'));
+    expect(beforeLine).toBeDefined();
+    expect(beforeLine).not.toContain('[cached PASS]'); // nothing judged yet
+    // Warm the real cache: the gate writes one entry PER LENS GROUP for correctness-reviewer, so
+    // the fake judge writes each group's own artifact (same shape as the split suite below).
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      for (const group of FOUR_WAY_LENS_GROUPS) {
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+          JSON.stringify({
+            items: [{ name: group[0], category: 'X', status: 'pass', issues: [] }],
+          }),
+        );
+      }
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const after = scan(repo);
+    expect(after.status, after.stderr).toBe(0);
+    const line = after.stdout.split('\n').find((l) => l.startsWith('correctness-reviewer'));
+    // Pre-fix, scan keyed without the split suffix and could NEVER report this line as cached.
+    expect(line).toContain('[cached PASS]');
+    expect(after.stdout).toContain('api-security-reviewer [cached PASS]'); // unsplit path intact
+    // GUARD_REVIEW_SKIP parity: the gate never plans a skipped reviewer, so scan must not report
+    // its cached PASS as skippable work — even though the entries are sitting in the cache.
+    const skipped = spawnSync('bun', [CLI_PATH, 'scan'], {
+      cwd: repo,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: { ...process.env, GUARD_REVIEW_SKIP: 'correctness-reviewer' },
+    });
+    expect(skipped.status, skipped.stderr).toBe(0);
+    expect(skipped.stdout).not.toContain('correctness-reviewer');
+    expect(skipped.stdout).toContain('api-security-reviewer [cached PASS]');
   });
 });
