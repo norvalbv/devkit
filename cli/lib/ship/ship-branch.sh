@@ -260,6 +260,11 @@ done
 # it. See assert-staged-set.sh for the clobber this defends against.
 . "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
 ship_record_staged_state "$WT" "$STAGED_STATE"
+# ...and prove the objects it names are actually readable. write-tree above cannot do this: it
+# persists a cache-tree and every later write-tree short-circuits on it, so a staged object that goes
+# missing stays invisible to the tree comparisons (sc-1420). Establishes the "present at staging"
+# end of the window; the preflight below establishes the other.
+ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
 . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
@@ -282,6 +287,7 @@ export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into 
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 # Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
 # GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before

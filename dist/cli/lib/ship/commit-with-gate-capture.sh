@@ -45,6 +45,9 @@ commit_with_gate_capture() {
   local progress="$root/.devkit/review-progress-${br//\//-}.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
   . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
+  # Both callers already source this, but the object probe below is this function's own evidence —
+  # don't inherit it by luck of call order.
+  . "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
 
   # Gate telemetry (best-effort, ship-scoped). A shared append-only JSONL sink + one ship_id per
   # attempt, inherited by every in-chain gate the SAME way DEVKIT_REVIEW_PROGRESS is — so the
@@ -80,8 +83,13 @@ commit_with_gate_capture() {
   # gates) silently no-ops (the bug this fixes). ship-branch/reship linked .devkit in, so the relative
   # path resolves to $wt/.devkit/hooks via the symlink; the overlay hook then execs the repo's own
   # committed hook too. Non-overlay repos have no such file → empty array → unchanged behaviour.
-  local hookcfg=()
-  [ -x "$root/.devkit/hooks/pre-commit" ] && hookcfg=(-c core.hooksPath=.devkit/hooks)
+  # gc.auto=0: this commit is the one ship-owned git call that can trip auto-gc, and it fires at the
+  # END of a multi-minute gate chain in a repo that may hold dozens of worktrees. Auto-gc cannot
+  # delete a minutes-old object under git's default pruneExpire, so this is hygiene rather than the
+  # sc-1420 fix — it just keeps ship from starting repository maintenance at its most fragile moment.
+  # APPEND the overlay flag below; assigning here would confine gc.auto=0 to overlay installs only.
+  local hookcfg=(-c gc.auto=0)
+  [ -x "$root/.devkit/hooks/pre-commit" ] && hookcfg+=(-c core.hooksPath=.devkit/hooks)
 
   # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
   # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
@@ -134,6 +142,19 @@ commit_with_gate_capture() {
     if [ -n "$head_now" ] && [ "$head_now" != "$DEVKIT_SHIP_BASE_SHA" ]; then head_clobbered=1; fi
   fi
 
+  # sc-1420, same evidence-not-grep discipline as the block above. A gate dies on `fatal: unable to
+  # read <oid>` when it cannot read a staged object, but the log alone cannot tell us WHY: the object
+  # may genuinely be gone from the shared database, or ship and the gate may simply be looking at
+  # DIFFERENT databases (ship inherits the caller's environment; gates are spawned through
+  # __dk_no_git_env, which strips GIT_OBJECT_DIRECTORY / GIT_ALTERNATE_OBJECT_DIRECTORIES). So ask the
+  # object database, from ship's own process, instead of grepping. Objects present here while the gate
+  # reported them missing is the signature of the second cause, and the banner records both views.
+  local staged_missing=0 staged_missing_list=""
+  if [ "$rc" -ne 0 ]; then
+    staged_missing_list=$(_ship_staged_missing_objects "$wt" 2>/dev/null || true)
+    [ -n "$staged_missing_list" ] && staged_missing=1
+  fi
+
   # Ship result telemetry — the outcome + a coarse blocked_gate tag derived from the captured log
   # (the per-gate/per-reviewer events carry the precise cause). Chain order is deterministic →
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
@@ -146,6 +167,10 @@ commit_with_gate_capture() {
   # greps below — a fail-OPEN gate line (`guard-review: … INCONCLUSIVE`, exit 2, chain continues)
   # can sit in the same log, and the review arm would otherwise claim a failure it did not cause.
   elif [ "$head_clobbered" -eq 1 ]; then blocked_json='"worktree_head_clobbered"'; timed_out=false
+  # NOT a blocked gate either: the gate chain could not read the staged content it was handed. Tested
+  # before the greps below for the same reason — whichever gate happened to read the staged diff first
+  # is the one that dies, so a grep would blame it for a failure it did not cause.
+  elif [ "$staged_missing" -eq 1 ]; then blocked_json='"staged_objects_missing"'; timed_out=false
   elif grep -q '✗ deterministic gates failed' "$log" 2>/dev/null; then blocked_json='"deterministic"'; timed_out=false
   elif grep -q 'decision smells:' "$log" 2>/dev/null; then blocked_json='"decisions"'; timed_out=false
   elif grep -qE 'guard-review: .* (FAILED|INCONCLUSIVE)' "$log" 2>/dev/null; then blocked_json='"review"'; timed_out=false
@@ -207,6 +232,19 @@ commit_with_gate_capture() {
       echo "   Most likely an outdated fallow: its audit base-snapshot cleanup could reach outside its"
       echo "   own worktree before 3.4.2. Check with: fallow --version  (devkit pins >= 3.6.0)."
       echo "   Full log: $log"
+    } >&2
+  elif [ "$staged_missing" -eq 1 ]; then
+    # sc-1420. Reuses the SAME evidence the telemetry above used — never a second grep. The gate that
+    # died is whichever one read the staged diff first; blaming it would send the operator to rerun a
+    # reviewer that was never the problem.
+    {
+      echo "🛑 ship: the gate chain could not read the staged content — objects the index references"
+      echo "   are missing from the object database. This is NOT a gate rejection, and nothing was"
+      echo "   pushed. The gate that reported it is simply the first one that read the staged diff."
+      printf '%s\n' "$staged_missing_list" | sed 's/^/     /'
+      _ship_report_object_environment "$wt"
+      echo "   Full log: $log"
+      echo "   Please attach this block to sc-1420 — it is the evidence that names the cause."
     } >&2
   else
     # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log
