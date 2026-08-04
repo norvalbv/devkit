@@ -194,7 +194,10 @@ export function emitMergedLensResults(splitParts, firstModel) {
                 status: p.res.status,
                 secs: p.secs,
                 ...(p.res.model ? { model: p.res.model } : {}),
+                ...(p.retried ? { retried: true } : {}),
             })),
+            // The merged row itself is flagged when ANY part needed the post-wave recovery (sc-1476).
+            ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
             ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
             ...itemFields(merged),
             ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),

@@ -31,28 +31,27 @@
  */
 
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
-import { emitCacheHit, emitGateEvent } from '../judge/gate-events.mts';
+import { emitCacheHit } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
-import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
-import { loadCache, savePasses } from './cache.mts';
+import { loadCache } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
-import { archiveFailedDiff } from './evidence/diff-archive.mts';
-import { attachItems, cachedLensFields, itemFields } from './evidence/items.mts';
+import { attachItems } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
-import {
-  emitMergedLensResults,
-  holdLensPart,
-  mapLimit,
-  planReviewWork,
-  taskLabel,
-} from './lens/split.mts';
+import { emitMergedLensResults, mapLimit, planReviewWork, taskLabel } from './lens/split.mts';
 import { applyOverrideValve } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
+import {
+  type ParkedRecovery,
+  retryableReason,
+  runDeferredRecoveries,
+  type SettleCtx,
+  settleReviewOutcome,
+} from './recovery/settle.mts';
 import {
   allowedToolsFor,
   cacheKey,
@@ -105,6 +104,10 @@ interface CascadeOpts {
   judgeEnv?: NodeJS.ProcessEnv;
   checklistRecoveryReason?: string;
   promptExtras?: PromptExtras;
+  /** Checklist-contract recovery scheduling (sc-1476, REVIEW-ONLY — commit/ship have no retry):
+   * 'defer' parks a voided PASS for the post-wave serial phase instead of retrying inline;
+   * 'final' marks the deferred attempt itself — a repeated miss is terminal, never re-retried. */
+  recovery?: 'defer' | 'final';
 }
 
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
@@ -137,6 +140,17 @@ export async function runCascade(
     initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
     let res = await cascadeVerdict(sel, opts);
     res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, async (reason) => {
+      // sc-1476: under 'defer', the contract miss is PARKED for the post-wave serial phase (haiku
+      // compliance degrades under concurrent load — retrying inside the same wave re-fails).
+      // Under 'final' (the deferred attempt), a repeated miss is terminal. One attempt total.
+      if (opts.recovery === 'defer')
+        return { ...res, status: 'inconclusive', reason, retryable: reason } as CascadeResult;
+      if (opts.recovery === 'final')
+        return {
+          ...res,
+          status: 'error',
+          reason: `reviewer checklist contract failed after one retry — ${reason}`,
+        } as CascadeResult;
       initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
       return cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason });
     });
@@ -430,18 +444,34 @@ export async function runReviewGate(
   const completed: string[] = [];
   const splitParts = plan.splitParts; // pre-seeded with groups whose PASS was already cached
   if (progressFile) writeProgress(progressFile, { running, completed });
-  const results = await mapLimit(plan.tasks, concurrency, (t) => {
+  const gateStart = Date.now();
+  const sctx: SettleCtx = {
+    cwd,
+    firstModel,
+    progressFile,
+    running,
+    completed,
+    splitParts,
+    timing,
+    verifyAssets,
+  };
+  const baseOpts = {
+    cwd,
+    cfg,
+    exec,
+    firstModel,
+    retryFirst: strict,
+    assetRoot,
+    judgeEnv,
+    promptExtras: ctx.promptExtras,
+  };
+  // sc-1476: checklist-contract recovery is DEFERRED out of the contended wave (review-only —
+  // the same scope the inline retry had). Parked outcomes settle nothing; the serial phase below
+  // re-runs each solo through the SAME settle path with `retried` marked.
+  const parked: ParkedRecovery[] = [];
+  const results = await mapLimit(plan.tasks, concurrency, (t, index) => {
     const t0 = Date.now();
-    return runCascade(t.sel, {
-      cwd,
-      cfg,
-      exec,
-      firstModel,
-      retryFirst: strict,
-      assetRoot,
-      judgeEnv,
-      promptExtras: ctx.promptExtras,
-    })
+    return runCascade(t.sel, { ...baseOpts, recovery: assetRoot ? 'defer' : undefined })
       .catch(
         (e): CascadeResult => ({
           name: t.sel.reviewer.name,
@@ -451,64 +481,32 @@ export async function runReviewGate(
         }),
       )
       .then((outcome) => {
-        const res = verifyAssets(outcome, t.base);
-        const durationMs = Date.now() - t0;
-        timing.observed(res.name, durationMs);
-        if (res.status === 'pass')
-          // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
-          // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
-          savePasses(cwd, {
-            [t.key]: {
-              at: new Date().toISOString(),
-              model: res.model ?? firstModel,
-              duration_ms: durationMs,
-              ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
-            },
-          });
-        if (res.status === 'fail') archiveFailedDiff(t.diffText);
-        if (progressFile) {
-          completed.push(taskLabel(t));
-          writeProgress(progressFile, { running, completed });
-        }
-        const secs = Math.round(durationMs / 1000);
-        // Persist the full judge transcript — the reviewed diff AND the agent's output — so a PASS
-        // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
-        // the ref + one-liner. No-op off-run (see run-context.mts).
-        if (t.splitOf) {
-          holdLensPart(splitParts, t.splitOf, { res, secs, task: t }, taskLabel(t));
-          return res;
-        }
-        const transcriptRef = res.transcript
-          ? saveTranscript(`review-${res.name}`, composeTranscript(t.diffText, res.transcript))
-          : null;
-        // Ship telemetry (best-effort, no-op off-ship): every reviewer outcome (pass/fail/
-        // inconclusive) so the usage tracker can report per-reviewer error counts and fail-rate.
-        emitGateEvent({
-          type: 'review_result',
-          reviewer: res.name,
-          status: res.status,
-          escalated: res.escalated,
-          // First-pass model that actually ran (pin-aware); firstModel only when no judge ran at
-          // all (missing brief / engine error), keeping the field always present for consumers.
-          model: res.model ?? firstModel,
-          reason: res.reason,
-          secs,
-          ...(res.waivers?.length ? { waivers: res.waivers } : {}),
-          // The per-lens vector, passes included; empty when the judge left no artifact (see
-          // evidence/items.mts for the shape and the spill rule).
-          ...itemFields(res),
-          ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
-        });
-        // Surface the one-line verdict reason on the completion line too (fails get theirs in the
-        // dedicated block below, with the full transcript — don't double-print it here).
-        const tail =
-          !['fail', 'error'].includes(res.status) && res.reason ? ` — ${res.reason}` : '';
-        console.error(
-          `guard-review: ${res.name} — ${res.status.toUpperCase()}${res.escalated ? ' (escalated)' : ''} in ${secs}s${res.status === 'pass' ? ' (checkpointed)' : ''}${tail}`,
-        );
+        const res = settleReviewOutcome(sctx, t, outcome, Date.now() - t0);
+        const reason = retryableReason(res);
+        if (reason) parked.push({ task: t, reason, index });
         return res;
       });
   });
+  await runDeferredRecoveries(
+    parked,
+    results,
+    sctx,
+    (task, reason) =>
+      runCascade(task.sel, {
+        ...baseOpts,
+        retryFirst: false, // the deferred run IS the second chance — never stack the outage retry
+        checklistRecoveryReason: reason,
+        recovery: 'final',
+      }).catch(
+        (e): CascadeResult => ({
+          name: task.sel.reviewer.name,
+          status: reviewMode ? 'error' : 'inconclusive',
+          reason: `engine error: ${e?.message ?? e}`,
+          escalated: false,
+        }),
+      ),
+    gateStart,
+  );
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report
 
   emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
