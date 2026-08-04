@@ -85,22 +85,55 @@ export function repinPackageJson(pkgRaw: string, version: string): string {
   return pkgRaw.replace(re, `$1${version}$2`);
 }
 
+/** The `X.Y.Z` pinned on a devkit dep ref (`…devkit.git#v0.47.1`), or null. */
+export function pinnedVersion(ref: string): string | null {
+  return ref.match(PIN_RE)?.[1] ?? null;
+}
+
+// A ref lookup must never become the slowest thing devkit does. `doctor` calls this too, and a
+// remote whose credentials aren't cached would otherwise sit on a git credential prompt reading a
+// stdin nobody is typing into — so prompts are off and the wait is bounded. Both failures land in
+// the same `{ error }` branch every caller already handles as "unreachable, carry on".
+const LS_REMOTE_TIMEOUT_MS = 5_000;
+
+/**
+ * Raw `git ls-remote` output for a git remote, or a human `{ error }` when it can't be reached.
+ * `refFlags` selects the ref space (`['--tags']` for published versions, `['--tags','--heads']` to
+ * also see branch tips). The `git+` prefix is stripped here — git wants a bare URL — so callers can
+ * pass a package.json dep ref verbatim.
+ */
+export function lsRemote(url: string, refFlags: string[]): { output?: string; error?: string } {
+  const lsUrl = url.replace(GIT_PREFIX_RE, '');
+  try {
+    return {
+      output: execFileSync('git', ['ls-remote', ...refFlags, lsUrl], {
+        encoding: 'utf8',
+        timeout: LS_REMOTE_TIMEOUT_MS,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        // Swallow git's stderr: every caller turns a failure into its own worded line, and
+        // execFileSync would otherwise forward raw transport noise ("ssh: Could not resolve
+        // hostname …") to the user's terminal ahead of it.
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    };
+  } catch {
+    return { error: `could not reach the git remote (${lsUrl})` };
+  }
+}
+
 /**
  * Query the remote for the highest published tag. Returns `{ latest }` (a x.y.z string, or null
  * when the remote has no version tags) or `{ error }` when the remote is unreachable. Shared by
  * `update` and `upgrade` so both resolve the latest tag the same way (single source for the repo URL).
  */
 export function fetchLatestTag(): { latest?: string | null; error?: string } {
-  const lsUrl = BUN_REF.replace(GIT_PREFIX_RE, '');
-  let ls: string;
-  try {
-    ls = execFileSync('git', ['ls-remote', '--tags', lsUrl], { encoding: 'utf8' });
-  } catch {
+  const { output, error } = lsRemote(repoUrl(), ['--tags']);
+  if (error) {
     return {
-      error: `could not reach the devkit remote (${lsUrl}). Set DEVKIT_REPO to override it (private fork / ssh host alias).`,
+      error: `could not reach the devkit remote (${repoUrl().replace(GIT_PREFIX_RE, '')}). Set DEVKIT_REPO to override it (private fork / ssh host alias).`,
     };
   }
-  return { latest: latestTag(ls) };
+  return { latest: latestTag(output ?? '') };
 }
 
 function run(cmd: string, args: string[], cwd: string): void {
@@ -173,7 +206,7 @@ export default async function update(args: string[], cwd: string): Promise<numbe
     const ref = pkg.dependencies?.[DEP] ?? pkg.devDependencies?.[DEP];
     if (ref) {
       mode = 'package';
-      pinned = ref.match(PIN_RE)?.[1] ?? null;
+      pinned = pinnedVersion(ref);
     }
   }
   const repoDep =

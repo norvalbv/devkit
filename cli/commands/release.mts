@@ -41,6 +41,21 @@ function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
+/**
+ * Whether `tag` is already published. `git tag --list` only knows what THIS clone fetched, so a
+ * clone that never fetched tags would happily re-cut a version that already exists — and a version
+ * tag is immutable: consumer lockfiles record the object it resolves to, so re-pointing one orphans
+ * every recorded SHA. An unreachable remote returns false (proceed): an offline maintainer must not
+ * be blocked by a check that can only ever add certainty.
+ */
+export function remoteTagExists(tag: string, cwd: string): boolean {
+  try {
+    return git(['ls-remote', '--tags', 'origin', `refs/tags/${tag}`], cwd) !== '';
+  } catch {
+    return false;
+  }
+}
+
 export const meta = {
   name: 'release',
   summary: 'MAINTAINER-ONLY: bump version, test, and open a release PR.',
@@ -102,6 +117,10 @@ export default async function release(args: string[], cwd: string): Promise<numb
   }
   if (git(['tag', '--list', tag], cwd)) {
     console.error(`devkit release: tag ${tag} already exists.`);
+    return 1;
+  }
+  if (remoteTagExists(tag, cwd)) {
+    console.error(`devkit release: tag ${tag} is already published on origin.`);
     return 1;
   }
   const releaseBranch = `release/${tag}`;
