@@ -111,44 +111,77 @@ describe('skill checklist script (spawned source)', () => {
     },
   );
 
+  // sc-1438 follow-up: a passing finalize tidies the artifact itself (no agent-run cleanup step),
+  // while the gate/review env guards keep it where the gate must independently verify it.
   it.each(CHECKLIST_CASES)(
-    '%s preserves its artifact for independent review-mode verification',
+    '%s finalize auto-tidies on success, keeps the artifact under the gate env',
     (skill, stateName) => {
-      const repo = mkdtempSync(join(tmpdir(), 'checklist-review-cleanup-'));
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-finalize-tidy-'));
       dirs.push(repo);
       const stateDir = join(repo, '.claude');
       const stateFile = join(stateDir, stateName);
       mkdirSync(stateDir, { recursive: true });
-      writeFileSync(stateFile, '{}');
+      const state =
+        skill === 'commit-guard'
+          ? { files: [{ path: 'src/a.ts', status: 'pass', issues: [] }] }
+          : { items: [{ name: 'x', category: 'X', status: 'pass', issues: [] }] };
       const script = fileURLToPath(
         new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
       );
 
-      const reviewCleanup = spawnSync('node', [script, 'cleanup'], {
-        cwd: repo,
-        encoding: 'utf8',
-        env: { ...process.env, DEVKIT_RUN_MODE: 'review' },
-      });
-      expect(reviewCleanup.status, reviewCleanup.stderr).toBe(0);
-      expect(existsSync(stateFile)).toBe(true);
-
-      // sc-1438: gate runs export DEVKIT_CHECKLIST_KEEP=1 — a judge obeying its brief's cleanup
-      // step must not delete the artifact the gate reads after it finishes (voids the PASS).
-      const gateCleanup = spawnSync('node', [script, 'cleanup'], {
+      writeFileSync(stateFile, JSON.stringify(state));
+      const gateFinalize = spawnSync('node', [script, 'finalize'], {
         cwd: repo,
         encoding: 'utf8',
         env: { ...process.env, DEVKIT_RUN_MODE: 'commit', DEVKIT_CHECKLIST_KEEP: '1' },
       });
-      expect(gateCleanup.status, gateCleanup.stderr).toBe(0);
+      expect(gateFinalize.status, gateFinalize.stderr).toBe(0);
       expect(existsSync(stateFile)).toBe(true);
 
-      const normalCleanup = spawnSync('node', [script, 'cleanup'], {
+      const interactiveFinalize = spawnSync('node', [script, 'finalize'], {
         cwd: repo,
         encoding: 'utf8',
         env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
       });
-      expect(normalCleanup.status, normalCleanup.stderr).toBe(0);
+      expect(interactiveFinalize.status, interactiveFinalize.stderr).toBe(0);
       expect(existsSync(stateFile)).toBe(false);
+    },
+  );
+
+  it.each(CHECKLIST_CASES)(
+    '%s preserves its artifact for independent review-mode verification (finalize under review mode)',
+    (skill, stateName) => {
+      const repo = mkdtempSync(join(tmpdir(), 'checklist-review-keep-'));
+      dirs.push(repo);
+      const stateDir = join(repo, '.claude');
+      const stateFile = join(stateDir, stateName);
+      mkdirSync(stateDir, { recursive: true });
+      const state =
+        skill === 'commit-guard'
+          ? { files: [{ path: 'src/a.ts', status: 'pass', issues: [] }] }
+          : { items: [{ name: 'x', category: 'X', status: 'pass', issues: [] }] };
+      writeFileSync(stateFile, JSON.stringify(state));
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+
+      const reviewFinalize = spawnSync('node', [script, 'finalize'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'review' },
+      });
+      expect(reviewFinalize.status, reviewFinalize.stderr).toBe(0);
+      expect(existsSync(stateFile)).toBe(true);
+
+      // sc-1438 follow-up: the cleanup command is BINNED — an agent (or stale brief) invoking it
+      // gets usage + exit 1 and cannot touch the artifact.
+      const binned = spawnSync('node', [script, 'cleanup'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, DEVKIT_RUN_MODE: 'commit' },
+      });
+      expect(binned.status).toBe(1);
+      expect(existsSync(stateFile)).toBe(true);
     },
   );
 

@@ -371,7 +371,7 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
     expect(p).toContain('src/main/a.ts');
     expect(p).toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(p).toContain('check-item <name> --pass');
-    expect(p).toContain('Do NOT run the `cleanup` step');
+    expect(p).toContain('Never delete the checklist artifact');
   });
   it('lets the packaged brief own enumeration and rewrites its skill paths in review mode', () => {
     const guard = REVIEWERS.find((r) => r.name === 'commit-guard');

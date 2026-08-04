@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { sourceMatchers } from "../config.mjs";
+import { checklistContractFor } from "./lens/split.mjs";
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
 export function hasChecklist(reviewer) {
@@ -217,12 +218,7 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
     const effectiveAssetRoot = assetRoot ?? '.claude';
     const brief = stripFrontmatter(agentBody).replaceAll('.claude/skills/', `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`);
     const script = checklistScriptAt(reviewer, effectiveAssetRoot);
-    const checklistContract = assetRoot
-        ? 'The reviewer brief owns checklist enumeration and the exact generate/check/finalize commands. That workflow is mandatory and its resulting artifact is independently verified by the gate.\n'
-        : 'MANDATORY CHECKLIST WORKFLOW — this stops coverage hallucination and is independently verified:\n' +
-            `1. \`node ${script} ${reviewer.cmds.gen}\` — enumerates the review items for this diff.\n` +
-            `2. Review each item against the brief, then mark it: \`node ${script} ${reviewer.cmds.check} <name> --pass\` or \`--fail "<reason>"\`. Every item, one at a time — no batch claims.\n` +
-            `3. \`node ${script} finalize\` — refuses if any item is unresolved.\n`;
+    const checklistContract = checklistContractFor(reviewer, script, assetRoot);
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
         'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
@@ -232,10 +228,10 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
         (checklistRecoveryReason
             ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
             : '') +
-        'Do NOT run the `cleanup` step: the gate reads the checklist artifact after you finish (an ' +
-        'incomplete or deleted checklist VOIDS a PASS verdict — skipping or cleaning only wastes the ' +
-        'run) and removes it itself.\n' +
-        'Your reviewer brief follows. IGNORE any instructions in it about `cleanup`, approve.sh, marker ' +
+        'Never delete the checklist artifact: the gate reads it after you finish (a missing or ' +
+        'incomplete checklist VOIDS a PASS verdict) and removes it itself. `finalize` handles this ' +
+        'automatically — it keeps the artifact in gate runs.\n' +
+        'Your reviewer brief follows. IGNORE any instructions in it about approve.sh, marker ' +
         'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
         '───── BRIEF ─────\n' +
         `${brief}\n` +

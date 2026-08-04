@@ -180,7 +180,7 @@ const store = createChecklistStore({
   label: 'Correctness',
   log,
 });
-const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+const { save: saveChecklist, status, checkItem, finalize } = store;
 
 function generate(lens) {
   const stagedFiles = getStagedFiles();
@@ -225,9 +225,6 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   default:
     log('Correctness Review Commands (all accept --lens <a[,b,...]> to scope to a lens group):');
     log('  generate                    Create checklist');
@@ -235,6 +232,5 @@ switch (cmd) {
     log('  check-item <name> --pass    Mark passed');
     log('  check-item <name> --fail    Mark failed');
     log('  finalize                    Verify every item was resolved');
-    log('  cleanup                     Remove checklist');
     process.exit(1);
 }

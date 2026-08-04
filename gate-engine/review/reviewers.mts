@@ -314,10 +314,10 @@ export function wrapPrompt(
     (checklistRecoveryReason
       ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
       : '') +
-    'Do NOT run the `cleanup` step: the gate reads the checklist artifact after you finish (an ' +
-    'incomplete or deleted checklist VOIDS a PASS verdict — skipping or cleaning only wastes the ' +
-    'run) and removes it itself.\n' +
-    'Your reviewer brief follows. IGNORE any instructions in it about `cleanup`, approve.sh, marker ' +
+    'Never delete the checklist artifact: the gate reads it after you finish (a missing or ' +
+    'incomplete checklist VOIDS a PASS verdict) and removes it itself. `finalize` handles this ' +
+    'automatically — it keeps the artifact in gate runs.\n' +
+    'Your reviewer brief follows. IGNORE any instructions in it about approve.sh, marker ' +
     'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
     '───── BRIEF ─────\n' +
     `${brief}\n` +

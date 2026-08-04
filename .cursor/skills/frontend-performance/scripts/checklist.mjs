@@ -57,7 +57,7 @@ const store = createChecklistStore({
   label: 'Frontend Performance',
   log,
 });
-const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+const { save: saveChecklist, status, checkItem, finalize } = store;
 
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -283,9 +283,6 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   default:
     log('Frontend Performance Review Commands:');
     log('  generate                    Create checklist');
@@ -293,6 +290,5 @@ switch (cmd) {
     log('  check-item <name> --pass    Mark passed');
     log('  check-item <name> --fail    Mark failed');
     log('  finalize                    Verify every item was resolved');
-    log('  cleanup                     Remove checklist');
     process.exit(1);
 }
