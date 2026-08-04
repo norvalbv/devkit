@@ -34,6 +34,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { envBool, envFlag, resolveGuardConfig } from "../config.mjs";
 import { scopedTargets } from "../decisions/scoped-targets.mjs";
+import { renderTargets } from "./evidence/targets-block.mjs";
+export { renderTargets } from "./evidence/targets-block.mjs";
 import { emitCacheHit, finishGateTiming } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
@@ -47,24 +49,6 @@ const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*
 // conventions-reviewer (which, having no Bash, needs the identical pre-rendered-evidence pattern
 // this gate pioneered). Re-exported under the original name — zero behavior change here.
 export { buildCappedDiffEvidence as buildCompletenessEvidence };
-/** Render the governing-Targets block (the consumer prep-critique shape) or its SKIP note. */
-export function renderTargets(blocks) {
-    if (blocks.length === 0) {
-        return ('## RELEVANT RECORDED TARGETS — SKIP\n' +
-            'No governing Target found (index unreachable, or none match). Do not claim ' +
-            'decision-alignment you did not check; a recorded decision is not a completeness gap.');
-    }
-    const lines = [
-        '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',
-        '',
-    ];
-    for (const b of blocks) {
-        lines.push(`### ${b.slug}${b.scope ? ` · scope: \`${b.scope}\`` : ''} _(${b.via})_`);
-        lines.push(b.ruling.trim());
-        lines.push('');
-    }
-    return lines.join('\n');
-}
 /** Wrap the consumer's completeness brief for one headless commit-msg judgement. */
 export function wrapCompleteness(agentBody, message, files, targetsBlock) {
     return ('You are running as an automated HEADLESS COMMIT-MESSAGE GATE, not an interactive assistant.\n' +
