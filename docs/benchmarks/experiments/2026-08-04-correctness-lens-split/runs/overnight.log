@@ -1,0 +1,6 @@
+[23:23:42Z] armed: waiting on pid 93194, then reset at 02:53 BST
+[23:57:42Z] control-2 wrapper exited
+[01:53:45Z] limit window reset — starting 4-way arm
+[03:52:33Z] 4-way arm exited 0
+[03:52:33Z] starting registered 2-way arm
+[05:30:29Z] 2-way arm exited 0 — chain complete
