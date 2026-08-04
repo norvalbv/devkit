@@ -60,6 +60,52 @@ function repoWithCraftedFile() {
 const run = (repo, args) => spawnSync('node', [SCRIPT, ...args], { cwd: repo, encoding: 'utf8' });
 
 describe('skill checklist script (spawned source)', () => {
+  // sc-1439: the gate's injected staged list is AUTHORITATIVE — the script reviews exactly those
+  // files even when its own root-resolution would find nothing, and when its filters exclude every
+  // injected file it writes a NAMED skip artifact instead of exiting file-less (the second
+  // artifact-killer behind the "checklist artifact missing" inconclusives).
+  it('generate honours the gate-injected staged list over its own root resolution', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-override-'));
+    dirs.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    // roots point AWAY from the file — legacy resolution finds nothing
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({ review: { backendRoots: ['elsewhere'] } }),
+    );
+    mkdirSync(join(repo, 'api'), { recursive: true });
+    writeFileSync(join(repo, 'api', 'auth.ts'), 'export const login = (password) => password;\n');
+    const r = spawnSync('node', [SCRIPT, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify(['api/auth.ts']) },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.api-security-review.json'), 'utf8'),
+    );
+    expect(state.items.length).toBeGreaterThan(0);
+  });
+
+  it('generate writes a NAMED skip artifact when filters exclude every injected file', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-override-skip-'));
+    dirs.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    writeFileSync(join(repo, 'guard.config.json'), JSON.stringify({}));
+    writeFileSync(join(repo, 'README.md'), '# prose only\n');
+    const r = spawnSync('node', [SCRIPT, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify(['README.md']) },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.api-security-review.json'), 'utf8'),
+    );
+    expect(state.items).toEqual([]);
+    expect(state.skipped).toContain('excluded');
+  });
+
   it('generate with a $(…)-named staged file: scanned via argv git, no shell side effect', () => {
     const repo = repoWithCraftedFile();
     const r = run(repo, ['generate']);

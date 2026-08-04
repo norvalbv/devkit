@@ -288,34 +288,6 @@ export function parseConventionFindings(raw) {
         offendingLine: Number(m[2]),
     }));
 }
-/**
- * Independent verification of the checklist artifact the judge's workflow left behind — the
- * gate-side half of the anti-hallucination contract. Returns null when the artifact is complete
- * and consistent with the verdict, else a human-readable reason (→ the cascade result becomes
- * inconclusive, never a PASS). A FAIL verdict needs no artifact scrutiny — it blocks regardless.
- *
- * @param state parsed state-file JSON (null = missing/unreadable)
- * @param verdict the judge's parsed verdict
- */
-export function verifyChecklist(state, verdict) {
-    if (verdict === 'FAIL')
-        return null;
-    const items = state?.items ?? state?.files; // domain reviewers use items[]; commit-guard files[]
-    if (!Array.isArray(items) || items.length === 0)
-        return ('checklist artifact missing — the judge skipped the checklist workflow (or its ' +
-            'checklist script was never synced: devkit sync-skills)');
-    const pending = items.filter((i) => i.status === 'pending');
-    if (pending.length > 0)
-        return `checklist incomplete — ${pending.length} item(s) never resolved: ${pending
-            .map((i) => i.name ?? i.path)
-            .join(', ')}`;
-    const failed = items.filter((i) => i.status === 'fail');
-    if (failed.length > 0)
-        return `checklist has ${failed.length} FAILED item(s) but the verdict says PASS: ${failed
-            .map((i) => i.name ?? i.path)
-            .join(', ')}`;
-    return null;
-}
 /** Escalation prompt: opus independently re-verifies a first-pass FAIL (check-alignment shape). */
 export function escalatePrompt(wrappedPrompt, firstPass) {
     return (`${wrappedPrompt}\n\n` +

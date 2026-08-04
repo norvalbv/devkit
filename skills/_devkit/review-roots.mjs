@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, win32 } from 'node:path';
 
 // `length > 0` is load-bearing, not belt-and-braces: `[].every(...)` is vacuously TRUE, so without it
@@ -11,6 +11,27 @@ export const isNonEmptyStringArray = (value) =>
   Array.isArray(value) &&
   value.length > 0 &&
   value.every((entry) => typeof entry === 'string' && entry.length > 0);
+
+/**
+ * The gate's authoritative staged file list for THIS reviewer (sc-1439). The gate selects
+ * reviewers from its own topology; each checklist previously re-resolved files independently
+ * (env/config roots + --diff-filter=ACM), and ANY divergence stranded generate() with zero files
+ * and no artifact — "checklist artifact missing" without the judge ever misbehaving. When this
+ * env is present the checklist treats it as the candidate universe and still applies its own
+ * filters (prose/tests/extensions). Staged deletions are dropped here (no worktree bytes to
+ * review — the ACM mirror). Returns null when unset/invalid: standalone runs resolve as before.
+ */
+export function stagedFilesOverride() {
+  const raw = process.env.DEVKIT_REVIEW_STAGED_FILES;
+  if (raw === undefined) return null;
+  try {
+    const files = JSON.parse(raw);
+    if (!isNonEmptyStringArray(files)) return null;
+    return files.filter((f) => existsSync(f));
+  } catch {
+    return null;
+  }
+}
 
 /** Normalize trusted repository-relative roots so selector and Git pathspec readers agree. */
 export function normalizeReviewRoots(value, name) {
