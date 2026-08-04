@@ -269,6 +269,15 @@ export function stripFrontmatter(md: string): string {
   return m ? md.slice(m[0].length) : String(md);
 }
 
+/** Prompt-only context riding beside a brief (sc-1441/sc-1442): the governing-Targets block and
+ * the fenced advisory commit-message block. NEVER hand either to anything that feeds `cacheKey` —
+ * the salt path takes the scope-only render via targets-block.mts, and the message must stay out
+ * of every key (ship-gates-converge-not-restart). */
+export interface PromptExtras {
+  targetsBlock?: string;
+  commitMsgBlock?: string;
+}
+
 /**
  * Wrap an interactive reviewer brief for headless gate use. The same Devkit-owned .md serves both
  * surfaces: interactively the root agent dispatches its synced copy; review mode uses the current
@@ -282,7 +291,7 @@ export function wrapPrompt(
   files: string[],
   assetRoot?: string,
   checklistRecoveryReason?: string,
-  targetsBlock = '',
+  { targetsBlock = '', commitMsgBlock = '' }: PromptExtras = {},
 ): string {
   const effectiveAssetRoot = assetRoot ?? '.claude';
   const brief = stripFrontmatter(agentBody).replaceAll(
@@ -304,6 +313,9 @@ export function wrapPrompt(
     // deny-floor bug by citing its governing Target) and the context-starved domain reviewers
     // (which PASSed the same diff). A violation of a governing Target below is IN CHARTER.
     (targetsBlock ? `${targetsBlock}\n` : '') +
+    // sc-1442: the author's stated intent, fenced as untrusted advisory context — the same signal
+    // that let the completeness gate catch a claim/change mismatch the domain reviewers missed.
+    (commitMsgBlock ? `${commitMsgBlock}\n` : '') +
     checklistContract +
     (checklistRecoveryReason
       ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
@@ -341,6 +353,7 @@ export function wrapConventionsPrompt(
   agentBody: string,
   files: string[],
   claudeMdBlock: string,
+  { commitMsgBlock = '' }: PromptExtras = {},
 ): string {
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
@@ -350,6 +363,7 @@ export function wrapConventionsPrompt(
     'ambiguous, but do not try to run git yourself). The governing CLAUDE.md rules for these files ' +
     'are already loaded below — do not search for more.\n' +
     `${claudeMdBlock}\n` +
+    (commitMsgBlock ? `${commitMsgBlock}\n` : '') + // sc-1442: fenced untrusted advisory intent
     'Your reviewer brief follows. IGNORE any instructions in it about checklist scripts, marker ' +
     'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
     '───── BRIEF ─────\n' +

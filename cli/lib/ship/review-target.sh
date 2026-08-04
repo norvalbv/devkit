@@ -53,6 +53,7 @@ SHIP_BASE_SHA=${DEVKIT_SHIP_BASE_SHA:-}
 # Never inherit another ship/review's authority, private paths, or telemetry destination. The two
 # topology hints and SHIP_COMMIT_TIMEOUT are intentional invocation inputs and remain untouched.
 for name in \
+  DEVKIT_COMMIT_MSG_FILE \
   DEVKIT_GATE_ARCHIVE_LOG DEVKIT_GATE_EVENTS DEVKIT_REVIEW_ASSET_ROOT \
   DEVKIT_REVIEW_BASELINE_DIR DEVKIT_REVIEW_BRANCH DEVKIT_REVIEW_DATA_ROOT \
   DEVKIT_REVIEW_DEPENDENCY_MANIFEST DEVKIT_REVIEW_DEPENDENCY_TOOL DEVKIT_REVIEW_GUARDS \
@@ -572,6 +573,20 @@ export DEVKIT_REVIEW_ASSET_ROOT="$ASSET_RUNTIME"
 export DEVKIT_REVIEW_DATA_ROOT="$PRIVATE_DATA_ROOT"
 export DEVKIT_REVIEW_BASELINE_DIR="$BASELINE_RUNTIME"
 export DEVKIT_REVIEW_MERGE_BASE="$MERGE_BASE"
+
+# sc-1442: no commit message exists for a review run — synthesize advisory intent from the
+# reviewed range's subjects, oldest first (line 1 = the branch's founding intent, which becomes
+# the reviewers' semantic-Target query). MUST run against the TARGET repo: the snapshot
+# worktrees' HEAD is pinned at the merge base, so `git log` there sees nothing. Best-effort under
+# set -e: any git failure or an empty range leaves the var unset → the gate's placeholder path.
+INTENT_FILE="$STATE_ROOT/commit-intent.txt"
+git -c core.hooksPath=/dev/null -C "$GIT_ROOT" log --reverse --format=%s \
+  "$MERGE_BASE..$TARGET_HEAD" > "$INTENT_FILE" 2>/dev/null || :
+if [ -s "$INTENT_FILE" ]; then
+  export DEVKIT_COMMIT_MSG_FILE="$INTENT_FILE"
+else
+  rm -f -- "$INTENT_FILE" 2>/dev/null || :
+fi
 
 write_mutable_exclusions() {
   local manifest=$1 destination=$2 raw=$STATE_ROOT/mutable-$$.bin root scoped last_byte

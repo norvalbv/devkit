@@ -1027,6 +1027,28 @@ describe('ship-branch.sh — worktree integration', () => {
     );
     expect(log).toContain(`HOOK_BASE=${headSha}`);
   });
+
+  // sc-1442: the composed message is handed to the pre-commit gates via a temp file BEFORE
+  // `git commit` runs (never .git/COMMIT_EDITMSG), and the file is gone once the commit returns.
+  it('exports DEVKIT_COMMIT_MSG_FILE with title+body during gates, and removes it after (sc-1442)', () => {
+    const { dir, env, git } = seedShipRepo({
+      hookBody: 'echo "MSGFILE=$DEVKIT_COMMIT_MSG_FILE"; cat "$DEVKIT_COMMIT_MSG_FILE"',
+    });
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/msg-ctx', 'TITLE_MARKER_1442', '--body', 'BODY_MARKER_1442', 'note.txt'],
+      { cwd: dir, input: '', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    const log = readFileSync(join(dir, '.devkit/last-ship-gates-feat-msg-ctx.log'), 'utf8');
+    expect(log).toContain('TITLE_MARKER_1442'); // the hook read the COMPOSED message pre-commit
+    expect(log).toContain('BODY_MARKER_1442');
+    const msgPath = log.match(/MSGFILE=(\S+)/)?.[1] ?? '';
+    expect(msgPath).toContain('devkit-ship-msg');
+    expect(existsSync(msgPath)).toBe(false); // cleaned up on the success path
+  });
 });
 
 // Overlay mode keeps the entire gate chain in a git-ignored .devkit/hooks/pre-commit that never

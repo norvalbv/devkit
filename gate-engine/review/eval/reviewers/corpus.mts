@@ -137,6 +137,12 @@ export function benchGateHash(reviewer) {
       readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
       readFileSync(path.join(repoRoot, 'gate-engine/review/runtime.mts'), 'utf8'),
+      // sc-1442: these supply judge-visible bytes (Targets framing, the advisory message wrapper,
+      // the stdin diff plumbing) — editing any changes what every judge reads, so a baseline
+      // earned under old bytes is not comparable. targets-block was a hash gap since sc-1441.
+      readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/targets-block.mts'), 'utf8'),
+      readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/commit-message.mts'), 'utf8'),
+      readFileSync(path.join(repoRoot, 'gate-engine/review/evidence/staged-git.mts'), 'utf8'),
       // Every shared helper, for the same reason the checklist itself is hashed: it ships into the
       // fixture and its edits change what the gate does, so a baseline earned under the old one is
       // not comparable.
