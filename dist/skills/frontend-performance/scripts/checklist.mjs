@@ -20,9 +20,14 @@ const CHECKLIST_PATH = '.claude/.frontend-performance-review.json';
 // Top-level regex patterns for performance
 const RE_IMAGE_DIFF = /\b(img|image|src=|srcset|loading|width=|height=)/i;
 const RE_IMAGE_FILE = /\.(png|jpg|jpeg|gif|webp|svg|avif)/;
-const RE_CSS = /\b(import.*\.css|className|style=|tailwind|styled)/i;
+// Bare `className` matched every TSX diff without being CSS-cost evidence.
+const RE_CSS = /\b(import.*\.css|style=|tailwind|styled)/i;
 const RE_INLINE_STYLE = /style\s*=\s*\{/i;
-const RE_IMPORT = /\bimport\s+/i;
+// Bundle size only moves when ADDED code imports a bare (package) specifier; relative imports
+// and `import type` (erased at build) cost zero bytes. Matched against the joined added lines
+// (addedText) so a declaration split across diff lines is seen whole: the type-exclusion sits
+// on the `import` token, and the gap stops at `;` so it cannot span into a later declaration.
+const RE_PKG_IMPORT = /\bimport\s+(?!type\b)(['"][^.'"]|[^;]{0,300}?\bfrom\s+['"][^.'"])/;
 const RE_SCRIPT = /<script/i;
 const RE_IFRAME = /<iframe/i;
 const RE_COMPONENT = /\b(function\s+\w+|const\s+\w+\s*=.*=>).*return.*</i;
@@ -34,7 +39,6 @@ const RE_SW = /\b(serviceWorker|navigator\.serviceWorker|workbox)/i;
 const RE_COOKIE = /\b(cookie|document\.cookie|Cookies)/i;
 const RE_RESOURCE_HINTS = /\b(preconnect|prefetch|preload|dns-prefetch)/i;
 const RE_FONT = /\b(font|@font-face|woff|woff2|font-display)/i;
-const RE_DEPS = /\b(from\s+['"][^'"]+['"])/i;
 // Runtime rendering-cost items (coverage refresh — see SKILL.md Provenance): synchronous layout
 // reads that force reflow, and animation of layout-affecting properties.
 const RE_LAYOUT_READ =
@@ -53,7 +57,7 @@ const store = createChecklistStore({
   label: 'Frontend Performance',
   log,
 });
-const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+const { save: saveChecklist, status, checkItem, finalize } = store;
 
 // Frontend roots to review — from guard.config.json `review.frontendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -97,9 +101,20 @@ function getFileDiff(file) {
   }
 }
 
+// Reconstruct just the ADDED code from the diff blob so declaration-level patterns (imports)
+// can match across the newlines a multi-line statement splits into.
+function addedText(fullDiff) {
+  return fullDiff
+    .split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.slice(1))
+    .join('\n');
+}
+
 function detectPerformancePatterns(files, diffs) {
   const items = [];
   const fullDiff = diffs.join('\n');
+  const added = addedText(fullDiff);
 
   if (RE_IMAGE_DIFF.test(fullDiff) || files.some((f) => RE_IMAGE_FILE.test(f))) {
     items.push({
@@ -120,7 +135,7 @@ function detectPerformancePatterns(files, diffs) {
   if (RE_INLINE_STYLE.test(fullDiff)) {
     items.push({ name: 'inline-styles', category: 'High Priority', status: 'pending', issues: [] });
   }
-  if (RE_IMPORT.test(fullDiff)) {
+  if (RE_PKG_IMPORT.test(added)) {
     items.push({ name: 'bundle-size', category: 'High Priority', status: 'pending', issues: [] });
   }
   if (RE_SCRIPT.test(fullDiff)) {
@@ -212,7 +227,7 @@ function detectPerformancePatterns(files, diffs) {
       issues: [],
     });
   }
-  if (RE_DEPS.test(fullDiff)) {
+  if (RE_PKG_IMPORT.test(added)) {
     items.push({
       name: 'dependency-size',
       category: 'Low Priority',
@@ -268,9 +283,6 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   default:
     log('Frontend Performance Review Commands:');
     log('  generate                    Create checklist');
@@ -278,6 +290,5 @@ switch (cmd) {
     log('  check-item <name> --pass    Mark passed');
     log('  check-item <name> --fail    Mark failed');
     log('  finalize                    Verify every item was resolved');
-    log('  cleanup                     Remove checklist');
     process.exit(1);
 }

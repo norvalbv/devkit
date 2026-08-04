@@ -18,21 +18,33 @@ import {
 const CHECKLIST_PATH = '.claude/.backend-performance-review.json';
 
 // Top-level regex patterns for performance
-const RE_DB_QUERY = /\b(query|select|findMany|findUnique|findFirst|execute|raw|sql)/i;
+// Statement-shaped SQL or qualified ORM/raw invocations — bare `query`/`select` matched nearly
+// every diff, and unqualified `execute`/`sql` matched non-database calls like command.execute().
+const RE_DB_QUERY =
+  /\bselect\b[\s\S]{0,120}?\bfrom\b|\binsert\s+into\b|\bupdate\b[\s\S]{0,80}?\bset\b|\bdelete\s+from\b|\$(query|execute)Raw|\.(query|execute)Raw\s*\(|\.execute\s*\(\s*['"`]|\bsql\s*[`(]|\b(findMany|findUnique|findFirst)\b/i;
 const RE_SELECT_STAR = /select\s*\*/i;
-const RE_N_PLUS_ONE_FOR = /for\s*\(.*\)[\s\S]*?(find|query|select)/i;
-const RE_N_PLUS_ONE_MAP = /\.map\s*\([\s\S]*?(find|query|await)/i;
-const RE_PAGINATION = /\b(skip|take|limit|offset|page|cursor|pagination)/i;
-const RE_INDEXING = /\b(index|createIndex|ensureIndex|orderBy)/i;
+// Gaps are bounded: the diffs of ALL staged files are joined into one blob, so an unbounded
+// [\s\S]*? couples a loop in one file with a find/await in an unrelated file.
+const RE_N_PLUS_ONE_FOR = /for\s*\(.*\)[\s\S]{0,300}?(find|query|select)/i;
+const RE_N_PLUS_ONE_MAP = /\.map\s*\([\s\S]{0,300}?(find|query|await)/i;
+// Bare `skip|take|page|limit` matched loop vars and UI copy; keep unambiguous markers.
+const RE_PAGINATION = /\b(offset|cursor|pagination|paginate)/i;
+// Bare `index` matched the a/…/index.ts paths in every diff header.
+const RE_INDEXING = /\b(createIndex|ensureIndex|orderBy)/i;
 const RE_CACHING = /\b(cache|redis|memcache|lru|ttl|expire|invalidate)/i;
-const RE_POOL = /\b(pool|connection|Pool|max|idle|timeout)/i;
-const RE_ASYNC = /\b(async|await|Promise|queue|worker|job|bull|agenda)/i;
+const RE_POOL = /\b(pool|connection)/i;
+// Bare `async|await|Promise` matched every backend diff. What the async-handling lens is
+// actually for is sequential awaits (loop + await) and offload infrastructure — Promise.all
+// stays out: it is RE_BATCH's trigger and would double-generate.
+const RE_ASYNC =
+  /\b(for|while)\b[\s\S]{0,200}?\bawait\b|\bfor\s+await\b|\.(map|forEach)\s*\(\s*async\b|\b(queue|worker|job|bull|agenda)\b/i;
 const RE_STREAM = /\b(stream|pipe|chunk|buffer|createReadStream|createWriteStream)/i;
 const RE_BATCH = /\b(batch|bulk|Promise\.all|in:\s*\[)/i;
 const RE_TIMEOUT = /\b(timeout|retry|backoff|AbortController)/i;
 const RE_RESPONSE = /\b(json\(|send\(|Response|gzip|brotli|compress)/i;
 const RE_NETWORK = /\b(cdn|cloudfront|cloudflare|edge|prefetch|preload)/i;
-const RE_LOGGING = /\b(log|logger|console\.|info|warn|error|debug|pino|winston)/i;
+// `\blog` matched login/logic; `info|warn|error|debug` matched any prose or variable.
+const RE_LOGGING = /\b(logger|console\.|pino|winston)/i;
 // Event-loop + memory-lifetime items (coverage refresh — see SKILL.md Provenance). existsSync is
 // excluded from the sync-IO trigger: it is cheap and ubiquitous in startup/config code.
 const RE_SYNC_IO =
@@ -51,7 +63,7 @@ const store = createChecklistStore({
   label: 'Backend Performance',
   log,
 });
-const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+const { save: saveChecklist, status, checkItem, finalize } = store;
 
 // Backend roots to review — from guard.config.json `review.backendRoots` (NOT hardcoded), so the
 // checklist scopes to ANY repo's layout. No/unreadable config, a non-object config, or an absent
@@ -215,9 +227,6 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   default:
     log('Backend Performance Review Commands:');
     log('  generate                    Create checklist');
@@ -225,6 +234,5 @@ switch (cmd) {
     log('  check-item <name> --pass    Mark passed');
     log('  check-item <name> --fail    Mark failed');
     log('  finalize                    Verify every item was resolved');
-    log('  cleanup                     Remove checklist');
     process.exit(1);
 }

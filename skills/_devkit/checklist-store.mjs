@@ -3,7 +3,7 @@
  * correctness, frontend-accessibility, frontend-performance, frontend-security).
  *
  * Each of those six carried its own byte-identical copy of load/save/status/check-item/finalize/
- * cleanup — differing only in the checklist path and the display label. fallow reported it as clone
+ * finalize/tidy — differing only in the checklist path and the display label. fallow reported it as clone
  * groups spanning all six files; this is the "extract into a shared directory" its clone-family
  * report asks for, and the same move `review-roots.mjs` already made for root validation.
  *
@@ -123,11 +123,16 @@ export function createChecklistStore({
       return;
     }
     log(`✅ ${label}: All checks passed`);
+    // Automatic tidy — finalize is the mandatory terminal step in EVERY session, so a passing one
+    // removes the scratch artifact itself; the agent never decides. tidy()'s env guards make
+    // this a no-op exactly where the artifact must survive: gate runs (DEVKIT_CHECKLIST_KEEP=1,
+    // the gate verifies then removes it) and review mode (evidence retained).
+    tidy();
   };
 
   // Review mode keeps the checklist: the ephemeral review worktree is discarded wholesale, and the
   // file is the evidence a reader may still want. Only a real commit cleans up after itself.
-  const cleanup = () => {
+  const tidy = () => {
     if (process.env.DEVKIT_RUN_MODE === 'review') return;
     // Gate runs set DEVKIT_CHECKLIST_KEEP=1: the gate reads the artifact AFTER the judge finishes
     // (a missing artifact voids the PASS) and removes it itself — a judge-side cleanup here would
@@ -140,5 +145,5 @@ export function createChecklistStore({
     }
   };
 
-  return { load, save, status, checkItem, finalize, cleanup };
+  return { load, save, status, checkItem, finalize };
 }

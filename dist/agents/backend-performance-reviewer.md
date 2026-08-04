@@ -103,6 +103,6 @@ For each item the checklist enumerated:
 ```bash
 node $SCRIPT finalize
 ```
-`cleanup` is for interactive sessions only — in gate mode the gate reads the checklist artifact after you finish and removes it itself; deleting it yourself voids your PASS.
+A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `finalize` verifies every enumerated item was resolved — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. No verbose summary needed.
 </workflow>

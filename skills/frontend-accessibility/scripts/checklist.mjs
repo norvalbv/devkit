@@ -12,7 +12,6 @@
  *   check-item <name> --pass    Mark item passed
  *   check-item <name> --fail    Mark item failed
  *   finalize                    Verify every item was resolved; refuses if any are pending or failed
- *   cleanup                     Remove checklist
  *   contrast <fg> <bg>          Check WCAG color contrast ratio
  */
 
@@ -144,7 +143,7 @@ const store = createChecklistStore({
   label: 'Frontend Accessibility',
   log,
 });
-const { save: saveChecklist, status, checkItem, finalize, cleanup } = store;
+const { save: saveChecklist, status, checkItem, finalize } = store;
 
 // ============ COLOR CONTRAST UTILITY ============
 
@@ -725,9 +724,6 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   case 'contrast': {
     const fg = args[1];
     const bg = args[2];
@@ -741,7 +737,6 @@ switch (cmd) {
     log('  check-item <name> --pass    Mark item passed');
     log('  check-item <name> --fail    Mark item failed');
     log('  finalize                    Verify every item was resolved');
-    log('  cleanup                     Remove checklist');
     log('  contrast <fg> <bg>          Check WCAG color contrast ratio');
     process.exit(1);
 }
