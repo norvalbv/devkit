@@ -375,19 +375,25 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
   // sc-1441: the governing-Targets block rides between the file list and the checklist contract.
   it('includes the targets block when provided and the evidence wording always (sc-1441)', () => {
     const reviewer = REVIEWERS.find((r) => r.name === 'api-security-reviewer');
-    const withTargets = wrapPrompt(
-      'body',
-      reviewer as never,
-      ['a.ts'],
-      undefined,
-      undefined,
-      '## RECORDED TARGETS\n### some-slug\nRuling.',
-    );
+    const withTargets = wrapPrompt('body', reviewer as never, ['a.ts'], undefined, undefined, {
+      targetsBlock: '## RECORDED TARGETS\n### some-slug\nRuling.',
+    });
     expect(withTargets).toContain('## RECORDED TARGETS');
     expect(withTargets).toContain('some-slug');
     expect(withTargets).toContain('per-file diff evidence is on stdin');
     const without = wrapPrompt('body', reviewer as never, ['a.ts']);
     expect(without).not.toContain('RECORDED TARGETS');
+  });
+
+  // sc-1442: the advisory message block rides in both wrappers when provided.
+  it('includes the commit-message block in checklist and conventions prompts (sc-1442)', () => {
+    const reviewer = REVIEWERS.find((r) => r.name === 'api-security-reviewer');
+    const extras = { commitMsgBlock: 'The commit message (…):\n─────\nfeat: x\n─────' };
+    const checklist = wrapPrompt('body', reviewer as never, ['a.ts'], undefined, undefined, extras);
+    expect(checklist).toContain('─────\nfeat: x\n─────');
+    const conventions = wrapConventionsPrompt('brief', ['a.ts'], 'rules', extras);
+    expect(conventions).toContain('─────\nfeat: x\n─────');
+    expect(wrapConventionsPrompt('brief', ['a.ts'], 'rules')).not.toContain('feat: x');
   });
   const body = '---\nname: api-security-reviewer\nmodel: opus\n---\nCheck auth on every route.';
   it('keeps exact registered checklist commands in ordinary commit/ship prompts', () => {

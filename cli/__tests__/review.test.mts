@@ -294,6 +294,39 @@ async function terminatePublicCliAtMarker(
 }
 
 describe('devkit review source CLI', () => {
+  // sc-1442: a review run has no commit message — the driver synthesizes the reviewed range's
+  // subjects (oldest first) into DEVKIT_COMMIT_MSG_FILE, and a caller-injected stale path must be
+  // scrubbed, never forwarded to the gates.
+  it('synthesizes range subjects as the intent file, ignoring a caller-injected stale path (sc-1442)', () => {
+    const action = `
+test -n "\${DEVKIT_COMMIT_MSG_FILE:-}" || exit 81
+test "$DEVKIT_COMMIT_MSG_FILE" != "/nope" || exit 82
+test "$(head -n 1 "$DEVKIT_COMMIT_MSG_FILE")" = "feature change" || exit 83
+printf 'REVIEW_INTENT_OK\\n'
+`;
+    const target = fixture(action);
+    addCommittedChange(target);
+    const result = runReview(target, [], {
+      env: { ...target.env, DEVKIT_COMMIT_MSG_FILE: '/nope' },
+    });
+    expect(result.status, combinedOutput(result)).toBe(0);
+    expect(combinedOutput(result)).toContain('REVIEW_INTENT_OK');
+  });
+
+  it('an empty reviewed range leaves the intent var unset and the review completes (sc-1442)', () => {
+    const action = `
+test -z "\${DEVKIT_COMMIT_MSG_FILE:-}" || exit 84
+printf 'REVIEW_NO_INTENT_OK\\n'
+`;
+    const target = fixture(action);
+    // Staged-only work: no commits past the merge base, so `git log` yields nothing.
+    write(target.root, 'staged.txt', 'staged local change\n');
+    git(target.root, 'add', 'staged.txt');
+    const result = runReview(target);
+    expect(result.status, combinedOutput(result)).toBe(0);
+    expect(combinedOutput(result)).toContain('REVIEW_NO_INTENT_OK');
+  });
+
   it('reviews the complete merge-base-to-final snapshot without changing the target checkout', () => {
     const action = `
 test "$(cat committed.txt)" = "committed branch change" || exit 71

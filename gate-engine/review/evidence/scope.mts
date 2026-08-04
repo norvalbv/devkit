@@ -49,6 +49,10 @@ export function emitReviewScope(
   diffText: string,
   promptIdentity: string | null,
   cached: boolean,
+  // sc-1442: bounded per-run context facts — did the prompt carry a commit message, and which
+  // Targets tier loaded. Without these the epic's "reviewers with intent vs blind" field
+  // comparison cannot be computed from the sink.
+  contextFields: { commit_msg: boolean; targets_via: 'scope' | 'scope+semantic' } | null = null,
 ): void {
   const files = [...sel.files].sort();
   const inline = JSON.stringify(files);
@@ -72,5 +76,6 @@ export function emitReviewScope(
     // second source of truth the gate cannot import and would have to sync-test.
     has_checklist: hasChecklist(sel.reviewer),
     cached,
+    ...(contextFields ?? {}),
   });
 }

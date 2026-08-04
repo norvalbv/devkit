@@ -30,6 +30,7 @@ Exits 0 when the review passes or there is nothing to review, 1 on argument/setu
 failure, and preserves timeout statuses such as 124.`,
 };
 const INHERITED_RUN_CONTEXT = new Set([
+    'DEVKIT_COMMIT_MSG_FILE', // stale ship intent must not leak in; review-target.sh synthesizes its own
     'DEVKIT_GATE_ARCHIVE_LOG',
     'DEVKIT_GATE_EVENTS',
     'DEVKIT_RUN_MODE',

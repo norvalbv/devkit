@@ -50,13 +50,22 @@ export async function scopedTargets(files, query, k = 6, cwd = process.cwd()) {
         via: 'scope-match',
     }));
     if (query?.trim()) {
-        const { rows } = await rankAxes(query, k, cwd);
-        for (const r of rows) {
-            if (scopedSlugs.has(r.slug))
-                continue;
-            const rf = rulingFor(r.slug, decisionsDir);
-            if (rf)
-                blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
+        // The supplement is best-effort BY CONTRACT (sc-1442): the scope-matched half must survive any
+        // semantic-tier error (embed endpoint down, unwritable vec index), or a caller that derives a
+        // cache salt from the scope-match subset would see the salt move because a QUERY was supplied —
+        // exactly what ship-gates-converge-not-restart forbids for the commit message.
+        try {
+            const { rows } = await rankAxes(query, k, cwd);
+            for (const r of rows) {
+                if (scopedSlugs.has(r.slug))
+                    continue;
+                const rf = rulingFor(r.slug, decisionsDir);
+                if (rf)
+                    blocks.push({ slug: r.slug, ruling: rf.ruling, scope: rf.scope, via: 'semantic' });
+            }
+        }
+        catch {
+            // scope-matches already collected; a lost supplement degrades the prompt, never the salt
         }
     }
     return blocks;

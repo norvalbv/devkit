@@ -19,8 +19,10 @@ import { envFlag, resolveGuardConfig } from '../config.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
+import { gitCached, stagedFiles } from './evidence/staged-git.mts';
+import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
 import { cacheKey, selectReviewers } from './reviewers.mts';
-import { gitCached, runReviewGate, stagedFiles } from './run-review.mts';
+import { runReviewGate } from './run-review.mts';
 import { resolveReviewerIdentities } from './runtime.mts';
 import { runWaive } from './valve/waive.mts';
 
@@ -29,15 +31,19 @@ import { runWaive } from './valve/waive.mts';
  * resolution matches the gate's COMMIT path (sc-1437), or the reported status would lie after an
  * asset edit; scan is not authoritative under review mode (no packaged-asset preflight here).
  */
-function scanReview(cwd = process.cwd()): number {
+async function scanReview(cwd = process.cwd()): Promise<number> {
   try {
     const cfg = resolveGuardConfig(cwd);
     const cache = loadCache(cwd);
     const sels = selectReviewers(stagedFiles(cwd), cfg);
     const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
+    // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
+    // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
+    const { saltBlock } = await loadReviewerTargetsBlocks(cwd, stagedFiles(cwd));
+    const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock);
     for (const s of sels) {
       const diff = gitCached(cwd, [], s.files);
-      const salt = cacheSalts.get(s.reviewer.name) ?? '';
+      const salt = salts.get(s.reviewer.name) ?? '';
       const hit = cache[cacheKey(s.reviewer.name, diff, salt)] ? ' [cached PASS]' : '';
       console.log(`${s.reviewer.name}${hit}: ${s.files.join(', ')}`);
     }

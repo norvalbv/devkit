@@ -253,14 +253,14 @@ function materializeConventionsFixture(
  * logic, the two NEW skill-less-reviewer modules this reviewer depends on, and the brief itself
  * (the brief IS gate code, the completeness-eval rule). */
 function gateHash(): string {
+  // sc-1442: evidence/ supplies judge-visible prompt AND diff bytes — edits break comparability.
+  const ev = ['targets-block', 'commit-message', 'staged-git'].map((f) => `evidence/${f}.mts`);
+  const files = ['reviewers.mts', 'run-review.mts', 'claude-md.mts', 'diff-evidence.mts', ...ev];
   return sha12(
-    [
-      readFileSync(path.join(repoRoot, 'gate-engine/review/reviewers.mts'), 'utf8'),
-      readFileSync(path.join(repoRoot, 'gate-engine/review/run-review.mts'), 'utf8'),
-      readFileSync(path.join(repoRoot, 'gate-engine/review/claude-md.mts'), 'utf8'),
-      readFileSync(path.join(repoRoot, 'gate-engine/review/diff-evidence.mts'), 'utf8'),
-      readFileSync(AGENT_MD, 'utf8'),
-    ].join('\n \n'),
+    files
+      .map((f) => readFileSync(path.join(repoRoot, 'gate-engine/review', f), 'utf8'))
+      .concat(readFileSync(AGENT_MD, 'utf8'))
+      .join('\n \n'),
   );
 }
 

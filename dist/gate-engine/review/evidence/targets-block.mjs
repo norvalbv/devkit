@@ -7,6 +7,7 @@
  * contract, so the shape must never fork.
  */
 import { scopedTargets } from "../../decisions/scoped-targets.mjs";
+import { hasChecklist } from "../reviewers.mjs";
 /** completeness.mts's original bytes, verbatim — its judge must keep reading exactly this. */
 export const COMPLETENESS_TARGETS_FRAMING = Object.freeze({
     header: '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',
@@ -51,13 +52,51 @@ export function renderTargets(blocks, framing = COMPLETENESS_TARGETS_FRAMING, ca
         lines.push(`OMITTED: ${omitted.length} further governing Target(s) over the size cap — ${omitted.join(', ')}. Read them under docs/decisions/ if this diff touches their scope.`, '');
     return lines.join('\n');
 }
+// The semantic supplement's wall-clock budget: on a cold vector index the embed tier may serially
+// embed every axis (each with its own 15s abort) BEFORE any judge starts — unbounded, that is a
+// multi-minute silent stall on the ship critical path. Timing out is free AND salt-safe: the
+// fallback is the scope-only load, which is exactly the salt render.
+const SEMANTIC_BUDGET_MS = 10_000;
 /**
- * The domain-cascade Targets block, loaded ONCE per gate run (sc-1441): scope-glob matches at
- * pre-commit (no commit message exists yet, so the semantic half is skipped — sc-1442 supplies
- * the query on ship), reviewer framing, 8KB named-omission cap. Fail-open: an unreadable
- * decisions store renders the SKIP note, never throws.
+ * The domain-cascade Targets blocks, loaded ONCE per gate run: reviewer framing, 8KB
+ * named-omission cap, fail-open (an unreadable decisions store renders the SKIP note).
+ *
+ * ONE `scopedTargets` call, TWO renders: `saltBlock` from the deterministic scope-glob matches
+ * only, `promptBlock` additionally carrying the query's semantic supplement. The commit-message
+ * subject supplies the query (sc-1442), so the supplement — and ONLY the supplement — may vary
+ * with the message; salting on the scope-only render keeps the message out of every cache key
+ * (ship-gates-converge-not-restart) while a Target EDIT still invalidates stale PASSes. Accepted
+ * consequence: a Target retrieved only semantically never participates in cache invalidation.
  */
-export async function loadReviewerTargetsBlock(cwd, files, query = '') {
-    const targets = await scopedTargets(files, query, 6, cwd).catch(() => []);
-    return renderTargets(targets, REVIEWER_TARGETS_FRAMING, 8_192);
+export async function loadReviewerTargetsBlocks(cwd, files, query = '') {
+    let targets = null;
+    if (query.trim()) {
+        targets = await Promise.race([
+            scopedTargets(files, query, 6, cwd).catch(() => null),
+            new Promise((resolve) => setTimeout(() => resolve(null), SEMANTIC_BUDGET_MS).unref()),
+        ]);
+    }
+    // No query, supplement timed out, or the load itself threw → the scope-only load (cheap, sync
+    // file reads; scopedTargets already survives semantic-tier errors internally).
+    if (targets === null)
+        targets = await scopedTargets(files, '', 6, cwd).catch(() => []);
+    const scoped = targets.filter((t) => t.via === 'scope-match');
+    const saltBlock = renderTargets(scoped, REVIEWER_TARGETS_FRAMING, 8_192);
+    const promptBlock = scoped.length === targets.length
+        ? saltBlock
+        : renderTargets(targets, REVIEWER_TARGETS_FRAMING, 8_192);
+    return { saltBlock, promptBlock, semantic: scoped.length !== targets.length };
+}
+/**
+ * Per-reviewer cache salts (extracted from runReviewGate, sc-1442): Target bytes join every
+ * CHECKLIST reviewer's salt — a Target edit invalidates stale PASSes like an asset edit (sc-1441).
+ * `saltBlock` MUST be the scope-only render: the commit message and its semantic Target hits NEVER
+ * enter this salt (ship-gates-converge-not-restart — amended-message retries must converge).
+ */
+export function reviewerTargetSalts(selected, cacheSalts, saltBlock) {
+    const salted = (s) => {
+        const base = cacheSalts.get(s.reviewer.name) ?? '';
+        return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}` : base;
+    };
+    return new Map(selected.map((s) => [s.reviewer.name, salted(s)]));
 }

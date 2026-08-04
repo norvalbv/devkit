@@ -55,6 +55,10 @@ const ENV_KEYS = [
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_SHIP_ID',
   'GUARD_CORRECTNESS_SPLIT',
+  // sc-1442: the ship-exported message file + the embed kill-switch (the message subject activates
+  // semantic Target retrieval, which must stay deterministic/off in tests).
+  'DEVKIT_COMMIT_MSG_FILE',
+  'DECISIONS_NO_EMBED',
 ];
 const saved = {};
 const COMMIT_GUARD_INIT_SCRIPT = `
@@ -1325,6 +1329,88 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(escalate).toBeDefined();
     expect(escalate).toBe(first);
     expect(escalate).toContain('export const q = 1;');
+  });
+
+  // ---- sc-1442: the commit message reaches every judge as fenced ADVISORY context — and NEVER
+  // the cache key (ship-gates-converge-not-restart: amended-message retries must converge).
+  const withMessage = (repo: string, text: string): string => {
+    const file = join(repo, 'ship-msg.txt');
+    writeFileSync(file, text);
+    process.env.DEVKIT_COMMIT_MSG_FILE = file;
+    process.env.DECISIONS_NO_EMBED = '1';
+    return file;
+  };
+
+  it('the ship-exported message renders fenced in checklist AND conventions prompts, with the scope row flagged (sc-1442)', async () => {
+    const repo = consumerRepo({ backend: true });
+    withMessage(repo, 'feat: rotate the telemetry sink (sc-9)\n\nWhy: the sink grows unbounded.\n');
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-msg-context';
+    const prompts = new Map<string, string>();
+    const exec = mkExec(async (opts) => {
+      prompts.set(opts.label, opts.args[1]);
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const api = prompts.get('review:api-security-reviewer') ?? '';
+    expect(api).toContain('STATED INTENT');
+    expect(api).toContain('feat: rotate the telemetry sink (sc-9)');
+    expect(api).toContain('UNTRUSTED author input');
+    expect(prompts.get('review:conventions-reviewer') ?? '').toContain(
+      'feat: rotate the telemetry sink (sc-9)',
+    );
+    // The epic's field receipt: every scope row records that this run's judges saw intent.
+    const scope = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_scope');
+    expect(scope.length).toBeGreaterThan(0);
+    expect(scope.every((e) => e.commit_msg === true)).toBe(true);
+    expect(scope.every((e) => e.targets_via === 'scope')).toBe(true); // no decisions store here
+  });
+
+  it.each([
+    ['env unset', (_repo: string) => {}],
+    [
+      'env points at a nonexistent file',
+      (_repo: string) => {
+        process.env.DEVKIT_COMMIT_MSG_FILE = '/nope/never/msg.txt';
+      },
+    ],
+  ])('%s → the placeholder renders and the gate proceeds (sc-1442)', async (_name, setup) => {
+    const repo = consumerRepo({ backend: true });
+    setup(repo);
+    let captured: { args: string[] } | undefined;
+    const exec = mkExec(async (opts) => {
+      if (opts.label === 'review:api-security-reviewer') captured = opts;
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(captured?.args[1] ?? '').toContain('(commit message not available at this hook stage)');
+  });
+
+  it('an amended message NEVER invalidates cached PASSes — the salt is message-independent (sc-1442)', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    withDecisions(repo); // a governing Target IS in the salt — the partition must exclude only the message
+    const file = withMessage(repo, 'feat: message A\n\nbody A\n');
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    // Rewrite the message entirely; the staged diff is unchanged. Every reviewer must cache-HIT —
+    // possible only if no salt byte depends on the message (subject drives the semantic query, so
+    // this also pins that the query's supplement stays out of the salt render).
+    writeFileSync(file, 'fix: entirely different subject B\n\nrewritten body B\n');
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(exec).not.toHaveBeenCalled();
+    // A third run with NO message at all must also hit: presence itself is not salted either.
+    delete process.env.DEVKIT_COMMIT_MSG_FILE;
+    const exec3 = mkExec(async () => 'VERDICT: PASS');
+    expect(await runReviewGate(repo, { exec: exec3 })).toBe(0);
+    expect(exec3).not.toHaveBeenCalled();
   });
 });
 

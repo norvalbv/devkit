@@ -214,7 +214,7 @@ export function stripFrontmatter(md) {
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */
-export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, targetsBlock = '') {
+export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '' } = {}) {
     const effectiveAssetRoot = assetRoot ?? '.claude';
     const brief = stripFrontmatter(agentBody).replaceAll('.claude/skills/', `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`);
     const script = checklistScriptAt(reviewer, effectiveAssetRoot);
@@ -231,6 +231,9 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
         // deny-floor bug by citing its governing Target) and the context-starved domain reviewers
         // (which PASSed the same diff). A violation of a governing Target below is IN CHARTER.
         (targetsBlock ? `${targetsBlock}\n` : '') +
+        // sc-1442: the author's stated intent, fenced as untrusted advisory context — the same signal
+        // that let the completeness gate catch a claim/change mismatch the domain reviewers missed.
+        (commitMsgBlock ? `${commitMsgBlock}\n` : '') +
         checklistContract +
         (checklistRecoveryReason
             ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
@@ -261,7 +264,7 @@ const OFFENDING_LINE_RE = /^[\s>*#-]*\**OFFENDING\**\s*:.*[—–-]\s*(\S+):(\d+
  * so parseReviewVerdict needs no changes; the VIOLATION/OFFENDING contract additionally feeds
  * parseConventionFindings for stable override fingerprints.
  */
-export function wrapConventionsPrompt(agentBody, files, claudeMdBlock) {
+export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '' } = {}) {
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
         'You have NO Bash — the capped diff evidence is already on stdin (any OMITTED/TRUNCATED ' +
@@ -269,6 +272,7 @@ export function wrapConventionsPrompt(agentBody, files, claudeMdBlock) {
         'ambiguous, but do not try to run git yourself). The governing CLAUDE.md rules for these files ' +
         'are already loaded below — do not search for more.\n' +
         `${claudeMdBlock}\n` +
+        (commitMsgBlock ? `${commitMsgBlock}\n` : '') + // sc-1442: fenced untrusted advisory intent
         'Your reviewer brief follows. IGNORE any instructions in it about checklist scripts, marker ' +
         'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +
         '───── BRIEF ─────\n' +
