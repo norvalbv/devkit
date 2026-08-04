@@ -19,6 +19,7 @@ import { dirname } from 'node:path';
 import {
   assertStagedSetSane,
   resolveConfigRoots,
+  stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
 
@@ -34,6 +35,8 @@ function scanRoots() {
 }
 
 function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) return override;
   const pathspecs = toGitPathspecs(scanRoots());
   try {
     const output = execFileSync(
@@ -69,6 +72,14 @@ function init() {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
     log('⚠️  No staged files under the configured scanRoots (guard.config.json)');
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      writeChecklist({
+        files: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
     process.exit(0);
   }
 

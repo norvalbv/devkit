@@ -68,6 +68,8 @@ import {
   type ReviewOutcome,
   readChecklistState,
   resolveReviewerIdentities,
+  skippedReviewers,
+  withStagedFiles,
 } from './runtime.mts';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
@@ -83,17 +85,6 @@ const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
 // A cap kill, likewise, is the gate's OWN contention kill — not auth/quota. Matches the reasons
 // cascadeVerdict sets from the judge's outage KIND (`judge timed out` / `escalation timed out`).
 const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
-// GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
-// per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
-function skippedReviewers(): Set<string> {
-  return new Set(
-    (process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
-}
-
 /** Orchestration inputs threaded through a cascade (config + the injectable judge runner). */
 interface CascadeOpts {
   cwd: string;
@@ -203,6 +194,7 @@ async function cascadeVerdict(
     checklistRecoveryReason,
   }: CascadeOpts,
 ): Promise<CascadeResult> {
+  const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files); // sc-1439
   const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
   if (body === null)
     // A missing brief must never be judged as an EMPTY brief (a wrapper-only prompt fake-passes):
@@ -244,7 +236,7 @@ async function cascadeVerdict(
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
     transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-    env: judgeEnv,
+    env,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       firstOutage = kind;
     },
@@ -312,7 +304,7 @@ async function cascadeVerdict(
     timeout: DEEP_JUDGE_TIMEOUT_MS, // opus re-investigation; only fires pre-block, never retried
     cwd,
     transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-    env: judgeEnv,
+    env,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       secondOutage = kind;
     },

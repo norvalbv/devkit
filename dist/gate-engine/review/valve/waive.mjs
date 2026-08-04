@@ -1,0 +1,140 @@
+/**
+ * `guard-review waive` — the ergonomic CLI affordance for the override valve (overrides.mts).
+ *
+ * Writes ONE entry into the same `.devkit/correctness-overrides.json` store the env-var channel
+ * (OVERRIDE_<fp>_RATIONALE) already writes through to — no new storage, no new consumption path.
+ * The NEXT `guard-review --gate` picks it up via the existing reconcile()/loadOverrides() merge
+ * (run-review.mts → applyOverrideValve). This command only WRITES; it never re-runs the gate.
+ *
+ * `itemId` is the exact 12-hex fingerprint blockingNote prints for a blocked finding (`[<fp>]`) —
+ * copy it verbatim from the FAIL output rather than re-deriving it here. Re-deriving would mean
+ * re-running the SAME reviewer-selection + `git diff --cached` the gate used, which silently drifts
+ * the moment the staged diff changes between the FAIL and the waive; keying off the printed fp
+ * avoids that entirely and matches exactly what reconcile() will hash against on the next run.
+ *
+ * Only reviewers pinned to a model (Reviewer.model — correctness-reviewer, conventions-reviewer)
+ * reach the override valve at all (applyOverrideValve's `!sel.reviewer.model` guard, overrides.mts).
+ * The five cascade reviewers' FAILs are opus-confirmed and have no override affordance today; this
+ * command refuses them rather than silently writing a store entry reconcile() will never consult.
+ */
+import { execFileSync } from 'node:child_process';
+import { FINGERPRINT_RE, loadOverrides, persist, withOverridesLock, } from "../overrides.mjs";
+import { REVIEWERS } from "../reviewers.mjs";
+// REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
+// shape), so `.find` on it directly can't be read through the shared `model` field below — every
+// entry IS structurally a `Reviewer` (optional fields simply absent), so this cast is sound.
+const REVIEWER_TABLE = REVIEWERS;
+const RATIONALE_MIN_CHARS = 15;
+// A dev pasting the exact hint text from blockingNote (or another generic non-answer) is not a
+// waive — envOverrides already treats a blank rationale as "no silent waive"; this extends the
+// same intent to a non-blank but content-free one.
+const PLACEHOLDER_RATIONALES = new Set([
+    'why this is not a real defect',
+    'not a real defect',
+    'false positive',
+    'n/a',
+    'na',
+    'todo',
+    'placeholder',
+    'waived',
+    'fixed',
+    'not a bug',
+]);
+const USAGE = 'Usage: guard-review waive <reviewer>[:<lens>] <itemId> "<rationale>" | guard-review waive --list';
+/** Best-effort git identity for the audit trail: user.name, then user.email, then $USER — never
+ * throws. `run` is injectable so tests never depend on the executing machine's real git identity. */
+export function resolveWaiveAuthor(cwd, env = process.env, run = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()) {
+    for (const args of [
+        ['config', 'user.name'],
+        ['config', 'user.email'],
+    ]) {
+        try {
+            const v = run(args);
+            if (v)
+                return v;
+        }
+        catch {
+            /* fall through to the next identity source */
+        }
+    }
+    return env.USER || env.USERNAME || 'unknown';
+}
+/** Split `<reviewer>[:<lens>]` on the FIRST colon — a conventions lens is itself `path:line`, so a
+ * naive split(':') on every colon would truncate it. Missing lens defaults to '(finding)',
+ * matching reconcile's own fallback (overrides.mts) for a reviewer with no resolved lens. */
+export function parseWaiveTarget(spec) {
+    const i = spec.indexOf(':');
+    return i === -1
+        ? { reviewer: spec, lens: '(finding)' }
+        : { reviewer: spec.slice(0, i), lens: spec.slice(i + 1) };
+}
+function isPlaceholder(rationale) {
+    return PLACEHOLDER_RATIONALES.has(rationale.trim().toLowerCase());
+}
+/** `guard-review waive --list` — one entry per active store row (non-blank rationale), newest first. */
+function listWaives(cwd) {
+    const store = loadOverrides(cwd);
+    const entries = Object.entries(store).filter(([, e]) => e.rationale?.trim());
+    if (entries.length === 0) {
+        console.log('guard-review: no active waives.');
+        return 0;
+    }
+    entries.sort(([, a], [, b]) => (b.at ?? '').localeCompare(a.at ?? ''));
+    for (const [fp, e] of entries) {
+        const who = e.author ?? (typeof e.by === 'string' ? e.by : 'unknown');
+        console.log(`[${fp}] ${e.reviewer ?? '?'}:${e.lens ?? '(finding)'} — by ${who}${e.at ? ` at ${e.at}` : ''}`);
+        console.log(`    ${e.rationale}`);
+    }
+    return 0;
+}
+/** `guard-review waive <reviewer>[:<lens>] <itemId> <rationale>` → 0 on a recorded waive, 2 on a
+ * refused/malformed request (matches the CLI's existing usage-error convention). `resolveAuthor`
+ * is injectable so tests never depend on the executing machine's real git identity. */
+export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaiveAuthor) {
+    if (rest[0] === '--list')
+        return listWaives(cwd);
+    const [target, itemId, ...rationaleParts] = rest;
+    const rationale = rationaleParts.join(' ').trim();
+    if (!target || !itemId || !rationale) {
+        console.error(USAGE);
+        return 2;
+    }
+    const { reviewer, lens } = parseWaiveTarget(target);
+    const known = REVIEWER_TABLE.find((r) => r.name === reviewer);
+    if (!known) {
+        console.error(`guard-review: waive — unknown reviewer "${reviewer}"`);
+        return 2;
+    }
+    if (!known.model) {
+        console.error(`guard-review: waive — ${reviewer} is a cascade reviewer whose FAIL is already ` +
+            `opus-confirmed; only a model-pinned reviewer (correctness-reviewer, conventions-reviewer) ` +
+            `can be waived today`);
+        return 2;
+    }
+    if (!FINGERPRINT_RE.test(itemId)) {
+        console.error(`guard-review: waive — itemId must be the 12-hex fingerprint from the FAIL output, e.g. ` +
+            `\`guard-review waive ${reviewer}:${lens} <fp-from-FAIL-output> "…"\` (got "${itemId}")`);
+        return 2;
+    }
+    if (rationale.length < RATIONALE_MIN_CHARS || isPlaceholder(rationale)) {
+        console.error(`guard-review: waive — rationale must be a real, specific reason (>= ${RATIONALE_MIN_CHARS} ` +
+            `chars, not a placeholder), got "${rationale}"`);
+        return 2;
+    }
+    withOverridesLock(cwd, () => {
+        const store = loadOverrides(cwd);
+        const entry = {
+            rationale,
+            reviewer,
+            lens,
+            itemId,
+            author: resolveAuthor(cwd),
+            at: new Date().toISOString(),
+            by: 'cli',
+        };
+        store[itemId] = entry;
+        persist(cwd, store);
+    });
+    console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${rationale}`);
+    return 0;
+}

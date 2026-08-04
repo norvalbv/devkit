@@ -11,8 +11,7 @@
  * inline either way, so a reader can always tell a spilled vector from a short one.
  */
 import { saveTranscript } from '../../judge/transcript-store.mts';
-import type { ChecklistState } from '../reviewers.mts';
-import type { ReviewItem, ReviewOutcome } from '../runtime.mts';
+import type { ChecklistState, ReviewItem, ReviewOutcome } from '../runtime.mts';
 
 // Non-passing items sort FIRST so any truncation can never keep the passes and drop the findings.
 const ITEM_CAP = 40;

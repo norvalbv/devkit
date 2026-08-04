@@ -12,6 +12,7 @@ import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   assertStagedSetSane,
   resolveReviewRoots,
+  stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
 
@@ -73,6 +74,8 @@ function frontendRoots() {
 }
 
 function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) return override.filter((f) => !f.endsWith('.pen') && !RE_PROSE_FILE.test(f));
   const pathspecs = toGitPathspecs(frontendRoots());
   try {
     const output = execFileSync(
@@ -247,6 +250,14 @@ function generate() {
     log(
       '⏭️  No staged frontend files under review.frontendRoots (guard.config.json). Skipping performance review.',
     );
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      saveChecklist({
+        items: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
     process.exit(0);
   }
   const diffs = stagedFiles.map((f) => getFileDiff(f));
