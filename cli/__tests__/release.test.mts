@@ -127,6 +127,71 @@ describe('release publishing', () => {
     expect(readFileSync(join(cwd, 'package.json'), 'utf8')).toContain('"version": "0.48.0"');
   });
 
+  // A published version tag is immutable: consumer lockfiles record the object it resolves to, so
+  // re-cutting one orphans every recorded SHA and breaks their installs (sc-1449). These two lock
+  // the only automated protection there is — tagging itself is a manual post-merge step.
+  it('refuses when the tag already exists locally, before doing any release work', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(cwd);
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    mockExec.mockImplementation((command: string, args: string[]) => {
+      if (command !== 'git') return '';
+      if (args[0] === 'status') return '';
+      if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return 'main\n';
+      if (args.join(' ') === 'tag --list v0.48.0') return 'v0.48.0\n';
+      return '';
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await release(['minor', '--yes'], cwd)).toBe(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/tag v0\.48\.0 already exists/));
+    // Nothing may have happened yet: no ship, no build, no bump written to disk.
+    expect(mockShip).not.toHaveBeenCalled();
+    expect(mockExec.mock.calls.some(([cmd]) => cmd === 'bun')).toBe(false);
+    expect(readFileSync(join(cwd, 'package.json'), 'utf8')).toContain('"version": "0.47.1"');
+  });
+
+  it('refuses when the tag exists only on origin, and proceeds when the remote is unreachable', async () => {
+    const build = (lsRemote: () => string) => {
+      mockExec.mockImplementation((command: string, args: string[]) => {
+        if (command === 'node') return `${builtVersion}\n`;
+        if (command !== 'git') return '';
+        if (args[0] === 'status') return '';
+        if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return 'main\n';
+        if (args[0] === 'ls-remote') return lsRemote();
+        return '';
+      });
+    };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // A clone that never fetched tags: `git tag --list` is empty, origin still has it.
+    const remote = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(remote);
+    writeFileSync(
+      join(remote, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    build(() => 'c68a526\trefs/tags/v0.48.0\n');
+    expect(await release(['minor', '--yes'], remote)).toBe(1);
+    expect(mockShip).not.toHaveBeenCalled();
+
+    // Offline must not block a maintainer — the check can only ever add certainty.
+    const offline = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(offline);
+    writeFileSync(
+      join(offline, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    build(() => {
+      throw new Error('Could not resolve host: github.com');
+    });
+    expect(await release(['minor', '--yes'], offline)).toBe(0);
+    expect(mockShip).toHaveBeenCalledOnce();
+  });
+
   it('returns the publishing failure and keeps the release edits recoverable', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
     made.push(cwd);
