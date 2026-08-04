@@ -7,6 +7,8 @@
  * contract, so the shape must never fork.
  */
 
+import { scopedTargets } from '../../decisions/scoped-targets.mts';
+
 /** One governing Target (scope-match or semantic) as returned by `scopedTargets`. */
 export interface TargetBlock {
   slug: string;
@@ -80,4 +82,19 @@ export function renderTargets(
       '',
     );
   return lines.join('\n');
+}
+
+/**
+ * The domain-cascade Targets block, loaded ONCE per gate run (sc-1441): scope-glob matches at
+ * pre-commit (no commit message exists yet, so the semantic half is skipped — sc-1442 supplies
+ * the query on ship), reviewer framing, 8KB named-omission cap. Fail-open: an unreadable
+ * decisions store renders the SKIP note, never throws.
+ */
+export async function loadReviewerTargetsBlock(
+  cwd: string,
+  files: string[],
+  query = '',
+): Promise<string> {
+  const targets = await scopedTargets(files, query, 6, cwd).catch(() => []);
+  return renderTargets(targets, REVIEWER_TARGETS_FRAMING, 8_192);
 }

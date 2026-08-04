@@ -1237,7 +1237,86 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(prompt).toContain('node .claude/skills/api-security/scripts/checklist.mjs generate');
     expect(prompt).not.toContain('name: api-security-reviewer'); // frontmatter stripped
     expect(captured.input).toContain('db.ts');
+    // sc-1441: stdin is capped per-file EVIDENCE (real hunks), not a bare stat
+    expect(captured.input).toContain('export const q = 1;');
     expect(captured.args).toContain('--no-session-persistence'); // isolated
+  });
+
+  // ---- sc-1441: governing Targets reach the domain judges, and their bytes ride the cache salt.
+  const withDecisions = (
+    repo: string,
+    ruling = 'All src/main writes go through the repo layer.',
+  ) => {
+    mkdirSync(join(repo, 'docs', 'decisions'), { recursive: true });
+    writeFileSync(
+      join(repo, 'docs', 'decisions', 'db-boundary.md'),
+      '---\nslug: db-boundary\ncreated: 2026-08-04\n---\n\n# db-boundary\n\n' +
+        '## Target \u00b7 2026-08-04 \u2014 DB writes stay behind the repo layer\n\n' +
+        '**Context:** test fixture.\n' +
+        `**Ruling:** ${ruling}\n` +
+        '**Scope:** src/main/**\n',
+    );
+    const cfg = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
+    cfg.decisionsDir = 'docs/decisions';
+    writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(cfg));
+  };
+
+  it('governing Targets render into the domain judge prompt under the reviewer framing (sc-1441)', async () => {
+    const repo = consumerRepo({ backend: true });
+    withDecisions(repo);
+    let captured: { args: string[] } | undefined;
+    const exec = mkExec(async (opts) => {
+      if (opts.label === 'review:api-security-reviewer') captured = opts;
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const prompt = captured?.args[1] ?? '';
+    expect(prompt).toContain('## RECORDED TARGETS');
+    expect(prompt).toContain('db-boundary');
+    expect(prompt).toContain('All src/main writes go through the repo layer.');
+  });
+
+  it('no decisions store → the prompt carries the SKIP note, never an error (sc-1441)', async () => {
+    const repo = consumerRepo({ backend: true });
+    let captured: { args: string[] } | undefined;
+    const exec = mkExec(async (opts) => {
+      if (opts.label === 'review:api-security-reviewer') captured = opts;
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(captured?.args[1] ?? '').toContain('## RECORDED TARGETS \u2014 SKIP');
+  });
+
+  it('a Target edit invalidates checklist reviewers\u2019 cached PASSes; conventions still hits (sc-1441)', async () => {
+    const repo = consumerRepo({ backend: true });
+    syncSkillAssets(repo);
+    withDecisions(repo);
+    expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+    withDecisions(repo, 'REVISED: every write is audited.'); // the governing ruling changed
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    const labels = exec.mock.calls.map(([opts]) => opts.label).sort();
+    expect(labels.length).toBeGreaterThan(0); // checklist reviewers re-judge under the new Target
+    expect(labels).not.toContain('review:conventions-reviewer'); // no Targets in its prompt or salt
+  });
+
+  it('the opus escalation reads the SAME evidence as the first pass (sc-1441)', async () => {
+    const repo = consumerRepo({ backend: true });
+    const inputs = new Map<string, string | undefined>();
+    const exec = mkExec(async (opts) => {
+      inputs.set(opts.label, opts.input);
+      writeArtifact(repo, opts.label);
+      if (opts.label === 'review:api-security-reviewer') return 'bad\nVERDICT: FAIL \u2014 x';
+      return 'VERDICT: PASS';
+    });
+    await runReviewGate(repo, { exec });
+    const first = inputs.get('review:api-security-reviewer');
+    const escalate = inputs.get('review:api-security-reviewer:escalate');
+    expect(escalate).toBeDefined();
+    expect(escalate).toBe(first);
+    expect(escalate).toContain('export const q = 1;');
   });
 });
 

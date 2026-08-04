@@ -42,7 +42,14 @@ import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { archiveFailedDiff } from './evidence/diff-archive.mts';
 import { attachItems, itemFields } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
-import { emitMergedLensResults, holdLensPart, planReviewWork, taskLabel } from './lens/split.mts';
+import { loadReviewerTargetsBlock } from './evidence/targets-block.mts';
+import {
+  emitMergedLensResults,
+  holdLensPart,
+  mapLimit,
+  planReviewWork,
+  taskLabel,
+} from './lens/split.mts';
 import { applyOverrideValve } from './overrides.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
@@ -95,6 +102,7 @@ interface CascadeOpts {
   assetRoot?: string;
   judgeEnv?: NodeJS.ProcessEnv;
   checklistRecoveryReason?: string;
+  targetsBlock?: string;
 }
 
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
@@ -107,29 +115,6 @@ interface CascadeOpts {
 // SHIP_COMMIT_TIMEOUT (3600s) — by design: a killed ship CONVERGES on re-run because PASSes checkpoint
 // per-completion and the caches skip what was earned (docs/decisions/ship-gates-converge-not-restart.md).
 // Only correctness nears the cap; the rest finish <300s, so a real ship is one slow wave + fast waves.
-
-// Bounded-concurrency map: at most `limit` fn calls in flight, input order preserved.
-// LOAD-BEARING: fn must never reject — the caller pre-wraps the cascade body in .catch. A worker
-// rejection here would reject Promise.all and abandon siblings' pending per-completion checkpoints.
-// ponytail: static pool. Load-adaptive sizing (os.loadavg / live concurrent-`claude` count) is the
-// upgrade path if one fixed cap ever proves too blunt across differently-loaded machines.
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < items.length) {
-      const i = cursor++;
-      results[i] = await fn(items[i], i);
-    }
-  };
-  const n = Math.max(1, Math.min(limit, items.length));
-  await Promise.all(Array.from({ length: n }, worker));
-  return results;
-}
 
 // argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
 // JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
@@ -192,6 +177,7 @@ async function cascadeVerdict(
     assetRoot,
     judgeEnv,
     checklistRecoveryReason,
+    targetsBlock,
   }: CascadeOpts,
 ): Promise<CascadeResult> {
   const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files); // sc-1439
@@ -212,11 +198,11 @@ async function cascadeVerdict(
   // into the prompt itself.
   const stat = gitCached(cwd, ['--stat'], files);
   const prompt = hasChecklist(reviewer)
-    ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason)
+    ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, targetsBlock)
     : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files));
-  const input = hasChecklist(reviewer)
-    ? stat
-    : buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
+  // sc-1441: every judge gets capped per-file evidence on stdin, not a bare stat — a judge that
+  // reads real hunks up front misses less; the caps are NAMED and Bash still fetches full hunks.
+  const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
   const args = (p: string, model: string): string[] => [
     '-p',
     p,
@@ -300,7 +286,7 @@ async function cascadeVerdict(
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,
     args: args(escalatePrompt(prompt, first), 'opus'),
-    input: stat,
+    input,
     timeout: DEEP_JUDGE_TIMEOUT_MS, // opus re-investigation; only fires pre-block, never retried
     cwd,
     transcript: false, // this gate persists its own review-<name> transcript — don't store twice
@@ -421,9 +407,7 @@ export async function runReviewGate(
   );
   const judgeEnv = gateJudgeEnv(reviewMode, cfg);
   const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
-  // Prompt-version identity + cache salt, one resolution for both roles (sc-1437: the identity is
-  // no longer telemetry-only — it salts the commit-path cache key so asset edits invalidate cached
-  // PASSes in the field). Composition lives in runtime.mts's resolveReviewerIdentities.
+  // Identity + cache salt, one resolution for both roles (sc-1437) — see resolveReviewerIdentities.
   const { identities, cacheSalts } = resolveReviewerIdentities(
     reviewMode,
     identitySalts,
@@ -433,8 +417,16 @@ export async function runReviewGate(
   );
   const promptIdentity = (sel: ReviewerSelection): string | null =>
     identities.get(sel.reviewer.name) ?? null;
+  // sc-1441: Target bytes join every checklist reviewer's salt — a Target edit invalidates stale
+  // PASSes like an asset edit; the commit message stays OUT (ship-gates-converge-not-restart).
+  const targetsBlock = await loadReviewerTargetsBlock(cwd, stagedFiles(cwd));
+  const salted = (s: ReviewerSelection): string => {
+    const base = cacheSalts.get(s.reviewer.name) ?? '';
+    return hasChecklist(s.reviewer) ? `${base}\0${targetsBlock}` : base;
+  };
+  const targetSalts = new Map(selected.map((s): [string, string] => [s.reviewer.name, salted(s)]));
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
-  const plan = planReviewWork(selected, diffs, cache, cacheSalts, cacheKey);
+  const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey);
   for (const s of plan.scope) emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached);
   for (const line of plan.cachedLines) console.error(line);
   for (const c of plan.fullyCached) {
@@ -465,6 +457,7 @@ export async function runReviewGate(
       retryFirst: strict,
       assetRoot,
       judgeEnv,
+      targetsBlock,
     })
       .catch(
         (e): CascadeResult => ({
