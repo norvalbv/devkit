@@ -58,4 +58,20 @@ describe('renderTargets — shared governing-Targets block', () => {
     const blocks = [block('a'), block('b')];
     expect(renderTargets(blocks, COMPLETENESS_TARGETS_FRAMING, 8_192)).toBe(renderTargets(blocks));
   });
+
+  // sc-1474: the cap guards argv BYTES. Em-dash-dense rulings (the norm in this repo) are ~3 bytes
+  // per visible char; measuring string.length let them blow the documented cap with no OMITTED note.
+  it('the cap measures UTF-8 bytes, not UTF-16 chars (sc-1474)', () => {
+    // 1000 em-dashes = 1000 chars but 3000 UTF-8 bytes: under a 2600 cap by CHAR count (plus the
+    // ~150-char section overhead), over it by BYTE count. The pre-fix char measure kept it.
+    const emHeavy = block('em-heavy', '—'.repeat(1_000));
+    const out = renderTargets([emHeavy], COMPLETENESS_TARGETS_FRAMING, 2_600);
+    expect(out).toContain('OMITTED: 1 further governing Target(s) over the size cap — em-heavy');
+    expect(out).not.toContain('———');
+    // The equivalent ASCII ruling (same char count, 1 byte each) stays comfortably under the cap.
+    const ascii = block('ascii-ruling', 'x'.repeat(1_000));
+    expect(renderTargets([ascii], COMPLETENESS_TARGETS_FRAMING, 2_600)).toContain(
+      'x'.repeat(1_000),
+    );
+  });
 });
