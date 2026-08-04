@@ -36,14 +36,18 @@ export function renderTargets(blocks, framing = COMPLETENESS_TARGETS_FRAMING, ca
         return `${framing.skipHeader}\n${framing.skipNote}`;
     const lines = [framing.header, ''];
     const omitted = [];
-    let size = framing.header.length + 1;
+    // Measured in UTF-8 BYTES, not string length: the cap guards argv size, and this repo's rulings
+    // are em-dash/middot-dense (each 2-3 bytes but 1 UTF-16 unit) — a char count under-measures and
+    // silently blows the documented byte cap with no OMITTED note (sc-1474).
+    let size = Buffer.byteLength(framing.header, 'utf8') + 1;
     for (const b of blocks) {
         const section = `### ${b.slug}${b.scope ? ` · scope: \`${b.scope}\`` : ''} _(${b.via})_\n${b.ruling.trim()}\n`;
-        if (size + section.length > capBytes) {
+        const sectionBytes = Buffer.byteLength(section, 'utf8');
+        if (size + sectionBytes > capBytes) {
             omitted.push(b.slug);
             continue;
         }
-        size += section.length;
+        size += sectionBytes;
         lines.push(`### ${b.slug}${b.scope ? ` · scope: \`${b.scope}\`` : ''} _(${b.via})_`);
         lines.push(b.ruling.trim());
         lines.push('');
