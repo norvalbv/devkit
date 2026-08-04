@@ -432,6 +432,22 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(cache[corrKey].model).toBe('sonnet');
   });
 
+  // sc-1438: judges must receive DEVKIT_CHECKLIST_KEEP=1 on the COMMIT path (the env was
+  // review-mode-gated), so a judge that runs its brief's cleanup step cannot delete the artifact
+  // the gate reads after it finishes — the top "checklist artifact missing" inconclusive source.
+  it('commit-path judges receive DEVKIT_CHECKLIST_KEEP=1 in their env (sc-1438)', async () => {
+    const repo = consumerRepo({ backend: true });
+    const envs: (NodeJS.ProcessEnv | undefined)[] = [];
+    const exec = mkExec(async (opts) => {
+      envs.push(opts.env);
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(envs.length).toBeGreaterThan(0);
+    for (const env of envs) expect(env?.DEVKIT_CHECKLIST_KEEP).toBe('1');
+  });
+
   it('identical diff re-run hits the cache — zero judge spawns', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passWithArtifact(repo) });

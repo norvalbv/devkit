@@ -61,13 +61,13 @@ import {
   agentBody,
   cleanupChecklistState,
   enforceChecklistContract,
+  gateJudgeEnv,
   initializeCommitGuardChecklist,
   passAssetVerifier,
   preflightReviewAssets,
   type ReviewOutcome,
   readChecklistState,
   resolveReviewerIdentities,
-  reviewJudgeEnv,
 } from './runtime.mts';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
@@ -427,7 +427,7 @@ export async function runReviewGate(
     selected.map((selection) => selection.reviewer.name),
     concurrency,
   );
-  const judgeEnv = reviewMode ? reviewJudgeEnv(cfg) : undefined;
+  const judgeEnv = gateJudgeEnv(reviewMode, cfg);
   const verifyAssets = passAssetVerifier(reviewMode, assetRoot, cfg, identitySalts);
   // Prompt-version identity + cache salt, one resolution for both roles (sc-1437: the identity is
   // no longer telemetry-only — it salts the commit-path cache key so asset edits invalidate cached

@@ -129,6 +129,10 @@ export function createChecklistStore({
   // file is the evidence a reader may still want. Only a real commit cleans up after itself.
   const cleanup = () => {
     if (process.env.DEVKIT_RUN_MODE === 'review') return;
+    // Gate runs set DEVKIT_CHECKLIST_KEEP=1: the gate reads the artifact AFTER the judge finishes
+    // (a missing artifact voids the PASS) and removes it itself — a judge-side cleanup here would
+    // void its own verdict (sc-1438; 219 all-time "checklist artifact missing" inconclusives).
+    if (process.env.DEVKIT_CHECKLIST_KEEP === '1') return;
     const p = filePath();
     if (existsSync(p)) {
       unlinkSync(p);

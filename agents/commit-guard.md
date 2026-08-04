@@ -108,8 +108,8 @@ or repeated inline JSX. The jscpd-backed clone detector catches those (verbatim,
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
-node $SCRIPT cleanup
 ```
+`cleanup` is for interactive sessions only — in gate mode the gate reads the checklist artifact after you finish and removes it itself; deleting it yourself voids your PASS.
 `finalize` verifies every staged file was marked — it refuses (exits non-zero) an incomplete or failed checklist, so coverage can't be claimed without doing the work. Report the unapproved pairs/clones you surfaced (or state that none were found). No verbose summary.
 </workflow>
 

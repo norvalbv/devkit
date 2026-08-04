@@ -175,6 +175,20 @@ export function reviewJudgeEnv(cfg) {
         DEVKIT_REVIEW_FRONTEND_ROOTS: JSON.stringify(cfg.review.frontendRoots),
     };
 }
+/**
+ * Judge env for a cascade run on EVERY path (commit, ship, review) — sc-1438. The old wiring was
+ * review-mode-gated (`reviewMode ? reviewJudgeEnv(cfg) : undefined`), which left commit-path
+ * judges without DEVKIT_CHECKLIST_KEEP: a judge that ran its brief's own `cleanup` step deleted
+ * the artifact the gate reads after it finishes, voiding its PASS to "checklist artifact missing"
+ * (219 all-time). Env propagates from the judge process to its Bash subprocesses — the same
+ * channel the review-roots injection uses. sc-1439 extends this with DEVKIT_REVIEW_STAGED_FILES.
+ */
+export function gateJudgeEnv(reviewMode, cfg) {
+    return {
+        ...(reviewMode ? reviewJudgeEnv(cfg) : process.env),
+        DEVKIT_CHECKLIST_KEEP: '1',
+    };
+}
 /** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
  * all — a skill-less reviewer has no stateFile to read → unverifiable). */
 export function readChecklistState(cwd, reviewer) {

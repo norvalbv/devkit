@@ -137,8 +137,8 @@ For each item: Grep/Read the staged files and their counterparties, then mark it
 ## 4. Finalize
 ```bash
 node $SCRIPT finalize
-node $SCRIPT cleanup
 ```
+`cleanup` is for interactive sessions only — in gate mode the gate reads the checklist artifact after you finish and removes it itself; deleting it yourself voids your PASS.
 `finalize` refuses an incomplete or failed checklist, so coverage can't be claimed without
 doing the work.
 
