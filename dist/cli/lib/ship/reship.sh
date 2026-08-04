@@ -87,10 +87,12 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
-# Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat).
+# Body: --body "<text>" wins (explicit, no temp file); else use the same bounded stdin contract as
+# new-ship so an inherited, open-but-idle background-task pipe cannot block re-ship forever.
+. "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
-else BODY=$(cat); fi
+else ship_read_stdin_body; fi
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
@@ -141,6 +143,9 @@ git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothi
 # chain to it. See assert-staged-set.sh for the clobber this defends against.
 . "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
 ship_record_staged_state "$WT" "$STAGED_STATE"
+# ...and prove the objects it names are readable — write-tree cannot, once its cache-tree is persisted
+# (sc-1420). Same pair of checkpoints as new-ship.
+ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
 . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
@@ -162,6 +167,7 @@ export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist int
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
 # anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 

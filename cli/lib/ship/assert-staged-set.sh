@@ -49,6 +49,77 @@ _ship_path_matches_base() {
   [ -z "$status" ]
 }
 
+# _ship_staged_missing_objects <worktree>
+# Print "<oid>\t<path>" for every index entry whose object is absent from the object database.
+#
+# WHY NOT `git write-tree` (which the assertions below already run): write_index_as_tree
+# short-circuits on cache_tree_fully_valid(), which verifies only that the cached TREE objects exist
+# — never the blobs. ship_record_staged_state's write-tree PERSISTS that cache-tree into the index,
+# so every later write-tree re-reads a cached oid and cannot see a blob that has gone missing.
+# Verified: stage a file, write-tree, delete the loose blob, write-tree again -> same oid, exit 0.
+#
+# WHY NOT `git rev-list --objects <tree>`: with --missing=allow-any it silently OMITS the missing
+# object rather than naming it, and without it rev-list aborts on the first one, so neither form can
+# enumerate what is gone.
+#
+# Gitlinks (mode 160000) are skipped: a submodule's commit lives in the SUBMODULE's object database
+# and is absent from the superproject's by design, so checking them would report a false positive on
+# every repo with a submodule.
+_ship_staged_missing_objects() {
+  local wt=$1 pairs missing
+  pairs=$(git -C "$wt" ls-files -s \
+    | awk '$1 != "160000" { line = $0; sub(/^[^\t]*\t/, "", line); print $2 "\t" line }') || return 2
+  [ -n "$pairs" ] || return 0
+  missing=$(printf '%s\n' "$pairs" | cut -f1 | sort -u \
+    | git -C "$wt" cat-file --batch-check 2>/dev/null \
+    | awk '$2 == "missing" { print $1 }') || return 2
+  [ -n "$missing" ] || return 0
+  printf '%s\n' "$pairs" | grep -F -f <(printf '%s\n' "$missing") || true
+}
+
+# ship_assert_staged_objects_readable <worktree> <label>
+# Every object the index names must be readable from the ship worktree's object database. sc-1420: a
+# ship died ten minutes into the gate chain when `git diff --cached` could not read a staged object,
+# and every existing invariant here passed straight through it — the tree oid was unchanged and the
+# staged path set was intact, because the missing object is not something a tree comparison reads.
+ship_assert_staged_objects_readable() {
+  local wt=$1 label=$2 missing rc=0
+  missing=$(_ship_staged_missing_objects "$wt") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "🛑 ship: could not enumerate the ship worktree's index to verify its objects ($label)." >&2
+    return 1
+  fi
+  [ -z "$missing" ] && return 0
+  {
+    echo "🛑 ship: ABORTED — objects the index references are NOT in the object database ($label)."
+    echo "   These are staged entries whose content git can no longer read, so any gate that reads"
+    echo "   the staged diff will fail with \`fatal: unable to read <oid>\`. Nothing pushed."
+    printf '%s\n' "$missing" | sed 's/^/     /'
+    _ship_report_object_environment "$wt"
+  } >&2
+  return 1
+}
+
+# The evidence that tells the two candidate causes apart, captured at the moment of failure:
+# a genuine DELETION from the shared object database, or ship and the gate chain simply looking at
+# DIFFERENT object databases (ship runs in the caller's environment; gates are spawned through
+# __dk_no_git_env, which strips GIT_OBJECT_DIRECTORY and GIT_ALTERNATE_OBJECT_DIRECTORIES).
+_ship_report_object_environment() {
+  local wt=$1
+  echo "   --- object-database evidence (sc-1420) ---"
+  printf '   git-common-dir: %s\n' "$(git -C "$wt" rev-parse --git-common-dir 2>&1)"
+  printf '   objects dir:    %s\n' "$(git -C "$wt" rev-parse --git-path objects 2>&1)"
+  printf '   GIT_OBJECT_DIRECTORY=%s\n' "${GIT_OBJECT_DIRECTORY-<unset>}"
+  printf '   GIT_ALTERNATE_OBJECT_DIRECTORIES=%s\n' "${GIT_ALTERNATE_OBJECT_DIRECTORIES-<unset>}"
+  printf '   gc.auto=%s pruneExpire=%s worktreePruneExpire=%s\n' \
+    "$(git -C "$wt" config --get gc.auto || echo '<default>')" \
+    "$(git -C "$wt" config --get gc.pruneExpire || echo '<default>')" \
+    "$(git -C "$wt" config --get gc.worktreePruneExpire || echo '<default>')"
+  echo "   count-objects: $(git -C "$wt" count-objects -v 2>&1 | tr '\n' ' ')"
+  echo "   worktrees still registered:"
+  git -C "$wt" worktree list --porcelain 2>&1 | sed 's/^/     /'
+}
+
 # ship_assert_staged_unchanged <worktree> <state-file>
 # Preflight, run immediately before the commit: nothing between staging and here may touch the index
 # (prepare_gate_worktree and link_untracked_gate_configs only create UNTRACKED symlinks), so this is

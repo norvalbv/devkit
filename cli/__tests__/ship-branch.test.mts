@@ -678,6 +678,52 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(localBranchExists(git, 'feat/leak-test')).toBe(false); // no leftover branch
   });
 
+  // sc-1420: a ship died ten minutes in because a gate could not read a staged object. The log's last
+  // line was a git fatal from whichever gate happened to read the staged diff first, so it read as
+  // that gate rejecting the commit — sending the operator to re-run a reviewer that was never the
+  // problem. The hook here reproduces the shape: it removes a staged object mid-gate, then fails. What
+  // must hold is attribution — NOT "the gate blocked", but "the staged content became unreadable".
+  it('attributes a mid-gate loss of a staged object to the object database, not to the gate', () => {
+    const sink = 'events.jsonl';
+    const { dir, env, git } = seedShipRepo({
+      hookBody: [
+        'oid=$(git rev-parse :note.txt)',
+        'objects=$(git rev-parse --path-format=absolute --git-common-dir)/objects',
+        'rm -f "$objects/$(printf %s "$oid" | cut -c1-2)/$(printf %s "$oid" | cut -c3-)"',
+        'echo "gate read the staged diff and failed" >&2',
+        'exit 1',
+      ].join('\n'),
+    });
+    writeFileSync(join(dir, 'note.txt'), 'hello\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/lost-object', 'x', 'note.txt'], {
+      cwd: dir,
+      input: 'b\n',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1', DEVKIT_GATE_EVENTS: join(dir, sink) },
+    });
+
+    expect(r.status, r.stderr).not.toBe(0);
+    // The banner names the real cause and says plainly that the reporting gate is not the culprit.
+    expect(r.stderr).toContain('missing from the object database');
+    expect(r.stderr).toContain('NOT a gate rejection');
+    // ...and carries the evidence that separates a deletion from an ODB split.
+    expect(r.stderr).toContain('GIT_OBJECT_DIRECTORY=');
+
+    // Telemetry agrees with the banner — one evidence-checked verdict, not a second independent grep.
+    const events = readFileSync(join(dir, sink), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    expect(events.find((e) => e.type === 'ship_result').blocked_gate).toBe(
+      'staged_objects_missing',
+    );
+
+    // Nothing shipped, nothing leaked.
+    expect(git(['worktree', 'list'])).not.toMatch(/devkit-ship-/);
+    expect(localBranchExists(git, 'feat/lost-object')).toBe(false);
+  });
+
   it('ships a dash-leading filename passed after -- (treated as a path, not a flag)', () => {
     const { dir, env, git } = seedShipRepo();
     const weird = '--looks-like-flag.txt';
