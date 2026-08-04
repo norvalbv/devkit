@@ -40,7 +40,7 @@ import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { archiveFailedDiff } from './evidence/diff-archive.mts';
-import { attachItems, itemFields } from './evidence/items.mts';
+import { attachItems, cachedLensFields, itemFields } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
@@ -462,7 +462,7 @@ export async function runReviewGate(
               at: new Date().toISOString(),
               model: res.model ?? firstModel,
               duration_ms: durationMs,
-              ...(t.splitOf ? { items: res.items } : {}), // resumed runs re-seed the lens vector
+              ...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)
             },
           });
         if (res.status === 'fail') archiveFailedDiff(t.diffText);

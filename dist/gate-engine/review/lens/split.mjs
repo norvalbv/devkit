@@ -266,10 +266,22 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
             cachedLines.push(`guard-review: ${taskLabel(p)} — cached PASS (identical)`);
             if (!p.splitOf)
                 continue;
-            const items = cache[p.key].items;
+            // Rebuild the part WITH its cached aggregates (sc-1475): a spilled part's `items` never
+            // reached the cache entry (undefined is dropped by JSON), so itemCount/itemTally are the
+            // only proof the artifact existed — without them mergeItemVectors reads the part as
+            // "never ran" and the merged review_result silently omits a real lens group.
+            const e = cache[p.key];
             const held = splitParts.get(p.splitOf) ?? [];
             held.push({
-                res: { status: 'pass', name, items: Array.isArray(items) ? items : [] },
+                res: {
+                    status: 'pass',
+                    name,
+                    items: Array.isArray(e.items) ? e.items : [],
+                    itemCount: typeof e.itemCount === 'number' ? e.itemCount : undefined,
+                    itemTally: e.itemTally && typeof e.itemTally === 'object' && !Array.isArray(e.itemTally)
+                        ? e.itemTally
+                        : undefined,
+                },
                 secs: 0,
                 task: p,
             });
