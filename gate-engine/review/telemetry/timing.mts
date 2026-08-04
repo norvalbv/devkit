@@ -1,8 +1,10 @@
 import { emitGateTiming } from '../../judge/gate-events.mts';
 
-const DEFAULT_REVIEW_CONCURRENCY = 2;
+// 3, not 2: the correctness lens split turns one reviewer into up to four pool tasks, and at 2 they
+// queue behind each other for no reason — the bound that matters is subscription slots, not CPU.
+const DEFAULT_REVIEW_CONCURRENCY = 3;
 
-/** Max judge cascades in flight; invalid settings preserve the two-worker default. */
+/** Max judge cascades in flight; invalid settings preserve the default. */
 export function reviewConcurrency(): number {
   const n = Number.parseInt(
     process.env.GUARD_REVIEW_CONCURRENCY ?? process.env.FRINK_REVIEW_CONCURRENCY ?? '',

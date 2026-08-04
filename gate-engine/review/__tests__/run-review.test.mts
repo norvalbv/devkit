@@ -573,7 +573,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
       gate: 'review',
       cache_state: 'full',
-      parallelism: 2,
+      parallelism: 3,
     });
     // A synthetic pass row would inflate review_result's fail-rate denominator and flatten the
     // duration percentiles that any judgement-cache change has to be sized against.
@@ -1340,12 +1340,12 @@ describe('runReviewGate — per-completion checkpoints', () => {
 describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
   // consumerRepo({backend, frontend}) stages one file per domain → all 7 reviewers selected
   // (backend pair, frontend pair, commit-guard, correctness, conventions).
-  it('default cap 2: at most 2 judge cascades run at once, all still complete + cache', async () => {
+  it('default cap 3: at most 3 judge cascades run at once, all still complete + cache', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(7);
-    expect(probe.maxInflight()).toBe(2);
+    expect(probe.maxInflight()).toBe(3);
     expect(Object.keys(loadCache(repo)).length).toBe(7);
   });
 
@@ -1372,17 +1372,28 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     const probe = concurrencyProbe(repo, { failFirst: true }); // first attempt null → one strict retry
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(14); // 7 reviewers × (attempt + retry), sequential in-slot
-    expect(probe.maxInflight()).toBeLessThanOrEqual(2);
+    expect(probe.maxInflight()).toBeLessThanOrEqual(3);
   });
 
-  it('a garbage / out-of-range cap falls back to the default of 2', async () => {
-    for (const bad of ['', '0', '-3', 'abc', '2.9']) {
+  it('a garbage / out-of-range cap falls back to the default of 3', async () => {
+    for (const bad of ['', '0', '-3', 'abc']) {
       const repo = consumerRepo({ backend: true, frontend: true });
       process.env.GUARD_REVIEW_CONCURRENCY = bad;
       const probe = concurrencyProbe(repo);
       expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-      expect(probe.maxInflight()).toBe(2);
+      expect(probe.maxInflight()).toBe(3);
     }
+  });
+
+  // '2.9' rode in the garbage list until the default moved off 2 and revealed it was never
+  // falling back at all: parseInt truncates it to a VALID cap of 2. Kept as its own case so the
+  // truncation is asserted deliberately rather than coinciding with whatever the default is.
+  it('a fractional cap truncates toward zero — it does not fall back', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    process.env.GUARD_REVIEW_CONCURRENCY = '2.9';
+    const probe = concurrencyProbe(repo);
+    expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
+    expect(probe.maxInflight()).toBe(2);
   });
 });
 

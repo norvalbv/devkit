@@ -67,9 +67,12 @@ post-hoc subgroup, but it still is not the registered arm.
 
 1. **Splitting was argued down from 4 groups to 2 partly on latency (~4× judge calls).** Measured
    per fresh row: control **1.09 min**, 4-way **0.74 min**, 2-way **0.70 min** — the split arms are
-   ~35% *faster*, because each judge gets a quarter of the checklist and returns sooner. Judges run
-   sequentially (`runLensCascades`), so this is not parallelism. Token spend is still higher, as the
-   diff is re-sent per lens.
+   ~35% *faster*, because each judge gets a quarter of the checklist and returns sooner. Token spend
+   is still higher, as the diff is re-sent per lens.
+
+   In the gate this is better still: `planReviewWork` flattens the lens groups into ordinary tasks
+   and `run-review.mts` runs them through its bounded pool, so the passes overlap rather than
+   queueing. The bench numbers above are the *unoverlapped* case.
 2. **The 4.2% single-judge inconclusive rate was expected to compound to ~15.8% over four judges.**
    All three arms finished with **zero** inconclusives. The four outages in the 4-way's first
    attempts were rate limits, and re-ran.
