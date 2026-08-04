@@ -92,9 +92,31 @@ commit_with_gate_capture() {
     "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
+  # sc-1442: the composed message exists BEFORE `git commit` runs — hand it to the pre-commit
+  # reviewers as ADVISORY intent via a temp file (NEVER .git/COMMIT_EDITMSG: at pre-commit that
+  # holds the PREVIOUS commit's message). Best-effort throughout: any failure degrades to the
+  # gate's placeholder, never a blocked ship. The gate keeps the message OUT of every reviewer
+  # cache key, so a reship retry with an amended message still reuses cached PASSes.
+  local msgf=""
+  msgf=$(mktemp "${TMPDIR:-/tmp}/devkit-ship-msg.XXXXXX" 2>/dev/null) || msgf=""
+  if [ -n "$msgf" ]; then
+    if printf '%s\n\n%s\n' "$title" "$body" > "$msgf" 2>/dev/null; then
+      export DEVKIT_COMMIT_MSG_FILE="$msgf"
+    else
+      rm -f -- "$msgf" 2>/dev/null || true
+      msgf=""
+    fi
+  fi
+
   local rc=0
   DEVKIT_GATE_ARCHIVE_LOG="$ship_log" run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
     git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
+
+  # sc-1442 cleanup — sits ABOVE both return sites, so every exit path is already clean. A Ctrl-C
+  # mid-gate can leak the mode-600 temp file; accepted — its content is the message the author is
+  # about to publish anyway.
+  if [ -n "$msgf" ]; then rm -f -- "$msgf" 2>/dev/null || true; fi
+  unset DEVKIT_COMMIT_MSG_FILE
 
   # Did OUR outer `git commit` die on its own HEAD finalize, or did a GATE merely PRINT the same git
   # error? The captured log is a COMBINED stream (`2>&1 | tee` above folds hook output in), so the two

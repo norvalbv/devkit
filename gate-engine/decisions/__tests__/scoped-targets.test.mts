@@ -7,8 +7,16 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { rankAxes } from '../decisions.mts';
 import { scopedTargets } from '../scoped-targets.mts';
+
+// The semantic supplement is exercised with rankAxes stubbed — the real ranker needs a vector
+// index/embeddings; what THIS file pins is scoped-targets' composition contract around it.
+vi.mock('../decisions.mts', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../decisions.mts')>();
+  return { ...mod, rankAxes: vi.fn(mod.rankAxes) };
+});
 
 let roots = [];
 function repoWithDecisions(targets) {
@@ -63,5 +71,32 @@ describe('scopedTargets (scope-match)', () => {
   it('returns [] for no files and no query (nothing governs)', async () => {
     const root = repoWithDecisions([['foo', 'src/foo/**', 'r']]);
     expect(await scopedTargets([], '', 6, root)).toEqual([]);
+  });
+});
+
+describe('scopedTargets — semantic supplement (sc-1442)', () => {
+  afterEach(() => vi.mocked(rankAxes).mockReset());
+
+  it('appends ranked axes as via:semantic, deduped against scope matches', async () => {
+    const root = repoWithDecisions([
+      ['foo', 'src/foo/**', 'The foo ruling'],
+      ['bar', 'src/bar/**', 'The bar ruling'],
+    ]);
+    vi.mocked(rankAxes).mockResolvedValue({ rows: [{ slug: 'bar' }, { slug: 'foo' }] } as never);
+    const blocks = await scopedTargets(['src/foo/handler.ts'], 'bar things', 6, root);
+    expect(blocks.map((b) => [b.slug, b.via])).toEqual([
+      ['foo', 'scope-match'],
+      ['bar', 'semantic'], // foo NOT duplicated: already scope-matched
+    ]);
+  });
+
+  it('a semantic-tier throw NEVER discards the scope matches (salt-safety, sc-1442)', async () => {
+    // A caller derives its cache salt from the scope-match subset; if a query-only error collapsed
+    // the whole result, supplying a commit message could move the salt — the exact violation of
+    // ship-gates-converge-not-restart this partition exists to prevent.
+    const root = repoWithDecisions([['foo', 'src/foo/**', 'The foo ruling']]);
+    vi.mocked(rankAxes).mockRejectedValue(new Error('embed endpoint down'));
+    const blocks = await scopedTargets(['src/foo/handler.ts'], 'any query', 6, root);
+    expect(blocks.map((b) => [b.slug, b.via])).toEqual([['foo', 'scope-match']]);
   });
 });

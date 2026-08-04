@@ -34,7 +34,11 @@ const SCOPE_FILES_INLINE_BUDGET = 2000;
  * PASS too. This is the row that answers "did this reviewer see this file, on which bytes, under
  * which prompt version".
  */
-export function emitReviewScope(sel, diffText, promptIdentity, cached) {
+export function emitReviewScope(sel, diffText, promptIdentity, cached, 
+// sc-1442: bounded per-run context facts — did the prompt carry a commit message, and which
+// Targets tier loaded. Without these the epic's "reviewers with intent vs blind" field
+// comparison cannot be computed from the sink.
+contextFields = null) {
     const files = [...sel.files].sort();
     const inline = JSON.stringify(files);
     const spilled = inline.length > SCOPE_FILES_INLINE_BUDGET
@@ -56,5 +60,6 @@ export function emitReviewScope(sel, diffText, promptIdentity, cached) {
         // second source of truth the gate cannot import and would have to sync-test.
         has_checklist: hasChecklist(sel.reviewer),
         cached,
+        ...(contextFields ?? {}),
     });
 }

@@ -30,7 +30,6 @@
  * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
  */
 
-import { execFileSync } from 'node:child_process';
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitCacheHit, emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
@@ -39,10 +38,12 @@ import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts
 import { loadCache, savePasses } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
+import { loadReviewerContext } from './evidence/commit-message.mts';
 import { archiveFailedDiff } from './evidence/diff-archive.mts';
 import { attachItems, itemFields } from './evidence/items.mts';
 import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
-import { loadReviewerTargetsBlock } from './evidence/targets-block.mts';
+import { gitCached, stagedFiles } from './evidence/staged-git.mts';
+import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import {
   emitMergedLensResults,
   holdLensPart,
@@ -58,6 +59,7 @@ import {
   effectiveReviewConfig,
   escalatePrompt,
   hasChecklist,
+  type PromptExtras,
   parseReviewVerdict,
   type ReviewerSelection,
   selectReviewers,
@@ -102,7 +104,7 @@ interface CascadeOpts {
   assetRoot?: string;
   judgeEnv?: NodeJS.ProcessEnv;
   checklistRecoveryReason?: string;
-  targetsBlock?: string;
+  promptExtras?: PromptExtras;
 }
 
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
@@ -115,23 +117,6 @@ interface CascadeOpts {
 // SHIP_COMMIT_TIMEOUT (3600s) — by design: a killed ship CONVERGES on re-run because PASSes checkpoint
 // per-completion and the caches skip what was earned (docs/decisions/ship-gates-converge-not-restart.md).
 // Only correctness nears the cap; the rest finish <300s, so a real ship is one slow wave + fast waves.
-
-// argv-based on purpose: staged FILENAMES ride these calls, and a shell string (even
-// JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
-export function gitCached(cwd: string, args: string[], files: string[]): string {
-  return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
-    cwd,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-}
-
-export function stagedFiles(cwd: string): string[] {
-  return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 
 /**
  * One reviewer's cascade → {name, status: 'pass'|'fail'|'inconclusive', reason, escalated}.
@@ -177,7 +162,7 @@ async function cascadeVerdict(
     assetRoot,
     judgeEnv,
     checklistRecoveryReason,
-    targetsBlock,
+    promptExtras,
   }: CascadeOpts,
 ): Promise<CascadeResult> {
   const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files); // sc-1439
@@ -198,8 +183,8 @@ async function cascadeVerdict(
   // into the prompt itself.
   const stat = gitCached(cwd, ['--stat'], files);
   const prompt = hasChecklist(reviewer)
-    ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, targetsBlock)
-    : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files));
+    ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras)
+    : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
   // sc-1441: every judge gets capped per-file evidence on stdin, not a bare stat — a judge that
   // reads real hunks up front misses less; the caps are NAMED and Bash still fetches full hunks.
   const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
@@ -417,17 +402,15 @@ export async function runReviewGate(
   );
   const promptIdentity = (sel: ReviewerSelection): string | null =>
     identities.get(sel.reviewer.name) ?? null;
-  // sc-1441: Target bytes join every checklist reviewer's salt — a Target edit invalidates stale
-  // PASSes like an asset edit; the commit message stays OUT (ship-gates-converge-not-restart).
-  const targetsBlock = await loadReviewerTargetsBlock(cwd, stagedFiles(cwd));
-  const salted = (s: ReviewerSelection): string => {
-    const base = cacheSalts.get(s.reviewer.name) ?? '';
-    return hasChecklist(s.reviewer) ? `${base}\0${targetsBlock}` : base;
-  };
-  const targetSalts = new Map(selected.map((s): [string, string] => [s.reviewer.name, salted(s)]));
+  // sc-1441/sc-1442: SCOPE-ONLY Target bytes join every checklist reviewer's salt — a Target edit
+  // invalidates stale PASSes; the commit message + its semantic Target hits ride ONLY the prompt
+  // (ship-gates-converge-not-restart: amended-message retries must reuse cached PASSes).
+  const ctx = await loadReviewerContext(cwd, stagedFiles(cwd));
+  const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock);
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
   const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey);
-  for (const s of plan.scope) emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached);
+  for (const s of plan.scope)
+    emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields);
   for (const line of plan.cachedLines) console.error(line);
   for (const c of plan.fullyCached) {
     timing.cacheHit(c.name, c.duration);
@@ -457,7 +440,7 @@ export async function runReviewGate(
       retryFirst: strict,
       assetRoot,
       judgeEnv,
-      targetsBlock,
+      promptExtras: ctx.promptExtras,
     })
       .catch(
         (e): CascadeResult => ({
