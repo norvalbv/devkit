@@ -92,8 +92,8 @@ export async function runCascade(sel, opts) {
                     status: 'error',
                     reason: `reviewer checklist contract failed after one retry — ${reason}`,
                 };
-            initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
-            return cascadeVerdict(sel, { ...opts, checklistRecoveryReason: reason });
+            // Unreachable: only the review lane sets assetRoot (the callback's gate), always with a mode.
+            throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
         });
         const disposition = applyOverrideValve(sel, res, cwd, {
             readState: () => readChecklistState(cwd, sel.reviewer),

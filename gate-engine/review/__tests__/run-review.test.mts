@@ -2241,18 +2241,25 @@ describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
     const repo = consumerRepo({ backend: true });
     reviewEnv(repo);
     let inflight = 0;
+    const attempts = new Map<string, number>();
     const calls: { label: string; solo: boolean; completedNow: string[] }[] = [];
     const exec = mkExec(async ({ label }) => {
       inflight++;
       try {
         await new Promise((r) => setTimeout(r, 20)); // force the wave to overlap
         const solo = inflight === 1; // sampled MID-RUN: was any sibling judging alongside?
+        // Non-compliance is pinned to the ATTEMPT, not to sampled overlap: the tail of a wave can
+        // legitimately hold one task in flight, and gating on `solo` would let that task comply
+        // first time and flake the assertions below. `solo` is still SAMPLED and asserted — it is
+        // the thing under test (the deferred phase runs serially), just not the trigger.
+        const attempt = (attempts.get(label) ?? 0) + 1;
+        attempts.set(label, attempt);
         let completedNow: string[] = [];
         try {
           completedNow = JSON.parse(readFileSync(join(repo, 'progress.json'), 'utf8')).completed;
         } catch {}
         calls.push({ label, solo, completedNow });
-        if (solo) writeArtifact(repo, label); // compliant ONLY when judging alone
+        if (attempt > 1) writeArtifact(repo, label); // compliant only on the post-wave attempt
         return 'VERDICT: PASS';
       } finally {
         inflight--;
@@ -2277,6 +2284,11 @@ describe('runReviewGate — deferred checklist recovery (sc-1476)', () => {
 
   it('the commit/ship path gains NO deferral: one judge run, inconclusive, fail-open', async () => {
     const repo = consumerRepo({ backend: true });
+    // Stated, not inherited: the commit/ship lane is defined by the ABSENCE of the review-mode
+    // keys, so pin them here rather than leaning on suite cleanup or test order for the contrast.
+    delete process.env.DEVKIT_RUN_MODE;
+    delete process.env.DEVKIT_REVIEW_ASSET_ROOT;
+    delete process.env.DEVKIT_REVIEW_PROGRESS;
     const exec = mkExec(async () => 'VERDICT: PASS'); // never writes an artifact
     expect(await runReviewGate(repo, { exec })).toBe(2);
     const apiCalls = exec.mock.calls.filter((c) => c[0].label === 'review:api-security-reviewer');

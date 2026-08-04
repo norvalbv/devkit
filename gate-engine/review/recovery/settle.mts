@@ -12,10 +12,10 @@
  *
  * `settleReviewOutcome` is the ONE code path that checkpoints, records progress, holds lens
  * parts, and emits telemetry — the first wave and the deferred phase both go through it, so the
- * two can never drift. A retryable outcome short-circuits: no cache write, no completed push, no
- * lens hold, no review_result — the deferred attempt's settle does all of that (progress/banner
- * semantics: a parked reviewer is NOT completed until its recovery settles, so a kill mid-phase
- * still names it unfinished and the re-run converges on it).
+ * two can never drift. A retryable outcome short-circuits: no timing, no cache write, no completed
+ * push, no lens hold, no review_result — the deferred attempt's settle does all of that (progress/
+ * banner semantics: a parked reviewer is NOT completed until its recovery settles, so a kill
+ * mid-phase still names it unfinished and the re-run converges on it).
  */
 
 import { emitGateEvent } from '../../judge/gate-events.mts';
@@ -65,10 +65,12 @@ export function settleReviewOutcome(
   retried = false,
 ): ReviewOutcome {
   const res = ctx.verifyAssets(outcome, t.base);
-  ctx.timing.observed(res.name, durationMs);
-  // Parked for post-wave recovery: the first attempt's wall time is real (observed above), but
-  // nothing else may land — the deferred attempt's settle is the one that counts.
+  // Parked for post-wave recovery: NOTHING lands, the duration included. ReviewGateTiming keys
+  // observed work by reviewer name and OVERWRITES (Map.set), so recording the voided attempt here
+  // would only be clobbered by the deferred settle — the gate's own wall clock counts that time
+  // either way. The deferred attempt's settle is the one that counts.
   if (retryableReason(res)) return res;
+  ctx.timing.observed(res.name, durationMs);
   if (res.status === 'pass')
     // res.model = the model that actually judged (a Reviewer.model pin wins over the cascade
     // default) — recording firstModel here mislabeled every pinned reviewer's cached PASS.
@@ -162,7 +164,10 @@ export async function runDeferredRecoveries(
         reason: `recovery deferred, budget exhausted — re-run to converge (${p.reason})`,
         escalated: false,
       };
-      results[p.index] = settleReviewOutcome(ctx, p.task, skipped, 0, true);
+      // NOT marked retried: no deferred judge ran. The flag measures attempts that happened, so
+      // counting a skip would inflate the very recovery rate it exists to report — the reason
+      // string is what names this outcome.
+      results[p.index] = settleReviewOutcome(ctx, p.task, skipped, 0);
       continue;
     }
     console.error(
