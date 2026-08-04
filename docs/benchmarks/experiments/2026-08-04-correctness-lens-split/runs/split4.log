@@ -1,0 +1,253 @@
+=== attempt 1/6 01:53:45Z ===
+reviewer-eval: 140 rows (75 gold) · model sonnet · cascade single-pass · concurrency 2 · est ≈ 158 min wall-clock
+reviewer-eval: A/B vs control-1.json — directional only (writes no baseline, exits 0)
+
+── correctness-reviewer (140 rows) ──
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-discarded-resume-return         MISS  first=∅ final=inconclusive
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-retry-stuck-unclaimable         MISS  first=∅ final=inconclusive
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-revive-user-cancelled           MISS  first=∅ final=inconclusive
+reviewer-eval: 3 consecutive judge outages — pausing (rate limit / drained pool?). Completed rows are checkpointed; re-run the SAME command to resume.
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-stale-failure-reasons           MISS  first=∅ final=inconclusive
+  corr-discarded-resume-return: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-revive-user-cancelled: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-stale-failure-reasons: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+
+correctness-reviewer (4 rows: 4 gold / 0 decoys)
+  first-pass FAIL-recall   0/4 = 0.00 [0.00, 0.49]
+  first-pass clean-pass    0/0 [0.00, 1.00]
+  right-reason split       —
+  live escalations         0
+  inconclusive             outage:4
+
+POOLED (PARTIAL — paused) (4 rows: 4 gold / 0 decoys)
+  first-pass FAIL-recall   0/4 = 0.00 [0.00, 0.49]
+  first-pass clean-pass    0/0 [0.00, 1.00]
+  right-reason split       —
+  live escalations         0
+  inconclusive             outage:4
+reviewer-eval: PAUSED after 4/140 rows (136 not run). Re-run the SAME command to resume from the checkpoint (switch accounts first if rate-limited).
+auto-resume: attempt 1 exited 2 (0 row-lines so far) — resuming in 300s
+=== attempt 2/6 01:59:12Z ===
+reviewer-eval: 140 rows (75 gold) · model sonnet · cascade single-pass · concurrency 2 · est ≈ 158 min wall-clock · resuming (4 checkpointed row(s) on disk)
+reviewer-eval: A/B vs control-1.json — directional only (writes no baseline, exits 0)
+
+── correctness-reviewer (140 rows) ──
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-discarded-resume-return         MISS  first=∅ final=inconclusive
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-retry-stuck-unclaimable         MISS  first=∅ final=inconclusive
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-revive-user-cancelled           MISS  first=∅ final=inconclusive
+reviewer-eval: 3 consecutive judge outages — pausing (rate limit / drained pool?). Completed rows are checkpointed; re-run the SAME command to resume.
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-stale-failure-reasons           MISS  first=∅ final=inconclusive
+  corr-discarded-resume-return: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-revive-user-cancelled: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+  corr-stale-failure-reasons: discordant with baseline — re-running once to confirm
+⚠️  review:correctness-reviewer: claude judge unavailable (1; offline/quota/absent) — judgement skipped
+
+correctness-reviewer (4 rows: 4 gold / 0 decoys)
+  first-pass FAIL-recall   0/4 = 0.00 [0.00, 0.49]
+  first-pass clean-pass    0/0 [0.00, 1.00]
+  right-reason split       —
+  live escalations         0
+  inconclusive             outage:4
+
+POOLED (PARTIAL — paused) (4 rows: 4 gold / 0 decoys)
+  first-pass FAIL-recall   0/4 = 0.00 [0.00, 0.49]
+  first-pass clean-pass    0/0 [0.00, 1.00]
+  right-reason split       —
+  live escalations         0
+  inconclusive             outage:4
+reviewer-eval: PAUSED after 4/140 rows (136 not run). Re-run the SAME command to resume from the checkpoint (switch accounts first if rate-limited).
+auto-resume: attempt 2 exited 2 (0 row-lines so far) — resuming in 900s
+=== attempt 3/6 02:14:36Z ===
+reviewer-eval: 140 rows (75 gold) · model sonnet · cascade single-pass · concurrency 2 · est ≈ 158 min wall-clock · resuming (8 checkpointed row(s) on disk)
+reviewer-eval: A/B vs control-1.json — directional only (writes no baseline, exits 0)
+
+── correctness-reviewer (140 rows) ──
+  corr-discarded-resume-return         OK    first=FAIL final=fail [right-item]
+  corr-retry-stuck-unclaimable         MISS  first=PASS final=pass
+  corr-stale-failure-reasons           OK    first=FAIL final=fail [right-item]
+  corr-revive-user-cancelled           OK    first=FAIL final=fail [right-item]
+  corr-reopen-before-cas-strands       OK    first=FAIL final=fail [right-item]
+  corr-stale-checklist-artifact        OK    first=FAIL final=fail [right-item]
+  corr-submit-latch-stuck              OK    first=FAIL final=fail [right-item]
+guard-review: correctness-reviewer — state-transitions dropped as out-of-charter (security/performance is another reviewer's finding)
+  corr-nearexpiry-permanent-reauth     OK    first=FAIL final=pass
+  corr-unguarded-unpark-clobber        OK    first=FAIL final=fail [pattern-only]
+  corr-read-then-write-clobber-terminal OK    first=FAIL final=fail [right-item]
+  corr-guarded-result-ignored-mode-flip OK    first=FAIL final=fail [pattern-only]
+  corr-lock-timeout-runs-unlocked      OK    first=FAIL final=fail [right-item]
+  corr-retry-broadcast-double-fire     OK    first=FAIL final=fail [pattern-only]
+  corr-json-string-result-dropped      OK    first=FAIL final=fail [right-item]
+  corr-group-map-last-write-wins       OK    first=FAIL final=fail [pattern-only]
+  corr-sync-source-target-divergence   MISS  first=PASS final=pass
+  corr-manifest-unknown-version-wiped  OK    first=FAIL final=fail [pattern-only]
+  corr-persist-unnormalized-signal     OK    first=FAIL final=fail [right-item]
+  corr-loose-cmd-classifier-anchor     OK    first=FAIL final=fail [right-item]
+  corr-field-validated-wrong-state     OK    first=FAIL final=fail [right-item]
+  corr-loose-json-error-classifier     OK    first=FAIL final=fail [right-item]
+  corr-exit-code-only-one-fails        OK    first=FAIL final=fail [right-item]
+  corr-swallowed-config-parse-bypass   OK    first=FAIL final=fail [right-item]
+  corr-only-selector-silent-drop       OK    first=FAIL final=fail [right-item]
+  corr-execfile-cmd-shim-swallowed     OK    first=FAIL final=fail [pattern-only]
+  corr-asymmetric-flip-classifier      OK    first=FAIL final=fail [right-item]
+  corr-reminder-ignores-plan-mode      OK    first=FAIL final=fail [right-item]
+  corr-decoy-conditional-update        OK    first=PASS final=pass
+  corr-decoy-cas-guarded-write         OK    first=PASS final=pass
+  corr-decoy-select-for-update         OK    first=PASS final=pass
+  corr-decoy-parses-json-string-result OK    first=PASS final=pass
+  corr-decoy-targeted-broadcast        MISS  first=FAIL final=fail
+  corr-decoy-retry-reset-counter       OK    first=PASS final=pass
+  corr-decoy-exit-code-fail-closed     OK    first=PASS final=pass
+  corr-decoy-tight-anchor-classifier   MISS  first=FAIL final=fail
+  corr-decoy-catch-rethrows            OK    first=PASS final=pass
+  corr-decoy-return-checked-fails-closed OK    first=PASS final=pass
+  corr-decoy-only-validated            OK    first=PASS final=pass
+  corr-xdomain-sqli                    OK    first=PASS final=pass
+  corr-xdomain-nplusone                OK    first=PASS final=pass
+  corr-xdomain-xss                     OK    first=PASS final=pass
+  corr-xdomain-render                  OK    first=PASS final=pass
+  corr-decoy-reset-failure-reasons     OK    first=PASS final=pass
+  corr-retry-leaves-stale-error        OK    first=FAIL final=fail [right-item]
+  corr-decoy-retry-clears-error        OK    first=PASS final=pass
+  corr-empty-recompute-keeps-stale     OK    first=FAIL final=fail [right-item]
+  corr-decoy-empty-recompute-clears    OK    first=PASS final=pass
+  corr-decoy-clears-stale-artifact     OK    first=PASS final=pass
+  corr-decoy-early-exit-preserved      OK    first=PASS final=pass
+  corr-early-exit-status-bypassed      OK    first=FAIL final=fail [right-item]
+  corr-decoy-loop-break-preserved      OK    first=PASS final=pass
+  corr-early-exit-loop-break-dropped   OK    first=FAIL final=fail [right-item]
+  corr-outage-exit-code-downgraded     OK    first=FAIL final=fail [pattern-only]
+  corr-decoy-outage-exit-preserved     OK    first=PASS final=pass
+  corr-worktree-leak-no-finally        OK    first=FAIL final=fail [right-item]
+  corr-decoy-worktree-finally          OK    first=PASS final=pass
+  corr-lock-not-released-on-throw      OK    first=FAIL final=fail [right-item]
+  corr-decoy-lock-finally              OK    first=PASS final=pass
+  corr-decoy-fs-recursive-mkdir        OK    first=PASS final=pass
+  corr-fs-check-then-act-race          OK    first=FAIL final=fail [right-item]
+  corr-decoy-timer-debounce-clears     OK    first=PASS final=pass
+  corr-timer-debounce-double-fire      OK    first=FAIL final=fail [right-item]
+  corr-decoy-signature-callsite-updated OK    first=PASS final=pass
+  corr-signature-change-callsite-missed OK    first=FAIL final=fail [right-item]
+  corr-broadcast-fanout-no-dedup       OK    first=FAIL final=fail [right-item]
+  corr-pr138-ci-breaking-gate-engine-coverage-pair OK    first=PASS final=pass
+  corr-decoy-broadcast-targeted        OK    first=PASS final=pass
+  corr-pr138-ci-breaking-gate-engine-coverage OK    first=FAIL final=fail [right-item]
+  corr-pr172-duplicate-let-spawnoptions-declaration OK    first=FAIL final=fail [right-item]
+  corr-pr172-duplicate-let-spawnoptions-declaration-pair OK    first=PASS final=pass
+  corr-pr200-important-pair            OK    first=PASS final=pass
+  corr-pr200-important                 OK    first=FAIL final=fail [pattern-only]
+  corr-pr200-ref-mutated-during-render-move-pair OK    first=PASS final=pass
+  corr-pr200-ref-mutated-during-render-move MISS  first=PASS final=pass
+  corr-pr21-fail-closed-when-the-remote-pair MISS  first=FAIL final=fail
+  corr-pr21-fail-closed-when-the-remote OK    first=FAIL final=fail [right-item]
+  corr-pr21-validate-the-parsed-github-repo-pair OK    first=PASS final=pass
+  corr-pr21-validate-the-parsed-github-repo OK    first=FAIL final=fail [right-item]
+  corr-pr26-cover-the-restart-interrupted-flow-pair OK    first=PASS final=pass
+  corr-pr26-cover-the-restart-interrupted-flow MISS  first=PASS final=pass
+  corr-pr26-keep-the-mcp-inputschema-in-pair MISS  first=FAIL final=fail
+  corr-pr26-keep-the-mcp-inputschema-in OK    first=FAIL final=fail [right-item]
+  corr-pr38-check-the-full-r2-credential-pair OK    first=PASS final=pass
+  corr-pr38-check-the-full-r2-credential OK    first=FAIL final=fail [right-item]
+  corr-pr38-require-the-full-azure-signing-pair MISS  first=FAIL final=fail
+  corr-pr38-require-the-full-azure-signing MISS  first=PASS final=pass
+  corr-pr48-cn-ts-src-pair             OK    first=PASS final=pass
+  corr-pr48-cn-ts-src                  MISS  first=PASS final=pass
+  corr-pr59-guard-config-json          OK    first=FAIL final=fail [pattern-only]
+  corr-pr59-guard-config-json-pair     MISS  first=FAIL final=fail
+  corr-pr1-clear-persisted-checklist-state-before OK    first=FAIL final=fail [right-item]
+  corr-pr1-clear-persisted-checklist-state-before-pair MISS  first=FAIL final=fail
+  corr-pr1-preserve-the-guard-exit-code-pair MISS  first=FAIL final=fail
+  corr-pr1-preserve-the-guard-exit-code OK    first=FAIL final=fail [right-item]
+  corr-pr1-return-exit-3-for-detect-pair OK    first=PASS final=pass
+  corr-pr1-return-exit-3-for-detect    OK    first=FAIL final=fail [pattern-only]
+  corr-pr23-keep-init-aligned-with-the-pair OK    first=PASS final=pass
+  corr-pr26-block-parked-answer-sends-when-pair OK    first=PASS final=pass
+  corr-pr23-keep-init-aligned-with-the OK    first=FAIL final=fail [right-item]
+  corr-pr26-block-parked-answer-sends-when OK    first=FAIL final=fail [pattern-only]
+  corr-pr26-do-not-let-terminal-signals-pair MISS  first=FAIL final=fail
+  corr-pr26-do-not-let-terminal-signals MISS  first=PASS final=pass
+  corr-pr28-include-bun-lock-in-the    MISS  first=PASS final=pass
+  corr-pr28-include-bun-lock-in-the-pair OK    first=PASS final=pass
+  corr-pr52-don-t-down-rank-recorded-pair OK    first=PASS final=pass
+  corr-pr52-don-t-down-rank-recorded   MISS  first=PASS final=pass
+  corr-pr52-use-frink-no-log-in-pair   OK    first=PASS final=pass
+  corr-pr52-use-frink-no-log-in        OK    first=FAIL final=fail [right-item]
+  corr-pr59-expand-knip-config-detection MISS  first=PASS final=pass
+  corr-pr59-expand-knip-config-detection-pair OK    first=PASS final=pass
+  corr-pr59-use-a-portable-whitespace-class OK    first=FAIL final=fail [right-item]
+  corr-pr59-use-a-portable-whitespace-class-pair OK    first=PASS final=pass
+  corr-pr60-avoid-leaving-the-member-in OK    first=FAIL final=fail [right-item]
+  corr-pr60-avoid-leaving-the-member-in-pair OK    first=PASS final=pass
+  corr-pr60-make-the-batch-reopen-atomic OK    first=FAIL final=fail [pattern-only]
+  corr-pr60-node-modules-pair          OK    first=PASS final=pass
+  corr-pr60-make-the-batch-reopen-atomic-pair MISS  first=FAIL final=fail
+  corr-pr60-node-modules               OK    first=FAIL final=fail [right-item]
+  corr-pr61-keep-the-carry-on-state-pair MISS  first=FAIL final=fail
+  corr-pr61-keep-the-carry-on-state    OK    first=FAIL final=fail [right-item]
+  corr-tel-append-uniqueness-check-unlocked OK    first=FAIL final=fail [right-item]
+  corr-tel-append-uniqueness-check-unlocked-pair OK    first=PASS final=pass
+  corr-tel-floor-flips-assigned-flag-pair OK    first=PASS final=pass
+  corr-tel-floor-flips-assigned-flag   OK    first=FAIL final=fail [right-item]
+  corr-tel-shared-merge-key-unfiltered-writer-pair MISS  first=FAIL final=fail
+  corr-tel-shared-merge-key-unfiltered-writer OK    first=FAIL final=fail [pattern-only]
+  corr-tel-validate-after-lint-rejected-shape-pair OK    first=PASS final=pass
+  corr-tel-validate-after-lint-rejected-shape OK    first=FAIL final=fail [pattern-only]
+  corr-tel-banner-ratio-masks-logic-line-pair MISS  first=FAIL final=fail
+  corr-tel-banner-ratio-masks-logic-line OK    first=FAIL final=fail [right-item]
+  corr-tel-banner-stray-line-excusal   OK    first=FAIL final=fail [right-item]
+guard-review: correctness-reviewer — error-and-edge-classification dropped as out-of-charter (security/performance is another reviewer's finding)
+  corr-tel-banner-stray-line-excusal-pair MISS  first=FAIL final=pass
+  corr-tel-loose-closer-absorbs-statement-pair MISS  first=FAIL final=fail
+  corr-tel-loose-closer-absorbs-statement OK    first=FAIL final=fail [right-item]
+  corr-tel-person-branch-bot-reply     OK    first=FAIL final=fail [pattern-only]
+  corr-tel-person-branch-bot-reply-pair OK    first=PASS final=pass
+  corr-tel-scoped-sweep-first-subentry-pair OK    first=PASS final=pass
+  corr-tel-scoped-sweep-first-subentry OK    first=FAIL final=fail [right-item]
+  corr-tel-suffix-decl-enters-list-state-pair MISS  first=FAIL final=fail
+  corr-tel-suffix-decl-enters-list-state OK    first=FAIL final=fail [right-item]
+  corr-asymmetric-flip-classifier: discordant with baseline — re-running once to confirm
+  corr-xdomain-xss: discordant with baseline — re-running once to confirm
+  corr-xdomain-render: discordant with baseline — re-running once to confirm
+  corr-xdomain-render: flip did not reproduce — excluded from flip table
+  corr-decoy-retry-clears-error: discordant with baseline — re-running once to confirm
+  corr-pr21-validate-the-parsed-github-repo: discordant with baseline — re-running once to confirm
+  corr-pr21-validate-the-parsed-github-repo: flip did not reproduce — excluded from flip table
+  corr-pr38-check-the-full-r2-credential: discordant with baseline — re-running once to confirm
+guard-review: correctness-reviewer — writer-reader-contracts dropped as out-of-charter (security/performance is another reviewer's finding)
+  corr-pr59-guard-config-json-pair: discordant with baseline — re-running once to confirm
+  corr-pr59-guard-config-json-pair: flip did not reproduce — excluded from flip table
+  corr-pr1-return-exit-3-for-detect: discordant with baseline — re-running once to confirm
+  corr-pr59-expand-knip-config-detection-pair: discordant with baseline — re-running once to confirm
+  corr-pr59-expand-knip-config-detection-pair: flip did not reproduce — excluded from flip table
+  corr-tel-validate-after-lint-rejected-shape-pair: discordant with baseline — re-running once to confirm
+  corr-tel-validate-after-lint-rejected-shape-pair: flip did not reproduce — excluded from flip table
+
+correctness-reviewer (140 rows: 75 gold / 65 decoys)
+  first-pass FAIL-recall   65/75 = 0.87 [0.77, 0.93]
+  first-pass clean-pass    49/65 = 0.75 [0.64, 0.84]
+  right-reason split       right-item:49 pattern-only:15
+  live escalations         0
+
+POOLED (140 rows: 75 gold / 65 decoys)
+  first-pass FAIL-recall   65/75 = 0.87 [0.77, 0.93]
+  first-pass clean-pass    49/65 = 0.75 [0.64, 0.84]
+  right-reason split       right-item:49 pattern-only:15
+  live escalations         0
+compare correctness-reviewer: IMPROVED — A/B (directional, not a regression gate) rows: shared 140 (0 changed, excluded), added 0, removed 0, unstable 5 (excluded)
+  flips ↓0 ↑5 (mid-p 0.031) — corr-asymmetric-flip-classifier ↑, corr-xdomain-xss ↑, corr-decoy-retry-clears-error ↑, corr-pr38-check-the-full-r2-credential ↑, corr-pr1-return-exit-3-for-detect ↑
+  gold  ↓0 ↑3 (mid-p 0.125)
+  decoy ↓0 ↑2 (mid-p 0.250)
+  clustered by case ↓0 ↑5 (mid-p 0.031)
+auto-resume: completed on attempt 3
