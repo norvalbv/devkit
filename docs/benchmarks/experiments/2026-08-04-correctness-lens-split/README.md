@@ -35,9 +35,23 @@ All four ran on the same corpus (140 rows, 75 gold) at `sonnet`, `BENCH_CASCADE=
 | 2-way (registered) | 0.84 (63/75) | 0.72 (47/65) | 0.83 | 0.59 | 0.86 / 0.83 | ↓1 ↑5, mid-p 0.125 |
 | 4-way | 0.87 (65/75) | 0.75 (49/65) | **0.85** | **0.66** | 0.90 / 0.83 | ↓0 ↑5, mid-p 0.031 |
 
-Per-lens and flip tables are reproducible from the committed logs:
+Per-lens metrics, flip tables, mid-p and the null adjustment are all reproducible from the committed
+runs. `--null` is what turns a raw flip count into the adjusted one the ruling cites:
 
-    bun lens-analysis.mjs <corpus>.jsonl runs/control-1.log runs/split4.log --labelA ctl1 --labelB SPLIT4
+    CASES=../../../../gate-engine/review/eval/reviewers/cases-correctness.jsonl
+    bun lens-analysis.mjs $CASES runs/control-1.log runs/split4.log \
+      --null runs/control-2.log --labelA ctl1 --labelB SPLIT4
+
+**Pin the corpus once it moves on.** These runs were scored against blob
+`6a0a3da466c7375c1ab26ab4efd05ac0682ecad2` (140 rows, tree `a319770`), which is still what `main`
+carries today — but the plan is to grow it. After that, reproduce with
+`git show 6a0a3da4 > /tmp/cases-at-run-time.jsonl` and pass that instead. Handing the analyzer a
+corpus that lacks a scored row is a hard error, not a silent skip, so a stale pin cannot quietly
+score a subset.
+
+Either artifact works as a run: the `.log` files, or `runs/control-1.json` (the baseline snapshot,
+whose `okFirst` pins each first-pass verdict exactly). `--selftest` checks the mid-p implementation
+against the three values the bench printed independently.
 
 ## Reading
 
@@ -52,8 +66,11 @@ arm with zero regressions. It was **not** the registered arm, so this is not a r
 **Subtract the noise before believing any of it.** Rows that also flip in the null comparison move
 regardless of arm. Excluding them, on the weak pair:
 
-- 4-way: **+4** (4 improvements, 0 regressions)
-- 2-way: **+1** (2 improvements, 1 regression)
+- 4-way: **+4** (4 improvements, 0 regressions; 3 of its 7 weak movements were shared with the null)
+- 2-way: **+1** (2 improvements, 1 regression; 3 shared with the null)
+
+Both figures come out of `lens-analysis.mjs --null` directly — run the command above to regenerate
+them rather than taking them on trust.
 
 against a repo decision floor of roughly 5 net flips. `corr-asymmetric-flip-classifier` improved in
 *all three* arms including the null — it is an unstable row, not evidence.
