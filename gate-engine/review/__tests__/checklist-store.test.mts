@@ -99,7 +99,8 @@ describe('createChecklistStore — path may be a thunk (correctness --lens)', ()
     // and every other operation follows the rebind, not the original
     h.store.checkItem('alpha', true);
     expect(JSON.parse(readFileSync(active, 'utf-8')).items[0].status).toBe('pass');
-    h.store.cleanup();
+    h.store.checkItem('beta', true);
+    h.store.finalize(); // passing finalize tidies the REBOUND path, not the original
     expect(existsSync(active)).toBe(false);
     expect(existsSync(join(root, '.claude', '.unlensed.json'))).toBe(true); // untouched
   });
@@ -275,59 +276,39 @@ describe('createChecklistStore — status', () => {
   });
 });
 
-describe('createChecklistStore — cleanup', () => {
-  it('removes the checklist on a normal run', () => {
-    const h = harness();
+// sc-1438 follow-up: there is no public cleanup command any more — tidy is internal to finalize.
+// These pin the tidy behaviors not already covered by the finalize describe above.
+describe('createChecklistStore — finalize tidy specifics', () => {
+  const passAll = (h: ReturnType<typeof harness>) => {
     h.store.save({ items: items() });
-    h.store.cleanup();
-    expect(existsSync(h.path)).toBe(false);
-    expect(h.out()).toContain('🗑️  Removed test review checklist');
-  });
+    h.store.checkItem('alpha', true);
+    h.store.checkItem('beta', true);
+  };
 
   // The review worktree is discarded wholesale and the checklist is the evidence a reader may still
-  // want — so review mode must NOT delete it.
-  it('KEEPS the checklist under DEVKIT_RUN_MODE=review', () => {
+  // want — so review mode must NOT delete it, even on a passing finalize.
+  it('a passing finalize KEEPS the checklist under DEVKIT_RUN_MODE=review', () => {
     const h = harness();
-    h.store.save({ items: items() });
+    passAll(h);
     process.env.DEVKIT_RUN_MODE = 'review';
-    h.store.cleanup();
-    expect(existsSync(h.path)).toBe(true);
-  });
-
-  // sc-1438: gate runs set DEVKIT_CHECKLIST_KEEP=1 — the gate reads the artifact after the judge
-  // finishes (a missing artifact voids the PASS) and removes it itself. A judge obeying its brief's
-  // cleanup step must not be able to void its own verdict.
-  it('KEEPS the checklist under DEVKIT_CHECKLIST_KEEP=1 (gate runs, sc-1438)', () => {
-    const h = harness();
-    h.store.save({ items: items() });
-    process.env.DEVKIT_CHECKLIST_KEEP = '1';
-    h.store.cleanup();
-    expect(existsSync(h.path)).toBe(true);
-  });
-
-  it('is idempotent — a second cleanup is silent, not an error', () => {
-    const h = harness();
-    h.store.save({ items: items() });
-    h.store.cleanup();
-    const after = h.lines.length;
-    h.store.cleanup();
-    expect(h.lines).toHaveLength(after);
+    h.store.finalize();
     expect(h.exits).toEqual([]);
+    expect(existsSync(h.path)).toBe(true);
   });
 
   // Regression guard for the one string that is NOT derivable from the display label: api-security
   // says "Removed API security checklist", which label.toLowerCase() would mangle to "api security".
-  it('cleanupLabel overrides the lowercased default (the api-security casing case)', () => {
+  it('cleanupLabel overrides the lowercased default in the tidy line', () => {
     const h = harness({ label: 'API Security', cleanupLabel: 'API security' });
-    h.store.save({ items: items() });
-    h.store.cleanup();
+    passAll(h);
+    h.store.finalize();
     expect(h.out()).toContain('🗑️  Removed API security checklist');
   });
 
   it('defaults cleanupLabel to the lowercased label when not given', () => {
     const h = harness({ label: 'Backend Performance' });
-    h.store.save({ items: items() });
-    h.store.cleanup();
+    passAll(h);
+    h.store.finalize();
     expect(h.out()).toContain('🗑️  Removed backend performance checklist');
   });
 });

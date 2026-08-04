@@ -11,7 +11,6 @@
  *   status                Show progress summary
  *   check-file <path>     Mark file as reviewed (--pass or --fail "reason")
  *   finalize              Verify every item was resolved; refuses if any are pending or failed
- *   cleanup               Remove checklist file
  */
 
 import { execFileSync } from 'node:child_process';
@@ -154,12 +153,12 @@ function finalize() {
 
   log('✅ All checks passed');
   // Automatic tidy — same contract as checklist-store.mjs finalize: env guards keep gate/review artifacts.
-  cleanup();
+  tidy();
 }
 
-function cleanup() {
+function tidy() {
   if (process.env.DEVKIT_RUN_MODE === 'review') return;
-  // Same guard as checklist-store.mjs cleanup(): in gate runs the gate owns artifact removal.
+  // Same guard as checklist-store.mjs tidy(): in gate runs the gate owns artifact removal.
   if (process.env.DEVKIT_CHECKLIST_KEEP === '1') return;
   if (existsSync(CHECKLIST_PATH)) {
     unlinkSync(CHECKLIST_PATH);
@@ -194,15 +193,11 @@ switch (cmd) {
   case 'finalize':
     finalize();
     break;
-  case 'cleanup':
-    cleanup();
-    break;
   default:
     log('Commands:');
     log('  init                         Create checklist from staged files');
     log('  status                       Show progress');
     log('  check-file <path> --pass|--fail  Mark file reviewed');
     log('  finalize                     Verify every item was resolved');
-    log('  cleanup                      Remove checklist');
     process.exit(1);
 }
