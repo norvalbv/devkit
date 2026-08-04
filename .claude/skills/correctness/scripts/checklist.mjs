@@ -26,6 +26,7 @@ import {
   isNonEmptyStringArray,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
+  stagedFilesOverride,
   toGitPathspecs,
 } from '../../_devkit/review-roots.mjs';
 
@@ -124,6 +125,11 @@ function sourceExtensions() {
 }
 
 function getStagedFiles() {
+  const override = stagedFilesOverride();
+  if (override) {
+    const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
+    return override.filter((f) => exts.some((x) => f.endsWith(x)) && !RE_TEST_INFIX.test(f));
+  }
   const pathspecs = toGitPathspecs(unionRoots());
   try {
     const output = execFileSync(
@@ -186,6 +192,14 @@ function generate(lens) {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
     log('⏭️  No staged source files under the declared roots. Skipping correctness review.');
+    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
+    // an absence (verifyChecklist voids a PASS on a missing artifact).
+    if (stagedFilesOverride())
+      saveChecklist({
+        items: [],
+        skipped:
+          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
+      });
     process.exit(0);
   }
   const items = detectCorrectnessItems(lens);

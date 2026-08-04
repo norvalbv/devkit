@@ -448,6 +448,27 @@ describe('runReviewGate — cascade + exit contract', () => {
     for (const env of envs) expect(env?.DEVKIT_CHECKLIST_KEEP).toBe('1');
   });
 
+  // sc-1439: each checklist judge receives the gate's staged list for ITS OWN selection, so its
+  // checklist script can never resolve a different (or empty) file set than the gate selected.
+  it('judges receive their own reviewer-scoped staged list in env (sc-1439)', async () => {
+    const repo = consumerRepo({ backend: true, frontend: true });
+    const byLabel = new Map<string, string | undefined>();
+    const exec = mkExec(async (opts) => {
+      byLabel.set(opts.label, opts.env?.DEVKIT_REVIEW_STAGED_FILES);
+      writeArtifact(repo, opts.label);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+    expect(JSON.parse(byLabel.get('review:api-security-reviewer') ?? '[]')).toEqual([
+      'src/main/db.ts',
+    ]);
+    expect(JSON.parse(byLabel.get('review:frontend-security-reviewer') ?? '[]')).toEqual([
+      'src/renderer/App.tsx',
+    ]);
+    // a skill-less reviewer has no checklist script — no injected list
+    expect(byLabel.get('review:conventions-reviewer')).toBeUndefined();
+  });
+
   it('identical diff re-run hits the cache — zero judge spawns', async () => {
     const repo = consumerRepo({ backend: true });
     await runReviewGate(repo, { exec: passWithArtifact(repo) });

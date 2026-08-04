@@ -9,11 +9,15 @@
  * skills/_devkit/ is PROJECTED into consumer repos by `devkit sync-skills` — a test file there would
  * ship into every consumer's .claude/.cursor tree as dead weight their runner might pick up.
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   isNonEmptyStringArray,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
+  stagedFilesOverride,
   toGitPathspecs,
 } from '../../../skills/_devkit/review-roots.mjs';
 
@@ -180,5 +184,23 @@ describe('end-to-end: config value → git pathspec', () => {
     expect(
       toGitPathspecs(normalizeReviewRoots(['src/main', './socket-server'], 'scanRoots')),
     ).toEqual([':(top,literal)src/main', ':(top,literal)socket-server']);
+  });
+});
+
+describe('stagedFilesOverride — the gate-injected authoritative file list (sc-1439)', () => {
+  it('returns null when unset, invalid JSON, empty, or non-string entries', () => {
+    expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: undefined }, stagedFilesOverride)).toBeNull();
+    expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: 'not json' }, stagedFilesOverride)).toBeNull();
+    expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: '[]' }, stagedFilesOverride)).toBeNull();
+    expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: '[1,2]' }, stagedFilesOverride)).toBeNull();
+  });
+
+  it('keeps only files that exist in the worktree (staged deletions have no bytes to review)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'staged-override-'));
+    const real = join(dir, 'a.ts');
+    writeFileSync(real, 'export {};\n');
+    const list = JSON.stringify([real, join(dir, 'deleted.ts')]);
+    expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: list }, stagedFilesOverride)).toEqual([real]);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

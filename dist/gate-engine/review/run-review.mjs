@@ -45,7 +45,7 @@ import { emitMergedLensResults, holdLensPart, planReviewWork, taskLabel } from "
 import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
 import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, enforceChecklistContract, gateJudgeEnv, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, } from "./runtime.mjs";
+import { agentBody, cleanupChecklistState, enforceChecklistContract, gateJudgeEnv, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, skippedReviewers, withStagedFiles, } from "./runtime.mjs";
 import { ReviewGateTiming, reviewConcurrency } from "./telemetry/timing.mjs";
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
 // remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
@@ -54,14 +54,6 @@ const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
 // A cap kill, likewise, is the gate's OWN contention kill — not auth/quota. Matches the reasons
 // cascadeVerdict sets from the judge's outage KIND (`judge timed out` / `escalation timed out`).
 const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
-// GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
-// per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one).
-function skippedReviewers() {
-    return new Set((process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean));
-}
 // Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
 // (judge/run-judge.mts), as does the commit-msg completeness judge; the 30-min rationale lives with
 // the constant. Three same-valued locals here is exactly how it drifted from completeness (sc-1227).
@@ -136,6 +128,7 @@ export async function runCascade(sel, opts) {
     }
 }
 async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, }) {
+    const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files); // sc-1439
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
     if (body === null)
         // A missing brief must never be judged as an EMPTY brief (a wrapper-only prompt fake-passes):
@@ -177,7 +170,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-        env: judgeEnv,
+        env,
         onOutage: (kind) => {
             firstOutage = kind;
         },
@@ -243,7 +236,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         timeout: DEEP_JUDGE_TIMEOUT_MS, // opus re-investigation; only fires pre-block, never retried
         cwd,
         transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-        env: judgeEnv,
+        env,
         onOutage: (kind) => {
             secondOutage = kind;
         },

@@ -12,10 +12,10 @@ import {
   rootsFor,
   selectReviewers,
   stripFrontmatter,
-  verifyChecklist,
   wrapConventionsPrompt,
   wrapPrompt,
 } from '../reviewers.mts';
+import { verifyChecklist } from '../runtime.mts';
 
 // A frink-shaped review config without touching disk: defaults + explicit roots.
 const cfg = {
@@ -357,6 +357,17 @@ describe('verifyChecklist — the gate-side anti-hallucination contract', () => 
   });
   it('a FAIL verdict needs no artifact — it blocks regardless', () => {
     expect(verifyChecklist(null, 'FAIL')).toBe(null);
+  });
+
+  // sc-1439: emptiness must be EXPLAINED, never mute — a named skip is valid, a bare empty voids.
+  it('an empty artifact with a NAMED skip reason is valid; unnamed emptiness still voids', () => {
+    expect(verifyChecklist({ items: [], skipped: 'filters excluded every file' }, 'PASS')).toBe(
+      null,
+    );
+    expect(verifyChecklist({ files: [], skipped: 'filters excluded every file' }, 'PASS')).toBe(
+      null,
+    );
+    expect(verifyChecklist({ items: [], skipped: '' }, 'PASS')).toContain('skipped the checklist');
   });
 });
 

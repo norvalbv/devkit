@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, verifyChecklist, } from "./reviewers.mjs";
+import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from "./reviewers.mjs";
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 // Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
 // every checklist reviewer — the bench's gateHash already treats it that way (corpus.mts
@@ -32,6 +32,42 @@ function reviewerAssetPaths(reviewer) {
 export const PACKAGED_REVIEW_ASSET_PATHS = Object.freeze([...new Set([REVIEW_ROOTS_HELPER, ...REVIEWERS.flatMap(reviewerAssetPaths)])].sort());
 function readPackagedReviewAsset(assetRoot, relativePath) {
     return readFileSync(path.join(assetRoot, relativePath));
+}
+/**
+ * Independent verification of the checklist artifact the judge's workflow left behind — the
+ * gate-side half of the anti-hallucination contract. Returns null when the artifact is complete
+ * and consistent with the verdict, else a human-readable reason (→ the cascade result becomes
+ * inconclusive, never a PASS). A FAIL verdict needs no artifact scrutiny — it blocks regardless.
+ *
+ * @param state parsed state-file JSON (null = missing/unreadable)
+ * @param verdict the judge's parsed verdict
+ */
+export function verifyChecklist(state, verdict) {
+    if (verdict === 'FAIL')
+        return null;
+    const items = state?.items ?? state?.files; // domain reviewers use items[]; commit-guard files[]
+    // sc-1439: a deliberate, NAMED skip is a valid artifact — the gate selected this reviewer but
+    // the checklist's own filters (prose/tests/extensions/deletions) excluded every file. Distinct
+    // from an ABSENT artifact, which still voids the PASS: emptiness must be explained, never mute.
+    if (Array.isArray(items) &&
+        items.length === 0 &&
+        typeof state?.skipped === 'string' &&
+        state.skipped)
+        return null;
+    if (!Array.isArray(items) || items.length === 0)
+        return ('checklist artifact missing — the judge skipped the checklist workflow (or its ' +
+            'checklist script was never synced: devkit sync-skills)');
+    const pending = items.filter((i) => i.status === 'pending');
+    if (pending.length > 0)
+        return `checklist incomplete — ${pending.length} item(s) never resolved: ${pending
+            .map((i) => i.name ?? i.path)
+            .join(', ')}`;
+    const failed = items.filter((i) => i.status === 'fail');
+    if (failed.length > 0)
+        return `checklist has ${failed.length} FAILED item(s) but the verdict says PASS: ${failed
+            .map((i) => i.name ?? i.path)
+            .join(', ')}`;
+    return null;
 }
 export function agentBody(cwd, cfg, name, assetRoot) {
     const dir = assetRoot ? path.join(assetRoot, 'agents') : cfg.review.agentsDir;
@@ -188,6 +224,30 @@ export function gateJudgeEnv(reviewMode, cfg) {
         ...(reviewMode ? reviewJudgeEnv(cfg) : process.env),
         DEVKIT_CHECKLIST_KEEP: '1',
     };
+}
+/**
+ * Per-reviewer judge env (sc-1439): hand the gate's authoritative staged file list to the
+ * reviewer's checklist script, so generate() can never resolve zero files while the gate selected
+ * the reviewer — the second artifact-killer behind the "checklist artifact missing" inconclusives.
+ * Checklist reviewers only; oversized lists fall back LOUDLY to script-side resolution.
+ */
+export function withStagedFiles(env, reviewer, files) {
+    if (!hasChecklist(reviewer))
+        return env;
+    const serialized = JSON.stringify(files);
+    if (serialized.length > 100_000) {
+        console.error(`guard-review: ${reviewer.name} staged list too large to inject (${serialized.length}B) — falling back to script-side resolution`);
+        return env;
+    }
+    return { ...env, DEVKIT_REVIEW_STAGED_FILES: serialized };
+}
+/** GUARD_REVIEW_SKIP / FRINK_REVIEW_SKIP: comma-list of reviewer names to drop from a run — the
+ * per-reviewer rollback lever (GUARD_NO_REVIEW kills the whole gate; this surgically disables one). */
+export function skippedReviewers() {
+    return new Set((process.env.GUARD_REVIEW_SKIP ?? process.env.FRINK_REVIEW_SKIP ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean));
 }
 /** Parsed checklist state-file artifact for a reviewer, or null (missing/corrupt/no checklist at
  * all — a skill-less reviewer has no stateFile to read → unverifiable). */
