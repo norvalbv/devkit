@@ -76,9 +76,15 @@ post-hoc subgroup, but it still is not the registered arm.
 
 ## Provenance — why nothing here is published
 
-These numbers were produced at worktree tree `a319770` **plus one uncommitted file**
-(`gate-engine/review/eval/reviewers/bench.mts`, the stability-pass fix now tracked as sc-1436). That
-tree exists as no commit.
+These numbers were produced at worktree tree `a319770` — sc-1436 (#325, `7c579a6` on `main`), which
+keys resume checkpoints by lens-split arm — **plus one uncommitted change to
+`gate-engine/review/eval/reviewers/bench.mts`** that filters `paused-skipped` rows out of the
+stability pass. That change is *not* sc-1436 and is not yet on `main` (`origin/main` still reads
+`for (const res of results)` unfiltered); it has no ticket. So the exact tree exists as no commit.
+
+The filter matters only when a run pauses: without it the stability pass re-runs every skipped row,
+spending a judge call apiece on the drained pool the pause exists to stop spending on. control-1 had
+zero outages, so it is a no-op there; the overnight arms did pause, so they carry it.
 
 Two behaviour fixes landed on `main` after the runs and are absent from the benched tree:
 
@@ -94,8 +100,10 @@ so a clean baseline may differ materially from control-1.
 
 ## Next
 
-1. Re-run one baseline on clean `main` once sc-1436 lands, and publish *that* as the accepted
-   checkpoint. Do not publish control-1.
-2. Grow the weak pair before re-testing. At 46 gold / 32 decoy, +4 under a floor of 5 cannot be
+1. Land the stability-pass filter described under Provenance — it is the last piece of the harness
+   still living outside a commit.
+2. Re-run one baseline on clean `main` and publish *that* as the accepted checkpoint. Do not publish
+   control-1.
+3. Grow the weak pair before re-testing. At 46 gold / 32 decoy, +4 under a floor of 5 cannot be
    resolved no matter how many times it is re-run.
-3. Then pre-register the 4-way, or an `error-and-edge`-isolated cut, and run it once as the primary.
+4. Then pre-register the 4-way, or an `error-and-edge`-isolated cut, and run it once as the primary.
