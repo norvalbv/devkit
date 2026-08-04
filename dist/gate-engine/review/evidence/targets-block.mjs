@@ -6,6 +6,7 @@
  * (violating one is IN CHARTER). One renderer, two framings: the bytes a judge reads are the
  * contract, so the shape must never fork.
  */
+import { scopedTargets } from "../../decisions/scoped-targets.mjs";
 /** completeness.mts's original bytes, verbatim — its judge must keep reading exactly this. */
 export const COMPLETENESS_TARGETS_FRAMING = Object.freeze({
     header: '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',
@@ -49,4 +50,14 @@ export function renderTargets(blocks, framing = COMPLETENESS_TARGETS_FRAMING, ca
     if (omitted.length > 0)
         lines.push(`OMITTED: ${omitted.length} further governing Target(s) over the size cap — ${omitted.join(', ')}. Read them under docs/decisions/ if this diff touches their scope.`, '');
     return lines.join('\n');
+}
+/**
+ * The domain-cascade Targets block, loaded ONCE per gate run (sc-1441): scope-glob matches at
+ * pre-commit (no commit message exists yet, so the semantic half is skipped — sc-1442 supplies
+ * the query on ship), reviewer framing, 8KB named-omission cap. Fail-open: an unreadable
+ * decisions store renders the SKIP note, never throws.
+ */
+export async function loadReviewerTargetsBlock(cwd, files, query = '') {
+    const targets = await scopedTargets(files, query, 6, cwd).catch(() => []);
+    return renderTargets(targets, REVIEWER_TARGETS_FRAMING, 8_192);
 }
