@@ -1,0 +1,1154 @@
+{
+  "sections": {
+    "correctness-reviewer@sonnet@cascade-off": {
+      "model": "sonnet",
+      "cascade": false,
+      "gateHash": "6e0b9e4a30cf",
+      "corpusHash": "a7d898118f2e",
+      "when": "2026-08-03T20:54:46.439Z",
+      "dev": false,
+      "rows": {
+        "corr-discarded-resume-return": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "ff1b6eaaf1ad",
+          "behaviorHash": "876d7e9cc5f3"
+        },
+        "corr-retry-stuck-unclaimable": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "0640a8b18d1b",
+          "behaviorHash": "19cbb96f3d51"
+        },
+        "corr-revive-user-cancelled": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "b2a0d733679e",
+          "behaviorHash": "f6699ce3b5fb"
+        },
+        "corr-stale-failure-reasons": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "09f050fde84d",
+          "behaviorHash": "1b44fe090d59"
+        },
+        "corr-stale-checklist-artifact": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "e90eb005ef97",
+          "behaviorHash": "79d6053f43a1"
+        },
+        "corr-reopen-before-cas-strands": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "918e6e35a29f",
+          "behaviorHash": "de8fe2f090c6"
+        },
+        "corr-submit-latch-stuck": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "8183fa0b5781",
+          "behaviorHash": "fbfdc500261f"
+        },
+        "corr-nearexpiry-permanent-reauth": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "5cbfcd319951",
+          "behaviorHash": "11d85ea963a2"
+        },
+        "corr-unguarded-unpark-clobber": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "868c6ced4079",
+          "behaviorHash": "a2620f6761e3"
+        },
+        "corr-guarded-result-ignored-mode-flip": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "5779051bc2d1",
+          "behaviorHash": "cc144a18a2d1"
+        },
+        "corr-read-then-write-clobber-terminal": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "85ac72a96350",
+          "behaviorHash": "f4bd2d13f712"
+        },
+        "corr-lock-timeout-runs-unlocked": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "ba399eec3288",
+          "behaviorHash": "f017eb829cc6"
+        },
+        "corr-retry-broadcast-double-fire": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "f55d220196ab",
+          "behaviorHash": "f6bd7c3e49d1"
+        },
+        "corr-json-string-result-dropped": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "cb0d1314d164",
+          "behaviorHash": "a2aeca801930"
+        },
+        "corr-group-map-last-write-wins": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "8884e07c6d1b",
+          "behaviorHash": "9c5ab8aed4f5"
+        },
+        "corr-sync-source-target-divergence": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "48bd49378904",
+          "behaviorHash": "5fa006308beb"
+        },
+        "corr-persist-unnormalized-signal": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "54e6d945cb0f",
+          "behaviorHash": "cbfd1f8cf64a"
+        },
+        "corr-manifest-unknown-version-wiped": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "d49452801030",
+          "behaviorHash": "9109c7de43a5"
+        },
+        "corr-field-validated-wrong-state": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "ef5656e35718",
+          "behaviorHash": "128a9ae99baf"
+        },
+        "corr-loose-cmd-classifier-anchor": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "6396f1f3b278",
+          "behaviorHash": "01f74523b5c8"
+        },
+        "corr-loose-json-error-classifier": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "9d6d1a732721",
+          "behaviorHash": "3d68cdfdf228"
+        },
+        "corr-swallowed-config-parse-bypass": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "5929d8e219fe",
+          "behaviorHash": "320d35c35356"
+        },
+        "corr-exit-code-only-one-fails": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "d145d1ad9a98",
+          "behaviorHash": "8084e39d7724"
+        },
+        "corr-only-selector-silent-drop": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "15e6fb189b63",
+          "behaviorHash": "a0e516fd30f7"
+        },
+        "corr-execfile-cmd-shim-swallowed": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "203e6fa03e0e",
+          "behaviorHash": "b64b32ecd591"
+        },
+        "corr-asymmetric-flip-classifier": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "6de9cfbf2954",
+          "behaviorHash": "6bd0ba1386cc"
+        },
+        "corr-reminder-ignores-plan-mode": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "71d93cd6e657",
+          "behaviorHash": "36050019f8f6"
+        },
+        "corr-decoy-cas-guarded-write": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "78f68c681a4b",
+          "behaviorHash": "6dc6849962cc"
+        },
+        "corr-decoy-conditional-update": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "2bdf6d299d0f",
+          "behaviorHash": "65779486a5b4"
+        },
+        "corr-decoy-select-for-update": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "14a0f0b1e50a",
+          "behaviorHash": "faeef19060b0"
+        },
+        "corr-decoy-targeted-broadcast": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "d98ec7291153",
+          "behaviorHash": "f7fc227832de"
+        },
+        "corr-decoy-parses-json-string-result": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "44a17ae0e114",
+          "behaviorHash": "019ba284b3e4"
+        },
+        "corr-decoy-tight-anchor-classifier": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "32273403766b",
+          "behaviorHash": "e5ab773aa958"
+        },
+        "corr-decoy-retry-reset-counter": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "d1986643add2",
+          "behaviorHash": "2c97fce5a1e8"
+        },
+        "corr-decoy-exit-code-fail-closed": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "21bd92d728ef",
+          "behaviorHash": "55eb028509e4"
+        },
+        "corr-decoy-catch-rethrows": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "e8f30a7b534c",
+          "behaviorHash": "ba88f5dadc60"
+        },
+        "corr-decoy-return-checked-fails-closed": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "b0212aaba7aa",
+          "behaviorHash": "9342ac44cc7e"
+        },
+        "corr-decoy-only-validated": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "323fff96a42c",
+          "behaviorHash": "389542eb8682"
+        },
+        "corr-xdomain-sqli": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "2ddabe1e3884",
+          "behaviorHash": "1219465dd77d"
+        },
+        "corr-xdomain-nplusone": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "a0bccc3e0faf",
+          "behaviorHash": "f5c26e95ab4c"
+        },
+        "corr-xdomain-xss": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "5562a8a8edb3",
+          "behaviorHash": "5ae8f0f38b69"
+        },
+        "corr-xdomain-render": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "a2babcecd2d6",
+          "behaviorHash": "b0a31c7721bb"
+        },
+        "corr-decoy-reset-failure-reasons": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "d1aa3924919d",
+          "behaviorHash": "9d773a74cbc4"
+        },
+        "corr-decoy-clears-stale-artifact": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "6b1d08fe1cda",
+          "behaviorHash": "e3abcc9cdbf7"
+        },
+        "corr-retry-leaves-stale-error": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "c05976dd01fd",
+          "behaviorHash": "6f21fa645f2e"
+        },
+        "corr-decoy-retry-clears-error": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "c3a89e627c9d",
+          "behaviorHash": "ccc32cefaeaa"
+        },
+        "corr-empty-recompute-keeps-stale": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "97ecde7284e1",
+          "behaviorHash": "8cf5f9a2834c"
+        },
+        "corr-decoy-empty-recompute-clears": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "3bd72383bd3a",
+          "behaviorHash": "8c7c569d238e"
+        },
+        "corr-early-exit-status-bypassed": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "bb1655183df9",
+          "behaviorHash": "6bfbb0cc59c9"
+        },
+        "corr-decoy-early-exit-preserved": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "f0e7c45072f7",
+          "behaviorHash": "395d01056ef4"
+        },
+        "corr-early-exit-loop-break-dropped": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "0d411082e3fc",
+          "behaviorHash": "36f101b647cc"
+        },
+        "corr-decoy-loop-break-preserved": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "c2c122dff0af",
+          "behaviorHash": "df377261a742"
+        },
+        "corr-outage-exit-code-downgraded": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "8d4201a5cf5d",
+          "behaviorHash": "48973e67e6ac"
+        },
+        "corr-decoy-outage-exit-preserved": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "ab4b076ebb7b",
+          "behaviorHash": "a732cf4f9bb8"
+        },
+        "corr-worktree-leak-no-finally": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "844bffb4162b",
+          "behaviorHash": "b3568af55ba4"
+        },
+        "corr-decoy-worktree-finally": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "b7d85baf480b",
+          "behaviorHash": "f8bde5fa6c93"
+        },
+        "corr-lock-not-released-on-throw": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "7f9f3d490d13",
+          "behaviorHash": "e93e720c713f"
+        },
+        "corr-decoy-lock-finally": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "e11d0cbad3ba",
+          "behaviorHash": "e4141da71b1b"
+        },
+        "corr-fs-check-then-act-race": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "e14b7efdc4ba",
+          "behaviorHash": "57deae2e9fe3"
+        },
+        "corr-decoy-fs-recursive-mkdir": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "eb96bfed4c42",
+          "behaviorHash": "b5e9fc9a69da"
+        },
+        "corr-timer-debounce-double-fire": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "ee84f73cfeb3",
+          "behaviorHash": "9944f18b1136"
+        },
+        "corr-decoy-timer-debounce-clears": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "f6b1ee659889",
+          "behaviorHash": "012cc9bf1452"
+        },
+        "corr-signature-change-callsite-missed": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "16d916a93384",
+          "behaviorHash": "c040d752f789"
+        },
+        "corr-decoy-signature-callsite-updated": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "8f24ea6cab36",
+          "behaviorHash": "d7c444476e49"
+        },
+        "corr-broadcast-fanout-no-dedup": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "47c008601f5a",
+          "behaviorHash": "a2f9edaf9f57"
+        },
+        "corr-decoy-broadcast-targeted": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "e938d8dfd98f",
+          "behaviorHash": "39a239330422"
+        },
+        "corr-pr138-ci-breaking-gate-engine-coverage-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "03b109856fa8",
+          "behaviorHash": "3d055011badf"
+        },
+        "corr-pr138-ci-breaking-gate-engine-coverage": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "bbaa0d63b28f",
+          "behaviorHash": "833c0189c684"
+        },
+        "corr-pr172-duplicate-let-spawnoptions-declaration-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "58955fb31aea",
+          "behaviorHash": "403fe2205f4c"
+        },
+        "corr-pr172-duplicate-let-spawnoptions-declaration": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "ec13d67c4497",
+          "behaviorHash": "6813a407800a"
+        },
+        "corr-pr200-important-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "c0ae2bb9ba5b",
+          "behaviorHash": "67f32e5da3ae"
+        },
+        "corr-pr200-important": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "5b4be62121e1",
+          "behaviorHash": "4f0cc16c9569"
+        },
+        "corr-pr200-ref-mutated-during-render-move-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "87332a189081",
+          "behaviorHash": "b8b49c26ea59"
+        },
+        "corr-pr200-ref-mutated-during-render-move": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "7b4f10bd7c1f",
+          "behaviorHash": "b12fa94e59b8"
+        },
+        "corr-pr21-fail-closed-when-the-remote-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "61e01ab552b4",
+          "behaviorHash": "efd7cd5954fd"
+        },
+        "corr-pr21-fail-closed-when-the-remote": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "b5efdb08286f",
+          "behaviorHash": "3b6380a1263d"
+        },
+        "corr-pr21-validate-the-parsed-github-repo-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "8d5b3f778d2c",
+          "behaviorHash": "19ffb1b75500"
+        },
+        "corr-pr21-validate-the-parsed-github-repo": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "22ae6cef1ae3",
+          "behaviorHash": "fc6314b9d7ad"
+        },
+        "corr-pr26-cover-the-restart-interrupted-flow-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "d5b2d88ce1a4",
+          "behaviorHash": "4c7ea32ad11b"
+        },
+        "corr-pr26-cover-the-restart-interrupted-flow": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "64bb8db9a785",
+          "behaviorHash": "729d918ccc39"
+        },
+        "corr-pr26-keep-the-mcp-inputschema-in-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "cd3e2928584d",
+          "behaviorHash": "73293f2de7ba"
+        },
+        "corr-pr26-keep-the-mcp-inputschema-in": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "7e174420f714",
+          "behaviorHash": "81a22ed00415"
+        },
+        "corr-pr38-check-the-full-r2-credential-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "a327217fc231",
+          "behaviorHash": "ee1bcf0b31bd"
+        },
+        "corr-pr38-check-the-full-r2-credential": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "3b141c8643d2",
+          "behaviorHash": "9b083dc9ce6e"
+        },
+        "corr-pr38-require-the-full-azure-signing-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "50cf11f113c3",
+          "behaviorHash": "7d2ebc76c5b9"
+        },
+        "corr-pr38-require-the-full-azure-signing": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "4ea330953efb",
+          "behaviorHash": "03896f763276"
+        },
+        "corr-pr48-cn-ts-src-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "920c44fa7a20",
+          "behaviorHash": "8bde3108ce22"
+        },
+        "corr-pr48-cn-ts-src": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "58f9cd6e3788",
+          "behaviorHash": "ac1f6a77d79e"
+        },
+        "corr-pr59-guard-config-json-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "1da10c9d3a79",
+          "behaviorHash": "5e02f95f6411"
+        },
+        "corr-pr59-guard-config-json": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "d27f9cc76bb3",
+          "behaviorHash": "2a1e182ad926"
+        },
+        "corr-pr1-clear-persisted-checklist-state-before-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "5b480ac3330b",
+          "behaviorHash": "fb56ef47e46f"
+        },
+        "corr-pr1-clear-persisted-checklist-state-before": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "cc618183d930",
+          "behaviorHash": "e220cd5adef8"
+        },
+        "corr-pr1-preserve-the-guard-exit-code-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "a67e025ecbd2",
+          "behaviorHash": "aa0861a5c9e4"
+        },
+        "corr-pr1-preserve-the-guard-exit-code": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "57cf8af3523a",
+          "behaviorHash": "632620ead36d"
+        },
+        "corr-pr1-return-exit-3-for-detect-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "da83b8954b18",
+          "behaviorHash": "6362e7661f13"
+        },
+        "corr-pr1-return-exit-3-for-detect": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "533cc72e788a",
+          "behaviorHash": "9b4a1fd71da6"
+        },
+        "corr-pr23-keep-init-aligned-with-the-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "1612e1096721",
+          "behaviorHash": "35fe8344abcf"
+        },
+        "corr-pr23-keep-init-aligned-with-the": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "fb56e47724c1",
+          "behaviorHash": "2a5d7c6f7402"
+        },
+        "corr-pr26-block-parked-answer-sends-when-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "b9f8e5aa5799",
+          "behaviorHash": "00636e352dda"
+        },
+        "corr-pr26-block-parked-answer-sends-when": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "5d8390cf7224",
+          "behaviorHash": "92c44337c29c"
+        },
+        "corr-pr26-do-not-let-terminal-signals-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "d8e6c3754a03",
+          "behaviorHash": "9eb2369b7d18"
+        },
+        "corr-pr26-do-not-let-terminal-signals": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "b41cbf30d2f3",
+          "behaviorHash": "bcf542bd0b9b"
+        },
+        "corr-pr28-include-bun-lock-in-the-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "1dfbcaa727f8",
+          "behaviorHash": "7d4f3cbb452f"
+        },
+        "corr-pr28-include-bun-lock-in-the": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "8a183354253f",
+          "behaviorHash": "96bcf7922fb5"
+        },
+        "corr-pr52-don-t-down-rank-recorded-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "de04c83a5690",
+          "behaviorHash": "d608cbe018bb"
+        },
+        "corr-pr52-don-t-down-rank-recorded": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "70de61675b0d",
+          "behaviorHash": "87a4236d82e8"
+        },
+        "corr-pr52-use-frink-no-log-in-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "d804030bed7e",
+          "behaviorHash": "7426d05f0a39"
+        },
+        "corr-pr52-use-frink-no-log-in": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "b3943aeb29aa",
+          "behaviorHash": "15bf35fc798a"
+        },
+        "corr-pr59-expand-knip-config-detection-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "8d39787d91a6",
+          "behaviorHash": "32891de706b7"
+        },
+        "corr-pr59-expand-knip-config-detection": {
+          "expected": "FAIL",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "pass",
+          "rowHash": "a6f92d68ce06",
+          "behaviorHash": "4cfa91869a55"
+        },
+        "corr-pr59-use-a-portable-whitespace-class-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "83c0633419a6",
+          "behaviorHash": "10478f0d690b"
+        },
+        "corr-pr59-use-a-portable-whitespace-class": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "090e2bae3776",
+          "behaviorHash": "b89f134d92e8"
+        },
+        "corr-pr60-avoid-leaving-the-member-in-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "1e9cf43a9101",
+          "behaviorHash": "1e937333098d"
+        },
+        "corr-pr60-avoid-leaving-the-member-in": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "2c3193a77f66",
+          "behaviorHash": "451857164cca"
+        },
+        "corr-pr60-make-the-batch-reopen-atomic-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "d026dbcbe1eb",
+          "behaviorHash": "536d2fe6f738"
+        },
+        "corr-pr60-make-the-batch-reopen-atomic": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "f00aab1a93a2",
+          "behaviorHash": "5c68c6fb9201"
+        },
+        "corr-pr60-node-modules-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "0296839c326d",
+          "behaviorHash": "dbb8d2a029fd"
+        },
+        "corr-pr60-node-modules": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "3a7834ffe077",
+          "behaviorHash": "577149330715"
+        },
+        "corr-pr61-keep-the-carry-on-state-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "290bbef9ca45",
+          "behaviorHash": "04581c2ee99f"
+        },
+        "corr-pr61-keep-the-carry-on-state": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "50679e292e64",
+          "behaviorHash": "9ac0b5db2d60"
+        },
+        "corr-tel-append-uniqueness-check-unlocked-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "101e9c1b1fcc",
+          "behaviorHash": "021ce7855b95"
+        },
+        "corr-tel-append-uniqueness-check-unlocked": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "bd9feafc5289",
+          "behaviorHash": "a4d052f022e8"
+        },
+        "corr-tel-floor-flips-assigned-flag-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "69caf588fe00",
+          "behaviorHash": "ac61412f3bdc"
+        },
+        "corr-tel-floor-flips-assigned-flag": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "2868a4909011",
+          "behaviorHash": "4095b3b60bc2"
+        },
+        "corr-tel-shared-merge-key-unfiltered-writer-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "e7541580404d",
+          "behaviorHash": "0db4485b0c95"
+        },
+        "corr-tel-shared-merge-key-unfiltered-writer": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "53b1eb901177",
+          "behaviorHash": "7527c41f3314"
+        },
+        "corr-tel-validate-after-lint-rejected-shape-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "96107cfcfdb2",
+          "behaviorHash": "5a9ecd05bf1c"
+        },
+        "corr-tel-validate-after-lint-rejected-shape": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "e52f0a3569fb",
+          "behaviorHash": "1d495b29ddae"
+        },
+        "corr-tel-banner-ratio-masks-logic-line-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "e645de07bfec",
+          "behaviorHash": "ff3d2994370d"
+        },
+        "corr-tel-banner-ratio-masks-logic-line": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "446af301278f",
+          "behaviorHash": "a4e9defded5d"
+        },
+        "corr-tel-banner-stray-line-excusal-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "04f23c7a90d0",
+          "behaviorHash": "047ee05ef853"
+        },
+        "corr-tel-banner-stray-line-excusal": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "f71ba264dacd",
+          "behaviorHash": "3600c22f4705"
+        },
+        "corr-tel-loose-closer-absorbs-statement-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "1fd32edaaa50",
+          "behaviorHash": "bfe8646af308"
+        },
+        "corr-tel-loose-closer-absorbs-statement": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "adceb3963c6d",
+          "behaviorHash": "67f6f63bec83"
+        },
+        "corr-tel-person-branch-bot-reply-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "c30dbf59c75c",
+          "behaviorHash": "283fa2b7242c"
+        },
+        "corr-tel-person-branch-bot-reply": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "743b035bf3b5",
+          "behaviorHash": "eae442510f80"
+        },
+        "corr-tel-scoped-sweep-first-subentry-pair": {
+          "expected": "PASS",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "pass",
+          "rowHash": "b45bad0aee0d",
+          "behaviorHash": "21ac9b083f3c"
+        },
+        "corr-tel-scoped-sweep-first-subentry": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "a9c92040ee21",
+          "behaviorHash": "53660521db51"
+        },
+        "corr-tel-suffix-decl-enters-list-state-pair": {
+          "expected": "PASS",
+          "okFirst": false,
+          "okFinal": false,
+          "finalStatus": "fail",
+          "rowHash": "3271b6d815b7",
+          "behaviorHash": "c336528d57a3"
+        },
+        "corr-tel-suffix-decl-enters-list-state": {
+          "expected": "FAIL",
+          "okFirst": true,
+          "okFinal": true,
+          "finalStatus": "fail",
+          "rowHash": "e8f213934cdd",
+          "behaviorHash": "13c53f1b8edb"
+        }
+      },
+      "metrics": {
+        "rows": 140,
+        "gold": 75,
+        "decoys": 65,
+        "firstFailRecall": {
+          "k": 61,
+          "n": 75
+        },
+        "firstCleanPass": {
+          "k": 45,
+          "n": 65
+        },
+        "escalations": 0,
+        "escalateMeanSecs": 0,
+        "reasons": {
+          "right-item": 51,
+          "pattern-only": 9
+        },
+        "inconclusive": {}
+      }
+    }
+  }
+}
