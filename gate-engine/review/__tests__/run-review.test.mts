@@ -2093,6 +2093,77 @@ describe('runReviewGate — the shipped four-way correctness split', () => {
     expect(results[0].status).toBe('fail');
     expect(results[0].item_tally).toEqual({ fail: 1, pass: 3 });
   });
+
+  // sc-1475: a lens part whose vector SPILLED to a sidecar on its first run caches with
+  // items: undefined (dropped by JSON), so the cache entry must carry itemCount/itemTally —
+  // otherwise the rebuilt part reads as "never ran" and the merged review_result silently
+  // omits a whole lens group on every partial-cache re-run.
+  it('a spilled lens vector survives the spill-then-cache round-trip into the merged tally (sc-1475)', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    const spillId = lensGroupId(FOUR_WAY_LENS_GROUPS[0]);
+    const failLens = FOUR_WAY_LENS_GROUPS[1][0];
+    const writeArtifacts = (failing: boolean) => {
+      for (const group of FOUR_WAY_LENS_GROUPS) {
+        const id = lensGroupId(group);
+        const fail = failing && group[0] === failLens;
+        const items =
+          id === spillId
+            ? Array.from({ length: 30 }, (_, i) => ({
+                name: `${'spill-lens-'.repeat(6)}${i}`,
+                category: 'X',
+                status: 'pass',
+                issues: [],
+              }))
+            : [
+                {
+                  name: group[0],
+                  category: 'X',
+                  status: fail ? 'fail' : 'pass',
+                  issues: fail ? ['boom'] : [],
+                },
+              ];
+        writeFileSync(
+          join(repo, `.claude/.correctness-review-${id}.json`),
+          JSON.stringify({ items }),
+        );
+      }
+    };
+    // Run 1: the spill group's 30-item vector exceeds the 2000B inline budget and PASSes →
+    // cached (with aggregates, items spilled); the FAIL group blocks and is NOT cached.
+    const exec1 = mkExec(async ({ label, args }) => {
+      writeArtifact(repo, label);
+      writeArtifacts(true);
+      // Group labels are identical by design (waiver fingerprints key on the reviewer name), so
+      // the failing group is recognized by ITS lens name in the wrapped prompt.
+      return label.includes('correctness') && args[1].includes(failLens)
+        ? 'found one\nVERDICT: FAIL — wedged'
+        : 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec: exec1 })).toBe(1);
+    // Run 2: ONLY the failed group re-judges; the spilled group is rebuilt from the cache.
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-spill-roundtrip';
+    const exec2 = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      writeArtifacts(false);
+      return 'VERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec: exec2 })).toBe(0);
+    expect(
+      exec2.mock.calls.filter((c) => c[0].label === 'review:correctness-reviewer'),
+    ).toHaveLength(1);
+    const results = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer');
+    expect(results).toHaveLength(1);
+    // Pre-fix the spilled-then-cached group vanished: count read 3 and the tally lost 30 passes.
+    expect(results[0].item_count).toBe(33);
+    expect(results[0].item_tally).toEqual({ pass: 33 });
+  });
 });
 
 // sc-1473: scan's cache status must come from the gate's OWN planner. A hand-rolled key here

@@ -67,6 +67,14 @@ export function mergeItemVectors(res, parts) {
     }
     res.itemsRef = saveTranscript(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
 }
+/** The lens-part fields a cached PASS must round-trip (sc-1475): a part whose vector SPILLED
+ * caches `items: undefined` (dropped by JSON.stringify), so without the aggregates the rebuilt
+ * part is indistinguishable from "never ran" and mergeItemVectors drops it from the merged
+ * review_result — a real artifact misreported as absent (gate-verdict-attribution). Resumed runs
+ * re-seed the lens vector from these fields. */
+export function cachedLensFields(res) {
+    return { items: res.items, itemCount: res.itemCount, itemTally: res.itemTally };
+}
 /** How many lenses landed in each state — the "did this reviewer's lenses fire" question, answerable
  * even when the vector itself spilled to a sidecar. */
 function tally(items) {
