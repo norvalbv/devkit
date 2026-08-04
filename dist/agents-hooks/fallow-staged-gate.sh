@@ -40,6 +40,11 @@ command -v node >/dev/null 2>&1 || exit 0
 # an unquoted shell command segment, global git flags are allowed, and commit must be the first
 # non-flag positional. Prose such as `echo git commit` or `echo "; git commit"` therefore stays
 # inert. Missing/malformed/unterminated input fails OPEN.
+#
+# Deliberately NOT matched, all fail OPEN: env-assignment prefixes (`FOO=1 git commit`) and wrapper
+# binaries (`env`/`sudo`/`nohup`/`bash -c`). Those commits reach fallow's own git hook instead, so
+# the gate under-fires rather than stranding an agent. Every classification error must land on that
+# side — see [[fallow-gate-owned-by-fallow]].
 SCOPE="$(
   node -e '
 const fs = require("node:fs");
@@ -70,7 +75,14 @@ const ws = "[\\x20\\t\\r\\n\\f\\v]";
 const nonWs = "[^\\x20\\t\\r\\n\\f\\v]";
 const flag = `-${nonWs}+`;
 const arg = `[^-]${nonWs}*`;
-const unit = `${flag}${ws}+(${arg}${ws}+)?`;
+// Only these global flags take a SEPARATE following value; every other flag stands alone. Pairing
+// any flag with an optional argument let `--no-pager` swallow the subcommand, so a later literal
+// `commit` token landed in subcommand position and blocked read-only queries (sc-1417). The
+// `--flag=value` spellings fall through to the standalone branch, which is why they are absent
+// here. Mis-classifying either way only ever consumes one extra token and fails OPEN.
+const valued =
+  "(-C|-c|--git-dir|--work-tree|--namespace|--super-prefix|--attr-source|--config-env|--exec-path)";
+const unit = `(${valued}${ws}+${arg}${ws}+|${flag}${ws}+)`;
 const gitPrefix = `^${ws}*(command${ws}+)?(${nonWs}*/)?git${ws}+(${unit})*`;
 // These top-level actions exit before Git dispatches a subcommand, even if "commit" follows.
 const action = new RegExp(
