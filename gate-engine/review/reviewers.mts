@@ -282,6 +282,7 @@ export function wrapPrompt(
   files: string[],
   assetRoot?: string,
   checklistRecoveryReason?: string,
+  targetsBlock = '',
 ): string {
   const effectiveAssetRoot = assetRoot ?? '.claude';
   const brief = stripFrontmatter(agentBody).replaceAll(
@@ -294,8 +295,15 @@ export function wrapPrompt(
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes (domain: ${reviewer.domain}). Staged files in scope: ${files.join(', ')}.\n` +
     'Reviewer selection has already been performed. Treat that staged-file list as authoritative; do not re-evaluate the brief trigger conditions or skip because repository configuration has empty roots.\n' +
-    'A diffstat is on stdin. INVESTIGATE before judging: run `git diff --cached -- <file>` to read ' +
-    'the actual staged hunks, and Read surrounding code where a hunk alone is ambiguous.\n' +
+    'The file/churn map (--stat) followed by per-file diff evidence is on stdin. Evidence is ' +
+    'capped per file and in total; anything the caps dropped is NAMED inline (OMITTED:/[TRUNCATED:). ' +
+    'INVESTIGATE before judging: run `git diff --cached -- <file>` for the full hunks whenever ' +
+    'evidence was capped or a hunk alone is ambiguous, and Read surrounding code as needed.\n' +
+    // sc-1441: the recorded Targets are what let a reviewer judge a diff against the product's own
+    // boundary — the mechanical difference between the completeness gate (which caught a real
+    // deny-floor bug by citing its governing Target) and the context-starved domain reviewers
+    // (which PASSed the same diff). A violation of a governing Target below is IN CHARTER.
+    (targetsBlock ? `${targetsBlock}\n` : '') +
     checklistContract +
     (checklistRecoveryReason
       ? `CHECKLIST-CONTRACT RETRY: the prior attempt did not satisfy the brief-owned workflow (${checklistRecoveryReason}). Complete that workflow before returning a verdict.\n`
