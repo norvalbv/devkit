@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
 import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
+import { CORRECTNESS_LENSES, FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
@@ -53,6 +54,7 @@ const ENV_KEYS = [
   // here, else off-ship runReviewGate would auto-capture; the ship test sets both keys explicitly.
   'DEVKIT_GATE_EVENTS',
   'DEVKIT_SHIP_ID',
+  'GUARD_CORRECTNESS_SPLIT',
 ];
 const saved = {};
 const COMMIT_GUARD_INIT_SCRIPT = `
@@ -68,6 +70,12 @@ beforeEach(() => {
     saved[k] = process.env[k];
     delete process.env[k];
   }
+  // This suite asserts the UNDIVIDED cascade contract — exec counts, cache identity, concurrency
+  // caps — none of which are about the lens split. Left unset, correctness now fans out to one
+  // judge per lens (the shipped default) and `writeArtifact` below, which resolves a single
+  // un-lensed stateFile from the registry, satisfies none of them. The split's own fan-out is
+  // covered by lens-split.test.mts and by the describe at the bottom of this file.
+  process.env.GUARD_CORRECTNESS_SPLIT = 'off';
 });
 
 const dirs = [];
@@ -1914,5 +1922,88 @@ describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-
     const prompt = wrapCompleteness('brief', 'feat: x', ['a.ts'], 'targets');
     expect(prompt).toContain('OMITTED');
     expect(prompt).toContain('investigate EVERY OMITTED/TRUNCATED entry');
+  });
+});
+
+// The SHIPPED default (GUARD_CORRECTNESS_SPLIT unset) fans correctness out to one judge per lens.
+// Everything above this pins it off to test the undivided contract, so this is the only place the
+// default configuration reaches runReviewGate end to end.
+describe('runReviewGate — the shipped four-way correctness split', () => {
+  // A lens judge writes its OWN group-scoped artifact. The exec label carries the reviewer name but
+  // not the group (the name is deliberately stable — waiver fingerprints key on it), so the fake
+  // judge satisfies whichever group is asking by writing all four.
+  const writeLensArtifacts = (repo, { failing = null } = {}) => {
+    for (const group of FOUR_WAY_LENS_GROUPS) {
+      const lens = group[0];
+      const status = lens === failing ? 'fail' : 'pass';
+      writeFileSync(
+        join(repo, `.claude/.correctness-review-${lensGroupId(group)}.json`),
+        JSON.stringify({
+          items: [{ name: lens, category: 'X', status, issues: status === 'fail' ? ['boom'] : [] }],
+        }),
+      );
+    }
+  };
+
+  it('runs one judge per lens and merges them into ONE review_result carrying all four', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-split';
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      writeLensArtifacts(repo);
+      return 'checked\nVERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+
+    const correctnessCalls = exec.mock.calls.filter(
+      (c) => c[0].label === 'review:correctness-reviewer',
+    );
+    expect(correctnessCalls).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
+
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const results = events.filter(
+      (e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer',
+    );
+    // gate-verdict-attribution: ONE row per reviewer, however many lenses produced it.
+    expect(results).toHaveLength(1);
+    // The regression this guards: count and tally used to describe a single part while `items`
+    // carried every part, so a four-way split read as a one-lens reviewer on the dashboard.
+    expect(results[0].item_count).toBe(FOUR_WAY_LENS_GROUPS.length);
+    expect(results[0].item_tally).toEqual({ pass: FOUR_WAY_LENS_GROUPS.length });
+    expect(results[0].items.map((i) => i.lens).sort()).toEqual([...CORRECTNESS_LENSES].sort());
+    // Per-group cost survives the merge, which the summed `secs` alone cannot express.
+    expect(results[0].lens_parts).toHaveLength(FOUR_WAY_LENS_GROUPS.length);
+    expect(results[0].lens_parts.map((p) => p.lens).sort()).toEqual([...CORRECTNESS_LENSES].sort());
+  });
+
+  it('one failing lens fails the whole reviewer, and the tally still shows the passing three', async () => {
+    delete process.env.GUARD_CORRECTNESS_SPLIT;
+    const repo = consumerRepo({ backend: true });
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-split-fail';
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async ({ label }) => {
+      writeArtifact(repo, label);
+      writeLensArtifacts(repo, { failing: 'state-transitions' });
+      return label.includes('correctness')
+        ? 'found one\nVERDICT: FAIL — state machine can wedge'
+        : 'checked\nVERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).not.toBe(0);
+    const results = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'review_result' && e.reviewer === 'correctness-reviewer');
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe('fail');
+    expect(results[0].item_tally).toEqual({ fail: 1, pass: 3 });
   });
 });

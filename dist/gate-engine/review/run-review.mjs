@@ -406,7 +406,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             // reviewer's reasoning is fetchable on demand rather than discarded; the event carries only
             // the ref + one-liner. No-op off-run (see run-context.mts).
             if (t.splitOf) {
-                holdLensPart(splitParts, t.splitOf, { res, secs, diffText: t.diffText }, taskLabel(t));
+                holdLensPart(splitParts, t.splitOf, { res, secs, task: t }, taskLabel(t));
                 return res;
             }
             const transcriptRef = res.transcript

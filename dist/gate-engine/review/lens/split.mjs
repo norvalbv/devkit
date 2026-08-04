@@ -1,5 +1,5 @@
 /**
- * Correctness lens split (pilot, default OFF) — the gate half of a mechanism whose SKILL half has
+ * Correctness lens split (default ON, one judge per lens) — the gate half of a mechanism whose SKILL half has
  * existed since the correctness checklist was written (`--lens` in
  * skills/correctness/scripts/checklist.mjs, whose own comment says "ship mode runs one judge PER
  * lens"). Nothing in the gate ever passed it; this module is what does.
@@ -10,15 +10,22 @@
  * error-and-edge-classification}, and clean-pass 0.89 vs 0.77 — the headline 0.81/0.83 is a blend
  * hiding a ~15pp spread. Difficulty does NOT explain it: stratified, the effect is LARGER
  * (Mantel-Haenszel OR 2.69) and the strong pair carries the HARDER rows. Provenance explains ~1pp.
- * But n=69 leaves it underpowered (Fisher exact p=0.21), so this ships DARK and is decided by the
- * pre-registered A/B in docs/benchmarks/pre-registration-lens-split.md — never by conviction.
+ * But n=69 left it underpowered (Fisher exact p=0.21), so it shipped DARK and went to the
+ * pre-registered A/B in docs/benchmarks/pre-registration-lens-split.md.
  *
- * DOSE. The default is TWO GROUPS OF TWO, not four judges. Four would cost 4x the per-commit judge
- * calls and compound the measured 4.2% single-judge inconclusive rate to ~15.8% on strict ships —
- * to decide a question whose weak-pair denominators (40 gold / 26 decoy rows) sit BELOW the repo's
- * own ~5-net-flip resolution floor, i.e. the 4-way A/B provably could not decide it. Two groups
- * test the same attention-dilution hypothesis at half the dose and leave the strong pair as a
- * near-control. A four-way split remains reachable as an explicit spec.
+ * DOSE — and what the A/B actually returned. The default is now ONE JUDGE PER LENS. Two arguments
+ * against four judges did not survive measurement: they were expected to cost 4x the wall-clock,
+ * but measured ~35% FASTER per row (0.74 vs 1.09 min) because each judge holds a quarter of the
+ * checklist; and the 4.2% single-judge inconclusive rate was expected to compound to ~15.8%, but
+ * all three arms finished with ZERO inconclusives. What remains true is the power argument: the
+ * weak-pair denominators sit below the repo's ~5-net-flip floor, the four-way's null-adjusted +4
+ * lands under it, and the arm that WAS pre-registered — the paired shape — FAILED its co-primary.
+ *
+ * So this is on by DIRECTIONAL evidence, not a cleared bar: ahead on both co-primaries, zero
+ * regressions, guardrail unharmed, cheaper per row. The deciding argument is that a configuration
+ * nobody runs mints no telemetry to decide it with, and the corpus cannot be grown to decide it
+ * without shipping first. `GUARD_CORRECTNESS_SPLIT=off` restores the monolith in one env var.
+ * docs/decisions/correctness-lens-split-shipped.md is the record.
  *
  * INVARIANT THROUGHOUT: the reviewer NAME never changes. The override valve fingerprints on
  * (reviewer name + lens + diff), reviewer asset paths and the prompt-identity salt are keyed by
@@ -27,25 +34,34 @@
  */
 import { emitGateEvent } from "../../judge/gate-events.mjs";
 import { composeTranscript, saveTranscript } from "../../judge/transcript-store.mjs";
-import { itemFields } from "../evidence/items.mjs";
+import { itemFields, mergeItemVectors } from "../evidence/items.mjs";
 export const CORRECTNESS_LENSES = Object.freeze([
     'state-transitions',
     'concurrency-races',
     'writer-reader-contracts',
     'error-and-edge-classification',
 ]);
-/** Default pilot shape: the measured-strong pair together, the measured-weak pair together. */
+/** The pilot's paired shape: the measured-strong pair together, the measured-weak pair together.
+ * No longer the default — kept addressable as `1`/`on` so the A/B's registered arm stays runnable. */
 export const DEFAULT_LENS_GROUPS = Object.freeze([
     Object.freeze(['concurrency-races', 'state-transitions']),
     Object.freeze(['writer-reader-contracts', 'error-and-edge-classification']),
 ]);
+/** One judge per lens — the shipped shape. See docs/decisions/correctness-lens-split-shipped.md:
+ * this ships on DIRECTIONAL evidence, not a cleared bar. The 2026-08-04 A/B put it ahead of the
+ * monolith on both co-primaries with zero regressions and ~35% lower per-row cost, but its
+ * null-adjusted +4 sat under the repo's ~5-flip floor, and the arm that WAS pre-registered (the
+ * paired shape above) failed. It is on because a configuration nobody runs mints no telemetry to
+ * decide it with, and `off` reverts in one env var. */
+export const FOUR_WAY_LENS_GROUPS = Object.freeze(CORRECTNESS_LENSES.map((lens) => Object.freeze([lens])));
 /** Stable id for a group — sorted, so `a,b` and `b,a` are the SAME group everywhere (state-file
  * name, cache key, progress label). Mirrors `lensPath` in the correctness checklist script. */
 export const lensGroupId = (group) => [...group].sort().join('+');
 /**
  * Parse `GUARD_CORRECTNESS_SPLIT` into lens groups, or null when the split is off.
  *
- * Accepted: unset/`0`/`off` → null (monolith, the default) · `1`/`on` → DEFAULT_LENS_GROUPS · an
+ * Accepted: unset → FOUR_WAY_LENS_GROUPS (the shipped shape) · `0`/`off` → null (the monolith, the
+ * pre-2026-08 behaviour) · `1`/`on` → DEFAULT_LENS_GROUPS (the A/B's registered paired arm) · an
  * explicit spec `a,b|c,d` → those groups. An explicit spec must be a PARTITION of the four lenses:
  * a missing lens would silently stop being reviewed — a correctness lens dropping out of a BLOCKING
  * gate is exactly the blindness this reviewer exists to prevent — and a duplicated one would
@@ -53,7 +69,9 @@ export const lensGroupId = (group) => [...group].sort().join('+');
  */
 export function resolveLensGroups(raw = process.env.GUARD_CORRECTNESS_SPLIT) {
     const spec = String(raw ?? '').trim();
-    if (spec === '' || spec === '0' || spec.toLowerCase() === 'off')
+    if (spec === '')
+        return FOUR_WAY_LENS_GROUPS;
+    if (spec === '0' || spec.toLowerCase() === 'off')
         return null;
     if (spec === '1' || spec.toLowerCase() === 'on')
         return DEFAULT_LENS_GROUPS;
@@ -154,8 +172,12 @@ export function emitMergedLensResults(splitParts, firstModel) {
             .map((p) => p.res.transcript)
             .join('\n\n');
         const transcriptRef = transcript
-            ? saveTranscript(`review-${name}`, composeTranscript(parts[0].diffText, transcript))
+            ? saveTranscript(`review-${name}`, composeTranscript(parts[0].task.diffText, transcript))
             : null;
+        // Rebuild the item fields ACROSS the parts. Without this the event pairs one part's count and
+        // tally with every part's items, so a four-way split reads as a single-lens reviewer — the
+        // "everything comes from one agent" failure the per-lens vector exists to prevent.
+        mergeItemVectors(merged, parts.map((p) => p.res));
         emitGateEvent({
             type: 'review_result',
             reviewer: name,
@@ -164,6 +186,15 @@ export function emitMergedLensResults(splitParts, firstModel) {
             model: merged.model ?? firstModel,
             reason: merged.reason,
             secs: parts.reduce((sum, p) => sum + p.secs, 0),
+            // Per-group cost and verdict. `secs` above sums, and `escalated`/`model` collapse to the
+            // worst part, so without this vector a slow or repeatedly-escalating lens is invisible —
+            // exactly the per-agent breakdown separate reviewers would have given for free.
+            lens_parts: parts.map((p) => ({
+                lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
+                status: p.res.status,
+                secs: p.secs,
+                ...(p.res.model ? { model: p.res.model } : {}),
+            })),
             ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
             ...itemFields(merged),
             ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
@@ -240,7 +271,7 @@ export function planReviewWork(selected, diffs, cache, salts, keyOf, groups = re
             held.push({
                 res: { status: 'pass', name, items: Array.isArray(items) ? items : [] },
                 secs: 0,
-                diffText: p.diffText,
+                task: p,
             });
             splitParts.set(p.splitOf, held);
         }
