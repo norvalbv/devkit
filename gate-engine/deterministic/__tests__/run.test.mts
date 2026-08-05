@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deterministicStrict } from '../../config.mts';
 import { parseOpts, prefixCacheScope, runDeterministic, selectedIds } from '../run.mts';
 
 const dirs = [];
@@ -474,5 +475,75 @@ describe('runDeterministic — opted-out gates are named, and strict refuses the
   it('no salt when strict is unset — an ordinary run keeps the plain scope', () => {
     expect(prefixCacheScope()).toBeUndefined();
     expect(prefixCacheScope('custom')).toBe('custom');
+  });
+});
+
+// The interleavings the first pass missed: one gate opting out on an otherwise-green run was the
+// only shape covered, so the plural wording and the fail+opt-out combination were never executed.
+describe('runDeterministic — opt-out reporting across the other run shapes', () => {
+  it('names EVERY gate that opted out, with plural wording', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'fanout', 'dup', 'clone']);
+    const exec = mkExec({ matcher: 2, 'clone-detector': 2 });
+    expect(runDeterministic(d, { exec })).toBe(0);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('2 deterministic gates opted out and did NOT run:');
+    expect(out).toContain('guard-dup');
+    expect(out).toContain('guard-clone');
+  });
+
+  // A real failure must not swallow the opt-out report: the run exits 1 for the failure AND still
+  // says the other gate proved nothing. Moving the skipped block below the failure branch (the
+  // obvious "tidy-up") silently breaks exactly this.
+  it('reports an opt-out ALONGSIDE a real failure, and still exits 1', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'dup']);
+    const exec = mkExec({ 'size-disable': 1, matcher: 2 });
+    expect(runDeterministic(d, { exec })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('1 deterministic gate opted out and did NOT run: guard-dup');
+    expect(out).toContain('deterministic gates failed: guard-size');
+  });
+
+  it('separates the two in telemetry: the failure is a fail, the opt-out is could_not_run', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'dup']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ 'size-disable': 1, matcher: 2 }) })).toBe(1);
+    const byGate = Object.fromEntries(
+      readFileSync(sink, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type === 'gate_result')
+        .map((e) => [e.gate, e]),
+    );
+    expect(byGate.size).toMatchObject({ status: 'fail' });
+    expect(byGate.dup).toMatchObject({ status: 'could_not_run', detail: 'guard-dup(opted-out)' });
+  });
+
+  it('says NOTHING when every gate actually ran — the block is conditional', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runDeterministic(repo(['size', 'dup']), { exec: mkExec({}) })).toBe(0);
+    expect(err.mock.calls.flat().join('\n')).not.toContain('opted out');
+  });
+});
+
+// Read per-call, and via envVar's GUARD_/FRINK_ pair. Both spellings are asserted because the
+// FRINK_ alias has no other caller here and would rot silently.
+describe('deterministicStrict', () => {
+  it('is false unless asked for, and true under either spelling', () => {
+    expect(deterministicStrict()).toBe(false);
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    expect(deterministicStrict()).toBe(true);
+    delete process.env.GUARD_DETERMINISTIC_STRICT;
+    process.env.FRINK_DETERMINISTIC_STRICT = '1';
+    expect(deterministicStrict()).toBe(true);
+  });
+
+  it('treats an explicit falsey value as off, not as "set"', () => {
+    process.env.GUARD_DETERMINISTIC_STRICT = '0';
+    expect(deterministicStrict()).toBe(false);
   });
 });

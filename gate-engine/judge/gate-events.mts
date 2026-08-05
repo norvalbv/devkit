@@ -85,6 +85,23 @@ export function finishGateTiming(
   return code;
 }
 
+/**
+ * A gate that COULD NOT RUN produced no outcome, so it gets its own event type rather than a
+ * synthetic `gate_result` row — Ruling (3) of the gate-telemetry-self-describing Target, whose
+ * stated reason is that a synthetic row "inflates that event's fail-rate denominator and flattens
+ * the duration percentiles read off the very same rows".
+ *
+ * sc-1366: an object-database fault emitted NOTHING at all, so it was invisible in the event
+ * stream and cost the same investigation twice. `fault` distinguishes the gate's view from ship's
+ * `staged_objects_missing` (cli/lib/ship/commit-with-gate-capture.sh): ship inherits the caller's
+ * git environment while gates are spawned through __dk_no_git_env, so "ship says readable + gate
+ * says unreadable" is the evidence that separates a deletion from a split object database. One
+ * shared token would erase it.
+ */
+export function emitGateInfraFailure(ev: Record<string, unknown> & { gate: string }): void {
+  emitGateEvent({ type: 'gate_infra_failure', ...ev });
+}
+
 export function emitGateEvent(ev: Record<string, unknown>): void {
   const file = telemetrySink();
   if (!file) return;

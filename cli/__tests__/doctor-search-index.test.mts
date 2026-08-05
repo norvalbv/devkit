@@ -11,8 +11,9 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
+import { adviseSearchIndex, checkGuardConfig } from '../lib/doctor/guard-config-checks.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -20,6 +21,9 @@ afterEach(() => {
   cleanup();
   delete process.env.SEARCH_CODE_DB;
   delete process.env.GUARD_INDEX_PATH;
+  // Without this a console spy survives into the next test and carries its calls with it, so a
+  // "stayed silent" assertion reads the PREVIOUS test's output and fails for the wrong reason.
+  vi.restoreAllMocks();
 });
 
 const CHECK = 'search-code index';
@@ -151,5 +155,65 @@ describe('doctor — scoping', () => {
     const { results } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
     expect(results.find((r) => r.name === CHECK)).toBeUndefined();
     expect(results.find((r) => r.name === 'guard.config.json')?.status).toBe('MISSING');
+  });
+});
+
+// The advisory path for overlay + self-host, which short-circuit before collectResults. It had NO
+// coverage, and its failure mode is the check silently vanishing in the mode devkit dogfoods —
+// the same shape of silent gap this whole change exists to close.
+describe('doctor — the overlay / self-host advisory', () => {
+  function advisoryRepo(opts: RepoOpts = {}) {
+    const { root, cfg } = repo(opts);
+    return { root, sel: (cfg as { components: Record<string, unknown> }).components };
+  }
+
+  it('prints an OK line when the matcher is wired', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { root, sel } = advisoryRepo({ guardConfig: { indexPath: '.search-code/index.db' } });
+    await adviseSearchIndex(root, sel);
+    expect(log.mock.calls.flat().join('\n')).toContain('✓ search-code index');
+  });
+
+  it('prints the warning AND its remediation on drift', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { root, sel } = advisoryRepo({ index: true });
+    await adviseSearchIndex(root, sel);
+    const out = log.mock.calls.flat().join('\n');
+    expect(out).toContain('⚠ search-code index');
+    expect(out).toContain('→');
+    expect(out).toContain('indexPath');
+  });
+
+  it('stays silent when the dup guard is not selected', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { root, sel } = advisoryRepo({ index: true, guards: ['size', 'fanout'] });
+    await adviseSearchIndex(root, sel);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // An advisory must not invent a finding out of an absent config — that is the validity check's
+  // job, and it runs on a different surface.
+  it('stays silent when guard.config.json is absent', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const root = mkTmp('doctor-advise-nocfg-');
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    writeFileSync(join(root, '.search-code', 'index.db'), 'stub');
+    await adviseSearchIndex(root, { guards: ['dup'] });
+    expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe('doctor — a config that does not parse', () => {
+  // resolveGuardConfig throws on corrupt JSON. That is the validity signal, and it must not also
+  // produce an index line: one broken file, one finding.
+  it('reports the config as DRIFT and skips the index check entirely', async () => {
+    const root = mkTmp('doctor-search-index-bad-');
+    writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": [oops');
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    writeFileSync(join(root, '.search-code', 'index.db'), 'stub');
+    const results = await checkGuardConfig(root, true, false);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ name: 'guard.config.json', status: 'DRIFT' });
+    expect(results.find((r) => r.name === CHECK)).toBeUndefined();
   });
 });

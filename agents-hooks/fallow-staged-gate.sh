@@ -121,9 +121,35 @@ fi
 # monorepo subdir all resolve the same way there and here.
 DIFF_FILE="$(mktemp)"
 FALLOW_OUT="$(mktemp)"
-cleanup() { rm -f "$DIFF_FILE" "$FALLOW_OUT"; }
+DIFF_ERR="$(mktemp)"
+cleanup() { rm -f "$DIFF_FILE" "$FALLOW_OUT" "$DIFF_ERR"; }
 trap cleanup EXIT
-git diff --cached --binary --full-index --find-renames --relative >"$DIFF_FILE" 2>/dev/null || true
+
+# sc-1366: an EMPTY staged diff and an UNREADABLE one are different facts. This used to be
+# `2>/dev/null || true`, which collapsed both into the "nothing to audit" line below — so a staged
+# object git could no longer read was reported as though there were nothing to audit. That is the
+# same misreport sc-1366 was filed about, one layer earlier in the chain.
+#
+# `if ! …` rather than `git diff …` / `rc=$?`: line 2 is `set -euo pipefail`, under which the bare
+# capture form aborts the script before `rc=$?` ever runs.
+#
+# Deliberately NOT classified here. Naming the unreadable objects needs the index probe, and this
+# hook's whole contract is to fail open when tooling is absent — so it reports git's own words and
+# lets the real `git commit` produce the authoritative failure (where the gates DO classify it).
+if ! git diff --cached --binary --full-index --find-renames --relative >"$DIFF_FILE" 2>"$DIFF_ERR"; then
+  DIFF_WHY="$(tr '\n' ' ' <"$DIFF_ERR" | cut -c1-400)"
+  echo "fallow-staged-gate: could not READ the staged diff — not an audit finding: $DIFF_WHY" >&2
+  # stderr on an exit-0 PreToolUse hook reaches neither the user nor Claude, so the report rides
+  # the stdout JSON channel. `systemMessage` only — never a permissionDecision: this hook must not
+  # start auto-approving a `git commit` it previously left to the normal permission flow.
+  # node is guaranteed here — line 36 exits 0 without it — so this only guards node itself erroring.
+  # A `{"systemMessage":}` payload would be invalid JSON, and a malformed hook payload is a worse
+  # failure than a less specific message.
+  DIFF_MSG="$(DW="$DIFF_WHY" node -e 'process.stdout.write(JSON.stringify("fallow-staged-gate: git could not read the staged diff, so no audit ran. This is an object-database fault, NOT a finding against your code: "+process.env.DW))' 2>/dev/null || true)"
+  [ -n "$DIFF_MSG" ] || DIFF_MSG='"fallow-staged-gate: git could not read the staged diff, so no audit ran. This is an object-database fault, NOT a finding against your code."'
+  printf '{"systemMessage":%s}\n' "$DIFF_MSG"
+  exit 0
+fi
 
 if [ ! -s "$DIFF_FILE" ]; then
   # Nothing staged: a `git push`, or a deletion-only / pure-rename / binary-only commit. fallow

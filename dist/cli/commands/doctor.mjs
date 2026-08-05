@@ -10,7 +10,7 @@ import { checkAgentAssets, checkRegistrations } from "../lib/doctor/asset-checks
 import { check } from "../lib/doctor/check-result.mjs";
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from "../lib/doctor/extends-checks.mjs";
 import { adviseSearchIndex, checkGuardConfig, SEARCH_INDEX_CHECK, } from "../lib/doctor/guard-config-checks.mjs";
-import { checkHookRunner, checkHusky } from "../lib/doctor/hook-checks.mjs";
+import { hookChecks } from "../lib/doctor/hook-checks.mjs";
 import { checkLockPin, checkPin } from "../lib/doctor/pin-checks.mjs";
 import { runSelfHostDoctor } from "../lib/doctor/self-host-doctor.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
@@ -325,7 +325,7 @@ async function collectResults(cwd, cfg, configResult) {
     const overrides = new Set(cfg.configOverrides ?? []);
     const results = [configResult];
     if (sel.husky)
-        results.push(checkHusky(cwd, sel.guards ?? []), checkHookRunner(cwd));
+        results.push(...hookChecks(cwd, sel.guards ?? []));
     if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
         results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
     // biome and tsconfig differ only by filename and expected pointer.

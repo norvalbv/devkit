@@ -290,6 +290,69 @@ describe('assembled hook is set -e-safe', () => {
   });
 });
 
+/**
+ * sc-1366. The line an operator actually reads is chosen HERE, from the gate's exit code, and it
+ * prints LAST — so a banner on the gate's own stderr cannot fix a misreport by itself. Before exit
+ * 4 existed, an unreadable staged object surfaced as a reviewer FAIL or a judge/auth outage, and
+ * the next agent hunted a defect that did not exist.
+ *
+ * The fix needs NO new fragment: exit 1 and exit 3 are the two codes with a verdict-shaped remedy,
+ * so a code that is NEITHER already falls through to the neutral "unexpected exit N" branch, which
+ * blocks and names nothing. That is what these pin — the property is "never renders as a verdict",
+ * not "prints a particular new line", and it holds on every already-installed consumer hook.
+ */
+describe('exit 4 renders as an object-database fault, never as a verdict', () => {
+  /** Stub bunx per-gate: `bunx <bin> ...` → the code this map gives that bin (default 0). */
+  const runHook = (codes: Record<string, number>) => {
+    const home = mkdtempSync(join(tmpdir(), 'dk-odb-'));
+    const bin = join(home, '.bun', 'bin');
+    mkdirSync(bin, { recursive: true });
+    const cases = Object.entries(codes)
+      .map(([b, c]) => `  ${b}) exit ${c} ;;`)
+      .join('\n');
+    writeFileSync(join(bin, 'bunx'), `#!/bin/sh\ncase "$1" in\n${cases}\n  *) exit 0 ;;\nesac\n`);
+    chmodSync(join(bin, 'bunx'), 0o755);
+    const hookPath = join(home, 'pre-commit');
+    writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
+    try {
+      const out = execFileSync('sh', ['-e', hookPath], {
+        env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin' },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+      return { status: 0, out };
+    } catch (e) {
+      return { status: e.status, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+    }
+  };
+
+  it('the decisions gate blocks without naming a defect', () => {
+    const { status, out } = runHook({ 'guard-decisions': 4 });
+    expect(status).toBe(1); // an unreadable staged set must stop the commit
+    // POSITIVE: the neutral diagnostic must actually be printed. Asserting only the absence of the
+    // wrong text would pass on a silent `exit 1`, which reports nothing at all.
+    expect(out).toContain('unexpected exit 4');
+    // The lines it must NOT print — each names a cause that did not happen.
+    expect(out).not.toContain('auth/quota');
+    expect(out).not.toContain('Record the decision target');
+  });
+
+  it('the review gate does not call it a reviewer verdict', () => {
+    const { status, out } = runHook({ 'guard-review': 4 });
+    expect(status).toBe(1);
+    expect(out).toContain('unexpected exit 4');
+    expect(out).not.toContain('opus-confirmed');
+    expect(out).not.toContain('auth/quota');
+  });
+
+  it('exit 1 and exit 3 DO still carry their verdict remedies — the contrast that matters', () => {
+    // Non-vacuity guard: if these ever stopped printing, the two assertions above would pass for
+    // the wrong reason and this suite would be measuring nothing.
+    expect(runHook({ 'guard-review': 1 }).out).toContain('opus-confirmed');
+    expect(runHook({ 'guard-review': 3 }).out).toContain('auth/quota');
+  });
+});
+
 describe('buildOverlayHook — gates-only guard for the global init.sh shim', () => {
   const hook = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit');
   const guardIdx = hook.indexOf('DEVKIT_VIA_HUSKY_INIT');
@@ -547,6 +610,15 @@ describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 
     const r = runCommitMsgHook(2);
     expect(r.status).toBe(0);
     expect(r.stateExists).toBe(false);
+  });
+
+  it('an object-database fault (exit 4) BLOCKS here, unlike an unknown code in pre-commit', () => {
+    // sc-1366, reviewer finding: this reader's default is CONTINUE — the opposite of pre-commit's
+    // — so exit 4 needs an explicit branch or a confirmed ODB fault silently fails open, inverting
+    // strict-ship's fail-closed contract.
+    const r = runCommitMsgHook(4);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('NOT a gate rejection');
   });
 
   it('a confirmed block (exit 1) blocks the commit with the guidance echoed', () => {
