@@ -6,8 +6,9 @@
  *
  * A ship exports DEVKIT_GATE_EVENTS (sink path) + DEVKIT_SHIP_ID (correlates every gate/reviewer
  * event of one ship attempt) through the hook chain — the SAME inheritance path git→husky→node that
- * carries DEVKIT_REVIEW_PROGRESS — so each in-chain gate stamps the same ship_id. When the env is
- * unset (an ad-hoc commit, not a ship) emit is a no-op, so ONLY ships produce telemetry.
+ * carries DEVKIT_REVIEW_PROGRESS — so each in-chain gate stamps the same ship_id. When that env is
+ * unset (an ad-hoc commit, not a ship) events still land, in the default ~/.devkit/telemetry sink
+ * that telemetrySink() supplies; DEVKIT_NO_TELEMETRY=1 is what makes emit a no-op.
  *
  * Failure direction: any IO error is swallowed — telemetry must NEVER fail a gate. Each event is one
  * JSON line appended with a single O_APPEND write, so concurrent judges can't tear each other's lines

@@ -37,7 +37,7 @@
     "minTokens": 50
   },
 
-  "//indexPath": "search-code embedding index for the semantic duplication matcher. null (or omit) => matcher opts out / fails open; guard-clone + ratchets still run.",
+  "//indexPath": "search-code embedding index for the semantic duplication matcher. null (or omit) => matcher opts out / fails open; guard-clone + ratchets still run. OMITTING is not the same as writing null: `devkit doctor` reports drift when the key is ABSENT while .search-code/index.db exists (or search-code was selected at init), because that combination is devkit's own wiring lost rather than a choice. An explicit null is the DECLARED opt-out and is always silent. Env: GUARD_INDEX_PATH (or SEARCH_CODE_DB, matcher-only).",
   "indexPath": ".search-code/index.db",
 
   "//searchTool": "Semantic-search tool NAME the search-steering hooks point agents at. Default: 'mcp__codebase__searchCode'. Env override: GUARD_SEARCH_TOOL.",

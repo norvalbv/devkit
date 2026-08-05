@@ -1,23 +1,17 @@
 /** `devkit doctor` diagnoses init drift. Read-only unless `--fix`; it never refreshes baselines.
  * Exit: 0 all-ok, 1 drift, 2 not-initialized. */
-var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path, preserveJsx) {
-    if (typeof path === "string" && /^\.\.?\//.test(path)) {
-        return path.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function (m, tsx, d, ext, cm) {
-            return tsx ? preserveJsx ? ".jsx" : ".js" : d && (!ext || !cm) ? m : (d + ext + "." + cm.toLowerCase() + "js");
-        });
-    }
-    return path;
-};
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { QAVIS_RECIPE, qavisOnPath } from "../../gate-engine/qavis-advisory/check.mjs";
 import { RECOMMENDED_GUARD_IDS, structureCmdFor } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { checkAgentAssets, checkRegistrations } from "../lib/doctor/asset-checks.mjs";
 import { check } from "../lib/doctor/check-result.mjs";
-import { checkHookRunner, checkHusky } from "../lib/doctor/hook-checks.mjs";
+import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from "../lib/doctor/extends-checks.mjs";
+import { adviseSearchIndex, checkGuardConfig, SEARCH_INDEX_CHECK, } from "../lib/doctor/guard-config-checks.mjs";
+import { hookChecks } from "../lib/doctor/hook-checks.mjs";
+import { checkLockPin, checkPin } from "../lib/doctor/pin-checks.mjs";
 import { runSelfHostDoctor } from "../lib/doctor/self-host-doctor.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { checkCommitMsgHook, commitMsgGuards } from "../lib/husky/commit-msg-block.mjs";
@@ -27,9 +21,7 @@ import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../li
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from "../lib/overlay.mjs";
 import { globalHookInstalled, globalInitPath } from "../lib/overlay-global-hook.mjs";
-import { cmpSemver } from "./update.mjs";
-// A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
-const PINNED_TAG = /#v\d/;
+import { cmpSemver, fetchLatestTag } from "./update.mjs";
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 function checkConfig(cwd) {
@@ -56,75 +48,6 @@ function checkStructureLint(cwd, stack) {
     }
     return check('structure-lint', 'OK', `runs \`${expectedCmd}\``);
 }
-// Strip // line comments so a jsonc config parses as JSON.
-const JSONC_LINE_COMMENT_RE = /^\s*\/\/.*$/gm;
-function jsoncText(path) {
-    return readFileSync(path, 'utf8').replace(JSONC_LINE_COMMENT_RE, '');
-}
-// Tolerant read for repair only; drift checks parse strictly and report syntax errors.
-function readJsonc(path) {
-    if (!existsSync(path))
-        return null;
-    try {
-        return JSON.parse(jsoncText(path));
-    }
-    catch {
-        return null;
-    }
-}
-// Expected extends are shared by check and repair. Package Biome presets mirror templates by stack;
-// standalone uses separately vendored .devkit paths, so keep its stack list aligned with standalone.
-const PKG_REACT_BIOME = new Set(['react-app', 'component-lib']);
-function expectedExtends(stack, standalone) {
-    return {
-        biome: standalone
-            ? `./.devkit/biome/${['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base'}.jsonc`
-            : `@norvalbv/devkit/biome/${PKG_REACT_BIOME.has(stack) ? 'react' : 'base'}`,
-        tsconfig: standalone
-            ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
-            : '@norvalbv/devkit/tsconfig/base',
-    };
-}
-function checkExtends(cwd, file, expected, key = 'extends', overridden = false) {
-    const path = join(cwd, file);
-    if (!existsSync(path)) {
-        return check(file, 'MISSING', 'absent', 'run `devkit init`', true);
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(jsoncText(path));
-    }
-    catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return check(file, 'DRIFT', `invalid JSON: ${msg}`, 'fix the JSON syntax, then re-run');
-    }
-    // configOverrides marks deliberate hand-ownership, but only after syntax validation.
-    if (overridden) {
-        return check(file, 'OK', 'intentional override (configOverrides)');
-    }
-    const ext = parsed[key];
-    const list = Array.isArray(ext) ? ext : [ext];
-    if (!list.includes(expected)) {
-        return check(file, 'DRIFT', `${key} is ${JSON.stringify(ext)}`, `should extend "${expected}" (if intentional, add "${file}" to .devkit/config.json configOverrides)`);
-    }
-    return check(file, 'OK', `extends ${expected}`);
-}
-async function checkGuardConfig(cwd) {
-    const path = join(cwd, 'guard.config.json');
-    if (!existsSync(path)) {
-        return check('guard.config.json', 'MISSING', 'absent', 'run `devkit init`', true);
-    }
-    // resolveGuardConfig throws on a corrupt file — that's the validity signal.
-    try {
-        const mod = (await import(__rewriteRelativeImportExtension(pathToFileURL(join(packageDir(), 'gate-engine', `config${SELF_EXT}`)).href)));
-        mod.resolveGuardConfig(cwd);
-        return check('guard.config.json', 'OK', 'valid (resolveGuardConfig parsed it)');
-    }
-    catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return check('guard.config.json', 'DRIFT', msg, 'fix the config JSON');
-    }
-}
 // searchSteering: the guard + counter engine bins are present in the installed package.
 function checkSearchToolBins() {
     const dir = join(packageDir(), 'gate-engine', 'search-tool');
@@ -144,21 +67,11 @@ function checkBaselines(cwd) {
         ? `grandfathered debt: ${present.join(' + ')}`
         : 'no grandfathered debt (enforced from config)');
 }
-function checkPin(cwd) {
-    const pkg = readJson(join(cwd, 'package.json'));
-    const ref = pkg?.devDependencies?.['@norvalbv/devkit'] ?? pkg?.dependencies?.['@norvalbv/devkit'];
-    if (!ref)
-        return check('devkit pin', 'MISSING', 'not a dependency', 'run `devkit init`', true);
-    if (PINNED_TAG.test(ref))
-        return check('devkit pin', 'OK', `pinned ${ref.split('#').pop()}`);
-    return check('devkit pin', 'DRIFT', 'not pinned to a #v* tag (bare SHA/branch)', 'pin to #v<version> for reproducible installs');
-}
 const SEMVER = /^\d+\.\d+\.\d+$/;
-// Warn if the RUNNING devkit is OLDER than the version this repo was set up with (stamped in
-// .devkit/config.json at init) or below a hand-declared `minDevkit` floor. Read-only, warn-only —
-// a contributor on a stale devkit is told to `devkit update`, never blocked. Uses .devkit/config.json
-// only (NOT package.json), so overlay/standalone repos introduce nothing into the shared tree.
-export function checkVersion(cwd) {
+// Warn when the RUNNING devkit is older than this repo's init stamp, a hand-declared `minDevkit`
+// floor, or the latest tag (info-only, never DRIFT; skippable via DEVKIT_SKIP_REMOTE_CHECKS).
+// Read-only, config.json-only (not package.json) — `devkit update` is always the told-to remedy.
+export function checkVersion(cwd, env = process.env) {
     const pkg = readJson(join(packageDir(), 'package.json'));
     const running = pkg?.version;
     if (!running || !SEMVER.test(running))
@@ -175,35 +88,11 @@ export function checkVersion(cwd) {
     if (stamped && SEMVER.test(stamped) && cmpSemver(running, stamped) < 0) {
         return check('devkit version', 'DRIFT', `installed ${running} older than this repo's init (${stamped})`, 'devkit update');
     }
+    const { latest } = env.DEVKIT_SKIP_REMOTE_CHECKS ? {} : fetchLatestTag(); // no `error` key on success
+    const behind = latest && cmpSemver(running, latest) < 0 ? `, latest ${latest} — run \`devkit update\`` : '';
     // Echo whichever floors are declared so a satisfied min/stamp is visibly active, not silent.
     const meta = [stamped && `repo init ${stamped}`, min && `min ${min}`].filter(Boolean).join(', ');
-    return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}`);
-}
-// Configs whose drifted `extends` pointer --fix can repair IN PLACE (kind → expectedExtends key).
-// The top-level config is the CONSUMER's (it carries paths, libs, plugins, overrides); only the
-// pointer it extends is devkit-owned. guard.config.json is excluded: --fix never touches its content
-// — it's only recreated when MISSING (by plain, create-if-absent init).
-const EXTENDS_REPAIRABLE = {
-    'biome.jsonc': 'biome',
-    'tsconfig.json': 'tsconfig',
-};
-// Replace only the devkit extends token, preserving comments and consumer deltas.
-function repairExtends(path, expected) {
-    if (!existsSync(path))
-        return false;
-    const ext = readJsonc(path)?.extends;
-    const list = Array.isArray(ext) ? ext : ext == null ? [] : [ext];
-    if (list.includes(expected))
-        return false;
-    const old = list.find((v) => typeof v === 'string' && v.includes('devkit'));
-    if (!old)
-        return false;
-    const raw = readFileSync(path, 'utf8');
-    const next = raw.replace(JSON.stringify(old), JSON.stringify(expected));
-    if (next === raw)
-        return false;
-    writeFileSync(path, next);
-    return true;
+    return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}${behind}`);
 }
 // Reproduce the recorded selection rather than the all-on `--yes` default.
 function selectionFlags(sel) {
@@ -271,7 +160,12 @@ function applyFix(cwd, results, sel, stack, standalone) {
     const hookDrift = results.some((r) => r.fixable &&
         (HOOK_CHECKS.has(r.name) || r.name === 'agent-hooks' || r.name === 'hook registrations') &&
         r.status !== 'OK');
-    if (needsInit || hookDrift) {
+    // A lost `indexPath` is repaired the way it was written: by init's --search-code step (which
+    // selectionFlags already emits for a repo whose recorded selection has it). `r.fixable` carries
+    // that precondition — the check clears it only when the selection can actually reproduce the
+    // wiring, so --fix never re-inits chasing a warning it has no flag to clear.
+    const indexDrift = results.some((r) => r.name === SEARCH_INDEX_CHECK && r.fixable && r.status !== 'OK');
+    if (needsInit || hookDrift || indexDrift) {
         const args = ['init', '--stack', stack, ...selectionFlags(sel)];
         if (standalone)
             args.push('--standalone');
@@ -396,6 +290,9 @@ async function runOverlayDoctor(cwd, cfg, fix) {
         advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
     if (surfaces.length)
         advise(checkRegistrations(cwd, hooks.components, surfaces, true));
+    // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
+    // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
+    await adviseSearchIndex(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     if (sel.fallow) {
         const wired = hookOk &&
@@ -428,7 +325,7 @@ async function collectResults(cwd, cfg, configResult) {
     const overrides = new Set(cfg.configOverrides ?? []);
     const results = [configResult];
     if (sel.husky)
-        results.push(checkHusky(cwd, sel.guards ?? []), checkHookRunner(cwd));
+        results.push(...hookChecks(cwd, sel.guards ?? []));
     if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
         results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
     // biome and tsconfig differ only by filename and expected pointer.
@@ -439,7 +336,7 @@ async function collectResults(cwd, cfg, configResult) {
         if (on)
             results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
     if (sel.guards?.length || sel.structure)
-        results.push(await checkGuardConfig(cwd));
+        results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true)));
     if (sel.structure && sel.husky)
         results.push(checkStructureLint(cwd, stack));
     const hooks = selectedHookAssets(sel);
@@ -457,8 +354,15 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkRegistrations(cwd, hooks.components, surfaces));
     if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
         results.push(checkBaselines(cwd));
-    if (!standalone)
+    // Two halves of the same signal: checkPin reads what package.json asks for, checkLockPin reads
+    // what bun.lock recorded for it. The latter is null whenever there is nothing to verify, which is
+    // what keeps doctor off the network for non-bun consumers.
+    if (!standalone) {
         results.push(checkPin(cwd));
+        const lock = checkLockPin(cwd);
+        if (lock)
+            results.push(lock);
+    }
     results.push(checkVersion(cwd));
     return { results, sel };
 }
