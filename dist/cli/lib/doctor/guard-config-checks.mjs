@@ -109,10 +109,24 @@ export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
     if (!existsSync(path)) {
         return [check('guard.config.json', 'MISSING', 'absent', 'run `devkit init`', true)];
     }
-    // resolveGuardConfig throws on a corrupt file — that's the validity signal.
+    // Two failures live here, owned by different people, so they are caught separately. Loading the
+    // engine module can fail for reasons that have nothing to do with the consumer — a SELF_EXT that
+    // does not match the install layout, a missing dist build, a throw at engine top level. Reporting
+    // those as "fix the config JSON" sends the reader at a file that is perfectly valid, and no edit
+    // to it can ever clear the message.
+    let mod;
+    try {
+        mod = (await import(__rewriteRelativeImportExtension(pathToFileURL(join(packageDir(), 'gate-engine', `config${SELF_EXT}`)).href)));
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return [
+            check('guard.config.json', 'DRIFT', `cannot load the gate-engine config module: ${msg}`, 'reinstall @norvalbv/devkit — a devkit install fault, not a problem with your config'),
+        ];
+    }
+    // resolveGuardConfig throws on a corrupt file — THAT is the config-validity signal.
     let resolved;
     try {
-        const mod = (await import(__rewriteRelativeImportExtension(pathToFileURL(join(packageDir(), 'gate-engine', `config${SELF_EXT}`)).href)));
         resolved = mod.resolveGuardConfig(cwd).indexPath ?? null;
     }
     catch (e) {
