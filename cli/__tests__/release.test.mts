@@ -262,4 +262,23 @@ describe('release publishing', () => {
     expect(errors).toHaveBeenCalledWith(expect.stringMatching(/missing from the build/));
     expect(mockShip).not.toHaveBeenCalled();
   });
+
+  it('refuses instead of throwing uncaught when ship-branch.sh is a directory, not a file', async () => {
+    // existsSync alone accepts directories — this locks in that the smoke check requires a regular
+    // file and fails cleanly (not an uncaught exception) when the build produced something malformed.
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(cwd);
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    const shipDir = join(cwd, 'dist', 'cli', 'lib', 'ship');
+    mkdirSync(join(shipDir, 'ship-branch.sh'), { recursive: true });
+    writeFileSync(join(shipDir, 'read-stdin-body.sh'), '# stub\n');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(release(['minor', '--yes'], cwd)).resolves.toBe(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/missing from the build/));
+    expect(mockShip).not.toHaveBeenCalled();
+  });
 });
