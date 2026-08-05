@@ -123,10 +123,13 @@ export function strictRemedy(cause: 'timeout' | 'sync' | 'outage'): string {
   return 'check `claude` CLI auth/quota, then re-run devkit ship';
 }
 
-// execFile's `timeout` fires by KILLING the child (SIGTERM), which marks the error `killed`. That
-// kill — not ENOENT / quota / a non-zero exit — is the one outage a retry can't fix: the re-run would
-// burn the same budget again. Callers that retry use this to skip a timeout. (ETIMEDOUT covers the
-// rare platform that reports a code instead of the signal.)
+// execFile's `timeout` fires by KILLING the child (SIGKILL, sc-1317 — SIGTERM alone let a child that
+// traps/ignores it survive past the cap), which marks the error `killed`. That kill — not ENOENT /
+// quota / a non-zero exit — is the one outage a retry can't fix: the re-run would burn the same
+// budget again. Callers that retry use this to skip a timeout. `killed` is set regardless of which
+// signal did it, so it's checked first; `err.signal === 'SIGTERM'` is a defensive fallback from
+// before the SIGKILL switch, kept in case a platform ever reports the pre-kill signal instead of
+// `killed`. (ETIMEDOUT covers the rare platform that reports a code instead of either.)
 function isJudgeTimeout(e: unknown): boolean {
   const err = judgeErr(e);
   return err.killed === true || err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT';
@@ -142,19 +145,21 @@ function isJudgeTimeout(e: unknown): boolean {
  * execFile timeout killed it), 'transient' (ENOENT / quota / non-zero exit), or 'empty' — so a caller
  * can retry selectively (a timeout is not worth re-running; a transient/empty flake can be).
  *
- * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
+ * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
  * @returns {string|null}
  */
 // Options for both execJudge and its async twin. onOutage is optional — most callers don't retry.
 // Transcripts are collected BY DEFAULT (the ledger's whole point is that judgements stay
 // inspectable without any caller remembering to ask); `transcript: false` opts out — for gates
 // that already persist their own gate-level transcript (the review gate) so every diff isn't
-// stored twice.
+// stored twice. `timeout` is REQUIRED (sc-1317): Node's `execFile`/`execFileSync` treat an
+// omitted/0 timeout as "no cap at all", which would silently defeat the SIGKILL guarantee below —
+// every real caller already supplies one, so this is a type-level guard, not a behavior change.
 interface ExecJudgeOpts {
   label: string;
   args: string[];
   input?: string;
-  timeout?: number;
+  timeout: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
@@ -213,6 +218,9 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
       input,
       encoding: 'utf8',
       timeout,
+      // SIGTERM alone can be trapped/ignored by the child, leaving the cap best-effort instead of a
+      // guarantee (sc-1317) — SIGKILL cannot be caught, so the timeout always actually terminates.
+      killSignal: 'SIGKILL',
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     if (!out || !String(out).trim()) {
@@ -240,41 +248,62 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
  * evidence (diffstat) goes to the child's stdin by hand. maxBuffer is explicit — an investigating
  * judge's transcript (tool output included) can exceed the 1 MB default.
  *
- * @param {{ label: string, args: string[], input?: string, timeout?: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
+ * @param {{ label: string, args: string[], input?: string, timeout: number, cwd?: string, onOutage?: (kind: 'timeout'|'transient'|'empty') => void }} opts
  * @returns {Promise<string|null>}
  */
 export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
   const { label, args, input, timeout, cwd, env, onOutage } = opts;
   const startedAt = Date.now();
   return new Promise((resolve) => {
-    const child = execFile(
-      'claude',
-      args,
-      // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
-      { cwd, env: withoutGitEnv(env), encoding: 'utf8', timeout, maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout) => {
-        if (err) {
-          warnUnavailable(label, err, timeout);
-          const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
-          emitJudgeExec(opts, kind, startedAt);
-          onOutage?.(kind);
-          resolve(null);
-          return;
-        }
-        if (!stdout || !String(stdout).trim()) {
-          warnNoOutput(label);
-          emitJudgeExec(opts, 'empty', startedAt);
-          onOutage?.('empty');
-          resolve(null);
-          return;
-        }
-        emitJudgeExec(opts, 'ok', startedAt, stdout);
-        resolve(stdout);
-      },
-    );
-    // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
-    child.stdin?.on('error', () => {});
-    if (input !== undefined) child.stdin?.write(input);
-    child.stdin?.end();
+    // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
+    // out-of-range `timeout` validates and throws before spawn even starts, sc-1317) both resolve
+    // null the same way. Without the try/catch below, that synchronous throw escaped as a REJECTED
+    // promise, breaking this function's own documented contract (never throws/rejects, always
+    // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
+    // already had this same guard via its enclosing try/catch.
+    const fail = (err: unknown) => {
+      warnUnavailable(label, err, timeout);
+      const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
+      emitJudgeExec(opts, kind, startedAt);
+      onOutage?.(kind);
+      resolve(null);
+    };
+    try {
+      const child = execFile(
+        'claude',
+        args,
+        {
+          cwd,
+          // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
+          env: withoutGitEnv(env),
+          encoding: 'utf8',
+          timeout,
+          // See the execJudge twin: SIGKILL so the cap is a guaranteed kill, not a trappable request.
+          killSignal: 'SIGKILL',
+          maxBuffer: 10 * 1024 * 1024,
+        },
+        (err, stdout) => {
+          if (err) {
+            fail(err);
+            return;
+          }
+          if (!stdout || !String(stdout).trim()) {
+            warnNoOutput(label);
+            emitJudgeExec(opts, 'empty', startedAt);
+            onOutage?.('empty');
+            resolve(null);
+            return;
+          }
+          emitJudgeExec(opts, 'ok', startedAt, stdout);
+          resolve(stdout);
+        },
+      );
+      // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
+      child.stdin?.on('error', () => {});
+      if (input !== undefined) child.stdin?.write(input);
+      child.stdin?.end();
+    } catch (e) {
+      fail(e);
+    }
   });
 }
