@@ -21,6 +21,11 @@ const saved: Record<string, string | undefined> = {};
 let dir: string;
 let sink: string;
 
+// A plain SIGTERM (Node's execFile/execFileSync default killSignal) can be trapped/ignored by the
+// child, leaving `timeout` a best-effort request instead of a guaranteed bound. Ignores SIGTERM and
+// sleeps well past any cap used below — without a SIGKILL killSignal this would run the full sleep.
+const TRAP_AND_SLEEP = "trap '' TERM\nsleep 5\necho SHOULD_NOT_REACH";
+
 function fakeClaude(script: string): void {
   const bin = path.join(dir, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -114,7 +119,12 @@ describe('judge_exec telemetry', () => {
 
   it('spawn failure (no claude on PATH) emits a transient outage event, still returns null', () => {
     process.env.PATH = dir; // no claude anywhere on this PATH
-    const out = execJudge({ label: 'vision', args: ['-p', '--model', 'opus', 'x'], input: 'y' });
+    const out = execJudge({
+      label: 'vision',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 30000,
+    });
     expect(out).toBeNull();
     const [ev] = events();
     expect(ev).toMatchObject({ type: 'judge_exec', judge: 'vision', outcome: 'transient' });
@@ -198,7 +208,151 @@ describe('judge_exec telemetry', () => {
     writeFileSync(notADir, 'x');
     process.env.DEVKIT_GATE_EVENTS = path.join(notADir, 'events.jsonl');
     fakeClaude('echo FIT');
-    const out = execJudge({ label: 'vision', args: ['-p', '--model', 'opus', 'x'], input: 'y' });
+    const out = execJudge({
+      label: 'vision',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 30000,
+    });
     expect(out?.trim()).toBe('FIT'); // judge contract untouched by the sink error
+  });
+});
+
+describe('timeout kill signal (sc-1317)', () => {
+  it('async: a child that traps SIGTERM is still killed at the timeout cap', async () => {
+    fakeClaude(TRAP_AND_SLEEP);
+    const startedAt = Date.now();
+    const out = await execJudgeAsync({
+      label: 'review:completeness',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 300,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    expect(out).toBeNull();
+    // Well short of the 5s sleep — proves SIGKILL fired rather than a trapped, ignored SIGTERM.
+    expect(elapsedMs).toBeLessThan(3000);
+    const [ev] = events();
+    expect(ev).toMatchObject({ type: 'judge_exec', outcome: 'timeout' });
+  });
+
+  it('sync: a child that traps SIGTERM is still killed at the timeout cap', () => {
+    fakeClaude(TRAP_AND_SLEEP);
+    const startedAt = Date.now();
+    const out = execJudge({
+      label: 'vision',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 300,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    expect(out).toBeNull();
+    expect(elapsedMs).toBeLessThan(3000);
+    const [ev] = events();
+    expect(ev).toMatchObject({ type: 'judge_exec', outcome: 'timeout' });
+  });
+
+  it('async: output written just before the SIGKILL is discarded, never returned as a verdict', async () => {
+    // A killed process still hands the callback whatever partial stdout it had buffered — the code
+    // must treat ANY kill as a hard failure (return null) regardless of what's sitting in that
+    // buffer, never mistake a truncated-but-plausible-looking verdict for a real one.
+    fakeClaude("trap '' TERM\necho 'VERDICT: PASS - looks fine'\nsleep 5\necho SHOULD_NOT_REACH");
+    const out = await execJudgeAsync({
+      label: 'review:completeness',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 300,
+    });
+    expect(out).toBeNull();
+  });
+
+  it('two concurrent timed-out calls resolve independently with correctly attributed telemetry', async () => {
+    // Mirrors the review gate's real shape (run-review.mts fans out one execJudgeAsync per domain
+    // reviewer concurrently) — a shared module-level kill path must not let one call's timeout
+    // block/misattribute another's outcome.
+    fakeClaude(TRAP_AND_SLEEP);
+    const startedAt = Date.now();
+    const [a, b] = await Promise.all([
+      execJudgeAsync({
+        label: 'review:api-security-reviewer',
+        args: ['-p', '--model', 'opus', 'x'],
+        input: 'y',
+        timeout: 300,
+      }),
+      execJudgeAsync({
+        label: 'review:correctness-reviewer',
+        args: ['-p', '--model', 'opus', 'x'],
+        input: 'y',
+        timeout: 300,
+      }),
+    ]);
+    const elapsedMs = Date.now() - startedAt;
+    expect(a).toBeNull();
+    expect(b).toBeNull();
+    expect(elapsedMs).toBeLessThan(3000); // both killed promptly, not serialized behind the 5s sleep
+    const evs = events().filter((e) => e.type === 'judge_exec');
+    expect(evs).toHaveLength(2);
+    expect(evs.every((e) => e.outcome === 'timeout')).toBe(true);
+    const judges = evs.map((e) => e.judge).sort();
+    expect(judges).toEqual(['review:api-security-reviewer', 'review:correctness-reviewer']);
+  });
+});
+
+describe('timeout boundary values (sc-1317 follow-up)', () => {
+  it('async: an out-of-range timeout (-1) resolves null instead of rejecting the promise', async () => {
+    // execFile validates `timeout` and THROWS SYNCHRONOUSLY for a negative value; unlike its sync
+    // twin (wrapped in try/catch), execJudgeAsync had no guard around the execFile() call itself, so
+    // that synchronous throw became a REJECTED promise — breaking the documented "never throws,
+    // always resolves null" contract for any caller that awaits it without its own try/catch (e.g.
+    // completeness.mts's `await exec(...)`, which sits outside its own try/catch block).
+    fakeClaude('echo FIT');
+    await expect(
+      execJudgeAsync({
+        label: 'vision',
+        args: ['-p', '--model', 'opus', 'x'],
+        input: 'y',
+        timeout: -1,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('sync: an out-of-range timeout (-1) returns null instead of throwing', () => {
+    fakeClaude('echo FIT');
+    expect(() =>
+      execJudge({
+        label: 'vision',
+        args: ['-p', '--model', 'opus', 'x'],
+        input: 'y',
+        timeout: -1,
+      }),
+    ).not.toThrow();
+  });
+
+  it('timeout: 0 disables the cap (Node semantics) rather than killing instantly', async () => {
+    fakeClaude('echo FIT');
+    const out = await execJudgeAsync({
+      label: 'vision',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: 0,
+    });
+    expect(out?.trim()).toBe('FIT');
+  });
+
+  it('timeout: Number.MAX_SAFE_INTEGER overflows Node\'s 32-bit timer to ~1ms, not "no timeout"', async () => {
+    // A caller who thinks "pass a huge number" is a safe way to soften/disable the cap gets the
+    // OPPOSITE of what they intended: Node silently clamps an out-of-32-bit-range delay and kills
+    // almost immediately. Documented here so nobody relies on that assumption.
+    fakeClaude(TRAP_AND_SLEEP); // would run the full 5s if the timeout were honored as "huge"
+    const startedAt = Date.now();
+    const out = await execJudgeAsync({
+      label: 'vision',
+      args: ['-p', '--model', 'opus', 'x'],
+      input: 'y',
+      timeout: Number.MAX_SAFE_INTEGER,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    expect(out).toBeNull();
+    expect(elapsedMs).toBeLessThan(3000);
   });
 });
