@@ -32,6 +32,8 @@ const ENV_KEYS = [
   'FRINK_REVIEW_MODEL',
   'GUARD_REVIEW_SKIP',
   'FRINK_REVIEW_SKIP',
+  'GUARD_REVIEW_NO_TOPOLOGY_WARN',
+  'FRINK_REVIEW_NO_TOPOLOGY_WARN',
   'GUARD_REVIEW_CONCURRENCY',
   'FRINK_REVIEW_CONCURRENCY',
   'GUARD_NO_COMPLETENESS',
@@ -95,7 +97,12 @@ afterEach(() => {
 
 // A consumer repo with a backend/frontend topology, synced agent briefs, and one staged file
 // per requested domain. Returns its root.
-function consumerRepo({ backend = false, frontend = false } = {}) {
+function consumerRepo({
+  backend = false,
+  frontend = false,
+  styles = false,
+  emptyFrontendRoots = false,
+} = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'guard-review-gate-'));
   dirs.push(repo);
   execSync('git init -q', { cwd: repo });
@@ -103,7 +110,12 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
     join(repo, 'guard.config.json'),
     JSON.stringify({
       scanRoots: ['src'],
-      review: { backendRoots: ['src/main'], frontendRoots: ['src/renderer'] },
+      review: {
+        backendRoots: ['src/main'],
+        // The shipped templates/generic shape on a frontend repo: the domain is live, its roots
+        // are not declared, and the two frontend reviewers are therefore never selected.
+        frontendRoots: emptyFrontendRoots ? [] : ['src/renderer'],
+      },
     }),
   );
   const agents = join(repo, '.claude', 'agents');
@@ -137,6 +149,10 @@ function consumerRepo({ backend = false, frontend = false } = {}) {
   if (frontend) {
     mkdirSync(join(repo, 'src', 'renderer'), { recursive: true });
     writeFileSync(join(repo, 'src', 'renderer', 'App.tsx'), 'export const A = 1;\n');
+  }
+  if (styles) {
+    mkdirSync(join(repo, 'src', 'renderer'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'renderer', 'theme.scss'), '.a { color: red; }\n');
   }
   execSync('git add .', { cwd: repo });
   return repo;
@@ -731,6 +747,115 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(skips.some((e) => e.reviewer === 'commit-guard' && e.reason === 'not_selected')).toBe(
       false,
     );
+  });
+
+  // An empty `review.frontendRoots` drops both frontend reviewers via selectReviewers' trailing
+  // `.filter(files.length > 0)` — the shipped templates/generic default on a frontend repo. It used
+  // to be entirely silent; these pin that it never is again.
+  describe('an empty domain root is never a silent drop', () => {
+    const stderr = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+    const lines = (spy) => spy.mock.calls.map((c) => String(c[0]));
+    const skipRows = (sink) =>
+      readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type === 'review_skipped');
+
+    it('warns BEFORE the nothing-selected early return', async () => {
+      // A .scss-only diff selects no domain reviewer at all; dropping conventions too empties the
+      // selection entirely, so the gate takes the `selected.length === 0` return. The warning must
+      // already have been printed — that ordering is the whole point of the call site.
+      const repo = consumerRepo({ styles: true, emptyFrontendRoots: true });
+      process.env.GUARD_REVIEW_SKIP = 'conventions-reviewer';
+      const spy = stderr();
+      const exec = mkExec(async () => 'VERDICT: PASS');
+      expect(await runReviewGate(repo, { exec })).toBe(0);
+      expect(exec).not.toHaveBeenCalled(); // proves the early return was taken
+      expect(lines(spy)).toEqual(
+        expect.arrayContaining([
+          'guard-review: frontend-security-reviewer skipped (review.frontendRoots is empty in guard.config.json)',
+          'guard-review: frontend-performance-reviewer skipped (review.frontendRoots is empty in guard.config.json)',
+        ]),
+      );
+      expect(lines(spy).some((l) => l.includes('1 staged frontend file(s) went unreviewed'))).toBe(
+        true,
+      );
+    });
+
+    it('still runs the backend reviewers it did select', async () => {
+      const repo = consumerRepo({ backend: true, frontend: true, emptyFrontendRoots: true });
+      const spy = stderr();
+      const exec = passWithArtifact(repo);
+      expect(await runReviewGate(repo, { exec })).toBe(0);
+      const ran = exec.mock.calls.map((c) => c[0].label);
+      expect(ran).toEqual(expect.arrayContaining(['review:api-security-reviewer']));
+      expect(ran).not.toEqual(expect.arrayContaining(['review:frontend-security-reviewer']));
+      expect(lines(spy).filter((l) => l.includes('review.frontendRoots is empty'))).toHaveLength(2);
+    });
+
+    it('attributes the non-run to empty_roots, not to plain not_selected', async () => {
+      const repo = consumerRepo({ frontend: true, emptyFrontendRoots: true });
+      const sink = join(repo, 'events.jsonl');
+      process.env.DEVKIT_GATE_EVENTS = sink;
+      process.env.DEVKIT_SHIP_ID = 'ship-empty-roots';
+      stderr();
+      expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+      const skips = skipRows(sink);
+      expect(
+        skips
+          .filter((e) => e.reason === 'empty_roots')
+          .map((e) => e.reviewer)
+          .sort(),
+      ).toEqual(['frontend-performance-reviewer', 'frontend-security-reviewer']);
+      // A config bug and "nothing in its domain was staged" are opposite conclusions downstream —
+      // the pair must never also appear as not_selected.
+      expect(
+        skips.filter((e) => e.reason === 'not_selected' && e.reviewer.startsWith('frontend-')),
+      ).toEqual([]);
+    });
+
+    it('stays silent on a backend-only diff', async () => {
+      const repo = consumerRepo({ backend: true, emptyFrontendRoots: true });
+      const spy = stderr();
+      expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(0);
+      expect(lines(spy).filter((l) => l.includes('review.frontendRoots is empty'))).toEqual([]);
+    });
+
+    it('stays silent in review mode, where effectiveReviewConfig already healed the roots', async () => {
+      const repo = consumerRepo({ frontend: true, emptyFrontendRoots: true });
+      process.env.DEVKIT_RUN_MODE = 'review';
+      process.env.DEVKIT_REVIEW_ASSET_ROOT = reviewAssets();
+      const spy = stderr();
+      await runReviewGate(repo, { exec: passWithArtifact(repo) });
+      expect(lines(spy).filter((l) => l.includes('review.frontendRoots is empty'))).toEqual([]);
+    });
+
+    it('rejects an explicitly-empty INJECTED root list rather than silently not healing', async () => {
+      // The one path that could bypass effectiveReviewConfig's heal: injectedRoots returns a
+      // non-null [] for '[]', which `frontend ?? fallback` would keep. normalizeReviewRoots refuses
+      // an empty array first, so review mode fails closed on the bad invocation instead — the
+      // warning is for a CONSUMER's config, never a substitute for validating our own inputs.
+      const repo = consumerRepo({ frontend: true, emptyFrontendRoots: true });
+      process.env.DEVKIT_RUN_MODE = 'review';
+      process.env.DEVKIT_REVIEW_ASSET_ROOT = reviewAssets();
+      process.env.DEVKIT_REVIEW_FRONTEND_ROOTS = '[]';
+      const spy = stderr();
+      expect(await runReviewGate(repo, { exec: passWithArtifact(repo) })).toBe(1);
+      expect(lines(spy).some((l) => l.includes('review setup failure'))).toBe(true);
+    });
+
+    it('GUARD_REVIEW_NO_TOPOLOGY_WARN silences the line without re-enabling the reviewers', async () => {
+      const repo = consumerRepo({ frontend: true, emptyFrontendRoots: true });
+      process.env.GUARD_REVIEW_NO_TOPOLOGY_WARN = '1';
+      const spy = stderr();
+      const exec = passWithArtifact(repo);
+      expect(await runReviewGate(repo, { exec })).toBe(0);
+      expect(lines(spy).filter((l) => l.includes('review.frontendRoots is empty'))).toEqual([]);
+      expect(exec.mock.calls.map((c) => c[0].label)).not.toEqual(
+        expect.arrayContaining(['review:frontend-security-reviewer']),
+      );
+    });
   });
 
   it('reports the gate-level disable as its own skip row', async () => {

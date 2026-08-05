@@ -16,6 +16,17 @@ export interface CheckResult {
   remediation: string;
   /** Whether `devkit doctor --fix` can heal this one (a baseline never is — it's cut once at init). */
   fixable: boolean;
+  /**
+   * Reported, but deliberately OUTSIDE the exit code — a real finding that is not a reason to call
+   * the repo unhealthy. Until this existed the only way to express that tier was to bypass
+   * CheckResult entirely and print from `run()` (printQavisAdvisoryHealth), which put the signal
+   * beyond the reach of every consumer that reads `results`.
+   *
+   * An advisory still renders with its true status glyph — a warning that prints as `✓` teaches the
+   * reader to distrust the glyph — it just never flips `drifted`, and so never triggers `--fix`'s
+   * "applied" line for something `--fix` cannot repair.
+   */
+  advisory?: boolean;
 }
 
 export function check(
@@ -24,6 +35,7 @@ export function check(
   detail: string,
   remediation = '',
   fixable = false,
+  advisory = false,
 ): CheckResult {
-  return { name, status, detail, remediation, fixable };
+  return { name, status, detail, remediation, fixable, advisory };
 }

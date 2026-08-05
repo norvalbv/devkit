@@ -508,7 +508,7 @@ export default async function run(args: string[], cwd: string): Promise<number> 
   }
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
-  const drifted = results.some((r) => r.status !== 'OK');
+  const drifted = results.some((r) => r.status !== 'OK' && !r.advisory); // see CheckResult.advisory
   if (fix && drifted) {
     applyFix(cwd, results, sel, cfg.stack ?? 'generic', Boolean(cfg.standalone));
     console.log('\n--fix applied. Re-run `devkit doctor` to confirm.');
