@@ -18,15 +18,21 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolveGuardConfig } from '../config.mts';
 import {
   type Classification,
   classify,
-  extractPattern,
+  firstAdvisablePattern,
   hasCommandSearch,
   normalize,
 } from './search-tool-lib.mts';
 import { resolveSearchTools, type SearchTools } from './tools.mts';
+
+// Ecosystem-universal roots the semantic-search index never covers,
+// regardless of consumer config — never a hardcoded stack layout (see
+// docs/decisions/synced-assets-layout-agnostic.md).
+const EXCLUDE_ROOTS = ['node_modules', '.git', '/tmp', tmpdir()];
 
 // The Bash PreToolUse payload Claude Code writes to stdin (only the fields we read).
 interface PreToolUsePayload {
@@ -68,16 +74,24 @@ const cmd = normalize(rawCmd);
 // is ignored. classify() then filters literal vs conceptual.
 if (!hasCommandSearch(cmd)) process.exit(0);
 
-// Extract the user-facing pattern. We look for the first quoted string,
-// falling back to the first non-flag token after the binary.
-const pattern = extractPattern(cmd);
+// Extract the user-facing pattern, skipping any invocation (in a compound
+// command) whose OWN target is outside anywhere the semantic index could
+// cover — the ecosystem-universal exclude roots (node_modules, /tmp, .git)
+// or the consumer's configured scanRoots — since the steered tool cannot
+// answer that invocation's query regardless of how its pattern classifies.
+// This must stay correlated per-invocation, not a separate whole-command
+// exclusion check followed by a separate "first pattern" extraction — the
+// two can disagree on WHICH invocation they're each looking at (guard-review
+// finding, sc-1359 follow-up round 8).
+const guardConfig = resolveGuardConfig();
+const pattern = firstAdvisablePattern(cmd, EXCLUDE_ROOTS, guardConfig.scanRoots);
 if (!pattern) process.exit(0);
 
 const classification = classify(pattern);
 
 if (classification.verdict === 'literal') process.exit(0);
 
-const tools = resolveSearchTools(resolveGuardConfig());
+const tools = resolveSearchTools(guardConfig);
 const advice = buildAdvice(classification, pattern, tools);
 
 if (MODE === 'block' && classification.verdict === 'conceptual_high') {

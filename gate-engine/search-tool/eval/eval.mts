@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveGuardConfig } from '../../config.mts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -31,10 +32,19 @@ const queriesPath = resolve(here, 'queries.json');
 const { queries } = JSON.parse(readFileSync(queriesPath, 'utf8'));
 const failOnRegression = process.argv.includes('--fail');
 
+// The guard now scopes advice to the consumer's configured scanRoots (see
+// firstAdvisablePattern) — a hardcoded `src/` target would silently score
+// every query as "not flagged" on any consumer whose scanRoots don't
+// include `src` (e.g. devkit's own `["cli","gate-engine"]`), since the
+// spawned guard subprocess below resolves ITS OWN scanRoots from the SAME
+// cwd this script runs in. Deriving the target the same way keeps the two
+// in sync for any consumer.
+const evalScanRoot = resolveGuardConfig().scanRoots[0] ?? 'src';
+
 const results = queries.map((q) => {
   const expectedFlag = q.expected_tool !== 'grep' && q.expected_tool !== 'find_glob';
   // Build a plausible bash command for this pattern.
-  const cmd = `grep -rn "${q.pattern}" src/`;
+  const cmd = `grep -rn "${q.pattern}" ${evalScanRoot}/`;
   const proc = spawnSync('node', [guard], {
     input: JSON.stringify({ tool_input: { command: cmd } }),
     encoding: 'utf8',
