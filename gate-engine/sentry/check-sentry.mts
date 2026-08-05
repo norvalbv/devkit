@@ -73,6 +73,7 @@ import { pathToFileURL } from 'node:url';
 import { envBool, resolveGuardConfig } from '../config.mts';
 import { focusHunks } from '../judge/diff-focus.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
+import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
@@ -484,9 +485,8 @@ export function run(gate: boolean): void {
     }
     process.exit(applyGateResult(result, message, hard));
   } catch (e: unknown) {
-    const detail = e instanceof Error ? e.message : String(e);
-    console.error(`sentry-gate: could not run — ${detail}`);
-    process.exit(2); // fail-open
+    // sc-1366: an unreadable staged object is infrastructure, not a verdict (see odb-probe.mts).
+    process.exit(reportGateInfraFailure('sentry', 'sentry-gate', e, CWD, 2)); // 2 = fail-open
   }
 }
 

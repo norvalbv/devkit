@@ -16,6 +16,7 @@ import { markEnd, markStart } from '../husky/husky.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
 import { type CheckResult, check } from './check-result.mts';
 import { strayGateCalls } from './stray-gate-calls.mts';
+import { checkFailOpenGuards } from './unguarded-gate-calls.mts';
 
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
@@ -289,4 +290,13 @@ export function checkHookRunner(cwd: string): CheckResult {
     'OK',
     `runner reachable (${required.length} files) — survives \`git worktree add\``,
   );
+}
+
+/**
+ * Every hook-shaped check, as one list. Exists so `devkit doctor` can gain a hook check without
+ * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
+ * ratchet is shrink-only.
+ */
+export function hookChecks(cwd: string, guards: string[]): CheckResult[] {
+  return [checkHusky(cwd, guards), checkHookRunner(cwd), checkFailOpenGuards(cwd)];
 }
