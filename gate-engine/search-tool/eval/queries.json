@@ -43,6 +43,12 @@
       "expected_tool": "find_glob",
       "why": "filename pattern"
     },
+    {
+      "id": "lit-08",
+      "pattern": "export async function getFlowDriveInfoForSubChat",
+      "expected_tool": "grep",
+      "why": "verbatim code snippet (sc-1359 #1) — keyword + identifier, not English prose"
+    },
 
     {
       "id": "sem-01",
@@ -91,6 +97,30 @@
       "pattern": "how does token refresh work",
       "expected_tool": "searchCode",
       "why": "English question"
+    },
+    {
+      "id": "sem-09",
+      "pattern": "explain how sessionToken refresh works",
+      "expected_tool": "searchCode",
+      "why": "regression guard (sc-1359) — leads with a non-anchored word, contains one camelCase token, must still flag"
+    },
+    {
+      "id": "sem-10",
+      "pattern": "handles OAuth callback errors",
+      "expected_tool": "searchCode",
+      "why": "regression guard (sc-1359) — domain acronym must not read as a code keyword"
+    },
+    {
+      "id": "sem-11",
+      "pattern": "function getUser fails silently",
+      "expected_tool": "searchCode",
+      "why": "regression guard (sc-1359, guard-review finding) — a bug report NAMING a symbol, keyword+identifier not last"
+    },
+    {
+      "id": "sem-12",
+      "pattern": "explain function getUserData",
+      "expected_tool": "searchCode",
+      "why": "regression guard (sc-1359, guard-review finding) — a REQUEST about a symbol, leading verb is not a code keyword"
     },
 
     {
