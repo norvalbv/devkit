@@ -14,7 +14,7 @@
  *   - a block prints fallow's own explanation, never a bare exit code (sc-1192's lesson).
  */
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -86,7 +86,7 @@ function run(
     input: input ?? JSON.stringify(cursor ? { command } : { tool_input: { command } }),
     env: { ...process.env, PATH, CLAUDE_PROJECT_DIR: dir, ...env },
   });
-  return { status: r.status, stderr: r.stderr ?? '' };
+  return { status: r.status, stderr: r.stderr ?? '', stdout: r.stdout ?? '' };
 }
 
 const PASS = '{"verdict":"pass","attribution":{"duplication_introduced":0}}';
@@ -221,6 +221,51 @@ describe('fallow-staged-gate.sh', () => {
     expect(r.status).toBe(0);
     expect(r.stderr).toMatch(/no staged added lines/);
     expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
+  /**
+   * sc-1366. `2>/dev/null || true` used to collapse "the diff is empty" and "the diff could not be
+   * read" into one skip message, so a staged object git can no longer read was reported as
+   * "nothing to audit" — a clean-looking result for a repo in a broken state.
+   */
+  it('an unreadable staged object is reported as a fault, not as "nothing to audit"', () => {
+    const dir = mkTmp('staged-gate-');
+    const binDir = stubFallow(dir, PASS);
+    repoWithStaged(dir);
+    // Reproduce the sc-1420 failure. BOTH steps are load-bearing, verified: with the loose blob
+    // deleted but the working-tree file still holding identical content, `git diff --cached`
+    // re-reads the content from the worktree and exits 0. It only fails once neither the object
+    // database nor the worktree can supply the staged content.
+    const oid = spawnSync('git', ['rev-parse', ':a.ts'], {
+      cwd: dir,
+      encoding: 'utf8',
+    }).stdout.trim();
+    rmSync(join(dir, '.git', 'objects', oid.slice(0, 2), oid.slice(2)), { force: true });
+    rmSync(join(dir, 'a.ts'), { force: true });
+
+    const r = run(dir, binDir);
+    // ALLOW: exit 2 is this hook's BLOCK signal, and a failing staged set must never block the
+    // `git reset` / `git restore --staged` commands that make it recoverable.
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/could not READ the staged diff/);
+    expect(r.stderr).not.toMatch(/no staged added lines/);
+    // stderr on an exit-0 PreToolUse hook is surfaced nowhere, so the report must ride stdout.
+    const payload = JSON.parse(r.stdout.trim());
+    expect(payload.systemMessage).toMatch(/NOT a finding against your code/);
+    // Never a permissionDecision: this hook must not start auto-approving commits it used to
+    // leave to the normal permission flow.
+    expect(payload.hookSpecificOutput).toBeUndefined();
+    expect(existsSync(join(dir, 'argv.log'))).toBe(false);
+  });
+
+  it('a readable-but-empty staged diff still takes the plain skip path', () => {
+    const dir = mkTmp('staged-gate-');
+    writeFileSync(join(dir, '.fallowrc.jsonc'), '{}\n');
+    spawnSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    const r = run(dir, stubFallow(dir, PASS));
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/no staged added lines/);
+    expect(r.stdout.trim()).toBe(''); // no JSON — nothing to report
   });
 
   it('fails OPEN before fallow when the staged diff exceeds its 10 MiB stdin cap', () => {

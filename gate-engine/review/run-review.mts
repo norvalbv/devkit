@@ -33,6 +33,7 @@
 import { envFlag, type GuardConfig, resolveGuardConfig } from '../config.mts';
 import { emitCacheHit } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { renderGoverningClaudeMd } from './claude-md.mts';
@@ -385,16 +386,12 @@ export async function runReviewGate(
     // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
     diffs = selected.map((s) => gitCached(cwd, [], s.files));
   } catch (e: unknown) {
-    if (reviewMode) {
-      console.error(
-        `guard-review: review setup failure — ${e instanceof Error ? e.message : String(e)}`,
-      );
-      return finish(1);
-    }
-    console.error(
-      `guard-review: could not run — ${e instanceof Error ? e.message : String(e)}${strict ? ' (strict ship mode: failing closed)' : ''}`,
-    );
-    return finish(strict ? 3 : 2); // fail-open, except on a ship
+    // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
+    // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+    const g = 'guard-review';
+    const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
+    const fb = reviewMode ? { message: m } : { strict };
+    return finish(reportGateInfraFailure(g, g, e, cwd, reviewMode ? 1 : strict ? 3 : 2, fb));
   }
 
   const cache = loadCache(cwd);
