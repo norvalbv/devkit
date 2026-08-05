@@ -14,7 +14,7 @@
  * consumer-side build.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cancel, confirm, isCancel } from '@clack/prompts';
 import ship from './ship.mts';
@@ -184,6 +184,34 @@ export default async function release(args: string[], cwd: string): Promise<numb
       encoding: 'utf8',
     }).trim();
     if (built !== target) throw new Error(`built bin reports ${built}, expected ${target}`);
+  } catch (e: unknown) {
+    console.error(
+      `devkit release: dist smoke check failed — ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return 1;
+  }
+  // Belt-and-suspenders on top of the version check above: a --version match proves the bin ran, not
+  // that a given source fix actually reached dist (sc-1340's own PR claimed it did and was wrong —
+  // sc-1419 was the consequence). Assert the stdin-hang fix's call site is actually in the built dist.
+  // Everything here — including the read — stays inside one try/catch: existsSync alone would accept
+  // a directory, and an unguarded readFileSync would throw uncaught on a permission error or a file
+  // removed between the check and the read.
+  const shipBranchPath = join(cwd, 'dist', 'cli', 'lib', 'ship', 'ship-branch.sh');
+  const readStdinBodyPath = join(cwd, 'dist', 'cli', 'lib', 'ship', 'read-stdin-body.sh');
+  const isFile = (p: string) => existsSync(p) && statSync(p).isFile();
+  try {
+    if (!isFile(shipBranchPath) || !isFile(readStdinBodyPath)) {
+      throw new Error(
+        'dist/cli/lib/ship/ship-branch.sh or dist/cli/lib/ship/read-stdin-body.sh ' +
+          'is missing from the build',
+      );
+    }
+    if (!readFileSync(shipBranchPath, 'utf8').includes('ship_read_stdin_body')) {
+      throw new Error(
+        'dist/cli/lib/ship/ship-branch.sh does not wire ship_read_stdin_body ' +
+          '(the sc-1419 stdin-hang fix is missing from this build)',
+      );
+    }
   } catch (e: unknown) {
     console.error(
       `devkit release: dist smoke check failed — ${e instanceof Error ? e.message : String(e)}`,
