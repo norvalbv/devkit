@@ -32,6 +32,13 @@ function runGuard(command, env = {}) {
   const out = execFileSync('node', [GUARD], {
     input: JSON.stringify({ tool_input: { command } }),
     env: { ...process.env, ...env },
+    // No guard.config.json here (fresh tmpdir) so scanRoots falls back to the
+    // DEFAULT (['src']), matching this file's `src/`-targeted fixtures — and
+    // isolates these hook-wiring tests from devkit's OWN dogfood scanRoots
+    // (["cli","gate-engine"]), which would otherwise read every `src/`/`.`
+    // target here as out-of-scope now that firstAdvisablePattern also scopes
+    // to scanRoots (PR review finding, sc-1359 follow-up).
+    cwd: stateDir,
   }).toString();
   return out ? JSON.parse(out) : null;
 }
@@ -103,6 +110,20 @@ describe('search-tool-guard (PreToolUse)', () => {
     )?.hookSpecificOutput?.additionalContext;
     expect(advice).toContain('the retry backoff path');
     expect(advice).not.toContain('auth flow logic');
+  });
+
+  it('stays quiet on a target outside the configured scanRoots (PR review finding)', () => {
+    // This fixture's isolated cwd has no guard.config.json, so scanRoots falls back to the
+    // DEFAULT (['src']) — "docs/" is out of scope under that default.
+    expect(guardFires(`grep -rn "how does the docs pipeline render" docs/`)).toBe(false);
+  });
+
+  it('in a compound command, skips the out-of-scanRoots invocation and advises on the in-scope one (PR review finding)', () => {
+    const advice = runGuard(
+      `grep -rn "how does the docs pipeline render" docs/ && grep -rn "the retry backoff path" src`,
+    )?.hookSpecificOutput?.additionalContext;
+    expect(advice).toContain('the retry backoff path');
+    expect(advice).not.toContain('how does the docs pipeline render');
   });
 
   it('steers toward the CONFIGURED search tool (not a hardcoded name)', () => {

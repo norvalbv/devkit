@@ -52,6 +52,18 @@ const RE_GREP_SCOPE = /(?:^|\s|\$\()(grep|rg|ripgrep|ack|ag|fd)(?=\s|$)([\s\S]*)
 const RE_FIND_SCOPE = /(?:^|\s|\$\()find(?=\s|$)([\s\S]*)/;
 const RE_WHITESPACE = /\s+/;
 
+// A bare `.`/`./`/`..`/`../` target is a cwd/parent-dir reference, not a
+// real scoped path — searching it covers everything the configured roots
+// would too, so its PRESENCE must keep an invocation in scope (see
+// allTargetsMissEveryRoot, the only check this matters for — guard-review
+// finding, sc-1359 follow-up round 9, refined in round 2 of the PR-review
+// follow-up: this must be a per-element check inside a match predicate, not
+// a pre-filter that strips cwd-refs out of a target array, which breaks a
+// MIXED target list like `grep ... node_modules .`). A real relative
+// sub-path like `./src` is unaffected — this only matches the BARE
+// reference, nothing trailing it.
+const RE_CWD_REF = /^\.\.?\/?$/;
+
 // --- classify ---
 const RE_HAS_WHITESPACE = /\s/;
 const RE_PATH_PREFIX = /^[~/]/;
@@ -178,11 +190,13 @@ function grepInvocations(cmd: string): { pattern: string | null; targets: string
     const match = matchUnquoted(segment, RE_GREP_SCOPE);
     if (!match) continue;
     const { patternValues, positionals } = classifyOperands(tokenizeArgv(match[2]), match[1]);
-    invocations.push(
-      patternValues.length
-        ? { pattern: patternValues[0], targets: positionals }
-        : { pattern: positionals[0] ?? null, targets: positionals.slice(1) },
-    );
+    // NOT filtering bare cwd-refs (`.`/`..`) out of targets here — see
+    // allTargetsMissEveryRoot's doc comment for why a pre-filter is wrong
+    // for a MIXED target list.
+    invocations.push({
+      pattern: patternValues.length ? patternValues[0] : (positionals[0] ?? null),
+      targets: patternValues.length ? positionals : positionals.slice(1),
+    });
   }
   return invocations;
 }
@@ -204,25 +218,33 @@ export function extractPattern(c: string): string | null {
 /**
  * Like extractPattern, but — for a compound command with more than one
  * grep-family invocation — skips any invocation whose OWN targets are
- * entirely inside `excludeRoots`, so its pattern is never advised on merely
- * because a LATER, unrelated invocation elsewhere in the same command has a
- * non-excluded target. Guard-only: isExcludedTarget's whole-command
- * aggregate (any-in-scope-wins) stays correct for the counter, which only
- * asks "is there real search activity happening anywhere in this command",
- * not "which specific pattern should I advise on" — the guard is the one
- * that attributes a pattern, so it's the one that needs this per-invocation
- * correlation (guard-review finding, sc-1359 follow-up round 8: `grep "auth
- * flow logic" node_modules && grep "y" src` used to advise on "auth flow
- * logic" — the excluded invocation's pattern — because isExcludedTarget and
- * extractPattern picked their answers from two different invocations).
+ * entirely inside `excludeRoots` OR entirely outside `scanRoots`, so its
+ * pattern is never advised on merely because a LATER, unrelated invocation
+ * elsewhere in the same command has an answerable target. This must stay a
+ * PER-INVOCATION check, not a separate whole-command aggregate (isExcludedTarget
+ * / isOutOfScanRoots) followed by a separate "first pattern" extraction — the
+ * two can disagree on WHICH invocation they're each looking at (guard-review
+ * finding, sc-1359 follow-up round 8: `grep "auth flow logic" node_modules &&
+ * grep "y" src` used to advise on "auth flow logic" — the excluded
+ * invocation's pattern — because isExcludedTarget and extractPattern picked
+ * their answers from two different invocations). scanRoots scoping was added
+ * later (PR review finding) once this per-invocation correlation existed to
+ * carry it correctly — the whole-command isOutOfScanRoots was deliberately
+ * NOT wired into the guard earlier because eval/eval.mts's synthetic `src/`
+ * targets would have gone silently unscored whenever a consumer's scanRoots
+ * don't include `src` (e.g. devkit's own `["cli","gate-engine"]`); eval.mts
+ * now derives its target from the resolved scanRoots instead of hardcoding
+ * `src/`, so that's no longer a blocker.
  */
-export function firstAdvisablePattern(cmd: string, excludeRoots: string[]): string | null {
+export function firstAdvisablePattern(
+  cmd: string,
+  excludeRoots: string[],
+  scanRoots: string[],
+): string | null {
   for (const inv of grepInvocations(cmd)) {
     if (inv.pattern === null) continue;
-    const excluded =
-      inv.targets.length > 0 &&
-      inv.targets.every((t) => excludeRoots.some((r) => matchesRoot(t, r)));
-    if (excluded) continue;
+    if (allTargetsMatchSomeRoot(inv.targets, excludeRoots)) continue;
+    if (allTargetsMissEveryRoot(inv.targets, scanRoots)) continue;
     return inv.pattern;
   }
   return null;
@@ -248,29 +270,15 @@ function findInvocationTargets(cmd: string): string[] {
   return targets;
 }
 
-// A bare `.`/`./`/`..`/`../` target is a cwd/parent-dir reference, not a
-// real scoped path — it carries no information about which directory
-// hierarchy is being searched, so it must be treated exactly like "no
-// operand" (never excluded, never out-of-scanRoots). Without this filter,
-// `matchesRoot('.', root)` is false for every root (it isn't literally
-// equal to, nor does it start with, any configured root), which
-// isOutOfScanRoots' inverted "every target fails to match" check reads as
-// "every target is out of scope" — silently no-op'ing the counter on the
-// extremely common `grep -r "x" .` shape (guard-review finding, sc-1359
-// follow-up round 9). A real relative sub-path like `./src` is unaffected —
-// this only matches the BARE reference, nothing trailing it.
-const RE_CWD_REF = /^\.\.?\/?$/;
-
 // Every non-pattern target across all grep/fd invocations (see
 // grepInvocations), plus every leading path token across all find
 // invocations — candidate targets. Deliberately NOT filtered by "contains a
 // slash": a bare target with no subpath (`grep -rn "x" node_modules`, `find
-// node_modules`) is a normal, common shape and must still be seen.
+// node_modules`) is a normal, common shape and must still be seen. Also NOT
+// filtered by cwd-ref (see allTargetsMissEveryRoot's doc comment) — a bare
+// `.`/`..` alongside another target must stay visible to that check.
 function targetTokens(cmd: string): string[] {
-  return [
-    ...grepInvocations(cmd).flatMap((inv) => inv.targets),
-    ...findInvocationTargets(cmd),
-  ].filter((t) => !RE_CWD_REF.test(t));
+  return [...grepInvocations(cmd).flatMap((inv) => inv.targets), ...findInvocationTargets(cmd)];
 }
 
 // Windows paths can appear literally in a bash command string on Windows
@@ -294,6 +302,41 @@ function matchesRoot(token: string, root: string): boolean {
   return t === r || t.startsWith(`${r}/`) || t.includes(`/${r}/`);
 }
 
+// Do ALL of `targets` match SOME root in `roots`? Empty targets => false (no
+// operand means "searches cwd", never excluded/out-of-scope). Shared by
+// isExcludedTarget (whole-command) and firstAdvisablePattern (per-invocation)
+// so the two can't drift on what "excluded" means.
+function allTargetsMatchSomeRoot(targets: string[], roots: string[]): boolean {
+  return targets.length > 0 && targets.every((t) => roots.some((r) => matchesRoot(t, r)));
+}
+
+// Do ALL of `targets` fail to match EVERY root in `roots`? Empty roots =>
+// false (conservative fallback — an unconfigured scanRoots never excludes
+// anything, never "match-nothing"). Shared by isOutOfScanRoots (whole-
+// command) and firstAdvisablePattern (per-invocation).
+//
+// A bare cwd-ref target (`.`/`./`/`..`/`../`) NEVER counts as "missing" —
+// it means "search all of cwd", which by definition includes whatever the
+// configured roots are, so its mere PRESENCE is enough to keep an
+// invocation in scope even alongside another, genuinely out-of-scope
+// target. This must be a per-element exception INSIDE the .every(), not a
+// pre-filter that removes cwd-refs from the target array before this runs
+// (PR review finding, sc-1359 follow-up round 2: an earlier version
+// filtered cwd-refs out of grepInvocations'/targetTokens' target arrays
+// directly — for a single bare `.` that correctly left an empty array
+// (never excluded, via the `targets.length > 0` guard), but for a MIXED
+// list like `grep ... node_modules .`, removing `.` left only
+// `['node_modules']`, which then matched every remaining root and was
+// wrongly classified as fully excluded — silently losing the exact signal
+// the `.` was supposed to provide).
+function allTargetsMissEveryRoot(targets: string[], roots: string[]): boolean {
+  return (
+    roots.length > 0 &&
+    targets.length > 0 &&
+    targets.every((t) => !RE_CWD_REF.test(t) && !roots.some((r) => matchesRoot(t, r)))
+  );
+}
+
 /**
  * Is every target in `cmd` inside one of the ecosystem-universal excluded
  * roots (node_modules, .git, the OS temp dir — never a hardcoded stack
@@ -303,25 +346,17 @@ function matchesRoot(token: string, root: string): boolean {
  * in-scope target keeps the command worth advising on).
  */
 export function isExcludedTarget(cmd: string, excludeRoots: string[]): boolean {
-  const targets = targetTokens(cmd);
-  if (!targets.length) return false;
-  return targets.every((t) => excludeRoots.some((root) => matchesRoot(t, root)));
+  return allTargetsMatchSomeRoot(targetTokens(cmd), excludeRoots);
 }
 
 /**
  * Is every target in `cmd` OUTSIDE all of the consumer's `scanRoots`?
  * Mirrors isExcludedTarget's "no operand / any-in-scope-wins" semantics,
  * scoped to the consumer's configured roots (resolveGuardConfig) instead of
- * the universal exclude list. Counter-only (see search-tool-guard /
- * search-tool-counter): applying this to the guard would silence it on
- * eval/eval.mts's synthetic `src/` targets whenever a consumer's scanRoots
- * don't include `src` (e.g. devkit's own `["cli","gate-engine"]`).
+ * the universal exclude list.
  */
 export function isOutOfScanRoots(cmd: string, scanRoots: string[]): boolean {
-  if (!scanRoots.length) return false;
-  const targets = targetTokens(cmd);
-  if (!targets.length) return false;
-  return targets.every((t) => !scanRoots.some((root) => matchesRoot(t, root)));
+  return allTargetsMissEveryRoot(targetTokens(cmd), scanRoots);
 }
 
 /**

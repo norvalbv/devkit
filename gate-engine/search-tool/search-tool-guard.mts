@@ -76,20 +76,22 @@ if (!hasCommandSearch(cmd)) process.exit(0);
 
 // Extract the user-facing pattern, skipping any invocation (in a compound
 // command) whose OWN target is outside anywhere the semantic index could
-// cover (node_modules, /tmp, .git) — the steered tool cannot answer that
-// invocation's query regardless of how its pattern classifies. This must
-// stay correlated per-invocation, not a separate whole-command exclusion
-// check followed by a separate "first pattern" extraction — the two can
-// disagree on WHICH invocation they're each looking at (guard-review
+// cover — the ecosystem-universal exclude roots (node_modules, /tmp, .git)
+// or the consumer's configured scanRoots — since the steered tool cannot
+// answer that invocation's query regardless of how its pattern classifies.
+// This must stay correlated per-invocation, not a separate whole-command
+// exclusion check followed by a separate "first pattern" extraction — the
+// two can disagree on WHICH invocation they're each looking at (guard-review
 // finding, sc-1359 follow-up round 8).
-const pattern = firstAdvisablePattern(cmd, EXCLUDE_ROOTS);
+const guardConfig = resolveGuardConfig();
+const pattern = firstAdvisablePattern(cmd, EXCLUDE_ROOTS, guardConfig.scanRoots);
 if (!pattern) process.exit(0);
 
 const classification = classify(pattern);
 
 if (classification.verdict === 'literal') process.exit(0);
 
-const tools = resolveSearchTools(resolveGuardConfig());
+const tools = resolveSearchTools(guardConfig);
 const advice = buildAdvice(classification, pattern, tools);
 
 if (MODE === 'block' && classification.verdict === 'conceptual_high') {
