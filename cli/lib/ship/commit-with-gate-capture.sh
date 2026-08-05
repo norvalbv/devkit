@@ -117,6 +117,11 @@ commit_with_gate_capture() {
   fi
 
   local rc=0
+  # $log is a REUSED per-branch path ("last-ship-gates-*"), so this attempt must start from empty.
+  # The capture appends now (it must not erase devkit review's preflight progress), which makes
+  # clearing the caller's job — without this every ship on a branch would pile onto the last one.
+  mkdir -p "$(dirname "$log")" 2>/dev/null || true
+  : > "$log" 2>/dev/null || true
   DEVKIT_GATE_ARCHIVE_LOG="$ship_log" run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
     git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
 
