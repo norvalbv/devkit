@@ -29,7 +29,16 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
 - **baseline** — a one-time snapshot of pre-existing violations (`eslint/baselines/*.mjs`) that are
   grandfathered in. Generated **once**, then shrink-only — devkit never re-snapshots to "launder" new debt.
 - **fail-open** — a gate that, when it can't run (missing index, missing dep), **allows** the commit rather
-  than blocking. Standalone hooks are fail-open by design.
+  than blocking. Standalone hooks are fail-open by design. A gate that fails open is **named** in
+  guard-deterministic's report even on a green run, and emits a `could_not_run` telemetry event — it
+  proved nothing, so it must never read like a gate that passed.
+- **deterministic strict** (`GUARD_DETERMINISTIC_STRICT=1`) — opt-in refusal of that fail-open: a gate
+  that opts out is reported as `<label>(could-not-run)` and **exits 1** with the other failures. The
+  sibling of `GUARD_AI_STRICT`, not an instance of it — it stays on exit **1** because there is no outage
+  to distinguish from a finding here, only a local condition (no index, no jscpd) the repo can fix. It
+  rejects only a real opt-out; an `--extra` command's fatal exit 2 was never one and stays
+  `(unexpected:2)`. Nothing exports it by default, and it salts the **deterministic-prefix cache** so a
+  non-strict all-green key can't authorise a later strict run.
 - **fail-closed** — the ship-only inverse of **fail-open**: when a strict AI gate can't reach a verdict
   (a `claude` outage, or inconclusive after its one retry) it **blocks** the ship instead of skipping.
   Armed by `GUARD_AI_STRICT=1`, which only `devkit ship` exports; an ad-hoc `git commit` stays fail-open.

@@ -19,6 +19,7 @@ import {
 } from '../husky/self-host.mts';
 import { checkAgents, checkSkills } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
+import { adviseSearchIndex } from './guard-config-checks.mts';
 import { checkHookRunner } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
 import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mts';
@@ -81,6 +82,10 @@ export async function runSelfHostDoctor(
     console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
   if (sel.skills && primary) advise(await checkSkills(cwd, primary));
   if (sel.agents && primary) advise(await checkAgents(cwd, primary));
+  // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
+  // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
+  // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
+  await adviseSearchIndex(cwd, sel);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
   // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the

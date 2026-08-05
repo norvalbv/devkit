@@ -30,6 +30,13 @@ MATCHER_CHANGED_FILES="<fileA>,<fileB>" \
 # exit 2 → could-not-run (no index / Ollama down). Continue (fail-open).
 ```
 
+**An exit 2 means the matcher proved nothing — treat it as a missing answer, not a clean one.** If you
+did not expect it, run `devkit doctor`: it reports drift when `.search-code/index.db` exists but
+`guard.config.json` has no `indexPath` (the wiring devkit writes at init, silently lost). That is the
+common cause of a repo that has an index and still never runs the gate. A deliberate opt-out is
+declared by writing `"indexPath": null`, which doctor then stays quiet about. To make a could-not-run
+fatal instead of fail-open, set `GUARD_DETERMINISTIC_STRICT=1`.
+
 Skipping this = reviewer cascade + tokens torched on a refactor that's actually incomplete. The gate blocks at commit anyway; pre-flight just catches it before the cascade.
 
 ## Fixing a dup someone hands you (workflow)

@@ -10,8 +10,10 @@ import { detectGitRoot } from "../detect-git-root.mjs";
 import { extractGuardBlock } from "../husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
 import { checkAgents, checkSkills } from "./asset-checks.mjs";
+import { adviseSearchIndex } from "./guard-config-checks.mjs";
 import { checkHookRunner } from "./hook-checks.mjs";
 import { printStrayGateCalls } from "./stray-gate-calls.mjs";
+import { inspectHookFailOpen, renderUnguardedGateCalls } from "./unguarded-gate-calls.mjs";
 export async function runSelfHostDoctor(cwd, cfg, fix) {
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const hookPath = join(gitRoot, '.husky', 'pre-commit');
@@ -38,6 +40,13 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         // Self-host never runs checkHusky, so without this the duplicate-gate warning is unreachable in
         // exactly the repo that dogfoods devkit — the one most likely to grow a hand-written gate copy.
         printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
+        // Same reason for the fail-open check (sc-1366): devkit's own generated calls are `-e`-safe,
+        // but a hand-added gate below the managed block would not be, and this is the repo where one
+        // is most likely to appear.
+        const failOpen = inspectHookFailOpen(gitRoot, join('.husky', 'pre-commit'));
+        for (const line of renderUnguardedGateCalls(failOpen, '.husky/pre-commit')) {
+            console.log(`  ⚠ ${line}`);
+        }
     }
     // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).
     const sel = cfg.components ?? {};
@@ -48,6 +57,10 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         advise(await checkSkills(cwd, primary));
     if (sel.agents && primary)
         advise(await checkAgents(cwd, primary));
+    // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
+    // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
+    // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
+    await adviseSearchIndex(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
