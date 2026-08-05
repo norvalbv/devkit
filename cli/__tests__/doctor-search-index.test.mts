@@ -13,7 +13,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
-import { adviseSearchIndex, checkGuardConfig } from '../lib/doctor/guard-config-checks.mts';
+import {
+  adviseSearchIndex,
+  checkGuardConfig,
+  checkSearchIndex,
+} from '../lib/doctor/guard-config-checks.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
@@ -215,5 +219,38 @@ describe('doctor — a config that does not parse', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ name: 'guard.config.json', status: 'DRIFT' });
     expect(results.find((r) => r.name === CHECK)).toBeUndefined();
+  });
+});
+
+// checkSearchIndex driven directly, for the branches its two callers cannot reach: checkGuardConfig
+// bails before it on an unparseable config, so the raw-key read's own failure path is only
+// observable from here.
+describe('checkSearchIndex — the branches the callers gate off', () => {
+  it('does not read a declared opt-out out of a config that does not parse', () => {
+    const root = mkTmp('doctor-search-index-rawbad-');
+    writeFileSync(join(root, 'guard.config.json'), '{ "indexPath": null,, }');
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    writeFileSync(join(root, '.search-code', 'index.db'), 'stub');
+    // An explicit null WOULD be an opt-out — but not when the file it is written in is broken.
+    const result = checkSearchIndex(root, null, false);
+    expect(result.status).toBe('DRIFT');
+    expect(result.detail).not.toContain('explicit');
+  });
+
+  it('treats an empty SEARCH_CODE_DB as unset, not as wiring', () => {
+    process.env.SEARCH_CODE_DB = '';
+    const root = mkTmp('doctor-search-index-emptyenv-');
+    writeFileSync(join(root, 'guard.config.json'), '{}');
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    writeFileSync(join(root, '.search-code', 'index.db'), 'stub');
+    expect(checkSearchIndex(root, null, false).status).toBe('DRIFT');
+  });
+
+  it('prefers the resolved path over every other signal', () => {
+    const root = mkTmp('doctor-search-index-resolved-');
+    writeFileSync(join(root, 'guard.config.json'), '{}');
+    const result = checkSearchIndex(root, '/somewhere/index.db', true);
+    expect(result.status).toBe('OK');
+    expect(result.detail).toContain('/somewhere/index.db');
   });
 });
