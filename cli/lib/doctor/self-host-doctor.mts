@@ -21,6 +21,7 @@ import { checkAgents, checkSkills } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
 import { checkHookRunner } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
+import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mts';
 
 /** The recorded config fields this path consults. */
 interface SelfHostConfig {
@@ -63,6 +64,13 @@ export async function runSelfHostDoctor(
     // Self-host never runs checkHusky, so without this the duplicate-gate warning is unreachable in
     // exactly the repo that dogfoods devkit — the one most likely to grow a hand-written gate copy.
     printStrayGateCalls(readFileSync(hookPath, 'utf8'), pkgRel, cwd);
+    // Same reason for the fail-open check (sc-1366): devkit's own generated calls are `-e`-safe,
+    // but a hand-added gate below the managed block would not be, and this is the repo where one
+    // is most likely to appear.
+    const failOpen = inspectHookFailOpen(gitRoot, join('.husky', 'pre-commit'));
+    for (const line of renderUnguardedGateCalls(failOpen, '.husky/pre-commit')) {
+      console.log(`  ⚠ ${line}`);
+    }
   }
 
   // Agent assets — advisory (never gate the exit code; a re-run re-syncs them).

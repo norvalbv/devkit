@@ -10,7 +10,7 @@ import { RECOMMENDED_GUARD_IDS, type Selection, structureCmdFor } from '../lib/c
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mts';
 import { type CheckResult, check } from '../lib/doctor/check-result.mts';
-import { checkHookRunner, checkHusky } from '../lib/doctor/hook-checks.mts';
+import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin-checks.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
@@ -527,7 +527,7 @@ async function collectResults(
   const overrides = new Set(cfg.configOverrides ?? []);
 
   const results = [configResult];
-  if (sel.husky) results.push(checkHusky(cwd, sel.guards ?? []), checkHookRunner(cwd));
+  if (sel.husky) results.push(...hookChecks(cwd, sel.guards ?? []));
   if (sel.husky && commitMsgGuards(sel.guards ?? []).length)
     results.push(checkCommitMsgHook(cwd, sel.guards ?? []));
   // biome and tsconfig differ only by filename and expected pointer.

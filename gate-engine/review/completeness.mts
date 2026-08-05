@@ -41,6 +41,7 @@ export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
 
 import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
@@ -145,10 +146,13 @@ export async function runCompleteness(
     );
     prompt = wrapCompleteness(body, message, files, renderTargets(targets));
   } catch (e: unknown) {
-    console.error(
-      `guard-review: completeness could not run — ${e instanceof Error ? e.message : String(e)}${envFlag('AI_STRICT') ? ' (strict ship mode: failing closed)' : ''}`,
+    // sc-1366: distinguish an unreadable staged object from an inconclusive judge before the exit
+    // code turns it into "judge unavailable — check `claude` CLI auth/quota".
+    const st = envFlag('AI_STRICT');
+    const lbl = 'guard-review: completeness';
+    return finish(
+      reportGateInfraFailure('review:completeness', lbl, e, cwd, st ? 3 : 2, { strict: st }),
     );
-    return finish(envFlag('AI_STRICT') ? 3 : 2);
   }
 
   // PASS cache, same store and shape as the domain reviewers (.devkit/review-cache.json): an
