@@ -200,6 +200,10 @@ export async function makeFixture(dirPrefix = 'devkit-e2e-repo-'): Promise<Fixtu
     PATH: `${binDir}:${BUN_BIN_DIR}:${process.env.PATH ?? ''}`,
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_SYSTEM: '/dev/null',
+    // checkVersion's latest-tag note would otherwise make every `devkit doctor` fixture run a real
+    // `git ls-remote` to GitHub — keep e2e hermetic and network-independent, same isolation goal as
+    // deleting DEVKIT_REPO below.
+    DEVKIT_SKIP_REMOTE_CHECKS: '1',
   };
   delete env.DEVKIT_REPO;
 

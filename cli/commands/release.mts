@@ -190,6 +190,25 @@ export default async function release(args: string[], cwd: string): Promise<numb
     );
     return 1;
   }
+  // Belt-and-suspenders on top of the version check above: a --version match proves the bin ran, not
+  // that a given source fix actually reached dist (sc-1340's own PR claimed it did and was wrong —
+  // sc-1419 was the consequence). Assert the stdin-hang fix's call site is actually in the built dist.
+  const shipBranchPath = join(cwd, 'dist', 'cli', 'lib', 'ship', 'ship-branch.sh');
+  const readStdinBodyPath = join(cwd, 'dist', 'cli', 'lib', 'ship', 'read-stdin-body.sh');
+  if (!existsSync(shipBranchPath) || !existsSync(readStdinBodyPath)) {
+    console.error(
+      'devkit release: dist smoke check failed — dist/cli/lib/ship/ship-branch.sh or ' +
+        'dist/cli/lib/ship/read-stdin-body.sh is missing from the build.',
+    );
+    return 1;
+  }
+  if (!readFileSync(shipBranchPath, 'utf8').includes('ship_read_stdin_body')) {
+    console.error(
+      'devkit release: dist smoke check failed — dist/cli/lib/ship/ship-branch.sh does not wire ' +
+        'ship_read_stdin_body (the sc-1419 stdin-hang fix is missing from this build).',
+    );
+    return 1;
+  }
 
   const trackedDistFiles = git(['ls-files', '--', 'dist'], cwd).split('\n').filter(Boolean);
   const ignoredDistAfter = git(['ls-files', '-o', '-i', '--exclude-standard', '--', 'dist'], cwd)

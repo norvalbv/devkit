@@ -24,7 +24,7 @@ import {
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
 import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../lib/overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../lib/overlay-global-hook.mts';
-import { cmpSemver } from './update.mts';
+import { cmpSemver, fetchLatestTag } from './update.mts';
 
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -209,14 +209,11 @@ function checkBaselines(cwd: string): CheckResult {
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 
-// Warn if the RUNNING devkit is OLDER than the version this repo was set up with (stamped in
-// .devkit/config.json at init) or below a hand-declared `minDevkit` floor. Read-only, warn-only —
-// a contributor on a stale devkit is told to `devkit update`, never blocked. Uses .devkit/config.json
-// only (NOT package.json), so overlay/standalone repos introduce nothing into the shared tree.
-export function checkVersion(cwd: string): CheckResult {
-  const pkg = readJson(join(packageDir(), 'package.json')) as {
-    version?: string;
-  } | null;
+// Warn when the RUNNING devkit is older than this repo's init stamp, a hand-declared `minDevkit`
+// floor, or the latest tag (info-only, never DRIFT; skippable via DEVKIT_SKIP_REMOTE_CHECKS).
+// Read-only, config.json-only (not package.json) — `devkit update` is always the told-to remedy.
+export function checkVersion(cwd: string, env = process.env): CheckResult {
+  const pkg = readJson(join(packageDir(), 'package.json')) as { version?: string } | null;
   const running = pkg?.version;
   if (!running || !SEMVER.test(running)) return check('devkit version', 'OK', 'unknown');
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
@@ -241,9 +238,12 @@ export function checkVersion(cwd: string): CheckResult {
       'devkit update',
     );
   }
+  const { latest } = env.DEVKIT_SKIP_REMOTE_CHECKS ? {} : fetchLatestTag(); // no `error` key on success
+  const behind =
+    latest && cmpSemver(running, latest) < 0 ? `, latest ${latest} — run \`devkit update\`` : '';
   // Echo whichever floors are declared so a satisfied min/stamp is visibly active, not silent.
   const meta = [stamped && `repo init ${stamped}`, min && `min ${min}`].filter(Boolean).join(', ');
-  return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}`);
+  return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}${behind}`);
 }
 
 // Configs whose drifted `extends` pointer --fix can repair IN PLACE (kind → expectedExtends key).

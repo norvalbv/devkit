@@ -1,10 +1,27 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import release, { bumpReadmePins, nextVersion } from '../commands/release.mts';
 import ship from '../commands/ship.mts';
+
+// The mocked `bun run build` below never writes real files, so any test expected to reach the dist
+// smoke checks (sc-1419: proves the stdin-hang fix's call site actually reached the build) needs this
+// written first — mirrors what a real `bun run build` would produce for these two files.
+function writeShipDistFixture(
+  cwd: string,
+  opts: { withFix?: boolean; skipReadStdinBody?: boolean } = {},
+): void {
+  const dir = join(cwd, 'dist', 'cli', 'lib', 'ship');
+  mkdirSync(dir, { recursive: true });
+  const withFix = opts.withFix ?? true;
+  writeFileSync(
+    join(dir, 'ship-branch.sh'),
+    withFix ? 'else ship_read_stdin_body; fi\n' : 'else BODY=$(cat); fi\n',
+  );
+  if (!opts.skipReadStdinBody) writeFileSync(join(dir, 'read-stdin-body.sh'), '# stub\n');
+}
 
 vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));
 vi.mock('../commands/ship.mts', () => ({ default: vi.fn() }));
@@ -92,6 +109,7 @@ describe('release publishing', () => {
       join(cwd, 'README.md'),
       'bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.47.1\n',
     );
+    writeShipDistFixture(cwd);
 
     expect(await release(['minor', '--yes'], cwd)).toBe(0);
 
@@ -185,6 +203,7 @@ describe('release publishing', () => {
       join(offline, 'package.json'),
       '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
     );
+    writeShipDistFixture(offline);
     build(() => {
       throw new Error('Could not resolve host: github.com');
     });
@@ -199,6 +218,7 @@ describe('release publishing', () => {
       join(cwd, 'package.json'),
       '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
     );
+    writeShipDistFixture(cwd);
     mockShip.mockReturnValue(1);
     builtVersion = '0.47.2';
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -209,5 +229,37 @@ describe('release publishing', () => {
       .filter(([command]) => command === 'git')
       .map(([, args]) => args as string[]);
     expect(gitCalls.some((args) => args[0] === 'restore')).toBe(false);
+  });
+
+  it('refuses when the built dist is missing the stdin-hang fix', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(cwd);
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    writeShipDistFixture(cwd, { withFix: false });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await release(['minor', '--yes'], cwd)).toBe(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/ship_read_stdin_body/));
+    expect(mockShip).not.toHaveBeenCalled();
+  });
+
+  it('refuses when read-stdin-body.sh is missing even though ship-branch.sh carries the fix string', async () => {
+    // Proves BOTH files are required — a build that dropped only the companion helper (not the
+    // string this check greps for) must still fail, not pass on the ship-branch.sh check alone.
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(cwd);
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    writeShipDistFixture(cwd, { skipReadStdinBody: true });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await release(['minor', '--yes'], cwd)).toBe(1);
+    expect(errors).toHaveBeenCalledWith(expect.stringMatching(/missing from the build/));
+    expect(mockShip).not.toHaveBeenCalled();
   });
 });
