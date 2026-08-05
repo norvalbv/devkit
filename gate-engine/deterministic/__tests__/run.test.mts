@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,11 @@ afterEach(() => {
   delete process.env.DEVKIT_SHIP;
   delete process.env.GUARD_COVERAGE_OK;
   delete process.env.GUARD_NO_COVERAGE;
+  // Both spellings: envVar() accepts the FRINK_ alias, and `devkit ship` exports strict envs that a
+  // pre-push vitest inherits — a leak that would silently flip every fail-open assertion below.
+  delete process.env.GUARD_DETERMINISTIC_STRICT;
+  delete process.env.FRINK_DETERMINISTIC_STRICT;
+  delete process.env.DEVKIT_GATE_EVENTS;
   vi.restoreAllMocks();
 });
 
@@ -358,6 +363,115 @@ describe('prefixCacheScope', () => {
 
   it('a falsey value leaves the scope unsalted (envFlag semantics)', () => {
     process.env.GUARD_COVERAGE_OK = '0';
+    expect(prefixCacheScope()).toBeUndefined();
+    expect(prefixCacheScope('custom')).toBe('custom');
+  });
+});
+
+// A gate that opts out proved nothing, but its own stderr scrolls past at the same weight as a gate
+// that passed — which is how a repo runs for weeks with its duplication gate silently disabled.
+describe('runDeterministic — opted-out gates are named, and strict refuses them', () => {
+  it('names the opted-out gate on a GREEN run (exit 0, but not silent)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size', 'dup']);
+    const exec = mkExec({ matcher: 2 }); // dup opts out; size passes
+    expect(runDeterministic(d, { exec })).toBe(0);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('1 deterministic gate opted out and did NOT run: guard-dup');
+    expect(out).toContain('proved nothing');
+    expect(out).not.toContain('deterministic gates failed');
+  });
+
+  it('emits a could_not_run telemetry event for a gate that opted out', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['dup']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ matcher: 2 }) })).toBe(0);
+    const events = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ gate: 'dup', status: 'could_not_run' });
+  });
+
+  it('strict turns the opt-out into a failure, labelled could-not-run (exit 1)', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['size', 'dup']);
+    expect(runDeterministic(d, { exec: mkExec({ matcher: 2 }) })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('guard-dup(could-not-run)');
+    expect(out).not.toContain('unexpected:2');
+  });
+
+  it('strict is OFF by default — the same run fails open', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runDeterministic(repo(['dup']), { exec: mkExec({ matcher: 2 }) })).toBe(0);
+  });
+
+  // The regression that makes strict safe to add: `failOpen2` is a property of the GATE, strict is a
+  // property of the RUN. An --extra/eslint exit 2 was never an opt-out, so strict must not relabel it
+  // as one — that would downgrade a fatal config error to "a gate chose to skip".
+  it('strict does NOT relabel an exit 2 that was never an opt-out', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['size']);
+    const exec = vi.fn((bin) => {
+      if (bin === 'bunx') {
+        const e = new Error('exit 2');
+        e.status = 2;
+        throw e;
+      }
+    });
+    expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(1);
+    const out = err.mock.calls.flat().join('\n');
+    expect(out).toContain('structure-lint(unexpected:2)');
+    expect(out).not.toContain('could-not-run');
+    expect(out).not.toContain('opted out and did NOT run');
+  });
+
+  it('a strict could-not-run is telemetry could_not_run, never a fail', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    const d = repo(['dup']);
+    const sink = join(d, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    expect(runDeterministic(d, { exec: mkExec({ matcher: 2 }) })).toBe(1);
+    const events = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'gate_result');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ gate: 'dup', status: 'could_not_run' });
+  });
+
+  // The anti-laundering property, mirroring the coverage salt: without it, a NON-strict all-green key
+  // would be hit by a later strict run of the identical tree, skipping every gate — so strict would
+  // never see the opt-out it exists to reject.
+  it.each(['GUARD_DETERMINISTIC_STRICT', 'FRINK_DETERMINISTIC_STRICT'])(
+    '%s salts the prefix scope away from a non-strict run',
+    (key) => {
+      const cleanDefault = prefixCacheScope();
+      const cleanCustom = prefixCacheScope('custom');
+      process.env[key] = '1';
+      expect(prefixCacheScope()).toBe('devkit-guards:deterministic-strict');
+      expect(prefixCacheScope('custom')).toBe('custom:deterministic-strict');
+      expect(prefixCacheScope()).not.toBe(cleanDefault);
+      expect(prefixCacheScope('custom')).not.toBe(cleanCustom);
+    },
+  );
+
+  it('the strict salt composes with the coverage salt rather than replacing it', () => {
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    process.env.GUARD_COVERAGE_OK = '1';
+    expect(prefixCacheScope()).toBe('devkit-guards:deterministic-strict:coverage-bypassed');
+  });
+
+  it('no salt when strict is unset — an ordinary run keeps the plain scope', () => {
     expect(prefixCacheScope()).toBeUndefined();
     expect(prefixCacheScope('custom')).toBe('custom');
   });

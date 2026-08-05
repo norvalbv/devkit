@@ -2,14 +2,24 @@
  * Exit: 0 all-ok, 1 drift, 2 not-initialized. */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { QAVIS_RECIPE, qavisOnPath } from '../../gate-engine/qavis-advisory/check.mts';
 import { RECOMMENDED_GUARD_IDS, type Selection, structureCmdFor } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mts';
 import { type CheckResult, check } from '../lib/doctor/check-result.mts';
+import {
+  checkExtends,
+  EXTENDS_REPAIRABLE,
+  expectedExtends,
+  repairExtends,
+} from '../lib/doctor/extends-checks.mts';
+import {
+  adviseSearchIndex,
+  checkGuardConfig,
+  SEARCH_INDEX_CHECK,
+} from '../lib/doctor/guard-config-checks.mts';
 import { checkHookRunner, checkHusky } from '../lib/doctor/hook-checks.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin-checks.mts';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
@@ -29,19 +39,6 @@ import { cmpSemver, fetchLatestTag } from './update.mts';
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
-// A jsonc/json config carrying an `extends` base pointer; the index signature lets checkExtends read
-// an arbitrary `key` (defaults to "extends") out of the parsed object.
-interface ConfigWithExtends {
-  extends?: string | string[];
-  [key: string]: unknown;
-}
-
-// The devkit-owned `extends` pointer for each emitted config, by install mode (see expectedExtends).
-interface ExpectedExtends {
-  biome: string;
-  tsconfig: string;
-}
-
 // The recorded .devkit/config.json shape doctor reads (only the fields it consults).
 interface DevkitConfig {
   overlay?: boolean;
@@ -52,11 +49,6 @@ interface DevkitConfig {
   configOverrides?: string[];
   minDevkit?: string;
   devkitRef?: string;
-}
-
-// The gate-engine config module, imported via a runtime path (so it's typed here, not resolved).
-interface GateConfigModule {
-  resolveGuardConfig(cwd: string): unknown;
 }
 
 function checkConfig(cwd: string): CheckResult {
@@ -89,90 +81,6 @@ function checkStructureLint(cwd: string, stack: string): CheckResult {
     );
   }
   return check('structure-lint', 'OK', `runs \`${expectedCmd}\``);
-}
-
-// Strip // line comments so a jsonc config parses as JSON.
-const JSONC_LINE_COMMENT_RE = /^\s*\/\/.*$/gm;
-function jsoncText(path: string): string {
-  return readFileSync(path, 'utf8').replace(JSONC_LINE_COMMENT_RE, '');
-}
-
-// Tolerant read for repair only; drift checks parse strictly and report syntax errors.
-function readJsonc(path: string): ConfigWithExtends | null {
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(jsoncText(path)) as ConfigWithExtends;
-  } catch {
-    return null;
-  }
-}
-
-// Expected extends are shared by check and repair. Package Biome presets mirror templates by stack;
-// standalone uses separately vendored .devkit paths, so keep its stack list aligned with standalone.
-const PKG_REACT_BIOME = new Set(['react-app', 'component-lib']);
-
-function expectedExtends(stack: string, standalone: boolean): ExpectedExtends {
-  return {
-    biome: standalone
-      ? `./.devkit/biome/${['electron', 'react-app', 'next', 'component-lib'].includes(stack) ? 'react' : 'base'}.jsonc`
-      : `@norvalbv/devkit/biome/${PKG_REACT_BIOME.has(stack) ? 'react' : 'base'}`,
-    tsconfig: standalone
-      ? `./.devkit/tsconfig/${stack === 'next' ? 'next' : stack === 'node-service' ? 'node' : 'base'}.json`
-      : '@norvalbv/devkit/tsconfig/base',
-  };
-}
-
-function checkExtends(
-  cwd: string,
-  file: string,
-  expected: string,
-  key = 'extends',
-  overridden = false,
-): CheckResult {
-  const path = join(cwd, file);
-  if (!existsSync(path)) {
-    return check(file, 'MISSING', 'absent', 'run `devkit init`', true);
-  }
-  let parsed: ConfigWithExtends;
-  try {
-    parsed = JSON.parse(jsoncText(path)) as ConfigWithExtends;
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return check(file, 'DRIFT', `invalid JSON: ${msg}`, 'fix the JSON syntax, then re-run');
-  }
-  // configOverrides marks deliberate hand-ownership, but only after syntax validation.
-  if (overridden) {
-    return check(file, 'OK', 'intentional override (configOverrides)');
-  }
-  const ext = parsed[key];
-  const list = Array.isArray(ext) ? ext : [ext];
-  if (!list.includes(expected)) {
-    return check(
-      file,
-      'DRIFT',
-      `${key} is ${JSON.stringify(ext)}`,
-      `should extend "${expected}" (if intentional, add "${file}" to .devkit/config.json configOverrides)`,
-    );
-  }
-  return check(file, 'OK', `extends ${expected}`);
-}
-
-async function checkGuardConfig(cwd: string): Promise<CheckResult> {
-  const path = join(cwd, 'guard.config.json');
-  if (!existsSync(path)) {
-    return check('guard.config.json', 'MISSING', 'absent', 'run `devkit init`', true);
-  }
-  // resolveGuardConfig throws on a corrupt file — that's the validity signal.
-  try {
-    const mod = (await import(
-      pathToFileURL(join(packageDir(), 'gate-engine', `config${SELF_EXT}`)).href
-    )) as GateConfigModule;
-    mod.resolveGuardConfig(cwd);
-    return check('guard.config.json', 'OK', 'valid (resolveGuardConfig parsed it)');
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return check('guard.config.json', 'DRIFT', msg, 'fix the config JSON');
-  }
 }
 
 // searchSteering: the guard + counter engine bins are present in the installed package.
@@ -244,30 +152,6 @@ export function checkVersion(cwd: string, env = process.env): CheckResult {
   // Echo whichever floors are declared so a satisfied min/stamp is visibly active, not silent.
   const meta = [stamped && `repo init ${stamped}`, min && `min ${min}`].filter(Boolean).join(', ');
   return check('devkit version', 'OK', `installed ${running}${meta ? ` (${meta})` : ''}${behind}`);
-}
-
-// Configs whose drifted `extends` pointer --fix can repair IN PLACE (kind → expectedExtends key).
-// The top-level config is the CONSUMER's (it carries paths, libs, plugins, overrides); only the
-// pointer it extends is devkit-owned. guard.config.json is excluded: --fix never touches its content
-// — it's only recreated when MISSING (by plain, create-if-absent init).
-const EXTENDS_REPAIRABLE: Record<string, 'biome' | 'tsconfig'> = {
-  'biome.jsonc': 'biome',
-  'tsconfig.json': 'tsconfig',
-};
-
-// Replace only the devkit extends token, preserving comments and consumer deltas.
-function repairExtends(path: string, expected: string): boolean {
-  if (!existsSync(path)) return false;
-  const ext = readJsonc(path)?.extends;
-  const list = Array.isArray(ext) ? ext : ext == null ? [] : [ext];
-  if (list.includes(expected)) return false;
-  const old = list.find((v) => typeof v === 'string' && v.includes('devkit'));
-  if (!old) return false;
-  const raw = readFileSync(path, 'utf8');
-  const next = raw.replace(JSON.stringify(old), JSON.stringify(expected));
-  if (next === raw) return false;
-  writeFileSync(path, next);
-  return true;
 }
 
 // Reproduce the recorded selection rather than the all-on `--yes` default.
@@ -345,7 +229,14 @@ function applyFix(
       (HOOK_CHECKS.has(r.name) || r.name === 'agent-hooks' || r.name === 'hook registrations') &&
       r.status !== 'OK',
   );
-  if (needsInit || hookDrift) {
+  // A lost `indexPath` is repaired the way it was written: by init's --search-code step (which
+  // selectionFlags already emits for a repo whose recorded selection has it). `r.fixable` carries
+  // that precondition — the check clears it only when the selection can actually reproduce the
+  // wiring, so --fix never re-inits chasing a warning it has no flag to clear.
+  const indexDrift = results.some(
+    (r) => r.name === SEARCH_INDEX_CHECK && r.fixable && r.status !== 'OK',
+  );
+  if (needsInit || hookDrift || indexDrift) {
     const args = ['init', '--stack', stack, ...selectionFlags(sel)];
     if (standalone) args.push('--standalone');
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), ...args], {
@@ -484,6 +375,9 @@ async function runOverlayDoctor(cwd: string, cfg: DevkitConfig, fix: boolean): P
   if (hooks.scripts.length && surfaces.length)
     advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
   if (surfaces.length) advise(checkRegistrations(cwd, hooks.components, surfaces, true));
+  // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
+  // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
+  await adviseSearchIndex(cwd, sel);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   if (sel.fallow) {
     const wired =
@@ -536,7 +430,14 @@ async function collectResults(
     [sel.tsconfig, 'tsconfig.json', expected.tsconfig],
   ] as const)
     if (on) results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
-  if (sel.guards?.length || sel.structure) results.push(await checkGuardConfig(cwd));
+  if (sel.guards?.length || sel.structure)
+    results.push(
+      ...(await checkGuardConfig(
+        cwd,
+        sel.guards?.includes('dup') === true,
+        sel.searchCode === true,
+      )),
+    );
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
   const hooks = selectedHookAssets(sel);
   if (sel.skills && surfaces.length) results.push(checkAgentAssets(cwd, 'skills', surfaces, sel));

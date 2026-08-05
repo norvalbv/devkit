@@ -172,6 +172,27 @@ export function envFlag(name) {
 export function coverageBypassed() {
     return envFlag('COVERAGE_OK') || envFlag('NO_COVERAGE');
 }
+/**
+ * Does THIS run refuse to accept a deterministic gate's fail-open? Lives beside coverageBypassed for
+ * the same reason: guard-deterministic asks it twice — once to decide the verdict, once to salt the
+ * prefix-cache scope — and a second copy of the predicate is what the dup/clone gates exist to stop.
+ *
+ * The sibling of GUARD_AI_STRICT, not an instance of it. AI strict answers "an AI gate could not
+ * reach its model", and exits 3 so an outage is never rendered as a finding. This answers "a
+ * DETERMINISTIC gate opted out" — a local, reproducible condition (no index, no jscpd binary) with
+ * no outage to distinguish, so it exits 1 through the ordinary failure path.
+ *
+ * Off by default, and deliberately not exported by `devkit ship`: fail-open is the shipped posture
+ * (docs/decisions/zero-consumer-tool-deps.md), and flipping it for every consumer whose index or
+ * jscpd is absent would turn a documented opt-out into a broken commit. This is the opt-in lever for
+ * a repo that HAS wired those tools and wants a skipped gate to be fatal.
+ *
+ * A function, never a hoisted const: prefixCacheScope is called more than once per process and the
+ * tests toggle the env between calls.
+ */
+export function deterministicStrict() {
+    return envFlag('DETERMINISTIC_STRICT');
+}
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
 // unparseable / not an object => throw: a typo'd config must fail loudly, never silently
 // degrade to defaults and quietly weaken a gate.

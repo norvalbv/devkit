@@ -10,6 +10,7 @@ import { detectGitRoot } from "../detect-git-root.mjs";
 import { extractGuardBlock } from "../husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
 import { checkAgents, checkSkills } from "./asset-checks.mjs";
+import { adviseSearchIndex } from "./guard-config-checks.mjs";
 import { checkHookRunner } from "./hook-checks.mjs";
 import { printStrayGateCalls } from "./stray-gate-calls.mjs";
 export async function runSelfHostDoctor(cwd, cfg, fix) {
@@ -48,6 +49,10 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         advise(await checkSkills(cwd, primary));
     if (sel.agents && primary)
         advise(await checkAgents(cwd, primary));
+    // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
+    // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
+    // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
+    await adviseSearchIndex(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
