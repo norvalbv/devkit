@@ -25,6 +25,12 @@ run_gates_with_capture() {
   # would sink an otherwise passing commit. Residual, deliberately accepted: an archive write that
   # fails MID-run (disk full) still fails tee and is reported against $log. Strictly narrower than the
   # window this replaces, and the pre-flight covers every failure mode we have seen.
+  # APPEND, never truncate: $log may already hold lines the caller wrote before the gates started
+  # (devkit review streams its header + per-phase preflight progress there, and a truncating tee
+  # erased all of it the instant the chain launched — a run that hung in preflight was then
+  # indistinguishable from one that never wrote anything). Freshness is the CALLER's job now:
+  # review-target.sh allocates a unique per-run path under `set -C`, and commit-with-gate-capture.sh
+  # clears its reused per-branch `last-ship-gates-*.log` before calling in.
   local logs=("$log")
   if [ -n "$archive_log" ]; then
     if mkdir -p "$(dirname "$archive_log")" 2>/dev/null && : >> "$archive_log" 2>/dev/null; then
@@ -68,7 +74,7 @@ run_gates_with_capture() {
   fi
 
   set +e
-  tee "${logs[@]}" < "$capture_fifo" >&2 &
+  tee -a "${logs[@]}" < "$capture_fifo" >&2 &
   tee_pid=$!
   if ! exec 8> "$capture_fifo"; then
     kill "$tee_pid" 2>/dev/null || true

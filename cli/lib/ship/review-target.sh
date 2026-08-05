@@ -51,7 +51,10 @@ done
 SHIP_BASE_SHA=${DEVKIT_SHIP_BASE_SHA:-}
 
 # Never inherit another ship/review's authority, private paths, or telemetry destination. The two
-# topology hints and SHIP_COMMIT_TIMEOUT are intentional invocation inputs and remain untouched.
+# topology hints, SHIP_COMMIT_TIMEOUT and DEVKIT_PREFLIGHT_TIMEOUT are intentional invocation inputs
+# and remain untouched. DEVKIT_PREFLIGHT_TIMEOUT deliberately avoids the DEVKIT_REVIEW_ prefix:
+# cli/commands/review.mts strips that whole namespace as inherited run context, so a knob named
+# DEVKIT_REVIEW_* would be silently deleted before this script ever saw it.
 for name in \
   DEVKIT_COMMIT_MSG_FILE \
   DEVKIT_GATE_ARCHIVE_LOG DEVKIT_GATE_EVENTS DEVKIT_REVIEW_ASSET_ROOT \
@@ -245,6 +248,42 @@ CACHE_FIELDS_FILE="$STATE_ROOT/cache-fields.bin"
 PROGRESS="$STATE_ROOT/progress.json"
 LOG="$TARGET_ROOT/.devkit/review-runs/$RUN_ID.log"
 STARTED_AT=$(date +%s)
+PREFLIGHT_STAGE_FILE="$STATE_ROOT/preflight-stage"
+PREFLIGHT_TIMEOUT_SENTINEL="$STATE_ROOT/preflight-timeout"
+PREFLIGHT_WATCHDOG_PID=
+PREFLIGHT_TIMED_OUT=0
+
+# Ceiling for the setup/teardown hang guard below. DERIVES from SHIP_COMMIT_TIMEOUT so operators
+# keep ONE knob — raise the reviewer budget and the setup guard follows. DEVKIT_PREFLIGHT_TIMEOUT
+# exists so the two ceilings can be driven INDEPENDENTLY: any value low enough to exercise this
+# guard would otherwise stop the run long before it reached the gate chain, leaving the two
+# mutually untestable. Validated with gate-supervisor.mts's semantics (finite, > 0, within range)
+# and rejected LOUDLY rather than defaulted: a silent fallback would diverge from the chain, which
+# refuses to start on a bad value, and `0` / `.` / `1.2.3` all make /bin/sleep return or fail
+# immediately — a spurious timeout on every single run.
+PREFLIGHT_TIMEOUT=${DEVKIT_PREFLIGHT_TIMEOUT:-${SHIP_COMMIT_TIMEOUT:-3600}}
+preflight_timeout_invalid() {
+  printf 'devkit review: invalid timeout %s (expected a positive number of seconds).\n' \
+    "$PREFLIGHT_TIMEOUT" >&2
+  exit 1
+}
+case $PREFLIGHT_TIMEOUT in
+  '' | . | *[!0-9.]* | *.*.*) preflight_timeout_invalid ;;
+esac
+# All-zero digits ("0", "0.0", ".0") is <= 0 and would fire the guard instantly.
+[ -n "${PREFLIGHT_TIMEOUT//[0.]/}" ] || preflight_timeout_invalid
+# Whole seconds, rounded UP, so a fractional ceiling never truncates to 0. The guard polls bash's
+# SECONDS builtin, which counts whole seconds — no `date` subprocess per tick.
+PREFLIGHT_TIMEOUT_SECS=${PREFLIGHT_TIMEOUT%%.*}
+[ -n "$PREFLIGHT_TIMEOUT_SECS" ] || PREFLIGHT_TIMEOUT_SECS=0
+PREFLIGHT_TIMEOUT_SECS=$((10#0$PREFLIGHT_TIMEOUT_SECS))
+case $PREFLIGHT_TIMEOUT in
+  *.*[1-9]*) PREFLIGHT_TIMEOUT_SECS=$((PREFLIGHT_TIMEOUT_SECS + 1)) ;;
+esac
+# gate-supervisor.mts caps at MAX_TIMEOUT_MS (2147483647ms); mirror it so one knob cannot be
+# accepted here and rejected there.
+[ "$PREFLIGHT_TIMEOUT_SECS" -ge 1 ] && [ "$PREFLIGHT_TIMEOUT_SECS" -le 2147483 ] ||
+  preflight_timeout_invalid
 
 FINAL_WT_CREATED=0
 BASE_WT_CREATED=0
@@ -254,6 +293,10 @@ ACTIVE_GATE_PID=
 GATE_LAUNCHING=0
 REQUESTED_SIGNAL_STATUS=0
 REQUESTED_SIGNAL=
+# How far the run got. The EXIT trap stamps this into the log so an abort is distinguishable from a
+# short successful run. Must stay bound before `trap on_exit EXIT` is armed below — under `set -u`
+# an unbound read inside the trap would abort it and skip emit_terminal_result.
+REVIEW_PHASE=preflight
 
 cleanup_worktrees() {
   local status=0
@@ -303,6 +346,104 @@ emit_terminal_result() {
     devkit-review-run-result-v1 >/dev/null 2>&1 || true
 }
 
+# Stamp how far the run got AND stream it. Until this existed $LOG got one header line and then
+# nothing until the gate chain launched ~245 lines later, so a review wedged in setup was
+# indistinguishable from one merely working hard — the only way to tell was an external `ps`.
+# Elapsed seconds, not wall-clock: the question a stalled run asks is "how long has THIS step been
+# going". Terminated with `|| :` deliberately — this is instrumentation, and a failed log write must
+# never abort a run or change a verdict (same reasoning as the terminal trailer in on_exit). That
+# matters more than usual here: `set -euo pipefail` is on, so an unguarded `tee` pipeline at every
+# phase boundary would be a dozen new ways for a full disk to kill the run.
+review_phase() {
+  REVIEW_PHASE=$1
+  printf '%s\n' "$REVIEW_PHASE" > "$PREFLIGHT_STAGE_FILE" 2>/dev/null || :
+  printf 'devkit review: phase=%s t=%ss\n' "$REVIEW_PHASE" "$(( $(date +%s) - STARTED_AT ))" |
+    tee -a "$LOG" >&2 || :
+}
+
+# ── Setup/teardown hang guard ────────────────────────────────────────────────────────────────────
+# The gate chain has been bounded since sc-1199, but SHIP_COMMIT_TIMEOUT is read INSIDE
+# run_gates_with_capture and wraps only the gate command. Everything around it — two `git worktree
+# add` checkouts, submodule and dependency materialization twice over, the asset runtime, the
+# baseline capture, and the teardown that removes the ephemeral worktrees — ran unbounded, and
+# nothing bounds this script from outside either (cli/commands/review.mts spawns it with no
+# timeout). A wedged setup step hung until a human noticed.
+#
+# Signals the process GROUP, not $$. Bash defers a trapped signal until the running FOREGROUND
+# command returns, and never signals that child — so `kill -TERM $$` against a wedged `git worktree
+# add` is a placebo: the trap would not run until the very command being interrupted finished on its
+# own. run-packaged-script.mts spawns this script `detached` for precisely this reason ("a dedicated
+# process group lets a signal interrupt foreground setup helpers too") and signals -pid; this is the
+# same mechanism applied from the inside. When this shell is NOT a group leader (a test running the
+# script directly under bash), `-$$` matches no group, ESRCH is tolerated, and the pid fallback runs
+# in knowingly degraded form.
+#
+# Does NOT escalate to SIGKILL. on_exit's teardown deliberately runs in a signal-ignoring subshell so
+# worktree removal cannot be interrupted; a KILL would defeat that and strand the ephemeral
+# worktrees checked out — strictly worse than the hang it replaces. TERM to the group unwedges the
+# foreground child, on_exit takes over, and a wedge that survives even that is reported rather than
+# force-killed.
+start_preflight_watchdog() {
+  [ -z "$PREFLIGHT_WATCHDOG_PID" ] || return 0
+  local main=$$
+  (
+    trap '' HUP INT QUIT TERM
+    # Poll rather than one long sleep: this subshell inherits the caller's stderr (its banner has to
+    # reach the console), so a single `sleep $PREFLIGHT_TIMEOUT` would hold that pipe open for the
+    # whole ceiling if the shell were SIGKILLed — the pipe-holder wedge documented at the top of
+    # run-gates-with-capture.sh. Noticing the parent is gone bounds that to one tick. SECONDS is a
+    # bash builtin, so the loop costs no subprocess per tick.
+    # `-le`, not `-lt`: SECONDS counts wall-clock second BOUNDARIES, so its first increment can land
+    # a few milliseconds in. Waiting one boundary longer guarantees the guard never fires EARLY —
+    # overshooting a hang ceiling by under a second costs nothing, undershooting it kills live runs.
+    SECONDS=0
+    while [ "$SECONDS" -le "$PREFLIGHT_TIMEOUT_SECS" ]; do
+      /bin/sleep 0.25
+      kill -0 "$main" 2>/dev/null || exit 0
+    done
+    stage=unknown
+    [ ! -f "$PREFLIGHT_STAGE_FILE" ] || IFS= read -r stage < "$PREFLIGHT_STAGE_FILE" || stage=unknown
+    # Written BEFORE the signal: on_exit reads this to tell a ceiling apart from a user's Ctrl-C.
+    : > "$PREFLIGHT_TIMEOUT_SENTINEL" 2>/dev/null || :
+    {
+      printf '⏱  devkit review: setup/teardown hit the %ss ceiling DURING: %s\n' \
+        "$PREFLIGHT_TIMEOUT" "$stage"
+      printf '   No gate verdict was reached. Raise DEVKIT_PREFLIGHT_TIMEOUT, or investigate a wedged setup step. Full log: %s\n' \
+        "$LOG"
+    } | tee -a "$LOG" >&2 || :
+    kill -TERM -"$main" 2>/dev/null || kill -TERM "$main" 2>/dev/null || :
+    # Report an unkillable wedge instead of forcing it; teardown is mid-flight and must finish.
+    SECONDS=0
+    while kill -0 "$main" 2>/dev/null; do
+      if [ "$SECONDS" -ge 60 ]; then
+        printf '   devkit review: still running 60s after the ceiling; teardown may be wedged (pid %s).\n' \
+          "$main" | tee -a "$LOG" >&2 || :
+        break
+      fi
+      /bin/sleep 0.25
+    done
+  ) >/dev/null &
+  PREFLIGHT_WATCHDOG_PID=$!
+}
+
+# KILL, not TERM. The watchdog IGNORES TERM by design — it sits in the process group it signals, and
+# a self-inflicted TERM would kill it before it could report an unkillable wedge. That makes TERM
+# useless for retiring it: the `wait` below would block until the ceiling elapsed on its own, hanging
+# every single run at the pre-gate handover for up to an hour. Nothing in the watchdog needs an
+# orderly shutdown — it owns no state and its only fd is the stderr it inherited — so an
+# uncatchable signal is exactly right.
+#
+# Idempotent, and safe while `set -e` is armed: `wait` on a killed child returns non-zero and `kill`
+# on an already-reaped pid fails, either of which would otherwise abort the script at the pre-gate
+# stop point, which sits outside on_exit's `set +e`. Same shape as the tee teardown in
+# run-gates-with-capture.sh.
+stop_preflight_watchdog() {
+  [ -n "$PREFLIGHT_WATCHDOG_PID" ] || return 0
+  kill -KILL "$PREFLIGHT_WATCHDOG_PID" 2>/dev/null || :
+  wait "$PREFLIGHT_WATCHDOG_PID" 2>/dev/null || :
+  PREFLIGHT_WATCHDOG_PID=
+}
+
 finalize_signal_status() {
   local lock status_file managed_status
   [ -n "$MANAGED_SIGNAL_ROOT" ] || return 0
@@ -324,8 +465,15 @@ finalize_signal_status() {
 }
 
 on_exit() {
-  local status=$? cleanup_status=0
-  # First make the transition non-interruptible, then disarm EXIT and install recording handlers.
+  local status=$? cleanup_status=0 result_word=
+  # FIRST, before anything else: disarm the hang guard and read its verdict. The sentinel lives under
+  # $STATE_ROOT, which the cleanup subshell below REMOVES — reading it any later would always miss,
+  # and every guard-fired ceiling would be misreported as `signaled` off the forwarded TERM. Stopping
+  # the guard here also closes the window where a watchdog firing mid-teardown relabels an ordinary
+  # preflight failure (there are ~20 `exit 1` paths above it) as a timeout.
+  stop_preflight_watchdog
+  [ ! -f "$PREFLIGHT_TIMEOUT_SENTINEL" ] || PREFLIGHT_TIMED_OUT=1
+  # Then make the transition non-interruptible, disarm EXIT and install recording handlers.
   # Cleanup itself runs in a signal-ignoring subshell so its git/rm descendants cannot be killed;
   # Bash records a forwarded signal as soon as that foreground cleanup completes.
   trap '' HUP INT QUIT TERM
@@ -351,7 +499,27 @@ on_exit() {
   cleanup_status=$?
   finalize_signal_status
   if [ "$REQUESTED_SIGNAL_STATUS" -ne 0 ]; then status=$REQUESTED_SIGNAL_STATUS; fi
+  # The guard's TERM arrives here as an ordinary forwarded signal (143); its sentinel is the only
+  # thing separating a ceiling from a user's Ctrl-C. Map it to the SAME 124 the gate chain's ceiling
+  # uses so both report one timeout vocabulary, and emit_terminal_result's timed_out flag follows.
+  # Ordered after the signal override so the ceiling wins over the signal it sent itself.
+  if [ "$PREFLIGHT_TIMED_OUT" -eq 1 ]; then status=124; fi
   if [ "$status" -eq 0 ] && [ "$cleanup_status" -ne 0 ]; then status=1; fi
+  # Make the log self-terminating: every exit past log creation leaves one machine-readable line, so
+  # a preflight abort cannot read as a short pass. Only safe against double emission because
+  # `trap - EXIT` above precedes the cleanup subshell. Deliberately best-effort — `set +e` is active
+  # and a failed log write must never change a verdict that has already been decided. `>>` not
+  # `tee`: the human ✓/✗ line already reached stderr and the trap must stay off the console.
+  if [ -n "${LOG:-}" ] && [ -f "$LOG" ]; then
+    case "$status" in
+      0) result_word=passed; [ "${REVIEW_PHASE:-}" = nothing-to-review ] && result_word=skipped ;;
+      124) result_word=timeout ;;
+      129 | 130 | 131 | 143) result_word=signaled ;;
+      *) result_word=failed ;;
+    esac
+    printf 'devkit review: result=%s exit=%s phase=%s\n' \
+      "$result_word" "$status" "${REVIEW_PHASE:-unknown}" >> "$LOG"
+  fi
   emit_terminal_result "$status"
   exit "$status"
 }
@@ -391,8 +559,24 @@ mkdir -p "$(dirname "$LOG")"
 printf 'devkit review: target=%s base=%s merge-base=%s\n' \
   "$TARGET_ROOT" "$BASE_REF" "$MERGE_BASE" | tee -a "$LOG" >&2
 
+# Armed as early as the log allows — it covers every node/git call from here to the gate chain.
+# Work ABOVE this point stays deliberately unguarded: $LOG does not exist yet, so a ceiling banner
+# would have nowhere to go, and that stretch is argument parsing plus a handful of rev-parses.
+start_preflight_watchdog
+review_phase setup-capture
 node "$SETUP_MANIFEST_TOOL" capture "$TARGET_ROOT" "$SETUP_MANIFEST"
+# Fail closed on a helper that exited 0 without doing its job. runDirectReviewCli returns silently
+# (exit 0) when its realpath entrypoint guard does not match, which would let the whole setup
+# authority — core.hooksPath included — go unchecked while looking exactly like success.
+[ -s "$SETUP_MANIFEST" ] || {
+  echo 'devkit review: setup capture produced no manifest.' >&2
+  exit 1
+}
 node "$REPOSITORY_STATE_TOOL" capture "$TARGET_ROOT" "$REPOSITORY_MANIFEST"
+[ -s "$REPOSITORY_MANIFEST" ] || {
+  echo 'devkit review: repository state capture produced no manifest.' >&2
+  exit 1
+}
 git_line_into CAPTURED_TARGET_HEAD "$GIT_ROOT" rev-parse --verify --end-of-options 'HEAD^{commit}' || exit 1
 git_line_into CAPTURED_BASE_COMMIT "$GIT_ROOT" rev-parse --verify --end-of-options \
   "$BASE_REF^{commit}" || exit 1
@@ -410,6 +594,7 @@ if [ "$CAPTURED_TARGET_HEAD:$CAPTURED_BASE_COMMIT:$CAPTURED_MERGE_BASE" != \
     | tee -a "$LOG" >&2
   exit 1
 fi
+review_phase snapshot
 SNAPSHOT_PAIR=$(review_snapshot_capture_trees "$TARGET_ROOT" "$TARGET_HEAD") || exit $?
 read -r STAGED_TREE RAW_TREE <<< "$SNAPSHOT_PAIR"
 case "$STAGED_TREE:$RAW_TREE" in
@@ -430,11 +615,13 @@ verify_target_capture || {
 }
 
 if [ "$STAGED_TREE" = "$BASE_TREE" ]; then
+  review_phase nothing-to-review
   printf '✓ devkit review: nothing to review against %s (%s). full output: %s\n' \
     "$BASE_REF" "$MERGE_BASE" "$LOG" | tee -a "$LOG" >&2
   exit 0
 fi
 
+review_phase worktree-final
 FINAL_WT_CREATED=1
 review_create_worktree "$GIT_ROOT" "$FINAL_WT" "$MERGE_BASE"
 review_materialize_tree "$FINAL_WT" "$STAGED_TREE" "$RAW_TREE"
@@ -442,9 +629,11 @@ review_snapshot_trees_match "$TARGET_ROOT" "$TARGET_HEAD" "$STAGED_TREE" "$RAW_T
   echo 'devkit review: target changed while the final snapshot was materialized; retry.' >&2
   exit 1
 }
+review_phase submodules-final
 FINAL_SUBMODULES_CREATED=1
 review_materialize_submodules "$FINAL_WT" "$GIT_ROOT" "$FINAL_SUBMODULE_MANIFEST"
 
+review_phase setup-runtime
 node "$SETUP_RUNTIME_TOOL" materialize "$SETUP_MANIFEST" "$FINAL_WT" \
   "$SETUP_RUNTIME_MANIFEST" > "$SETUP_FIELDS_FILE"
 SETUP_FIELDS=()
@@ -489,6 +678,7 @@ while [ "$index" -lt "$GUARD_COUNT" ]; do
   index=$((index + 1))
 done
 
+review_phase deps-final
 export DEVKIT_REVIEW_DEPENDENCY_MANIFEST="$FINAL_DEPENDENCY_MANIFEST"
 prepare_gate_worktree "$FINAL_TARGET" "$TARGET_ROOT" review
 unset DEVKIT_REVIEW_DEPENDENCY_MANIFEST
@@ -496,6 +686,7 @@ export DEVKIT_REVIEW_PROJECTION_MANIFEST="$FINAL_PROJECTION_MANIFEST"
 link_untracked_gate_configs "$FINAL_TARGET" "$TARGET_ROOT" review
 unset DEVKIT_REVIEW_PROJECTION_MANIFEST
 
+review_phase assets
 ASSET_FINGERPRINT=$(node "$ASSET_RUNTIME_TOOL" materialize "$PACKAGE_ROOT" "$ASSET_RUNTIME")
 [ -n "$ASSET_FINGERPRINT" ] || {
   echo 'devkit review: reviewer asset runtime returned no fingerprint.' >&2
@@ -511,6 +702,7 @@ DEVKIT_REVIEW_RUNTIME_FINGERPRINT=$(printf '%s\0%s' \
   git -c core.hooksPath=/dev/null -C "$GIT_ROOT" hash-object --stdin) || exit 1
 export DEVKIT_REVIEW_RUNTIME_FINGERPRINT
 
+review_phase worktree-base
 BASE_WT_CREATED=1
 review_create_worktree "$GIT_ROOT" "$BASE_WT" "$MERGE_BASE"
 if [ "$TARGET_RELATIVE" = . ]; then
@@ -528,8 +720,10 @@ read -r BASE_CAPTURED_STAGED BASE_RAW_TREE <<< "$BASE_SNAPSHOT_PAIR"
   echo 'devkit review: merge-base worktree did not materialize the resolved base tree.' >&2
   exit 1
 }
+review_phase submodules-base
 BASE_SUBMODULES_CREATED=1
 review_materialize_submodules "$BASE_WT" "$GIT_ROOT" "$BASE_SUBMODULE_MANIFEST"
+review_phase deps-base
 export DEVKIT_REVIEW_DEPENDENCY_MANIFEST="$BASE_DEPENDENCY_MANIFEST"
 prepare_gate_worktree "$BASE_TARGET" "$TARGET_ROOT" review-baseline
 unset DEVKIT_REVIEW_DEPENDENCY_MANIFEST
@@ -537,6 +731,7 @@ export DEVKIT_REVIEW_PROJECTION_MANIFEST="$BASE_PROJECTION_MANIFEST"
 link_untracked_gate_configs "$BASE_TARGET" "$TARGET_ROOT" review-baseline
 unset DEVKIT_REVIEW_PROJECTION_MANIFEST
 
+review_phase baseline-capture
 BASELINE_GATE="$ASSET_RUNTIME/gate-engine/review/baseline-gate.mjs"
 [ -f "$BASELINE_GATE" ] || BASELINE_GATE="$ASSET_RUNTIME/gate-engine/review/baseline-gate.mts"
 [ -f "$BASELINE_GATE" ] || {
@@ -545,6 +740,7 @@ BASELINE_GATE="$ASSET_RUNTIME/gate-engine/review/baseline-gate.mjs"
 }
 node "$BASELINE_GATE" capture "$BASE_WT" "$FINAL_WT" "$BASELINE_RUNTIME"
 
+review_phase cache-session
 mkdir "$PRIVATE_DATA_ROOT"
 IFS= read -r -d '' PERSISTENT_CACHE_ROOT < <(
   node "$CACHE_ROOT_TOOL" "$TARGET_ROOT" "$STATE_ROOT"
@@ -621,6 +817,7 @@ git_line_into BASE_BEFORE_HEAD "$BASE_WT" rev-parse --verify HEAD || exit 1
   echo 'devkit review: private worktree HEAD moved before the hook started.' >&2
   exit 1
 }
+review_phase preflight-verify
 review_worktree_matches_tree "$FINAL_WT" "$RAW_TREE" "$STAGED_TREE"
 review_worktree_matches_tree "$BASE_WT" "$BASE_RAW_TREE" "$BASE_TREE"
 review_verify_submodules "$FINAL_SUBMODULE_MANIFEST"
@@ -635,6 +832,11 @@ node "$PROJECTION_RUNTIME_TOOL" verify "$TARGET_ROOT" "$BASE_TARGET" \
 node "$ASSET_RUNTIME_TOOL" verify "$PACKAGE_ROOT" "$ASSET_RUNTIME" "$ASSET_FINGERPRINT"
 verify_target_capture
 
+# Hand the ceiling over to the gate chain, which has owned its own since sc-1199. Two guards must
+# never be armed at once: this one signals the whole process group, which would tear the supervised
+# gate tree out from under the supervisor that is already reaping it.
+stop_preflight_watchdog
+review_phase gates
 GATE_RAW_STATUS=0
 if [ "$OVERLAY" -eq 1 ]; then
   run_gates_with_capture "$FINAL_TARGET" "$TARGET_ROOT" 'devkit review' "$LOG" "$PROGRESS" -- \
@@ -653,6 +855,12 @@ fi
 if [ "$REQUESTED_SIGNAL_STATUS" -ne 0 ]; then GATE_RAW_STATUS=$REQUESTED_SIGNAL_STATUS; fi
 rm -f "$PROGRESS"
 
+# Re-arm for teardown. This stretch is a second unbounded region for exactly the reasons the setup
+# was — a dozen verify passes plus cleanup_worktrees, whose `git worktree remove` can wedge just as
+# readily as the `git worktree add` that created it. Without this the run would hang here with a
+# stale phase=gates, which is the very symptom this work exists to remove.
+start_preflight_watchdog
+review_phase postflight-verify
 AUTHORITY_OK=1
 FORMAT_CHANGED=0
 FINAL_AFTER_STAGED=$(review_staged_tree "$FINAL_WT" 2>/dev/null) || AUTHORITY_OK=0
@@ -685,9 +893,11 @@ node "$ASSET_RUNTIME_TOOL" verify "$PACKAGE_ROOT" "$ASSET_RUNTIME" \
   "$ASSET_FINGERPRINT" || AUTHORITY_OK=0
 verify_target_capture || AUTHORITY_OK=0
 
+review_phase cleanup
 cleanup_worktrees || AUTHORITY_OK=0
 verify_target_capture || AUTHORITY_OK=0
 
+review_phase cache-promote
 CACHE_RESET=0
 if [ "$AUTHORITY_OK" -eq 1 ]; then
   index=0
@@ -719,6 +929,7 @@ esac
 if [ "$FINAL_STATUS" -eq 0 ] && { [ "$AUTHORITY_OK" -ne 1 ] || [ "$CACHE_RESET" -eq 1 ]; }; then
   FINAL_STATUS=1
 fi
+review_phase verdict
 
 if [ "$FORMAT_CHANGED" -eq 1 ]; then
   {

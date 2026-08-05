@@ -152,6 +152,12 @@ function fixture(action = "printf 'REVIEW_HOOK_RAN\\n'"): Fixture {
     env: {
       ...process.env,
       DEVKIT_NO_TELEMETRY: '1',
+      // Pinned high, and pinned SEPARATELY from SHIP_COMMIT_TIMEOUT. The setup ceiling defaults to
+      // SHIP_COMMIT_TIMEOUT, so without this every fixture would bound two `git worktree add`
+      // checkouts plus dependency and asset materialization at 15s — spurious 124s on a loaded CI
+      // box — and the timeout test below, which drops SHIP_COMMIT_TIMEOUT to 1s to exercise the GATE
+      // CHAIN's ceiling, would trip the setup guard before the gates ever launched.
+      DEVKIT_PREFLIGHT_TIMEOUT: '600',
       HOME: home,
       SHIP_COMMIT_TIMEOUT: '15',
       TMPDIR: temp,
@@ -203,6 +209,17 @@ function repositoryEvidence(root: string): RepositoryEvidence {
 function logs(root: string): string[] {
   const directory = join(root, '.devkit', 'review-runs');
   return existsSync(directory) ? readdirSync(directory).sort() : [];
+}
+
+/**
+ * The contents of the one run log that appeared since `before`. Never index logs() directly: a test
+ * that invokes review twice produces two logs, and RUN_ID (`<branch>-<UTC-seconds>-$$-$RANDOM`)
+ * only sorts chronologically while the runs land in different seconds.
+ */
+function newLogSince(root: string, before: readonly string[]): string {
+  const fresh = logs(root).filter((name) => !before.includes(name));
+  expect(fresh, `expected exactly one new run log, got ${fresh.join(', ')}`).toHaveLength(1);
+  return readFileSync(join(root, '.devkit/review-runs', fresh[0] as string), 'utf8');
 }
 
 function combinedOutput(result: SpawnSyncReturns<string>): string {
@@ -370,31 +387,65 @@ printf 'REVIEW_SNAPSHOT_OK\\n'
     }
     expect(existsSync(join(target.root, 'deleted.txt'))).toBe(false);
     expect(logs(target.root)).toHaveLength(1);
-    expect(
-      readFileSync(
-        join(target.root, '.devkit/review-runs', logs(target.root)[0] as string),
-        'utf8',
-      ),
-    ).toContain('REVIEW_SNAPSHOT_OK');
+    const log = readFileSync(
+      join(target.root, '.devkit/review-runs', logs(target.root)[0] as string),
+      'utf8',
+    );
+    expect(log).toContain('REVIEW_SNAPSHOT_OK');
+    expect(log).toContain('result=passed exit=0 phase=verdict');
   }, 240_000);
 
   it('validates setup before a clean success and never runs the hook for no changes', () => {
     const target = fixture("echo 'CLEAN_HOOK_MUST_NOT_RUN' >&2; exit 91");
 
+    const beforeClean = logs(target.root);
     const clean = runReview(target);
 
     expect(clean.status, combinedOutput(clean)).toBe(0);
     expect(combinedOutput(clean)).toContain('nothing to review');
     expect(combinedOutput(clean)).not.toContain('CLEAN_HOOK_MUST_NOT_RUN');
+    // A no-op is recorded as its own outcome, never as a pass.
+    expect(newLogSince(target.root, beforeClean)).toContain(
+      'result=skipped exit=0 phase=nothing-to-review',
+    );
 
     write(target.root, '.husky/pre-commit', '#!/bin/sh\nexit 0\n', true);
     git(target.root, 'add', '.husky/pre-commit');
     git(target.root, 'commit', '-qm', 'commit invalid setup');
     updateInferredBase(target.root);
+    const beforeInvalid = logs(target.root);
     const invalid = runReview(target);
 
     expect(invalid.status).toBe(1);
     expect(combinedOutput(invalid)).toMatch(/gate block differs.*devkit doctor --fix/i);
+    expect(newLogSince(target.root, beforeInvalid)).toContain(
+      'result=failed exit=1 phase=setup-capture',
+    );
+  }, 240_000);
+
+  /**
+   * A P1 report claimed a drifted core.hooksPath exits 0 with an unreviewed diff — the persisted log
+   * being nothing but its own header made a setup abort look like a legitimate short run. The drift
+   * is routine (any husky-running install re-claims core.hooksPath). Two properties are pinned here:
+   * the setup failure is fail-closed, and the log says so rather than ending mid-sentence.
+   */
+  it('fails a review whose core.hooksPath drifted, and records why in the run log', () => {
+    const target = fixture("printf 'DRIFT_HOOK_MUST_NOT_RUN\\n'");
+    addCommittedChange(target);
+    git(target.root, 'config', 'core.hooksPath', '.git/hooks');
+
+    const before = logs(target.root);
+    const result = runReview(target);
+
+    expect(result.status, combinedOutput(result)).toBe(1);
+    expect(combinedOutput(result)).toMatch(
+      /core\.hooksPath is "\.git\/hooks", expected \.husky\/_.*doctor --fix/,
+    );
+    expect(combinedOutput(result)).not.toContain('DRIFT_HOOK_MUST_NOT_RUN');
+
+    const log = newLogSince(target.root, before);
+    expect(log).toContain('result=failed exit=1 phase=setup-capture');
+    expect(log).not.toContain('✓');
   }, 240_000);
 
   it('supports explicit targets and bases, prefers origin/HEAD, and never fetches', () => {
@@ -473,6 +524,7 @@ exec ${JSON.stringify(REAL_GIT)} "$@"
     const target = fixture('echo TIMEOUT_HOOK_STARTED; sleep 30');
     addCommittedChange(target);
     const before = repositoryEvidence(target.root);
+    const beforeLogs = logs(target.root);
 
     const result = runReview(target, [], {
       env: { ...target.env, SHIP_COMMIT_TIMEOUT: '1' },
@@ -483,6 +535,8 @@ exec ${JSON.stringify(REAL_GIT)} "$@"
     expect(result.status, combinedOutput(result)).toBe(124);
     expect(combinedOutput(result)).toContain('TIMEOUT_HOOK_STARTED');
     expect(combinedOutput(result)).toContain('gate chain hit the 1s ceiling');
+    // 124 reaches the terminal block rather than exiting out of the gate region, so phase=verdict.
+    expect(newLogSince(target.root, beforeLogs)).toContain('result=timeout exit=124 phase=verdict');
     expect(repositoryEvidence(target.root)).toEqual(before);
     expect(gitBuffer(target.root, 'worktree', 'list', '--porcelain', '-z')).toEqual(
       before.worktrees,
@@ -608,5 +662,117 @@ exec ${JSON.stringify(process.execPath)} "$@"
       before.worktrees,
     );
     expect(readdirSync(runtime)).toEqual(runtimeBefore);
+  }, 240_000);
+
+  /**
+   * A P2 report saw a review sit 15+ minutes with a 152-byte run log — the header and nothing else.
+   * The gate chain was never the problem: it streams through a FIFO+tee opened before launch. The
+   * ~245 lines of setup BEFORE it wrote nothing, so a wedged checkout and a slow one were the same
+   * observation. Two properties are pinned: setup narrates itself as it goes, and the narration
+   * survives the gate chain (whose capture used to open the log truncating, erasing everything
+   * written before it — including the header the report was looking at).
+   */
+  it('streams setup phases to the run log and keeps them once the gates run', () => {
+    const target = fixture();
+    addCommittedChange(target);
+    const beforeLogs = logs(target.root);
+
+    const startedAt = Date.now();
+    const result = runReview(target);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(result.status, combinedOutput(result)).toBe(0);
+    // The setup guard must be retired at the gate handover, not waited out. It ignores SIGTERM (it
+    // sits in the group it signals), so retiring it with anything catchable makes the handover block
+    // until the ceiling elapses on its own — a passing review would take DEVKIT_PREFLIGHT_TIMEOUT
+    // (600s here) instead of seconds. Cheap, direct guard against that regression returning.
+    expect(elapsedMs, `handover stalled: ${elapsedMs}ms`).toBeLessThan(120_000);
+    const log = newLogSince(target.root, beforeLogs);
+    // The header is written ~245 lines before the gates launch; a truncating capture erased it.
+    expect(log).toContain('devkit review: target=');
+    expect(log).toMatch(/phase=setup-capture t=\d+s/);
+    expect(log).toMatch(/phase=worktree-final t=\d+s/);
+    expect(log).toMatch(/phase=gates t=\d+s/);
+    // Gate output still lands in the same log the setup lines are now sharing.
+    expect(log).toContain('REVIEW_HOOK_RAN');
+    expect(log).toContain('result=passed exit=0 phase=verdict');
+    // Every phase line must precede the gate output rather than being flushed at the end.
+    expect(log.indexOf('phase=setup-capture')).toBeLessThan(log.indexOf('REVIEW_HOOK_RAN'));
+  }, 240_000);
+
+  /**
+   * The ceiling that already bounded the gate chain wrapped only the gate command, leaving setup and
+   * teardown unbounded — and nothing bounds review-target.sh from outside either. The wedge here is a
+   * FOREGROUND child, which is the only case that distinguishes a working guard from a placebo: bash
+   * defers a trapped signal until the running foreground command returns, so a pid-targeted kill
+   * would write a "timed out" banner and then hang anyway. The guard signals the process group.
+   */
+  it('bounds a wedged foreground setup step, attributes it, and still removes the worktrees', () => {
+    const target = fixture();
+    const bin = join(target.parent, 'managed-node-bin');
+    const cliNode = join(bin, 'node-cli');
+    mkdirSync(bin);
+    copyFileSync(process.execPath, cliNode);
+    chmodSync(cliNode, 0o755);
+    // Wedges asset materialization: late enough that both ephemeral worktrees already exist, so a
+    // guard that killed too hard would strand them checked out in the target's worktree list.
+    write(
+      target.parent,
+      'managed-node-bin/node',
+      `#!/bin/sh
+case "$1:$2" in
+  */review/asset-runtime.mts:materialize)
+    exec ${JSON.stringify(process.execPath)} -e 'console.error("ASSET_WEDGE_STARTED"); setInterval(() => {}, 1000)'
+    ;;
+esac
+exec ${JSON.stringify(process.execPath)} "$@"
+`,
+      true,
+    );
+    addCommittedChange(target);
+    const before = repositoryEvidence(target.root);
+    const beforeLogs = logs(target.root);
+
+    const result = spawnSync(cliNode, [CLI, 'review'], {
+      cwd: target.root,
+      encoding: 'utf8',
+      // Generous enough that setup reliably REACHES the wedge before the ceiling fires — the wedge
+      // is infinite, so the guard still fires deterministically, just attributed to the phase we
+      // meant to test. A tight ceiling would race parallel test load and name an earlier phase.
+      env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: '30' },
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 150_000,
+    });
+
+    expect(result.signal, combinedOutput(result)).toBeNull();
+    expect(combinedOutput(result)).toContain('ASSET_WEDGE_STARTED');
+    // 124, not 143: the sentinel is what separates a ceiling from a user's Ctrl-C, and it reuses the
+    // gate chain's timeout vocabulary rather than inventing a second one.
+    expect(result.status, combinedOutput(result)).toBe(124);
+    expect(combinedOutput(result)).toContain('hit the 30s ceiling DURING: assets');
+    expect(newLogSince(target.root, beforeLogs)).toContain('result=timeout exit=124 phase=assets');
+    // A hang guard that leaks ephemeral worktrees is worse than no hang guard.
+    expect(repositoryEvidence(target.root)).toEqual(before);
+    expect(gitBuffer(target.root, 'worktree', 'list', '--porcelain', '-z')).toEqual(
+      before.worktrees,
+    );
+  }, 240_000);
+
+  /**
+   * `0`, `.` and `1.2.3` all make /bin/sleep return or fail immediately, which would fire a spurious
+   * ceiling on every run. Rejected loudly rather than defaulted, matching gate-supervisor.mts —
+   * a silent fallback would accept here what the gate chain refuses to start on.
+   */
+  it('rejects a malformed setup ceiling instead of silently defaulting', () => {
+    const target = fixture();
+    addCommittedChange(target);
+
+    for (const value of ['abc', '0', '0.0', '1.2.3', '-5']) {
+      const result = runReview(target, [], {
+        env: { ...target.env, DEVKIT_PREFLIGHT_TIMEOUT: value },
+      });
+      expect(result.status, `${value}: ${combinedOutput(result)}`).toBe(1);
+      expect(combinedOutput(result)).toContain(`invalid timeout ${value}`);
+    }
   }, 240_000);
 });
