@@ -196,12 +196,15 @@ export function mergeLensOutcomes<
   };
 }
 
-type LensPart = {
+export type LensPart = {
   res: { status: string; name: string; transcript?: string; model?: string; items?: unknown[] };
   secs: number;
   /** The task this part ran. Carries the diff AND the derived reviewer, whose `lens` is the only
    * place the group survives — the reviewer NAME deliberately does not encode it. */
   task: ReviewTask;
+  /** This part's verdict came from the post-wave recovery attempt (sc-1476) — kept per-part so a
+   * recovered lens stays attributable in the merged row's lens_parts. Never in a cache key. */
+  retried?: boolean;
 };
 
 /**
@@ -246,7 +249,10 @@ export function emitMergedLensResults(
         status: p.res.status,
         secs: p.secs,
         ...(p.res.model ? { model: p.res.model } : {}),
+        ...(p.retried ? { retried: true } : {}),
       })),
+      // The merged row itself is flagged when ANY part needed the post-wave recovery (sc-1476).
+      ...(parts.some((p) => p.retried) ? { retried: true, retry_phase: 'deferred' } : {}),
       ...(merged.waivers?.length ? { waivers: merged.waivers } : {}),
       ...itemFields(merged as never),
       ...(transcriptRef ? { transcript_ref: transcriptRef } : {}),
