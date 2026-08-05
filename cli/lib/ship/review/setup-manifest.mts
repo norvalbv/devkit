@@ -17,6 +17,11 @@ import {
   reviewPathWithin,
 } from './runtime-paths.mts';
 import {
+  OVERLAY_HOOKS_PATH,
+  type OverlayHooksPathContext,
+  overlayHooksPathRejection,
+} from './setup/overlay-hooks-path.mts';
+import {
   REVIEW_SETUP_ABSENT,
   REVIEW_SETUP_VERSION,
   reviewSetupHash,
@@ -24,6 +29,7 @@ import {
 import { parseReviewSetupManifest } from './setup-manifest-parse.mts';
 import {
   REVIEW_SETUP_DOCTOR as DOCTOR,
+  REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR,
   parseReviewSetupProfile,
   type RawReviewConfig,
 } from './setup-profile.mts';
@@ -228,14 +234,35 @@ function readHooksPath(root: string): string {
   return decodeHooksPath(result.status, result.stdout);
 }
 
-function effectiveHooksPath(root: string, overlay: boolean): string {
+/**
+ * The hooksPath to FREEZE, after validating the live one.
+ *
+ * Package mode freezes what it reads — review-target.sh actually runs the gates with it. Overlay
+ * mode always freezes the canonical `.devkit/hooks`, which is what review-target.sh hardcodes for
+ * its private gate run, and validates the live value through the acceptance predicate instead.
+ *
+ * Canonicalizing is what keeps the frozen value STABLE. The live value is transient in overlay mode
+ * — the `git ci` alias (overlay.mts) and `devkit doctor --fix` both re-point it — and the frozen
+ * value is re-compared against the live one throughout a review (setup-runtime.mts verifySource,
+ * re-run at several points in review-target.sh). Freezing the reclaimed `.husky/_` would let a
+ * concurrent `git ci` in another terminal abort an in-flight review.
+ */
+function effectiveHooksPath(
+  root: string,
+  overlay: boolean,
+  context: OverlayHooksPathContext,
+): string {
   const value = readHooksPath(root);
-  const expected = overlay ? '.devkit/hooks' : '.husky/_';
-  if (value !== expected)
-    fail(
-      `core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected ${expected} — ${DOCTOR}`,
-    );
-  return value;
+  if (!overlay) {
+    if (value !== '.husky/_')
+      fail(
+        `core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected .husky/_ — ${DOCTOR}`,
+      );
+    return value;
+  }
+  const rejection = overlayHooksPathRejection(value, context);
+  if (rejection) fail(`${rejection} — ${OVERLAY_DOCTOR}`);
+  return OVERLAY_HOOKS_PATH;
 }
 
 function captureSetupPaths(
@@ -260,7 +287,12 @@ function captureOverlayChain(
   gitRoot: string,
   targetRoot: string,
   config: RawReviewConfig,
-): { chain: NonNullable<ReviewSetupState['chain']>; paths: ReviewSetupPath[] } {
+): {
+  chain: NonNullable<ReviewSetupState['chain']>;
+  paths: ReviewSetupPath[];
+  /** The chain hook exists and is executable — the acceptance predicate's proof, not a re-stat. */
+  present: boolean;
+} {
   const origHooksPath =
     typeof config.origHooksPath === 'string'
       ? config.origHooksPath
@@ -271,10 +303,11 @@ function captureOverlayChain(
   if (sourcePath === '.')
     fail('root-level overlay pre-commit chains are not supported by devkit review.');
   const chainState = pathState('git', gitRoot, 'overlay-chain', path, false, true);
+  const present = chainState.fingerprint !== REVIEW_SETUP_ABSENT;
   const paths = [chainState];
-  if (chainState.fingerprint !== REVIEW_SETUP_ABSENT)
+  if (present)
     paths.push(pathState('git', gitRoot, 'overlay-chain-source', sourcePath, false, false));
-  return { chain: { path, sourcePath }, paths };
+  return { chain: { path, sourcePath }, paths, present };
 }
 
 function captureState(targetRoot: string, gitRoot: string): ReviewSetupState {
@@ -286,9 +319,17 @@ function captureState(targetRoot: string, gitRoot: string): ReviewSetupState {
     if (cause instanceof Error && cause.message.startsWith('devkit review:')) throw cause;
     return fail(`could not read .devkit/config.json (${errorMessage(cause)}) — ${DOCTOR}`);
   }
-  const hooksPath = effectiveHooksPath(gitRoot, parsed.overlay);
-  const paths = captureSetupPaths(targetRoot, gitRoot, parsed.overlay);
+  // The chain is captured BEFORE the hooksPath so the acceptance predicate can reuse its verdict:
+  // whether the repo's committed hook exists and where it lives are two of the preconditions for
+  // accepting a husky-reclaimed hooksPath, and re-stat'ing them here would let the manifest and the
+  // acceptance disagree.
   const overlay = parsed.overlay ? captureOverlayChain(gitRoot, targetRoot, parsed.raw) : null;
+  const hooksPath = effectiveHooksPath(gitRoot, parsed.overlay, {
+    gitRoot,
+    chain: overlay?.chain ?? null,
+    chainPresent: overlay?.present ?? false,
+  });
+  const paths = captureSetupPaths(targetRoot, gitRoot, parsed.overlay);
   return {
     overlay: parsed.overlay,
     hooksPath,

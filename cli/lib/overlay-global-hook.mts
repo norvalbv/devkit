@@ -23,6 +23,9 @@ import { dirname, join } from 'node:path';
 const MARK_START = '# >>> devkit overlay global pre-commit gate >>>';
 const MARK_END = '# <<< devkit overlay global pre-commit gate <<<';
 const TRAILING_NEWLINES = /\n+$/; // hoisted (perf: never recompile per install/remove)
+// The overlay hook the block invokes. Interpolated into BLOCK (never re-typed) so the string
+// `globalHookWired` greps for cannot drift from the string the block actually runs.
+const OVERLAY_HOOK_REL = '.devkit/hooks/pre-commit';
 
 // The devkit block. Guarded so it ONLY acts in an overlaid repo and is otherwise inert:
 //   - HUSKY=0 (husky's documented skip-hooks escape hatch) → skip. _/h's own HUSKY=0 exit is at
@@ -39,8 +42,8 @@ const BLOCK = `${MARK_START}
 # HUSKY=0. Repo root resolved via git so worktrees / submodules / git -C still gate the right tree.
 if [ "\${HUSKY:-}" != "0" ] && [ "\${0##*/}" = "pre-commit" ]; then
   __dk_root=$(git rev-parse --show-toplevel 2>/dev/null) || __dk_root=
-  if [ -n "$__dk_root" ] && [ -x "$__dk_root/.devkit/hooks/pre-commit" ]; then
-    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/.devkit/hooks/pre-commit" "$@" || exit $?
+  if [ -n "$__dk_root" ] && [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ]; then
+    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/${OVERLAY_HOOK_REL}" "$@" || exit $?
   fi
   unset __dk_root
 fi
@@ -57,6 +60,31 @@ export function globalHookInstalled() {
   const file = globalInitPath();
   try {
     return existsSync(file) && readFileSync(file, 'utf8').includes(MARK_START);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True iff the global init.sh carries a COMPLETE, still-wired devkit block: both markers AND the
+ * line that actually runs the overlay hook between them.
+ *
+ * `globalHookInstalled` (MARK_START alone) stays doctor's advisory signal — a start marker is
+ * enough to say "you opted in". `devkit review` needs the stronger claim, because this shim is the
+ * ONLY thing keeping an overlay repo gated once husky reclaims core.hooksPath: a block truncated
+ * after its start marker (a half-applied hand edit, an interrupted write) passes the advisory test
+ * while gating nothing.
+ */
+export function globalHookWired() {
+  const file = globalInitPath();
+  try {
+    if (!existsSync(file)) return false;
+    const content = readFileSync(file, 'utf8');
+    const start = content.indexOf(MARK_START);
+    if (start === -1) return false;
+    const end = content.indexOf(MARK_END, start);
+    if (end === -1) return false;
+    return content.slice(start, end).includes(OVERLAY_HOOK_REL);
   } catch {
     return false;
   }

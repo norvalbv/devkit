@@ -15,6 +15,13 @@ import { normalizeSafeReviewRelativePath } from './runtime-paths.mts';
 import { fail, objectValue } from './shared/common.mts';
 
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
+/**
+ * Overlay's hooksPath remedy. Leads with the DURABLE fix: `doctor --fix` re-points core.hooksPath,
+ * but husky's `prepare` reclaims it again on the very next install, so pointing there first would
+ * hand the user a repair that undoes itself.
+ */
+export const REVIEW_SETUP_OVERLAY_DOCTOR =
+  "run 'devkit init --overlay --global-commit-gate' (durable — survives husky's reclaim), or 'devkit doctor --fix' (transient — the next install reclaims it).";
 
 export interface RawReviewConfig {
   overlay?: unknown;

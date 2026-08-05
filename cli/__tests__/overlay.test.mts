@@ -8,7 +8,7 @@
 import { execFileSync } from 'node:child_process';
 // Reason: test scenario setup is intentionally explicit + self-contained per install mode (package/standalone/overlay/monorepo); shared bits already live in __tests__/_helpers.mjs
 // fallow-ignore-next-line code-duplication
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
@@ -988,6 +988,63 @@ describe('overlay hook regeneration (syncOverlayHook + doctor --fix)', () => {
     // doctor --fix: regenerates → exit 0, sentinel restored
     expect(await doctorRun(['--fix'], root)).toBe(0);
     expect(readHook(root)).toContain('devkit-gates: chain start');
+  });
+
+  // husky's `prepare` reclaims core.hooksPath on every install. `doctor --fix` used to only WARN
+  // about that, while `devkit review` told users to run exactly this command to repair it.
+  const hooksPathOf = (root) =>
+    execFileSync('git', ['config', '--get', 'core.hooksPath'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+
+  it('doctor --fix re-points a reclaimed core.hooksPath; read-only doctor only warns', async () => {
+    const root = workRepo();
+    await initOverlay(root);
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root });
+
+    // read-only: reports the drift, changes nothing
+    expect(await doctorRun([], root)).toBe(1);
+    expect(hooksPathOf(root)).toBe('.husky/_');
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(hooksPathOf(root)).toBe('.devkit/hooks');
+  });
+
+  it('doctor --fix never leaves a re-pointed hooksPath aiming at a missing hook', async () => {
+    // The two halves must heal together: re-pointing at a .devkit/hooks with no hook in it would
+    // turn a loud warning into a SILENT zero-gate state. --fix regenerates the hook first (so
+    // hookOk holds by the time the re-point is considered) and only then moves the pointer.
+    const root = workRepo();
+    await initOverlay(root);
+    rmSync(join(root, '.devkit', 'hooks'), { recursive: true, force: true });
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root });
+
+    expect(await doctorRun(['--fix'], root)).toBe(0);
+    expect(hooksPathOf(root)).toBe('.devkit/hooks');
+    expect(existsSync(join(root, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
+  });
+
+  it('doctor --fix leaves the shared core.hooksPath alone inside a linked worktree', async () => {
+    // core.hooksPath lives in the SHARED .git/config (only --worktree scope is per-checkout) and
+    // `.devkit/hooks` is relative, so writing it here would re-point every sibling worktree at a
+    // directory most of them do not have.
+    const root = workRepo();
+    await initOverlay(root);
+    execFileSync('git', ['config', 'core.hooksPath', '.husky/_'], { cwd: root });
+    const linked = join(mkTmp('overlay-linked-'), 'wt');
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', linked], { cwd: root });
+    // `.devkit/` is git-ignored (overlay is invisible), so a fresh worktree has none. Copy it in,
+    // otherwise doctor exits "not initialized" and the worktree guard is never reached.
+    cpSync(join(root, '.devkit'), join(linked, '.devkit'), { recursive: true });
+    expect(existsSync(join(linked, '.devkit', 'hooks', 'pre-commit'))).toBe(true);
+
+    // Exit 1 (not 2 "not initialized") proves the overlay branch ran, and the hook IS present, so
+    // the only thing that can have refused the write is the linked-worktree guard.
+    expect(await doctorRun(['--fix'], linked)).toBe(1);
+
+    expect(hooksPathOf(root)).toBe('.husky/_');
+    expect(hooksPathOf(linked)).toBe('.husky/_');
   });
 });
 
