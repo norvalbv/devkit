@@ -32,13 +32,14 @@
 import { envFlag, resolveGuardConfig } from "../config.mjs";
 import { emitCacheHit } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
+import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache } from "./cache.mjs";
 import { renderGoverningClaudeMd } from "./claude-md.mjs";
 import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
 import { loadReviewerContext } from "./evidence/commit-message.mjs";
 import { attachItems } from "./evidence/items.mjs";
-import { emitReviewScope, emitReviewSkipped, emitUnselected } from "./evidence/scope.mjs";
+import { emitReviewScope, emitReviewSkipped, reportNonRuns } from "./evidence/scope.mjs";
 import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
 import { reviewerTargetSalts } from "./evidence/targets-block.mjs";
 import { emitMergedLensResults, mapLimit, planReviewWork, taskLabel } from "./lens/split.mjs";
@@ -285,7 +286,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         }
         if (reviewMode)
             cfg = effectiveReviewConfig(cfg);
-        selected = selectReviewers(stagedFiles(cwd), cfg);
+        const staged = stagedFiles(cwd);
+        selected = selectReviewers(staged, cfg);
         const skip = skippedReviewers();
         const knobDropped = new Set();
         if (skip.size > 0) {
@@ -297,9 +299,8 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             }
             selected = selected.filter((s) => !skip.has(s.reviewer.name));
         }
-        // Before the early return: a run where nothing was selected is still a run, and "this reviewer
-        // did not look at this commit" is the fact that stops a later miss-analysis mislabelling it.
-        emitUnselected(selected, knobDropped);
+        // Before the early return: name what an empty domain root dropped, then record every non-run.
+        reportNonRuns(staged, cfg, selected, knobDropped, skip);
         if (selected.length === 0)
             return finish(0);
         if (reviewMode) {
@@ -310,12 +311,12 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         diffs = selected.map((s) => gitCached(cwd, [], s.files));
     }
     catch (e) {
-        if (reviewMode) {
-            console.error(`guard-review: review setup failure — ${e instanceof Error ? e.message : String(e)}`);
-            return finish(1);
-        }
-        console.error(`guard-review: could not run — ${e instanceof Error ? e.message : String(e)}${strict ? ' (strict ship mode: failing closed)' : ''}`);
-        return finish(strict ? 3 : 2); // fail-open, except on a ship
+        // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review
+        // mode is the worse — exit 1 is rendered as "A reviewer FAILED (opus-confirmed)".
+        const g = 'guard-review';
+        const m = `${g}: review setup failure — ${e instanceof Error ? e.message : String(e)}`;
+        const fb = reviewMode ? { message: m } : { strict };
+        return finish(reportGateInfraFailure(g, g, e, cwd, reviewMode ? 1 : strict ? 3 : 2, fb));
     }
     const cache = loadCache(cwd);
     const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';

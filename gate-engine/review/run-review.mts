@@ -40,7 +40,7 @@ import { renderGoverningClaudeMd } from './claude-md.mts';
 import { buildCappedDiffEvidence } from './diff-evidence.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
 import { attachItems } from './evidence/items.mts';
-import { emitReviewScope, emitReviewSkipped, emitUnselected } from './evidence/scope.mts';
+import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
 import { emitMergedLensResults, mapLimit, planReviewWork, taskLabel } from './lens/split.mts';
@@ -363,7 +363,8 @@ export async function runReviewGate(
       return finish(0);
     }
     if (reviewMode) cfg = effectiveReviewConfig(cfg);
-    selected = selectReviewers(stagedFiles(cwd), cfg);
+    const staged = stagedFiles(cwd);
+    selected = selectReviewers(staged, cfg);
     const skip = skippedReviewers();
     const knobDropped = new Set<string>();
     if (skip.size > 0) {
@@ -375,9 +376,8 @@ export async function runReviewGate(
       }
       selected = selected.filter((s) => !skip.has(s.reviewer.name));
     }
-    // Before the early return: a run where nothing was selected is still a run, and "this reviewer
-    // did not look at this commit" is the fact that stops a later miss-analysis mislabelling it.
-    emitUnselected(selected, knobDropped);
+    // Before the early return: name what an empty domain root dropped, then record every non-run.
+    reportNonRuns(staged, cfg, selected, knobDropped, skip);
     if (selected.length === 0) return finish(0);
     if (reviewMode) {
       assetRoot = process.env.DEVKIT_REVIEW_ASSET_ROOT;

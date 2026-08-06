@@ -185,22 +185,23 @@ const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—�
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const TRAILING_SLASH_RE = /\/$/;
 
+/** The deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
+ * undeclared trees (vendored code, scripts) are outside the consumer's stated review surface. */
+export function declaredRoots(cfg: GuardConfig): string[] {
+  return [...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots])];
+}
+
 /** The config roots that trigger a reviewer's domain. */
 export function rootsFor(reviewer: Reviewer, cfg: GuardConfig): string[] {
   if (reviewer.domain === 'backend') return cfg.review.backendRoots;
   if (reviewer.domain === 'frontend') return cfg.review.frontendRoots;
-  // `all` = the deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
-  // undeclared trees (vendored code, scripts) are outside the consumer's stated review surface.
-  // `conventions` shares this union (a CLAUDE.md rule anywhere in the declared surface is fair
+  // `conventions` shares the `all` union (a CLAUDE.md rule anywhere in the declared surface is fair
   // game) but — unlike `all` — is never filtered to source-only in selectReviewers below.
-  if (reviewer.domain === 'all' || reviewer.domain === 'conventions')
-    return [
-      ...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots]),
-    ];
+  if (reviewer.domain === 'all' || reviewer.domain === 'conventions') return declaredRoots(cfg);
   return cfg.scanRoots;
 }
 
-function underRoot(file: string, root: string): boolean {
+export function underRoot(file: string, root: string): boolean {
   const r = root.endsWith('/') ? root.slice(0, -1) : root;
   if (r === '.') return true;
   return file === r || file.startsWith(`${r}/`);

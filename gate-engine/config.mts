@@ -202,9 +202,11 @@ export const DEFAULTS = Object.freeze({
   // selected coverage gate must never silently pass unverified). `false` = explicit opt-out;
   // `{ statements, functions, lines?, branches? }` enforces the keys present. See coverage/run.mts.
   coverage: Object.freeze({}) as CoverageConfig,
-  // Review-agent topology (the 5 reviewer subagents READ these). Frink-agnostic defaults:
-  // a generic repo treats `src` as its only backend root, has no configured frontend
-  // topology (frontend reviewers exit early), and enforces WCAG touch targets + skips the
+  // Review-agent topology (the reviewer subagents READ these). Frink-agnostic defaults: a generic
+  // repo treats `src` as its only backend root and declares NO frontend topology — an empty array
+  // means selectReviewers never picks that domain at all, so the frontend reviewers simply do not
+  // run (the gate warns on stderr if such a commit stages frontend files; `devkit doctor` flags the
+  // combination against the detected stack). Enforces WCAG touch targets + skips the
   // tracker/Shortcut rule until opted in.
   review: Object.freeze({
     backendRoots: ['src'],
