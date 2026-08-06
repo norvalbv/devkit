@@ -33,6 +33,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { retainNewest } from './store-retention.mts';
 
 const MAX_ENTRIES = 100;
 const MAX_STORE_SIZE = 4 * 1024 * 1024;
@@ -171,13 +172,8 @@ export function verdictStoreGeneration(file: string): string | null {
   const state = generationState(file);
   return state.kind === 'valid' ? state.value : null;
 }
-function newestEntries(entries: Record<string, VerdictMeta>): Record<string, VerdictMeta> {
-  return Object.fromEntries(
-    Object.entries(entries)
-      .sort((a, b) => String(b[1]?.at ?? '').localeCompare(String(a[1]?.at ?? '')))
-      .slice(0, MAX_ENTRIES),
-  );
-}
+const newestEntries = (entries: Record<string, VerdictMeta>, file?: string) =>
+  retainNewest(entries, MAX_ENTRIES, file);
 function writeAtomic(
   destination: string,
   contents: string,
@@ -262,7 +258,7 @@ function publishMergedEntries(
   options: SaveEntriesOptions,
 ): void {
   const generated = ensureGeneratedStore(file, handle, active);
-  const merged = newestEntries({ ...generated.entries, ...keyToMeta });
+  const merged = newestEntries({ ...generated.entries, ...keyToMeta }, file);
   options.afterLoad?.();
   writeStore(
     file,
@@ -306,7 +302,7 @@ export function replaceEntries(file: string, entries: Record<string, VerdictMeta
     fenceLock(handle);
     const generation = randomUUID();
     writeGeneration(file, generation, handle);
-    writeStore(file, generation, newestEntries(entries), handle);
+    writeStore(file, generation, newestEntries(entries, file), handle);
   });
 }
 export function clearEntries(file: string): boolean {

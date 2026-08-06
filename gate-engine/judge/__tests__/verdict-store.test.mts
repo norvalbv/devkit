@@ -268,6 +268,35 @@ describe('verdict store mutations', () => {
     expect(loadEntries(file)).toMatchObject({ newest: { at: '999' } });
     expect(loadEntries(file)).not.toHaveProperty('old-0');
   });
+  // parsedStore rejects any store larger than MAX_STORE_SIZE (4 MiB) and returns null, which
+  // activeStore turns into entries:{} — i.e. an oversize store reads as NO CACHE. Two properties
+  // matter and neither was covered: it must fail toward re-review (never replay a stale PASS), and
+  // it must SELF-HEAL, because the same empty read feeds publishMergedEntries, which then rewrites
+  // the file with only the new keys. That makes it a one-time wipe, not a permanently dead store.
+  it('reads an oversize store as empty and heals it on the next write', () => {
+    const file = path.join(tempRoot('verdict-oversize'), 'review-cache.json');
+    expect(saveEntries(file, { earned: { at: '2026-08-05T00:00:00.000Z' } })).toBe(true);
+    const generation = verdictStoreGeneration(file);
+    expect(loadEntries(file)).toHaveProperty('earned');
+
+    // Same shape, just past the ceiling — so only the SIZE can be what rejects it.
+    writeFileSync(
+      file,
+      `${JSON.stringify({
+        version: 2,
+        generation,
+        entries: { earned: { at: '2026-08-05T00:00:00.000Z', pad: 'x'.repeat(4 * 1024 * 1024) } },
+      })}\n`,
+    );
+    expect(readFileSync(file, 'utf8').length).toBeGreaterThan(4 * 1024 * 1024);
+    expect(loadEntries(file)).toEqual({});
+
+    expect(saveEntries(file, { fresh: { at: '2026-08-05T01:00:00.000Z' } })).toBe(true);
+    expect(readFileSync(file, 'utf8').length).toBeLessThan(4 * 1024 * 1024);
+    expect(loadEntries(file)).toHaveProperty('fresh');
+    // The oversize entry is gone, not resurrected — the wipe is real and the store is usable again.
+    expect(loadEntries(file)).not.toHaveProperty('earned');
+  });
   it('reports a generation mismatch without mutating the active store', () => {
     const file = path.join(tempRoot('verdict-generation-mismatch'), 'review-cache.json');
     expect(saveEntries(file, { prior: { at: '1' } })).toBe(true);
