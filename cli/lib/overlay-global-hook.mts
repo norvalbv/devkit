@@ -23,6 +23,9 @@ import { dirname, join } from 'node:path';
 const MARK_START = '# >>> devkit overlay global pre-commit gate >>>';
 const MARK_END = '# <<< devkit overlay global pre-commit gate <<<';
 const TRAILING_NEWLINES = /\n+$/; // hoisted (perf: never recompile per install/remove)
+// The overlay hook the block invokes. Interpolated into BLOCK (never re-typed) so the string
+// `globalHookWired` greps for cannot drift from the string the block actually runs.
+const OVERLAY_HOOK_REL = '.devkit/hooks/pre-commit';
 
 // The devkit block. Guarded so it ONLY acts in an overlaid repo and is otherwise inert:
 //   - HUSKY=0 (husky's documented skip-hooks escape hatch) → skip. _/h's own HUSKY=0 exit is at
@@ -39,8 +42,8 @@ const BLOCK = `${MARK_START}
 # HUSKY=0. Repo root resolved via git so worktrees / submodules / git -C still gate the right tree.
 if [ "\${HUSKY:-}" != "0" ] && [ "\${0##*/}" = "pre-commit" ]; then
   __dk_root=$(git rev-parse --show-toplevel 2>/dev/null) || __dk_root=
-  if [ -n "$__dk_root" ] && [ -x "$__dk_root/.devkit/hooks/pre-commit" ]; then
-    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/.devkit/hooks/pre-commit" "$@" || exit $?
+  if [ -n "$__dk_root" ] && [ -x "$__dk_root/${OVERLAY_HOOK_REL}" ]; then
+    DEVKIT_VIA_HUSKY_INIT=1 sh "$__dk_root/${OVERLAY_HOOK_REL}" "$@" || exit $?
   fi
   unset __dk_root
 fi
@@ -57,6 +60,32 @@ export function globalHookInstalled() {
   const file = globalInitPath();
   try {
     return existsSync(file) && readFileSync(file, 'utf8').includes(MARK_START);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True iff the global init.sh carries this devkit's block VERBATIM.
+ *
+ * `globalHookInstalled` (MARK_START alone) stays doctor's advisory signal — a start marker is
+ * enough to say "you opted in". `devkit review` needs a stronger claim, because this shim is the
+ * ONLY thing keeping an overlay repo gated once husky reclaims core.hooksPath.
+ *
+ * Exact-match rather than grepping for the hook path between the markers: any substring test is
+ * satisfied by text that never executes, and `# .devkit/hooks/pre-commit` inside the block would
+ * pass one while husky runs nothing. Byte-equality against the generator is the same standard
+ * `reviewHookDrift` already applies to the pre-commit block, and it needs no shell parsing at all.
+ *
+ * A block this devkit did not generate (an older release's wording, a hand edit) therefore reads as
+ * NOT wired. That is deliberate and fail-closed: devkit can only vouch for a block whose behaviour
+ * it knows. `installGlobalHook` is strip-then-reinsert, so re-running
+ * `devkit init --overlay --global-commit-gate` restores the exact block.
+ */
+export function globalHookWired() {
+  const file = globalInitPath();
+  try {
+    return existsSync(file) && readFileSync(file, 'utf8').includes(BLOCK);
   } catch {
     return false;
   }

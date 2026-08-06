@@ -1,11 +1,20 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { normalizeSelection, structureCmdFor } from '../lib/components.mts';
 import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { globalInitPath, installGlobalHook } from '../lib/overlay-global-hook.mts';
 import {
   captureReviewSetup,
   type ReviewSetupManifest,
@@ -57,6 +66,13 @@ function setup(name: string, overlay = false) {
   git(root, 'config', 'core.hooksPath', overlay ? '.devkit/hooks' : '.husky/_');
   return { parent, root, manifest: join(parent, 'setup.json') };
 }
+
+// husky 9.1.7's real `_/h`, verbatim in the part that matters: it builds the XDG init.sh path and
+// sources it. The acceptance predicate greps for that, so a fixture that paraphrases it proves
+// nothing about the arrangement devkit is agreeing to trust.
+const HUSKY_RUNNER_H =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+  '#!/usr/bin/env sh\ni="${XDG_CONFIG_HOME:-$HOME/.config}/husky/init.sh"\n[ -f "$i" ] && . "$i"\n';
 
 function pathRecord(manifest: ReviewSetupManifest, id: string) {
   return manifest.setup.paths.find((entry) => entry.id === id);
@@ -413,5 +429,203 @@ describe('review setup manifest', () => {
     writeFileSync(manifest, `${JSON.stringify(malformed, null, 2)}\n`);
 
     expect(() => verifyReviewSetup(root, manifest)).toThrow(/profile has invalid guards/);
+  });
+});
+
+// husky's committed `prepare` resets core.hooksPath to `.husky/_` on EVERY install, un-wiring the
+// overlay's `.devkit/hooks` pointer. Commits stay gated when the opt-in `~/.config/husky/init.sh`
+// shim is installed — husky's own `_/h` sources it before running the committed hook — so review
+// must accept that arrangement instead of failing on the literal. It is accepted only on proof:
+// every link of that chain has to be intact, or a genuinely ungated repo would pass review.
+describe('review setup manifest — husky-reclaimed overlay hooksPath', () => {
+  const origXdg = process.env.XDG_CONFIG_HOME;
+
+  afterEach(() => {
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
+  });
+
+  /**
+   * An overlay repo AFTER husky reclaimed core.hooksPath: the overlay hook is still installed and
+   * chains to the committed `.husky/pre-commit`, but git now runs husky's `.husky/_` runner.
+   * `shim: false` sandboxes XDG at an empty dir, so the global block is genuinely absent.
+   */
+  function reclaimed(name: string, { shim = true } = {}) {
+    const parent = mkTmp(`devkit-review-reclaimed-${name}-`);
+    process.env.XDG_CONFIG_HOME = join(parent, 'xdg');
+    if (shim) installGlobalHook();
+    const root = join(parent, 'target');
+    mkdirSync(root);
+    git(root, 'init', '-q');
+    // husky 9.1.7's real runner shape: `_/h` sources the XDG init.sh, `_/<hook>` sources `_/h`.
+    write(root, '.husky/_/h', HUSKY_RUNNER_H);
+    write(root, '.husky/_/pre-commit', '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n', true);
+    write(root, '.husky/pre-commit', '#!/bin/sh\necho team hook\n', true);
+    write(root, '.devkit/hooks/pre-commit', buildOverlayHook(selection, '.husky/pre-commit'), true);
+    write(
+      root,
+      '.devkit/config.json',
+      `${JSON.stringify(config(true, { origHooksPath: '.husky/_' }), null, 2)}\n`,
+    );
+    git(root, 'config', 'core.hooksPath', '.husky/_');
+    return { parent, root, manifest: join(parent, 'setup.json') };
+  }
+
+  it('accepts the reclaimed path and still freezes the canonical .devkit/hooks', () => {
+    const { root, manifest } = reclaimed('accepted');
+
+    const captured = captureReviewSetup(root, manifest);
+
+    // Canonical, NOT the live `.husky/_`: review-target.sh hardcodes `.devkit/hooks` for its gate
+    // run, and freezing the transient value would let a concurrent `git ci` abort a live review.
+    expect(captured.setup.hooksPath).toBe('.devkit/hooks');
+    expect(captured.setup.overlay).toBe(true);
+    expect(captured.setup.chain).toEqual({ path: '.husky/pre-commit', sourcePath: '.husky' });
+    expect(verifyReviewSetup(root, manifest)).toEqual(captured);
+  });
+
+  it('rejects the reclaimed path when the global shim is absent, naming the resolved init.sh', () => {
+    const { root, manifest } = reclaimed('no-shim', { shim: false });
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(
+      new RegExp(`no devkit block in ${globalInitPath().replaceAll('.', '\\.')}`),
+    );
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/--global-commit-gate/);
+  });
+
+  it('rejects a shim whose hook invocation is commented out but still present', () => {
+    // Both markers intact and the hook path still in the text, so any substring test passes — yet
+    // husky runs nothing. The block is compared verbatim against the generator for exactly this.
+    const { root, manifest } = reclaimed('commented-shim');
+    const initSh = globalInitPath();
+    const disabled = readFileSync(initSh, 'utf8').replace(
+      /^(\s*)(DEVKIT_VIA_HUSKY_INIT=1 sh )/m,
+      '$1# $2',
+    );
+    expect(disabled).toContain('.devkit/hooks/pre-commit'); // the path survives the edit
+    expect(disabled).toContain('<<< devkit overlay global pre-commit gate <<<'); // markers intact
+    writeFileSync(initSh, disabled);
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/no devkit block in/);
+  });
+
+  it('rejects a shim block truncated after its start marker', () => {
+    const { root, manifest } = reclaimed('truncated-shim');
+    const initSh = globalInitPath();
+    const truncated = readFileSync(initSh, 'utf8').split('\n').slice(0, 2).join('\n');
+    expect(truncated).toContain('>>> devkit overlay global pre-commit gate >>>');
+    writeFileSync(initSh, `${truncated}\n`);
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/no devkit block in/);
+  });
+
+  it('rejects the reclaimed path when no committed .husky/pre-commit exists', () => {
+    // husky's `_/h` runs `[ ! -f "$s" ] && exit 0` BEFORE sourcing init.sh, so with no committed
+    // hook the shim never fires at all and every commit is silently ungated.
+    const { root, manifest } = reclaimed('no-committed-hook');
+    rmSync(join(root, '.husky/pre-commit'));
+    writeFileSync(join(root, '.devkit/hooks/pre-commit'), buildOverlayHook(selection, ''), {
+      mode: 0o755,
+    });
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(
+      /husky's runner would never reach it|exits before sourcing the shim/,
+    );
+  });
+
+  it('rejects a runner that only MENTIONS init.sh without sourcing it', () => {
+    // husky's own `_/h` prints a deprecation notice for `~/.huskyrc` that embeds the literal
+    // `~/.config/husky/init.sh`. A runner stripped of its `. "$i"` line but still carrying that
+    // echo satisfies a substring test while never reaching the shim — presence is not proof.
+    const { root, manifest } = reclaimed('mentions-only');
+    write(
+      root,
+      '.husky/_/h',
+      '#!/usr/bin/env sh\nif [ -f "$HOME/.huskyrc" ]; then\n\techo "husky - DEPRECATED, move your code to ~/.config/husky/init.sh"\nfi\n',
+    );
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/never sources husky\/init\.sh/);
+  });
+
+  it('accepts a runner that sources init.sh from an indented if-block', () => {
+    // Valid shell that genuinely sources: the dot-source sits at a line start WITH indentation,
+    // not after a `;`/`&&`. Rejecting it would hard-fail a repo that IS gated — the false-reject
+    // mirror of the echo/comment traps, and just as much a defect.
+    const { root, manifest } = reclaimed('indented-source');
+    write(
+      root,
+      '.husky/_/h',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+      '#!/usr/bin/env sh\ni="${XDG_CONFIG_HOME:-$HOME/.config}/husky/init.sh"\nif [ -f "$i" ]; then\n  . "$i"\nfi\n',
+    );
+
+    expect(captureReviewSetup(root, manifest).setup.hooksPath).toBe('.devkit/hooks');
+  });
+
+  it('rejects a runner whose source line is commented out', () => {
+    // A comment still supplies the `;` a source-command pattern keys on, so a disabled line reads
+    // as an active one unless comments are stripped first. Same trap as the echo, different shape.
+    const { root, manifest } = reclaimed('commented-source');
+    write(
+      root,
+      '.husky/_/h',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+      '#!/usr/bin/env sh\ni="${XDG_CONFIG_HOME:-$HOME/.config}/husky/init.sh"\n# disabled; . "$i"\n',
+    );
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/never sources husky\/init\.sh/);
+  });
+
+  it('rejects a stub whose source of the runner is commented out', () => {
+    const { root, manifest } = reclaimed('commented-stub');
+    write(root, '.husky/_/pre-commit', '#!/usr/bin/env sh\n# . "$(dirname "$0")/h"\n', true);
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(
+      /pre-commit never sources \.husky\/_\/h/,
+    );
+  });
+
+  it('rejects a runner that cannot reach the shim', () => {
+    const { root, manifest } = reclaimed('broken-runner');
+    write(root, '.husky/_/h', '#!/usr/bin/env sh\nexit 0\n');
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/never sources husky\/init\.sh/);
+
+    write(root, '.husky/_/h', HUSKY_RUNNER_H);
+    chmodSync(join(root, '.husky/_/pre-commit'), 0o644);
+    expect(() => captureReviewSetup(root, manifest)).toThrow(
+      /\.husky\/_\/pre-commit is not executable/,
+    );
+  });
+
+  it('rejects a reclaimed overlay whose chain does not resolve through .husky', () => {
+    // An overlay installed BEFORE husky records origHooksPath '' and chains to .git/hooks — husky's
+    // runner would never execute that, so review must not vouch for a chain it never ran.
+    const { root, manifest } = reclaimed('foreign-chain');
+    writeFileSync(join(root, '.git/hooks/pre-commit'), '#!/bin/sh\necho chained\n', {
+      mode: 0o755,
+    });
+    write(
+      root,
+      '.devkit/hooks/pre-commit',
+      buildOverlayHook(selection, '.git/hooks/pre-commit'),
+      true,
+    );
+    write(
+      root,
+      '.devkit/config.json',
+      `${JSON.stringify(config(true, { origHooksPath: '' }), null, 2)}\n`,
+    );
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/chains to \.git\/hooks, not \.husky/);
+  });
+
+  it('still rejects an overlay hooksPath that is neither the overlay nor husky runner', () => {
+    const { root, manifest } = reclaimed('foreign-path');
+    git(root, 'config', 'core.hooksPath', '.githooks');
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(
+      /core\.hooksPath is "\.githooks", expected \.devkit\/hooks/,
+    );
   });
 });
