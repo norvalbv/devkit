@@ -118,12 +118,24 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
     expect(errorCodeOf(reviewed({ legs: legs as never }))).toBe('INVALID_STATUS_COMBINATION');
   });
 
-  it('rejects a local leg resolving checkouts that were never declared', () => {
+  it('rejects a local leg resolving checkouts when no glob pattern was declared', () => {
     const legs = [
       { ...LEGS_ALL_REACHED[0], declaredCheckouts: 0, resolvedCheckouts: 2 },
       ...LEGS_ALL_REACHED.slice(1),
     ];
     expect(errorCodeOf(reviewed({ legs: legs as never }))).toBe('INVALID_STATUS_COMBINATION');
+  });
+
+  it('ACCEPTS one glob pattern resolving to many checkouts (the canonical shape)', () => {
+    // `declaredCheckouts` counts PATTERNS, `resolvedCheckouts` counts DIRECTORIES, so resolved
+    // routinely exceeds declared: `cloned-projects/*` → five checkouts is the motivating Frink
+    // case. A `resolved <= declared` rule reads as tidy and rejects exactly the shape the whole
+    // local-first design exists to serve. Guarding it so nobody re-derives that rule.
+    const legs = [
+      { ...LEGS_ALL_REACHED[0], declaredCheckouts: 1, resolvedCheckouts: 5 },
+      ...LEGS_ALL_REACHED.slice(1),
+    ];
+    expect(parsePriorArtResponse(raw(reviewed({ legs: legs as never }))).ok).toBe(true);
   });
 
   it('rejects GENUINE_NEW_WORK when the local leg is unavailable (undeclared checkouts)', () => {
