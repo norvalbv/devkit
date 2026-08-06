@@ -11,6 +11,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { sourceMatchers } from "../config.mjs";
+import { devkitVersion } from "../devkit-version.mjs";
 import { checklistContractFor } from "./lens/split.mjs";
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
@@ -325,14 +326,28 @@ export function parseReviewVerdict(raw) {
     };
 }
 /**
- * Cache key for a PASS verdict: reviewer identity + the exact bytes of its staged domain diff.
- * An IDENTICAL diff re-reviewed (amend, rebase replay, retry after fixing an unrelated gate)
- * skips instantly — including after a rebase onto changed surrounding context. That skip is BY
+ * Cache key for a PASS verdict: reviewer identity + devkit version + the exact bytes of its staged
+ * domain diff. An IDENTICAL diff re-reviewed (amend, rebase replay, retry after fixing an unrelated
+ * gate) skips instantly — including after a rebase onto changed surrounding context. That skip is BY
  * DESIGN: the reviewed object is the diff itself, and re-judging it on unchanged bytes buys
  * latency, not safety.
+ *
+ * The version salt mirrors the prefix cache's (prefix-cache.mts, which folds devkitVersion() in for
+ * the same reason). `identitySalt` covers reviewer ASSET bytes and gate config only, so a devkit
+ * upgrade that changes review-ENGINE semantics — escalation policy, model selection, verdict
+ * parsing, lens grouping — leaves every asset byte-identical and would otherwise replay PASSes
+ * earned under the old engine. Injectable so this module stays unit-testable without reading a
+ * package manifest; the default is the running package's version.
  */
-export function cacheKey(reviewerName, diffText, identitySalt = '') {
-    return `${reviewerName}:${createHash('sha256').update(identitySalt).update('\0').update(diffText).digest('hex')}`;
+export function cacheKey(reviewerName, diffText, identitySalt = '', versionSalt = devkitVersion()) {
+    const digest = createHash('sha256')
+        .update(identitySalt)
+        .update('\0')
+        .update(versionSalt)
+        .update('\0')
+        .update(diffText)
+        .digest('hex');
+    return `${reviewerName}:${digest}`;
 }
 function injectedRoots(value, name) {
     if (value === undefined)

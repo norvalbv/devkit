@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { devkitVersion } from '../../devkit-version.mts';
 import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
 import {
   allowedToolsFor,
@@ -478,6 +479,31 @@ describe('cacheKey', () => {
     );
     expect(cacheKey('commit-guard', 'diff-a', 'brief-v1')).not.toBe(
       cacheKey('commit-guard', 'diff-a', 'brief-v2'),
+    );
+  });
+
+  // The gap this closes: identitySalt covers reviewer ASSET bytes and gate config, so a devkit
+  // upgrade that changes review-ENGINE semantics (escalation policy, model selection, verdict
+  // parsing, lens grouping) leaves every asset byte-identical. Without the version in the key, a
+  // PASS earned under the old engine is replayed by the new one. prefix-cache.mts already salts
+  // its key this way; this reviewer key did not.
+  it('same assets + same diff but a different devkit version → different key', () => {
+    expect(cacheKey('commit-guard', 'diff-a', 'brief-v1', '0.47.1')).not.toBe(
+      cacheKey('commit-guard', 'diff-a', 'brief-v1', '0.47.2'),
+    );
+  });
+
+  it('the version salt is injectable and otherwise defaults to the running package version', () => {
+    expect(cacheKey('commit-guard', 'diff-a', '', devkitVersion())).toBe(
+      cacheKey('commit-guard', 'diff-a'),
+    );
+  });
+
+  // A guard on the salt SEPARATOR, not on hashing: concatenating the parts without the NUL
+  // delimiter lets a boundary shift between identity and version produce one shared key.
+  it('identity/version boundary shifts do not collide', () => {
+    expect(cacheKey('commit-guard', 'diff-a', 'a', 'bc')).not.toBe(
+      cacheKey('commit-guard', 'diff-a', 'ab', 'c'),
     );
   });
 });

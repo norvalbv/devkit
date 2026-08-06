@@ -24,6 +24,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
+import { retainNewest } from "./store-retention.mjs";
 const MAX_ENTRIES = 100;
 const MAX_STORE_SIZE = 4 * 1024 * 1024;
 const MAX_OWNER_SIZE = 1_024;
@@ -145,11 +146,7 @@ export function verdictStoreGeneration(file) {
     const state = generationState(file);
     return state.kind === 'valid' ? state.value : null;
 }
-function newestEntries(entries) {
-    return Object.fromEntries(Object.entries(entries)
-        .sort((a, b) => String(b[1]?.at ?? '').localeCompare(String(a[1]?.at ?? '')))
-        .slice(0, MAX_ENTRIES));
-}
+const newestEntries = (entries, file) => retainNewest(entries, MAX_ENTRIES, file);
 function writeAtomic(destination, contents, handle, afterFenceCheck, afterFinalOwnershipCheck) {
     const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
     try {
@@ -215,7 +212,7 @@ function fenceLock(handle) {
 }
 function publishMergedEntries(file, keyToMeta, active, handle, options) {
     const generated = ensureGeneratedStore(file, handle, active);
-    const merged = newestEntries({ ...generated.entries, ...keyToMeta });
+    const merged = newestEntries({ ...generated.entries, ...keyToMeta }, file);
     options.afterLoad?.();
     writeStore(file, generated.generation, merged, handle, options.afterStoreFenceCheck, options.afterFinalStoreOwnershipCheck);
 }
@@ -244,7 +241,7 @@ export function replaceEntries(file, entries) {
         fenceLock(handle);
         const generation = randomUUID();
         writeGeneration(file, generation, handle);
-        writeStore(file, generation, newestEntries(entries), handle);
+        writeStore(file, generation, newestEntries(entries, file), handle);
     });
 }
 export function clearEntries(file) {
