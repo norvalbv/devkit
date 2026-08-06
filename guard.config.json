@@ -1,10 +1,18 @@
 {
-  "scanRoots": ["cli", "gate-engine"],
-  "sourceExtensions": ["mts"],
+  "scanRoots": [
+    "cli",
+    "gate-engine"
+  ],
+  "sourceExtensions": [
+    "mts"
+  ],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",
   "review": {
-    "backendRoots": ["cli", "gate-engine"],
+    "backendRoots": [
+      "cli",
+      "gate-engine"
+    ],
     "frontendRoots": [],
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
   },
@@ -13,20 +21,40 @@
       {
         "name": "cli",
         "root": "cli",
-        "sourceExtensions": ["mts"],
-        "entryAllowlist": ["index.mts"],
+        "sourceExtensions": [
+          "mts"
+        ],
+        "entryAllowlist": [
+          "index.mts"
+        ],
         "libDomains": {
-          "lib": ["doctor", "generate", "guard", "help", "husky", "install", "ship"]
+          "lib": [
+            "doctor",
+            "generate",
+            "guard",
+            "help",
+            "husky",
+            "install",
+            "ship"
+          ]
         },
         "grammar": {
-          "files": ["index.mts"],
+          "files": [
+            "index.mts"
+          ],
           "folders": {
             "commands": {
-              "files": ["{kebab}", "{kebab_test}"],
+              "files": [
+                "{kebab}",
+                "{kebab_test}"
+              ],
               "recurse": "kebabModule"
             },
             "lib": {
-              "files": ["{kebab}", "{kebab_test}"],
+              "files": [
+                "{kebab}",
+                "{kebab_test}"
+              ],
               "domainGate": "lib",
               "recurse": "kebabModule"
             }
@@ -34,7 +62,11 @@
           "rules": {
             "kebabModule": {
               "folderName": "{kebab_dir}",
-              "files": ["{kebab}", "{kebab_test}", "{json}"],
+              "files": [
+                "{kebab}",
+                "{kebab_test}",
+                "{json}"
+              ],
               "recurse": "kebabModule"
             }
           }
@@ -43,9 +75,16 @@
       {
         "name": "gate-engine",
         "root": "gate-engine",
-        "sourceExtensions": ["mts"],
-        "entryAllowlist": ["config.mts", "devkit-version.mts"],
-        "ignoredDirs": ["eval"],
+        "sourceExtensions": [
+          "mts"
+        ],
+        "entryAllowlist": [
+          "config.mts",
+          "devkit-version.mts"
+        ],
+        "ignoredDirs": [
+          "eval"
+        ],
         "libDomains": {
           "@root": [
             "co-occurrence",
@@ -66,13 +105,19 @@
           ]
         },
         "grammar": {
-          "files": ["config.mts"],
+          "files": [
+            "config.mts"
+          ],
           "domainGate": "@root",
           "recurse": "engineModule",
           "rules": {
             "engineModule": {
               "folderName": "{kebab_dir}",
-              "files": ["{kebab}", "{kebab_test}", "{json}"],
+              "files": [
+                "{kebab}",
+                "{kebab_test}",
+                "{json}"
+              ],
               "recurse": "engineModule"
             }
           }
@@ -82,5 +127,7 @@
     "walls": []
   },
   "//maxLines": "Raw line cap per source file (guard-size ratchet enforces it; existing giants grandfathered shrink-only). 0 = off. Per-FUNCTION caps need a parser — not yet.",
-  "maxLines": 500
+  "maxLines": 500,
+  "//maxTestLines": "Loose raw line cap per test file; existing oversized tests are grandfathered shrink-only. 0 = off.",
+  "maxTestLines": 2000
 }

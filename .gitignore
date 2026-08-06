@@ -69,3 +69,4 @@ gate-engine/review/eval/conventions/runs.log
 gate-engine/review/eval/conventions/transcripts/
 gate-engine/edge-cases/eval/raw/
 gate-engine/edge-cases/eval/cases.jsonl
+.devkit/adhd-off

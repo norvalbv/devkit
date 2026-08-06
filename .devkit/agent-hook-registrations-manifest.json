@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "kind": "agent_hook_registration_ownership",
+  "entries": [
+    {
+      "registrationId": "decisions:pre-edit",
+      "ownerId": "decisions",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit|Delete",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-edit-guard.mjs\""
+      }
+    },
+    {
+      "registrationId": "decisions:scope-brief",
+      "ownerId": "decisions",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "PreToolUse",
+        "matcher": "Edit|Write|MultiEdit",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-scope-brief.mjs\""
+      }
+    },
+    {
+      "registrationId": "decisions:pre-edit",
+      "ownerId": "decisions",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "preToolUse",
+        "matcher": "Write|Delete",
+        "command": ".cursor/hooks/decision-edit-guard.mjs"
+      }
+    },
+    {
+      "registrationId": "decisions:scope-brief",
+      "ownerId": "decisions",
+      "provider": "cursor",
+      "installScope": "shared",
+      "destinationRel": ".cursor/hooks.json",
+      "native": {
+        "event": "preToolUse",
+        "matcher": "Write",
+        "command": ".cursor/hooks/decision-scope-brief.mjs"
+      }
+    }
+  ]
+}
