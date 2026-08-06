@@ -51,9 +51,27 @@ Start by understanding the current project context, then ask questions one at a 
     `INSUFFICIENT_EVIDENCE` instead.)
   - `INSUFFICIENT_EVIDENCE` / `aborted` / invalid JSON → say "prior art unverified" and continue;
     never treat it as clearance or as a blocker.
-  The eventual plan records one line — `Prior-art verdict: <verdict> — <how the plan responds>` (or
-  the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line summary only
-  (verdict, framing, one citation), never the full JSON.
+  The eventual plan records one line — `Prior-art: <verdict> · followed | overridden: <reason> |
+  unverified` (or the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line
+  summary only (verdict, framing, one citation), never the full JSON.
+  Then RECORD the run. The subagent is dispatched through the Task tool, so no gate spawns it and
+  no telemetry captures it otherwise — production prior-art is invisible in the dashboard while its
+  bench runs are fully recorded. Pipe its raw JSON verbatim (quoted heredoc, so no JSON content can
+  be reinterpreted by the shell), passing the SAME disposition you wrote in the plan line:
+
+  ```
+  guard-review record-agent prior-art --model opus \
+    --disposition followed --reason "<one line>" <<'PRIOR_ART_JSON'
+  {…the subagent's response, unmodified…}
+  PRIOR_ART_JSON
+  ```
+
+  `--model` mirrors the `model:` frontmatter of `agents/prior-art.md` (read it rather than trusting
+  this example); every flag is optional and an omitted one is left off the event, never guessed.
+  Skip silently when `guard-review` is not on PATH — same idiom as the decisions query above. The
+  command never blocks: it always exits 0 and no-ops without a telemetry sink. An override is a
+  DISAGREEMENT label, not a ruling on who was right (the motivating Frink case is a root agent
+  overriding the *correct* frame), so record what you disagreed with, never that the agent was wrong.
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
