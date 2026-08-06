@@ -5,6 +5,6 @@
  * return one without a cycle. `checkCommitMsgHook` previously had to restate the shape structurally
  * for exactly that reason; it now imports this instead.
  */
-export function check(name, status, detail, remediation = '', fixable = false) {
-    return { name, status, detail, remediation, fixable };
+export function check(name, status, detail, remediation = '', fixable = false, advisory = false) {
+    return { name, status, detail, remediation, fixable, advisory };
 }

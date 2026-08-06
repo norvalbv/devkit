@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
 import {
   allowedToolsFor,
   cacheKey,
@@ -125,14 +126,21 @@ describe('selectReviewers', () => {
     const defaults = resolveGuardConfig('/nonexistent-defaults-only');
     expect(selectReviewers(['infra/main.tf'], defaults)).toEqual([]);
   });
-  it('empty frontendRoots → frontend reviewers never selected', () => {
+  it('empty frontendRoots → frontend reviewers never selected (but the gate says so out loud)', () => {
     const noFe = { ...cfg, review: { ...cfg.review, frontendRoots: [] } };
-    expect(names(selectReviewers(['src/renderer/App.tsx', 'src/main/a.ts'], noFe))).toEqual([
+    const staged = ['src/renderer/App.tsx', 'src/main/a.ts'];
+    expect(names(selectReviewers(staged, noFe))).toEqual([
       'api-security-reviewer',
       'backend-performance-reviewer',
       'commit-guard',
       'correctness-reviewer', // domain 'all' still sees both files under scanRoot src
       'conventions-reviewer', // domain 'conventions' shares that same union
+    ]);
+    // Silence is NOT the contract — the other half of it lives in empty-roots.test.mts. Asserted
+    // here too so the two halves cannot drift apart.
+    expect(domainsDisabledByEmptyRoots(staged, noFe).map((d) => d.reviewer)).toEqual([
+      'frontend-security-reviewer',
+      'frontend-performance-reviewer',
     ]);
   });
   it('review mode fills an empty domain from scanRoots so it never silently skips', () => {

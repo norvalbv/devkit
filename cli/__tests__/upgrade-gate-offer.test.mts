@@ -101,8 +101,14 @@ describe('devkit upgrade — gate reconcile', () => {
     const before = guards(root);
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
-    expect(up.stdout).toMatch(/no new recommended gates/i);
-    expect(up.stdout).not.toMatch(/\breview\b/i); // opt-in gate not re-surfaced
+    // Scoped to upgrade's OWN offer sections (3a/3b/3c) — everything before it hands off to doctor.
+    // `upgrade` ends in `return doctor([], cwd)`, and doctor's diagnostics legitimately name the
+    // review reviewers (the `review topology` advisory); policing the whole stream would make this
+    // assertion fail on unrelated doctor output rather than on the gate being re-offered.
+    const offers = up.stdout.split('devkit doctor')[0];
+    // Proves the slice is the offer region and not empty — an empty one would pass vacuously.
+    expect(offers).toMatch(/no new recommended gates/i);
+    expect(offers).not.toMatch(/\breview\b/i); // opt-in gate not re-surfaced
     expect(guards(root)).toEqual(before); // selection unchanged
   });
 });
