@@ -119,6 +119,17 @@
       "canonical": "agents/frontend-security-reviewer.md"
     },
     {
+      "id": "agent-prior-art",
+      "label": "Prior-art agent",
+      "kind": "agent",
+      "lifecycle": "experimental",
+      "evidence": "evidence-only",
+      "suiteIds": [
+        "prior-art"
+      ],
+      "canonical": "agents/prior-art.md"
+    },
+    {
       "id": "bin-devkit",
       "label": "devkit CLI",
       "kind": "bin",
@@ -434,6 +445,38 @@
     }
   ],
   "suites": [
+    {
+      "id": "prior-art",
+      "label": "Prior-art validation",
+      "adapter": "prior-art",
+      "subjectIds": [
+        "agent-prior-art"
+      ],
+      "runner": "gate-engine/prior-art/eval/bench.mts",
+      "baseline": "gate-engine/prior-art/eval/results.baseline.json",
+      "lifecycle": "experimental",
+      "acceptance": "K=3 full intrinsic tier, matcher K=3, zero outages",
+      "hashes": {
+        "implementation": [
+          "agents/prior-art.md",
+          "skills/prior-art/**"
+        ],
+        "corpus": [
+          "gate-engine/prior-art/eval/cases-*.jsonl"
+        ],
+        "scorer": [
+          "gate-engine/prior-art/eval/matcher.mts",
+          "gate-engine/prior-art/response-contract.mts",
+          "gate-engine/prior-art/response-status.mts",
+          "gate-engine/judge/matcher-core.mts"
+        ],
+        "runner": [
+          "gate-engine/prior-art/eval/bench.mts",
+          "gate-engine/prior-art/eval/cases.mts",
+          "gate-engine/prior-art/eval/run-agent.mts"
+        ]
+      }
+    },
     {
       "id": "critique",
       "label": "Feature critique",

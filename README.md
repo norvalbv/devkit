@@ -134,6 +134,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 
 | Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| Prior-art validation | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Feature critique | shipped | accepted | stale | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
@@ -167,6 +168,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Frontend accessibility agent | shipped | none | — |
 | Frontend performance agent | shipped | evidence-only | reviewer-frontend-performance |
 | Frontend security agent | shipped | evidence-only | reviewer-frontend-security |
+| Prior-art agent | experimental | evidence-only | prior-art |
 
 [Methodology, immutable checkpoints, full subject inventory, and provenance audit](docs/benchmarks/README.md)
 <!-- benchmark-dashboard:end -->

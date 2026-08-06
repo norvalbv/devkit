@@ -27,6 +27,30 @@ Start by understanding the current project context, then ask questions one at a 
   settled question must be re-opened deliberately, never by accident. `list` is not a substitute: it
   dumps every axis instead of finding the relevant one, so it stops being readable the moment a repo
   has more than a handful.
+- **Validate the problem before designing (step 0):** immediately after the decisions query, decide
+  whether to invoke one fresh `prior-art` subagent with the problem statement (see the `prior-art`
+  skill for the input format; pass the query's rulings as Settled Axes so they are not re-derived).
+  The trigger predicate — written, not discretionary:
+  - FIRE when the idea is problem-shaped AND proposes new machinery, a new boundary, or a new
+    dependency (a bug/pain attributed to a dependency, a missing capability, a limit to work around).
+  - FIRE UNCONDITIONALLY when the governing axis shows repeat patches: run
+    `guard-decisions show <top-axis-slug>` and count `## Target ·` headings — ≥2 means this fork has
+    been patched before, the exact signature of a frame that deserves interrogation.
+  - SKIP trivial creative turns (a rename, copy tweak, single-component edit) with a one-line note.
+  - SKIP with the note `Prior-art: skipped — no reachable research leg` when no external leg is
+    available (`gh auth status` fails AND no web tool AND no deep-research MCP) — never spend the
+    run on a verdict that can only be INSUFFICIENT_EVIDENCE.
+  The verdict is **advisory but must be acknowledged, never dropped**:
+  - `SOLVED_ELSEWHERE` / `DISSOLVE_FRAME` → present the cited finding and pose the found
+    alternative/reframe as the LEADING option among the 2-3 you offer.
+  - `GENUINE_NEW_WORK` → proceed; carry the absence evidence into the plan's context. (Sanity check:
+    if its own `legs` show a dark external leg or zero resolved checkouts, record it as
+    `INSUFFICIENT_EVIDENCE` instead.)
+  - `INSUFFICIENT_EVIDENCE` / `aborted` / invalid JSON → say "prior art unverified" and continue;
+    never treat it as clearance or as a blocker.
+  The eventual plan records one line — `Prior-art verdict: <verdict> — <how the plan responds>` (or
+  the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line summary only
+  (verdict, framing, one citation), never the full JSON.
 - Propose 2-3 different approaches with trade-offs
 - Present options conversationally with your recommendation and reasoning
 - Lead with your recommended option and explain why
