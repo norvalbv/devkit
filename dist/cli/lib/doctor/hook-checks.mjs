@@ -13,8 +13,46 @@ import { REVIEWABLE_GUARD_IDS } from "../components.mjs";
 import { detectGitRoot } from "../detect-git-root.mjs";
 import { markEnd, markStart } from "../husky/husky.mjs";
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../husky/husky-block.mjs";
+import { firstLine } from "../standalone.mjs";
 import { check } from "./check-result.mjs";
 import { strayGateCalls } from "./stray-gate-calls.mjs";
+import { checkFailOpenGuards } from "./unguarded-gate-calls.mjs";
+/**
+ * `doctor --fix`'s repair for a husky-reclaimed `core.hooksPath` in OVERLAY mode. husky's `prepare`
+ * resets it to `.husky/_` on every install, and until now `--fix` only WARNED — while `devkit review`
+ * told users to run exactly this command to repair it. Transient by nature (the next install
+ * reclaims it again); `devkit init --overlay --global-commit-gate` is the durable fix.
+ *
+ * Lives here rather than in `doctor.mts` for the same reason the checks above do — that file is at
+ * its recorded size budget — and beside them because this module already owns doctor's hooksPath
+ * reasoning.
+ *
+ * Two refusals, both fail-safe:
+ *   - no `.devkit/hooks/pre-commit` → re-pointing would aim core.hooksPath at a directory with no
+ *     hook in it, turning a loud warning into a silent zero-gate state. Belt-and-braces in practice:
+ *     the caller runs syncOverlayHook first, which regenerates a missing hook under `--fix`, so this
+ *     only fires if that ever stops guaranteeing the file. The pointer must never lead the hook.
+ *   - a LINKED worktree → core.hooksPath lives in the SHARED .git/config (only `--worktree` scope is
+ *     per-checkout) and `.devkit/hooks` is relative, so writing it from here would re-point every
+ *     sibling worktree at a path most of them do not have. Print the main-checkout command instead.
+ */
+export function repointHooksPath(gitRoot, hookOk) {
+    if (!hookOk)
+        return false;
+    try {
+        const git = (...args) => execFileSync('git', args, { cwd: gitRoot, encoding: 'utf8' }).trim();
+        if (git('rev-parse', '--git-dir') !== git('rev-parse', '--git-common-dir')) {
+            console.log('  · linked worktree — core.hooksPath is shared with every other worktree, so --fix leaves it alone; re-point from the main checkout: git config --local core.hooksPath .devkit/hooks');
+            return false;
+        }
+        git('config', '--local', 'core.hooksPath', '.devkit/hooks');
+        return true; // the caller reports the healed path on its own core.hooksPath line
+    }
+    catch (e) {
+        console.log(`  ! could not re-point core.hooksPath: ${firstLine(e)}`);
+        return false;
+    }
+}
 // Selection-aware: only the SELECTED guards must be present in the block (a deselected
 // guard being absent is correct, not drift). Monorepo: the hook lives at the git root and the
 // block is package-scoped — resolve both from cwd.
@@ -222,4 +260,12 @@ export function checkHookRunner(cwd) {
         return check(RUNNER, 'DRIFT', `runner is gitignored (${unreachable.join(', ')}) — it can never reach a new checkout, so a fresh \`git worktree add\` runs ZERO gates, silently`, `devkit sync-hook-runner (or: git add -f ${unreachable.join(' ')})`);
     }
     return check(RUNNER, 'OK', `runner reachable (${required.length} files) — survives \`git worktree add\``);
+}
+/**
+ * Every hook-shaped check, as one list. Exists so `devkit doctor` can gain a hook check without
+ * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
+ * ratchet is shrink-only.
+ */
+export function hookChecks(cwd, guards) {
+    return [checkHusky(cwd, guards), checkHookRunner(cwd), checkFailOpenGuards(cwd)];
 }

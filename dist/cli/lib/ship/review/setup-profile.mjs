@@ -3,16 +3,14 @@ import { isAbsolute } from 'node:path';
 import { DEFAULT_REVIEW_DECISIONS_DIR, GUARD_IDS, normalizeReviewProfile, normalizeSelection, REVIEWABLE_GUARD_IDS, } from "../../components.mjs";
 import { reviewGuardIssues } from "../../install/review-profile.mjs";
 import { normalizeSafeReviewRelativePath } from "./runtime-paths.mjs";
+import { fail, objectValue } from "./shared/common.mjs";
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
-function objectValue(value, label) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return fail(`${label} must be a JSON object — ${REVIEW_SETUP_DOCTOR}`);
-    }
-    return value;
-}
+/**
+ * Overlay's hooksPath remedy. Leads with the DURABLE fix: `doctor --fix` re-points core.hooksPath,
+ * but husky's `prepare` reclaims it again on the very next install, so pointing there first would
+ * hand the user a repair that undoes itself.
+ */
+export const REVIEW_SETUP_OVERLAY_DOCTOR = "run 'devkit init --overlay --global-commit-gate' (durable — survives husky's reclaim), or 'devkit doctor --fix' (transient — the next install reclaims it).";
 function booleanField(value, label) {
     if (value !== undefined && typeof value !== 'boolean')
         fail(`${label} must be a boolean — ${REVIEW_SETUP_DOCTOR}`);
@@ -43,7 +41,7 @@ function parseConfigJson(raw) {
         const message = cause instanceof Error ? cause.message : String(cause);
         return fail(`could not parse .devkit/config.json (${message}) — ${REVIEW_SETUP_DOCTOR}`);
     }
-    return objectValue(parsed, '.devkit/config.json');
+    return objectValue(parsed, `.devkit/config.json must be a JSON object — ${REVIEW_SETUP_DOCTOR}`);
 }
 function parseOverlayMode(config) {
     const overlay = booleanField(config.overlay, '.devkit/config.json overlay') === true;
@@ -58,7 +56,7 @@ function parseOverlayMode(config) {
 function parseInstalledSelection(config) {
     const components = config.components === undefined
         ? {}
-        : objectValue(config.components, '.devkit/config.json components');
+        : objectValue(config.components, `.devkit/config.json components must be a JSON object — ${REVIEW_SETUP_DOCTOR}`);
     const recordedGuards = components.guards === undefined
         ? undefined
         : stringArray(components.guards, '.devkit/config.json components.guards');
@@ -85,7 +83,9 @@ function parseRequestedGuards(settings, installed) {
     return requested;
 }
 function parseReviewProfile(config, installed) {
-    const settings = config.review === undefined ? {} : objectValue(config.review, '.devkit/config.json review');
+    const settings = config.review === undefined
+        ? {}
+        : objectValue(config.review, `.devkit/config.json review must be a JSON object — ${REVIEW_SETUP_DOCTOR}`);
     const enabled = booleanField(settings.enabled, '.devkit/config.json review.enabled') ?? true;
     if (!enabled)
         fail("disabled by .devkit/config.json — run 'devkit init --review'.");

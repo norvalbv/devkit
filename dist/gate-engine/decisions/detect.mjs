@@ -29,6 +29,7 @@ import { resolveGuardConfig } from "../config.mjs";
 import { splitDiffByFile } from "../judge/diff-focus.mjs";
 import { emitCacheHit, emitGateEvent, finishGateTiming } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
+import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { execJudge } from "../judge/run-judge.mjs";
 import { composeTranscript, saveTranscript } from "../judge/transcript-store.mjs";
 import { git, stagedFiles } from "./git-io.mjs";
@@ -422,9 +423,8 @@ function runGate() {
         finish(1);
     }
     catch (e) {
-        const reason = e instanceof Error ? e.message : String(e);
-        console.error(`decision-gate: could not run — ${reason}`);
-        finish(2); // fail-open
+        // sc-1366: an unreadable staged object is infrastructure, not a verdict (see odb-probe.mts).
+        finish(reportGateInfraFailure('decisions', 'decision-gate', e, cwd, 2)); // 2 = fail-open
     }
 }
 function runScan(mode) {

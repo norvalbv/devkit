@@ -60,12 +60,16 @@ if [ "$crc" -eq 1 ]; then
     echo "   Confirmed completeness gap (hard-by-default; findings above)."
     echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
     exit 1
+elif [ "$crc" -eq 4 ]; then
+    echo "   NOT a gate rejection — no defect was named; the staged content itself is unreadable."
+    exit 1
 elif [ "$crc" -eq 3 ]; then
     echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
     echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 fi
-# crc 0 = pass / warn-only / skipped, crc 2 = fail-open → continue.
+# crc 0 = pass / warn-only / skipped, crc 2 = fail-open → continue; 4 = object-database fault.
+# Unlike pre-commit, THIS reader continues by default, so 4 needs an explicit branch here.
 # /devkit:guard-completeness`;
 // The Sentry-capture judge (guard-sentry, gate-engine/sentry/check-sentry.mts) — hard-by-default:
 // a confident MONITOR on a silent runtime error-class with no capture in the diff exits 1.
@@ -79,8 +83,11 @@ if [ "$src" -eq 1 ]; then
     echo "   Verdict wrong? Do not bypass on your own judgement — surface it to the user; with"
     echo "   their approval:  GUARD_NO_SENTRY_JUDGE=1 git commit ..."
     exit 1
+elif [ "$src" -eq 4 ]; then
+    echo "   NOT a gate rejection — no defect was named; the staged content itself is unreadable."
+    exit 1
 fi
-# src 0 = pass / warn-only / skipped, src 2 = fail-open → continue.
+# src 0 = pass / warn-only / skipped, src 2 = fail-open → continue; 4 = object-database fault.
 # /devkit:guard-sentry`;
 // The shebang + header + PATH preamble for a FRESH devkit-owned commit-msg hook (the PATH setup is
 // shared with pre-commit; replaceGuardBlock injects it itself when splicing into a consumer hook

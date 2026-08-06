@@ -1,6 +1,5 @@
-import { types as utilTypes } from 'node:util';
 import { PLAN_CRITIQUE_CALLBACK_IDENTITY_MAX_BYTES, } from "../capture-normalizer.mjs";
-import { PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, sha256Bytes } from "../evidence-record.mjs";
+import { PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES, plainRecord, sha256Bytes, } from "../evidence-record.mjs";
 export const CLAUDE_PLAN_CRITIQUE_IDENTITY_MAX_BYTES = 1024;
 export const CLAUDE_PLAN_CRITIQUE_SKIP_REASONS = [
     'invalid_payload',
@@ -12,21 +11,6 @@ export const CLAUDE_PLAN_CRITIQUE_SKIP_REASONS = [
     'final_message_unavailable',
     'final_message_too_large',
 ];
-function plainRecord(value) {
-    if (value === null || typeof value !== 'object')
-        return null;
-    try {
-        if (utilTypes.isProxy(value) || Array.isArray(value))
-            return null;
-        const prototype = Object.getPrototypeOf(value);
-        if (prototype !== Object.prototype && prototype !== null)
-            return null;
-        return value;
-    }
-    catch {
-        return null;
-    }
-}
 function ownDataValue(record, key) {
     try {
         const descriptor = Object.getOwnPropertyDescriptor(record, key);
