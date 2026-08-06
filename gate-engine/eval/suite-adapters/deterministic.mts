@@ -1,4 +1,4 @@
-import type { MetricObservation, ParsedBaseline } from './types.mts';
+import type { MetricObservation, ParsedBaseline } from '../types.mts';
 
 // biome-ignore lint/suspicious/noExplicitAny: adapters intentionally normalize suite-owned JSON.
 type Json = Record<string, any>;

@@ -72,6 +72,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 
 | Suite | Lifecycle | Evidence | Freshness | Change | Assessment | Latest evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| Prior-art validation | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Feature critique | shipped | accepted | stale | methodology-reset | ? unknown | Gold finding recall: 23/25 (92.0%) · Clean-plan pass rate: 5/5 (100.0%) |
 | Feature completeness | shipped | accepted | stale | methodology-reset | ? unknown | Gold gap recall: 25/35 (71.4%) · Decoy false-flag rate: 2/27 (7.4%) |
 | Repository conventions | shipped | accepted | stale | quality | ? unknown | Gold gap recall: 18/18 (100.0%) · Decoy false-flag rate: 1/14 (7.1%) |
@@ -105,6 +106,7 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Frontend accessibility agent | agent | shipped | none | — |
 | Frontend performance agent | agent | shipped | evidence-only | reviewer-frontend-performance |
 | Frontend security agent | agent | shipped | evidence-only | reviewer-frontend-security |
+| Prior-art agent | agent | experimental | evidence-only | prior-art |
 | devkit CLI | bin | shipped | none | — |
 | Clone gate | bin | shipped | evidence-only | co-occurrence |
 | Coverage gate | bin | shipped | none | — |

@@ -38,6 +38,8 @@ gate-engine/decisions/eval/progress-*.jsonl
 # critique-eval: ledger + per-run transcripts are local telemetry. NOTE: its results.baseline.json
 # IS committed (sc-1059 requires a committed baseline) — do not add it here.
 gate-engine/critique/eval/runs.log
+gate-engine/prior-art/eval/runs.log
+gate-engine/prior-art/eval/checkpoint.jsonl
 gate-engine/critique/eval/transcripts/
 
 # eslint-plugin-project-structure cache

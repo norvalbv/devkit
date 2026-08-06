@@ -1,6 +1,6 @@
 {
   "devkitRef": "v0.48.0",
-  "generatedAt": "2026-08-06T10:39:03.491Z",
+  "generatedAt": "2026-08-06T14:30:41.030Z",
   "targets": [
     "claude",
     "cursor"
@@ -16,6 +16,7 @@
     "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
     "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
     "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
-    "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79"
+    "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
+    "prior-art.md": "c7488a622ab8354d1eece3ab5f85ba0869e7c993da440db7a9da125176e9358d"
   }
 }
