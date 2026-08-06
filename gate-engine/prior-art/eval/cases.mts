@@ -67,6 +67,14 @@ export function lintRows(rows: Row[]): string[] {
       errors.push(`${at}: legs.local needs status/declared/resolved`);
     if (local && local.resolved === 0 && local.status === 'reached')
       errors.push(`${at}: legs.local cannot pin reached with zero resolved checkouts`);
+    // `declared` counts glob PATTERNS and `resolved` counts the DIRECTORIES they expand to, so
+    // resolved > declared is normal (one `cloned-projects/*` → five checkouts) and must NOT be
+    // linted. Only the reverse is impossible: no pattern can expand into a directory. Caught here
+    // too, not just in the parser, so a malformed row cannot reach a paid call.
+    if (local && local.declared === 0 && local.resolved > 0)
+      errors.push(
+        `${at}: legs.local resolves ${local.resolved} checkouts with no glob pattern declared`,
+      );
     for (const leg of ['github', 'web', 'deep-research'] as const)
       if (!LEG_STATUSES.includes(row?.legs?.[leg] as string))
         errors.push(`${at}: legs.${leg} must be reached|unavailable|failed`);

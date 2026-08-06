@@ -127,7 +127,9 @@ into a searched one.
    gets skipped, and its answers are verifiable in minutes.
 2. **github** — `gh` CLI via Bash, where available and authenticated: `gh search code` for other
    consumers of the dependency, `gh search issues`/`gh api` on the dependency's repo for the
-   capability, its absence, or the known workaround. `gh auth status` failing → attest `failed`.
+   capability, its absence, or the known workaround. Check the executable BEFORE authentication:
+   no `gh` on PATH is `unavailable` (the tool is absent), while an installed `gh` whose
+   `gh auth status` fails is `failed`. Both dark, but only the second is a fixable credential.
 3. **web** — WebSearch / WebFetch for docs, changelogs, comparable projects.
 4. **deep-research** — the deep-research MCP (`start_research`), where available.
 
