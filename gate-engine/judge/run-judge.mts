@@ -172,13 +172,73 @@ function modelFromArgs(args: string[]): string | null {
   return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
 }
 
+export interface RecordAgentRunOpts {
+  /** Telemetry label — the `judge` field, e.g. `review:correctness-reviewer` or `prior-art`. */
+  label: string;
+  /** The agent's response. Absent/empty means no transcript is stored (nothing to store). */
+  output?: string;
+  /** What the agent judged, stored above the output under the DIFF header. */
+  input?: string;
+  model?: string | null;
+  /**
+   * Omit to have it DERIVED from `output` — an absent/blank response is `empty`, matching how
+   * execJudge classifies the same condition. Never defaults to a blanket `ok`: that would land a
+   * no-output run as `{outcome:'ok', output_chars:0}`, distinguishable from a real success only by
+   * inferring from the missing `transcript_ref` (which gate-telemetry-self-describing rules out)
+   * and silently inflating the label's success rate.
+   */
+  outcome?: 'ok' | 'timeout' | 'transient' | 'empty';
+  /** Omitted entirely from the event when unknown, rather than emitted as a misleading 0. */
+  durationMs?: number;
+  transcript?: boolean;
+  /** Extra event keys (e.g. a disposition). Spread FIRST so it can never shadow the core shape. */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * Record ONE agent invocation into the shared telemetry stream: the durable transcript plus the
+ * `judge_exec` line that references it. Exported because not every agent devkit wants visible is
+ * spawned through `execJudge` — one dispatched by the assistant via the Task tool (the `prior-art`
+ * subagent the brainstorming skill invokes) never enters this module, so its production runs were
+ * absent from the dashboard while its BENCH runs, which do go through execJudgeAsync, were recorded
+ * in full.
+ * `guard-review record-agent` is the entry point for those; this is the one implementation both use,
+ * so a Task-dispatched agent and a spawned judge produce the same event shape.
+ *
+ * Best-effort by construction — emitGateEvent/saveTranscriptUnique never throw and no-op without a
+ * sink, so no caller's contract is touched. Returns the transcript ref, or null when none was stored.
+ */
+export function recordAgentRun(opts: RecordAgentRunOpts): string | null {
+  // Same predicate execJudge applies to a judge's stdout, so both entry points name a no-output run
+  // identically rather than one of them calling it a success.
+  const outcome = opts.outcome ?? (opts.output?.trim() ? 'ok' : 'empty');
+  // Exclusive-create store: the durable event line's transcript_ref must keep resolving to THIS
+  // invocation's output — never silently rewritten by a later sample OR a later process (a
+  // retried/amended commit shares the same run id). Uniqueness is the filesystem's, not ours.
+  const ref =
+    outcome === 'ok' && opts.transcript !== false && opts.output
+      ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', opts.output))
+      : null;
+  emitGateEvent({
+    ...(opts.extra ?? {}),
+    type: 'judge_exec',
+    judge: opts.label,
+    model: opts.model ?? null,
+    outcome,
+    ...(opts.durationMs === undefined ? {} : { duration_ms: opts.durationMs }),
+    input_chars: opts.input?.length ?? 0,
+    output_chars: opts.output?.length ?? 0,
+    ...(ref ? { transcript_ref: ref } : {}),
+  });
+  return ref;
+}
+
 /**
  * One `judge_exec` telemetry line per `claude -p` invocation — the SPEND/OUTAGE ledger every judge
  * shares, complementing (never replacing) the richer gate-level verdict events the review/decisions
  * gates emit themselves. This is what makes every judge visible to the usage tracker: the gate-level
  * emitters only cover the gates that thought to call them (the factory/sentry judges recorded
- * nothing at all before this). Best-effort by construction — emitGateEvent/saveTranscript never
- * throw and no-op without a sink, so the judge's own contract is untouched.
+ * nothing at all before this).
  */
 function emitJudgeExec(
   opts: ExecJudgeOpts,
@@ -186,22 +246,14 @@ function emitJudgeExec(
   startedAt: number,
   output?: string,
 ): void {
-  // Exclusive-create store: the durable event line's transcript_ref must keep resolving to THIS
-  // invocation's output — never silently rewritten by a later sample OR a later process (a
-  // retried/amended commit shares the same run id). Uniqueness is the filesystem's, not ours.
-  const ref =
-    outcome === 'ok' && opts.transcript !== false && output
-      ? saveTranscriptUnique(opts.label, composeTranscript(opts.input ?? '', output))
-      : null;
-  emitGateEvent({
-    type: 'judge_exec',
-    judge: opts.label,
+  recordAgentRun({
+    label: opts.label,
+    output,
+    input: opts.input,
     model: modelFromArgs(opts.args),
     outcome,
-    duration_ms: Date.now() - startedAt,
-    input_chars: opts.input?.length ?? 0,
-    output_chars: output?.length ?? 0,
-    ...(ref ? { transcript_ref: ref } : {}),
+    durationMs: Date.now() - startedAt,
+    transcript: opts.transcript,
   });
 }
 

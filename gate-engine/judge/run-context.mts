@@ -103,12 +103,23 @@ function commitRunContext(): { id: string; tree: string; repo: string; branch: s
   return commitCtx;
 }
 
-/** The correlation id for this run: the ship id, else the per-commit id, else null (capture off). */
+/**
+ * The correlation id for this run: the ship id, else a review, else THIS agent invocation, else the
+ * per-commit id, else null (capture off).
+ *
+ * `DEVKIT_AGENT_RUN_ID` exists because the commit fallback is scoped to a commit ATTEMPT, and an
+ * agent the assistant dispatches mid-conversation (`guard-review record-agent`) runs before anything
+ * is staged. Two unrelated runs with an unchanged index would derive the same `commit-<write-tree>`
+ * id and merge downstream into one synthesized commit row — erasing exactly the per-run separation
+ * that recording these agents is for. Set per invocation, it keeps each run its own.
+ */
 export function runId(): string | null {
   const ship = process.env.DEVKIT_SHIP_ID;
   if (ship) return ship;
   const review = process.env.DEVKIT_REVIEW_ID;
   if (review) return review;
+  const agent = process.env.DEVKIT_AGENT_RUN_ID;
+  if (agent) return agent;
   if (!telemetryEnabled()) return null;
   return commitRunContext()?.id ?? null;
 }
@@ -148,6 +159,21 @@ export function runEnvelope(): Record<string, unknown> {
       source,
       devkit_version: runningVersion,
     };
+  // An agent invocation has no staged tree to describe, and deriving one would cost a `git
+  // write-tree` whose id is precisely what must NOT be shared here. Repo/branch come from plain
+  // rev-parse; `run_mode:'agent'` keeps a reader from synthesising a commit row out of it.
+  const agent = process.env.DEVKIT_AGENT_RUN_ID;
+  if (agent) {
+    const top = git(['rev-parse', '--show-toplevel']);
+    return {
+      ship_id: agent,
+      run_mode: 'agent',
+      repo: top ? path.basename(top) : '',
+      branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
+      source,
+      devkit_version: runningVersion,
+    };
+  }
   const ctx = telemetryEnabled() ? commitRunContext() : null;
   if (!ctx) return {}; // capture off (or not a git repo) — emit is a no-op anyway (no sink + no id)
   return {

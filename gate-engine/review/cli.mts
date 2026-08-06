@@ -10,12 +10,16 @@
  *   guard-review waive <reviewer>[:<lens>] <id> "<why>"   record an override (see valve/waive.mts)
  *   guard-review waive --list                    show active waives
  *   guard-review transcript <ref>                print a persisted agent transcript by its ref
+ *   guard-review record-agent <label>            record one Task-dispatched agent run (stdin)
  *
  * Everything resolves from resolveGuardConfig(process.cwd()) — the CONSUMER repo, never the
  * package dir (W-3). Exit contract per sub-engine (run-review.mjs / completeness.mjs headers).
  */
 
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { envFlag, resolveGuardConfig } from '../config.mts';
+import { recordAgentRun } from '../judge/run-judge.mts';
 import { readTranscript } from '../judge/transcript-store.mts';
 import { clearCache, loadCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
@@ -58,6 +62,60 @@ async function scanReview(cwd = process.cwd()): Promise<number> {
   return 0;
 }
 
+/** The dispositions a root agent may report. Anything else is dropped, so the field stays groupable. */
+const DISPOSITIONS = new Set(['followed', 'overridden', 'unverified']);
+
+/**
+ * `guard-review record-agent <label>` — record ONE agent run the assistant dispatched itself.
+ *
+ * The reviewers reach telemetry through `execJudge`, which emits their `judge_exec` line and stores
+ * their transcript. An agent spawned via the Task tool never enters that path: the `prior-art`
+ * subagent the brainstorming skill invokes was therefore invisible in production, while its BENCH
+ * runs — which do go through execJudgeAsync — were fully recorded. This is the entry point for those
+ * runs; `recordAgentRun` is the one implementation both use, so a Task-dispatched agent and a
+ * spawned judge land the same event shape.
+ *
+ * The response arrives on stdin. ALWAYS returns 0: telemetry must never block, and the caller here
+ * is an assistant mid-conversation rather than a gate.
+ */
+function recordAgent(label: string, rest: string[]): number {
+  const flag = (name: string): string | undefined => {
+    const i = rest.indexOf(`--${name}`);
+    return i !== -1 && i + 1 < rest.length ? rest[i + 1] : undefined;
+  };
+  // One correlation id PER INVOCATION. Without it runId() falls back to `commit-<write-tree>`, and
+  // two prior-art runs made before anything is staged — the normal case, since this fires during
+  // brainstorming — would share an id and merge downstream into a single synthesized commit row.
+  // A ship/review that legitimately owns the run still wins: runId() checks those first.
+  process.env.DEVKIT_AGENT_RUN_ID ||= `agent-${randomUUID()}`;
+  let output = '';
+  try {
+    output = readFileSync(0, 'utf8');
+  } catch {
+    // A tty or closed pipe — still emit the event. That the agent RAN is the fact the dashboard
+    // needs most, and a run recorded without its transcript beats a run recorded nowhere.
+  }
+  const duration = Number.parseInt(flag('duration-ms') ?? '', 10);
+  const disposition = flag('disposition');
+  const reason = flag('reason');
+  if (disposition !== undefined && !DISPOSITIONS.has(disposition))
+    console.error(
+      `guard-review: ignoring unknown --disposition "${disposition}" ` +
+        `(expected ${[...DISPOSITIONS].join(' | ')})`,
+    );
+  recordAgentRun({
+    label,
+    output,
+    model: flag('model') ?? null,
+    ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
+    extra: {
+      ...(disposition !== undefined && DISPOSITIONS.has(disposition) ? { disposition } : {}),
+      ...(reason ? { disposition_reason: reason } : {}),
+    },
+  });
+  return 0;
+}
+
 async function run(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (cmd === '--gate') return runReviewGate();
@@ -79,9 +137,12 @@ async function run(argv: string[]): Promise<number> {
     process.stdout.write(text);
     return 0;
   }
+  if (cmd === 'record-agent' && rest[0]) return recordAgent(rest[0], rest.slice(1));
   console.error(
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | ' +
-      'waive <reviewer>[:<lens>] <id> "<why>" | waive --list | transcript <ref>',
+      'waive <reviewer>[:<lens>] <id> "<why>" | waive --list | transcript <ref> | ' +
+      'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
+      '[--disposition followed|overridden|unverified] [--reason "<why>"]',
   );
   return 2;
 }
