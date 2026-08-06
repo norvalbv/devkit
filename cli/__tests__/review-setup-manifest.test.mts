@@ -493,6 +493,22 @@ describe('review setup manifest — husky-reclaimed overlay hooksPath', () => {
     expect(() => captureReviewSetup(root, manifest)).toThrow(/--global-commit-gate/);
   });
 
+  it('rejects a shim whose hook invocation is commented out but still present', () => {
+    // Both markers intact and the hook path still in the text, so any substring test passes — yet
+    // husky runs nothing. The block is compared verbatim against the generator for exactly this.
+    const { root, manifest } = reclaimed('commented-shim');
+    const initSh = globalInitPath();
+    const disabled = readFileSync(initSh, 'utf8').replace(
+      /^(\s*)(DEVKIT_VIA_HUSKY_INIT=1 sh )/m,
+      '$1# $2',
+    );
+    expect(disabled).toContain('.devkit/hooks/pre-commit'); // the path survives the edit
+    expect(disabled).toContain('<<< devkit overlay global pre-commit gate <<<'); // markers intact
+    writeFileSync(initSh, disabled);
+
+    expect(() => captureReviewSetup(root, manifest)).toThrow(/no devkit block in/);
+  });
+
   it('rejects a shim block truncated after its start marker', () => {
     const { root, manifest } = reclaimed('truncated-shim');
     const initSh = globalInitPath();

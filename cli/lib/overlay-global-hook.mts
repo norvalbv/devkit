@@ -66,25 +66,26 @@ export function globalHookInstalled() {
 }
 
 /**
- * True iff the global init.sh carries a COMPLETE, still-wired devkit block: both markers AND the
- * line that actually runs the overlay hook between them.
+ * True iff the global init.sh carries this devkit's block VERBATIM.
  *
  * `globalHookInstalled` (MARK_START alone) stays doctor's advisory signal — a start marker is
- * enough to say "you opted in". `devkit review` needs the stronger claim, because this shim is the
- * ONLY thing keeping an overlay repo gated once husky reclaims core.hooksPath: a block truncated
- * after its start marker (a half-applied hand edit, an interrupted write) passes the advisory test
- * while gating nothing.
+ * enough to say "you opted in". `devkit review` needs a stronger claim, because this shim is the
+ * ONLY thing keeping an overlay repo gated once husky reclaims core.hooksPath.
+ *
+ * Exact-match rather than grepping for the hook path between the markers: any substring test is
+ * satisfied by text that never executes, and `# .devkit/hooks/pre-commit` inside the block would
+ * pass one while husky runs nothing. Byte-equality against the generator is the same standard
+ * `reviewHookDrift` already applies to the pre-commit block, and it needs no shell parsing at all.
+ *
+ * A block this devkit did not generate (an older release's wording, a hand edit) therefore reads as
+ * NOT wired. That is deliberate and fail-closed: devkit can only vouch for a block whose behaviour
+ * it knows. `installGlobalHook` is strip-then-reinsert, so re-running
+ * `devkit init --overlay --global-commit-gate` restores the exact block.
  */
 export function globalHookWired() {
   const file = globalInitPath();
   try {
-    if (!existsSync(file)) return false;
-    const content = readFileSync(file, 'utf8');
-    const start = content.indexOf(MARK_START);
-    if (start === -1) return false;
-    const end = content.indexOf(MARK_END, start);
-    if (end === -1) return false;
-    return content.slice(start, end).includes(OVERLAY_HOOK_REL);
+    return existsSync(file) && readFileSync(file, 'utf8').includes(BLOCK);
   } catch {
     return false;
   }

@@ -92,20 +92,26 @@ export interface OverlayHooksPathContext {
   chainPresent: boolean;
 }
 
+// `throwIfNoEntry: false` only silences ENOENT — an unreadable parent directory still throws
+// EACCES, and a symlink cycle ELOOP. Both must read as "cannot prove this link is intact" and fall
+// through to the caller's rejection message, not escape as an unhandled error from a predicate whose
+// whole job is to return a diagnostic.
 function readIfFile(path: string): string | null {
-  const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (stat === undefined || !stat.isFile()) return null;
   try {
-    return readFileSync(path, 'utf8');
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    return stat?.isFile() ? readFileSync(path, 'utf8') : null;
   } catch {
     return null;
   }
 }
 
 function isExecutableFile(path: string): boolean {
-  const stat = lstatSync(path, { throwIfNoEntry: false });
-  if (!stat?.isFile()) return false;
-  return (stat.mode & 0o111) !== 0;
+  try {
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    return stat?.isFile() === true && (stat.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

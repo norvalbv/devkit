@@ -76,22 +76,27 @@ function runnerSourcesInit(script) {
     const assigned = HUSKY_INIT_ASSIGNMENT.exec(runner)?.[1];
     return assigned !== undefined && sourceCommand(String.raw `\$\{?${assigned}\}?`).test(runner);
 }
+// `throwIfNoEntry: false` only silences ENOENT — an unreadable parent directory still throws
+// EACCES, and a symlink cycle ELOOP. Both must read as "cannot prove this link is intact" and fall
+// through to the caller's rejection message, not escape as an unhandled error from a predicate whose
+// whole job is to return a diagnostic.
 function readIfFile(path) {
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat === undefined || !stat.isFile())
-        return null;
     try {
-        return readFileSync(path, 'utf8');
+        const stat = lstatSync(path, { throwIfNoEntry: false });
+        return stat?.isFile() ? readFileSync(path, 'utf8') : null;
     }
     catch {
         return null;
     }
 }
 function isExecutableFile(path) {
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (!stat?.isFile())
+    try {
+        const stat = lstatSync(path, { throwIfNoEntry: false });
+        return stat?.isFile() === true && (stat.mode & 0o111) !== 0;
+    }
+    catch {
         return false;
-    return (stat.mode & 0o111) !== 0;
+    }
 }
 /**
  * Why a husky-reclaimed core.hooksPath is NOT provably gated, or null when it is. The order walks
