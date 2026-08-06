@@ -84,11 +84,15 @@ function parseLeg(value, path, expected) {
     if (expected === 'local') {
         parsed.declaredCheckouts = countValue(object.declaredCheckouts, `${path}.declaredCheckouts`);
         parsed.resolvedCheckouts = countValue(object.resolvedCheckouts, `${path}.resolvedCheckouts`);
-        // `resolved` is the SUBSET of `declared` that exists on disk, so resolving checkouts none of
-        // which were declared is a state the consumer-side security bound cannot produce — and it is
-        // precisely the shape that would walk an undeclared scan through the GENUINE_NEW_WORK coupling.
+        // These count DIFFERENT things: `declaredCheckouts` is the number of glob PATTERNS in
+        // `research.referenceCheckouts`, `resolvedCheckouts` the number of DIRECTORIES they expand to
+        // (agents/prior-art.md Phase 0). So `resolved` routinely EXCEEDS `declared` — one
+        // `cloned-projects/*` resolving to five checkouts is the canonical case, and a
+        // `resolved <= declared` rule would reject the very shape the design targets. The only
+        // impossible corner is expanding nothing into something: zero patterns can match no directory,
+        // and that shape is exactly what would walk an undeclared scan through GENUINE_NEW_WORK.
         if (parsed.declaredCheckouts === 0 && parsed.resolvedCheckouts > 0)
-            fail('INVALID_STATUS_COMBINATION', `${path}.resolvedCheckouts`, 'local leg cannot resolve checkouts when none were declared');
+            fail('INVALID_STATUS_COMBINATION', `${path}.resolvedCheckouts`, 'local leg cannot resolve checkouts when no glob pattern was declared');
         // The declaration-laundering guard: "nothing declared/resolved" must never read as a
         // searched corpus. Zero resolved checkouts cannot attest `reached`.
         if (parsed.resolvedCheckouts === 0 && parsed.status === 'reached')
