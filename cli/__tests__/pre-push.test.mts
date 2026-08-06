@@ -79,7 +79,13 @@ function seedRepository(): {
   };
 }
 
-function runPrePush(root: string, fakeBin: string, logPath: string, input: string) {
+function runPrePush(
+  root: string,
+  fakeBin: string,
+  logPath: string,
+  input: string,
+  extraEnv: Record<string, string> = {},
+) {
   return spawnSync('sh', ['-e', PRE_PUSH_HOOK, 'origin', 'fixture://origin'], {
     cwd: root,
     encoding: 'utf8',
@@ -87,6 +93,7 @@ function runPrePush(root: string, fakeBin: string, logPath: string, input: strin
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
       PRE_PUSH_TEST_LOG: logPath,
+      ...extraEnv,
     },
     input,
   });
@@ -159,5 +166,89 @@ describe('devkit repository pre-push hook', () => {
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     expect(() => readFileSync(logPath, 'utf8')).toThrow();
+  });
+
+  // sc-1508: a devkit ship hands the hook the exact commit it is pushing. That one commit's suite is
+  // gated by CI on the PR, so the local pre-push suite is skipped for it — content-keyed and fail-closed.
+  it('skips the pre-push suite for a devkit ship of the exact pushed commit', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+      { DEVKIT_SHIP_PREPUSH_SKIP_SHA: head },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(`${head} is a devkit ship`);
+    expect(result.stderr).toContain('skipping the local pre-push suite');
+    // The fake bun logs every invocation; a skipped suite never touches it, so the log never exists.
+    expect(() => readFileSync(logPath, 'utf8')).toThrow();
+  });
+
+  it('runs the full suite when the ship sha does not match the pushed commit (fail-closed)', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+    const otherSha = 'a'.repeat(40); // valid 40-hex oid, but not the commit being pushed
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+      { DEVKIT_SHIP_PREPUSH_SKIP_SHA: otherSha },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('devkit ship');
+    expect(readLog(logPath)).toEqual([
+      `${realpathSync(root)}\trun typecheck`,
+      `${realpathSync(root)}\trun test:run`,
+    ]);
+  });
+
+  it('ignores a non-oid ship marker and runs the full suite', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+      { DEVKIT_SHIP_PREPUSH_SKIP_SHA: 'ship-in-progress' }, // junk → treated as absent
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('devkit ship');
+    expect(readLog(logPath)).toEqual([
+      `${realpathSync(root)}\trun typecheck`,
+      `${realpathSync(root)}\trun test:run`,
+    ]);
+  });
+
+  it('fail-closed on a mixed push where another branch is not the ship commit', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+    const otherSha = 'b'.repeat(40); // a second branch at a different tip, pushed alongside the ship commit
+
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n` +
+        `refs/heads/other ${otherSha} refs/heads/other ${ZERO_OID}\n`,
+      { DEVKIT_SHIP_PREPUSH_SKIP_SHA: head },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('devkit ship');
+    expect(readLog(logPath)).toEqual([
+      `${realpathSync(root)}\trun typecheck`,
+      `${realpathSync(root)}\trun test:run`,
+    ]);
   });
 });

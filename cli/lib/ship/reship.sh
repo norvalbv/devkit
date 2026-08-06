@@ -181,7 +181,10 @@ fi
 
 # Fast-forward push to the existing branch (NO --force). If origin/<branch> advanced since the fetch,
 # this is rejected — the human resolves rather than overwriting someone's commit.
-git -C "$WT" push origin "HEAD:$BR" || {
+# sc-1508: same content-keyed skip seam as ship-branch.sh — hand the pre-push hook this commit's sha so
+# it skips its typecheck + test:run for this one commit (CI re-runs both on the PR); any other ref fails
+# closed to the full suite.
+DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push origin "HEAD:$BR" || {
   echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
   exit 1
 }
