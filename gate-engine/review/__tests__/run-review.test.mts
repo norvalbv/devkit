@@ -14,7 +14,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
-import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
+import {
+  buildCompletenessEvidence,
+  normalizeCommitMessage,
+  runCompleteness,
+  wrapCompleteness,
+} from '../completeness.mts';
 import { CORRECTNESS_LENSES, FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { REVIEWERS } from '../reviewers.mts';
@@ -602,7 +607,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
       gate: 'review',
       cache_state: 'full',
-      parallelism: 3,
+      parallelism: 6,
     });
     // A synthetic pass row would inflate review_result's fail-rate denominator and flatten the
     // duration percentiles that any judgement-cache change has to be sized against.
@@ -1639,12 +1644,12 @@ describe('runReviewGate — per-completion checkpoints', () => {
 describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
   // consumerRepo({backend, frontend}) stages one file per domain → all 7 reviewers selected
   // (backend pair, frontend pair, commit-guard, correctness, conventions).
-  it('default cap 3: at most 3 judge cascades run at once, all still complete + cache', async () => {
+  it('default cap 6: at most 6 judge cascades run at once, all still complete + cache', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(7);
-    expect(probe.maxInflight()).toBe(3);
+    expect(probe.maxInflight()).toBe(6);
     expect(Object.keys(loadCache(repo)).length).toBe(7);
   });
 
@@ -1671,16 +1676,16 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     const probe = concurrencyProbe(repo, { failFirst: true }); // first attempt null → one strict retry
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(14); // 7 reviewers × (attempt + retry), sequential in-slot
-    expect(probe.maxInflight()).toBeLessThanOrEqual(3);
+    expect(probe.maxInflight()).toBeLessThanOrEqual(6);
   });
 
-  it('a garbage / out-of-range cap falls back to the default of 3', async () => {
+  it('a garbage / out-of-range cap falls back to the default of 6', async () => {
     for (const bad of ['', '0', '-3', 'abc']) {
       const repo = consumerRepo({ backend: true, frontend: true });
       process.env.GUARD_REVIEW_CONCURRENCY = bad;
       const probe = concurrencyProbe(repo);
       expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-      expect(probe.maxInflight()).toBe(3);
+      expect(probe.maxInflight()).toBe(6);
     }
   });
 
@@ -1943,6 +1948,45 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     expect(captured.args).toContain('opus'); // straight opus, no cascade
   });
 
+  // The cost ruling (2026-08-06): completeness judges the message's CLAIMS, so a ship retry whose
+  // diff was reshaped to satisfy another reviewer — same branch, same message — is not re-judged.
+  it('a PASS is intent-sticky: a reshaped diff on the same branch + message skips the judge', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    // The retry: a correctness fix reshapes the staged diff; the claim (message) is unchanged.
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 2;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1); // sticky hit — the opus judgement is not re-paid
+  });
+
+  it('an amended message is a NEW claim — the sticky pass does not cover it', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(await runCompleteness(msg(repo, 'feat: add db layer AND retries'), repo, { exec })).toBe(
+      0,
+    );
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('a FAIL is never sticky — the retry with a fixed diff re-judges', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let verdict = 'VERDICT: FAIL — half-shipped';
+    const exec = mkExec(async () => verdict);
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+    verdict = 'VERDICT: PASS';
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 3;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
   it('GUARD_NO_COMPLETENESS=1 skips before any spawn', async () => {
     const repo = consumerRepo({ backend: true });
     process.env.GUARD_NO_COMPLETENESS = '1';
@@ -2134,6 +2178,17 @@ describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-
     const prompt = wrapCompleteness('brief', 'feat: x', ['a.ts'], 'targets');
     expect(prompt).toContain('OMITTED');
     expect(prompt).toContain('investigate EVERY OMITTED/TRUNCATED entry');
+  });
+
+  // The gate is judged from TWO message sources that must produce the SAME cache key: the ship's
+  // raw composed temp file at pre-commit (the parallel prewarm) and git's cleaned COMMIT_EDITMSG
+  // at commit-msg. Whitespace-only differences between them must normalise away, or the prewarm's
+  // cached PASS silently misses and the opus judgement is re-paid.
+  it('normalizeCommitMessage converges the ship temp file and git cleanup=whitespace output', () => {
+    const composed = 'feat: x  \n\n\n\nbody line \n\n';
+    const gitCleaned = 'feat: x\n\nbody line\n';
+    expect(normalizeCommitMessage(composed)).toBe(normalizeCommitMessage(gitCleaned));
+    expect(normalizeCommitMessage(composed)).toBe('feat: x\n\nbody line');
   });
 });
 

@@ -1,8 +1,11 @@
 import { emitGateTiming } from '../../judge/gate-events.mts';
 
-// 3, not 2: the correctness lens split turns one reviewer into up to four pool tasks, and at 2 they
-// queue behind each other for no reason — the bound that matters is subscription slots, not CPU.
-const DEFAULT_REVIEW_CONCURRENCY = 3;
+// 6, not 3: the correctness lens split turns one reviewer into up to four pool tasks, so a
+// backend commit schedules ~8 (4 lenses + 4 domain reviewers). At 6 the lens wave and most of the
+// fleet run in one wave and the review makespan approaches the slowest single judge instead of
+// packing eight tasks into three slots. The bound that matters is subscription slots, not CPU or
+// memory — watch judge timeout rates, not RSS, if this ever needs lowering.
+const DEFAULT_REVIEW_CONCURRENCY = 6;
 
 /** Max judge cascades in flight; invalid settings preserve the default. */
 export function reviewConcurrency(): number {
