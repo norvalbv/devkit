@@ -24,7 +24,7 @@ Not for: critiquing a drafted plan (route to `feature-critique`), reviewing impl
 When invoking the `prior-art` subagent via the Task tool, format the prompt with these sections.
 Only Problem Statement is required.
 
-```
+```text
 ## Problem Statement
 [The problem as currently framed. One paragraph.]
 

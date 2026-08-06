@@ -19,7 +19,7 @@ departures**, same idiom as the critique bench's deep-research gap.
 | Legs positive control (declared-and-searched-empty + upstream wontfix) | 1 | GENUINE_NEW_WORK |
 
 Haystack rows bury one probative excerpt among near-misses (watchdogs, retries, renderer dedups) so
-recognition is earned, not handed over. Decoy slots are spread across 10 rows — slot flips cluster
+recognition is earned, not handed over. Decoy slots are spread across 11 rows — slot flips cluster
 by CASE, so decoys concentrated in one row would be n=1 (`open-ended-reviewer-gold-slots`).
 
 ## Metrics

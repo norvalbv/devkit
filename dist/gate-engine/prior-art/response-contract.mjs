@@ -84,6 +84,11 @@ function parseLeg(value, path, expected) {
     if (expected === 'local') {
         parsed.declaredCheckouts = countValue(object.declaredCheckouts, `${path}.declaredCheckouts`);
         parsed.resolvedCheckouts = countValue(object.resolvedCheckouts, `${path}.resolvedCheckouts`);
+        // `resolved` is the SUBSET of `declared` that exists on disk, so resolving checkouts none of
+        // which were declared is a state the consumer-side security bound cannot produce — and it is
+        // precisely the shape that would walk an undeclared scan through the GENUINE_NEW_WORK coupling.
+        if (parsed.declaredCheckouts === 0 && parsed.resolvedCheckouts > 0)
+            fail('INVALID_STATUS_COMBINATION', `${path}.resolvedCheckouts`, 'local leg cannot resolve checkouts when none were declared');
         // The declaration-laundering guard: "nothing declared/resolved" must never read as a
         // searched corpus. Zero resolved checkouts cannot attest `reached`.
         if (parsed.resolvedCheckouts === 0 && parsed.status === 'reached')

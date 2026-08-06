@@ -120,8 +120,13 @@ export function validatePriorArtCoupling(response, combo) {
             const q4 = response.questions.find((question) => question.id === 'Q4');
             if (q4?.status !== 'ANSWERED')
                 combo('$.questions', 'GENUINE_NEW_WORK requires Q4 answered with positive absence evidence');
-            if (local.status !== 'reached' || (local.resolvedCheckouts ?? 0) < 1)
-                combo('$.legs[0]', 'GENUINE_NEW_WORK requires the local leg reached with at least one resolved checkout');
+            // `declaredCheckouts >= 1` is redundant with the parser (which rejects resolved-without-
+            // declared outright) and deliberately restated: this validator is exported, so a caller
+            // holding a hand-built response must not be able to earn the verdict off an undeclared scan.
+            if (local.status !== 'reached' ||
+                (local.resolvedCheckouts ?? 0) < 1 ||
+                (local.declaredCheckouts ?? 0) < 1)
+                combo('$.legs[0]', 'GENUINE_NEW_WORK requires the local leg reached over at least one declared, resolved checkout');
             if (!externalReached)
                 combo('$.legs', 'GENUINE_NEW_WORK requires at least one external leg reached');
             if (response.evidence.length === 0)

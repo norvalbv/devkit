@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { type PriorArtResponseV1, parsePriorArtResponse } from '../response-contract.mts';
+import {
+  type PriorArtResponseV1,
+  parsePriorArtResponse,
+  validatePriorArtCoupling,
+} from '../response-contract.mts';
 
 const raw = (value: unknown): string => JSON.stringify(value);
 
@@ -109,6 +113,14 @@ describe('parsePriorArtResponse — absence-laundering guards', () => {
   it('rejects a local leg attesting reached with zero resolved checkouts', () => {
     const legs = [
       { ...LEGS_ALL_REACHED[0], declaredCheckouts: 0, resolvedCheckouts: 0 },
+      ...LEGS_ALL_REACHED.slice(1),
+    ];
+    expect(errorCodeOf(reviewed({ legs: legs as never }))).toBe('INVALID_STATUS_COMBINATION');
+  });
+
+  it('rejects a local leg resolving checkouts that were never declared', () => {
+    const legs = [
+      { ...LEGS_ALL_REACHED[0], declaredCheckouts: 0, resolvedCheckouts: 2 },
       ...LEGS_ALL_REACHED.slice(1),
     ];
     expect(errorCodeOf(reviewed({ legs: legs as never }))).toBe('INVALID_STATUS_COMBINATION');
@@ -377,9 +389,39 @@ describe('parsePriorArtResponse — transport hygiene', () => {
     );
     expect(truncated.ok).toBe(true);
     if (truncated.ok) expect(truncated.value.evidence[0].quote).toHaveLength(240);
-    // Legs out of order: slot 0 must be the local leg, whose required checkout counts the
-    // github entry lacks — the shape check rejects before the name check ever runs.
-    const shuffled = [LEGS_ALL_REACHED[1], LEGS_ALL_REACHED[0], ...LEGS_ALL_REACHED.slice(2)];
-    expect(errorCodeOf(reviewed({ legs: shuffled as never }))).toBe('MISSING_FIELD');
+    // Legs out of order, and otherwise valid: the swapped github entry carries the counts slot 0
+    // requires, so nothing but the leg NAME can fail — which is what this asserts.
+    const shuffled = [
+      { ...LEGS_ALL_REACHED[1], declaredCheckouts: 1, resolvedCheckouts: 2 },
+      LEGS_ALL_REACHED[0],
+      ...LEGS_ALL_REACHED.slice(2),
+    ];
+    expect(errorCodeOf(reviewed({ legs: shuffled as never }))).toBe('INVALID_VALUE');
+  });
+});
+
+describe('validatePriorArtCoupling — direct-caller defense', () => {
+  it('rejects GENUINE_NEW_WORK over resolved-but-undeclared checkouts', () => {
+    // The parser rejects this leg shape outright, so reaching the coupling with it requires a
+    // hand-built response — exactly the caller this restated rule defends against.
+    const parsed = parsePriorArtResponse(
+      raw(
+        reviewed({
+          verdict: 'GENUINE_NEW_WORK',
+          suggestedNextStep: { kind: 'proceed_to_plan', detail: 'Build the mapping here.' },
+        }),
+      ),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const forged: PriorArtResponseV1 = {
+      ...parsed.value,
+      legs: [{ ...parsed.value.legs[0], declaredCheckouts: 0 }, ...parsed.value.legs.slice(1)],
+    };
+    expect(() =>
+      validatePriorArtCoupling(forged, (path, requirement) => {
+        throw new Error(`${path}: ${requirement}`);
+      }),
+    ).toThrow('$.legs[0]');
   });
 });

@@ -107,11 +107,13 @@ function recordRun(raw: string | null): RunRecord {
   const parsed = parsePriorArtResponse(raw);
   if (!parsed.ok || parsed.value.status !== 'reviewed')
     return { raw, valid: false, verdict: 'INVALID', framing: 'INVALID' };
+  // The coupling makes verdict and frameChallenge non-null on every `reviewed` response, so the
+  // fallbacks are unreachable — they exist so the record's declared types hold without a cast.
   return {
     raw,
     valid: true,
-    verdict: parsed.value.verdict as string,
-    framing: parsed.value.frameChallenge?.framing as string,
+    verdict: parsed.value.verdict ?? 'INVALID',
+    framing: parsed.value.frameChallenge?.framing ?? 'INVALID',
   };
 }
 
@@ -179,6 +181,8 @@ interface Summary {
     runs: number;
     matchRuns: number;
     outages: number;
+    /** Rows actually executed vs the loaded corpus — `--only` runs report a partial denominator. */
+    corpus: { executed: number; total: number };
     agentHash: string;
     runnerHash: string;
     corpusHash: string;
@@ -196,6 +200,7 @@ export function aggregate(
   results: RowResult[],
   agent: AgentSource,
   hashes: ReturnType<typeof experimentHashes>,
+  corpusTotal: number,
 ): Summary {
   const framingRows = results.filter((row) => row.framingOk !== null);
   const genuineRows = results.filter((row) => row.genuineClean !== null);
@@ -211,6 +216,9 @@ export function aggregate(
       runs: RUNS,
       matchRuns: MATCH_RUNS,
       outages: results.reduce((sum, row) => sum + row.outages, 0),
+      // Acceptance reads this: a `--only` subset can otherwise post K=3, zero outages and no slots
+      // at all, and be read as a clean full run over a corpus it never touched.
+      corpus: { executed: results.length, total: corpusTotal },
       ...hashes,
       verdictAccuracy: {
         correct: results.filter((row) => row.verdictOk).length,
@@ -322,7 +330,8 @@ async function main(): Promise<void> {
   const mode = argv.find((arg) => ['coverage', '--dev', '--baseline', '--fail'].includes(arg));
   if (!mode) throw new BenchAbort(2, USAGE);
 
-  let rows = loadRows();
+  const corpus = loadRows();
+  let rows = corpus;
   if (only) {
     rows = rows.filter((row) => row.id === only);
     if (!rows.length) throw new BenchAbort(2, `prior-art-eval: no row matches --only ${only}`);
@@ -373,8 +382,13 @@ async function main(): Promise<void> {
   }
   let reused = 0;
 
-  // One work item per (row, run) so the pool bounds total concurrent opus calls.
-  const runsByRow = new Map<string, RunRecord[]>(rows.map((row) => [row.id, []]));
+  // One work item per (row, run) so the pool bounds total concurrent opus calls. Records are
+  // written at their RUN INDEX, never appended: mapPool completes work items out of order and a
+  // resumed pass resolves banked entries first, so append order is not reproducible — and a
+  // reproducible bank must score identically on every pass, whatever majorityVerdict does on ties.
+  const runsByRow = new Map<string, RunRecord[]>(
+    rows.map((row) => [row.id, Array.from({ length: RUNS }, () => recordRun(null))]),
+  );
   const outagesByRow = new Map<string, number>(rows.map((row) => [row.id, 0]));
   const work = rows.flatMap((row) => Array.from({ length: RUNS }, (_, run) => ({ row, run })));
   await mapPool(work, AGENT_CONCURRENCY, async ({ row, run }) => {
@@ -395,7 +409,7 @@ async function main(): Promise<void> {
           `${JSON.stringify({ fp: fingerprint, rowId: row.id, run, raw })}\n`,
         );
     }
-    (runsByRow.get(row.id) as RunRecord[]).push(recordRun(raw));
+    (runsByRow.get(row.id) as RunRecord[])[run] = recordRun(raw);
   });
 
   const results: RowResult[] = [];
@@ -403,7 +417,7 @@ async function main(): Promise<void> {
     results.push(
       await scoreRow(row, runsByRow.get(row.id) as RunRecord[], outagesByRow.get(row.id) ?? 0),
     );
-  const summary = aggregate(results, agent, hashes);
+  const summary = aggregate(results, agent, hashes, corpus.length);
   if (reused > 0) console.log(`\nresumed ${reused}/${work.length} agent calls from checkpoint`);
   printSummary(summary);
   appendFileSync(
@@ -416,6 +430,12 @@ async function main(): Promise<void> {
     console.log(`\nwrote ${path.relative(process.cwd(), baselinePath)}`);
   }
   if (mode === '--fail') {
+    if (!existsSync(baselinePath))
+      throw new BenchAbort(
+        2,
+        `prior-art-eval: no baseline at ${path.relative(process.cwd(), baselinePath)} — ` +
+          'run `--baseline` first',
+      );
     const flips = regressionFlips(summary, readFileSync(baselinePath, 'utf8'));
     if (flips.length) {
       console.error(`\nREGRESSION FLIPS:\n  ${flips.join('\n  ')}`);

@@ -71,13 +71,20 @@ export function parsePriorArtBaseline(
     metrics.push(
       ratio('response-contract', 'Valid response contract', response.ok, response.total),
     );
-  const accepted = value.outages === 0 && value.runs >= 3 && value.matchRuns >= 3;
+  // Acceptance needs the FULL corpus attested, not just K and outages: `bench.mts --only <rowId>`
+  // over a contract-only row legitimately reports runs=3, matchRuns=3, outages=0 and zero slots,
+  // which would otherwise read as a clean full run. Absent (pre-corpus-field) baselines fail this
+  // by construction — `undefined > 0` is false — so the check is fail-closed, never grandfathered.
+  const fullCorpus = value.corpus?.total > 0 && value.corpus?.executed === value.corpus?.total;
+  const accepted = value.outages === 0 && value.runs >= 3 && value.matchRuns >= 3 && fullCorpus;
   return {
     metrics,
     rows: rows(value),
     acceptance: {
       accepted,
-      reason: accepted ? 'K=3 full run with zero outages' : 'Requires K=3 and zero outages',
+      reason: accepted
+        ? 'K=3 full-corpus run with zero outages'
+        : 'Requires K=3, zero outages, and every corpus row executed',
     },
   };
 }
