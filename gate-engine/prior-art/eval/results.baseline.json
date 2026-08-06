@@ -1,0 +1,378 @@
+{
+  "priorArt": {
+    "model": "opus",
+    "runs": 1,
+    "matchRuns": 3,
+    "outages": 0,
+    "agentHash": "c7488a622ab8354d",
+    "runnerHash": "da4e35c0843d22a9",
+    "corpusHash": "f68af20f042cd592",
+    "verdictAccuracy": {
+      "correct": 10,
+      "total": 15
+    },
+    "framingAccuracy": {
+      "correct": 3,
+      "total": 11
+    },
+    "goldRecall": {
+      "hits": 9,
+      "total": 10
+    },
+    "decoyEndorsements": {
+      "endorsed": 0,
+      "total": 11
+    },
+    "genuineControls": {
+      "clean": 3,
+      "total": 5
+    },
+    "contract": {
+      "responseValid": {
+        "ok": 13,
+        "total": 15
+      }
+    },
+    "rows": {
+      "int-frink-wake-hold": {
+        "verdict": "DISSOLVE_FRAME",
+        "verdictOk": true,
+        "framing": "DISSOLVES",
+        "framingOk": true,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-session-consumer",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-better-heuristic",
+            "endorsed": false
+          },
+          {
+            "slotId": "d-watchdog",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-frink-wake-hold-v1": {
+        "verdict": "DISSOLVE_FRAME",
+        "verdictOk": true,
+        "framing": "DISSOLVES",
+        "framingOk": true,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-session-consumer",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-better-heuristic",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-vendored-adhd": {
+        "verdict": "SOLVED_ELSEWHERE",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-existing-skill",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-author-inhouse",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-clone-gate-jscpd": {
+        "verdict": "SOLVED_ELSEWHERE",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-jscpd",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-handroll-scanner",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-qavis-visual-qa": {
+        "verdict": "INVALID",
+        "verdictOk": false,
+        "framing": "INVALID",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 0,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-qavis",
+            "hit": false
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-bespoke-differ",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-skill-dedup-frame": {
+        "verdict": "DISSOLVE_FRAME",
+        "verdictOk": true,
+        "framing": "DISSOLVES",
+        "framingOk": true,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-canonical-home",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-renderer-dedup",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-genuine-decisions-gate": {
+        "verdict": "GENUINE_NEW_WORK",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-absence",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-adopt-adr-tools",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": true,
+        "outages": 0
+      },
+      "int-genuine-gold-slot-bench": {
+        "verdict": "DISSOLVE_FRAME",
+        "verdictOk": false,
+        "framing": "DISSOLVES",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-absence",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-adopt-framework",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": false,
+        "outages": 0
+      },
+      "int-genuine-worktree-leases": {
+        "verdict": "DISSOLVE_FRAME",
+        "verdictOk": false,
+        "framing": "DISSOLVES",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-absence",
+            "hit": false
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-semaphore",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": false,
+        "outages": 0
+      },
+      "int-genuine-verdict-cache": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "verdictOk": false,
+        "framing": "NARROWS",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-absence",
+            "hit": true
+          }
+        ],
+        "decoys": [
+          {
+            "slotId": "d-adopt-turbo",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": true,
+        "outages": 0
+      },
+      "int-insufficient-private-dep": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": null,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [],
+        "decoys": [
+          {
+            "slotId": "d-rewrite-inhouse",
+            "endorsed": false
+          }
+        ],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-legs-dark": {
+        "verdict": "INVALID",
+        "verdictOk": false,
+        "framing": "INVALID",
+        "framingOk": null,
+        "unanimous": true,
+        "valid": {
+          "ok": 0,
+          "total": 1
+        },
+        "gold": [],
+        "decoys": [],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-legs-undeclared": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": null,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [],
+        "decoys": [],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-legs-gh-failed": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": null,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [],
+        "decoys": [],
+        "genuineClean": null,
+        "outages": 0
+      },
+      "int-legs-declared-empty": {
+        "verdict": "GENUINE_NEW_WORK",
+        "verdictOk": true,
+        "framing": "NARROWS",
+        "framingOk": false,
+        "unanimous": true,
+        "valid": {
+          "ok": 1,
+          "total": 1
+        },
+        "gold": [
+          {
+            "slotId": "g-wontfix",
+            "hit": true
+          }
+        ],
+        "decoys": [],
+        "genuineClean": true,
+        "outages": 0
+      }
+    }
+  }
+}

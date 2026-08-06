@@ -8,6 +8,7 @@ import {
   parseCritique,
   parseDecisions,
   parseEdgeCases,
+  parsePriorArt,
   parseReviewer,
   parseSentry,
   wilson,
@@ -296,6 +297,21 @@ describe('benchmark adapters', () => {
     });
     expect(decisions.acceptance.accepted).toBe(false);
     expect(decisions.acceptance.reason).toMatch(/K below 3|floor/i);
+  });
+
+  it('accepts the prior-art suite only on a full-corpus K=3 run with zero outages', () => {
+    const baseline = json('gate-engine/prior-art/eval/results.baseline.json');
+    // Committed K=1 seed: evidence-only, and it predates the corpus field entirely.
+    expect(parsePriorArt(baseline).acceptance.accepted).toBe(false);
+
+    const full = { priorArt: { ...baseline.priorArt, runs: 3, matchRuns: 3, outages: 0 } };
+    // K and outages alone are not enough — `bench.mts --only <rowId>` can post exactly this.
+    full.priorArt.corpus = { executed: 1, total: 15 };
+    expect(parsePriorArt(full).acceptance.accepted).toBe(false);
+    expect(parsePriorArt(full).acceptance.reason).toMatch(/every corpus row/i);
+
+    full.priorArt.corpus = { executed: 15, total: 15 };
+    expect(parsePriorArt(full).acceptance.accepted).toBe(true);
   });
 
   it('rejects unknown adapters and computes bounded Wilson intervals', () => {

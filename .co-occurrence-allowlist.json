@@ -683,6 +683,86 @@
       "description": "baseline 2026-08-02 — pre-existing clone, frozen by guard-clone",
       "date": "2026-08-02",
       "decayDays": 3650
+    },
+    {
+      "fragmentHash": "4d897129fd056e8b",
+      "fileA": "gate-engine/critique/response-contract.mts",
+      "fileB": "gate-engine/prior-art/response-contract.mts",
+      "description": "deliberate per-suite copy: closed-world response parse wrapper — each suite owns its contract scaffolding so one suite's parser change never silently shifts another's scorer hash (same pattern as the frozen matcher pairs)",
+      "date": "2026-08-06",
+      "lines": 37,
+      "rangeA": "378-414",
+      "rangeB": "339-375"
+    },
+    {
+      "fragmentHash": "ab6e85a66af4baa6",
+      "fileA": "gate-engine/critique/response-contract.mts",
+      "fileB": "gate-engine/prior-art/response-contract.mts",
+      "description": "deliberate per-suite copy: bounded-string/enum field guards of the closed-world contract scaffolding (per-suite ownership, matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 24,
+      "rangeA": "86-109",
+      "rangeB": "84-107"
+    },
+    {
+      "fragmentHash": "ccd988b147cc61fc",
+      "fileA": "gate-engine/critique/response-contract.mts",
+      "fileB": "gate-engine/prior-art/response-contract.mts",
+      "description": "deliberate per-suite copy: absolute-URL research-reference validation of the closed-world contract scaffolding (per-suite ownership, matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 23,
+      "rangeA": "260-282",
+      "rangeB": "187-209"
+    },
+    {
+      "fragmentHash": "e0514c2d72c983cd",
+      "fileA": "gate-engine/critique/eval/run-critic.mts",
+      "fileB": "gate-engine/prior-art/eval/run-agent.mts",
+      "description": "deliberate per-suite copy: claude result-envelope unwrap in the bench runner — each bench owns its spawn scaffolding (matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 18,
+      "rangeA": "139-156",
+      "rangeB": "122-139"
+    },
+    {
+      "fragmentHash": "ed78088e5d8b466a",
+      "fileA": "gate-engine/critique/response-contract.mts",
+      "fileB": "gate-engine/prior-art/response-contract.mts",
+      "description": "deliberate per-suite copy: exactObject closed-field guard of the contract scaffolding (per-suite ownership, matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 13,
+      "rangeA": "73-85",
+      "rangeB": "72-83"
+    },
+    {
+      "fragmentHash": "52a2c8bd0bbc119d",
+      "fileA": "gate-engine/critique/response-contract.mts",
+      "fileB": "gate-engine/prior-art/response-contract.mts",
+      "description": "deliberate per-suite copy: ContractFailure thrower of the contract scaffolding (per-suite ownership, matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 12,
+      "rangeA": "52-63",
+      "rangeB": "49-60"
+    },
+    {
+      "fragmentHash": "f8643b900b9610fb",
+      "fileA": "gate-engine/critique/eval/run-critic.mts",
+      "fileB": "gate-engine/prior-art/eval/run-agent.mts",
+      "description": "deliberate per-suite copy: read-agent-from-source loader in the bench runner (per-suite ownership, matcher-pair precedent)",
+      "date": "2026-08-06",
+      "lines": 7,
+      "rangeA": "84-90",
+      "rangeB": "94-100"
+    },
+    {
+      "fragmentHash": "d67a998aee651108",
+      "fileA": "gate-engine/eval/adapters.mts",
+      "fileB": "gate-engine/eval/suite-adapters/prior-art.mts",
+      "description": "adapter metric-block shape shared between the in-file critique adapter and the size-split prior-art adapter — same ratio-list idiom every adapter in this file uses",
+      "date": "2026-08-06",
+      "lines": 12,
+      "rangeA": "97-108",
+      "rangeB": "57-68"
     }
   ]
 }

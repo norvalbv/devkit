@@ -2,8 +2,9 @@ import {
   DECISIONS_ACCEPTANCE,
   selectAlignmentContradiction,
 } from '../decisions/eval/acceptance.mts';
-import { parseDeterministic as parseDeterministicBaseline } from './deterministic-adapter.mts';
 import { wilsonScoreInterval } from './statistics.mts';
+import { parseDeterministic as parseDeterministicBaseline } from './suite-adapters/deterministic.mts';
+import { parsePriorArtBaseline } from './suite-adapters/prior-art.mts';
 import type { MetricObservation, ParsedBaseline } from './types.mts';
 
 // biome-ignore lint/suspicious/noExplicitAny: adapters intentionally normalize heterogeneous, suite-owned JSON shapes.
@@ -45,11 +46,7 @@ function scalar(
 
 export function wilson(successes: number, total: number): MetricObservation['interval'] {
   const { lower, upper } = wilsonScoreInterval(successes, total);
-  return {
-    method: 'wilson-95',
-    lower,
-    upper,
-  };
+  return { method: 'wilson-95', lower, upper };
 }
 
 function rows(value: Json): Record<string, unknown> {
@@ -475,9 +472,11 @@ export function parseEdgeCases(input: Json): ParsedBaseline {
   };
 }
 
-export function parseDeterministic(input: Json): ParsedBaseline {
-  return parseDeterministicBaseline(input, { ratio, scalar });
-}
+export const parseDeterministic = (input: Json): ParsedBaseline =>
+  parseDeterministicBaseline(input, { ratio, scalar });
+
+export const parsePriorArt = (input: Json): ParsedBaseline =>
+  parsePriorArtBaseline(input, { ratio, rows });
 
 const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   critique: parseCritique,
@@ -488,6 +487,7 @@ const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   sentry: parseSentry,
   deterministic: parseDeterministic,
   'edge-cases': parseEdgeCases,
+  'prior-art': parsePriorArt,
 };
 
 export function parseBaseline(adapter: string, input: unknown): ParsedBaseline {
