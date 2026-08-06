@@ -300,7 +300,11 @@ if [ -n "${SHIP_DRY_RUN:-}" ]; then
   exit 0
 fi
 
-git -C "$WT" push -u origin "$BR"
+# sc-1508: hand the pre-push hook the EXACT commit this ship built, so it can skip its
+# typecheck + test:run for this one commit (CI's gate.yml re-runs both on the PR). Command-scoped —
+# nothing else inherits it — and content-keyed: the hook fails closed and runs the full suite for any
+# ref whose oid is not this sha, so a plain `git push` (no env) is unchanged.
+DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
 # Open the PR, but a create FAILURE must NOT skip the manifest write below: recording on PR-create
