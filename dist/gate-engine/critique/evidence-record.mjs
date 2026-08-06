@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { types as utilTypes } from 'node:util';
 export const PLAN_CRITIQUE_EXACT_RESPONSE_MAX_BYTES = 512 * 1024;
 export const PLAN_CRITIQUE_PROJECTION_MAX_BYTES = 8 * 1024;
 export const PLAN_CRITIQUE_TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
@@ -102,4 +103,32 @@ export function canonicalPlanCritiqueRecordJson(value) {
             return item;
         return Object.fromEntries(Object.entries(item).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
     })}\n`;
+}
+/** Text fields accepted into critique evidence records: bounded, non-blank, no control chars. */
+export const PLAN_CRITIQUE_MAX_TEXT_BYTES = 4 * 1024;
+export function validText(value) {
+    return (typeof value === 'string' &&
+        value.trim().length > 0 &&
+        Buffer.byteLength(value, 'utf8') <= PLAN_CRITIQUE_MAX_TEXT_BYTES &&
+        ![...value].some((character) => {
+            const code = character.charCodeAt(0);
+            return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+        }));
+}
+/** Hardened plain-record guard for untrusted values: rejects proxies, arrays, and anything with
+ * a non-null, non-Object prototype (getter traps and prototype tricks must not reach readers). */
+export function plainRecord(value) {
+    if (value === null || typeof value !== 'object')
+        return null;
+    try {
+        if (utilTypes.isProxy(value) || Array.isArray(value))
+            return null;
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null)
+            return null;
+        return value;
+    }
+    catch {
+        return null;
+    }
 }

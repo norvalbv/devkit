@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { markEnd, markStart } from "../husky/husky.mjs";
+import { isQuotedOrCommented } from "./hook-gate-scan.mjs";
 // Bins devkit itself emits into the managed block. A call to one of these from outside the markers
 // is (almost always) a hand-written copy that predates devkit owning the gate.
 const DEVKIT_GATE_BINS = [
@@ -72,35 +73,6 @@ function gateNeedles(cwd) {
         // No/unreadable package.json — bin names alone still cover every non-self-hosted consumer.
     }
     return needles;
-}
-/**
- * Is the position after `before` inside a quoted string, or past an inline `#` comment? Walks the
- * prefix tracking shell quote state, because a bin name is very often *mentioned* rather than run —
- * in a remedy message or a trailing comment — and reporting those tells the consumer to go delete a
- * line that never invoked anything. Ambiguity resolves toward NOT reporting: this check is
- * advisory, so a missed duplicate is far cheaper than a false accusation.
- */
-function isQuotedOrCommented(before) {
-    let quote = null;
-    for (let i = 0; i < before.length; i++) {
-        const c = before[i];
-        if (c === '\\') {
-            i++;
-            continue;
-        }
-        if (quote) {
-            if (c === quote)
-                quote = null;
-            continue;
-        }
-        if (c === '"' || c === "'") {
-            quote = c;
-            continue;
-        }
-        if (c === '#')
-            return true;
-    }
-    return quote !== null;
 }
 function gateSignatures(code, needles) {
     const found = [];

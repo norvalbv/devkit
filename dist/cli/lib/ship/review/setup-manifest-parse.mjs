@@ -5,14 +5,7 @@ import { REVIEWABLE_GUARD_IDS } from "../../components.mjs";
 import { hasExactManifestKeys as exactKeys, hasValidManifestRoots, } from "./manifest/validation.mjs";
 import { isSafeReviewRelativePath } from "./runtime-paths.mjs";
 import { isReviewSetupHash, REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from "./setup-manifest-format.mjs";
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
-function objectValue(value, label) {
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-        return fail(`${label} must be a JSON object.`);
-    return value;
-}
+import { fail, objectValue } from "./shared/common.mjs";
 function manifestString(value, label) {
     if (typeof value !== 'string' || !value || value.includes('\0'))
         fail(`review setup manifest ${label} is invalid.`);
@@ -26,7 +19,7 @@ function manifestRelativePath(value, label) {
     return path;
 }
 function parseProfile(value) {
-    const profile = objectValue(value, 'review setup manifest profile');
+    const profile = objectValue(value, 'review setup manifest profile must be a JSON object.');
     if (!exactKeys(profile, ['enabled', 'guards', 'decisionsDir']) ||
         typeof profile.enabled !== 'boolean' ||
         !Array.isArray(profile.guards)) {
@@ -46,7 +39,7 @@ function parseProfile(value) {
 function parseChain(value) {
     if (value === null)
         return null;
-    const chain = objectValue(value, 'review setup manifest chain');
+    const chain = objectValue(value, 'review setup manifest chain must be a JSON object.');
     if (!exactKeys(chain, ['path', 'sourcePath']))
         return fail('review setup manifest chain has an invalid shape.');
     const path = manifestRelativePath(chain.path, 'chain path');
@@ -56,7 +49,7 @@ function parseChain(value) {
     return { path, sourcePath };
 }
 function parsePath(value, index) {
-    const path = objectValue(value, `review setup manifest path ${index}`);
+    const path = objectValue(value, `review setup manifest path ${index} must be a JSON object.`);
     if (!exactKeys(path, ['id', 'root', 'relativePath', 'fingerprint', 'required', 'executable']) ||
         (path.root !== 'target' && path.root !== 'git') ||
         typeof path.required !== 'boolean' ||
@@ -76,7 +69,7 @@ function parsePath(value, index) {
     };
 }
 function parseSetup(value) {
-    const setup = objectValue(value, 'review setup manifest setup');
+    const setup = objectValue(value, 'review setup manifest setup must be a JSON object.');
     if (!exactKeys(setup, ['overlay', 'hooksPath', 'profile', 'chain', 'paths']) ||
         typeof setup.overlay !== 'boolean' ||
         !Array.isArray(setup.paths)) {
@@ -106,7 +99,7 @@ export function parseReviewSetupManifest(path) {
         const message = cause instanceof Error ? cause.message : String(cause);
         return fail(`could not read review setup manifest (${message}).`);
     }
-    const manifest = objectValue(value, 'review setup manifest');
+    const manifest = objectValue(value, 'review setup manifest must be a JSON object.');
     if (!hasValidManifestRoots(manifest, ['version', 'targetRoot', 'gitRoot', 'setup', 'selfHash'], REVIEW_SETUP_VERSION) ||
         !isReviewSetupHash(manifest.selfHash)) {
         return fail('review setup manifest has an invalid shape.');

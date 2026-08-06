@@ -5,16 +5,15 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from "./run-direct.mjs";
 import { reviewRuntimeFingerprint } from "./runtime-fingerprint.mjs";
 import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
+import { overlayHooksPathRejection } from "./setup/overlay-hooks-path.mjs";
 import { copyMergedReviewSetup, reviewSetupStat, safeReviewSetupDestination, } from "./setup/setup-runtime-copy.mjs";
 import { REVIEW_SETUP_ABSENT, reviewSetupHash } from "./setup-manifest-format.mjs";
 import { parseReviewSetupManifest } from "./setup-manifest-parse.mjs";
 import { encodeReviewSetupRuntimeFields, parseReviewSetupRuntimeManifest, reviewSetupRuntimeHash, REVIEW_SETUP_RUNTIME_VERSION as VERSION, } from "./setup-runtime-format.mjs";
+import { fail } from "./shared/common.mjs";
 import { resolveReviewSource } from "./source-projection.mjs";
 const CHAIN_MIRROR = '.devkit/review-chain-root';
 export { encodeReviewSetupRuntimeFields } from "./setup-runtime-format.mjs";
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
 function canonicalManifestRoot(path, label) {
     const canonical = canonicalReviewDirectory(path, label);
     if (canonical !== path)
@@ -83,10 +82,33 @@ function readHooksPath(gitRoot) {
     }
     return result.stdout.subarray(0, -1).toString();
 }
-function verifySource(context) {
-    if (readHooksPath(context.gitRoot) !== context.manifest.setup.hooksPath) {
-        fail('target core.hooksPath changed after setup capture; retry.');
+/**
+ * Package mode froze the value it read, so literal equality is the whole check. Overlay froze the
+ * canonical `.devkit/hooks` (what review-target.sh hardcodes for the gate run), so re-run the
+ * ACCEPTANCE PREDICATE against the live value instead: both `git ci` and `devkit doctor --fix`
+ * re-point core.hooksPath, and a re-point in either direction mid-review must not abort a run whose
+ * gates never consulted the live value. It still fails closed — a live value that is no longer
+ * provably gated (the shim removed, the committed hook deleted) aborts exactly as before.
+ */
+function verifyHooksPath(context) {
+    const live = readHooksPath(context.gitRoot);
+    const { setup } = context.manifest;
+    if (!setup.overlay) {
+        if (live !== setup.hooksPath)
+            fail('target core.hooksPath changed after setup capture; retry.');
+        return;
     }
+    const chain = setup.paths.find((entry) => entry.id === 'overlay-chain');
+    const rejection = overlayHooksPathRejection(live, {
+        gitRoot: context.gitRoot,
+        chain: setup.chain,
+        chainPresent: chain !== undefined && chain.fingerprint !== REVIEW_SETUP_ABSENT,
+    });
+    if (rejection)
+        fail(`target core.hooksPath changed after setup capture (${rejection}); retry.`);
+}
+function verifySource(context) {
+    verifyHooksPath(context);
     return context.manifest.setup.paths.map((entry) => {
         const current = inspectSource(context, entry);
         if (entry.required && current.fingerprint === REVIEW_SETUP_ABSENT) {

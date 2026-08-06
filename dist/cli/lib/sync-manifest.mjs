@@ -14,9 +14,8 @@ import { packageDir, sha256 } from "./fs-helpers.mjs";
 import { isTracked } from "./git-tracked.mjs";
 import { AGENT_ASSET_MANIFESTS, assertLegacyAssetWriterCompatible, } from "./install/agent-asset-manifest/compatibility.mjs";
 import { removeProviderNativeAssets, withAgentAssetLifecycleLock, } from "./install/agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest } from "./install/agent-asset-manifest/reader.mjs";
+import { readAgentAssetManifest, resolveLegacyProviderTargets, } from "./install/agent-asset-manifest/reader.mjs";
 import { agentAssetDir } from "./install/agent-assets/agent-assets.mjs";
-import { LEGACY_AGENT_PROVIDERS } from "./install/agent-assets/agent-providers.mjs";
 export { decodeSyncManifest, encodeSyncManifestV2, } from "./install/agent-asset-manifest/codec.mjs";
 // ── ownership inference (forward: sync-time conflict detection) ───────────────────────────────
 // A consumer may author their OWN skill/agent/hook under a name devkit bundles. These tell the sync
@@ -202,8 +201,7 @@ export function removeSkills(root, dryRun, targets, dropManifest = true, skipTra
             return;
         }
         const decoded = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
-        const inferredTargets = decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-        const legacyTargets = (targets ?? inferredTargets).filter((target) => LEGACY_AGENT_PROVIDERS.includes(target));
+        const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
         if (!legacyTargets.length)
             return;
         const dirs = legacyTargets.map((target) => agentAssetDir(target, 'skills'));
@@ -226,8 +224,7 @@ export function removeAgents(root, dryRun, targets, dropManifest = true, skipTra
             return;
         }
         const decoded = readAgentAssetManifest(join(root, '.devkit', 'agents-manifest.json'), 'agents');
-        const inferredTargets = decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-        const legacyTargets = (targets ?? inferredTargets).filter((target) => LEGACY_AGENT_PROVIDERS.includes(target));
+        const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
         if (!legacyTargets.length)
             return;
         const dirs = legacyTargets.map((target) => agentAssetDir(target, 'agents'));

@@ -19,9 +19,9 @@ import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
 import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest.mjs";
 import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "./agent-asset-manifest/compatibility.mjs";
 import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from "./agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest } from "./agent-asset-manifest/reader.mjs";
+import { readAgentAssetManifest, resolveLegacyProviderTargets, } from "./agent-asset-manifest/reader.mjs";
 import { agentAssetDir } from "./agent-assets/agent-assets.mjs";
-import { LEGACY_AGENT_PROVIDERS, requireAgentProviders } from "./agent-assets/agent-providers.mjs";
+import { requireAgentProviders } from "./agent-assets/agent-providers.mjs";
 import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from "./hook-registration-ledger/codec.mjs";
 import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, stripRetiredRegistrations, } from "./hook-registration-ledger/install-support.mjs";
 import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from "./hook-registration-ledger/lifecycle.mjs";
@@ -198,8 +198,7 @@ export function removeHookScripts(root, { dryRun = false, targets, dropManifest 
             return;
         }
         const decoded = readAgentAssetManifest(join(root, '.devkit', 'agent-hooks-manifest.json'), 'hooks');
-        const inferredTargets = decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
-        const legacyTargets = (targets ?? inferredTargets).filter((target) => LEGACY_AGENT_PROVIDERS.includes(target));
+        const legacyTargets = resolveLegacyProviderTargets(decoded, targets);
         if (!legacyTargets.length)
             return;
         removeManifested(root, 'agent-hooks-manifest.json', hookDirs(legacyTargets), 'agent-hook script', dryRun, dropManifest, bundledNames('agents-hooks', (e) => e.isFile()), join(packageDir(), 'agents-hooks'), skipTracked);

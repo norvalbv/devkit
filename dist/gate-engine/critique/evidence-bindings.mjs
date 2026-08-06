@@ -1,4 +1,4 @@
-import { canonicalPlanCritiqueRecordJson, sha256Bytes, } from "./evidence-record.mjs";
+import { canonicalPlanCritiqueRecordJson, sha256Bytes, validText, } from "./evidence-record.mjs";
 import { readPlanCritiqueRecord } from "./evidence-store.mjs";
 import { listPrivateFiles, managedPath, publishImmutable, readPrivateFileBounded, } from "./immutable-file.mjs";
 import { getPlanCritiqueWorkQuarantine } from "./lifecycle/work-quarantine.mjs";
@@ -10,7 +10,6 @@ const CRITIQUE_ID = /^pc1_[0-9a-f]{64}$/;
 const GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const BINDING_FILE = /^[0-9a-f]{64}\.json$/;
-const MAX_TEXT_BYTES = 4 * 1024;
 const MAX_BINDING_BYTES = 16 * 1024;
 const BINDING_PATH = ['devkit', 'plan-critique-bindings', 'v1'];
 const bindingKey = (workId) => sha256Bytes(Buffer.from(workId, 'utf8'));
@@ -20,15 +19,6 @@ function exactObject(value, fields) {
         return null;
     const keys = Object.keys(value);
     return keys.length === fields.length && keys.every((key) => fields.includes(key)) ? value : null;
-}
-function validText(value) {
-    return (typeof value === 'string' &&
-        value.trim().length > 0 &&
-        Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-        ![...value].some((character) => {
-            const code = character.charCodeAt(0);
-            return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-        }));
 }
 function canonicalBindingJson(binding) {
     return Buffer.from(canonicalPlanCritiqueRecordJson(binding));

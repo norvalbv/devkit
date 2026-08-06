@@ -24,8 +24,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveGuardConfig } from "../config.mjs";
-import { isPrimarySearchCommand, normalize } from "./search-tool-lib.mjs";
+import { isExcludedTarget, isOutOfScanRoots, isPrimarySearchCommand, normalize, } from "./search-tool-lib.mjs";
 import { resolveSearchTools } from "./tools.mjs";
+// Ecosystem-universal roots the semantic-search index never covers,
+// regardless of consumer config — never a hardcoded stack layout (see
+// docs/decisions/synced-assets-layout-agnostic.md).
+const EXCLUDE_ROOTS = ['node_modules', '.git', '/tmp', tmpdir()];
 const THRESHOLD = Number(process.env.SEARCH_STREAK_THRESHOLD ?? 3);
 let payload;
 try {
@@ -45,7 +49,9 @@ try {
 catch { }
 const stateFile = join(stateDir, `${sessionId}.json`);
 const state = readState();
-const { searchTool } = resolveSearchTools(resolveGuardConfig());
+const guardConfig = resolveGuardConfig();
+const { searchTool } = resolveSearchTools(guardConfig);
+const { scanRoots } = guardConfig;
 // Any semantic-search use resets the counter, hook stays silent. Match the
 // configured tool exactly, or any tool whose name ends in the searchCode MCP
 // suffix (back-compat / provider-prefixed variants).
@@ -68,6 +74,17 @@ if (!isPrimarySearchCommand(norm)) {
         state.streak = 0;
         writeState(state);
     }
+    process.exit(0);
+}
+// The target is outside anywhere the semantic index could cover (universal
+// exclusions, or outside the consumer's configured scanRoots) — an agent
+// legitimately grepping node_modules or /tmp is not enumerating a concept
+// across the indexed codebase, but it isn't a non-search command either, so
+// this is a THIRD, explicit transition: no-op. Neither incrementing (the bug
+// — the counter would escalate toward a tool that can't answer the query)
+// nor resetting (an out-of-index grep sandwiched between two real ones would
+// wrongly clear a genuine enumeration streak) is correct here.
+if (isExcludedTarget(norm, EXCLUDE_ROOTS) || isOutOfScanRoots(norm, scanRoots)) {
     process.exit(0);
 }
 // Every primary search counts — a run of clean-identifier greps is still
