@@ -2,19 +2,9 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { canonicalReviewDirectory, isSafeReviewRelativePath } from "./runtime-paths.mjs";
+import { reviewSetupStat } from "./setup/setup-runtime-copy.mjs";
 function fail(message) {
     throw new Error(`devkit review: ${message}`);
-}
-function safeStat(path) {
-    try {
-        return lstatSync(path, { throwIfNoEntry: false });
-    }
-    catch (cause) {
-        const code = cause.code;
-        if (code === 'ENOENT' || code === 'ENOTDIR')
-            return undefined;
-        throw cause;
-    }
 }
 function requireParentDirectory(stat, leaf, path) {
     if (leaf)
@@ -54,7 +44,7 @@ function traverseSegment(traversal, segments, index, relativePath, allowProjecti
         lexical: join(traversal.lexical, segment),
         physical: join(traversal.physical, segment),
     };
-    const stat = safeStat(next.lexical);
+    const stat = reviewSetupStat(next.lexical);
     if (stat === undefined)
         return { traversal: next, exists: false };
     if (stat.isSymbolicLink()) {

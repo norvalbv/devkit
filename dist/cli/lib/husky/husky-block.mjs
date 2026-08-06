@@ -188,7 +188,7 @@ fi`;
 // AI-gate helper: FAIL-FAST (never aggregated — findings surface one at a time), with exit 3
 // (strict ship mode failing closed on a judge outage) given its own remedy so it is never
 // rendered as a code violation.
-const DK_GATE_AI_HELPER = '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; __dk_no_git_env "$@" || rc=$?; if [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
+const DK_GATE_AI_HELPER = '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || return 0; rc=0; __dk_no_git_env "$@" || rc=$?; if [ "$rc" -eq 4 ]; then echo "   $1: NOT a gate rejection — the staged content itself is unreadable (evidence above)."; exit 1; elif [ "$rc" -eq 3 ]; then echo "   $1: judge unavailable — strict ship mode failed closed. Check claude auth/quota, then re-run devkit ship."; exit 1; elif [ "$rc" -eq 1 ] || { [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; }; then exit 1; fi; }';
 /**
  * Build standalone gates from global fail-open bins. Biome needs local tooling and is omitted;
  * structure joins via `--structure`, and `pkgRel` scopes monorepos.

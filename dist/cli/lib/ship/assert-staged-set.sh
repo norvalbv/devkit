@@ -144,7 +144,11 @@ ship_assert_staged_unchanged() {
 # ship_assert_commit_scope <worktree> <base> <state-file>
 # Post-commit, run BEFORE the push: the commit must still contain the work that was staged.
 ship_assert_commit_scope() {
-  local wt=$1 base=$2 state=$3 changed missing lost path rc briefed_n del_extra_n
+  # `lost` MUST be initialized here, not just inside the `if` below. Under `set -u` a bare `local x`
+  # is UNSET in bash 4.4+ (CI, every Linux runner), so reading it on the clean path — the path every
+  # honest ship takes — aborts the ship with "lost: unbound variable". macOS bash 3.2 treats it as
+  # empty instead, which is why the suite is green locally and red in CI.
+  local wt=$1 base=$2 state=$3 changed missing lost='' path rc briefed_n del_extra_n
   changed=$(git -C "$wt" diff --no-renames --name-only "$base" HEAD) || {
     echo "🛑 ship: could not diff the ship commit against its base ($base)." >&2
     return 1
@@ -157,7 +161,6 @@ ship_assert_commit_scope() {
     <(_ship_state_paths "$state" | sort -u) \
     <(printf '%s\n' "$changed" | sort -u))
   if [ -n "$missing" ]; then
-    lost=
     while IFS= read -r path; do
       [ -n "$path" ] || continue
       if _ship_path_matches_base "$wt" "$base" "$path"; then

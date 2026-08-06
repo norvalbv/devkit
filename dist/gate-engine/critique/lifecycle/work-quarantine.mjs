@@ -1,44 +1,29 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { types as utilTypes } from 'node:util';
-import { canonicalPlanCritiqueRecordJson, PLAN_CRITIQUE_PROVIDERS, sha256Bytes, } from "../evidence-record.mjs";
+import { canonicalPlanCritiqueRecordJson, PLAN_CRITIQUE_PROVIDERS, plainRecord, sha256Bytes, validText, } from "../evidence-record.mjs";
 import { managedPath, publishImmutable, readPrivateFileBounded } from "../immutable-file.mjs";
 import { resolvePlanCritiqueEvidenceRoot, withExistingPlanCritiquePersistenceLock, withPlanCritiquePersistenceLock, } from "../persistence-lock.mjs";
 const SHA256 = /^[0-9a-f]{64}$/;
-const MAX_TEXT_BYTES = 4 * 1024;
 const QUARANTINE_PATH = ['work-quarantines'];
 function exactObject(value, fields) {
-    if (value === null || typeof value !== 'object')
+    const record = plainRecord(value);
+    if (record === null)
         return null;
     try {
-        if (utilTypes.isProxy(value) || Array.isArray(value))
-            return null;
-        const prototype = Object.getPrototypeOf(value);
-        if (prototype !== Object.prototype && prototype !== null)
-            return null;
-        const keys = Reflect.ownKeys(value);
+        const keys = Reflect.ownKeys(record);
         if (keys.length !== fields.length ||
             keys.some((key) => typeof key !== 'string' || !fields.includes(key)))
             return null;
         for (const key of keys) {
-            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            const descriptor = Object.getOwnPropertyDescriptor(record, key);
             if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value'))
                 return null;
         }
-        return value;
+        return record;
     }
     catch {
         return null;
     }
-}
-function validText(value) {
-    return (typeof value === 'string' &&
-        value.trim().length > 0 &&
-        Buffer.byteLength(value, 'utf8') <= MAX_TEXT_BYTES &&
-        ![...value].some((character) => {
-            const code = character.charCodeAt(0);
-            return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-        }));
 }
 function parseIdentity(value) {
     const identity = exactObject(value, ['provider', 'repositoryFingerprint', 'workId']);

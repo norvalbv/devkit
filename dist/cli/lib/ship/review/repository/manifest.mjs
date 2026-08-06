@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
 import { hasExactManifestKeys, hasValidManifestRoots, isSafeManifestAbsolutePath, } from "../manifest/validation.mjs";
+import { errorMessage, fail, objectValue } from "../shared/common.mjs";
 export const REVIEW_REPOSITORY_STATE_VERSION = 1;
 export const REVIEW_REPOSITORY_OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -16,18 +17,6 @@ const MANIFEST_KEYS = [
     'selfHash',
 ];
 const STATE_KEYS = ['headOid', 'headSymrefBase64', 'refsSha256', 'configSha256'];
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
-function errorMessage(cause) {
-    return cause instanceof Error ? cause.message : String(cause);
-}
-function objectValue(value, label) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        fail(`repository state manifest ${label} is invalid.`);
-    }
-    return value;
-}
 function canonicalBase64(value) {
     if (typeof value !== 'string' || !value)
         return false;
@@ -67,8 +56,8 @@ export function reviewRepositoryManifestHash(value) {
 }
 /** Read, authenticate, and deeply validate a repository-state manifest. */
 export function parseReviewRepositoryStateManifest(path) {
-    const manifest = objectValue(readManifestValue(path), 'shape');
-    const state = objectValue(manifest.state, 'state');
+    const manifest = objectValue(readManifestValue(path), 'repository state manifest shape is invalid.');
+    const state = objectValue(manifest.state, 'repository state manifest state is invalid.');
     if (!hasValidManifestRoots(manifest, MANIFEST_KEYS, REVIEW_REPOSITORY_STATE_VERSION)) {
         fail('repository state manifest has an invalid shape.');
     }

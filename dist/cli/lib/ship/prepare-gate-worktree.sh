@@ -252,7 +252,7 @@ prepare_gate_worktree() {
     return $?
   fi
 
-  local link_dirs=(.husky/_ node_modules coverage)
+  local link_dirs=(node_modules coverage)
   [ "$#" -gt 0 ] && link_dirs+=("$@")
 
   # Overlay mode stores its complete hook chain under ignored .devkit/hooks. It must be linked and
@@ -268,11 +268,28 @@ prepare_gate_worktree() {
   local main_root
   main_root=$(gate_main_worktree "$root")
 
-  # Every devkit install uses Husky's generated runner, including overlay installs (their own hook
-  # chains to the repo hook). Missing runner = `git hook run`/commit silently has no real chain.
-  if ! gate_link_source "$root" "$main_root" .husky/_ >/dev/null; then
-    echo "missing .husky/_ in $root or $main_root — run dependency setup before $purpose (gates must not fail open)" >&2
-    return 1
+  # Project the hook directory git will actually use. Package-mode Husky points at its ignored
+  # `.husky/_` runner, while a standalone install deliberately points at the committed `.husky`
+  # directory and needs no generated runner. Keep `.husky/_` as the fallback when hooksPath is unset
+  # so the existing devkit-install preflight remains fail-closed.
+  local hooks_path hook_link_rel
+  hooks_path=$(git -C "$wt" config --get core.hooksPath 2>/dev/null) || hooks_path=''
+  if [ -z "$hooks_path" ]; then
+    hook_link_rel=.husky/_
+  elif [[ "$hooks_path" != /* ]]; then
+    hook_link_rel=$hooks_path
+  else
+    hook_link_rel=
+  fi
+  if [ -n "$hook_link_rel" ]; then
+    if [ ! -e "$wt/$hook_link_rel" ] && [ ! -L "$wt/$hook_link_rel" ] &&
+      ! gate_link_source "$root" "$main_root" "$hook_link_rel" >/dev/null; then
+      echo "missing $hook_link_rel in $root or $main_root — run dependency setup before $purpose (gates must not fail open)" >&2
+      return 1
+    fi
+    # Append after `.devkit`: overlay mode must project the complete directory before its nested
+    # hooksPath is considered, rather than materializing only `.devkit/hooks`.
+    link_dirs+=("$hook_link_rel")
   fi
 
   # Announce every link with the source it RESOLVED TO. link-gate-configs.sh, four lines downstream in

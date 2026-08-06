@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.47.1",
+  "version": "0.48.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -63,6 +63,7 @@
     "benchmarks:check": "bun gate-engine/eval/cli.mts check",
     "benchmarks:render": "bun gate-engine/eval/cli.mts render",
     "benchmarks:typecheck": "tsc -p gate-engine/eval/tsconfig.json",
+    "search-eval:check": "node gate-engine/search-tool/eval/eval.mts --fail",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
     "prepare": "husky",
@@ -70,7 +71,7 @@
     "build": "tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.6",
     "@types/node": "^25.9.3",
     "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",

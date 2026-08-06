@@ -1,4 +1,5 @@
 import { firstDuplicateJsonKey } from "../../../../gate-engine/critique/json-duplicate-keys.mjs";
+import { LEGACY_AGENT_PROVIDERS } from "../agent-assets/agent-providers.mjs";
 import { readBoundedRegularFile } from "../strict-bounded-file-read.mjs";
 import { decodeSyncManifest } from "./codec.mjs";
 const MAX_MANIFEST_BYTES = 1024 * 1024;
@@ -30,4 +31,13 @@ export function readAgentAssetManifest(path, kind) {
         throw new Error('agent asset manifest is not valid JSON');
     }
     return decodeSyncManifest(parsed, kind);
+}
+/**
+ * Legacy-provider slice of the requested (or manifest-recorded) target set — the providers a
+ * pre-provider-aware devkit could have written to. Shared by the remove paths in
+ * sync-manifest.mts and install-hooks.mts (was copy-pasted at three sites; sc-1414).
+ */
+export function resolveLegacyProviderTargets(decoded, targets) {
+    const inferred = decoded?.version === 1 ? decoded.manifest.targets : [...LEGACY_AGENT_PROVIDERS];
+    return (targets ?? inferred).filter((target) => LEGACY_AGENT_PROVIDERS.includes(target));
 }

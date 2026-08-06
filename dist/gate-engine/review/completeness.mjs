@@ -38,6 +38,7 @@ import { renderTargets } from "./evidence/targets-block.mjs";
 export { renderTargets } from "./evidence/targets-block.mjs";
 import { emitCacheHit, finishGateTiming } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
+import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache, savePasses } from "./cache.mjs";
 import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
@@ -120,8 +121,11 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         prompt = wrapCompleteness(body, message, files, renderTargets(targets));
     }
     catch (e) {
-        console.error(`guard-review: completeness could not run — ${e instanceof Error ? e.message : String(e)}${envFlag('AI_STRICT') ? ' (strict ship mode: failing closed)' : ''}`);
-        return finish(envFlag('AI_STRICT') ? 3 : 2);
+        // sc-1366: distinguish an unreadable staged object from an inconclusive judge before the exit
+        // code turns it into "judge unavailable — check `claude` CLI auth/quota".
+        const st = envFlag('AI_STRICT');
+        const lbl = 'guard-review: completeness';
+        return finish(reportGateInfraFailure('review:completeness', lbl, e, cwd, st ? 3 : 2, { strict: st }));
     }
     // PASS cache, same store and shape as the domain reviewers (.devkit/review-cache.json): an
     // identical judgement never re-runs. Without it this gate was the ONE thing a ship retry always

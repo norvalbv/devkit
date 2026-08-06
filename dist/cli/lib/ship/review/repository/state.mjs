@@ -5,24 +5,9 @@ import { isAbsolute, join } from 'node:path';
 import { writeFileAtomic } from "../../../atomic-write.mjs";
 import { runDirectReviewCli } from "../run-direct.mjs";
 import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from "../runtime-paths.mjs";
+import { errorMessage, fail, gitEnvironment } from "../shared/common.mjs";
 import { parseReviewRepositoryStateManifest, REVIEW_REPOSITORY_OBJECT_ID, REVIEW_REPOSITORY_STATE_VERSION, reviewRepositoryManifestHash, } from "./manifest.mjs";
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
-function errorMessage(cause) {
-    return cause instanceof Error ? cause.message : String(cause);
-}
-function gitEnvironment() {
-    const env = { ...process.env };
-    for (const name of Object.keys(env)) {
-        if (name.startsWith('GIT_'))
-            delete env[name];
-    }
-    // These commands are read-only; forbid opportunistic lock-taking such as index refreshes too.
-    env.GIT_OPTIONAL_LOCKS = '0';
-    return env;
-}
 function spawnGit(root, args) {
     return spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {
         env: gitEnvironment(),

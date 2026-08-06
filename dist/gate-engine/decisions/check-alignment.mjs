@@ -44,6 +44,7 @@ import { pathToFileURL } from 'node:url';
 import { envFlag, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
 import { emitCacheHit } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
+import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { execJudge, strictRemedy } from "../judge/run-judge.mjs";
 import { currentTarget, effectiveScope, parseDecision } from "./decisions.mjs";
 import { git, stagedFiles } from "./git-io.mjs";
@@ -377,10 +378,11 @@ function runGate() {
         process.exit(depthBlock ? 1 : 0);
     }
     catch (e) {
+        // sc-1366: an unreadable staged object is infrastructure, not a CONTRADICT. Under strict this
+        // otherwise exits 3, which the generated hook renders as a judge/auth outage.
         const strict = envFlag('AI_STRICT');
-        const reason = e instanceof Error ? e.message : String(e);
-        console.error(`decision-alignment: could not run — ${reason}${strict ? ' (strict ship mode: failing closed)' : ''}`);
-        process.exit(strict ? 3 : 2); // fail-open, except on a ship
+        const g = 'decision-alignment';
+        process.exit(reportGateInfraFailure(g, g, e, cwd, strict ? 3 : 2, { strict })); // open off-ship
     }
 }
 function runScan() {

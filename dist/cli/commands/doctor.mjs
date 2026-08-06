@@ -9,8 +9,9 @@ import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { checkAgentAssets, checkRegistrations } from "../lib/doctor/asset-checks.mjs";
 import { check } from "../lib/doctor/check-result.mjs";
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from "../lib/doctor/extends-checks.mjs";
-import { adviseSearchIndex, checkGuardConfig, SEARCH_INDEX_CHECK, } from "../lib/doctor/guard-config-checks.mjs";
+import { checkGuardConfig, SEARCH_INDEX_CHECK } from "../lib/doctor/guard-config-checks.mjs";
 import { hookChecks } from "../lib/doctor/hook-checks.mjs";
+import { runOverlayDoctor } from "../lib/doctor/overlay-doctor.mjs";
 import { checkLockPin, checkPin } from "../lib/doctor/pin-checks.mjs";
 import { runSelfHostDoctor } from "../lib/doctor/self-host-doctor.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
@@ -19,8 +20,6 @@ import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../lib/husky/husky-block.m
 import { checkAdhdSkill } from "../lib/install/adhd-skill.mjs";
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-assets/agent-providers.mjs";
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
-import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from "../lib/overlay.mjs";
-import { globalHookInstalled, globalInitPath } from "../lib/overlay-global-hook.mjs";
 import { cmpSemver, fetchLatestTag } from "./update.mjs";
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -223,85 +222,6 @@ const DEFAULT_DOCTOR_SEL = {
     structure: false,
     guards: [...RECOMMENDED_GUARD_IDS],
 };
-// Overlay health is gated by its local hook + hooksPath; agent assets and fallow are advisory.
-// Reason: flat signal reporting keeps the exit code gated only on hook + path.
-// fallow-ignore-next-line complexity
-async function runOverlayDoctor(cwd, cfg, fix) {
-    // hooksPath and its alias are repo-wide, including for a monorepo package.
-    const { gitRoot } = detectGitRoot(cwd);
-    const gitGet = (key) => {
-        try {
-            return execFileSync('git', ['config', '--get', key], {
-                cwd: gitRoot,
-                encoding: 'utf8',
-            }).trim();
-        }
-        catch {
-            return ''; // unset
-        }
-    };
-    const hooksPath = gitGet('core.hooksPath');
-    const aliasOurs = isHealAlias(gitGet(`alias.${HEAL_ALIAS_NAME}`));
-    // Compare the ignored overlay hook with a fresh build; --fix rewrites stale/missing copies.
-    const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: !fix });
-    const hookOk = existsSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit')); // post-fix presence
-    const pathOk = hooksPath === '.devkit/hooks';
-    console.log('devkit doctor — overlay (local-only)\n');
-    if (!hookOk)
-        console.log('  ✗ .devkit/hooks/pre-commit MISSING — run `devkit doctor --fix` (or `devkit init --overlay`)');
-    else if (fix && (sync.missing || sync.drift))
-        console.log('  ✓ .devkit/hooks/pre-commit regenerated (was stale/missing — refreshed to the current devkit)');
-    else if (sync.drift)
-        console.log('  ⚠ .devkit/hooks/pre-commit is STALE (predates the current devkit) — run `devkit doctor --fix` to refresh');
-    else
-        console.log('  ✓ .devkit/hooks/pre-commit present');
-    console.log(`  ${pathOk ? '✓' : '⚠'} core.hooksPath = ${hooksPath || '(unset)'}${pathOk ? '' : ` — heal with \`git ${HEAL_ALIAS_NAME}\` (re-points it) or re-run \`devkit init --overlay\``}`);
-    // Advisory only — never affects the exit code (hook + path are the real health signal).
-    if (aliasOurs && !hookOk)
-        console.log(`  ⚠ git ${HEAL_ALIAS_NAME} points at a missing .devkit/hooks — run \`devkit clean\``);
-    else if (aliasOurs)
-        console.log(`  ✓ git ${HEAL_ALIAS_NAME} self-heal alias`);
-    else
-        console.log(`  · self-heal off (git ${HEAL_ALIAS_NAME} re-points core.hooksPath; or re-run \`devkit init --overlay\`)`);
-    // The opt-in global shim gates plain commits after Husky reclaims hooksPath; advisory here.
-    if (globalHookInstalled()) {
-        console.log(`  ✓ global pre-commit gate (${globalInitPath()}) — plain \`git commit\` gated`);
-        if (aliasOurs)
-            console.log(`    (git ${HEAL_ALIAS_NAME} is the CLI fast-path; shim + alias don't double-run)`);
-        // Husky cannot source the shim without a committed .husky/pre-commit.
-        const huskyPresent = existsSync(join(gitRoot, '.husky', '_')) || existsSync(join(gitRoot, '.husky'));
-        if (huskyPresent && !existsSync(join(gitRoot, '.husky', 'pre-commit')))
-            console.log(`  ⚠ no committed .husky/pre-commit — husky won't source the shim for pre-commit; a plain \`git commit\` stays ungated here (use \`git ${HEAL_ALIAS_NAME}\`)`);
-    }
-    else if (!pathOk) {
-        console.log(`  · plain \`git commit\` is ungated (husky reclaimed core.hooksPath); \`git ${HEAL_ALIAS_NAME}\` heals it, or wire it permanently with \`devkit init --overlay --global-commit-gate\``);
-    }
-    // Agent-half + fallow checks — ADVISORY (printed, never gate the exit code; a re-run re-syncs them).
-    const recorded = cfg?.components ?? {};
-    const surfaces = resolveExistingAgentProviders(gitRoot, recorded.agentTargets);
-    const sel = { ...recorded, agentTargets: surfaces };
-    const advise = (r) => console.log(`  ${r.status === 'OK' ? '✓' : '·'} ${r.name}: ${r.detail}`);
-    const hooks = selectedHookAssets(sel, { searchSteering: false });
-    if (sel.skills && surfaces.length)
-        advise(checkAgentAssets(cwd, 'skills', surfaces, sel));
-    if (sel.agents && surfaces.length)
-        advise(checkAgentAssets(cwd, 'agents', surfaces));
-    if (hooks.scripts.length && surfaces.length)
-        advise(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
-    if (surfaces.length)
-        advise(checkRegistrations(cwd, hooks.components, surfaces, true));
-    // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
-    // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
-    await adviseSearchIndex(cwd, sel);
-    printQavisAdvisoryHealth(cwd, sel.guards ?? []);
-    if (sel.fallow) {
-        const wired = hookOk &&
-            readFileSync(join(gitRoot, '.devkit', 'hooks', 'pre-commit'), 'utf8').includes('fallow audit');
-        console.log(`  ${wired ? '✓' : '·'} fallow gate: ${wired ? 'wired in the local hook' : 'not wired'}`);
-    }
-    // A stale hook is unhealthy (exit 1) so CI/agents notice; --fix having just regenerated it heals this run.
-    return hookOk && pathOk && (fix || !sync.drift) ? 0 : 1;
-}
 // Self-host (the devkit repo dogfooding itself) doctor: the ONE health signal is whether the
 // committed source hook still matches what the CURRENT generator produces — a mismatch means the
 // generator changed without a regen, or the hook was hand-edited. `--fix` regenerates it. Skills/
@@ -395,7 +315,7 @@ export default async function run(args, cwd) {
     }
     const cfg = (readJson(join(cwd, '.devkit', 'config.json')) ?? {});
     if (cfg.overlay)
-        return runOverlayDoctor(cwd, cfg, fix);
+        return runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
     if (cfg.selfHost)
         return runSelfHostDoctor(cwd, cfg, fix);
     const { results, sel } = await collectResults(cwd, cfg, configResult);

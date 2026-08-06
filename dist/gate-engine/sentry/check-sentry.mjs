@@ -71,6 +71,7 @@ import { pathToFileURL } from 'node:url';
 import { envBool, resolveGuardConfig } from "../config.mjs";
 import { focusHunks } from "../judge/diff-focus.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
+import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { execJudge } from "../judge/run-judge.mjs";
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
 // gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
@@ -421,9 +422,8 @@ export function run(gate) {
         process.exit(applyGateResult(result, message, hard));
     }
     catch (e) {
-        const detail = e instanceof Error ? e.message : String(e);
-        console.error(`sentry-gate: could not run — ${detail}`);
-        process.exit(2); // fail-open
+        // sc-1366: an unreadable staged object is infrastructure, not a verdict (see odb-probe.mts).
+        process.exit(reportGateInfraFailure('sentry', 'sentry-gate', e, CWD, 2)); // 2 = fail-open
     }
 }
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;

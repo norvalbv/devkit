@@ -6,14 +6,9 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runDirectReviewCli } from "../run-direct.mjs";
 import { reviewPathWithin } from "../runtime-paths.mjs";
+import { errorMessage, fail, gitEnvironment } from "../shared/common.mjs";
 const REVIEW_CACHE_NAMESPACE = 'devkit-review-cache-v1';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
-function errorMessage(cause) {
-    return cause instanceof Error ? cause.message : String(cause);
-}
 function assertPhysicalDirectory(path, label) {
     const requested = resolve(path);
     try {
@@ -56,22 +51,9 @@ function ensurePhysicalDirectory(path, label) {
     }
     return assertPhysicalDirectory(requested, label);
 }
-function gitEnvironment() {
-    const env = { ...process.env };
-    for (const name of Object.keys(env)) {
-        if (name.startsWith('GIT_'))
-            delete env[name];
-    }
-    return {
-        ...env,
-        GIT_NO_LAZY_FETCH: '1',
-        GIT_OPTIONAL_LOCKS: '0',
-        GIT_TERMINAL_PROMPT: '0',
-    };
-}
 function gitOutput(targetRoot, args, label) {
     const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', targetRoot, ...args], {
-        env: gitEnvironment(),
+        env: gitEnvironment({ GIT_NO_LAZY_FETCH: '1', GIT_TERMINAL_PROMPT: '0' }),
         maxBuffer: 1024 * 1024,
     });
     if (result.status !== 0) {
