@@ -18,9 +18,10 @@ Dispatch the `commit-guard` agent before committing. It runs semantic search que
 
 ## Scripts
 
-The scripts live beside this skill, but the containing provider directory varies:
-`.agents/skills` (Codex), `.claude/skills`, or `.cursor/skills`. Resolve a complete copy before
-invoking either script:
+The checklist script lives beside this skill, but the containing provider directory varies:
+`.agents/skills` (Codex), `.claude/skills`, or `.cursor/skills`. Resolve it before invoking it;
+duplication and allowlist operations use the installed devkit bins (`guard-dup`, `guard-clone`,
+and `guard-dup-allowlist`), not a provider-projected sidecar:
 
 ```bash
 COMMIT_GUARD_SKILL=""
@@ -29,14 +30,13 @@ for candidate in \
   .claude/skills/commit-guard \
   .cursor/skills/commit-guard
 do
-  if [ -f "$candidate/scripts/checklist.mjs" ] &&
-    [ -f "$candidate/scripts/co-occurrence.mjs" ]; then
+  if [ -f "$candidate/scripts/checklist.mjs" ]; then
     COMMIT_GUARD_SKILL="$candidate"
     break
   fi
 done
 if [ -z "$COMMIT_GUARD_SKILL" ]; then
-  echo "commit-guard scripts unavailable: run devkit sync-skills" >&2
+  echo "commit-guard checklist unavailable: run devkit sync-skills" >&2
   exit 2
 fi
 ```
@@ -44,12 +44,11 @@ fi
 | Script | Purpose |
 |--------|---------|
 | `checklist.mjs` | Per-file review checklist — `init`, `status`, `check-file`, `finalize` (refuses an incomplete/failed checklist), `cleanup` |
-| `co-occurrence.mjs` | Allowlist CRUD — `add`/`remove`/`check`/`prune`/`list` (pairs) + `add-clone`/`remove-clone`/`check-clone`/`baseline-clones` (clones). **See `dup-detection` skill.** |
 
 ## Two detectors, one allowlist (overview)
 
-- **Embedding matcher** (`scripts/co-occurrence/matcher.mjs`) — semantic, symbol-level. Catches renamed/paraphrased dups. Runs as the **blocking pre-commit gate** (`scan --new --changed --gate`, scoped to staged files) + the advisory `.husky/pre-push` net. Exit codes: 1 = block, 0 = clean, 2 = fail-open.
-- **Clone detector** (`scripts/co-occurrence/clone-detector.mjs`) — verbatim, token-level (jscpd). Catches sub-chunk + inline-JSX (molecules) dups the matcher misses.
+- **Embedding matcher** (`guard-dup`) — semantic, symbol-level. Catches renamed/paraphrased dups. Runs as the **blocking pre-commit gate** (`scan --new --changed --gate`, scoped to staged files) + the advisory `.husky/pre-push` net. Exit codes: 1 = block, 0 = clean, 2 = fail-open. A fail-open gate is NAMED in guard-deterministic's report (it proved nothing); if the dup gate opts out unexpectedly, `devkit doctor` reports whether the index is present but unwired. `GUARD_DETERMINISTIC_STRICT=1` makes an opt-out fatal.
+- **Clone detector** (`guard-clone`) — verbatim, token-level (jscpd). Catches sub-chunk + inline-JSX (molecules) dups the matcher misses.
 
 This skill's agent runs both as a best-effort EARLY surface (step 3 searchCode = semantic; step 3b = clone detector); the husky gate is the deterministic authority. When the gate blocks, it prints a **pre-filled `add` / `add-clone` command** — **copy that command** rather than hand-building one (hand-built = empty metadata).
 

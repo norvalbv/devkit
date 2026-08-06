@@ -1,21 +1,21 @@
 {
-  "devkitRef": "v0.45.0",
-  "generatedAt": "2026-07-27T17:05:50.198Z",
+  "devkitRef": "v0.48.0",
+  "generatedAt": "2026-08-06T10:39:03.491Z",
   "targets": [
     "claude",
     "cursor"
   ],
   "files": {
+    "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
+    "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
     "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
-    "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
     "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
-    "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
-    "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
-    "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
+    "correctness-reviewer.md": "227246dbdaea499c97d1857f23910a3c61e5f0ae314442c4a93886e215f8d6bf",
     "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
     "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
-    "correctness-reviewer.md": "227246dbdaea499c97d1857f23910a3c61e5f0ae314442c4a93886e215f8d6bf",
-    "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
-    "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420"
+    "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
+    "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
+    "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
+    "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79"
   }
 }

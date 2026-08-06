@@ -20,7 +20,7 @@ local patch ("flow editor got a modal") *churns*. Write the durable thing.
 - `docs/decisions/INDEX.md` — derived spine: current **Target** per axis. Shows the Target, never a
   note. Regenerable; holds no history.
 
-CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `query` · `list` · `show` · `check` · `reindex`).
+CLI: `guard-decisions` (`add --target` · `add --note` · `amend --target` · `amend --note` · `amend --note-replace` · `query` · `list` · `show` · `check` · `reindex`).
 
 ## The bar — is this log-worthy, and at what altitude? (LAYERED)
 
@@ -137,7 +137,9 @@ where implementation churn lives — so it never masquerades as a target flip.
 only edit allowed is an entry you're authoring in the *current uncommitted* workflow (typo fix).
 Use `amend <slug> --target …` or `amend <slug> --note "…"` for that narrow case: only the newest
 entry absent from `HEAD` can be replaced, and the CLI refuses if committed or earlier working-tree
-history changed. While the decisions guard is selected, direct native agent edits are blocked only
+history changed. For a small correction in a long draft note, use
+`amend <slug> --note-replace "<old>" "<new>"`; it changes exactly one matching substring and refuses
+missing or ambiguous matches. While the decisions guard is selected, direct native agent edits are blocked only
 under the configured decisions directory; shell commands and unsupported payloads remain outside
 this enforcement and fail open.
 To retire a mis-filed (non-epic) entry: **archive, don't delete** — move it under a
