@@ -14,8 +14,9 @@ import {
 } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
+import { globalInitPath, installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { captureReviewSetup } from '../lib/ship/review/setup-manifest.mts';
 import {
   encodeReviewSetupRuntimeFields,
@@ -28,6 +29,12 @@ import { reviewSetupFixtures } from './review-setup-fixture.mts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '../lib/ship/review/setup-runtime.mts');
 const { git, mkTmp, selection, write } = reviewSetupFixtures();
+
+// husky 9.1.7's real `_/h`, verbatim in the part that matters: it builds the XDG init.sh path and
+// sources it — which is what the acceptance predicate greps for.
+const HUSKY_RUNNER_H =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+  '#!/usr/bin/env sh\ni="${XDG_CONFIG_HOME:-$HOME/.config}/husky/init.sh"\n[ -f "$i" ] && . "$i"\n';
 
 function config(overlay: boolean, pkgRel = '') {
   return {
@@ -104,6 +111,82 @@ function seedSnapshot(fx: ReturnType<typeof fixture>, overlay = false): void {
     chmodSync(destination, lstatSync(source).mode & 0o111 ? 0o755 : 0o644);
   }
 }
+
+// An overlay repo whose core.hooksPath husky has reclaimed to `.husky/_`, with the global init.sh
+// shim keeping it gated. The frozen value is the canonical `.devkit/hooks`, so the live value is
+// re-validated by the acceptance predicate rather than compared literally.
+describe('private review setup runtime — husky-reclaimed overlay hooksPath', () => {
+  const origXdg = process.env.XDG_CONFIG_HOME;
+
+  afterEach(() => {
+    if (origXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = origXdg;
+  });
+
+  function reclaimedFixture(name: string) {
+    const parent = mkTmp(`devkit-review-runtime-reclaimed-${name}-`);
+    process.env.XDG_CONFIG_HOME = join(parent, 'xdg');
+    installGlobalHook();
+    const gitRoot = join(parent, 'source');
+    mkdirSync(gitRoot, { recursive: true });
+    git(gitRoot, 'init', '-q');
+    write(gitRoot, '.husky/_/h', HUSKY_RUNNER_H);
+    write(gitRoot, '.husky/_/pre-commit', '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n', true);
+    write(gitRoot, '.husky/pre-commit', '#!/bin/sh\necho team hook\n', true);
+    write(
+      gitRoot,
+      '.devkit/hooks/pre-commit',
+      buildOverlayHook(selection, '.husky/pre-commit'),
+      true,
+    );
+    write(
+      gitRoot,
+      '.devkit/config.json',
+      `${JSON.stringify({ ...config(true), origHooksPath: '.husky/_' }, null, 2)}\n`,
+    );
+    git(gitRoot, 'config', 'core.hooksPath', '.husky/_');
+    const setupManifest = join(parent, 'setup.json');
+    captureReviewSetup(gitRoot, setupManifest);
+    const destination = join(parent, 'private');
+    mkdirSync(destination);
+    return {
+      parent,
+      gitRoot,
+      setupManifest,
+      destination,
+      runtimeManifest: join(parent, 'runtime.json'),
+    };
+  }
+
+  it('survives a mid-review re-point back to .devkit/hooks', () => {
+    // `git ci` (overlay's self-heal alias) and `devkit doctor --fix` both re-point core.hooksPath.
+    // Either can fire from another terminal while a review runs; because the overlay gate run never
+    // consults the live value, that must not abort the run.
+    const fx = reclaimedFixture('flip');
+    materializeReviewSetupRuntime(fx.setupManifest, fx.destination, fx.runtimeManifest);
+
+    // Before the flip: live `.husky/_` against a frozen `.devkit/hooks` — literal equality (what
+    // this check used to be) would abort here.
+    expect(git(fx.gitRoot, 'config', '--get', 'core.hooksPath')).toBe('.husky/_');
+    expect(() => verifyReviewSetupSource(fx.setupManifest, fx.gitRoot)).not.toThrow();
+
+    git(fx.gitRoot, 'config', 'core.hooksPath', '.devkit/hooks');
+
+    expect(() => verifyReviewSetupSource(fx.setupManifest, fx.gitRoot)).not.toThrow();
+    expect(() => verifyReviewSetupRuntime(fx.setupManifest, fx.runtimeManifest)).not.toThrow();
+  });
+
+  it('still aborts when the reclaimed setup stops being provably gated mid-review', () => {
+    const fx = reclaimedFixture('shim-removed');
+    materializeReviewSetupRuntime(fx.setupManifest, fx.destination, fx.runtimeManifest);
+
+    rmSync(globalInitPath());
+
+    expect(() => verifyReviewSetupRuntime(fx.setupManifest, fx.runtimeManifest)).toThrow(
+      /core\.hooksPath changed/,
+    );
+  });
+});
 
 describe('private review setup runtime', () => {
   it('maps nested target setup, merges identical snapshot files, and dereferences the runner', () => {
