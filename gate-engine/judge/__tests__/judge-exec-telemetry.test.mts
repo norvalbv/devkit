@@ -13,8 +13,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { execJudge, execJudgeAsync } from '../run-judge.mts';
-import { DIFF_HEADER, OUTPUT_HEADER } from '../transcript-store.mts';
+import { execJudge, execJudgeAsync, recordAgentRun } from '../run-judge.mts';
+import { DIFF_HEADER, OUTPUT_HEADER, readTranscript } from '../transcript-store.mts';
 
 const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'PATH'];
 const saved: Record<string, string | undefined> = {};
@@ -354,5 +354,83 @@ describe('timeout boundary values (sc-1317 follow-up)', () => {
     const elapsedMs = Date.now() - startedAt;
     expect(out).toBeNull();
     expect(elapsedMs).toBeLessThan(3000);
+  });
+});
+
+/**
+ * `recordAgentRun` is the same contract reached WITHOUT a spawn — the entry point for an agent the
+ * assistant dispatched itself (prior-art via the Task tool), which no gate ever execs.
+ */
+describe('recordAgentRun', () => {
+  it('emits one judge_exec and stores a transcript the ref resolves to', () => {
+    const ref = recordAgentRun({
+      label: 'prior-art',
+      output: '{"verdict":"DISSOLVE_FRAME"}',
+      model: 'opus',
+      durationMs: 42_000,
+    });
+    const [ev, ...rest] = events();
+    expect(rest).toEqual([]);
+    expect(ev).toMatchObject({
+      type: 'judge_exec',
+      judge: 'prior-art',
+      model: 'opus',
+      outcome: 'ok',
+      duration_ms: 42_000,
+      output_chars: 28,
+    });
+    expect(ref).toBe(ev?.transcript_ref);
+    // The ref must resolve through the SAME reader `guard-review transcript <ref>` uses.
+    expect(readTranscript(ref as string)).toContain('{"verdict":"DISSOLVE_FRAME"}');
+  });
+
+  it('carries extra keys (the disposition label) without letting them shadow the core shape', () => {
+    recordAgentRun({
+      label: 'prior-art',
+      output: 'x',
+      extra: {
+        disposition: 'overridden',
+        disposition_reason: 'root agent disagreed',
+        judge: 'spoof',
+      },
+    });
+    expect(events()[0]).toMatchObject({
+      judge: 'prior-art', // core wins — a caller cannot relabel the run out from under the dashboard
+      disposition: 'overridden',
+      disposition_reason: 'root agent disagreed',
+    });
+  });
+
+  it('omits duration_ms entirely when unknown, rather than emitting a misleading 0', () => {
+    recordAgentRun({ label: 'prior-art', output: 'x' });
+    expect(events()[0]).not.toHaveProperty('duration_ms');
+  });
+
+  it('classifies a no-output run as empty, never as a silent ok', () => {
+    // A blanket 'ok' default would make a dead run indistinguishable from a real success except by
+    // inferring from the absent transcript_ref, inflating the label's success rate.
+    const ref = recordAgentRun({ label: 'prior-art', model: 'opus' });
+    expect(ref).toBeNull();
+    expect(events()[0]).toMatchObject({ judge: 'prior-art', outcome: 'empty', output_chars: 0 });
+    expect(events()[0]).not.toHaveProperty('transcript_ref');
+  });
+
+  it('treats a whitespace-only response as empty — the same predicate execJudge applies', () => {
+    expect(recordAgentRun({ label: 'prior-art', output: '  \n\t ' })).toBeNull();
+    expect(events()[0]).toMatchObject({ outcome: 'empty' });
+  });
+
+  it('an explicit outcome still wins over the derived one', () => {
+    recordAgentRun({ label: 'prior-art', output: 'x', outcome: 'transient' });
+    expect(events()[0]).toMatchObject({ outcome: 'transient' });
+  });
+
+  it('is a silent no-op with no sink — telemetry off must never be an error path', () => {
+    // vitest.setup already holds DEVKIT_NO_TELEMETRY=1 suite-wide; dropping the explicit sink is
+    // what takes telemetrySink() to undefined. Never restore that env here — afterEach only tracks
+    // ENV_KEYS, so clearing it would leak an opted-IN default into every later test file.
+    delete process.env.DEVKIT_GATE_EVENTS;
+    expect(recordAgentRun({ label: 'prior-art', output: 'x' })).toBeNull();
+    expect(events()).toEqual([]);
   });
 });
