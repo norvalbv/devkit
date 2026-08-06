@@ -4,6 +4,15 @@ set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ZERO_OID=0000000000000000000000000000000000000000
+# sc-1508: the exact commit sha a `devkit ship` is pushing (set command-scoped by ship-branch.sh /
+# reship.sh). Only a 40/64-hex non-zero oid is honoured; anything else — including a plain `git push`
+# where the env is unset — is treated as absent, so the branch path falls through to the full suite.
+SHIP_SKIP_SHA="${DEVKIT_SHIP_PREPUSH_SKIP_SHA:-}"
+if ! { [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{64}$ ]]; }; then
+  SHIP_SKIP_SHA=
+fi
+NON_TAG_UPDATE_COUNT=0
+NON_TAG_MATCH_COUNT=0
 UPDATES_FILE=$(mktemp "${TMPDIR:-/tmp}/devkit-pre-push-updates.XXXXXX")
 TAG_TEMP_ROOT=
 TAG_WORKTREE=
@@ -60,6 +69,10 @@ while read -r local_ref local_oid remote_ref remote_oid; do
   HAS_UPDATES=1
   if [[ "$remote_ref" != refs/tags/* ]]; then
     HAS_NON_TAG_UPDATE=1
+    NON_TAG_UPDATE_COUNT=$((NON_TAG_UPDATE_COUNT + 1))
+    if [ -n "$SHIP_SKIP_SHA" ] && [ "$local_oid" = "$SHIP_SKIP_SHA" ]; then
+      NON_TAG_MATCH_COUNT=$((NON_TAG_MATCH_COUNT + 1))
+    fi
     continue
   fi
   [ "$local_oid" = "$ZERO_OID" ] && continue
@@ -69,6 +82,19 @@ done < "$UPDATES_FILE"
 
 # Branch and mixed pushes retain the existing contract: validate the caller's exact worktree.
 if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
+  # sc-1508: skip the heavy suite ONLY for a devkit ship of the exact commit(s) it just built — every
+  # non-tag ref being pushed must be the ship sha, and there must be at least one. Anything else fails
+  # closed to the full suite: a plain `git push` (SHIP_SKIP_SHA unset), a branch DELETION (local_oid is
+  # ZERO_OID, never the sha), or a piggybacked second branch (count > matches). The skip is content-keyed,
+  # not "a ship is running", and CI's .github/workflows/gate.yml re-runs typecheck + test:run on the PR —
+  # so the check is not dropped, only moved server-side. A skipped run is announced (never silent).
+  if [ -n "$SHIP_SKIP_SHA" ] && [ "$NON_TAG_UPDATE_COUNT" -gt 0 ] \
+     && [ "$NON_TAG_MATCH_COUNT" -eq "$NON_TAG_UPDATE_COUNT" ]; then
+    echo "devkit pre-push: $SHIP_SKIP_SHA is a devkit ship — typecheck + test:run are gated by CI" >&2
+    echo "  (.github/workflows/gate.yml) on the PR; skipping the local pre-push suite." >&2
+    echo "  A plain git push still runs the full suite." >&2
+    exit 0
+  fi
   run_checks "$ROOT"
   exit 0
 fi
