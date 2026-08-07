@@ -62,9 +62,7 @@ function extractLens(argv) {
 // Group-scoped path. Sorted so the SAME group always resolves to the same file regardless of the
 // order the caller listed its lenses — otherwise `a,b` and `b,a` would be two different runs.
 const lensPath = (lens) =>
-  lens && lens.length
-    ? `.claude/.correctness-review-${[...lens].sort().join('+')}.json`
-    : CHECKLIST_PATH;
+  lens?.length ? `.claude/.correctness-review-${[...lens].sort().join('+')}.json` : CHECKLIST_PATH;
 
 const log = console.log;
 

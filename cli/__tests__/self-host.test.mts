@@ -115,6 +115,20 @@ describe('buildSelfHostHook', () => {
     expect(hook).not.toContain('@norvalbv/devkit');
   });
 
+  // The `--extra` above is only as hard as the script it names, and biome exits 0 when every
+  // diagnostic is warn-severity. A bare `biome check .` therefore PRINTS its findings into the gate
+  // log — indistinguishable from a real failure to the reader — and passes the commit anyway (a
+  // v0.50.0 ship shipped with six of them). `--error-on-warnings` is what makes the exit code match
+  // what the log shows. devkit's own root config turns `noConsole` (the one deliberately-advisory
+  // rule in biome/base.jsonc) off for the whole authored surface, so nothing advisory is caught here.
+  it('backs the lint extra with a biome invocation that exits non-zero on WARNINGS too', () => {
+    const pkg: { scripts?: Record<string, string> } = JSON.parse(
+      readFileSync(join(ROOT, 'package.json'), 'utf8'),
+    );
+    expect(SELF_HOST_EXTRAS).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
+    expect(pkg.scripts?.lint).toContain('--error-on-warnings');
+  });
+
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain(
@@ -144,6 +158,7 @@ describe('buildSelfHostHook', () => {
     // which execs a binary and cannot see shell functions.
     const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
     const stub = join(binDir, 'fallow');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
     writeFileSync(stub, '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset}"\n');
     chmodSync(stub, 0o755);
     const script = `${DK_NO_GIT_ENV_HELPER}\n${fragment}`;
