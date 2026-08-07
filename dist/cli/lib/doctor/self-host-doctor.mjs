@@ -9,6 +9,7 @@ import { printQavisAdvisoryHealth } from "../../commands/doctor.mjs";
 import { detectGitRoot } from "../detect-git-root.mjs";
 import { extractGuardBlock } from "../husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
+import { checkAdhdSkill } from "../install/adhd-skill.mjs";
 import { checkAgents, checkSkills } from "./asset-checks.mjs";
 import { adviseSearchIndex } from "./guard-config-checks.mjs";
 import { checkHookRunner } from "./hook-checks.mjs";
@@ -57,6 +58,12 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         advise(await checkSkills(cwd, primary));
     if (sel.agents && primary)
         advise(await checkAgents(cwd, primary));
+    // A selected component whose payload is missing is its OWN finding, not a skills-manifest count.
+    // Without this line the dogfood repo saw only "bundle has 1 skill(s) the manifest lacks
+    // (i-have-adhd)" — which reads as bookkeeping drift, while what it actually meant was that a
+    // component the config said was ON had no installed skill and a silently self-skipping hook.
+    if (sel.adhd)
+        advise(checkAdhdSkill(cwd));
     // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
     // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
     // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
