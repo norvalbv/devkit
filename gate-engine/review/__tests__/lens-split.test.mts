@@ -332,3 +332,38 @@ describe('mergeItemVectors — per-lens attribution across a split', () => {
     expect((merged as unknown as { itemCount?: number }).itemCount).toBeUndefined();
   });
 });
+
+// The sentry-gate fix loop: the ONLY delta between attempts is the capture line the gate demanded.
+// Keys hash diffCacheIdentity(diff), so every PASS earned on the pre-fix diff must survive it.
+describe('planReviewWork — a sentry-additive restage keeps earned keys', () => {
+  const sel = { reviewer: base, files: ['src/a.ts'] };
+  const key = (n: string, d: string, salt: string) => `${n}|${d}|${salt}`;
+  const d1 =
+    'diff --git a/src/a.ts b/src/a.ts\nindex 1111111..2222222 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n ctx();\n+handle();\n more();\n';
+  const d2 =
+    'diff --git a/src/a.ts b/src/a.ts\nindex 1111111..3333333 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,4 @@\n ctx();\n+handle();\n+Sentry.captureException(e);\n more();\n';
+
+  it('a PASS earned pre-fix is a full cache hit after the capture-only restage (all lens groups)', () => {
+    const before = planReviewWork([sel], [d1], {}, new Map(), key, DEFAULT_LENS_GROUPS);
+    const cache = Object.fromEntries(before.tasks.map((t) => [t.key, { at: 'n' }]));
+    const after = planReviewWork([sel], [d2], cache, new Map(), key, DEFAULT_LENS_GROUPS);
+    expect(after.tasks).toHaveLength(0);
+    expect(after.fullyCached).toHaveLength(1);
+    expect(after.scope[0].cached).toBe(true);
+  });
+
+  it('judges/transcripts still receive the RAW restaged diff, never the normalized identity', () => {
+    const plan = planReviewWork([sel], [d2], {}, new Map(), key, null);
+    expect(plan.tasks[0].diffText).toBe(d2);
+    expect(plan.scope[0].diff).toBe(d2);
+  });
+
+  it('a real change riding along with the capture re-runs every group', () => {
+    const d3 = d2.replace('+Sentry.captureException(e);', '+refund(user);');
+    const before = planReviewWork([sel], [d1], {}, new Map(), key, DEFAULT_LENS_GROUPS);
+    const cache = Object.fromEntries(before.tasks.map((t) => [t.key, { at: 'n' }]));
+    const after = planReviewWork([sel], [d3], cache, new Map(), key, DEFAULT_LENS_GROUPS);
+    expect(after.tasks).toHaveLength(DEFAULT_LENS_GROUPS.length);
+    expect(after.fullyCached).toHaveLength(0);
+  });
+});
