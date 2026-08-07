@@ -15,7 +15,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ADHD_SKILL_DIR } from '../lib/install/adhd-skill.mts';
+import { ADHD_SKILL_DIR, checkAdhdSkill, syncAdhdSkill } from '../lib/install/adhd-skill.mts';
 import { HOOK_REGISTRATIONS } from '../lib/install/hook-registration-ledger/registrations.mts';
 import {
   ADHD_ANCHOR_HOOK,
@@ -200,5 +200,35 @@ describe('adhd hook wiring', () => {
     expect(
       hookScriptsFor({ agentHooks: false, decisions: false, fallow: false, adhd: true }).sort(),
     ).toEqual([ADHD_ANCHOR_HOOK, ADHD_SESSION_HOOK].sort());
+  });
+});
+
+// sc-1529. The component's payload has no coverage of its own, which is how an upgrade that
+// DELETED it stayed invisible: the hook self-skips when the file is gone (asserted above), the
+// config still said the component was on, and doctor folded the absence into a skills-manifest
+// count. These pin the install/reclaim contract and the check that has to name it.
+describe('vendored skill delivery + doctor coverage', () => {
+  it('reclaims the skill when the component is deselected', () => {
+    const root = repoWithSkill();
+    expect(checkAdhdSkill(root).status).toBe('OK');
+    syncAdhdSkill(root, false, false);
+    expect(checkAdhdSkill(root).status).toBe('MISSING');
+  });
+
+  it('a dry run neither installs nor reclaims', () => {
+    const root = repoWithSkill();
+    syncAdhdSkill(root, false, true);
+    expect(checkAdhdSkill(root).status).toBe('OK'); // dry-run must not delete
+    const empty = repoWithSkill(null);
+    syncAdhdSkill(empty, true, true);
+    expect(checkAdhdSkill(empty).status).toBe('MISSING'); // …nor write
+  });
+
+  it('names the missing payload and its remedy, rather than reporting silence', () => {
+    const result = checkAdhdSkill(repoWithSkill(null));
+    expect(result.status).toBe('MISSING');
+    expect(result.detail).toContain(ADHD_SKILL_DIR);
+    expect(result.detail).toContain('SessionStart hook injects nothing');
+    expect(result.remediation).toBeTruthy();
   });
 });
