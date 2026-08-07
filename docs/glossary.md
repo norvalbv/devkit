@@ -53,7 +53,10 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
 - **checkpointed verdicts** — earned AI verdicts persist per-completion so a killed ship re-runs only
   unfinished work: reviewer PASSes checkpoint as each reviewer finishes (not batched at the end), and
   decisions ROUTINE/ALIGN/depth-PASS verdicts cache on their exact evidence bytes (`.devkit/`). This is what
-  lets a ship retry **converge** instead of restart. Drop them with `guard-review clear-cache`.
+  lets a ship retry **converge** instead of restart. Drop them with `guard-review clear-cache`. The sentry
+  commit-msg judge checkpoints too (`.devkit/sentry-verdict-cache.json`) — uniquely it also replays a
+  confident MONITOR (a block) for byte-identical diff-tier evidence; any restage re-judges, and `rm` on the
+  store file resets it.
 
 ## Config & structure
 

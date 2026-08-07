@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { loadEntries, replaceEntries, saveEntriesIfGeneration, verdictStoreGeneration, } from "../../../../../gate-engine/judge/verdict-store.mjs";
 import { runDirectReviewCli } from "../run-direct.mjs";
 import { reviewPathWithin } from "../runtime-paths.mjs";
+import { fail } from "../shared/common.mjs";
 const PREPARE_PROTOCOL = 'devkit-review-cache-session-v1';
 const PROMOTION_PROTOCOL = 'devkit-review-cache-promotion-v1';
 const STABLE_READ_ATTEMPTS = 8;
@@ -12,10 +13,8 @@ export const REVIEW_CACHE_STORE_NAMES = [
     'review-cache.json',
     'decisions-verdict-cache.json',
     'prefix-cache.json',
+    'sentry-verdict-cache.json',
 ];
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
 function physicalRoot(requestedPath, label) {
     if (!requestedPath || requestedPath.includes('\0'))
         fail(`${label} must be a physical directory.`);

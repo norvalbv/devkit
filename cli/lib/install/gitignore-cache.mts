@@ -21,6 +21,7 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/prefix-cache.json',
   '.devkit/decisions-verdict-cache.json',
   '.devkit/review-cache.json',
+  '.devkit/sentry-verdict-cache.json',
   '.devkit/review-progress-*.json',
   '.devkit/review-runs/',
   '.devkit/last-ship-gates-*.log',

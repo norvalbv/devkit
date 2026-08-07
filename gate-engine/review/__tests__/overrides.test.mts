@@ -236,3 +236,25 @@ describe('reconcile — author pass-through', () => {
     });
   });
 });
+
+// fingerprint hashes diffCacheIdentity(diff): a waiver recorded pre-fix must survive the
+// purely-sentry-additive restage the sentry gate demands, and void on anything more.
+describe('fingerprint across a sentry-additive restage', () => {
+  const d1 =
+    'diff --git a/src/a.ts b/src/a.ts\nindex 1111111..2222222 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n ctx();\n+handle();\n more();\n';
+  const d2 =
+    'diff --git a/src/a.ts b/src/a.ts\nindex 1111111..3333333 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,4 @@\n ctx();\n+handle();\n+Sentry.captureException(e);\n more();\n';
+
+  it('survives the capture-only restage', () => {
+    expect(fingerprint('correctness-reviewer', 'concurrency-races', d1)).toBe(
+      fingerprint('correctness-reviewer', 'concurrency-races', d2),
+    );
+  });
+
+  it('voids when a real line rides along', () => {
+    const d3 = d2.replace('+Sentry.captureException(e);', '+refund(user);');
+    expect(fingerprint('correctness-reviewer', 'concurrency-races', d1)).not.toBe(
+      fingerprint('correctness-reviewer', 'concurrency-races', d3),
+    );
+  });
+});

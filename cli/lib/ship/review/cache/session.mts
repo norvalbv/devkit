@@ -11,6 +11,7 @@ import {
 } from '../../../../../gate-engine/judge/verdict-store.mts';
 import { runDirectReviewCli } from '../run-direct.mts';
 import { reviewPathWithin } from '../runtime-paths.mts';
+import { fail } from '../shared/common.mts';
 
 const PREPARE_PROTOCOL = 'devkit-review-cache-session-v1';
 const PROMOTION_PROTOCOL = 'devkit-review-cache-promotion-v1';
@@ -21,6 +22,7 @@ export const REVIEW_CACHE_STORE_NAMES = [
   'review-cache.json',
   'decisions-verdict-cache.json',
   'prefix-cache.json',
+  'sentry-verdict-cache.json',
 ] as const;
 
 export type ReviewCacheStoreName = (typeof REVIEW_CACHE_STORE_NAMES)[number];
@@ -29,10 +31,6 @@ export type ReviewCachePromotion = 'saved' | 'generation-changed' | 'failed';
 export interface ReviewCacheCheckpoint {
   name: ReviewCacheStoreName;
   generation: string | null;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
 }
 
 function physicalRoot(requestedPath: string, label: string): string {

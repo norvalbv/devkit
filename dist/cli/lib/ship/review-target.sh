@@ -752,14 +752,14 @@ node "$CACHE_SESSION_TOOL" prepare "$PERSISTENT_CACHE_ROOT" "$PRIVATE_DATA_ROOT"
   > "$CACHE_FIELDS_FILE"
 CACHE_FIELDS=()
 while IFS= read -r -d '' field; do CACHE_FIELDS+=("$field"); done < "$CACHE_FIELDS_FILE"
-[ "${#CACHE_FIELDS[@]}" -eq 8 ] && \
+[ "${#CACHE_FIELDS[@]}" -eq 10 ] && \
   [ "${CACHE_FIELDS[0]}" = devkit-review-cache-session-v1 ] && \
-  [ "${CACHE_FIELDS[1]}" = 3 ] || {
+  [ "${CACHE_FIELDS[1]}" = 4 ] || {
   echo 'devkit review: cache session returned a malformed protocol.' >&2
   exit 1
 }
-CACHE_NAMES=("${CACHE_FIELDS[2]}" "${CACHE_FIELDS[4]}" "${CACHE_FIELDS[6]}")
-CACHE_GENERATIONS=("${CACHE_FIELDS[3]}" "${CACHE_FIELDS[5]}" "${CACHE_FIELDS[7]}")
+CACHE_NAMES=("${CACHE_FIELDS[2]}" "${CACHE_FIELDS[4]}" "${CACHE_FIELDS[6]}" "${CACHE_FIELDS[8]}")
+CACHE_GENERATIONS=("${CACHE_FIELDS[3]}" "${CACHE_FIELDS[5]}" "${CACHE_FIELDS[7]}" "${CACHE_FIELDS[9]}")
 
 export DEVKIT_RUN_MODE=review
 export DEVKIT_REVIEW_GUARDS="$GUARDS"
@@ -901,7 +901,7 @@ review_phase cache-promote
 CACHE_RESET=0
 if [ "$AUTHORITY_OK" -eq 1 ]; then
   index=0
-  while [ "$index" -lt 3 ]; do
+  while [ "$index" -lt "${#CACHE_NAMES[@]}" ]; do
     promotion_status=0
     node "$CACHE_SESSION_TOOL" promote "$PERSISTENT_CACHE_ROOT" "$PRIVATE_DATA_ROOT" \
       "${CACHE_NAMES[$index]}" "${CACHE_GENERATIONS[$index]}" >/dev/null || promotion_status=$?

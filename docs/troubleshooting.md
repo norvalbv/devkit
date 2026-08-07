@@ -70,10 +70,14 @@ it was mid-flight in and any reviewers missing a completion heartbeat. For more 
 ## A `.devkit/` ship cache looks stale (gates pass when they shouldn't)
 The **deterministic-prefix cache** and **checkpointed verdicts** live under `.devkit/`, keyed on the
 staged-tree hash and evidence bytes. They can go stale against **gitignored** inputs a gate reads but the
-key can't see (e.g. the search-code index behind `guard-dup`). Escape hatches — both only discard cached
-*passes*, never hide a failure:
+key can't see (e.g. the search-code index behind `guard-dup`). Escape hatches — the first two only
+discard cached *passes*, never hide a failure:
 - `guard-prefix clear` — drop the cached all-green deterministic prefix (forces a full deterministic re-run).
 - `guard-review clear-cache` — drop cached reviewer PASS verdicts (forces the reviewers to re-run).
+- `rm .devkit/sentry-verdict-cache.json` — drop cached sentry-judge verdicts. Unlike the two above, this
+  store also persists a confident **MONITOR** (a block): a byte-identical retry replays it **by design**,
+  and any restage of the staged diff re-judges (the cache is diff-tier-only), so remove the file only when
+  a cached block is provably stale (e.g. after rolling devkit back).
 
 ## `✗ deterministic gates failed: <names>`
 The deterministic gates (structure, fanout, size, dup, clone …) run all-and-**aggregate**: instead of

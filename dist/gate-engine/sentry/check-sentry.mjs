@@ -33,10 +33,9 @@
  *     The diff directive also self-clears a fix that ELIMINATES the silent path (measured on the
  *     elimination tier: 15/23 -> 19/23 with the clause, no real-slice recall loss under K=3).
  *   - few-shot >> zero-shot, chain-of-thought does not help commit classification (arXiv 2605.02033).
- *   - self-consistency (sample N, majority-vote) reliably lifts a model; reasoning tiers give no
- *     advantage and are slow (arXiv 2510.22389) — so prefer *_SENTRY_SAMPLES over a reasoning tier.
- * The eval/ benchmark sweeps {model, context, shots, samples}; the env defaults below are the cell the
- * seed corpus picks (haiku + diff — see the CONTEXT_TIER note) — re-run the sweep on your own corpus.
+ *   - self-consistency (majority vote) lifts a model; reasoning tiers don't and are slow (arXiv
+ *     2510.22389) — prefer *_SENTRY_SAMPLES. The eval/ benchmark sweeps {model, context, shots,
+ *     samples}; the defaults below are the seed corpus's pick (haiku + diff) — re-sweep on your own.
  *
  *   --gate    : exit 0 = SKIP / warn-only / skipped / fail-open · exit 1 = hard mode + confident MONITOR · exit 2 = could-not-run
  *   (no flag) : report mode — judge the given message and PRINT the verdict, exit 0.
@@ -60,9 +59,8 @@
  *
  * GOVERNING RULE (devkit "ship the generator, never the data"): every runtime path resolves against
  * the CONSUMER cwd, never __dirname. The WATCHLIST + the BASELINE stay the consumer's data (born in
- * their repo, never shipped). The eval `cases.jsonl` DOES ship — 127 cases (104 real-derived + 23
- * authored elimination-tier) — but it is a
- * dev-only SEED the gate never reads at runtime; a consumer copies + grows it with their own commits.
+ * their repo, never shipped). The eval `cases.jsonl` DOES ship (127 cases: 104 real-derived + 23
+ * authored elimination-tier) but is a dev-only SEED the gate never reads at runtime.
  */
 import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -73,6 +71,7 @@ import { focusHunks } from "../judge/diff-focus.mjs";
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
 import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { execJudge } from "../judge/run-judge.mjs";
+import { judgeSentryWithCache } from "./verdict-cache.mjs";
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
 // gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
 function envVar(name) {
@@ -412,9 +411,13 @@ export function run(gate) {
         // Hard-by-default (envBool distinguishes unset → hard from an explicit =0 soften); resolve it
         // BEFORE judging so the samples default can follow it. Report mode never blocks → warn tier.
         const hard = gate && effectiveHard(envBool('SENTRY_HARD') ?? true, CONTEXT_TIER, diff);
-        const result = judge(buildContext(message, nameStatus, diff, CONTEXT_TIER), {
-            samples: resolveSamples(hard),
-        });
+        const input = buildContext(message, nameStatus, diff, CONTEXT_TIER);
+        const opts = { model: MODEL, samples: resolveSamples(hard), prompt: SENTRY_JUDGE_PROMPT };
+        // Diff-tier only: message/names evidence can't change with the demanded FIX, so a cached hard
+        // MONITOR would replay forever there. A bypassed run (SENTRY_NO_LLM) earns and replays nothing.
+        const result = envVar('SENTRY_NO_LLM') || CONTEXT_TIER !== 'diff'
+            ? judge(input, opts)
+            : judgeSentryWithCache(CWD, input, opts, () => judge(input, opts));
         if (!gate) {
             console.log(reportLine(result));
             process.exit(0);
