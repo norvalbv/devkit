@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLAUDE_RESULT_ARGS, unwrapClaudeResult } from '../../judge/claude-result.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { stripFrontmatter } from '../../review/reviewers.mts';
@@ -30,7 +31,7 @@ export const AGENT_MD_PATH = path.join(here, '../../../agents/prior-art.md');
 
 export const INTRINSIC_TIMEOUT_MS = 300_000;
 
-export const CLAUDE_RESULT_ARGS = ['--output-format', 'json'] as const;
+export { CLAUDE_RESULT_ARGS };
 
 /** A row's pinned research-leg fixture: what the offline run is allowed to attest. */
 export interface LegsFixture {
@@ -115,26 +116,10 @@ export function buildIntrinsicArgs(
   ];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** Claude's JSON output mode isolates the final result from intermediate narration. */
-export function unwrapClaudeResult(raw: string | null): string | null {
-  if (raw === null) return null;
-  try {
-    const envelope = JSON.parse(raw) as unknown;
-    if (
-      isRecord(envelope) &&
-      envelope.type === 'result' &&
-      typeof envelope.result === 'string' &&
-      envelope.result.trim()
-    )
-      return envelope.result;
-  } catch {
-    // Injected test doubles and older CLIs may still return the final response directly.
-  }
-  return raw;
-}
+// Re-exported, not redefined: the spawn layer now requests and unwraps the same envelope for every
+// production judge (sc-1527), and three identical copies of the parser is exactly what the dup gate
+// exists to stop. Importers here keep their current import path.
+export { unwrapClaudeResult };
 
 export interface RunAgentOpts {
   agent: AgentSource;
