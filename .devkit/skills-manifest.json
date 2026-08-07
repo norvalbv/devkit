@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.48.0",
-  "generatedAt": "2026-08-06T12:25:25.626Z",
+  "devkitRef": "v0.49.0",
+  "generatedAt": "2026-08-07T09:04:08.415Z",
   "targets": [
     "claude",
     "cursor"
@@ -13,7 +13,7 @@
     "api-security/scripts/checklist.mjs": "3c4cd9e29aa2ef20e9a99f265bf20800ceaeb0027a5d1f137b2b456eb5bd8b9d",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "23b506a7f2d5d0f68723d75fe381b611574b727fd672f7cc5fe223127d86513c",
-    "brainstorming/SKILL.md": "5be2e320b69f697a054c437704ae91d4c283c35383bee411f381540ad3ee9fdb",
+    "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
     "commit-guard/SKILL.md": "9a5310f972f70d625db1c4fd2c149c899eff081ee2ff11fc372d7450dbffb5ce",
     "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
     "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
@@ -28,7 +28,7 @@
     "frontend-security/SKILL.md": "b4f097efd4076ebf530d59b2042def53bb51d975c50e6dc12da698d882fe630f",
     "frontend-security/scripts/checklist.mjs": "017cae47453060b336a91069bb7d2d588502cd133828b4ac70b7731e0c032a2b",
     "parallel-neon-migration/SKILL.md": "b2c2d90ff77fe8bd4eb6e2dda074dd0c8b5adfc1b179ac136689445a4d2c981e",
-    "prior-art/SKILL.md": "65b701289d428f1d219bfd232d60eae60cec1c7bef12168715cc4d49003e6037",
+    "prior-art/SKILL.md": "633e10db0ced4abb96e9a575641db178763c5f5689126faa6fe27c8c7a46c34c",
     "structure-governance/SKILL.md": "21fb605d1b6fadd81358da7dbe078c634b60115234b427dae4ae47ce8df30f04",
     "structure-governance/references/fixing-lint-errors.md": "44ad9ba30d747bac4fac27d2d2a8f2ef788b5894db77df70d6c4f3359c7a1fc8",
     "structure-governance/references/walls.md": "9986c487a0a2cdf06adad88ea1261657c0c6945179aa4c8b15d7cef086cd540d",
