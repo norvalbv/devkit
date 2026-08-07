@@ -69,6 +69,37 @@ describe('selfHostSelection', () => {
       expect(sel.guards).toContain(g);
     expect(sel.husky).toBe(true);
   });
+
+  // sc-1529. The fixed selection used to reset every opt-in on upgrade, so a dogfood repo running
+  // `adhd: true` silently came back false — which deletes .devkit/vendored-skills/i-have-adhd
+  // (syncAdhdSkill's reclaim branch) and prunes the two hooks that component owns, while the
+  // config still claimed it was on. An opt-in the repo recorded must survive.
+  it('carries the recorded components through — an opt-in survives an upgrade', () => {
+    const sel = selfHostSelection({ adhd: true, fallow: true, searchCode: true });
+    expect(sel.adhd).toBe(true);
+    expect(sel.fallow).toBe(true);
+    expect(sel.searchCode).toBe(true);
+  });
+
+  it('still lets a recorded OFF win over a default-on component', () => {
+    expect(selfHostSelection({ lineGrowth: false }).lineGrowth).toBe(false);
+    expect(selfHostSelection().lineGrowth).toBe(true);
+  });
+
+  // The guards half of the fixed selection is deliberate and must NOT follow the recorded value:
+  // a future RECOMMENDED_GUARD_IDS addition would otherwise open an interactive multiselect in the
+  // dogfood repo, which is the whole reason the selection was pinned in the first place.
+  it('keeps guards FIXED even when the config records a narrower set', () => {
+    const sel = selfHostSelection({ guards: ['size'] });
+    for (const g of ['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory', 'review'])
+      expect(sel.guards).toContain(g);
+  });
+
+  it('an absent key falls through to the default instead of becoming undefined', () => {
+    const sel = selfHostSelection({ adhd: undefined });
+    expect(sel.adhd).toBe(false);
+    expect(sel.skills).toBe(true);
+  });
 });
 
 describe('buildSelfHostHook', () => {
