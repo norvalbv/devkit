@@ -14,6 +14,7 @@ import { buildCommitTerminalFragment } from './commit-terminal.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   DK_HOOK_HELPERS,
+  DK_NO_GIT_ENV_INLINE,
   DK_REVIEW_BASELINE_HELPER,
   selectedFragment,
 } from './review-fragments.mts';
@@ -77,14 +78,18 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 # with the reviewer fleet, instead of serially at commit-msg. Its confident PASS lands in the
 # shared verdict store, so the commit-msg gate re-judges it as a cache hit — the serial ~4min of
 # opus overlaps the fleet instead of following it. Interactive commits (no message yet) are
-# unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed below —
-# nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it exports
-# the SAME env as its reviewer intent file (review-target.sh), but completeness is a commit gate,
-# not part of a range review.
+# unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed AND reaped
+# below — nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it
+# exports the SAME env as its reviewer intent file (review-target.sh), but completeness is a
+# commit gate, not part of a range review.
+#
+# DK_NO_GIT_ENV_INLINE, not the __dk_no_git_env function: backgrounding a function forks a
+# subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
+# review-fragments.mts.
 comp_pid=""
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
-    __dk_no_git_env bunx guard-review completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
+    ${DK_NO_GIT_ENV_INLINE} bunx guard-review completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi
 rrc=0
 __dk_no_git_env bunx guard-review --gate || rrc=$?
@@ -95,7 +100,15 @@ if [ -n "$comp_pid" ]; then
     else
         # The fleet already blocked this commit — stop paying for a judgement of a diff that is
         # about to change. (The verdict would be keyed to THIS diff; the fix invalidates it.)
+        # SIGNAL THEN REAP, never signal alone: the judge inherited git's stdout/stderr, so the
+        # ship capture pipeline only unblocks once every copy of that write-end is closed. A hook
+        # that returns while a signalled child is still winding down leaves the reader waiting on
+        # a pipe nobody will write to again — the exact hang commit-with-gate-capture.sh's R3
+        # supervisor exists to bound. Both lines are status-tested (|| true) because a reaped
+        # job's status IS the signal (143), and under sh -e an untested non-zero would abort the
+        # hook here, before it reports its own verdict below.
         kill "$comp_pid" 2>/dev/null || true
+        wait "$comp_pid" 2>/dev/null || true
     fi
 fi
 if [ "$rrc" -eq 1 ]; then

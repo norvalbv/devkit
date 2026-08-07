@@ -56,7 +56,25 @@ echo "$tool $*" >> "$HOME/calls.log"
 case "$tool" in
   guard-deterministic) exit \${DET_RC:-0};;
   guard-decisions) exit \${DEC_RC:-0};;
-  guard-review) case "$1" in completeness) exit \${COMP_RC:-0};; *) exit \${REVIEW_RC:-0};; esac;;
+  guard-review)
+    case "$1" in
+      completeness)
+        # COMP_SLOW_TERM: a judge that does not die the instant it is signalled. It releases the
+        # inherited stdout/stderr FIRST (\`exec >/dev/null\`) so this harness measures the HOOK's
+        # own return, not the pipe drain — otherwise spawnSync would block on the pipe regardless
+        # and a hook that never reaps would still look correct. The trap then delays before
+        # recording that it finished winding down, so "hook returned" and "child was reaped" are
+        # separable events.
+        if [ -n "\${COMP_SLOW_TERM:-}" ]; then
+            exec >/dev/null 2>&1
+            trap 'sleep 1; echo reaped > "$HOME/comp-reaped"; exit 143' TERM
+            echo running > "$HOME/comp-running"
+            sleep 30 &
+            wait $!
+        fi
+        exit \${COMP_RC:-0};;
+      *) exit \${REVIEW_RC:-0};;
+    esac;;
   *) exit 0;;
 esac
 `,
@@ -82,7 +100,8 @@ esac
   } catch {
     // hook never reached the stub
   }
-  return { status, stdout, calls };
+  // `home` rides along so a test can assert on markers the stubs dropped there (the reap probe).
+  return { status, stdout, calls, home };
 }
 
 describe('assembled hook execution (stubbed bunx, sh -e)', () => {
@@ -196,6 +215,40 @@ describe('parallel completeness prewarm (ship message file present)', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('opus-confirmed');
     expect(r.stdout).not.toContain('Confirmed completeness gap');
+  });
+
+  it('review mode does NOT prewarm — it exports the same env for its reviewer intent file', () => {
+    const r = runHook({ DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' }, undefined, {
+      shipMsg: true,
+    });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).not.toContain('guard-review completeness');
+  });
+
+  it('a message-file path that does not exist arms nothing (the -f guard, not just -n)', () => {
+    const r = runHook({ DEVKIT_COMMIT_MSG_FILE: '/nonexistent/dk-msg.txt' });
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-review completeness');
+  });
+
+  // The reap contract: the judge inherits git's stdout/stderr, so a hook that returns while a
+  // signalled child is still winding down leaves the ship's capture reader on a pipe nobody will
+  // close — commit-with-gate-capture.sh's R3 hang. Signalling alone is not enough; the harness
+  // stub releases the pipe first so this asserts the HOOK waited, not that the pipe drained.
+  it('a killed completeness judge is REAPED before the hook returns, not merely signalled', () => {
+    const r = runHook({ REVIEW_RC: '1', COMP_SLOW_TERM: '1' }, undefined, { shipMsg: true });
+    expect(r.status).toBe(1); // still the fleet's verdict
+    expect(existsSync(join(r.home, 'comp-running'))).toBe(true); // the judge really did start
+    // Written only by the TERM handler, after a delay: present iff the hook waited for it.
+    expect(existsSync(join(r.home, 'comp-reaped'))).toBe(true);
+  });
+
+  it('the fleet failing CLOSED (exit 3) also kills and reaps — every block path, not just exit 1', () => {
+    const r = runHook({ REVIEW_RC: '3', COMP_SLOW_TERM: '1' }, undefined, { shipMsg: true });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('strict ship mode failed closed');
+    expect(existsSync(join(r.home, 'comp-reaped'))).toBe(true);
   });
 });
 

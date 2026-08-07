@@ -67,6 +67,9 @@ const ENV_KEYS = [
   // semantic Target retrieval, which must stay deterministic/off in tests).
   'DEVKIT_COMMIT_MSG_FILE',
   'DECISIONS_NO_EMBED',
+  // The completeness sticky key is scoped to the shipping branch, so a developer running the suite
+  // DURING a ship (which exports this) would otherwise key verdicts to that ship's branch.
+  'DEVKIT_SHIP_BRANCH',
 ];
 const saved = {};
 const COMMIT_GUARD_INIT_SCRIPT = `
@@ -1985,6 +1988,91 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     execSync('git add .', { cwd: repo });
     expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
     expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  // The sticky key's three inputs, each proven to re-open the gate on its own. A component that
+  // silently stopped keying would replay a stale PASS across branches or briefs — the failure mode
+  // that makes a sticky verdict dangerous rather than cheap.
+  // Isolating the BRANCH component needs a moving diff: with the diff held still the exact-bytes
+  // key hits on its own (identical inputs, identical judgement — branch-independent, and true
+  // before this change), which would mask whether the sticky key is branch-scoped at all.
+  it('a different branch is a different claim — the sticky pass does not cross branches', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    const reshape = (n: number) => {
+      writeFileSync(join(repo, 'src', 'main', 'db.ts'), `export const q = ${n};\n`);
+      execSync('git add .', { cwd: repo });
+    };
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/one';
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    reshape(2); // same branch, same claim, reshaped diff → sticky hit
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    reshape(3); // a DIFFERENT branch: neither key covers it
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/two';
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('an edited reviewer brief re-judges — a new judge is not covered by the old verdict', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    writeFileSync(
+      join(repo, '.claude', 'agents', 'feature-completeness-reviewer.md'),
+      '---\nname: feature-completeness-reviewer\n---\nBrief for feature-completeness-reviewer. Also check migrations.',
+    );
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  // The actual prewarm handoff: pre-commit judges the ship's RAW composed temp file, commit-msg
+  // re-judges git's cleaned COMMIT_EDITMSG. Same claim, so the second must be a cache hit — this is
+  // the contract normalizeCommitMessage exists for, asserted end to end rather than as a string fn.
+  it('the ship temp file and git-cleaned message are ONE judgement across the two hooks', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    // pre-commit: ship's composed message (trailing spaces, extra blank runs, no cleanup applied).
+    expect(
+      await runCompleteness(msg(repo, 'feat: add db layer  \n\n\n\nships the pool.  \n\n'), repo, {
+        exec,
+      }),
+    ).toBe(0);
+    // commit-msg: the same message after git's --cleanup=whitespace.
+    expect(
+      await runCompleteness(msg(repo, 'feat: add db layer\n\nships the pool.\n'), repo, { exec }),
+    ).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1); // one opus judgement, not two
+  });
+
+  it('a sticky hit reports itself as a cache_hit and a fully-cached gate, never a silent skip', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-sticky';
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 9;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    // Labelled exactly as judge_exec labels it, so hit rate stays a group-by with no join.
+    expect(events.find((e) => e.type === 'cache_hit')).toMatchObject({
+      judge: 'review:completeness',
+      model: 'opus',
+    });
+    expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
+      gate: 'completeness',
+      cache_state: 'full',
+    });
   });
 
   it('GUARD_NO_COMPLETENESS=1 skips before any spawn', async () => {
