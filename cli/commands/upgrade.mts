@@ -115,12 +115,14 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
   const rawTargets = cfg.components?.agentTargets;
   const agentTargets = resolveExistingAgentProviders(gitRoot, rawTargets, ['skills', 'agents']);
 
-  // Self-host (the devkit repo dogfooding itself): there is no published pin, no emitted-config
-  // migration (configs are hand-owned), and the selection is FIXED (selfHostSelection — not the
-  // recorded guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive
-  // multiselect in the dogfood repo). Regenerate the source hook + re-sync assets from the current
-  // generator, then verify — the whole point is that `devkit upgrade` keeps the dogfood hook in
-  // lockstep with the generator, for free.
+  // Self-host (the devkit repo dogfooding itself): there is no published pin and no emitted-config
+  // migration (configs are hand-owned). The GUARDS are fixed (selfHostSelection — not the recorded
+  // guards, so a future RECOMMENDED_GUARD_IDS addition never triggers an interactive multiselect in
+  // the dogfood repo); the recorded COMPONENTS are carried through. Fixing both was the sc-1529 bug:
+  // an upgrade reset every opt-in to its default, so `adhd: true` silently became false, taking the
+  // vendored skill and its two hooks with it while the config still claimed the component was on.
+  // Regenerate the source hook + re-sync assets from the current generator, then verify — the whole
+  // point is that `devkit upgrade` keeps the dogfood hook in lockstep with the generator, for free.
   if (cfg.selfHost) {
     console.log(
       `devkit upgrade${dryRun ? ' (dry-run — nothing written)' : ''} — self-host (source-mode dogfood), stack=${stack}\n`,
@@ -128,7 +130,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     console.log('Regenerating the source hook + re-syncing assets from the current generator.');
     await applyInit(cwd, {
       stack,
-      selection: { ...selfHostSelection(), agentTargets },
+      selection: { ...selfHostSelection(cfg.components), agentTargets },
       selfHost: true,
       force,
       dryRun,
