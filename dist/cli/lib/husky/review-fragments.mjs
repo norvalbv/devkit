@@ -13,6 +13,20 @@ import { GIT_ENV_VARS } from "../../../gate-engine/judge/judge-isolation.mjs";
 export const DK_NO_GIT_ENV_HELPER = `__dk_no_git_env() {
     env ${GIT_ENV_VARS.map((name) => `-u ${name}`).join(' \\\n        ')} "$@"
 }`;
+/**
+ * The same scrub as a PREFIX for one simple command, for the single case the function form cannot
+ * serve: a BACKGROUNDED gate whose pid the hook must later signal.
+ *
+ * `__dk_no_git_env cmd &` backgrounds a shell FUNCTION, which forks a subshell — so `$!` is that
+ * subshell and the gate itself is a grandchild. Signalling the subshell then kills a wrapper while
+ * the real judge runs on, orphaned, still holding the stdout/stderr it inherited from git (and
+ * still spending model budget on a verdict nobody will read). Backgrounding a simple command
+ * instead makes the shell fork-and-exec directly, so `$!` IS the gate and one kill reaches it.
+ *
+ * Single line, no continuations: it has to sit inline ahead of a command in a background job.
+ * Same GIT_ENV_VARS source as the function above, so the two can never scrub different sets.
+ */
+export const DK_NO_GIT_ENV_INLINE = `env ${GIT_ENV_VARS.map((name) => `-u ${name}`).join(' ')}`;
 // Review mode has its own positive guard allowlist. Normal commit/ship runs select everything in
 // the generated hook; review runs only ids named by DEVKIT_REVIEW_GUARDS.
 export const DK_GATE_SELECTED_HELPER = `__dk_gate_selected() {
