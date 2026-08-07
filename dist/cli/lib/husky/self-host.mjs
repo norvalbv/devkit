@@ -89,8 +89,25 @@ export function toSelfHost(hookText, cwd) {
  * in-chain reviewer fleet — the whole point of self-host is that devkit gates its own commits with
  * its own reviewers). structureCmd/extras are added at hook-build time (constants above), not here.
  */
-export function selfHostSelection() {
-    return { ...defaultSelection(), guards: [...RECOMMENDED_GUARD_IDS, 'review'] };
+export function selfHostSelection(recorded) {
+    return {
+        ...defaultSelection(),
+        // The repo's OWN recorded components survive an upgrade. Without this the fixed selection
+        // silently reverted every opt-in the dogfood repo had turned on: `adhd: true` came back as
+        // false, which both deleted `.devkit/vendored-skills/i-have-adhd/` (syncAdhdSkill's reclaim
+        // branch) and pruned the two hooks the adhd component owns — a component the config still
+        // claimed was on. Undefined entries are dropped so an absent key falls through to the default
+        // rather than overwriting it with undefined.
+        ...definedOnly(recorded),
+        // Guards stay FIXED even so: that is the deliberate part (see upgrade.mts) — a future
+        // RECOMMENDED_GUARD_IDS addition must not open an interactive multiselect in the dogfood repo.
+        guards: [...RECOMMENDED_GUARD_IDS, 'review'],
+    };
+}
+function definedOnly(recorded) {
+    if (!recorded)
+        return {};
+    return Object.fromEntries(Object.entries(recorded).filter(([, value]) => value !== undefined));
 }
 // Inject the fallow fragment as the last member of the devkit-guards block (just before its end
 // marker), in both the block-only and full-hook forms so they stay consistent.
