@@ -434,3 +434,80 @@ describe('recordAgentRun', () => {
     expect(events()).toEqual([]);
   });
 });
+
+/**
+ * sc-1527 — the spend ledger. These spawn a real subprocess through the same fake-`claude` path as
+ * the success tests above, so the whole argv → envelope → unwrap → emit pipeline runs rather than a
+ * mocked slice of it.
+ */
+describe('judge spend capture', () => {
+  const ENVELOPE = JSON.stringify({
+    type: 'result',
+    result: 'checked\nVERDICT: PASS',
+    session_id: 'sess-abc',
+    total_cost_usd: 0.25,
+    usage: {
+      input_tokens: 11,
+      output_tokens: 22,
+      cache_creation_input_tokens: 33,
+      cache_read_input_tokens: 44,
+    },
+  });
+
+  it('records tokens, cost and session_id on the judge_exec line', async () => {
+    fakeClaude(`cat <<'EOF'\n${ENVELOPE}\nEOF`);
+    await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(events()[0]).toMatchObject({
+      type: 'judge_exec',
+      judge: 'review:x',
+      outcome: 'ok',
+      input_tokens: 11,
+      output_tokens: 22,
+      cache_creation: 33,
+      cache_read: 44,
+      cost_usd: 0.25,
+      session_id: 'sess-abc',
+    });
+  });
+
+  // The contract that keeps every existing caller working: the envelope is an implementation detail
+  // of the spawn layer, so callers still parse the verdict text they always did.
+  it('returns the unwrapped verdict text, never the JSON envelope', async () => {
+    fakeClaude(`cat <<'EOF'\n${ENVELOPE}\nEOF`);
+    const out = await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(out).toBe('checked\nVERDICT: PASS');
+    expect(out).not.toContain('total_cost_usd');
+  });
+
+  it('transcript + output_chars follow the verdict text, not the envelope bytes', async () => {
+    fakeClaude(`cat <<'EOF'\n${ENVELOPE}\nEOF`);
+    await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(events()[0]).toMatchObject({ output_chars: 'checked\nVERDICT: PASS'.length });
+  });
+
+  it('the sync twin captures spend identically', () => {
+    fakeClaude(`cat <<'EOF'\n${ENVELOPE}\nEOF`);
+    const out = execJudge({ label: 'decisions:y', args: ['-p', 'q'], timeout: 20_000 });
+    expect(out).toBe('checked\nVERDICT: PASS');
+    expect(events()[0]).toMatchObject({ judge: 'decisions:y', cost_usd: 0.25, input_tokens: 11 });
+  });
+
+  // A judge that works must not start failing because its accounting could not be read.
+  it('bare text still succeeds, and books NO usage rather than a free-looking zero', async () => {
+    fakeClaude("echo 'VERDICT: PASS'");
+    const out = await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(out).toBe('VERDICT: PASS\n');
+    const event = events()[0];
+    expect(event).toMatchObject({ outcome: 'ok' });
+    expect(event).not.toHaveProperty('cost_usd');
+    expect(event).not.toHaveProperty('input_tokens');
+  });
+
+  it('an outage books no spend — there was none', async () => {
+    process.env.PATH = ''; // spawn ENOENTs deterministically
+    await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    const event = events()[0];
+    expect(event).toMatchObject({ outcome: 'transient' });
+    expect(event).not.toHaveProperty('cost_usd');
+  });
+});

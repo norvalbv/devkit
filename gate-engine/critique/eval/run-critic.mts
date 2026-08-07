@@ -27,6 +27,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CLAUDE_RESULT_ARGS, unwrapClaudeResult } from '../../judge/claude-result.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../../judge/judge-isolation.mts';
 import { execJudgeAsync } from '../../judge/run-judge.mts';
 import { stripFrontmatter } from '../../review/reviewers.mts';
@@ -49,7 +50,7 @@ export const WORKFLOW_TIMEOUT_MS = 600_000; // agentic opus with tool use runs 2
 /** What the workflow agent may touch inside its fixture. Single comma-joined string (the flag is
  * variadic — one argv slot keeps the prompt safe), prefix-colon Bash rule per check-alignment. */
 export const WORKFLOW_TOOLS = 'Read,Grep,Glob,LS,Write,Edit,Bash(git:*)';
-export const CLAUDE_RESULT_ARGS = ['--output-format', 'json'] as const;
+export { CLAUDE_RESULT_ARGS };
 
 /**
  * The intrinsic-mode directive — ported from scripts/agent-benchmarks/run.mjs and updated to the
@@ -135,23 +136,9 @@ export interface WorkflowRunOutput {
   raw: string | null;
 }
 
-/** Claude's JSON output mode isolates the final result from intermediate tool-use narration. */
-export function unwrapClaudeResult(raw: string | null): string | null {
-  if (raw === null) return null;
-  try {
-    const envelope = JSON.parse(raw) as unknown;
-    if (
-      isRecord(envelope) &&
-      envelope.type === 'result' &&
-      typeof envelope.result === 'string' &&
-      envelope.result.trim()
-    )
-      return envelope.result;
-  } catch {
-    // Injected test doubles and older CLIs may still return the final response directly.
-  }
-  return raw;
-}
+// Re-exported, not redefined — see the twin note in prior-art/eval/run-agent.mts. The spawn layer
+// owns this parser now (sc-1527); importers here keep their current import path.
+export { unwrapClaudeResult };
 
 export async function runIntrinsic({
   critic,

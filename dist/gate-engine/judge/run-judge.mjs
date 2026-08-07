@@ -16,6 +16,7 @@
 // diverges: a warn-by-default gate fails open (commit proceeds) while a deterministic-floor gate's
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
+import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from "./claude-result.mjs";
 import { emitGateEvent } from "./gate-events.mjs";
 import { withoutGitEnv } from "./judge-isolation.mjs";
 import { composeTranscript, saveTranscriptUnique } from "./transcript-store.mjs";
@@ -158,7 +159,7 @@ export function recordAgentRun(opts) {
  * emitters only cover the gates that thought to call them (the factory/sentry judges recorded
  * nothing at all before this).
  */
-function emitJudgeExec(opts, outcome, startedAt, output) {
+function emitJudgeExec(opts, outcome, startedAt, output, usage) {
     recordAgentRun({
         label: opts.label,
         output,
@@ -167,13 +168,24 @@ function emitJudgeExec(opts, outcome, startedAt, output) {
         outcome,
         durationMs: Date.now() - startedAt,
         transcript: opts.transcript,
+        // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
+        // than an absent one.
+        ...(usage ? { extra: { ...usage } } : {}),
     });
+}
+/**
+ * Unwrap one judge's stdout into the verdict text its caller expects, plus the spend to bill it.
+ * Both come from the SAME parse of the same bytes, so a run can never be recorded with a cost that
+ * belongs to different output.
+ */
+function readJudgeOutput(stdout) {
+    return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
 }
 export function execJudge(opts) {
     const { label, args, input, timeout, cwd, env, onOutage } = opts;
     const startedAt = Date.now();
     try {
-        const out = execFileSync('claude', args, {
+        const out = execFileSync('claude', withResultArgs(args), {
             cwd,
             // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
             // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
@@ -193,8 +205,9 @@ export function execJudge(opts) {
             onOutage?.('empty');
             return null;
         }
-        emitJudgeExec(opts, 'ok', startedAt, out);
-        return out;
+        const { text, usage } = readJudgeOutput(String(out));
+        emitJudgeExec(opts, 'ok', startedAt, text, usage);
+        return text;
     }
     catch (e) {
         warnUnavailable(label, e, timeout);
@@ -233,7 +246,7 @@ export function execJudgeAsync(opts) {
             resolve(null);
         };
         try {
-            const child = execFile('claude', args, {
+            const child = execFile('claude', withResultArgs(args), {
                 cwd,
                 // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
                 env: withoutGitEnv(env),
@@ -254,8 +267,9 @@ export function execJudgeAsync(opts) {
                     resolve(null);
                     return;
                 }
-                emitJudgeExec(opts, 'ok', startedAt, stdout);
-                resolve(stdout);
+                const { text, usage } = readJudgeOutput(String(stdout));
+                emitJudgeExec(opts, 'ok', startedAt, text, usage);
+                resolve(text);
             });
             // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
             child.stdin?.on('error', () => { });
