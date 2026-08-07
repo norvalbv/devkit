@@ -14,7 +14,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEEP_JUDGE_TIMEOUT_MS } from '../../judge/run-judge.mts';
 import { loadCache } from '../cache.mts';
-import { buildCompletenessEvidence, runCompleteness, wrapCompleteness } from '../completeness.mts';
+import {
+  buildCompletenessEvidence,
+  normalizeCommitMessage,
+  runCompleteness,
+  wrapCompleteness,
+} from '../completeness.mts';
 import { CORRECTNESS_LENSES, FOUR_WAY_LENS_GROUPS, lensGroupId } from '../lens/split.mts';
 import { readProgress, unfinishedReviewers, writeProgress } from '../progress.mts';
 import { REVIEWERS } from '../reviewers.mts';
@@ -62,6 +67,9 @@ const ENV_KEYS = [
   // semantic Target retrieval, which must stay deterministic/off in tests).
   'DEVKIT_COMMIT_MSG_FILE',
   'DECISIONS_NO_EMBED',
+  // The completeness sticky key is scoped to the shipping branch, so a developer running the suite
+  // DURING a ship (which exports this) would otherwise key verdicts to that ship's branch.
+  'DEVKIT_SHIP_BRANCH',
 ];
 const saved = {};
 const COMMIT_GUARD_INIT_SCRIPT = `
@@ -602,7 +610,7 @@ describe('runReviewGate — cascade + exit contract', () => {
     expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
       gate: 'review',
       cache_state: 'full',
-      parallelism: 3,
+      parallelism: 6,
     });
     // A synthetic pass row would inflate review_result's fail-rate denominator and flatten the
     // duration percentiles that any judgement-cache change has to be sized against.
@@ -1639,12 +1647,12 @@ describe('runReviewGate — per-completion checkpoints', () => {
 describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
   // consumerRepo({backend, frontend}) stages one file per domain → all 7 reviewers selected
   // (backend pair, frontend pair, commit-guard, correctness, conventions).
-  it('default cap 3: at most 3 judge cascades run at once, all still complete + cache', async () => {
+  it('default cap 6: at most 6 judge cascades run at once, all still complete + cache', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(7);
-    expect(probe.maxInflight()).toBe(3);
+    expect(probe.maxInflight()).toBe(6);
     expect(Object.keys(loadCache(repo)).length).toBe(7);
   });
 
@@ -1671,16 +1679,16 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     const probe = concurrencyProbe(repo, { failFirst: true }); // first attempt null → one strict retry
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(14); // 7 reviewers × (attempt + retry), sequential in-slot
-    expect(probe.maxInflight()).toBeLessThanOrEqual(3);
+    expect(probe.maxInflight()).toBeLessThanOrEqual(6);
   });
 
-  it('a garbage / out-of-range cap falls back to the default of 3', async () => {
+  it('a garbage / out-of-range cap falls back to the default of 6', async () => {
     for (const bad of ['', '0', '-3', 'abc']) {
       const repo = consumerRepo({ backend: true, frontend: true });
       process.env.GUARD_REVIEW_CONCURRENCY = bad;
       const probe = concurrencyProbe(repo);
       expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
-      expect(probe.maxInflight()).toBe(3);
+      expect(probe.maxInflight()).toBe(6);
     }
   });
 
@@ -1943,6 +1951,130 @@ describe('runCompleteness — hard-by-default commit-msg gate', () => {
     expect(captured.args).toContain('opus'); // straight opus, no cascade
   });
 
+  // The cost ruling (2026-08-06): completeness judges the message's CLAIMS, so a ship retry whose
+  // diff was reshaped to satisfy another reviewer — same branch, same message — is not re-judged.
+  it('a PASS is intent-sticky: a reshaped diff on the same branch + message skips the judge', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    // The retry: a correctness fix reshapes the staged diff; the claim (message) is unchanged.
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 2;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1); // sticky hit — the opus judgement is not re-paid
+  });
+
+  it('an amended message is a NEW claim — the sticky pass does not cover it', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(await runCompleteness(msg(repo, 'feat: add db layer AND retries'), repo, { exec })).toBe(
+      0,
+    );
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('a FAIL is never sticky — the retry with a fixed diff re-judges', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let verdict = 'VERDICT: FAIL — half-shipped';
+    const exec = mkExec(async () => verdict);
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(1);
+    verdict = 'VERDICT: PASS';
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 3;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  // The sticky key's three inputs, each proven to re-open the gate on its own. A component that
+  // silently stopped keying would replay a stale PASS across branches or briefs — the failure mode
+  // that makes a sticky verdict dangerous rather than cheap.
+  // Isolating the BRANCH component needs a moving diff: with the diff held still the exact-bytes
+  // key hits on its own (identical inputs, identical judgement — branch-independent, and true
+  // before this change), which would mask whether the sticky key is branch-scoped at all.
+  it('a different branch is a different claim — the sticky pass does not cross branches', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    const reshape = (n: number) => {
+      writeFileSync(join(repo, 'src', 'main', 'db.ts'), `export const q = ${n};\n`);
+      execSync('git add .', { cwd: repo });
+    };
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/one';
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    reshape(2); // same branch, same claim, reshaped diff → sticky hit
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1);
+    reshape(3); // a DIFFERENT branch: neither key covers it
+    process.env.DEVKIT_SHIP_BRANCH = 'feat/two';
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('an edited reviewer brief re-judges — a new judge is not covered by the old verdict', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    writeFileSync(
+      join(repo, '.claude', 'agents', 'feature-completeness-reviewer.md'),
+      '---\nname: feature-completeness-reviewer\n---\nBrief for feature-completeness-reviewer. Also check migrations.',
+    );
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  // The actual prewarm handoff: pre-commit judges the ship's RAW composed temp file, commit-msg
+  // re-judges git's cleaned COMMIT_EDITMSG. Same claim, so the second must be a cache hit — this is
+  // the contract normalizeCommitMessage exists for, asserted end to end rather than as a string fn.
+  it('the ship temp file and git-cleaned message are ONE judgement across the two hooks', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    // pre-commit: ship's composed message (trailing spaces, extra blank runs, no cleanup applied).
+    expect(
+      await runCompleteness(msg(repo, 'feat: add db layer  \n\n\n\nships the pool.  \n\n'), repo, {
+        exec,
+      }),
+    ).toBe(0);
+    // commit-msg: the same message after git's --cleanup=whitespace.
+    expect(
+      await runCompleteness(msg(repo, 'feat: add db layer\n\nships the pool.\n'), repo, { exec }),
+    ).toBe(0);
+    expect(exec).toHaveBeenCalledTimes(1); // one opus judgement, not two
+  });
+
+  it('a sticky hit reports itself as a cache_hit and a fully-cached gate, never a silent skip', async () => {
+    const repo = consumerRepo({ backend: true });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exec = mkExec(async () => 'VERDICT: PASS');
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    const sink = join(repo, 'events.jsonl');
+    process.env.DEVKIT_GATE_EVENTS = sink;
+    process.env.DEVKIT_SHIP_ID = 'ship-sticky';
+    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 9;\n');
+    execSync('git add .', { cwd: repo });
+    expect(await runCompleteness(msg(repo, 'feat: add db layer'), repo, { exec })).toBe(0);
+    const events = readFileSync(sink, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    // Labelled exactly as judge_exec labels it, so hit rate stays a group-by with no join.
+    expect(events.find((e) => e.type === 'cache_hit')).toMatchObject({
+      judge: 'review:completeness',
+      model: 'opus',
+    });
+    expect(events.find((e) => e.type === 'gate_timing')).toMatchObject({
+      gate: 'completeness',
+      cache_state: 'full',
+    });
+  });
+
   it('GUARD_NO_COMPLETENESS=1 skips before any spawn', async () => {
     const repo = consumerRepo({ backend: true });
     process.env.GUARD_NO_COMPLETENESS = '1';
@@ -2134,6 +2266,17 @@ describe('buildCompletenessEvidence — per-file caps + omission accounting (sc-
     const prompt = wrapCompleteness('brief', 'feat: x', ['a.ts'], 'targets');
     expect(prompt).toContain('OMITTED');
     expect(prompt).toContain('investigate EVERY OMITTED/TRUNCATED entry');
+  });
+
+  // The gate is judged from TWO message sources that must produce the SAME cache key: the ship's
+  // raw composed temp file at pre-commit (the parallel prewarm) and git's cleaned COMMIT_EDITMSG
+  // at commit-msg. Whitespace-only differences between them must normalise away, or the prewarm's
+  // cached PASS silently misses and the opus judgement is re-paid.
+  it('normalizeCommitMessage converges the ship temp file and git cleanup=whitespace output', () => {
+    const composed = 'feat: x  \n\n\n\nbody line \n\n';
+    const gitCleaned = 'feat: x\n\nbody line\n';
+    expect(normalizeCommitMessage(composed)).toBe(normalizeCommitMessage(gitCleaned));
+    expect(normalizeCommitMessage(composed)).toBe('feat: x\n\nbody line');
   });
 });
 

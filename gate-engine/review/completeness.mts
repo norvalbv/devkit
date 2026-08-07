@@ -50,6 +50,29 @@ import { cacheKey, parseReviewVerdict, stripFrontmatter } from './reviewers.mts'
 const AGENT_NAME = 'feature-completeness-reviewer';
 const TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
+// Trailing whitespace + blank-run normalisation, mirroring git's `--cleanup=whitespace` (the mode
+// a `-m`/`-F` commit gets). The gate is now judged from TWO message sources that must produce the
+// SAME cache key: the sc-1442 ship temp file at pre-commit (raw composed message) and git's
+// cleaned COMMIT_EDITMSG at commit-msg. Without this, a message with a trailing space or a double
+// blank line keys differently per hook and the pre-commit prewarm's cached PASS silently misses —
+// re-paying the full opus judgement the prewarm existed to avoid.
+const TRAILING_WS_RE = /[ \t]+$/gm;
+const BLANK_RUN_RE = /\n{3,}/g;
+export function normalizeCommitMessage(raw: string): string {
+  return raw.replace(TRAILING_WS_RE, '').replace(BLANK_RUN_RE, '\n\n').trim();
+}
+
+/** The branch a sticky verdict is scoped to: the ship's exported branch, else the checkout's. */
+function verdictBranch(cwd: string): string {
+  const exported = process.env.DEVKIT_SHIP_BRANCH;
+  if (exported) return exported;
+  try {
+    return execSync('git rev-parse --abbrev-ref HEAD', { cwd, encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
 // The capped, omission-accounted stdin-evidence builder (sc-1060) now lives in diff-evidence.mts
 // so gate-engine/review/claude-md.mts's CLAUDE.md renderer can reuse the same capping shape for
 // conventions-reviewer (which, having no Bash, needs the identical pre-rendered-evidence pattern
@@ -100,12 +123,12 @@ export async function runCompleteness(
   if (envFlag('NO_COMPLETENESS')) return finish(0);
   let prompt: string;
   let diff: string;
+  let stickyKey = '';
   try {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
-    const message = readFileSync(
-      path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile),
-      'utf8',
+    const message = normalizeCommitMessage(
+      readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
     const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
       .split('\n')
@@ -122,6 +145,25 @@ export async function runCompleteness(
     } catch {
       console.error(`guard-review: ${AGENT_NAME}.md not found under ${dir} — completeness skipped`);
       return finish(0);
+    }
+    // Intent-scoped sticky PASS (cost ruling, 2026-08-06): this gate judges the MESSAGE's claims
+    // against the delivered change, so a retry whose diff was reshaped to satisfy ANOTHER
+    // reviewer — same branch, same message — has not changed what is claimed and is not
+    // re-judged. What re-opens the gate is a new claim or a new judge: an amended message, a
+    // different branch, a changed reviewer brief, or a devkit upgrade (cacheKey's versionSalt).
+    // A FAIL is never sticky (only the confident-PASS save below writes this key), so a found gap
+    // must genuinely be re-judged closed. Checked before scopedTargets/diff assembly — a sticky
+    // hit skips the retrieval work too, not just the judge.
+    stickyKey = cacheKey('completeness-intent', `${verdictBranch(cwd)}\u0000${message}`, body);
+    const sticky = loadCache(cwd)[stickyKey];
+    if (sticky) {
+      console.error(
+        'guard-review: completeness — cached PASS (same branch + message; a retry-reshaped diff is not re-judged)',
+      );
+      const stickyDuration =
+        typeof sticky.duration_ms === 'number' ? sticky.duration_ms : undefined;
+      emitCacheHit('review:completeness', sticky.model, stickyDuration);
+      return finish(0, 'full', stickyDuration);
     }
     const targets = await scopedTargets(files, message.split('\n')[0] ?? '', 6, cwd).catch(
       () => [],
@@ -202,14 +244,16 @@ export async function runCompleteness(
   // Only a CONFIDENT PASS is cached — never a FAIL (the author fixes, the evidence changes), never
   // an unparseable verdict, and never the GUARD_COMPLETENESS_HARD=0 soften below (it exits 0 on a
   // FAIL the judge did make; caching it would make one softened run silence every later re-run).
-  if (verdict === 'PASS')
-    savePasses(cwd, {
-      [key]: {
-        at: new Date().toISOString(),
-        model: 'opus',
-        duration_ms: Date.now() - startedAt,
-      },
-    });
+  if (verdict === 'PASS') {
+    const meta = {
+      at: new Date().toISOString(),
+      model: 'opus',
+      duration_ms: Date.now() - startedAt,
+    };
+    // Both identities: the exact byte key (any caller, any order) and the branch+message sticky
+    // key that lets a ship retry with a reshaped diff skip this judge (see the lookup above).
+    savePasses(cwd, stickyKey ? { [key]: meta, [stickyKey]: meta } : { [key]: meta });
+  }
   if (verdict !== 'FAIL') return finish(0);
   console.error(`guard-review: completeness finding — ${reason || 'see transcript'}`);
   console.error(raw.trim());

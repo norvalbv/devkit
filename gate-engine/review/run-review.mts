@@ -21,7 +21,7 @@
  *   reviewer-eval bench validated the domain reviewers at haiku, 6/6 block/6/6 clean; a FAIL still
  *   escalates to opus, so opus stays the block authority) ·
  * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
- * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 2, floor 1) ·
+ * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 6, floor 1) ·
  * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
  * FRINK_* aliases honoured. Judges are isolated (JUDGE_ISOLATION) with an airtight read-only
  * allowlist — a gate judge can never write, stage, or commit.
@@ -335,7 +335,7 @@ async function cascadeVerdict(
 
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
- * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 2) — so under machine
+ * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 6) — so under machine
  * load each judge keeps enough CPU + subscription slots to finish under its timeout. Wall-clock is
  * ceil(N/K) waves of the slowest cascade rather than the single slowest, a deliberate trade.
  */
