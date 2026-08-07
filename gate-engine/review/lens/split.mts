@@ -33,6 +33,7 @@
  * derived clones would void every committed waiver and split the telemetry in two.
  */
 
+import { diffCacheIdentity } from '../../judge/diff-focus.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { itemFields, mergeItemVectors } from '../evidence/items.mts';
@@ -329,17 +330,21 @@ export function planReviewWork(
     const sel = selected[i];
     const name = sel.reviewer.name;
     const salt = salts.get(name) ?? '';
+    // Keys hash the diff's CACHE IDENTITY (sentry-additive lines normalized out) so a restage whose
+    // only delta is the capture the sentry gate demanded keeps every earned PASS. Judges, transcripts
+    // and scope rows still get the RAW diffs[i] — only the key input is normalized.
+    const idText = diffCacheIdentity(diffs[i]);
     const split = groups && name === 'correctness-reviewer' && sel.reviewer.skill ? groups : null;
     const parts: ReviewTask[] = split
       ? split.map((g) => ({
           sel: { ...sel, reviewer: deriveLensReviewer(sel.reviewer as ChecklistReviewer, g) },
-          key: keyOf(name, diffs[i], `${salt}|split:${lensGroupId(g)}`),
+          key: keyOf(name, idText, `${salt}|split:${lensGroupId(g)}`),
           diffText: diffs[i],
           splitOf: name,
           group: lensGroupId(g),
           base: sel,
         }))
-      : [{ sel, key: keyOf(name, diffs[i], salt), diffText: diffs[i], base: sel }];
+      : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
     const allCached = parts.every((p) => Boolean(cache[p.key]));
     scope.push({ sel, diff: diffs[i], cached: allCached });
     if (allCached) {

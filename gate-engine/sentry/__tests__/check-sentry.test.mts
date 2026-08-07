@@ -3,7 +3,7 @@
 // every pure rule is exercised via it.each so the assertions read as data, not boilerplate.
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -398,7 +398,7 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
 describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent degrades silently)', () => {
   const gate = (env, msg) =>
     spawnSync('node', [SCRIPT, '--gate', msg], {
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...privateStore(), ...env },
       encoding: 'utf8',
     });
   // Stub `claude` on PATH so the real judge path runs (runJudgeOnce + the sample loop). Stubs return
@@ -415,6 +415,15 @@ describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent 
   afterEach(() => {
     while (stubs.length) rmSync(stubs.pop(), { recursive: true, force: true });
   });
+  // The sentry verdict cache anchors to the real checkout (git-common-dir), so a judged spawn would
+  // read a prior test's verdict AND pollute the developer's .devkit. Every gate() spawn gets a
+  // private store root (the managed-review redirect). realpath: reviewDataRoot rejects the
+  // /var→/private/var alias.
+  const privateStore = () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'sentry-store-')));
+    stubs.push(dir);
+    return { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_DATA_ROOT: dir };
+  };
 
   it('GUARD_NO_SENTRY_JUDGE=1 skips entirely → exit 0', () => {
     expect(gate({ GUARD_NO_SENTRY_JUDGE: '1' }, 'fix(x): y').status).toBe(0);

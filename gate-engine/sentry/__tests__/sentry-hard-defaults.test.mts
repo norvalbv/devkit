@@ -5,7 +5,7 @@
 // covered in check-sentry.test.mts).
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,15 +47,20 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
     return `${dir}:${process.env.PATH}`;
   };
   // MONITOR on the warn path appends to the watchlist — point it at a tmp file, never the repo's.
-  // The tmp dir joins `stubs` so afterEach reclaims it with the claude stubs.
+  // The verdict cache likewise anchors to the real checkout, so each spawn gets a private store
+  // root (realpath: reviewDataRoot rejects the /var→/private/var alias). Both tmp dirs join
+  // `stubs` so afterEach reclaims them with the claude stubs.
   const gate = (env: Record<string, string>, msg: string) => {
     const wlDir = mkdtempSync(join(tmpdir(), 'sentry-hard-wl-'));
-    stubs.push(wlDir);
+    const storeDir = realpathSync(mkdtempSync(join(tmpdir(), 'sentry-hard-store-')));
+    stubs.push(wlDir, storeDir);
     return spawnSync('node', [SCRIPT, '--gate', msg], {
       env: {
         ...process.env,
         GUARD_SENTRY_CONTEXT: 'message',
         GUARD_SENTRY_WATCHLIST: join(wlDir, 'wl.md'),
+        DEVKIT_RUN_MODE: 'review',
+        DEVKIT_REVIEW_DATA_ROOT: storeDir,
         ...env,
       },
       encoding: 'utf8',
