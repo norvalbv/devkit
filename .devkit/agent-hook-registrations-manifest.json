@@ -3,6 +3,30 @@
   "kind": "agent_hook_registration_ownership",
   "entries": [
     {
+      "registrationId": "adhd:prompt-anchor",
+      "ownerId": "adhd",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "UserPromptSubmit",
+        "matcher": "",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-prompt-anchor.mjs\""
+      }
+    },
+    {
+      "registrationId": "adhd:session-start",
+      "ownerId": "adhd",
+      "provider": "claude",
+      "installScope": "shared",
+      "destinationRel": ".claude/settings.json",
+      "native": {
+        "event": "SessionStart",
+        "matcher": "startup|resume|clear|compact",
+        "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-session-start.mjs\""
+      }
+    },
+    {
       "registrationId": "decisions:pre-edit",
       "ownerId": "decisions",
       "provider": "claude",
