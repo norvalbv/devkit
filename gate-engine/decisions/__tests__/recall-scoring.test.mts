@@ -118,18 +118,21 @@ describe('scoreCase — MULTI', () => {
 });
 
 describe('scoreCase — CURRENT_STATE', () => {
+  // Hoisted (not inlined into `cs()`) so a case can vary ONE field off the same baseline without
+  // reaching back through the optional `currentState` of a freshly built case.
+  const CURRENT_STATE: NonNullable<RecallCase['currentState']> = {
+    axis: 'hooks',
+    liveId: 'target:2026-06-17',
+    staleId: 'target:2026-06-08',
+    mustSurface: ['nothing executable to bridge'],
+    mustNotAssert: ['hooks FOLLOW the user'],
+  };
   const cs = (): RecallCase => ({
     id: 'c1',
     q: 'q',
     type: 'CURRENT_STATE',
     gold: ['hooks'],
-    currentState: {
-      axis: 'hooks',
-      liveId: 'target:2026-06-17',
-      staleId: 'target:2026-06-08',
-      mustSurface: ['nothing executable to bridge'],
-      mustNotAssert: ['hooks FOLLOW the user'],
-    },
+    currentState: { ...CURRENT_STATE },
   });
 
   it('CSA needs all three: right axis, LIVE block, live content without an unqualified stale claim', () => {
@@ -252,7 +255,7 @@ describe('scoreCase — CURRENT_STATE', () => {
   it('an EMPTY mustSurface cannot silently disable SFER (vacuous [].every)', () => {
     // `[].every()` is true, which would claim the live content surfaced and switch staleness off.
     // An empty list is evidence of nothing, so it must read as NOT surfaced.
-    const empty = { ...cs(), currentState: { ...cs().currentState!, mustSurface: [] } };
+    const empty = { ...cs(), currentState: { ...CURRENT_STATE, mustSurface: [] } };
     const s = scoreCase(
       empty,
       env(

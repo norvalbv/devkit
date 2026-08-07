@@ -415,6 +415,7 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
   });
 
   it('emits the fallow gate scoped by DEVKIT_SHIP_BASE_SHA', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
     expect(hook).toContain('[ -n "${DEVKIT_SHIP_BASE_SHA:-}" ]');
     expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
     expect(hook).toContain('fallow audit $FALLOW_BASE_ARGS || exit 1');
@@ -437,6 +438,7 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
     const stub = join(binDir, 'fallow');
     writeFileSync(
       stub,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
       '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset} GIT_INDEX_FILE:${GIT_INDEX_FILE:-unset}"\n',
     );
     chmodSync(stub, 0o755);

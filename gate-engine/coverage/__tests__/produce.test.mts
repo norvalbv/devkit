@@ -120,7 +120,11 @@ describe('publishCoverage', () => {
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
     const dir = runDirWith(root, 'runA');
-    const aDifferentFileThanTheOneThereNow = snapshotArtifact(root)! - 5_000;
+    // The artifact was just written, so it HAS an mtime — asserted rather than assumed, because a
+    // null here would silently read as mtime 0 and make the -5s below meaningless.
+    const mtimeNow = snapshotArtifact(root);
+    if (mtimeNow === null) throw new Error('the artifact written above must have an mtime');
+    const aDifferentFileThanTheOneThereNow = mtimeNow - 5_000;
 
     expect(publishCoverage(dir, root, aDifferentFileThanTheOneThereNow)).toBe(false);
     expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({

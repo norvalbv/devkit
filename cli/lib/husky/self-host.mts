@@ -32,8 +32,10 @@ import {
 } from './husky-block.mts';
 
 // devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
-// and its hard biome-lint gate (`lint` = `biome check .`). The hard-lint is folded into the
-// deterministic orchestrator via `--extra` (any non-zero blocks); both run via real devDeps
+// and its hard biome-lint gate (`lint` = `biome check --error-on-warnings .` — biome exits 0 when
+// every diagnostic is warn-severity, so without that flag the gate PRINTS its findings into the log
+// and passes the commit anyway). The hard-lint is folded into the deterministic orchestrator via
+// `--extra` (any non-zero blocks); both run via real devDeps
 // (eslint/biome), so toSelfHost leaves them untouched. Together with the advisory fallow fragment
 // below, the self-host hook preserves every gate the pre-self-host hand hook ran AND adds review + dup/clone.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
