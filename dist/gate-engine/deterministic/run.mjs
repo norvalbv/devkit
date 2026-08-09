@@ -41,7 +41,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { coverageBypassed, deterministicStrict } from "../config.mjs";
+import { coverageBypassed, deterministicStrict, structureBypassed } from "../config.mjs";
 import { emitGateEvent, finishGateTiming } from "../judge/gate-events.mjs";
 import { prefixEntry, recordPrefix } from "../prefix-cache/prefix-cache.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -184,7 +184,15 @@ export function prefixCacheScope(scope, effectiveIds) {
     // bypassed run cannot reuse a clean run's key either, so it re-runs the other gates. Same trade
     // the review salt makes — correctness over a cache hit.) `?? 'devkit-guards'` materialises the
     // default scope checkPrefix would otherwise supply internally, or the salt would be lost.
-    return coverageBypassed() ? `${strictBase ?? 'devkit-guards'}:coverage-bypassed` : strictBase;
+    const coverageBase = coverageBypassed()
+        ? `${strictBase ?? 'devkit-guards'}:coverage-bypassed`
+        : strictBase;
+    // Structure commands are arbitrary (`guard-structure`, Electron's eslint invocation, devkit's
+    // own package script), so the bypass lives at this orchestrator layer. Keep its cache namespace
+    // apart from a normal run for the same anti-laundering reason as coverage above.
+    return structureBypassed()
+        ? `${coverageBase ?? 'devkit-guards'}:structure-bypassed`
+        : coverageBase;
 }
 // Run one gate as a subprocess; return its exit code (0 on success). stdio inherited so the gate's
 // own banner/output reaches the user exactly as it did when the hook invoked it directly.
@@ -254,14 +262,28 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const cacheScope = prefixCacheScope(opts.scope, effectiveIds);
     // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
     // every gate. checkPrefix returns true = skip, false = run.
-    const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
-    const skip = Boolean(cachedPrefix);
-    const fails = [];
+  const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
+  const skip = Boolean(cachedPrefix);
+  const bypassStructure = Boolean(opts.structure) && structureBypassed();
+  const fails = [];
     // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
     // green run — the whole defect this exists for is a skipped gate reading like a passed one.
-    const skipped = [];
-    if (!skip) {
-        const ids = new Set(effectiveIds);
+  const skipped = [];
+  if (!skip) {
+    if (bypassStructure) {
+      console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
+      console.log('   Repository structure was NOT verified for this commit.');
+      emitGateEvent({
+        type: 'gate_result',
+        gate: 'structure-lint',
+        // The collector's gate_result schema accepts fail | could_not_run. Keep the deliberate
+        // bypass measurable as a non-run, and distinguish it from an infrastructure opt-out in
+        // detail instead of inventing a status that downstream readers would treat as clean.
+        status: 'could_not_run',
+        detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
+      });
+    }
+    const ids = new Set(effectiveIds);
         const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
             label: `guard-${g.id}`,
             argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
@@ -269,8 +291,9 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
         }));
         for (const x of opts.extra ?? [])
             gates.push(commandGate(x.label, x.cmd));
-        if (opts.structure)
+        if (opts.structure && !bypassStructure) {
             gates.push(commandGate('structure-lint', opts.structure));
+        }
         for (const gate of gates) {
             if (!gate.argv) {
                 fails.push(`${gate.label}(unrunnable: empty command)`);
@@ -327,6 +350,11 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
         }
         console.error(`✗ deterministic gates failed:${fails.map((f) => ` ${f}`).join('')}`);
         console.error('   Every deterministic failure is listed above — fix them together, then commit once.');
+        if (fails.some((f) => f.startsWith('structure-lint'))) {
+            console.error('   Base branch structure debt that your diff did not cause? Re-run with the explicit');
+            console.error('   one-run assertion:  export GUARD_STRUCTURE_OK=1');
+            console.error('   A structure violation introduced by your own change must be fixed instead.');
+        }
         if (fails.some((f) => NOT_FOUND_RE.test(f))) {
             console.error('   exit 127 = command not found: the gate ran, but its BINARY did not resolve — a');
             console.error('   dependency problem, not a code finding. Under `devkit ship` the gates run in an');
