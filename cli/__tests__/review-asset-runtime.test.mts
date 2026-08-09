@@ -133,6 +133,21 @@ describe('packaged reviewer asset runtime', () => {
     }
   });
 
+  it('makes correctness checklist discovery portable across agent providers', () => {
+    const sources = [
+      readFileSync(join(HERE, '../../agents/correctness-reviewer.md'), 'utf8'),
+      readFileSync(join(HERE, '../../skills/correctness/SKILL.md'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      expect(source).toContain('.agents/skills/correctness');
+      expect(source).toContain('.claude/skills/correctness');
+      expect(source).toContain('.cursor/skills/correctness');
+      expect(source).toContain('[ -f "$candidate/scripts/checklist.mjs" ]');
+      expect(source).toContain('Correctness Review checklist unavailable: run devkit sync-skills');
+    }
+  });
+
   it('copies only registered assets, dereferences links, preserves executability, and keeps preflight identity', () => {
     const source = packageFixture('devkit review package ');
     const originalBrief = join(source, 'agents/api-security-reviewer.md');
