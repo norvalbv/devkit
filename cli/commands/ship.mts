@@ -46,6 +46,10 @@ Env:
                       command-rewriting shell hooks (same caveat as SHIP_COMMIT_TIMEOUT).
                       Editing "coverage": false in guard.config.json does NOT work here — ship reads
                       that file from the committed tree, so a local-only edit is silently ignored.
+  GUARD_STRUCTURE_OK=1 Ship without structure lint, for THIS run only (alias: GUARD_NO_STRUCTURE=1).
+                      Use only when the BASE branch already has structure violations your diff did
+                      not cause. The gate logs a loud BYPASSED line, records telemetry, and keeps
+                      every other deterministic gate active. Prefer exporting it on its own line.
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
 that lands but fails to push KEEPS the branch (recovery line on stderr); a commit that never lands

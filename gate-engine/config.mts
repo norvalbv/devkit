@@ -278,6 +278,19 @@ export function coverageBypassed(): boolean {
 }
 
 /**
+ * Is structure lint bypassed for THIS run? The orchestrator owns this predicate rather than
+ * guard-structure because Electron consumers supply their own arbitrary eslint command through
+ * `--structure`; putting the bypass inside guard-structure would leave those consumers wedged.
+ *
+ * `GUARD_STRUCTURE_OK` is the canonical operator assertion. `GUARD_NO_STRUCTURE` is the accepted
+ * guessable alias, matching coverageBypassed. guard-deterministic banners + telemeters the skip and
+ * salts its prefix-cache scope so this one-run assertion cannot authorise a later normal run.
+ */
+export function structureBypassed(): boolean {
+  return envFlag('STRUCTURE_OK') || envFlag('NO_STRUCTURE');
+}
+
+/**
  * Does THIS run refuse to accept a deterministic gate's fail-open? Lives beside coverageBypassed for
  * the same reason: guard-deterministic asks it twice — once to decide the verdict, once to salt the
  * prefix-cache scope — and a second copy of the predicate is what the dup/clone gates exist to stop.
