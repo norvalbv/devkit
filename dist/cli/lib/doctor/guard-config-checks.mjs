@@ -31,8 +31,10 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     return path;
 };
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
+import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from "../../../gate-engine/co-occurrence/index-refresh.mjs";
 import { REVIEWERS } from "../../../gate-engine/review/reviewers.mjs";
 import { detectStack } from "../detect-stack.mjs";
 import { packageDir, readJson } from "../fs-helpers.mjs";
@@ -77,8 +79,31 @@ function envWired() {
  *   emits that flag only for a repo whose recorded selection already has it.
  */
 export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
-    if (resolved)
-        return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}`);
+    if (resolved) {
+        const indexPath = resolve(cwd, resolved);
+        if (!existsSync(indexPath)) {
+            return check(SEARCH_INDEX_CHECK, 'MISSING', missingIndexMessage(indexPath, { cwd, indexPath: resolved }), 'build the configured index, or link the primary checkout index as shown above', false, true);
+        }
+        let db = null;
+        try {
+            db = new DatabaseSync(indexPath, { readOnly: true });
+            const freshness = inspectIndexFreshness(db, indexPath, { cwd, indexPath: resolved });
+            if (freshness.status === 'stale') {
+                return check(SEARCH_INDEX_CHECK, 'DRIFT', staleIndexMessage(freshness), 'run `touch <files> && search-code index --seed-files "<files>"` and retry', false, true);
+            }
+            if (freshness.status === 'unverifiable') {
+                return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`);
+            }
+            return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}; ${freshness.checkedFiles} indexed file(s) match the source checkout`);
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`, 'rebuild the search-code index and retry', false, true);
+        }
+        finally {
+            db?.close();
+        }
+    }
     if (envWired())
         return check(SEARCH_INDEX_CHECK, 'OK', 'matcher wired via SEARCH_CODE_DB');
     if (indexPathKeyPresent(cwd)) {

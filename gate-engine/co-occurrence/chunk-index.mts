@@ -96,7 +96,7 @@ export function buildVectors(rows: readonly ChunkRow[]): {
 export const FRESH_RATIO = 0.8;
 /** A line short enough to be punctuation/boilerplate (`}`, `};`, `return;`) carries no evidence. */
 const SIG_LINE_MIN_LEN = 12;
-/** Below this, a ratio is 0 / 0.5 / 1 and means nothing — such a body stays UNVERIFIABLE (kept). */
+/** Below this, the ordinary ratio is too coarse; judgeBody handles exactly two lines separately. */
 const MIN_BODY_SIG_LINES = 3;
 /** A file this large is a generated blob, not something the matcher should hold in memory twice. */
 const MAX_FILE_BYTES = 2_000_000;
@@ -135,6 +135,17 @@ export function significantLines(text: string): string[] {
     .filter((l) => l.length >= SIG_LINE_MIN_LEN);
 }
 
+function alignedPresence(wanted: readonly string[], have: readonly string[]): number {
+  let best = 0;
+  for (let offset = 0; offset <= Math.max(0, have.length - wanted.length); offset++) {
+    let hits = 0;
+    for (let i = 0; i < wanted.length; i++) if (have[offset + i] === wanted[i]) hits++;
+    if (hits > best) best = hits;
+    if (best === wanted.length) break;
+  }
+  return best / wanted.length;
+}
+
 /**
  * How much of the body survives IN ONE PLACE in the file: the best score over every aligned window
  * of the file's significant lines. -1 when the body is too small to score — the caller must read
@@ -151,15 +162,7 @@ export function bodyPresence(body: string, fileText: string): number {
   const wanted = significantLines(body);
   if (wanted.length < MIN_BODY_SIG_LINES) return -1;
   const have = significantLines(fileText.replace(CRLF_RE, '\n'));
-  let best = 0;
-  // <= so a file shorter than the body still scores its one partial window rather than nothing.
-  for (let offset = 0; offset <= Math.max(0, have.length - wanted.length); offset++) {
-    let hits = 0;
-    for (let i = 0; i < wanted.length; i++) if (have[offset + i] === wanted[i]) hits++;
-    if (hits > best) best = hits;
-    if (best === wanted.length) break;
-  }
-  return best / wanted.length;
+  return alignedPresence(wanted, have);
 }
 
 /**
@@ -174,6 +177,12 @@ export function judgeBody(body: string, fileText: string | null): Freshness {
   if (fileText == null) return 'stale';
   const normalized = fileText.replace(CRLF_RE, '\n');
   if (normalized.includes(body)) return 'fresh';
+  const wanted = significantLines(body);
+  if (wanted.length === 2) {
+    const ratio = alignedPresence(wanted, significantLines(normalized));
+    if (ratio === 0) return 'stale';
+    return ratio === 1 ? 'fresh' : 'unverifiable';
+  }
   const ratio = bodyPresence(body, normalized);
   if (ratio < 0) return 'unverifiable';
   return ratio >= FRESH_RATIO ? 'fresh' : 'stale';

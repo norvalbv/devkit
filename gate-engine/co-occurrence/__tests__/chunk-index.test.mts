@@ -139,6 +139,16 @@ describe('bodyPresence — alignment-based, indentation-agnostic', () => {
   it('returns -1 (no evidence) for a body with too few significant lines', () => {
     expect(bodyPresence('const a = 1;\n}\n', 'anything')).toBe(-1);
   });
+
+  it('uses two aligned distinctive lines to disprove an extracted short helper (sc-1509)', () => {
+    const helper = 'function fail(message: string): never {\n  throw new Error(message);\n}';
+    const extractedParent = "import { fail } from './common';\n";
+    expect(bodyPresence(helper, extractedParent)).toBe(-1);
+    expect(judgeBody(helper, extractedParent)).toBe('stale');
+    expect(judgeBody(helper, 'function fail(message: string): never {\n  return never;\n}')).toBe(
+      'unverifiable',
+    );
+  });
 });
 
 describe('judgeBody — verbatim first, ratio as whitespace tolerance', () => {
