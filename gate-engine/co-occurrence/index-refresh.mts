@@ -16,8 +16,24 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { dirname, isAbsolute, relative } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+
+const MTIME_TOLERANCE_MS = 1;
+
+export interface IndexFreshnessDb {
+  prepare(sql: string): {
+    all(): Record<string, unknown>[];
+  };
+}
+
+export interface IndexFreshness {
+  status: 'fresh' | 'stale' | 'unverifiable';
+  checkedFiles: number;
+  staleFiles: string[];
+  sourceRoot: string | null;
+  reason?: string;
+}
 
 /**
  * Absolute working root of the PRIMARY checkout — the one holding the real `.git`. Every linked
@@ -53,6 +69,140 @@ export function indexIsInThisCheckout(indexPath: string, cwd: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The checkout whose file mtimes search-code recorded in this database. A normal checkout owns its
+ * index directly. A ship/link worktree reaches the PRIMARY checkout's copy through a symlink, so
+ * validate the physical index against that primary tree instead of against the ephemeral worktree
+ * whose checkout operation necessarily gave every file a different mtime.
+ *
+ * An arbitrary external SEARCH_CODE_DB has no provable source tree and stays unverifiable; the
+ * candidate-level body check remains the fallback there.
+ */
+export function indexSourceRoot(
+  indexPath: string,
+  cfg: { cwd: string; indexPath: string | null },
+): string | null {
+  try {
+    if (indexIsInThisCheckout(indexPath, cfg.cwd)) return realpathSync(cfg.cwd);
+    if (!cfg.indexPath) return null;
+    const primary = primaryCheckout(cfg.cwd);
+    if (!primary) return null;
+    const expected = realpathSync(resolve(primary, cfg.indexPath));
+    return realpathSync(indexPath) === expected ? realpathSync(primary) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whole-index freshness proof using search-code's own per-file `file_mtime` stamp. This catches the
+ * small/generic chunks that candidate-level body verification must conservatively keep as
+ * unverifiable. It is deliberately all-or-nothing: once any indexed file changed or disappeared,
+ * the embeddings no longer describe one coherent tree and the matcher must not present their hits
+ * as current duplication findings.
+ */
+export function inspectIndexFreshness(
+  db: IndexFreshnessDb,
+  indexPath: string,
+  cfg: { cwd: string; indexPath: string | null },
+): IndexFreshness {
+  const sourceRoot = indexSourceRoot(indexPath, cfg);
+  if (!sourceRoot) {
+    return {
+      status: 'unverifiable',
+      checkedFiles: 0,
+      staleFiles: [],
+      sourceRoot: null,
+      reason: 'the index is not owned by this checkout or its primary checkout',
+    };
+  }
+
+  let rows: Record<string, unknown>[];
+  try {
+    rows = db
+      .prepare(
+        'SELECT file_path, MIN(file_mtime) AS min_mtime, MAX(file_mtime) AS max_mtime FROM chunks GROUP BY file_path',
+      )
+      .all();
+  } catch {
+    return {
+      status: 'unverifiable',
+      checkedFiles: 0,
+      staleFiles: [],
+      sourceRoot,
+      reason: 'the index has no readable per-file freshness stamps',
+    };
+  }
+
+  if (rows.length === 0) {
+    return {
+      status: 'unverifiable',
+      checkedFiles: 0,
+      staleFiles: [],
+      sourceRoot,
+      reason: 'the index contains no source files',
+    };
+  }
+
+  const staleFiles: string[] = [];
+  for (const row of rows) {
+    const file = typeof row.file_path === 'string' ? row.file_path : '';
+    if (row.min_mtime == null || row.max_mtime == null) {
+      return {
+        status: 'unverifiable',
+        checkedFiles: rows.length,
+        staleFiles: [],
+        sourceRoot,
+        reason: 'the index has empty per-file freshness stamps',
+      };
+    }
+    const minMtime = Number(row.min_mtime);
+    const maxMtime = Number(row.max_mtime);
+    const abs = resolve(sourceRoot, file);
+    const rel = relative(sourceRoot, abs);
+    if (!file || rel.startsWith('..') || isAbsolute(rel)) {
+      return {
+        status: 'unverifiable',
+        checkedFiles: rows.length,
+        staleFiles: [],
+        sourceRoot,
+        reason: 'the index contains a path outside its source checkout',
+      };
+    }
+    try {
+      const diskMtime = statSync(abs).mtimeMs;
+      if (
+        !Number.isFinite(minMtime) ||
+        !Number.isFinite(maxMtime) ||
+        Math.abs(minMtime - maxMtime) > MTIME_TOLERANCE_MS ||
+        Math.abs(diskMtime - maxMtime) > MTIME_TOLERANCE_MS
+      ) {
+        staleFiles.push(file);
+      }
+    } catch {
+      staleFiles.push(file);
+    }
+  }
+
+  return {
+    status: staleFiles.length > 0 ? 'stale' : 'fresh',
+    checkedFiles: rows.length,
+    staleFiles,
+    sourceRoot,
+  };
+}
+
+export function staleIndexMessage(freshness: IndexFreshness): string {
+  const sample = freshness.staleFiles.slice(0, 6);
+  const more = freshness.staleFiles.length - sample.length;
+  const files = `${sample.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  return (
+    `search-code index is STALE — ${freshness.staleFiles.length}/${freshness.checkedFiles} indexed file(s) changed or disappeared in ${freshness.sourceRoot ?? 'its source checkout'}.\n` +
+    `  ${files}\n` +
+    '  Refresh affected files with `touch <files> && search-code index --seed-files "<files>"`.'
+  );
 }
 
 /**

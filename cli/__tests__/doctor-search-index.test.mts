@@ -9,8 +9,9 @@
  * and a false positive exits 1 forever in the many repos that legitimately have no search-code.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
 import {
@@ -81,6 +82,19 @@ async function required(opts: RepoOpts = {}) {
   return result;
 }
 
+function writeIndex(root: string, storedMtime?: number): void {
+  const source = join(root, 'src.ts');
+  writeFileSync(source, 'export const indexed = true;\n');
+  mkdirSync(join(root, '.search-code'), { recursive: true });
+  const db = new DatabaseSync(join(root, '.search-code', 'index.db'));
+  db.exec('CREATE TABLE chunks (file_path TEXT, file_mtime INTEGER)');
+  db.prepare('INSERT INTO chunks (file_path, file_mtime) VALUES (?, ?)').run(
+    'src.ts',
+    storedMtime ?? statSync(source).mtimeMs,
+  );
+  db.close();
+}
+
 describe('doctor — an unwired search-code index is drift', () => {
   it('flags an index on disk that nothing points at', async () => {
     const result = await required({ index: true });
@@ -114,11 +128,11 @@ describe('doctor — the silence cases (a false positive here punishes every con
   });
 
   it('stays OK when indexPath is set', async () => {
-    const result = await required({
-      guardConfig: { indexPath: '.search-code/index.db' },
-      index: true,
-    });
+    const { root } = repo({ guardConfig: { indexPath: '.search-code/index.db' } });
+    writeIndex(root);
+    const result = checkSearchIndex(root, '.search-code/index.db', false);
     expect(result.status).toBe('OK');
+    expect(result.detail).toContain('match the source checkout');
   });
 
   // The escape hatch. An explicit null is a DECLARED opt-out; only an ABSENT key is drift.
@@ -137,8 +151,11 @@ describe('doctor — the silence cases (a false positive here punishes every con
   });
 
   it('stays OK when the matcher is wired by GUARD_INDEX_PATH', async () => {
-    process.env.GUARD_INDEX_PATH = '/tmp/some-index.db';
-    expect((await required({ index: true })).status).toBe('OK');
+    const { root } = repo();
+    writeIndex(root);
+    process.env.GUARD_INDEX_PATH = join(root, '.search-code', 'index.db');
+    const results = await checkGuardConfig(root, true, false);
+    expect(results.find((r) => r.name === CHECK)?.status).toBe('OK');
   });
 });
 
@@ -174,6 +191,7 @@ describe('doctor — the overlay / self-host advisory', () => {
   it('prints an OK line when the matcher is wired', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { root, sel } = advisoryRepo({ guardConfig: { indexPath: '.search-code/index.db' } });
+    writeIndex(root);
     await adviseSearchIndex(root, sel);
     expect(log.mock.calls.flat().join('\n')).toContain('✓ search-code index');
   });
@@ -246,11 +264,45 @@ describe('checkSearchIndex — the branches the callers gate off', () => {
     expect(checkSearchIndex(root, null, false).status).toBe('DRIFT');
   });
 
-  it('prefers the resolved path over every other signal', () => {
+  it('surfaces a configured index that is absent', () => {
     const root = mkTmp('doctor-search-index-resolved-');
     writeFileSync(join(root, 'guard.config.json'), '{}');
-    const result = checkSearchIndex(root, '/somewhere/index.db', true);
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
+    expect(result.status).toBe('MISSING');
+    expect(result.advisory).toBe(true);
+    expect(result.detail).toContain('LINKED WORKTREE');
+    expect(result.detail).toContain('devkit ship --link');
+  });
+
+  it('surfaces a configured index whose file stamps are behind the checkout', () => {
+    const root = mkTmp('doctor-search-index-stale-');
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      JSON.stringify({ indexPath: '.search-code/index.db' }),
+    );
+    writeIndex(root, 1);
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
+    expect(result.status).toBe('DRIFT');
+    expect(result.advisory).toBe(true);
+    expect(result.detail).toContain('index is STALE');
+    expect(result.detail).toContain('src.ts');
+    expect(result.remediation).toContain('search-code index --seed-files');
+    expect(result.remediation).toContain('touch');
+  });
+
+  it('keeps a legacy index advisory when freshness stamps are unavailable', () => {
+    const root = mkTmp('doctor-search-index-legacy-');
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      JSON.stringify({ indexPath: '.search-code/index.db' }),
+    );
+    mkdirSync(join(root, '.search-code'), { recursive: true });
+    const db = new DatabaseSync(join(root, '.search-code', 'index.db'));
+    db.exec('CREATE TABLE chunks (file_path TEXT)');
+    db.close();
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
     expect(result.status).toBe('OK');
-    expect(result.detail).toContain('/somewhere/index.db');
+    expect(result.detail).toContain('freshness unavailable');
+    expect(result.detail).toContain('scan-time body verification');
   });
 });

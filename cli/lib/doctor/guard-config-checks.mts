@@ -24,8 +24,14 @@
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
+import {
+  inspectIndexFreshness,
+  missingIndexMessage,
+  staleIndexMessage,
+} from '../../../gate-engine/co-occurrence/index-refresh.mts';
 import { REVIEWERS } from '../../../gate-engine/review/reviewers.mts';
 import { detectStack, type Stack } from '../detect-stack.mts';
 import { packageDir, readJson } from '../fs-helpers.mts';
@@ -35,7 +41,6 @@ export const SEARCH_INDEX_CHECK = 'search-code index';
 
 /** Where `devkit init --search-code` puts the index — mirrors INDEX_PATH in install-search-code.mts. */
 const DEFAULT_INDEX = '.search-code/index.db';
-
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
 
@@ -91,7 +96,56 @@ export function checkSearchIndex(
   resolved: string | null,
   searchCodeSelected: boolean,
 ): CheckResult {
-  if (resolved) return check(SEARCH_INDEX_CHECK, 'OK', `matcher reads ${resolved}`);
+  if (resolved) {
+    const indexPath = resolve(cwd, resolved);
+    if (!existsSync(indexPath)) {
+      return check(
+        SEARCH_INDEX_CHECK,
+        'MISSING',
+        missingIndexMessage(indexPath, { cwd, indexPath: resolved }),
+        'build the configured index, or link the primary checkout index as shown above',
+        false,
+        true,
+      );
+    }
+    let db: DatabaseSync | null = null;
+    try {
+      db = new DatabaseSync(indexPath, { readOnly: true });
+      const freshness = inspectIndexFreshness(db, indexPath, { cwd, indexPath: resolved });
+      if (freshness.status === 'stale') {
+        return check(
+          SEARCH_INDEX_CHECK,
+          'DRIFT',
+          staleIndexMessage(freshness),
+          'run `touch <files> && search-code index --seed-files "<files>"` and retry',
+          false,
+          true,
+        );
+      }
+      if (freshness.status === 'unverifiable') {
+        return check(
+          SEARCH_INDEX_CHECK,
+          'OK',
+          `matcher reads ${resolved}; freshness unavailable (${freshness.reason ?? 'unknown index schema'}), so scan-time body verification remains the fallback`,
+        );
+      }
+      return check(
+        SEARCH_INDEX_CHECK,
+        'OK',
+        `matcher reads ${resolved}; ${freshness.checkedFiles} indexed file(s) match the source checkout`,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return check(
+        SEARCH_INDEX_CHECK,
+        'DRIFT',
+        `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`,
+        'rebuild the search-code index and retry',
+      );
+    } finally {
+      db?.close();
+    }
+  }
   if (envWired()) return check(SEARCH_INDEX_CHECK, 'OK', 'matcher wired via SEARCH_CODE_DB');
   if (indexPathKeyPresent(cwd)) {
     return check(SEARCH_INDEX_CHECK, 'OK', 'matcher opted out by explicit `"indexPath": null`');
