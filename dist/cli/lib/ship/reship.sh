@@ -85,6 +85,10 @@ DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 
+# Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
+. "$SCRIPT_DIR/prepare-gate-worktree.sh"
+ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 # Body: --body "<text>" wins (explicit, no temp file); else use the same bounded stdin contract as
@@ -148,7 +152,6 @@ ship_record_staged_state "$WT" "$STAGED_STATE"
 ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
-. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
 prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
 
 # Link gate configs present in the repo but absent from this fresh checkout (an untracked config, a
