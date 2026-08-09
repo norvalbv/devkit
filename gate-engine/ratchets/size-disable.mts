@@ -24,6 +24,8 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { hasStagedFiles, stageBaseline, stagedSet } from './git-index.mts';
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
+import { runPreflightCli } from './size-preflight.mts';
 
 // The impl-file predicate bundle sourceMatchers() returns (isSource/isTest/isBarrel).
 type SourceMatchers = ReturnType<typeof sourceMatchers>;
@@ -40,8 +42,7 @@ interface DisableCount {
   file: number; // `eslint-disable max-lines` directives in the file
   fn: number; // `eslint-disable max-lines-per-function` directives
 }
-// Per-file disable baseline so only staged-file shrink auto-lowers during a commit.
-// A pre-per-file `{ fileDisables, fnDisables }` baseline (no `files` key) is treated as NO
+// Per-file disable baseline; a pre-per-file `{ fileDisables, fnDisables }` baseline (no `files` key) is NO
 // grandfathered debt and self-deleted on the next commit; the owner re-freezes once
 // (`guard-size freeze`, or `devkit upgrade`) to re-grandfather any real disables. Baselines are
 // regenerable state, so no dual-format gate is carried.
@@ -57,8 +58,6 @@ interface LinesBaseline {
 }
 
 const BASELINE = 'eslint/baselines/size.json';
-const LINES_BASELINE = 'eslint/baselines/size-lines.json';
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '_shared']);
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.
 const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
@@ -82,7 +81,7 @@ function walk(
   for (const e of entries) {
     const rel = `${dir}/${e.name}`;
     if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) walk(root, rel, files, match, includeTests);
+      if (!SIZE_SKIP_DIRS.has(e.name)) walk(root, rel, files, match, includeTests);
     } else if (match.isSource(e.name) && (includeTests || !match.isTest(e.name))) {
       files.push(rel);
     }
@@ -488,11 +487,12 @@ function runCli(cmd: string): void {
     process.exit(0);
   }
 
-  console.error('usage: guard-size <freeze|gate>');
+  console.error('usage: guard-size <freeze|gate|preflight --base <ref> [-- path...]>');
   process.exit(2);
 }
 
 // Run as a CLI only when invoked directly; importing this module (tests) has no side effects.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  if (process.argv[2] === 'preflight') runPreflightCli(process.argv.slice(3));
   runCli(process.argv[2]);
 }

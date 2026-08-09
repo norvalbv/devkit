@@ -144,6 +144,10 @@ DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 
+# Preview the raw-line ratchet against the exact base baseline BEFORE creating the worktree.
+. "$SCRIPT_DIR/prepare-gate-worktree.sh"
+ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
+
 # Nothing to commit → say so NOW. Staging (below) has exactly three inputs: the tracked diff vs
 # BASE, the untracked files in scope, and the untracked-but-IGNORED files in scope (a briefed path
 # under a gitignored, force-tracked tree such as devkit's own dist/). All empty ⇒ an empty index — which git only reports AFTER the
@@ -267,7 +271,6 @@ ship_record_staged_state "$WT" "$STAGED_STATE"
 ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
-. "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
 prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
 
 # Link gate configs that live in the repo but aren't in this fresh checkout (an untracked config, a
