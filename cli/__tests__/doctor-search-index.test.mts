@@ -290,6 +290,19 @@ describe('checkSearchIndex — the branches the callers gate off', () => {
     expect(result.remediation).toContain('touch');
   });
 
+  it('keeps an unreadable configured index advisory', () => {
+    const { root } = repo({ guardConfig: { indexPath: '.search-code/index.db' } });
+    mkdirSync(join(root, '.search-code', 'index.db'), { recursive: true });
+    const result = checkSearchIndex(root, '.search-code/index.db', true);
+    expect(result).toMatchObject({
+      status: 'DRIFT',
+      advisory: true,
+      fixable: false,
+    });
+    expect(result.detail).toContain('index cannot be inspected');
+    expect(result.remediation).toContain('rebuild');
+  });
+
   it('keeps a legacy index advisory when freshness stamps are unavailable', () => {
     const root = mkTmp('doctor-search-index-legacy-');
     writeFileSync(

@@ -98,7 +98,7 @@ export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`, 'rebuild the search-code index and retry');
+            return check(SEARCH_INDEX_CHECK, 'DRIFT', `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`, 'rebuild the search-code index and retry', false, true);
         }
         finally {
             db?.close();

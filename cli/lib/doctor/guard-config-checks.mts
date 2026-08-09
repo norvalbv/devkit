@@ -141,6 +141,8 @@ export function checkSearchIndex(
         'DRIFT',
         `matcher reads ${resolved}, but the index cannot be inspected: ${msg}`,
         'rebuild the search-code index and retry',
+        false,
+        true,
       );
     } finally {
       db?.close();
