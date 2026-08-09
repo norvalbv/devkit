@@ -334,3 +334,27 @@ prepare_gate_worktree() {
     refresh_ship_reviewer_assets "$wt" "$root" "$purpose"
   fi
 }
+
+# Preview the raw-line ratchet before creating a gate worktree. Exit 2 means the optional preview is
+# unavailable; the authoritative worktree gate still runs. Exit 1 is a proven size violation.
+ship_size_preflight() {
+  local root=${1:?root} base=${2:?base} size_guard rc
+  shift 2
+  local script_dir
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  size_guard="$script_dir/../../../gate-engine/ratchets/size-disable.mts"
+  [ -f "$size_guard" ] || size_guard="$script_dir/../../../gate-engine/ratchets/size-disable.mjs"
+  if [ ! -f "$size_guard" ]; then
+    rc=2
+  elif (cd "$root" && node "$size_guard" preflight --base "$base" -- "$@"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    2) echo "⚠️  ship: guard-size base-aware preflight unavailable — continuing to the authoritative worktree gate" >&2; return 0 ;;
+    *) echo "ship: guard-size preflight failed unexpectedly (exit $rc)" >&2; return 1 ;;
+  esac
+}

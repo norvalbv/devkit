@@ -14,9 +14,9 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
 import { hasStagedFiles, stageBaseline, stagedSet } from "./git-index.mjs";
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
+import { runPreflightCli } from "./size-preflight.mjs";
 const BASELINE = 'eslint/baselines/size.json';
-const LINES_BASELINE = 'eslint/baselines/size-lines.json';
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '_shared']);
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.
 const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
@@ -34,7 +34,7 @@ function walk(root, dir, files, match, includeTests = false) {
     for (const e of entries) {
         const rel = `${dir}/${e.name}`;
         if (e.isDirectory()) {
-            if (!SKIP_DIRS.has(e.name))
+            if (!SIZE_SKIP_DIRS.has(e.name))
                 walk(root, rel, files, match, includeTests);
         }
         else if (match.isSource(e.name) && (includeTests || !match.isTest(e.name))) {
@@ -390,10 +390,12 @@ function runCli(cmd) {
             runLinesGate(root, cfg, linesBaselineFile);
         process.exit(0);
     }
-    console.error('usage: guard-size <freeze|gate>');
+    console.error('usage: guard-size <freeze|gate|preflight --base <ref> [-- path...]>');
     process.exit(2);
 }
 // Run as a CLI only when invoked directly; importing this module (tests) has no side effects.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+    if (process.argv[2] === 'preflight')
+        runPreflightCli(process.argv.slice(3));
     runCli(process.argv[2]);
 }

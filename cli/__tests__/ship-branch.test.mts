@@ -398,6 +398,42 @@ describe('ship-branch.sh — --base <branch>', () => {
     expect(git(['rev-parse', 'feat/fresh^']).trim()).toBe(advancedTip); // fetched, not the stale local
   });
 
+  it('fails before creating a worktree when the base has a tighter size ceiling than the checkout', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    writeFileSync(
+      join(dir, 'guard.config.json'),
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+    );
+    writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
+    writeFileSync(
+      join(dir, 'eslint/baselines/size-lines.json'),
+      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
+    );
+    git(['add', 'guard.config.json', 'src/hot.ts', 'eslint/baselines/size-lines.json']);
+    git(['commit', '-q', '-m', 'size baseline']);
+    git(['push', '-q', 'origin', 'work:studio']);
+    git(['checkout', '-q', '-b', 'finalized']);
+
+    writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
+    writeFileSync(
+      join(dir, 'eslint/baselines/size-lines.json'),
+      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
+    );
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/size-preflight', 't', '--base', 'studio', '--', 'src/hot.ts'],
+      { cwd: join(dir, 'src'), input: '', encoding: 'utf8', env: { ...env, SHIP_DRY_RUN: '1' } },
+    );
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('working-tree baseline would allow 80');
+    expect(localBranchExists(git, 'feat/size-preflight')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/size-preflight')).toBe(false);
+    expect(r.stderr).not.toMatch(EPHEMERAL_WT_RE);
+  });
+
   it('rejects a --base branch that does not exist on origin', () => {
     const { dir, env } = seedBaseRepo();
     const r = spawnSync(
@@ -1200,6 +1236,40 @@ describe('ship-branch.sh — overlay-mode gate chain', () => {
 });
 
 describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
+  it('runs the base-aware size preflight before creating a reship worktree', () => {
+    const { dir, env, git } = seedReshipRepo();
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    writeFileSync(
+      join(dir, 'guard.config.json'),
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+    );
+    writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
+    writeFileSync(
+      join(dir, 'eslint/baselines/size-lines.json'),
+      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
+    );
+    git(['add', 'guard.config.json', 'src/hot.ts', 'eslint/baselines/size-lines.json']);
+    git(['commit', '-q', '-m', 'size baseline']);
+    git(['push', '-q', 'origin', 'work:pr-open']);
+    writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
+    writeFileSync(
+      join(dir, 'eslint/baselines/size-lines.json'),
+      JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
+    );
+
+    const r = spawnSync('/bin/bash', [reshipScript, 'pr-open', 't', 'src/hot.ts'], {
+      cwd: dir,
+      input: '',
+      encoding: 'utf8',
+      env: { ...env, SHIP_DRY_RUN: '1' },
+    });
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('working-tree baseline would allow 80');
+    expect(r.stderr).not.toMatch(EPHEMERAL_WT_RE);
+  });
+
   it('forces ship mode when the caller inherits review mode', () => {
     const { dir, env, git } = seedReshipRepo();
     writeFileSync(

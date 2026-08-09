@@ -233,7 +233,7 @@ describe('diffCacheIdentity — conservative matching + function anchors', () =>
       "import { captureException } from '../utils/presentry-shim';",
     ],
     ['a nested call smuggled as the argument', 'Sentry.captureException(mutateGlobalState(err));'],
-    ['a template-literal argument', 'Sentry.captureMessage(`${sideEffect()}`);'],
+    ['a template-literal argument', ['Sentry.captureMessage(`', '$', '{sideEffect()}`);'].join('')],
   ])('does NOT strip %s — the restage re-reviews', (_label, line) => {
     const fixed = edit(10, ['handle();']);
     const d1 = gitDiffOf(BASE, fixed);
