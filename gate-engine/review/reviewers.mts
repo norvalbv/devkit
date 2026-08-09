@@ -294,11 +294,13 @@ export function wrapPrompt(
   assetRoot?: string,
   checklistRecoveryReason?: string,
   { targetsBlock = '', commitMsgBlock = '' }: PromptExtras = {},
+  checklistRoot = assetRoot ?? '.claude',
 ): string {
-  const effectiveAssetRoot = assetRoot ?? '.claude';
-  const brief = stripFrontmatter(agentBody).replaceAll(
-    '.claude/skills/',
-    `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`,
+  const effectiveAssetRoot = checklistRoot;
+  const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
+  const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce(
+    (body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix),
+    stripFrontmatter(agentBody),
   );
   const script = checklistScriptAt(reviewer, effectiveAssetRoot);
   const checklistContract = checklistContractFor(reviewer, script, assetRoot);

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { GuardConfig } from '../config.mts';
+import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mts';
 import type { RecordedWaiver } from './overrides.mts';
 import {
   checklistAssetPath,
@@ -249,21 +250,6 @@ export function preflightReviewAssets(
 }
 
 /**
- * The SYNCED consumer copy of a packaged asset. `reviewerAssetPaths` names package-relative paths;
- * a consumer keeps its briefs wherever `review.agentsDir` points (configurable) and every skill
- * asset under `.claude/` — devkit's own sync convention, the same one `checklistScript` encodes.
- */
-function readConsumerReviewAsset(cwd: string, cfg: GuardConfig, relativePath: string): Buffer {
-  const AGENTS_PREFIX = 'agents/';
-  if (relativePath.startsWith(AGENTS_PREFIX)) {
-    const dir = cfg.review.agentsDir;
-    const base = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
-    return readFileSync(path.join(base, relativePath.slice(AGENTS_PREFIX.length)));
-  }
-  return readFileSync(path.resolve(cwd, '.claude', relativePath));
-}
-
-/**
  * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
  * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
  * attributable to the prompt version that produced it — AND, since sc-1437, what salts the verdict
@@ -309,7 +295,12 @@ export function consumerReviewerIdentity(
   reviewer: Reviewer,
 ): string | null {
   try {
-    return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, rel), reviewer, cfg);
+    const skillRoot = consumerChecklistAssetRoot(cwd, reviewer);
+    return hashReviewerIdentity(
+      (rel) => readConsumerReviewAsset(cwd, cfg, skillRoot, rel),
+      reviewer,
+      cfg,
+    );
   } catch {
     return null;
   }
