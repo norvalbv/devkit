@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,8 @@ afterEach(() => {
   delete process.env.DEVKIT_SHIP;
   delete process.env.GUARD_COVERAGE_OK;
   delete process.env.GUARD_NO_COVERAGE;
+  delete process.env.GUARD_STRUCTURE_OK;
+  delete process.env.GUARD_NO_STRUCTURE;
   // Both spellings: envVar() accepts the FRINK_ alias, and `devkit ship` exports strict envs that a
   // pre-push vitest inherits — a leak that would silently flip every fail-open assertion below.
   delete process.env.GUARD_DETERMINISTIC_STRICT;
@@ -138,6 +141,86 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain('structure-lint(unexpected:2)');
     expect(exec).toHaveBeenCalledWith('bunx', ['eslint', 'src'], expect.anything());
+  });
+
+  it.each(['GUARD_STRUCTURE_OK', 'GUARD_NO_STRUCTURE'])(
+    '%s skips an arbitrary structure command but keeps the other deterministic gates active',
+    (key) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const d = repo(['size']);
+      const exec = mkExec({});
+      process.env[key] = '1';
+
+      expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(0);
+      expect(exec).toHaveBeenCalledTimes(1); // size still ran; only structure was skipped
+      expect(exec.mock.calls.some(([bin]) => bin === 'bunx')).toBe(false);
+      expect(log.mock.calls.flat().join('\n')).toContain('Structure lint BYPASSED');
+    },
+  );
+
+  it('records the structure bypass with the collector-supported non-run status', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size']);
+    const sink = join(d, 'events.jsonl');
+    process.env.GUARD_STRUCTURE_OK = '1';
+    process.env.DEVKIT_GATE_EVENTS = sink;
+
+    expect(runDeterministic(d, { exec: mkExec({}), structure: 'bunx eslint src' })).toBe(0);
+    const events = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === 'gate_result');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        gate: 'structure-lint',
+        status: 'could_not_run',
+        detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
+      }),
+    );
+  });
+
+  it('does not re-emit the structure bypass when a prefix-cache hit skips the retry', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const d = repo(['size']);
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    execFileSync('git', ['add', '.'], { cwd: d });
+    const sink = join(d, 'events.jsonl');
+    const exec = mkExec({});
+    process.env.DEVKIT_SHIP = '1';
+    process.env.GUARD_STRUCTURE_OK = '1';
+    process.env.DEVKIT_GATE_EVENTS = sink;
+
+    expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(0);
+    expect(runDeterministic(d, { exec, structure: 'bunx eslint src' })).toBe(0);
+
+    expect(exec).toHaveBeenCalledTimes(1); // first run executes size; cached retry executes nothing
+    expect(
+      log.mock.calls.flat().filter((line) => String(line).includes('Structure lint BYPASSED')),
+    ).toHaveLength(1);
+    const bypassEvents = readFileSync(sink, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter(
+        (event) =>
+          event.gate === 'structure-lint' &&
+          event.status === 'could_not_run' &&
+          event.detail === 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
+      );
+    expect(bypassEvents).toHaveLength(1);
+  });
+
+  it('a structure failure prints the explicit base-debt remedy', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const d = repo(['size']);
+    expect(
+      runDeterministic(d, {
+        exec: mkExec({ 'structure/run.mts': 1 }),
+        structure: 'guard-structure gate',
+      }),
+    ).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('export GUARD_STRUCTURE_OK=1');
   });
 
   it('--extra gates run under their own label and aggregate with the built-ins', () => {
@@ -366,6 +449,28 @@ describe('prefixCacheScope', () => {
     process.env.GUARD_COVERAGE_OK = '0';
     expect(prefixCacheScope()).toBeUndefined();
     expect(prefixCacheScope('custom')).toBe('custom');
+  });
+
+  it.each(['GUARD_STRUCTURE_OK', 'GUARD_NO_STRUCTURE'])(
+    '%s salts the scope away from a normal structure run',
+    (key) => {
+      const cleanDefault = prefixCacheScope();
+      const cleanCustom = prefixCacheScope('custom');
+      process.env[key] = '1';
+      expect(prefixCacheScope()).toBe('devkit-guards:structure-bypassed');
+      expect(prefixCacheScope('custom')).toBe('custom:structure-bypassed');
+      expect(prefixCacheScope()).not.toBe(cleanDefault);
+      expect(prefixCacheScope('custom')).not.toBe(cleanCustom);
+    },
+  );
+
+  it('the structure salt composes after strict and coverage salts', () => {
+    process.env.GUARD_DETERMINISTIC_STRICT = '1';
+    process.env.GUARD_COVERAGE_OK = '1';
+    process.env.GUARD_STRUCTURE_OK = '1';
+    expect(prefixCacheScope()).toBe(
+      'devkit-guards:deterministic-strict:coverage-bypassed:structure-bypassed',
+    );
   });
 });
 
