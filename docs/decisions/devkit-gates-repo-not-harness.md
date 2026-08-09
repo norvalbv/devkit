@@ -19,3 +19,16 @@ created: 2026-08-04
 **Revisit-when:** A second independent harness-misuse incident that is NOT self-recovering (the run fails or corrupts state rather than agents improvising back to the correct path), OR one originating from a checked-in devkit script rather than an ad-hoc session script.
 **Scope:** agents-hooks/**,cli/lib/install/hook-registration-ledger/**
 **Source:** shortcut · sc-1368
+
+## Target · 2026-08-09 — Narrow carve-out: hooks may order devkit's own shipped workflow stages
+
+**Context:** prior-art ordering ships as prose in the brainstorming skill; sessions in this repo and consumer repos exit plans and invoke feature-critique without ever dispatching prior-art unless the user intervenes each time. The owner asked for a mechanical guarantee. The prior ruling rejected PreToolUse hooks on harness tools because devkit cannot version a third-party argument schema and must not fail closed against it.
+**Ruling:** PreToolUse hooks validating third-party argument SHAPES remain rejected. A narrow carve-out is granted for ordering devkit's OWN shipped workflow stages: a hook may deny a harness tool call when the denial enforces sequencing that devkit's own skills mandate (prior-art before feature-critique/ExitPlanMode), provided it reads only tool_name and tool_input.subagent_type, denies at most once per session (snooze marker), fails open on every error, and ships as an opt-in component.
+**Consequences:**
+- Positive: Positive: the step-0 ordering devkit ships finally has one mechanical enforcement point; a schema drift upstream degrades to the gate never firing (fail-open), never a false block. Negative: this is the first devkit hook whose subject is a harness tool call rather than the consumer repository; the boundary now requires the reads-only-tool-identity + deny-once + fail-open + opt-in fence to stay principled.
+- Negative: Accepted one bounded exception to the gates-repo-not-harness line in exchange for closing a recurring, non-self-recovering workflow failure; rejected staying prose-only (measurably unfollowed) and rejected hard fail-closed denial (would block legitimate skips and inherit the foreign-schema fragility the original ruling feared).
+**Vision-fit:** Still serves the promise that installing devkit adds obligations only devkit owns: the gate enforces devkit's own published workflow, reads no foreign schema beyond tool identity, and is opt-in — a consumer that never selects priorArtGate is untouched.
+**Revisit-when:** The deny-once gate produces a false block in practice (a denial where neither running prior-art nor stating a skip was appropriate), or upstream renames Task/subagent_type so the gate silently never fires for a full release.
+**Scope:** agents-hooks/**,cli/lib/install/hook-registration-ledger/**
+**Source:** brainstorm
+**Evidence-change:** The revisit trigger fired: a second harness-misuse class that is not self-recovering — agents repeatedly skip the step-0 prior-art stage that devkit's own checked-in brainstorming skill mandates, and no agent improvises back to the correct path without the user manually prompting. Unlike the Workflow-args case, the failing contract is devkit-owned prose (skills/brainstorming/SKILL.md), not a foreign argument schema.
