@@ -90,6 +90,19 @@ describe('inspectIndexFreshness', () => {
     expect(result).toMatchObject({ status: 'fresh', checkedFiles: 1, staleFiles: [] });
   });
 
+  it('normalizes Windows separators in an index read on POSIX', () => {
+    const source = join(root, 'nested', 'path.ts');
+    mkdirSync(join(root, 'nested'), { recursive: true });
+    writeFileSync(source, 'export const current = true;\n');
+    const mtime = statSync(source).mtimeMs;
+    const result = inspectIndexFreshness(
+      freshnessDb([{ file_path: 'nested\\path.ts', min_mtime: mtime, max_mtime: mtime }]),
+      join(root, '.search-code', 'index.db'),
+      { cwd: root, indexPath: '.search-code/index.db' },
+    );
+    expect(result).toMatchObject({ status: 'fresh', staleFiles: [] });
+  });
+
   it('detects the reported failure: an indexed file changed after the index was built', () => {
     const source = join(root, 'changed.ts');
     writeFileSync(source, 'export const current = true;\n');

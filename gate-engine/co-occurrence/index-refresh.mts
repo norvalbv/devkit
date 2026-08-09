@@ -20,6 +20,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 const MTIME_TOLERANCE_MS = 1;
+const BACKSLASH_RE = /\\/g;
 
 export interface IndexFreshnessDb {
   prepare(sql: string): {
@@ -148,7 +149,7 @@ export function inspectIndexFreshness(
 
   const staleFiles: string[] = [];
   for (const row of rows) {
-    const file = typeof row.file_path === 'string' ? row.file_path : '';
+    const file = typeof row.file_path === 'string' ? row.file_path.replace(BACKSLASH_RE, '/') : '';
     if (row.min_mtime == null || row.max_mtime == null) {
       return {
         status: 'unverifiable',

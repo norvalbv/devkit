@@ -18,6 +18,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 const MTIME_TOLERANCE_MS = 1;
+const BACKSLASH_RE = /\\/g;
 /**
  * Absolute working root of the PRIMARY checkout — the one holding the real `.git`. Every linked
  * worktree of a repo shares that common dir, so this resolves to the same place from anywhere in
@@ -119,7 +120,7 @@ export function inspectIndexFreshness(db, indexPath, cfg) {
     }
     const staleFiles = [];
     for (const row of rows) {
-        const file = typeof row.file_path === 'string' ? row.file_path : '';
+        const file = typeof row.file_path === 'string' ? row.file_path.replace(BACKSLASH_RE, '/') : '';
         if (row.min_mtime == null || row.max_mtime == null) {
             return {
                 status: 'unverifiable',
