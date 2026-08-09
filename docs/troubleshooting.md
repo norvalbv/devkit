@@ -49,6 +49,14 @@ permanent approval for a duplication that does not co-exist. A `Freshness NOT ve
 index carries no `raw_code`/`id` (or its paths don't resolve here), so the pairs above it were reported
 unchecked — eyeball the ranges before approving. `GUARD_DUP_VERIFY_TREE=0` disables the check.
 
+## `devkit doctor` reports `search-code index: DRIFT` or `MISSING`
+These index-freshness findings are advisory: they keep their warning glyph but do not make doctor exit
+nonzero. `DRIFT` means the owned index has file stamps behind the checkout; force-refresh the named files
+with `touch <files> && search-code index --seed-files "<files>"`. `MISSING` is common in a clone or linked
+worktree because the index is gitignored: build it locally, or link the primary checkout's `.search-code`
+directory (`devkit ship` does this automatically). Scan-time body verification remains the gate's source
+of truth while the index is stale or its freshness metadata cannot be inspected.
+
 ## Commit blocked because I'm on a protected branch
 Don't hand-roll a branch (that moves a shared checkout's HEAD). Use `devkit ship <branch> "<title>" -- <paths>`
 — it commits onto a new branch and opens a PR **without** moving HEAD, so parallel agents stay undisturbed.
