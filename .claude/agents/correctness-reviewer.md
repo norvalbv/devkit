@@ -67,10 +67,26 @@ performance issue as "correctness" to justify a FAIL.
 
 <workflow>
 
-## 1. Read skill for detailed rules:
-- `.claude/skills/correctness/SKILL.md`
+## 1. Resolve the installed skill and read it for detailed rules
 
-SCRIPT=".claude/skills/correctness/scripts/checklist.mjs"
+CORRECTNESS_SKILL=""
+for candidate in \
+  .agents/skills/correctness \
+  .claude/skills/correctness \
+  .cursor/skills/correctness
+do
+  if [ -f "$candidate/scripts/checklist.mjs" ]; then
+    CORRECTNESS_SKILL="$candidate"
+    break
+  fi
+done
+if [ -z "$CORRECTNESS_SKILL" ]; then
+  echo "Correctness Review checklist unavailable: run devkit sync-skills" >&2
+  exit 2
+fi
+SCRIPT="$CORRECTNESS_SKILL/scripts/checklist.mjs"
+
+Read `$CORRECTNESS_SKILL/SKILL.md` before continuing.
 
 ## 2. Generate the checklist
 ```bash

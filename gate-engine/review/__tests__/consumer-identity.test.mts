@@ -6,11 +6,12 @@
  *     ship-mode identities are two incomparable namespaces and every cross-mode rate is a blend.
  *  2. It never throws. It feeds telemetry, and telemetry must never fail a gate.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { consumerChecklistAssetRoot } from '../cascade/consumer-assets.mts';
 import {
   checklistAssetPath,
   hasChecklist,
@@ -76,6 +77,26 @@ describe('consumerReviewerIdentity', () => {
     const packagedIdentities = preflightReviewAssets(packaged, selected, cfg);
 
     for (const reviewer of REVIEWERS) {
+      expect(consumerReviewerIdentity(root, cfg, reviewer)).toBe(
+        packagedIdentities.get(reviewer.name),
+      );
+    }
+  });
+
+  it('uses a provider-projected skill root for execution identity when Claude skills are absent', () => {
+    const { root, packaged } = consumerFixture();
+    mkdirSync(join(root, '.agents'), { recursive: true });
+    renameSync(join(root, '.claude/skills'), join(root, '.agents/skills'));
+    const cfg = resolveGuardConfig(root);
+    const selected: ReviewerSelection[] = REVIEWERS.map((reviewer) => ({
+      reviewer,
+      files: ['src/example.ts'],
+    }));
+    const packagedIdentities = preflightReviewAssets(packaged, selected, cfg);
+
+    for (const reviewer of REVIEWERS) {
+      if (hasChecklist(reviewer))
+        expect(consumerChecklistAssetRoot(root, reviewer)).toBe('.agents');
       expect(consumerReviewerIdentity(root, cfg, reviewer)).toBe(
         packagedIdentities.get(reviewer.name),
       );

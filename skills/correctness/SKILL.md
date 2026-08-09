@@ -8,7 +8,22 @@ description: Correctness bug hunting for a finished diff. Use when reviewing cha
 ## Review Script
 
 ```bash
-SCRIPT=".claude/skills/correctness/scripts/checklist.mjs"
+CORRECTNESS_SKILL=""
+for candidate in \
+  .agents/skills/correctness \
+  .claude/skills/correctness \
+  .cursor/skills/correctness
+do
+  if [ -f "$candidate/scripts/checklist.mjs" ]; then
+    CORRECTNESS_SKILL="$candidate"
+    break
+  fi
+done
+if [ -z "$CORRECTNESS_SKILL" ]; then
+  echo "Correctness Review checklist unavailable: run devkit sync-skills" >&2
+  exit 2
+fi
+SCRIPT="$CORRECTNESS_SKILL/scripts/checklist.mjs"
 
 node $SCRIPT generate     # Enumerate review items from staged source files (all declared roots)
 node $SCRIPT status       # Show progress

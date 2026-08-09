@@ -270,6 +270,11 @@ describe('allowedToolsFor', () => {
     expect(tools).toContain(',mcp__codebase__searchCode');
     expect(tools).toContain('Bash(node .claude/skills/commit-guard/scripts/checklist.mjs:*)');
   });
+  it('grants a provider-projected checklist path when the consumer resolver supplies one', () => {
+    const tools = allowedToolsFor(REVIEWERS[0], cfg, '.agents');
+    expect(tools).toContain('Bash(node .agents/skills/api-security/scripts/checklist.mjs:*)');
+    expect(tools).not.toContain('Bash(node .claude/skills/api-security/scripts/checklist.mjs:*)');
+  });
   it('a skill-less reviewer (conventions) gets EXACTLY Read,Grep,Glob — no Bash at all, per its AC', () => {
     const conv = REVIEWERS.find((r) => r.name === 'conventions-reviewer');
     expect(allowedToolsFor(conv, cfg)).toBe('Read,Grep,Glob');
@@ -416,16 +421,34 @@ describe('wrapPrompt / escalatePrompt / stripFrontmatter', () => {
     expect(p).toContain('check-item <name> --pass');
     expect(p).toContain('Never delete the checklist artifact');
   });
+  it('rewrites ordinary commit/ship prompts to the resolved consumer checklist root', () => {
+    const p = wrapPrompt(
+      'Try .agents/skills/api-security/SKILL.md, .claude/skills/api-security/SKILL.md, then .cursor/skills/api-security/SKILL.md.',
+      REVIEWERS[0],
+      ['src/main/a.ts'],
+      undefined,
+      undefined,
+      undefined,
+      '.agents',
+    );
+    expect(p).toContain('node .agents/skills/api-security/scripts/checklist.mjs generate');
+    expect(p.match(/\.agents\/skills\/api-security/g)).toHaveLength(6);
+    expect(p).not.toContain('.claude/skills/api-security');
+    expect(p).not.toContain('.cursor/skills/api-security');
+    expect(p).toContain('MANDATORY CHECKLIST WORKFLOW');
+  });
   it('lets the packaged brief own enumeration and rewrites its skill paths in review mode', () => {
     const guard = REVIEWERS.find((r) => r.name === 'commit-guard');
     const p = wrapPrompt(
-      'Read .claude/skills/commit-guard/SKILL.md.',
+      'Try .agents/skills/commit-guard/SKILL.md, .claude/skills/commit-guard/SKILL.md, then .cursor/skills/commit-guard/SKILL.md.',
       guard,
       ['src/a.ts'],
       '/tmp/devkit-review-assets',
     );
     expect(p).toContain('/tmp/devkit-review-assets/skills/commit-guard/SKILL.md');
     expect(p).not.toContain('.claude/skills/commit-guard/SKILL.md');
+    expect(p).not.toContain('.agents/skills/commit-guard');
+    expect(p).not.toContain('.cursor/skills/commit-guard');
     expect(p).toContain('The reviewer brief owns checklist enumeration');
     expect(p).not.toContain('check-file <name>');
   });
