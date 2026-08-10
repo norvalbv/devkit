@@ -15,16 +15,15 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import {
+  assertInterruptedGateKeepsWorktree,
   testExecFileSync as execFileSync,
   hasAnyCommand,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
 
-// Coverage for ship-branch.sh: the pure resolution seam (the fork-upstream bug — gh's default repo
-// can resolve to a fork's UPSTREAM remote instead of origin, opening the PR against the wrong repo;
-// the fix derives owner/repo from `git remote get-url origin`), the isolation guards, the flag/path arg
-// grammar, and the real worktree-commit path (HEAD never moves, the hook fires in the worktree).
-// Hermetic — throwaway repos, SHIP_DRY_RUN / SHIP_RESOLVE_ONLY seams, no gh, no network.
+// Hermetic coverage for ship-branch.sh resolution, isolation, argument parsing, and real worktree
+// commits. The origin-derived repo assertions prevent a fork's upstream from hijacking PR creation;
+// fixtures use throwaway repos and dry-run seams, with no GitHub or network dependency.
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
@@ -973,13 +972,9 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(readFileSync(log, 'utf8')).toMatch(/BLOCK_REASON_XYZ/); // blocking gate's reason captured
   });
 
-  // R2 (commit-with-gate-capture.sh): a HUNG gate that backgrounds a pipe-holding grandchild must NOT
-  // wedge the ship forever. The gate supervisor's process-group kill reaps the hook AND its child so the
-  // capture unblocks; the ship exits 124 fast. The backgrounded `sleep &` is the whole point — a hook that
-  // is merely the sleeper would unblock even under a leader-only signal, so it tests nothing.
-  // These three used to be gated on coreutils `timeout`/`gtimeout` being installed, which stock macOS
-  // lacks — so the hang bound went unverified on the platform devkit is developed on. sc-1199 retired
-  // the coreutils dependency (node + /bin/ps only), so they now run everywhere.
+  // A hung hook with a background pipe-holder must be group-reaped so capture can return 124; a
+  // leader-only kill leaves the child holding the pipe. This runs on stock macOS since sc-1199
+  // replaced the coreutils timeout dependency with Node + /bin/ps.
   it('bounds a hung gate: the backgrounded pipe-holder is reaped, the ship exits 124 fast (not hung)', () => {
     // sleep 30 & → a grandchild inheriting the commit's stdout (the pipe) that outlives a kill-git-only;
     // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
@@ -1003,6 +998,17 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
   });
 
+  it('keeps the new-ship worktree alive until an interrupted gate is fully reaped', async () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    await assertInterruptedGateKeepsWorktree({
+      dir,
+      env,
+      script: scriptPath,
+      args: ['feat/signal-handoff', 't', 'note.txt'],
+      listWorktrees: () => git(['worktree', 'list']),
+    });
+  });
   it('a timeout DURING the reviewer gate names the stage and the reviewers with no completion', () => {
     // The deterministic supervisor fixture records the running set + one checkpointed completion to
     // the progress JSON the ship exported (DEVKIT_REVIEW_PROGRESS), then returns timeout status 124.
