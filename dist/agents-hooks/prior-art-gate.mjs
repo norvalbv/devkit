@@ -7,9 +7,13 @@
  * session" as an empty marker file. PreToolUse (ExitPlanMode|Task|Agent) denies the FIRST
  * ExitPlanMode call or feature-critique dispatch in a session with no such run — once — with
  * a reason that restates the brainstorming skill's skip predicate; the denial itself writes a
- * snooze marker, so every retry that session passes. This orders devkit's OWN shipped workflow
- * stages (the carve-out recorded in docs/decisions/devkit-gates-repo-not-harness.md); it reads
- * only tool identity plus tool_input.subagent_type, never argument shapes or plan content.
+ * snooze marker, so every retry that session passes. A gated call whose plan/prompt already
+ * carries the skill-mandated `Prior-art:` acknowledgment line (verdict or skip note) passes
+ * without any deny and marks the session acknowledged — the gate wants the recorded judgment,
+ * not proof of a run. This orders devkit's OWN shipped workflow stages (the carve-out recorded
+ * in docs/decisions/devkit-gates-repo-not-harness.md); it reads tool identity,
+ * tool_input.subagent_type, and that one devkit-prescribed token — never foreign argument
+ * shapes or plan content beyond the token match.
  *
  * Markers live in ${tmpdir()}/devkit-prior-art/, namespaced by repo root + session id: session
  * ids are globally unique but $TMPDIR is machine-global, and two files (.ran/.snoozed) instead
@@ -33,6 +37,9 @@ import { pathToFileURL } from "node:url";
 const STEP0_SUBAGENT = "prior-art";
 const GATED_SUBAGENT = "feature-critique";
 const SUBAGENT_TOOLS = new Set(["Task", "Agent"]);
+// The one-line disposition the brainstorming skill mandates every plan record
+// (`Prior-art: <verdict> …` or the skip note). Its presence IS the acknowledgment.
+const ACK_TOKEN = "Prior-art:";
 
 export function markerPaths(root, sessionId, tmp = tmpdir()) {
   let real = root;
@@ -78,16 +85,23 @@ export function decide(
     if (!gated) return null; // incl. the Task call that spawns prior-art itself
     const markers = markerPaths(root, input?.session_id, tmp);
     if (existsSync(markers.ran) || existsSync(markers.snoozed)) return null;
+    const text =
+      tool === "ExitPlanMode"
+        ? input?.tool_input?.plan
+        : input?.tool_input?.prompt;
+    // The marker means "acknowledged or already-reminded" — sticky either way.
     mkdirSync(markers.dir, { recursive: true });
     writeFileSync(markers.snoozed, "");
+    if (typeof text === "string" && text.includes(ACK_TOKEN)) return null;
     return (
       "Step-0 prior-art has not run this session. Before finalizing a plan or invoking " +
       "feature-critique, dispatch one fresh `prior-art` subagent (Task tool, subagent_type: " +
       "prior-art) with the problem statement and acknowledge its verdict in the plan — see the " +
       "prior-art skill. Legitimate skips: a trivial creative turn (a rename, copy tweak, " +
       "single-component edit), or no reachable research leg (no resolved " +
-      "research.referenceCheckouts glob AND gh auth fails AND no web tool). If a skip applies, " +
-      "state the skip note in the plan and retry this call — it will be allowed."
+      "research.referenceCheckouts glob AND gh auth fails AND no web tool). Record the " +
+      "disposition as a `Prior-art: <verdict | skipped — reason>` line in the plan (or the " +
+      "critique prompt) and retry this call — a call carrying that line is never denied."
     );
   } catch {
     return null;

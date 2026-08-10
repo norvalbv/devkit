@@ -29,7 +29,8 @@ Usage:
                          --no-adhd (which also removes it on a re-run).
   --prior-art-gate       Install the deny-once step-0 ordering HOOK: the first ExitPlanMode
                          or feature-critique dispatch in a session with no prior-art run is
-                         denied once with the skip predicate; retries pass (off by default).
+                         denied once with the skip predicate; a call whose plan/prompt carries
+                         a \`Prior-art:\` line passes untaxed, and retries pass (off by default).
                          Drop it with --no-prior-art-gate (also removes it on a re-run).
   --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
                          bins; add nothing to package.json. Requires \`bun add -g\` devkit.

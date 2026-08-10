@@ -95,6 +95,43 @@ describe('decide (PreToolUse)', () => {
     }
   });
 
+  it('passes an ExitPlanMode whose plan carries the Prior-art: line, and the pass is sticky', () => {
+    const ack = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'ExitPlanMode',
+      tool_input: { plan: '## Plan\n\nPrior-art: skipped — copy tweak\n\n1. Edit the string.' },
+      session_id: 'sess-1',
+    };
+    expect(decide(ack, root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(true);
+    // acknowledged once — a later gated call WITHOUT the line is not taxed
+    expect(decide(pre('Task', 'feature-critique'), root, tmp)).toBeNull();
+  });
+
+  it('passes a feature-critique dispatch whose prompt carries the Prior-art: line', () => {
+    const ack = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'feature-critique',
+        prompt: 'Critique this plan. Prior-art: GENUINE_NEW_WORK · followed.',
+      },
+      session_id: 'sess-1',
+    };
+    expect(decide(ack, root, tmp)).toBeNull();
+    expect(existsSync(markerPaths(root, 'sess-1', tmp).snoozed)).toBe(true);
+  });
+
+  it('still denies when the plan text exists but lacks the token', () => {
+    const noAck = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'ExitPlanMode',
+      tool_input: { plan: '## Plan\n\n1. Rewrite everything.' },
+      session_id: 'sess-1',
+    };
+    expect(decide(noAck, root, tmp)).not.toBeNull();
+  });
+
   it('falls back to a shared "unknown" session bucket when session_id is absent', () => {
     const input = { hook_event_name: 'PreToolUse', tool_name: 'ExitPlanMode', tool_input: {} };
     expect(decide(input, root, tmp)).not.toBeNull();
