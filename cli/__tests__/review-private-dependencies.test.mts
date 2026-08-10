@@ -384,6 +384,7 @@ describe('private review dependency runtime', () => {
   it('preserves the shipping dependency link and refreshes packaged reviewer assets', () => {
     const { source, destination } = fixture('prepare-shipping');
     write(source, '.husky/_/pre-commit', 'runner\n');
+    chmodSync(join(source, '.husky/_/pre-commit'), 0o755);
     write(source, 'node_modules/pkg/index.js');
     write(source, '.claude/agents/api-security-reviewer.md', 'stale agent\n');
     write(source, '.claude/skills/api-security/scripts/checklist.mjs', 'stale checklist\n');
@@ -411,6 +412,7 @@ describe('private review dependency runtime', () => {
   it('projects packaged reviewer assets when the ship caller has no .claude projection', () => {
     const { source, destination } = fixture('prepare-ship-without-projection');
     write(source, '.husky/_/pre-commit', 'runner\n');
+    chmodSync(join(source, '.husky/_/pre-commit'), 0o755);
     write(source, 'node_modules/pkg/index.js');
 
     const result = prepare(source, destination, 'shipping');

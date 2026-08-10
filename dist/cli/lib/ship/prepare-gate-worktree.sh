@@ -220,13 +220,31 @@ gate_node_modules_source() {
   return 2
 }
 
-# The hook git will ACTUALLY run in the ephemeral worktree, or '' when nothing is configured.
-# Resolved, never hardcoded: husky points core.hooksPath at `.husky/_`, an overlay install points it
-# at `.devkit/hooks` (overlay.mts), and it may be unset entirely.
+# The pre-commit hook ship will run in the ephemeral worktree. This is the single resolver shared by
+# preparation and commit: overlay wins when projected, an explicit core.hooksPath is honoured, an
+# unset path falls back to the projected package-mode Husky runner, and Git's default hooks directory
+# is the final candidate. Returning a non-executable candidate is intentional — callers fail closed
+# with a useful path instead of treating absence as an opt-out.
 gate_worktree_pre_commit() {
-  local wt=$1 hooks_path
+  local wt=$1 root=${2:-} hooks_path default_hooks_dir
+  if [ -n "$root" ] && [ -x "$root/.devkit/hooks/pre-commit" ]; then
+    printf '%s\n' "$wt/.devkit/hooks/pre-commit"
+    return 0
+  fi
   hooks_path=$(git -C "$wt" config --get core.hooksPath 2>/dev/null) || hooks_path=''
-  [ -n "$hooks_path" ] || return 0
+  if [ -z "$hooks_path" ]; then
+    if [ -e "$wt/.husky/_/pre-commit" ] || [ -L "$wt/.husky/_/pre-commit" ]; then
+      printf '%s\n' "$wt/.husky/_/pre-commit"
+      return 0
+    fi
+    default_hooks_dir=$(git -C "$wt" rev-parse --git-path hooks 2>/dev/null) || default_hooks_dir=''
+    [ -n "$default_hooks_dir" ] || return 0
+    case $default_hooks_dir in
+      /*) printf '%s\n' "$default_hooks_dir/pre-commit" ;;
+      *) printf '%s\n' "$wt/$default_hooks_dir/pre-commit" ;;
+    esac
+    return 0
+  fi
   case $hooks_path in
     /*) printf '%s\n' "$hooks_path/pre-commit" ;;
     *) printf '%s\n' "$wt/$hooks_path/pre-commit" ;;
@@ -315,12 +333,11 @@ prepare_gate_worktree() {
     echo "  ↳ $purpose: linked $d ← $source" >&2
   done
 
-  # Postcondition, not a resolution question: a `.husky/_` that is populated but carries no pre-commit
-  # shim passes every test above, and the ship then commits and opens a PR with ZERO gates — the exact
-  # fail-open the .husky/_ preflight exists to prevent. Skipped when no hooksPath is configured, which
-  # leaves that case exactly as it was.
+  # Postcondition, not a second resolution question: a projected hook directory that carries no
+  # executable pre-commit shim must never reach `git commit`. The shared resolver includes the
+  # hooksPath-unset package-mode fallback, closing the clean-clone fail-open before reviewers run.
   local pre_commit
-  pre_commit=$(gate_worktree_pre_commit "$wt")
+  pre_commit=$(gate_worktree_pre_commit "$wt" "$root")
   if [ -n "$pre_commit" ] && [ ! -x "$pre_commit" ]; then
     echo "no executable pre-commit hook at $pre_commit — the $purpose worktree would commit with NO gate chain (gates must not fail open)" >&2
     return 1
