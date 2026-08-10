@@ -35,3 +35,16 @@ created: 2026-08-06
 **Scope:** agents-hooks/prior-art-gate.mjs,agents/prior-art.md,skills/prior-art/**,skills/brainstorming/**,gate-engine/prior-art/**
 **Source:** brainstorm
 **Evidence-change:** Advisory-only ordering is measurably unfollowed: agents skip step-0 unless the user manually prompts every session. Deny-once-then-allow is the minimum mechanical strength that cannot block a legitimate skip.
+
+## Target · 2026-08-10 — Acknowledgment-token pass: a gated call whose ExitPlanMode plan or feature-critique prompt already c
+
+**Context:** The previous Target on this axis gave step-0 mechanical deny-once enforcement: first ExitPlanMode or feature-critique dispatch with no recorded prior-art run is denied once, retry passes. The brainstorming skill independently mandates every plan record a one-line `Prior-art:` disposition — verdict, or the trivial/no-leg skip note. The gate ignored that line, so the session that followed the skill to the letter was indistinguishable from one that never thought about step-0.
+**Ruling:** Acknowledgment-token pass: a gated call whose ExitPlanMode plan or feature-critique prompt already contains a `Prior-art:` line passes silently and marks the session acknowledged (same sticky marker as the post-deny snooze); a gated call without it is denied once exactly as before, with a deny reason that names the line to add. The judgment of WHETHER to run prior-art stays entirely in the model per the skill written predicate — the hook verifies the judgment was recorded, never re-makes it. Verdict substance stays advisory; SubagentStop stays dead code; run detection stays PostToolUse-on-Task.
+**Consequences:**
+- Positive: Trivial plans with the skip note sail through with zero denies, removing the last friction argument against the component. Sessions unaware of the convention (a debugging plan-mode session that never brainstormed) still pay one teaching deny — accepted, since removing it requires content judgment the hook must not have. The token is now load-bearing in two places (skill prose and hook) and they must not drift.
+- Negative: Rejected leaving deny-once untouched: it punishes the exact behavior the skill asks for. Rejected gating feature-critique only: any plan that skips critique would escape enforcement entirely. Rejected content heuristics for triviality: non-deterministic, and no diff exists at plan time to measure.
+**Vision-fit:** Recommended-not-forced, mechanically: the gate never forces a run, it forces the one-line acknowledgment the skill already requires, and only when even that is absent.
+**Revisit-when:** Telemetry shows token-pasting without a real step-0 decision on problem-shaped work; the skill line format changes; the acknowledgment marker needs to survive compaction or session restarts.
+**Scope:** agents-hooks/prior-art-gate.mjs,skills/brainstorming/**
+**Source:** brainstorm
+**Evidence-change:** User-observed defect in the just-shipped deny-once gate: a one-line change whose plan carries the skill-mandated skip note (`Prior-art: skipped — <reason>`) still eats the session one deny. The gate taxed compliance identically to omission.
