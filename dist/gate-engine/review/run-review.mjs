@@ -31,233 +31,26 @@
  */
 import { envFlag, resolveGuardConfig } from "../config.mjs";
 import { emitCacheHit } from "../judge/gate-events.mjs";
-import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
 import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
-import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
+import { execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache } from "./cache.mjs";
-import { renderGoverningClaudeMd } from "./claude-md.mjs";
-import { buildCappedDiffEvidence } from "./diff-evidence.mjs";
+import { runCascade } from "./cascade/reviewer.mjs";
 import { loadReviewerContext } from "./evidence/commit-message.mjs";
-import { attachItems } from "./evidence/items.mjs";
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from "./evidence/scope.mjs";
 import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
 import { reviewerTargetSalts } from "./evidence/targets-block.mjs";
 import { emitMergedLensResults, mapLimit, planReviewWork, taskLabel } from "./lens/split.mjs";
-import { applyOverrideValve } from "./overrides.mjs";
 import { clearProgress, writeProgress } from "./progress.mjs";
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from "./recovery/settle.mjs";
-import { allowedToolsFor, cacheKey, effectiveReviewConfig, escalatePrompt, hasChecklist, parseReviewVerdict, selectReviewers, wrapConventionsPrompt, wrapPrompt, } from "./reviewers.mjs";
-import { agentBody, cleanupChecklistState, enforceChecklistContract, gateJudgeEnv, initializeCommitGuardChecklist, passAssetVerifier, preflightReviewAssets, readChecklistState, resolveReviewerIdentities, skippedReviewers, withStagedFiles, } from "./runtime.mjs";
+import { cacheKey, effectiveReviewConfig, selectReviewers, } from "./reviewers.mjs";
+import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, skippedReviewers, } from "./runtime.mjs";
 import { ReviewGateTiming, reviewConcurrency } from "./telemetry/timing.mjs";
+export { runCascade };
 // A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
-// remedy branches on it (see the inconclusive loop). Matches the reasons set in cascadeVerdict
-// (`agent brief …`) and verifyChecklist (`checklist artifact missing …`).
+// remedy branches on it (see the inconclusive loop).
 const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
-// A cap kill, likewise, is the gate's OWN contention kill — not auth/quota. Matches the reasons
-// cascadeVerdict sets from the judge's outage KIND (`judge timed out` / `escalation timed out`).
+// A cap kill, likewise, is the gate's OWN contention kill — not auth/quota.
 const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
-// Every pass here — first, strict first, opus escalation — runs on the SHARED DEEP_JUDGE_TIMEOUT_MS
-// (judge/run-judge.mts), as does the commit-msg completeness judge; the 30-min rationale lives with
-// the constant. Three same-valued locals here is exactly how it drifted from completeness (sc-1227).
-// Budget arithmetic — the ship ceiling bounds the WHOLE hook chain, not this gate alone: deterministic
-// prefix ~240s + decisions ≤60s (both ≈0 on a cache hit) + this cascade gate + completeness on the same
-// cap. PER-CASCADE worst ≈ 1800 (first) + 1800 (escalate) = 3600s; under the concurrency cap (default
-// 2, see the docblock) cascades run in ceil(N/K) WAVES, so the theoretical worst far exceeds
-// SHIP_COMMIT_TIMEOUT (3600s) — by design: a killed ship CONVERGES on re-run because PASSes checkpoint
-// per-completion and the caches skip what was earned (docs/decisions/ship-gates-converge-not-restart.md).
-// Only correctness nears the cap; the rest finish <300s, so a real ship is one slow wave + fast waves.
-/**
- * One reviewer's cascade → {name, status: 'pass'|'fail'|'inconclusive', reason, escalated}.
- * `exec` is injectable for tests; the gate always passes execJudgeAsync.
- *
- * Wraps the verdict cascade with the checklist-artifact contract: the state file is cleaned
- * BEFORE the judge runs (a stale artifact from an interactive session must never satisfy the
- * gate), a PASS is voided to inconclusive when the artifact is missing/incomplete/inconsistent
- * (verifyChecklist), and the artifact is removed afterwards either way.
- */
-export async function runCascade(sel, opts) {
-    const { cwd } = opts;
-    cleanupChecklistState(cwd, sel.reviewer);
-    try {
-        initializeCommitGuardChecklist(cwd, sel.reviewer, opts.assetRoot, opts.judgeEnv);
-        let res = await cascadeVerdict(sel, opts);
-        res = await enforceChecklistContract(sel, res, cwd, opts.assetRoot, async (reason) => {
-            // sc-1476: under 'defer', the contract miss is PARKED for the post-wave serial phase (haiku
-            // compliance degrades under concurrent load — retrying inside the same wave re-fails).
-            // Under 'final' (the deferred attempt), a repeated miss is terminal. One attempt total.
-            if (opts.recovery === 'defer')
-                return { ...res, status: 'inconclusive', reason, retryable: reason };
-            if (opts.recovery === 'final')
-                return {
-                    ...res,
-                    status: 'error',
-                    reason: `reviewer checklist contract failed after one retry — ${reason}`,
-                };
-            // Unreachable: only the review lane sets assetRoot (the callback's gate), always with a mode.
-            throw new Error(`checklist recovery has no scheduling mode — ${reason}`);
-        });
-        const disposition = applyOverrideValve(sel, res, cwd, {
-            readState: () => readChecklistState(cwd, sel.reviewer),
-            stagedDiff: () => gitCached(cwd, [], sel.files),
-        });
-        attachItems(res, readChecklistState(cwd, sel.reviewer), disposition);
-        return res;
-    }
-    finally {
-        cleanupChecklistState(cwd, sel.reviewer);
-    }
-}
-async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, promptExtras, }) {
-    const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files); // sc-1439
-    const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
-    if (body === null)
-        // A missing brief must never be judged as an EMPTY brief (a wrapper-only prompt fake-passes):
-        // inconclusive → fail-open on a normal commit, fail-closed on a ship — exactly the loudness
-        // an updated-CLI-but-unsynced-agents consumer needs.
-        return {
-            name: reviewer.name,
-            status: 'inconclusive',
-            reason: `agent brief ${reviewer.name}.md missing under ${cfg.review.agentsDir} — run devkit sync-agents && devkit sync-skills`,
-            escalated: false,
-        };
-    // A skill-less reviewer (no checklist, no Bash) gets its evidence PRE-RENDERED instead of a
-    // "fetch it yourself" instruction: the capped diff (diff-evidence.mts) rides on stdin exactly
-    // like completeness.mts's judge, and the governing CLAUDE.md rules (claude-md.mts) are baked
-    // into the prompt itself.
-    const stat = gitCached(cwd, ['--stat'], files);
-    const prompt = hasChecklist(reviewer)
-        ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras)
-        : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
-    // sc-1441: every judge gets capped per-file evidence on stdin, not a bare stat — a judge that
-    // reads real hunks up front misses less; the caps are NAMED and Bash still fetches full hunks.
-    const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
-    const args = (p, model) => [
-        '-p',
-        p,
-        '--model',
-        model,
-        ...JUDGE_ISOLATION,
-        '--allowedTools',
-        allowedToolsFor(reviewer, cfg, assetRoot),
-    ];
-    // A model-pinned reviewer (correctness, conventions) runs single-pass at its pinned model — no escalation.
-    const passModel = reviewer.model ?? firstModel;
-    let firstOutage;
-    const firstOpts = {
-        label: `review:${reviewer.name}`,
-        args: args(prompt, passModel),
-        input,
-        timeout: DEEP_JUDGE_TIMEOUT_MS,
-        cwd,
-        transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-        env,
-        onOutage: (kind) => {
-            firstOutage = kind;
-        },
-    };
-    let first = await exec(firstOpts);
-    if (first === null && retryFirst && firstOutage !== 'timeout') {
-        // Strict (ship) runs get ONE first-pass retry — a TRANSIENT/empty failure must not fail a ship
-        // closed. A TIMEOUT is NOT retried: the pass already had the full DEEP_JUDGE_TIMEOUT_MS (a
-        // contended judge got its time UP FRONT), so a re-run burns the same budget again past the ship
-        // ceiling. The escalation pass never retries: outage stays inconclusive.
-        // Colon (not " — ") on purpose: the ship timeout banner's awk reads `<name> — ` as COMPLETED.
-        console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
-        cleanupChecklistState(cwd, reviewer); // a dead first pass may have left partial rows
-        initializeCommitGuardChecklist(cwd, reviewer, assetRoot, judgeEnv);
-        first = await exec(firstOpts);
-    }
-    if (first === null)
-        return {
-            name: reviewer.name,
-            status: 'inconclusive',
-            // The CAUSE rides in the reason so the strict remedy can name it (sc-1227): a cap kill is
-            // not an auth/quota outage, and that remedy wastes the operator's time on a healthy CLI.
-            reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
-            escalated: false,
-            model: passModel,
-        };
-    const firstVerdict = parseReviewVerdict(first);
-    if (firstVerdict.verdict === 'PASS')
-        // Keep the judge's one-line PASS reason (the tail of its VERDICT line) instead of dropping it —
-        // it flows to the telemetry event + the terminal line, and `first` is persisted as a transcript.
-        return {
-            name: reviewer.name,
-            status: 'pass',
-            reason: firstVerdict.reason,
-            escalated: false,
-            model: passModel,
-            transcript: first,
-        };
-    if (firstVerdict.verdict === null)
-        return {
-            name: reviewer.name,
-            status: 'inconclusive',
-            reason: 'no VERDICT line',
-            escalated: false,
-            model: passModel,
-            transcript: first,
-        };
-    // Single-pass (model-pinned) reviewer: this FAIL is final — no opus escalation to second-guess it.
-    if (reviewer.model)
-        return {
-            name: reviewer.name,
-            status: 'fail',
-            reason: firstVerdict.reason,
-            escalated: false,
-            model: passModel,
-            transcript: first,
-        };
-    let secondOutage;
-    const second = await exec({
-        label: `review:${reviewer.name}:escalate`,
-        args: args(escalatePrompt(prompt, first), 'opus'),
-        input,
-        timeout: DEEP_JUDGE_TIMEOUT_MS, // opus re-investigation; only fires pre-block, never retried
-        cwd,
-        transcript: false, // this gate persists its own review-<name> transcript — don't store twice
-        env,
-        onOutage: (kind) => {
-            secondOutage = kind;
-        },
-    });
-    if (second === null)
-        return {
-            name: reviewer.name,
-            status: 'inconclusive',
-            reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
-            escalated: true,
-            model: passModel,
-            transcript: first, // the first-pass FAIL evidence survives even when opus was dark
-        };
-    const finalVerdict = parseReviewVerdict(second);
-    if (finalVerdict.verdict === 'FAIL')
-        return {
-            name: reviewer.name,
-            status: 'fail',
-            reason: finalVerdict.reason,
-            escalated: true,
-            model: passModel,
-            transcript: second,
-        };
-    if (finalVerdict.verdict === 'PASS')
-        return {
-            name: reviewer.name,
-            status: 'pass',
-            reason: finalVerdict.reason,
-            escalated: true,
-            model: passModel,
-            transcript: second,
-        };
-    return {
-        name: reviewer.name,
-        status: 'inconclusive',
-        reason: 'no VERDICT line',
-        escalated: true,
-        model: passModel,
-        transcript: second,
-    };
-}
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
  * `reviewConcurrency()` cascades in flight (GUARD_REVIEW_CONCURRENCY, default 6) — so under machine

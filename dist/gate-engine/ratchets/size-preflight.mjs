@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { stagedSet } from "./git-index.mjs";
+import { gitPrefix, stagedSet } from "./git-index.mjs";
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
 function readLinesBaseline(file) {
     if (!existsSync(file))
@@ -15,10 +15,7 @@ function readLinesBaselineAtRef(root, ref) {
         cwd: root,
         stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const prefix = execFileSync('git', ['rev-parse', '--show-prefix'], {
-        cwd: root,
-        encoding: 'utf8',
-    }).trim();
+    const prefix = gitPrefix(root);
     let text;
     try {
         text = execFileSync('git', ['show', `${ref}:${prefix}${LINES_BASELINE}`], {
