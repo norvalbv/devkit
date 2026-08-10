@@ -21,7 +21,6 @@ import {
   applyOverlayConstraints,
   COMPONENTS,
   CONFIG_DRIVEN_STRUCTURE,
-  defaultSelection,
   dropUndecided,
   GUARD_IDS,
   normalizeReviewProfile,
@@ -49,6 +48,8 @@ import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/hus
 import { ADHD_SKILL_DIR, syncAdhdSkill } from '../lib/install/adhd-skill.mts';
 import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-assets/agent-surfaces.mts';
 import { resolveAssetConflicts } from '../lib/install/agent-assets/asset-conflict-picker.mts';
+import { parseFlags, selectionFromFlags } from '../lib/install/flags/init-flags.mts';
+import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
   ensureFallowGitignore,
@@ -58,11 +59,6 @@ import {
 } from '../lib/install/install-fallow.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
-import {
-  parseReviewFlags,
-  type ReviewFlagValues,
-  reviewPlanFromFlags,
-} from '../lib/install/review-profile.mts';
 import { installOverlay } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mts';
@@ -121,6 +117,7 @@ interface RecordedComponents {
   searchCode?: boolean;
   lineGrowth?: boolean;
   adhd?: boolean;
+  priorArtGate?: boolean;
   agentTargets?: string[];
   guards?: string[];
 }
@@ -192,99 +189,6 @@ interface InitPlan {
 // block builders (buildFullHook / buildGuardBlock / installStandaloneHook) consume.
 type HookSelectionInput = Selection & { structureCmd?: string };
 
-interface InitFlags extends ReviewFlagValues {
-  yes: boolean;
-  dryRun: boolean;
-  force: boolean;
-  stack: string | null;
-  removeDeselected: boolean;
-  fallow: boolean;
-  searchSteering: boolean;
-  agentHooks: boolean;
-  searchCode: boolean;
-  adhd: boolean;
-  standalone: boolean;
-  overlay: boolean;
-  baselinesOnly: boolean;
-  no: Set<string>;
-  guards: string[] | null;
-  scanRoots: string[] | null;
-  // Opt-in overlay-only flag; set lazily when --global-commit-gate is passed.
-  globalCommitGate?: boolean;
-}
-
-function parseFlags(args: string[]): InitFlags {
-  const flags: InitFlags = {
-    yes: false,
-    dryRun: false,
-    force: false,
-    stack: null,
-    removeDeselected: false,
-    fallow: false,
-    searchSteering: false,
-    agentHooks: false,
-    searchCode: false,
-    adhd: false,
-    standalone: false,
-    overlay: false,
-    baselinesOnly: false,
-    no: new Set(),
-    guards: null,
-    scanRoots: null,
-    ...parseReviewFlags(args),
-  };
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--yes' || a === '-y') flags.yes = true;
-    else if (a === '--dry-run') flags.dryRun = true;
-    else if (a === '--force') flags.force = true;
-    else if (a === '--remove-deselected') flags.removeDeselected = true;
-    else if (a === '--fallow') flags.fallow = true;
-    else if (a === '--search-steering') flags.searchSteering = true;
-    else if (a === '--agent-hooks') flags.agentHooks = true;
-    else if (a === '--search-code') flags.searchCode = true;
-    else if (a === '--adhd') flags.adhd = true;
-    else if (a === '--standalone') flags.standalone = true;
-    else if (a === '--overlay') flags.overlay = true;
-    else if (a === '--global-commit-gate') flags.globalCommitGate = true;
-    else if (a === '--baselines-only') flags.baselinesOnly = true;
-    else if (a === '--stack') flags.stack = args[++i];
-    else if (a === '--guards') flags.guards = (args[++i] ?? '').split(',').map((g) => g.trim());
-    // --scan-root <comma-list>: override guard.config.json scanRoots up front, so the freezes
-    // + the react-app structureRoot grandfather a non-standard tree (e.g. services/webapp/src).
-    else if (a === '--scan-root' || a === '--scan-roots')
-      flags.scanRoots = (args[++i] ?? '')
-        .split(',')
-        .map((r) => r.trim())
-        .filter(Boolean);
-    else if (a.startsWith('--no-')) flags.no.add(a.slice('--no-'.length));
-  }
-  return flags;
-}
-
-// Build a selection from flags (the --yes / non-TTY path): all recommended, minus --no-*,
-// guards narrowed by --guards / --no-guards.
-function selectionFromFlags(flags: InitFlags): Selection {
-  const sel = defaultSelection();
-  for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure'] as const) {
-    if (flags.no.has(id)) sel[id] = false;
-  }
-  if (flags.no.has('guards')) sel.guards = [];
-  else if (flags.guards) sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
-  // Line-growth block is recommended-on; --no-line-growth opts out under --yes / non-TTY.
-  if (flags.no.has('line-growth')) sel.lineGrowth = false;
-  // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
-  sel.fallow = flags.fallow && !flags.no.has('fallow');
-  sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
-  sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
-  sel.searchCode = flags.searchCode && !flags.no.has('search-code');
-  // The vendored i-have-adhd skill: opt-in even under --yes (an output-style preference).
-  sel.adhd = flags.adhd && !flags.no.has('adhd');
-  // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
-  sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
-  return sel;
-}
-
 // Which components are currently wired? Read the recorded set first (authoritative), then
 // fall back to on-disk detection for a pre-wizard repo with no `components` block.
 function detectInstalled(cwd: string) {
@@ -303,6 +207,7 @@ function detectInstalled(cwd: string) {
       'husky',
       'structure',
       'adhd',
+      'priorArtGate',
     ] as const) {
       if (recorded[id]) installed.add(id);
     }
@@ -853,6 +758,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
       fallow: fallowWired,
       adhd: Boolean(selection.adhd),
+      priorArtGate: Boolean(selection.priorArtGate),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     } as Record<string, unknown>,
     plan.undecided,
@@ -1097,6 +1003,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     // Always written, including `false` — an ABSENT key is what marks a repo as never-offered, so
     // recording the decline is what stops `devkit upgrade` re-asking (see unofferedComponents).
     adhd: Boolean(selection.adhd),
+    priorArtGate: Boolean(selection.priorArtGate),
     agentTargets: [...agentTargets],
     // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
     // owns an agent pre-edit hook, so it remains authoritative in config even without husky.
@@ -1276,4 +1183,6 @@ export default async function run(args: string[], cwd: string) {
   return 0;
 }
 
+// parseFlags/selectionFromFlags re-exported for existing test importers; they live in
+// cli/lib/install/flags/init-flags.mts now.
 export { detectInstalled, parseFlags, selectionFromFlags };

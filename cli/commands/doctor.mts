@@ -170,6 +170,7 @@ function selectionFlags(sel: Partial<Selection>): string[] {
     ['agentHooks', '--agent-hooks'],
     ['searchCode', '--search-code'],
     ['adhd', '--adhd'],
+    ['priorArtGate', '--prior-art-gate'],
   ] as const)
     if (sel[id]) flags.push(flag);
   if (!sel.guards?.length) flags.push('--no-guards');

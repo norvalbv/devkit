@@ -10,7 +10,7 @@ import {
   type ReviewProfile,
   type Selection,
 } from '../../components.mts';
-import { reviewGuardIssues } from '../../install/review-profile.mts';
+import { reviewGuardIssues } from '../../install/flags/review-profile.mts';
 import { normalizeSafeReviewRelativePath } from './runtime-paths.mts';
 import { fail, objectValue } from './shared/common.mts';
 
