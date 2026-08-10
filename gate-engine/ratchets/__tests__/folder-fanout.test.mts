@@ -74,6 +74,16 @@ describe('countFanout', () => {
     expect(counts['ignored-root/d']).toBeUndefined();
   });
 
+  it('counts an explicit skip-named scanRoot while still skipping one nested below another root', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['dist', 'src'] });
+    fill(root, 'dist', 3);
+    fill(root, 'src/out', 4);
+    const counts = countFanout(root);
+    expect(counts.dist).toBe(3);
+    expect(counts['src/out']).toBeUndefined();
+  });
+
   it('exempts only config.fanoutExempt dirs (NOT hardcoded — opt-in per consumer)', () => {
     const root = makeRoot();
     writeConfig(root, {
@@ -144,6 +154,21 @@ describe('CLI freeze/gate contract', () => {
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('src/new-pile');
+  });
+
+  it('gate counts a skip-named scanRoot in both HEAD and the pending index', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['dist'] });
+    fill(root, 'dist', FANOUT_CAP);
+    gitAdd(root, '.');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    fill(root, 'dist', FANOUT_CAP + 1);
+    gitAdd(root, 'dist');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('dist: 13 files');
   });
 
   it('freeze writes NO baseline when no folder is over cap (no empty file left on disk)', () => {
@@ -232,5 +257,151 @@ describe('CLI freeze/gate contract', () => {
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('socket-server/src/new-pile');
+  });
+
+  it('freeze names folders that grew since the previous freeze', () => {
+    const root = makeRoot();
+    fill(root, 'src/pile', 20);
+    run(root, 'freeze');
+    fill(root, 'src/pile', 22);
+    const r = run(root, 'freeze');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('grew since the last freeze');
+    expect(r.stdout).toContain('src/pile: 20 → 22');
+  });
+});
+
+// The gate must fail the CHANGE that broke the cap, never whoever commits next. These cases use a
+// real repository and index because that is the only context where "this change" is defined.
+describe('attribution — pending index against HEAD', () => {
+  const run = (root, cmd, cwd = root) =>
+    spawnSync(process.execPath, [SCRIPT, cmd], { cwd, encoding: 'utf8' });
+
+  const driftedRepo = (piled = 24, frozenAt = 23) => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {});
+    fill(root, 'src/pile', frozenAt);
+    run(root, 'freeze');
+    fill(root, 'src/pile', piled);
+    mkdirSync(join(root, 'src/other'), { recursive: true });
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'seed with drift'], { cwd: root });
+    return root;
+  };
+
+  it('does not blame an unrelated change for existing fan-out drift', () => {
+    const root = driftedRepo();
+    writeFileSync(join(root, 'src/other/unrelated.ts'), 'export {};\n');
+    gitAdd(root, 'src/other/unrelated.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('Folder fan-out exceeded');
+  });
+
+  it('reports drift separately with the baseline-refresh remedy', () => {
+    const root = driftedRepo();
+    writeFileSync(join(root, 'src/other/unrelated.ts'), 'export {};\n');
+    gitAdd(root, 'src/other/unrelated.ts');
+    const r = run(root, 'gate');
+    expect(r.stdout).toContain('drifted above their baseline');
+    expect(r.stdout).toContain('src/pile: 24 files (baseline 23)');
+    expect(r.stdout).toContain('guard-fanout freeze');
+    expect(r.stdout).not.toContain('Split into cohesive kebab subfolders');
+    expect(r.stdout).not.toContain('Folder fan-out exceeded');
+  });
+
+  it('still blocks a change that grows the drifted folder further', () => {
+    const root = driftedRepo();
+    writeFileSync(join(root, 'src/pile/grown.ts'), 'export {};\n');
+    gitAdd(root, 'src/pile/grown.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/pile: 25 files (allowed 23)');
+    expect(r.stderr).toContain('Split into cohesive kebab subfolders');
+  });
+
+  it('blocks a fresh folder crossing the cap', () => {
+    const root = driftedRepo();
+    fill(root, 'src/brand-new', FANOUT_CAP + 1);
+    gitAdd(root, 'src/brand-new');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/brand-new');
+  });
+
+  it('blocks drift with a clean index, preserving the CI backstop', () => {
+    const root = driftedRepo();
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/pile: 24 files (allowed 23)');
+  });
+
+  it("ignores a parallel agent's untracked files", () => {
+    const root = driftedRepo();
+    for (const name of ['p1', 'p2', 'p3'])
+      writeFileSync(join(root, `src/pile/${name}.ts`), 'export {};\n');
+    writeFileSync(join(root, 'src/pile/file-0.ts'), 'export {}; // edited\n');
+    gitAdd(root, 'src/pile/file-0.ts');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('src/pile: 24 files (baseline 23)');
+  });
+
+  it('catches a merge that creates an aggregate pile neither parent had', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {});
+    fill(root, 'src/pile', 8);
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'fork point'], { cwd: root });
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+
+    git('checkout', '-qb', 'branch-a');
+    for (let i = 0; i < 4; i++) writeFileSync(join(root, `src/pile/a${i}.ts`), 'export {};\n');
+    gitAdd(root, '-A');
+    git('commit', '-qm', 'branch a adds 4');
+
+    git('checkout', '-q', git('rev-parse', 'HEAD~1').trim());
+    git('checkout', '-qb', 'branch-b');
+    for (let i = 0; i < 4; i++) writeFileSync(join(root, `src/pile/b${i}.ts`), 'export {};\n');
+    gitAdd(root, '-A');
+    git('commit', '-qm', 'branch b adds 4');
+
+    spawnSync('git', ['merge', '--no-commit', '--no-ff', 'branch-a'], { cwd: root });
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/pile');
+  });
+
+  it('enforces from a monorepo package-directory install', () => {
+    const repo = makeRoot();
+    gitInit(repo);
+    const pkg = join(repo, 'packages/app');
+    mkdirSync(pkg, { recursive: true });
+    writeConfig(pkg, {});
+    mkdirSync(join(repo, 'other/src'), { recursive: true });
+    writeFileSync(join(repo, 'other/src/sibling.ts'), 'export {};\n');
+    fill(pkg, 'src/pile', FANOUT_CAP);
+    run(pkg, 'freeze', pkg);
+    gitAdd(repo, '-A');
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: repo });
+
+    writeFileSync(join(pkg, 'src/pile/over.ts'), 'export {};\n');
+    execFileSync('git', ['add', 'src/pile/over.ts'], { cwd: pkg });
+    const r = run(pkg, 'gate', pkg);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`src/pile: ${FANOUT_CAP + 1} files`);
+  });
+
+  it('treats every over-cap folder as new on an unborn HEAD', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {});
+    fill(root, 'src/pile', FANOUT_CAP + 1);
+    gitAdd(root, '-A');
+    const r = run(root, 'gate');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('src/pile');
   });
 });

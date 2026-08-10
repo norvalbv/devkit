@@ -41,6 +41,12 @@ export function hasStagedFiles(root: string): boolean {
   }
 }
 
+// Split a NUL-delimited git list. `-z` is used so a path containing a newline (or one git would
+// otherwise quote and escape) survives verbatim.
+function splitNul(out: string): string[] {
+  return out.split('\0').filter((line) => line.length > 0);
+}
+
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
 // During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
 // intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH
@@ -128,4 +134,36 @@ export function pullRequestScope(root: string): Set<string> | null {
   if (scope) return scope;
   console.error(`guard-size: pull-request base is unavailable: ${baseRef}`);
   process.exit(2);
+}
+
+// Every tracked path in the git INDEX — the tree the pending commit will record — CWD-relative.
+// `git ls-files` is already scoped and addressed to the cwd. Deduped: an UNMERGED index lists a
+// conflicted path once per stage (1/2/3), and a conflicted file is still one file. Returns null when
+// git is unavailable, so callers can fall back to the filesystem.
+export function indexFiles(root: string): string[] | null {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--cached'], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    return [...new Set(splitNul(out))];
+  } catch {
+    return null;
+  }
+}
+
+// Every tracked path in `ref`'s tree, CWD-relative (same scoping as indexFiles). Returns null when
+// the ref cannot be resolved — an UNBORN HEAD on a repo's first commit is the common case, and
+// answering "no prior state" there is correct: on an initial commit every file IS new.
+export function treeFilesAtRef(root: string, ref = 'HEAD'): string[] | null {
+  try {
+    const out = execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', ref], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return splitNul(out);
+  } catch {
+    return null;
+  }
 }

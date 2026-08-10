@@ -39,6 +39,11 @@ export function hasStagedFiles(root) {
         return false;
     }
 }
+// Split a NUL-delimited git list. `-z` is used so a path containing a newline (or one git would
+// otherwise quote and escape) survives verbatim.
+function splitNul(out) {
+    return out.split('\0').filter((line) => line.length > 0);
+}
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
 // During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
 // intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH
@@ -67,6 +72,82 @@ export function stagedSet(root) {
             // Ordinary commit, or merge metadata Git cannot resolve: preserve first-parent staged scope.
             return staged;
         }
+    }
+    catch {
+        return null;
+    }
+}
+// The CWD path inside its repository, slash-terminated (empty at the repository root).
+export function gitPrefix(root) {
+    try {
+        return execFileSync('git', ['rev-parse', '--show-prefix'], {
+            cwd: root,
+            encoding: 'utf8',
+        }).trimEnd();
+    }
+    catch {
+        return '';
+    }
+}
+// The CWD-relative paths changed between an exact base commit and HEAD. This is the clean-index
+// analogue of stagedSet for pull-request CI: GitHub supplies the base SHA, so inherited base debt
+// is not attributed to the PR. NUL delimiters preserve every valid path byte except NUL itself.
+export function changedSetSince(root, baseRef) {
+    try {
+        execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
+            cwd: root,
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        const prefix = gitPrefix(root);
+        const out = execFileSync('git', ['diff', '--name-only', '-z', '--diff-filter=ACMR', `${baseRef}...HEAD`], { cwd: root, encoding: 'utf8' });
+        const paths = out.split('\0').filter(Boolean);
+        return new Set(prefix
+            ? paths.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length))
+            : paths);
+    }
+    catch {
+        return null;
+    }
+}
+// GitHub PR checks opt into change attribution with the event's exact base SHA. No environment
+// value means the ordinary local/push audit; an invalid supplied ref is an unavailable hard failure.
+export function pullRequestScope(root) {
+    const baseRef = process.env.GUARD_RATCHET_BASE;
+    if (!baseRef)
+        return null;
+    const scope = changedSetSince(root, baseRef);
+    if (scope)
+        return scope;
+    console.error(`guard-size: pull-request base is unavailable: ${baseRef}`);
+    process.exit(2);
+}
+// Every tracked path in the git INDEX — the tree the pending commit will record — CWD-relative.
+// `git ls-files` is already scoped and addressed to the cwd. Deduped: an UNMERGED index lists a
+// conflicted path once per stage (1/2/3), and a conflicted file is still one file. Returns null when
+// git is unavailable, so callers can fall back to the filesystem.
+export function indexFiles(root) {
+    try {
+        const out = execFileSync('git', ['ls-files', '-z', '--cached'], {
+            cwd: root,
+            encoding: 'utf8',
+        });
+        return [...new Set(splitNul(out))];
+    }
+    catch {
+        return null;
+    }
+}
+// Every tracked path in `ref`'s tree, CWD-relative (same scoping as indexFiles). Returns null when
+// the ref cannot be resolved — an UNBORN HEAD on a repo's first commit is the common case, and
+// answering "no prior state" there is correct: on an initial commit every file IS new.
+export function treeFilesAtRef(root, ref = 'HEAD') {
+    try {
+        const out = execFileSync('git', ['ls-tree', '-r', '--name-only', '-z', ref], {
+            cwd: root,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        return splitNul(out);
     }
     catch {
         return null;
