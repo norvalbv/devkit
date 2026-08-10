@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { consumerChecklistAssetRoot, readConsumerReviewAsset } from "./cascade/consumer-assets.mjs";
 import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from "./reviewers.mjs";
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 // Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
@@ -127,20 +128,6 @@ export function preflightReviewAssets(assetRoot, selected, cfg) {
     return identities;
 }
 /**
- * The SYNCED consumer copy of a packaged asset. `reviewerAssetPaths` names package-relative paths;
- * a consumer keeps its briefs wherever `review.agentsDir` points (configurable) and every skill
- * asset under `.claude/` — devkit's own sync convention, the same one `checklistScript` encodes.
- */
-function readConsumerReviewAsset(cwd, cfg, relativePath) {
-    const AGENTS_PREFIX = 'agents/';
-    if (relativePath.startsWith(AGENTS_PREFIX)) {
-        const dir = cfg.review.agentsDir;
-        const base = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
-        return readFileSync(path.join(base, relativePath.slice(AGENTS_PREFIX.length)));
-    }
-    return readFileSync(path.resolve(cwd, '.claude', relativePath));
-}
-/**
  * Per-reviewer prompt identity for the ordinary commit/ship path, where there is no packaged asset
  * root and `preflightReviewAssets` therefore never runs. This is what makes a production verdict
  * attributable to the prompt version that produced it — AND, since sc-1437, what salts the verdict
@@ -174,7 +161,8 @@ export function resolveReviewerIdentities(reviewMode, identitySalts, selected, c
 }
 export function consumerReviewerIdentity(cwd, cfg, reviewer) {
     try {
-        return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, rel), reviewer, cfg);
+        const skillRoot = consumerChecklistAssetRoot(cwd, reviewer);
+        return hashReviewerIdentity((rel) => readConsumerReviewAsset(cwd, cfg, skillRoot, rel), reviewer, cfg);
     }
     catch {
         return null;
