@@ -156,6 +156,8 @@ export function defaultSelection() {
         lineGrowth: true,
         // Output-style preference — never arrives uninvited. See Selection.adhd.
         adhd: false,
+        // Denies harness tool calls — never arrives uninvited. See Selection.priorArtGate.
+        priorArtGate: false,
         agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
         guards: [...RECOMMENDED_GUARD_IDS],
     };
@@ -259,6 +261,14 @@ export const OPTIONAL_COMPONENTS = [
         hint: 'ADHD-friendly output style — a vendored MIT skill, always-on via a SessionStart hook',
         flag: '--adhd',
         since: '0.47.0',
+    },
+    {
+        id: 'priorArtGate',
+        kind: 'hook',
+        label: 'prior-art gate',
+        hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
+        flag: '--prior-art-gate',
+        since: '0.51.0',
     },
 ];
 /**

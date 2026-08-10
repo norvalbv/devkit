@@ -54,8 +54,14 @@ describe('unofferedComponents', () => {
 
   it('does not offer one that was answered — either way', () => {
     // The false case is the load-bearing one: a recorded decline must be as final as an accept.
-    expect(unofferedComponents({ [id]: false } as Partial<Selection>)).toEqual([]);
-    expect(unofferedComponents({ [id]: true } as Partial<Selection>)).toEqual([]);
+    const declinedAll = Object.fromEntries(OPTIONAL_COMPONENTS.map((c) => [c.id, false]));
+    const acceptedAll = Object.fromEntries(OPTIONAL_COMPONENTS.map((c) => [c.id, true]));
+    expect(unofferedComponents(declinedAll as Partial<Selection>)).toEqual([]);
+    expect(unofferedComponents(acceptedAll as Partial<Selection>)).toEqual([]);
+    // Answering ONE component silences only that one — the rest stay offered.
+    expect(unofferedComponents({ [id]: false } as Partial<Selection>).map((c) => c.id)).toEqual(
+      OPTIONAL_COMPONENTS.slice(1).map((c) => c.id),
+    );
   });
 
   it('lists only genuinely optional components', () => {

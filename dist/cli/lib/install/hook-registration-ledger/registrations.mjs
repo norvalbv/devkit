@@ -85,6 +85,28 @@ export const HOOK_REGISTRATIONS = {
             command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/adhd-prompt-anchor.mjs"',
         },
     ],
+    // Deny-once step-0 ordering gate: the first ExitPlanMode or feature-critique dispatch in a
+    // session with no recorded prior-art run is denied once (the denial writes a session snooze);
+    // the PostToolUse half records prior-art runs. Carve-out ruled in
+    // docs/decisions/devkit-gates-repo-not-harness.md (2026-08-09): it orders devkit's OWN shipped
+    // workflow stages and reads only tool identity + subagent_type. Run detection is deliberately
+    // PostToolUse-on-Task, NOT SubagentStop — that capture path stays dead code per
+    // docs/decisions/prior-art-before-plan.md. No cursorEvent: Cursor has no ExitPlanMode/Task, so
+    // nativeProjection skips Cursor entirely.
+    priorArtGate: [
+        {
+            registrationId: 'prior-art-gate:pre-plan',
+            event: 'PreToolUse',
+            matcher: 'ExitPlanMode|Task|Agent',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs"',
+        },
+        {
+            registrationId: 'prior-art-gate:post-task',
+            event: 'PostToolUse',
+            matcher: 'Task|Agent',
+            command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/prior-art-gate.mjs"',
+        },
+    ],
     // story 17 — agent-hooks: synced scripts under the consumer's .claude/hooks/ (self-skip when
     // their tool/config is absent). UserPromptSubmit nudge, Stop QA trio, format-after-edit, compactor.
     agentHooks: [

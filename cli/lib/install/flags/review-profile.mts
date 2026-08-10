@@ -3,7 +3,7 @@ import {
   REVIEWABLE_GUARD_IDS,
   type ReviewProfile,
   type Selection,
-} from '../components.mts';
+} from '../../components.mts';
 
 export interface ReviewFlagValues {
   review: boolean | null;

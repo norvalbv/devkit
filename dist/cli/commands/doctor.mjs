@@ -116,6 +116,7 @@ function selectionFlags(sel) {
         ['agentHooks', '--agent-hooks'],
         ['searchCode', '--search-code'],
         ['adhd', '--adhd'],
+        ['priorArtGate', '--prior-art-gate'],
     ])
         if (sel[id])
             flags.push(flag);

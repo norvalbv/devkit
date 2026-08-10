@@ -37,6 +37,7 @@ interface DevkitConfig {
     agentHooks?: boolean;
     fallow?: boolean;
     adhd?: boolean;
+    priorArtGate?: boolean;
     guards?: string[];
   };
 }
@@ -80,6 +81,8 @@ export default function run(args: string[], cwd: string): number {
   // Same reason as fallow above: the adhd SessionStart hook is owned by the ADHD component, so a
   // full sync that ignored the recorded selection would prune an installed hook as deselected.
   const adhd = cfg?.components?.adhd ?? false;
+  // Same again: the prior-art gate hook is owned by the priorArtGate component.
+  const priorArtGate = cfg?.components?.priorArtGate ?? false;
   const explicitTargets = listFlag(args, '--targets');
   const targets =
     explicitTargets ??
@@ -98,7 +101,9 @@ export default function run(args: string[], cwd: string): number {
     return 1;
   }
   const override = args.includes('--force') ? () => true : undefined;
-  const desired = only ? undefined : hookScriptsFor({ agentHooks: true, decisions, fallow, adhd });
+  const desired = only
+    ? undefined
+    : hookScriptsFor({ agentHooks: true, decisions, fallow, adhd, priorArtGate });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
     targets,
