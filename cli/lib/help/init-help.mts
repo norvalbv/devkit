@@ -27,6 +27,10 @@ Usage:
                          needs --skills). Turn it off for this session by saying "stop
                          adhd mode", durably with .devkit/adhd-off, or drop it with
                          --no-adhd (which also removes it on a re-run).
+  --prior-art-gate       Install the deny-once step-0 ordering HOOK: the first ExitPlanMode
+                         or feature-critique dispatch in a session with no prior-art run is
+                         denied once with the skip predicate; retries pass (off by default).
+                         Drop it with --no-prior-art-gate (also removes it on a re-run).
   --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
                          bins; add nothing to package.json. Requires \`bun add -g\` devkit.
   --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the

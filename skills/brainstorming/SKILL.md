@@ -54,6 +54,9 @@ Start by understanding the current project context, then ask questions one at a 
   The eventual plan records one line — `Prior-art: <verdict> · followed | overridden: <reason> |
   unverified` (or the skip note) — and at plan-exit `feature-critique` receives a bounded 3-line
   summary only (verdict, framing, one citation), never the full JSON.
+  Repos with the `prior-art-gate` component installed enforce this ordering mechanically: the first
+  `feature-critique` dispatch or `ExitPlanMode` call in a session with no prior-art run is denied
+  once — run step 0 (or state the skip note per the predicate above) and retry; the retry passes.
   Then RECORD the run. The subagent is dispatched through the Task tool, so no gate spawns it and
   no telemetry captures it otherwise — production prior-art is invisible in the dashboard while its
   bench runs are fully recorded. Pipe its raw JSON verbatim (quoted heredoc, so no JSON content can

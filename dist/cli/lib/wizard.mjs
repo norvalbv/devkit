@@ -12,7 +12,13 @@ import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@cl
 import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, OPTIONAL_COMPONENTS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
 // The components that sync into an agent surface. Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
-const AGENT_SURFACE_COMPONENTS = ['skills', 'agents', 'agentHooks', 'searchSteering'];
+const AGENT_SURFACE_COMPONENTS = [
+    'skills',
+    'agents',
+    'agentHooks',
+    'searchSteering',
+    'priorArtGate',
+];
 const AGENT_SURFACE_SETS = {
     all: [...AGENT_TARGETS],
     'claude-codex': ['claude', 'codex'],
@@ -54,6 +60,14 @@ const ADHD_OPTION = {
     id: 'adhd',
     label: 'i-have-adhd skill',
     hint: 'ADHD-friendly output style, invoked with /i-have-adhd (off by default; needs Agent skills)',
+};
+// prior-art gate: same opt-in shape as adhd, and kept out of COMPONENTS for the same reason — it
+// denies harness tool calls (deny-once per session), so it only ever arrives because someone ticked
+// this box. The id is the camelCase Selection key so installedOptional seeding matches on re-runs.
+const PRIOR_ART_GATE_OPTION = {
+    id: 'priorArtGate',
+    label: 'prior-art gate',
+    hint: 'deny-once hook: plans must run (or explicitly skip) step-0 prior-art (off by default)',
 };
 // The line-growth block rides the guards multiselect as this pseudo-id, then is split back into
 // selection.lineGrowth (it's a guard.config.json knob, not a husky guard fragment).
@@ -134,6 +148,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                 ...choices.map(componentOption),
                 componentOption(FALLOW_OPTION),
                 componentOption(ADHD_OPTION),
+                componentOption(PRIOR_ART_GATE_OPTION),
             ],
             initialValues: [
                 ...choices.filter((c) => c.recommended).map((c) => c.id),
@@ -149,6 +164,8 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         selection.fallow = chosen.has('fallow');
         // Overlay syncs skills too, so the vendored skill works here unchanged.
         selection.adhd = chosen.has('adhd');
+        // Overlay syncs hooks too (same delivery as agentHooks), so the gate works here unchanged.
+        selection.priorArtGate = chosen.has('priorArtGate');
         selection.husky = true; // overlay's local hook is the delivery mechanism — always on
     }
     else {
@@ -160,6 +177,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                 componentOption(FALLOW_OPTION),
                 componentOption(SEARCHCODE_OPTION),
                 componentOption(ADHD_OPTION),
+                componentOption(PRIOR_ART_GATE_OPTION),
             ],
             initialValues: [
                 ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
@@ -175,6 +193,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         selection.fallow = chosen.has('fallow');
         selection.searchCode = chosen.has('search-code');
         selection.adhd = chosen.has('adhd');
+        selection.priorArtGate = chosen.has('priorArtGate');
         if (!structAvail)
             selection.structure = false;
     }
@@ -304,6 +323,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
             `${on('agentHooks')} agent hooks → ${surfaces} provider settings (tracked files preserved)`,
             `${on('fallow')} fallow gate (chained into the local hook; global install if missing, else skipped)`,
             `${on('adhd')} ${ADHD_OPTION.label}`,
+            `${on('priorArtGate')} ${PRIOR_ART_GATE_OPTION.label}`,
         ].join('\n');
     }
     const lines = COMPONENTS.filter((c) => !(c.id === 'structure' && !structureAvailable)).map((c) => {
@@ -314,6 +334,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
     lines.push(`${selection.fallow ? '✓' : '·'} ${FALLOW_OPTION.label}`);
     lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
     lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
+    lines.push(`${selection.priorArtGate ? '✓' : '·'} ${PRIOR_ART_GATE_OPTION.label}`);
     lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);

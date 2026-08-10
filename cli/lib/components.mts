@@ -190,6 +190,13 @@ export interface Selection {
    * reshapes how the assistant writes, which is a personal preference.
    */
   adhd: boolean;
+  /**
+   * The deny-once step-0 ordering gate (agents-hooks/prior-art-gate.mjs): the first ExitPlanMode
+   * or feature-critique dispatch in a session with no recorded prior-art run is denied once with
+   * the skip predicate; retries pass. Opt-in even under --yes: it denies harness tool calls, which
+   * a repo must choose (carve-out ruled in docs/decisions/devkit-gates-repo-not-harness.md).
+   */
+  priorArtGate: boolean;
   agentTargets: string[];
   guards: string[];
 }
@@ -224,6 +231,8 @@ export function defaultSelection(): Selection {
     lineGrowth: true,
     // Output-style preference — never arrives uninvited. See Selection.adhd.
     adhd: false,
+    // Denies harness tool calls — never arrives uninvited. See Selection.priorArtGate.
+    priorArtGate: false,
     agentTargets: [...FRESH_DEFAULT_AGENT_PROVIDERS],
     guards: [...RECOMMENDED_GUARD_IDS],
   };
@@ -326,7 +335,7 @@ export interface OptionalComponent {
    * it says nothing about the thing being installed, so every user-facing string is rendered from
    * this instead ("the i-have-adhd skill", not "the adhd component").
    */
-  kind: 'skill';
+  kind: 'skill' | 'hook';
   label: string;
   hint: string;
   /** The `devkit init` flag that enables it — printed in the non-TTY notice. */
@@ -355,6 +364,14 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     hint: 'ADHD-friendly output style — a vendored MIT skill, always-on via a SessionStart hook',
     flag: '--adhd',
     since: '0.47.0',
+  },
+  {
+    id: 'priorArtGate',
+    kind: 'hook',
+    label: 'prior-art gate',
+    hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
+    flag: '--prior-art-gate',
+    since: '0.51.0',
   },
 ];
 

@@ -2,7 +2,7 @@
   "maxLines": 500,
   "maxTestLines": 2000,
   "files": {
-    "cli/commands/init.mts": 1280,
+    "cli/commands/init.mts": 1189,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
     "cli/lib/husky/husky-block.mts": 510,
     "cli/lib/overlay.mts": 558,
