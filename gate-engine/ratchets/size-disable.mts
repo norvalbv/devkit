@@ -23,7 +23,7 @@ import {
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
-import { hasStagedFiles, stageBaseline, stagedSet } from './git-index.mts';
+import { hasStagedFiles, pullRequestScope, stageBaseline, stagedSet } from './git-index.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
 import { runPreflightCli } from './size-preflight.mts';
 
@@ -262,6 +262,7 @@ function runLinesGate(
   root: string,
   cfg: ReturnType<typeof resolveGuardConfig>,
   linesBaselineFile: string,
+  ciScope: Set<string> | null,
 ): void {
   const over = countOversized(root);
   const grandfathered: Record<string, number> = existsSync(linesBaselineFile)
@@ -271,9 +272,9 @@ function runLinesGate(
   const inCommit = staged !== null && hasStagedFiles(root);
   const match = sourceMatchers(cfg.sourceExtensions);
   const cap = (f: string) => (match.isTest(f) ? cfg.maxTestLines : cfg.maxLines);
-  // Scope to the committing files; with nothing staged, fall back to the whole tree (CI).
-  const scoped = inCommit ? over.filter((o) => staged?.has(o.file)) : over;
-
+  // A PR supplies an exact base scope; local commits use the index; audits use the whole tree.
+  const selected = ciScope ?? (inCommit ? staged : null);
+  const scoped = selected ? over.filter((o) => selected.has(o.file)) : over;
   // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
   const grew = scoped.filter((o) => o.lines > Math.max(cap(o.file), grandfathered[o.file] ?? 0));
   if (grew.length) {
@@ -285,7 +286,7 @@ function runLinesGate(
     }
     process.exit(1);
   }
-  if (!inCommit || !staged) return; // no commit in progress → never tighten/stage
+  if (ciScope || !inCommit || !staged) return; // CI never tightens/stages
 
   // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
   // so a concurrent agent's uncommitted shrink is never locked in.
@@ -319,7 +320,6 @@ function runLinesGate(
     }
   }
 }
-
 // Read the disable baseline. A pre-per-file `{ fileDisables, fnDisables }` shape (no `files` key) is
 // reported empty + `legacy: true` so the gate blocks with a migrate hint (real disables) or
 // self-cleans it (a stale {0,0}); a re-freeze rewrites it to the per-file shape.
@@ -344,6 +344,7 @@ function runDisableGate(
   root: string,
   baselineFile: string,
   current: ReturnType<typeof countDisables>,
+  ciScope: Set<string> | null,
 ): void {
   const { grandfathered, legacy } = readDisableBaseline(baselineFile);
   const cur = current.perFile;
@@ -351,15 +352,15 @@ function runDisableGate(
   const inCommit = staged !== null && hasStagedFiles(root);
   const ceil = (f: string): DisableCount => grandfathered[f] ?? { file: 0, fn: 0 };
 
-  // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). Scope to
-  // the committing files; with nothing staged, the whole tree (CI). A LEGACY baseline is always
-  // whole-tree: it has no per-file grandfathering, so any disable ANYWHERE is unrecognised and must
-  // block the migrate — else an unstaged disable slips past and the commit path below deletes
+  // A file fails when its disables exceed its recorded ceiling (0 for an unlisted/new file). A PR
+  // scopes to its diff. Otherwise a LEGACY baseline stays whole-tree: it has no per-file
+  // grandfathering, so an unstaged disable must block rather than let the commit path below delete
   // size.json wholesale (changed=legacy, empty map), silently un-grandfathering it.
-  const scoped = legacy
-    ? Object.keys(cur)
-    : inCommit
-      ? [...(staged as Set<string>)]
+  const selected = legacy ? null : (ciScope ?? (inCommit ? staged : null));
+  const scoped = selected
+    ? [...selected]
+    : legacy
+      ? Object.keys(cur)
       : Object.keys({ ...cur, ...grandfathered });
   const grew = scoped.filter(
     (f) => cur[f] && (cur[f].file > ceil(f).file || cur[f].fn > ceil(f).fn),
@@ -381,7 +382,7 @@ function runDisableGate(
     process.exit(1);
   }
 
-  if (!inCommit || !staged) {
+  if (ciScope || !inCommit || !staged) {
     // No commit in progress → never mutate. Nudge a re-freeze if anything shrank or a legacy file lingers.
     if (legacy) {
       console.log(
@@ -471,6 +472,7 @@ function runCli(cmd: string): void {
   // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
   // fallow-ignore-next-line code-duplication
   if (cmd === 'gate') {
+    const ciScope = pullRequestScope(root);
     const hasBaseline = existsSync(baselineFile);
     // A missing baseline means "no grandfathered debt". Enforce from config (empty baseline = 0/0)
     // whenever the repo is governed (guard.config.json present — true in devkit's own repo, CI, and
@@ -481,9 +483,8 @@ function runCli(cmd: string): void {
       process.exit(2); // ungoverned + un-frozen → fail open
     }
     // Disable ratchet: per-file, per-commit shrink-only (auto-lowers as disables are removed).
-    runDisableGate(root, baselineFile, current);
-    // Raw-line caps: a per-file, per-COMMIT shrink-only ratchet.
-    if (cfg.maxLines || cfg.maxTestLines) runLinesGate(root, cfg, linesBaselineFile);
+    runDisableGate(root, baselineFile, current, ciScope);
+    if (cfg.maxLines || cfg.maxTestLines) runLinesGate(root, cfg, linesBaselineFile, ciScope);
     process.exit(0);
   }
 
