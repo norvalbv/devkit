@@ -109,14 +109,10 @@ cleanup() {
   git worktree remove --force "$WT" 2>/dev/null || true
 }
 trap cleanup EXIT
-# bash runs the EXIT trap on a signal too, so cleanup was never at risk — but it REPORTS 0 for INT and
-# QUIT, so an interrupted reship read as a successful one to any caller checking the status. Re-exit
-# with the conventional 128+signo; `exit` from a handler still runs the EXIT trap, so the worktree
-# teardown above is unchanged. Only the reported status becomes honest.
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 131' QUIT
-trap 'exit 143' TERM
+# Match new-ship: a signal delivered only to this public shell is handed to the active gate
+# supervisor, and cleanup waits until its complete reviewer tree is reaped (sc-1538).
+. "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
+gate_signal_handoff_init
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
@@ -172,6 +168,9 @@ export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist int
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
+# Preserve the public signal contract across the post-wait reap window; a recorded interruption
+# must stop before commit-scope verification or push even when its forwarded PID already exited.
+[ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
 ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then

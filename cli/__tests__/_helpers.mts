@@ -3,8 +3,21 @@
  * it up as a suite. Collapses the tmp-repo + subprocess-runner + cleanup boilerplate that every
  * subprocess-style CLI test repeated verbatim.
  */
-import { execFileSync as nodeExecFileSync, spawnSync as nodeSpawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  execFileSync as nodeExecFileSync,
+  spawnSync as nodeSpawnSync,
+  spawn,
+} from 'node:child_process';
+import { once } from 'node:events';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +27,7 @@ export const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mt
 const TEST_SUBPROCESS = fileURLToPath(new URL('./test-subprocess.mts', import.meta.url));
 export const TEST_SUBPROCESS_TIMEOUT_MS = 90_000;
 const TEST_SUBPROCESS_CLEANUP_MS = 30_000;
+const EPHEMERAL_SHIP_WORKTREE_RE = /devkit-(?:re)?ship-/;
 
 function commandCall(
   command: string,
@@ -85,6 +99,72 @@ export function processAlive(pid: number): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Resolve when a fixture path appears, or fail with a path-specific timeout. */
+export function waitForPath(path: string, timeoutMs = 30_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const check = (): void => {
+      if (existsSync(path)) {
+        resolve();
+        return;
+      }
+      if (Date.now() - started >= timeoutMs) {
+        reject(new Error(`timed out waiting for ${path}`));
+        return;
+      }
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+/** Exercise the public-shell-only signal path and assert cleanup waits for the gate hook to exit. */
+export async function assertInterruptedGateKeepsWorktree({
+  dir,
+  env,
+  script,
+  args,
+  listWorktrees,
+}) {
+  const ready = join(dir, '.signal-hook-ready');
+  const result = join(dir, '.signal-hook-result');
+  const hook = join(dir, '.husky/_/pre-commit');
+  writeFileSync(
+    hook,
+    [
+      '#!/bin/sh',
+      'echo ready > "$SIGNAL_HOOK_READY"',
+      'trap \'if [ -d "$PWD" ]; then echo present > "$SIGNAL_HOOK_RESULT"; else echo deleted > "$SIGNAL_HOOK_RESULT"; fi; exit 143\' TERM',
+      'while :; do sleep 0.1; done',
+    ].join('\n'),
+  );
+  chmodSync(hook, 0o755);
+
+  const child = spawn('/bin/bash', [script, ...args], {
+    cwd: dir,
+    stdio: 'ignore',
+    env: {
+      ...env,
+      SHIP_DRY_RUN: '1',
+      SHIP_COMMIT_TIMEOUT: '3',
+      SIGNAL_HOOK_READY: ready,
+      SIGNAL_HOOK_RESULT: result,
+    },
+  });
+  await waitForPath(ready, 15_000);
+  if (!child.kill('SIGTERM')) throw new Error('could not signal ship shell');
+  const [code, signal] = await once(child, 'exit');
+  await waitForPath(result, 15_000);
+
+  if (code !== 143 || signal !== null) throw new Error(`unexpected ship exit: ${code}/${signal}`);
+  if (readFileSync(result, 'utf8').trim() !== 'present') {
+    throw new Error('gate worktree was removed before the interrupted hook exited');
+  }
+  if (EPHEMERAL_SHIP_WORKTREE_RE.test(listWorktrees())) {
+    throw new Error('interrupted ship left an ephemeral worktree behind');
   }
 }
 

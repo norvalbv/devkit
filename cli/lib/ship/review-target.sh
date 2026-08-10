@@ -73,6 +73,7 @@ done
 . "$SCRIPT_DIR/review/worktrees.sh"
 . "$SCRIPT_DIR/review/snapshot.sh"
 . "$SCRIPT_DIR/review/submodules.sh"
+. "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
 . "$SCRIPT_DIR/run-gates-with-capture.sh"
 _review_worktree_clear_git_env
@@ -289,10 +290,6 @@ FINAL_WT_CREATED=0
 BASE_WT_CREATED=0
 FINAL_SUBMODULES_CREATED=0
 BASE_SUBMODULES_CREATED=0
-ACTIVE_GATE_PID=
-GATE_LAUNCHING=0
-REQUESTED_SIGNAL_STATUS=0
-REQUESTED_SIGNAL=
 # How far the run got. The EXIT trap stamps this into the log so an abort is distinguishable from a
 # short successful run. Must stay bound before `trap on_exit EXIT` is armed below — under `set -u`
 # an unbound read inside the trap would abort it and skip emit_terminal_result.
@@ -524,32 +521,8 @@ on_exit() {
   exit "$status"
 }
 
-forward_signal() {
-  local status=$1 signal=$2
-  REQUESTED_SIGNAL_STATUS=$status
-  REQUESTED_SIGNAL=$signal
-  if [ -n "$ACTIVE_GATE_PID" ]; then
-    kill -s "$signal" "$ACTIVE_GATE_PID" 2>/dev/null || true
-    return 0
-  fi
-  [ "$GATE_LAUNCHING" -eq 0 ] || return 0
-  exit "$status"
-}
-review_gate_launching() { GATE_LAUNCHING=1; }
-review_gate_started() {
-  ACTIVE_GATE_PID=$1
-  GATE_LAUNCHING=0
-  if [ "$REQUESTED_SIGNAL_STATUS" -ne 0 ]; then
-    kill -s "$REQUESTED_SIGNAL" "$ACTIVE_GATE_PID" 2>/dev/null || true
-  fi
-}
-review_gate_reaped() { ACTIVE_GATE_PID=; }
-review_gate_finished() { ACTIVE_GATE_PID=; }
 trap on_exit EXIT
-trap 'forward_signal 129 HUP' HUP
-trap 'forward_signal 130 INT' INT
-trap 'forward_signal 131 QUIT' QUIT
-trap 'forward_signal 143 TERM' TERM
+gate_signal_handoff_init
 
 mkdir -p "$(dirname "$LOG")"
 (set -C; : > "$LOG") || {
