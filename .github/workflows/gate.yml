@@ -33,6 +33,8 @@ jobs:
         run: node gate-engine/ratchets/folder-fanout.mts gate
 
       - name: Ratchet — size-disable
+        env:
+          GUARD_RATCHET_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
         run: node gate-engine/ratchets/size-disable.mts gate
 
       - name: Typecheck

@@ -80,3 +80,52 @@ export function stagedSet(root: string): Set<string> | null {
     return null;
   }
 }
+
+// The CWD path inside its repository, slash-terminated (empty at the repository root).
+export function gitPrefix(root: string): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-prefix'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trimEnd();
+  } catch {
+    return '';
+  }
+}
+
+// The CWD-relative paths changed between an exact base commit and HEAD. This is the clean-index
+// analogue of stagedSet for pull-request CI: GitHub supplies the base SHA, so inherited base debt
+// is not attributed to the PR. NUL delimiters preserve every valid path byte except NUL itself.
+export function changedSetSince(root: string, baseRef: string): Set<string> | null {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const prefix = gitPrefix(root);
+    const out = execFileSync(
+      'git',
+      ['diff', '--name-only', '-z', '--diff-filter=ACMR', `${baseRef}...HEAD`],
+      { cwd: root, encoding: 'utf8' },
+    );
+    const paths = out.split('\0').filter(Boolean);
+    return new Set(
+      prefix
+        ? paths.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length))
+        : paths,
+    );
+  } catch {
+    return null;
+  }
+}
+
+// GitHub PR checks opt into change attribution with the event's exact base SHA. No environment
+// value means the ordinary local/push audit; an invalid supplied ref is an unavailable hard failure.
+export function pullRequestScope(root: string): Set<string> | null {
+  const baseRef = process.env.GUARD_RATCHET_BASE;
+  if (!baseRef) return null;
+  const scope = changedSetSince(root, baseRef);
+  if (scope) return scope;
+  console.error(`guard-size: pull-request base is unavailable: ${baseRef}`);
+  process.exit(2);
+}
