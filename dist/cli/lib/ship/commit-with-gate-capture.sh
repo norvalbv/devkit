@@ -45,6 +45,7 @@ commit_with_gate_capture() {
   local progress="$root/.devkit/review-progress-${br//\//-}.json"
   . "$(dirname "${BASH_SOURCE[0]}")/run-gates-with-capture.sh"
   . "$(dirname "${BASH_SOURCE[0]}")/telemetry.sh"
+  . "$(dirname "${BASH_SOURCE[0]}")/prepare-gate-worktree.sh"
   # Both callers already source this, but the object probe below is this function's own evidence —
   # don't inherit it by luck of call order.
   . "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
@@ -77,28 +78,86 @@ commit_with_gate_capture() {
   local ship_log="$ship_logs_dir/${ship_id_safe}.log"
   mkdir -p "$ship_logs_dir" 2>/dev/null || true
 
-  # Overlay mode: force core.hooksPath at the .devkit overlay hook so the FULL gate chain runs in the
-  # ship worktree in EVERY state. A plain `git commit` otherwise honours the husky-reclaimed
-  # core.hooksPath=.husky/_ and runs only the team's committed hook — the overlay chain (devkit's
-  # gates) silently no-ops (the bug this fixes). ship-branch/reship linked .devkit in, so the relative
-  # path resolves to $wt/.devkit/hooks via the symlink; the overlay hook then execs the repo's own
-  # committed hook too. Non-overlay repos have no such file → empty array → unchanged behaviour.
-  # gc.auto=0: this commit is the one ship-owned git call that can trip auto-gc, and it fires at the
-  # END of a multi-minute gate chain in a repo that may hold dozens of worktrees. Auto-gc cannot
-  # delete a minutes-old object under git's default pruneExpire, so this is hygiene rather than the
-  # sc-1420 fix — it just keeps ship from starting repository maintenance at its most fragile moment.
-  # APPEND the overlay flag below; assigning here would confine gc.auto=0 to overlay installs only.
-  local hookcfg=(-c gc.auto=0)
-  [ -x "$root/.devkit/hooks/pre-commit" ] && hookcfg+=(-c core.hooksPath=.devkit/hooks)
-
-  # Ship attempt telemetry — one line per commit attempt; count-per-branch = the number of times the
-  # root agent re-shipped after a gate blocked it. mode ('ship'|'reship') is set by the caller.
+  # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
+  # ship_result row instead of disappearing from telemetry.
   local dur_start; dur_start=$(date +%s)
   printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
     "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
     "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
     "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+
+  # $log is a REUSED per-branch path ("last-ship-gates-*"), so this attempt starts from empty even
+  # when hook setup fails before run_gates_with_capture gets a chance to own the log.
+  mkdir -p "$(dirname "$log")" 2>/dev/null || true
+  : > "$log" 2>/dev/null || true
+  local rc=0 hook_setup_failed=0 hook_setup_error="" ship_hook_dir=""
+
+  # Resolve the hook ship intends to run, then put ship-owned wrappers in front of the real hook
+  # directory. The pre-commit wrapper emits an attempt-specific proof marker; every wrapper directly
+  # execs its real counterpart with the original args/stdin. Direct execution is load-bearing for
+  # Husky's generated shims: they locate `.husky/<hook>` from their own $0, so symlinking those shims
+  # into the private directory would silently no-op sibling hooks such as commit-msg. This closes two
+  # fail-open paths at once:
+  #   - core.hooksPath is unset in a clean clone, even though prepare-gate-worktree projected the
+  #     package-mode .husky/_ runner into the disposable worktree; and
+  #   - git commit returns zero without proving that any hook actually ran.
+  # Hook resolution is shared with prepare_gate_worktree so projection and execution cannot drift.
+  local real_hooks_dir real_pre_commit
+  real_pre_commit=$(gate_worktree_pre_commit "$wt" "$root")
+  real_hooks_dir=${real_pre_commit%/pre-commit}
+  if [ -z "$real_hooks_dir" ] || [ ! -x "$real_pre_commit" ]; then
+    hook_setup_error="ship: no executable pre-commit hook for the ship worktree (resolved: ${real_pre_commit:-none}) — gates must not fail open"
+    hook_setup_failed=1
+    rc=1
+  fi
+
+  local ship_hook_rel="" ship_hook_marker source_hook source_name
+  ship_hook_marker="devkit-ship-hook-start:$ship_id_safe"
+  if [ "$hook_setup_failed" -eq 0 ]; then
+    ship_hook_dir=$(mktemp -d "$wt/.devkit-ship-hooks.XXXXXX") || {
+      hook_setup_error="ship: could not create the private hook wrapper — gates must not fail open"
+      hook_setup_failed=1
+      rc=1
+    }
+  fi
+  if [ "$hook_setup_failed" -eq 0 ]; then
+    ship_hook_rel=${ship_hook_dir#"$wt/"}
+    for source_hook in "$real_hooks_dir"/*; do
+      [ -x "$source_hook" ] || continue
+      source_name=${source_hook##*/}
+      if ! (umask 077; cat > "$ship_hook_dir/$source_name" <<'SHIP_HOOK_WRAPPER'
+#!/bin/sh
+hook_name=${0##*/}
+if [ "$hook_name" = pre-commit ]; then
+  printf '%s\n' "$DEVKIT_SHIP_HOOK_MARKER" >&2
+fi
+exec "$DEVKIT_SHIP_REAL_HOOKS_DIR/$hook_name" "$@"
+SHIP_HOOK_WRAPPER
+        chmod 700 "$ship_hook_dir/$source_name"); then
+        hook_setup_error="ship: could not project the real hook chain into the private wrapper — gates must not fail open"
+        hook_setup_failed=1
+        rc=1
+        break
+      fi
+    done
+  fi
+  if [ "$hook_setup_failed" -eq 0 ] && [ ! -x "$ship_hook_dir/pre-commit" ]; then
+    hook_setup_error="ship: private hook projection omitted pre-commit — gates must not fail open"
+    hook_setup_failed=1
+    rc=1
+  fi
+  if [ "$hook_setup_failed" -eq 0 ]; then
+    export DEVKIT_SHIP_HOOK_MARKER="$ship_hook_marker"
+    export DEVKIT_SHIP_REAL_HOOKS_DIR="$real_hooks_dir"
+  fi
+
+  # gc.auto=0: this commit is the one ship-owned git call that can trip auto-gc, and it fires at the
+  # END of a multi-minute gate chain in a repo that may hold dozens of worktrees. Auto-gc cannot
+  # delete a minutes-old object under git's default pruneExpire, so this is hygiene rather than the
+  # sc-1420 fix — it just keeps ship from starting repository maintenance at its most fragile moment.
+  # APPEND the overlay flag below; assigning here would confine gc.auto=0 to overlay installs only.
+  local hookcfg=(-c gc.auto=0 -c core.hooksPath="$ship_hook_rel")
 
   # sc-1442: the composed message exists BEFORE `git commit` runs — hand it to the pre-commit
   # reviewers as ADVISORY intent via a temp file (NEVER .git/COMMIT_EDITMSG: at pre-commit that
@@ -116,20 +175,49 @@ commit_with_gate_capture() {
     fi
   fi
 
-  local rc=0
-  # $log is a REUSED per-branch path ("last-ship-gates-*"), so this attempt must start from empty.
-  # The capture appends now (it must not erase devkit review's preflight progress), which makes
-  # clearing the caller's job — without this every ship on a branch would pile onto the last one.
-  mkdir -p "$(dirname "$log")" 2>/dev/null || true
-  : > "$log" 2>/dev/null || true
-  DEVKIT_GATE_ARCHIVE_LOG="$ship_log" run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
-    git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
+  if [ "$hook_setup_failed" -eq 1 ]; then
+    printf '%s\n' "$hook_setup_error" | tee -a "$log" "$ship_log" >&2
+  else
+    DEVKIT_GATE_ARCHIVE_LOG="$ship_log" run_gates_with_capture "$wt" "$root" ship "$log" "$progress" -- \
+      git -C "$wt" ${hookcfg[@]+"${hookcfg[@]}"} commit -m "$title" -m "$body" || rc=$?
+  fi
+
+  local ship_hook_proved=0
+  grep -qF "$ship_hook_marker" "$log" 2>/dev/null && ship_hook_proved=1
+  [ -z "$ship_hook_dir" ] || rm -rf -- "$ship_hook_dir"
+  unset DEVKIT_SHIP_HOOK_MARKER DEVKIT_SHIP_REAL_HOOKS_DIR
 
   # sc-1442 cleanup — sits ABOVE both return sites, so every exit path is already clean. A Ctrl-C
   # mid-gate can leak the mode-600 temp file; accepted — its content is the message the author is
   # about to publish anyway.
   if [ -n "$msgf" ]; then rm -f -- "$msgf" 2>/dev/null || true; fi
   unset DEVKIT_COMMIT_MSG_FILE
+
+  # A zero-exit commit is provisional until ship proves its wrapper ran and, for sentinel-aware
+  # overlays, that the real gate chain emitted output. Rewind before telemetry so the terminal row
+  # records the actual failed ship rather than a success that callers will never publish.
+  local ship_abort_reported=0 blocked_override=""
+  if [ "$rc" -eq 0 ] && [ "$ship_hook_proved" -ne 1 ]; then
+    git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
+    {
+      echo "⚠️  ship: NO pre-commit execution proof was captured — ship aborted; nothing pushed"
+      echo "    Expected marker: $ship_hook_marker. Full log: $log"
+    } >&2
+    rc=1
+    blocked_override='"hook_proof"'
+    ship_abort_reported=1
+  elif [ "$rc" -eq 0 ] && [ -x "$root/.devkit/hooks/pre-commit" ] \
+     && grep -q 'devkit-gates: chain start' "$root/.devkit/hooks/pre-commit" \
+     && ! grep -q 'devkit-gates: chain start' "$log"; then
+    git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
+    {
+      echo "⚠️  ship: NO gate output captured — overlay hook chain appears to have no-op'd"
+      echo "    (expected .devkit/hooks/pre-commit to run). Ship aborted; nothing pushed. Log: $log"
+    } >&2
+    rc=1
+    blocked_override='"overlay_no_output"'
+    ship_abort_reported=1
+  fi
 
   # Did OUR outer `git commit` die on its own HEAD finalize, or did a GATE merely PRINT the same git
   # error? The captured log is a COMBINED stream (`2>&1 | tee` above folds hook output in), so the two
@@ -165,7 +253,9 @@ commit_with_gate_capture() {
   # decisions → review, and each hook step is `|| exit`, so exactly one gate blocks; grep in that
   # order attributes it. qavis is advisory (never blocks a ship) so it is not a blocked_gate value.
   local blocked_json timed_out
-  if [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
+  if [ -n "$blocked_override" ]; then blocked_json=$blocked_override; timed_out=false
+  elif [ "$hook_setup_failed" -eq 1 ]; then blocked_json='"hook_setup"'; timed_out=false
+  elif [ "$rc" -eq 0 ]; then blocked_json=null; timed_out=false
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then blocked_json='"timeout"'; timed_out=true
   # NOT a blocked gate: every gate PASSED and `git commit` then died on its finalize ref-update
   # because something moved the ship worktree's HEAD mid-commit. Must be tested BEFORE the gate
@@ -189,27 +279,9 @@ commit_with_gate_capture() {
 
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     : # run_gates_with_capture already emitted the attributed timeout + retry guidance
+  elif [ "$ship_abort_reported" -eq 1 ]; then
+    : # Proof/sentinel failure was already reported before terminal telemetry was emitted.
   elif [ "$rc" -eq 0 ]; then
-    # Honest banner: a zero-exit commit is NOT proof the gates ran. In overlay mode the chain can
-    # silently no-op (see the core.hooksPath forcing above); if that ever happens the log holds no
-    # gate output and reporting "✓ gates ran" would be a lie. Gate enforcement on the overlay hook
-    # FILE emitting the sentinel — `devkit update` re-pins the package but does NOT regenerate the
-    # git-ignored on-disk hook, so a consumer on a new ship.sh + an old sentinel-less hook still
-    # runs its gates correctly; holding it to a sentinel it can't emit would falsely abort a fully
-    # gated ship. Only sentinel-emitting hooks are held to fail-closed enforcement.
-    if [ -x "$root/.devkit/hooks/pre-commit" ] \
-       && grep -q 'devkit-gates: chain start' "$root/.devkit/hooks/pre-commit" \
-       && ! grep -q 'devkit-gates: chain start' "$log"; then
-      # The commit already succeeded (rc=0) but the chain produced no sentinel → undo it so the
-      # caller's cleanup reclaims the branch (else tip≠BASE keeps it, blocking a retry). HEAD~1==BASE
-      # (branch created at BASE, exactly one commit); the worktree is discarded next, so --soft suffices.
-      git -C "$wt" reset --soft HEAD~1 2>/dev/null || true
-      {
-        echo "⚠️  ship: NO gate output captured — overlay hook chain appears to have no-op'd"
-        echo "    (expected .devkit/hooks/pre-commit to run). Ship aborted; nothing pushed. Log: $log"
-      } >&2
-      return 1
-    fi
     {
       echo "✓ pre-commit gates ran in the ship worktree — full output: $log"
       # Was: "(e.g. coverage is NOT gated in the ship worktree)" — false since prepare-gate-worktree.sh
