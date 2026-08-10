@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { waitForPath as waitForFile } from '../../../cli/__tests__/_helpers.mts';
 import {
   clearEntries,
   devkitDataFile,
@@ -122,13 +123,6 @@ function replacePublishedLock(file: string, label: string): { displaced: string;
     `${JSON.stringify({ fenced: true, pid: process.pid, processStart: `ps:${processStart}`, token })}\n`,
   );
   return { displaced, token };
-}
-async function waitForFile(file: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!existsSync(file) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  if (!existsSync(file)) throw new Error(`timed out waiting for ${file}`);
 }
 async function assertFilePresence(file: string, expected: boolean): Promise<void> {
   const deadline = Date.now() + 200;

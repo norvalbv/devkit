@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
 import {
+  assertInterruptedGateKeepsWorktree,
   testExecFileSync as execFileSync,
   processAlive,
   testSpawnSync as spawnSync,
@@ -34,6 +35,30 @@ function run(args, dir, env = {}, opts = {}) {
     ...opts,
   });
 }
+
+describe('reship — interrupted gate handoff', () => {
+  it('keeps the worktree alive until an interrupted gate is fully reaped', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'reship-signal-bare-'));
+    dirs.push(bare);
+    execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GENV } });
+    const { dir } = repo(bare);
+    const env = { ...process.env, ...GENV };
+    const git = (args) =>
+      execFileSync('git', ['-C', dir, ...args], { env, encoding: 'utf8' }).trim();
+    mkdirSync(join(dir, '.husky/_'), { recursive: true });
+    git(['config', 'core.hooksPath', '.husky/_']);
+    git(['push', '-q', 'origin', 'HEAD:pr-open']);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    await assertInterruptedGateKeepsWorktree({
+      dir,
+      env,
+      script: scriptPath,
+      args: ['pr-open', 't', '--pr', '--', 'note.txt'],
+      listWorktrees: () => git(['worktree', 'list']),
+    });
+  });
+});
 
 /** A repo with `origin` set (GitHub-shaped by default) on branch `work`. */
 function repo(origin = 'git@github.com:acme/app.git') {

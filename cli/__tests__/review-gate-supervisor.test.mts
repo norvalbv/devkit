@@ -4,7 +4,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
-import { processAlive, rootRegistry, testSpawnSync as spawnSync } from './_helpers.mts';
+import {
+  processAlive,
+  rootRegistry,
+  testSpawnSync as spawnSync,
+  waitForPath,
+} from './_helpers.mts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUPERVISOR = join(HERE, '../lib/ship/review/process/gate-supervisor.mts');
@@ -47,24 +52,6 @@ function waitForExit(child: ChildProcess, timeoutMs = WAIT_MS): Promise<number |
       clearTimeout(timer);
       resolve(code);
     });
-  });
-}
-
-function waitForPath(path: string, timeoutMs = WAIT_MS): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const started = Date.now();
-    const check = (): void => {
-      if (existsSync(path)) {
-        resolve();
-        return;
-      }
-      if (Date.now() - started >= timeoutMs) {
-        reject(new Error(`timed out waiting for ${path}`));
-        return;
-      }
-      setTimeout(check, 10);
-    };
-    check();
   });
 }
 

@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { waitForPath as waitForFile } from '../../../cli/__tests__/_helpers.mts';
 import {
   resolvePlanCritiqueEvidenceRoot,
   withExistingPlanCritiquePersistenceLock,
@@ -57,14 +58,6 @@ function runChild(script: string, args: string[]): Promise<ChildResult> {
     child.once('error', reject);
     child.once('close', (code) => resolve({ code, stderr }));
   });
-}
-
-async function waitForFile(file: string): Promise<void> {
-  for (let attempt = 0; attempt < 5_000; attempt += 1) {
-    if (existsSync(file)) return;
-    await delay(2);
-  }
-  throw new Error(`timed out waiting for ${file}`);
 }
 
 function aliasRoots(scratch: string): { alias: string; real: string } {

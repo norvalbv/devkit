@@ -224,14 +224,11 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-# bash runs the EXIT trap on a signal too, so cleanup was never at risk — but it REPORTS 0 for INT and
-# QUIT, so an interrupted ship read as a successful one to any caller checking the status. Re-exit
-# with the conventional 128+signo; `exit` from a handler still runs the EXIT trap, so the worktree +
-# branch teardown above is unchanged. Only the reported status becomes honest.
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 131' QUIT
-trap 'exit 143' TERM
+# Keep cleanup ordered after the active gate supervisor. A signal may target only this public shell
+# (Codex task termination does), so forwarding + waiting is load-bearing: immediate exit would run
+# cleanup while a reviewer still has $WT as its cwd (sc-1538).
+. "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
+gate_signal_handoff_init
 
 git worktree add -q -b "$BR" "$WT" "$BASE" >&2
 
@@ -292,6 +289,10 @@ export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into 
 ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
 ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
+# A signal can land after the gate supervisor exits but before its reap callback clears the PID.
+# The handoff records it even when forwarding finds that PID already dead; never let that narrow
+# window continue into a push or report success (sc-1538).
+[ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
 # Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
 # GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before
 # anything leaves the machine — dry runs included, so the check is exercised on every ship path.
