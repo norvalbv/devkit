@@ -216,9 +216,10 @@ export function stripFrontmatter(md) {
  * preamble re-scopes it (staged-only, checklist-driven, no marker/approve machinery) and the
  * postamble pins the machine-parseable verdict line.
  */
-export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '' } = {}) {
-    const effectiveAssetRoot = assetRoot ?? '.claude';
-    const brief = stripFrontmatter(agentBody).replaceAll('.claude/skills/', `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`);
+export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecoveryReason, { targetsBlock = '', commitMsgBlock = '' } = {}, checklistRoot = assetRoot ?? '.claude') {
+    const effectiveAssetRoot = checklistRoot;
+    const skillPrefix = `${effectiveAssetRoot.replace(TRAILING_SLASH_RE, '')}/skills/`;
+    const brief = ['.agents/skills/', '.claude/skills/', '.cursor/skills/'].reduce((body, providerPrefix) => body.replaceAll(providerPrefix, skillPrefix), stripFrontmatter(agentBody));
     const script = checklistScriptAt(reviewer, effectiveAssetRoot);
     const checklistContract = checklistContractFor(reviewer, script, assetRoot);
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +

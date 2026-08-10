@@ -262,28 +262,28 @@ export function runDeterministic(cwd = process.cwd(), opts = {}) {
     const cacheScope = prefixCacheScope(opts.scope, effectiveIds);
     // Deterministic-prefix cache (ship only — a no-op otherwise): a cached all-green staged tree skips
     // every gate. checkPrefix returns true = skip, false = run.
-  const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
-  const skip = Boolean(cachedPrefix);
-  const bypassStructure = Boolean(opts.structure) && structureBypassed();
-  const fails = [];
+    const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
+    const skip = Boolean(cachedPrefix);
+    const bypassStructure = Boolean(opts.structure) && structureBypassed();
+    const fails = [];
     // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
     // green run — the whole defect this exists for is a skipped gate reading like a passed one.
-  const skipped = [];
-  if (!skip) {
-    if (bypassStructure) {
-      console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
-      console.log('   Repository structure was NOT verified for this commit.');
-      emitGateEvent({
-        type: 'gate_result',
-        gate: 'structure-lint',
-        // The collector's gate_result schema accepts fail | could_not_run. Keep the deliberate
-        // bypass measurable as a non-run, and distinguish it from an infrastructure opt-out in
-        // detail instead of inventing a status that downstream readers would treat as clean.
-        status: 'could_not_run',
-        detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
-      });
-    }
-    const ids = new Set(effectiveIds);
+    const skipped = [];
+    if (!skip) {
+        if (bypassStructure) {
+            console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
+            console.log('   Repository structure was NOT verified for this commit.');
+            emitGateEvent({
+                type: 'gate_result',
+                gate: 'structure-lint',
+                // The collector's gate_result schema accepts fail | could_not_run. Keep the deliberate
+                // bypass measurable as a non-run, and distinguish it from an infrastructure opt-out in
+                // detail instead of inventing a status that downstream readers would treat as clean.
+                status: 'could_not_run',
+                detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
+            });
+        }
+        const ids = new Set(effectiveIds);
         const gates = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
             label: `guard-${g.id}`,
             argv: ['node', path.resolve(HERE, g.module.replace(MJS_EXT_RE, SELF_EXT)), ...g.args],
