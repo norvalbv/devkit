@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   decide,
@@ -136,6 +136,21 @@ describe('decide (PreToolUse)', () => {
     const input = { hook_event_name: 'PreToolUse', tool_name: 'ExitPlanMode', tool_input: {} };
     expect(decide(input, root, tmp)).not.toBeNull();
     expect(existsSync(markerPaths(root, undefined, tmp).snoozed)).toBe(true);
+  });
+
+  it('keeps a traversal-shaped session id inside the marker directory', () => {
+    const evil = '../../escape/attempt';
+    const paths = markerPaths(root, evil, tmp);
+    expect(dirname(paths.ran)).toBe(paths.dir);
+    expect(dirname(paths.snoozed)).toBe(paths.dir);
+    const input = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'ExitPlanMode',
+      tool_input: {},
+      session_id: evil,
+    };
+    expect(decide(input, root, tmp)).not.toBeNull();
+    expect(existsSync(paths.snoozed)).toBe(true);
   });
 
   it('fails open on malformed input', () => {

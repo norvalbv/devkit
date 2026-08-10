@@ -49,8 +49,14 @@ export function markerPaths(root, sessionId, tmp = tmpdir()) {
     // keep the unresolved path; a stable wrong key still isolates the namespace
   }
   const repoKey = createHash("sha256").update(real).digest("hex").slice(0, 12);
+  // Hash the session id too: it arrives from harness stdin, and interpolating it raw would let a
+  // path-shaped value (`../../…`) escape the namespace directory.
+  const sessionKey =
+    typeof sessionId === "string" && sessionId.length > 0
+      ? createHash("sha256").update(sessionId).digest("hex").slice(0, 12)
+      : "unknown";
   const dir = join(tmp, "devkit-prior-art");
-  const base = join(dir, `${repoKey}-${sessionId || "unknown"}`);
+  const base = join(dir, `${repoKey}-${sessionKey}`);
   return { dir, ran: `${base}.ran`, snoozed: `${base}.snoozed` };
 }
 

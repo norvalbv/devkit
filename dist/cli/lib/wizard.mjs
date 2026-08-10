@@ -220,6 +220,12 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         if (bail(surface))
             return null;
         selection.agentTargets = [...(AGENT_SURFACE_SETS[surface] ?? AGENT_TARGETS)];
+        // The prior-art gate's registrations are Claude-only: keeping it selected without the claude
+        // surface would record an enabled component that installs nothing.
+        if (selection.priorArtGate && !selection.agentTargets.includes('claude')) {
+            selection.priorArtGate = false;
+            note('prior-art gate skipped: its hooks are Claude-only and claude is not a selected surface');
+        }
     }
     // 4. Guards — a dedicated multiselect when the hook is in (every mode runs them in the hook). The
     // line-growth block rides this list as a checkbox (recommended-on) but is a CONFIG KNOB, not a guard

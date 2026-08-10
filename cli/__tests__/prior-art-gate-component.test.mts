@@ -89,6 +89,23 @@ describe('devkit init --prior-art-gate', () => {
     expect(ledger).toContain('prior-art-gate:post-task');
   });
 
+  it('--prior-art-gate with --no-claude deselects the gate with a notice (Claude-only hooks)', () => {
+    const root = tmpRepo();
+    const run = devkit(
+      root,
+      'init',
+      '--stack',
+      'generic',
+      '--yes',
+      '--prior-art-gate',
+      '--no-claude',
+    );
+    expect(run.status).toBe(0);
+    expect(`${run.stdout}${run.stderr}`).toContain('prior-art gate skipped');
+    expect(existsSync(hookPath(root))).toBe(false);
+    expect(readJson(root, '.devkit/config.json').components.priorArtGate).toBe(false);
+  });
+
   it('--no-prior-art-gate keeps it off even when --prior-art-gate is also passed', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--prior-art-gate', '--no-prior-art-gate');

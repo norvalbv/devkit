@@ -98,5 +98,11 @@ export function selectionFromFlags(flags) {
     sel.priorArtGate = flags.priorArtGate && !flags.no.has('prior-art-gate');
     // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
     sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
+    // The gate's registrations are Claude-only: recording it enabled with no claude surface would
+    // install nothing and leave dead config, so deselect it visibly instead.
+    if (sel.priorArtGate && !sel.agentTargets.includes('claude')) {
+        sel.priorArtGate = false;
+        console.warn('  ! prior-art gate skipped: its hooks are Claude-only and the claude surface is deselected');
+    }
     return sel;
 }
