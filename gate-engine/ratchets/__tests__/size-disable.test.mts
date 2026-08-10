@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stagedSet } from '../git-index.mts';
+import { changedSetSince, stagedSet } from '../git-index.mts';
 import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
@@ -466,6 +466,20 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(resolved.status).toBe(1);
     expect(resolved.stderr).toContain('src/resolution.ts: 70 lines (max 50)');
     expect(resolved.stderr).not.toContain('src/upstream.ts');
+  });
+
+  it('preserves leading whitespace when scoping a PR from a nested directory', () => {
+    const root = makeRoot();
+    gitInit(root);
+    write(root, ' leading/base.ts', 'export {};\n');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, ' leading/changed.ts', 'export const changed = true;\n');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'change nested file'], { cwd: root });
+
+    expect(changedSetSince(join(root, ' leading'), base)).toEqual(new Set(['changed.ts']));
   });
 
   it('with nothing staged (CI / audit) the whole tree is enforced and the baseline is not mutated', () => {

@@ -87,7 +87,7 @@ export function gitPrefix(root: string): string {
     return execFileSync('git', ['rev-parse', '--show-prefix'], {
       cwd: root,
       encoding: 'utf8',
-    }).trim();
+    }).trimEnd();
   } catch {
     return '';
   }
