@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { stagedSet } from '../git-index.mts';
+import { changedSetSince, stagedSet } from '../git-index.mts';
 import { countDisables, countOversized, freezeLines } from '../size-disable.mts';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'size-disable.mts');
@@ -126,6 +126,19 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
     expect(frozen).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
     expect(run(root, 'gate').status).toBe(0);
+  });
+
+  it('freeze ignores a stale pull-request base because only gate consumes PR scope', () => {
+    const root = makeRoot();
+    write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
+    const r = spawnSync(process.execPath, [SCRIPT, 'freeze'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: 'missing-base' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
+    expect(frozen).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
   });
 
   it('writes the baseline under the CONSUMER cwd, not the package dir (W-3)', () => {
@@ -455,6 +468,20 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(resolved.stderr).not.toContain('src/upstream.ts');
   });
 
+  it('preserves leading whitespace when scoping a PR from a nested directory', () => {
+    const root = makeRoot();
+    gitInit(root);
+    write(root, ' leading/base.ts', 'export {};\n');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, ' leading/changed.ts', 'export const changed = true;\n');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'change nested file'], { cwd: root });
+
+    expect(changedSetSince(join(root, ' leading'), base)).toEqual(new Set(['changed.ts']));
+  });
+
   it('with nothing staged (CI / audit) the whole tree is enforced and the baseline is not mutated', () => {
     const root = makeRoot();
     gitInit(root);
@@ -468,6 +495,76 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(80); // unchanged — no mutation without a commit
+  });
+
+  it('pull-request CI ignores inherited line drift outside the diff', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/inherited.ts', big(80));
+    write(root, 'src/clean.ts', big(10));
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/inherited.ts': 60 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base with inherited drift'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, 'src/clean.ts', big(11));
+    gitAdd(root, 'src/clean.ts');
+    execFileSync('git', ['commit', '-qm', 'unrelated PR change'], { cwd: root });
+
+    expect(run(root, 'gate').status).toBe(1); // push/manual audit still sees the inherited drift
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(pr.status, pr.stderr).toBe(0);
+    expect(pr.stderr).not.toContain('src/inherited.ts');
+  });
+
+  it('pull-request CI still blocks a changed file that exceeds its ceiling', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/changed.ts', big(80));
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/changed.ts': 80 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, 'src/changed.ts', big(90));
+    gitAdd(root, 'src/changed.ts');
+    execFileSync('git', ['commit', '-qm', 'grow changed file'], { cwd: root });
+
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(pr.status).toBe(1);
+    expect(pr.stderr).toContain('src/changed.ts: 90 lines (max 80)');
+  });
+
+  it('pull-request CI fails unavailable when its supplied base cannot be resolved', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/clean.ts', big(10));
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: 'missing-base' },
+    });
+    expect(pr.status).toBe(2);
+    expect(pr.stderr).toContain('pull-request base is unavailable');
   });
 
   it('freeze is monotone-down: never raises a recorded ceiling (anti-laundering)', () => {
@@ -584,6 +681,29 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     expect(r.stderr).toContain('src/b.ts');
   });
 
+  it('pull-request CI ignores inherited disable debt outside the diff', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/inherited.ts', dis(1));
+    write(root, 'src/clean.ts', 'export {};\n');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base with inherited debt'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, 'src/clean.ts', 'export const clean = true;\n');
+    gitAdd(root, 'src/clean.ts');
+    execFileSync('git', ['commit', '-qm', 'unrelated PR change'], { cwd: root });
+
+    expect(run(root, 'gate').status).toBe(1); // whole-tree audit retains the migration block
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(pr.status, pr.stderr).toBe(0);
+    expect(pr.stderr).not.toContain('src/inherited.ts');
+  });
+
   it('a stale {0,0} legacy baseline self-deletes + stages in a commit (the qavis case)', () => {
     const root = makeRoot();
     gitInit(root);
@@ -631,6 +751,30 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     expect(r.status).toBe(1); // must block on the whole-tree disable, never staged-scope past it
     expect(r.stderr).toContain('pre-per-file baseline');
     expect(() => readBaseline(root)).not.toThrow(); // size.json is NOT deleted
+  });
+
+  it('pull-request CI still blocks a legacy baseline until its disables are migrated', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'] });
+    write(root, 'src/inherited.ts', dis(1));
+    write(root, 'src/clean.ts', 'export {};\n');
+    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    write(root, 'src/clean.ts', 'export const clean = true;\n');
+    gitAdd(root, 'src/clean.ts');
+    execFileSync('git', ['commit', '-qm', 'unrelated PR change'], { cwd: root });
+
+    const r = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('pre-per-file baseline');
+    expect(r.stderr).toContain('guard-size freeze');
   });
 
   it('a legacy baseline migrates to per-file shape on `guard-size freeze`', () => {
