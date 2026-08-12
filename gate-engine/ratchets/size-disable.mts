@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { hasStagedFiles, pullRequestScope, stageBaseline, stagedSet } from './git-index.mts';
+import { freezeLinesBaseline, type LinesFreezeMode } from './size-lines-freeze.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
 import { runPreflightCli } from './size-preflight.mts';
 
@@ -140,33 +141,15 @@ export function countOversized(
   return over.sort((a, b) => a.file.localeCompare(b.file));
 }
 
-// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json),
-// shrink-only — min(prev, current) so a re-freeze after a `--no-verify` growth can't launder a larger
-// count back in. Writes ONLY the line baseline; it NEVER touches the disable-count baseline
-// (size.json), so an already-adopted repo can turn the cap on without re-snapshotting (and possibly
-// laundering) its disable debt. Returns the number of files over the cap; deletes a stale baseline
-// when none remain. No-op when both caps are off.
-export function freezeLines(root = process.cwd()): number {
+// Grandfather the current over-cap source files into the raw-line baseline (size-lines.json).
+// Automatic onboarding stays shrink-only; the explicit CLI refresh may raise a ceiling, but names
+// every increase so legitimate main-branch drift can be reconciled without a silent laundering path.
+// Writes ONLY the line baseline and never touches the disable-count baseline (size.json). Returns
+// the number of files over the cap; deletes a stale baseline when none remain.
+export function freezeLines(root = process.cwd(), mode: LinesFreezeMode = 'shrink-only'): number {
   const cfg = resolveGuardConfig(root);
   if (!cfg.maxLines && !cfg.maxTestLines) return 0;
-  const linesBaselineFile = join(root, LINES_BASELINE);
-  const over = countOversized(root);
-  const prev: Record<string, number> = existsSync(linesBaselineFile)
-    ? (JSON.parse(readFileSync(linesBaselineFile, 'utf8')) as LinesBaseline).files
-    : {};
-  const files = Object.fromEntries(
-    over.map((o) => [o.file, o.file in prev ? Math.min(prev[o.file], o.lines) : o.lines]),
-  );
-  if (Object.keys(files).length > 0) {
-    mkdirSync(dirname(linesBaselineFile), { recursive: true });
-    writeFileSync(
-      linesBaselineFile,
-      `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files }, null, 2)}\n`,
-    );
-  } else {
-    rmSync(linesBaselineFile, { force: true });
-  }
-  return over.length;
+  return freezeLinesBaseline(root, cfg, countOversized(root), mode);
 }
 
 // ── line-growth onboarding + upgrade back-fill ─────────────────────────────────────────────────
@@ -459,10 +442,10 @@ function runCli(cmd: string): void {
       );
     }
     if (cfg.maxLines || cfg.maxTestLines) {
-      const over = freezeLines(root);
+      const over = freezeLines(root, 'refresh');
       console.log(
         over > 0
-          ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) grandfathered (shrink-only)`
+          ? `✓ ${LINES_BASELINE}: ${over} oversized file(s) grandfathered`
           : `✓ ${LINES_BASELINE}: no oversized files — no baseline written`,
       );
     }
