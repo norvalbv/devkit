@@ -64,9 +64,17 @@ done
 LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
 
-# Preflight, fail fast before touching anything.
+# A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
+# commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
+# base, body and scoped snapshot are known so we can distinguish the exact preserved commit from an
+# unrelated local branch. Dry runs deliberately keep their worktree for inspection and never publish,
+# so they retain the strict new-branch precondition.
+LOCAL_BRANCH_EXISTS=
 if git show-ref --verify -q "refs/heads/$BR"; then
-  echo "branch already exists: $BR" >&2; exit 1
+  if [ -n "${SHIP_DRY_RUN:-}" ]; then
+    echo "branch already exists: $BR" >&2; exit 1
+  fi
+  LOCAL_BRANCH_EXISTS=1
 fi
 if [ -z "${SHIP_DRY_RUN:-}" ] && ! command -v gh >/dev/null 2>&1; then
   echo "gh not installed (needed to open the PR)" >&2; exit 1
@@ -161,7 +169,8 @@ ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 # "has changes" and falls through to the old behaviour — fail toward the status quo, never toward a
 # false abort. Says "no changes in" rather than "identical to": a misspelled path also lands here
 # (`git diff --quiet -- nonexistent` exits 0), and the wording stays true for it.
-if git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
+if [ -z "$LOCAL_BRANCH_EXISTS" ] &&
+   git -C "$ROOT" diff --quiet "$BASE" -- "${PATHS[@]}" &&
    [ -z "$(git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}")" ] &&
    [ -z "$(git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}")" ]; then
   echo "nothing to commit: no changes in ${PATHS[*]} vs $BASE_REF (${BASE:0:7})" >&2
@@ -188,8 +197,16 @@ elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
+RECOVERY_INDEX=
+RECOVERY_PATHS_ALL=
+RECOVERY_PATHS_SCOPED=
+RECOVERY_RECEIPT_REF="refs/devkit/ship-receipts/$BR"
+BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
 cleanup() {
   rm -f "$PATCH" "$STAGED_STATE"
+  [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
+  [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
+  [ -z "$RECOVERY_PATHS_SCOPED" ] || rm -f "$RECOVERY_PATHS_SCOPED"
   # A staged-set invariant fired. Removing the worktree would destroy the only copy of the bad index
   # and leave nothing to diagnose from, so hand it to the operator instead (worktree AND branch).
   if [ -n "$KEEP_WT" ]; then
@@ -209,7 +226,7 @@ cleanup() {
   local tip; tip=$(git rev-parse -q --verify "$BR" 2>/dev/null || true)
   if [ -z "$tip" ] || [ "$tip" = "$BASE" ]; then
     git worktree remove --force "$WT" 2>/dev/null || true
-    [ -n "$tip" ] && git branch -D "$BR" 2>/dev/null || true
+    [ -n "$tip" ] && [ -n "$BRANCH_CREATED" ] && git branch -D "$BR" 2>/dev/null || true
     return
   fi
   # A commit DID land beyond BASE.
@@ -230,18 +247,86 @@ trap cleanup EXIT
 . "$SCRIPT_DIR/review/process/gate-signal-handoff.sh"
 gate_signal_handoff_init
 
-git worktree add -q -b "$BR" "$WT" "$BASE" >&2
+if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  # Resume only when the existing branch proves it is the exact output this invocation would have
+  # produced: one commit on this base, the same message, no out-of-scope paths, and a tree rebuilt
+  # from the caller's CURRENT scoped files that is byte-for-byte identical. The temporary index makes
+  # that last check include tracked, untracked and ignored files without touching the caller's index.
+  RECOVERY_REASON=
+  RECOVERY_COMMIT=$(git rev-parse -q --verify "$BR^{commit}" 2>/dev/null || true)
+  RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
+  RECOVERY_PARENTS=()
+  read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
+  if [ "${#RECOVERY_PARENTS[@]}" -ne 2 ] || [ "${RECOVERY_PARENTS[1]:-}" != "$BASE" ]; then
+    RECOVERY_REASON="its tip is not one commit on the requested base"
+  fi
 
-# Tracked edits (modify + delete, binary-safe) -> worktree index.
-git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
-[ -s "$PATCH" ] && git -C "$WT" apply --index "$PATCH"
+  # `git commit -m` applies stripspace cleanup before writing the object. Apply the same cleanup to
+  # the retry input so an identical invocation containing trailing spaces compares equal to `%B`.
+  EXPECTED_MESSAGE=$(printf '%s\n\n%s\n' "$TITLE" "$BODY" | git stripspace)
+  ACTUAL_MESSAGE=$(git log -1 --format=%B "$RECOVERY_COMMIT" 2>/dev/null || true)
+  if [ -z "$RECOVERY_REASON" ] && [ "$ACTUAL_MESSAGE" != "$EXPECTED_MESSAGE" ]; then
+    RECOVERY_REASON="its commit message differs from this ship title/body"
+  fi
+
+  # Ask Git to resolve the caller's pathspecs, then compare that exact NUL-delimited set with the
+  # complete changed-path set. This accepts equivalent spellings such as `./note.txt`, stays binary
+  # safe for unusual filenames, and uses --no-renames so BOTH sides of a rename must be briefed.
+  RECOVERY_PATHS_ALL=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-all.XXXXXX")
+  RECOVERY_PATHS_SCOPED=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-scoped.XXXXXX")
+  git diff --name-only --no-renames -z "$BASE" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
+  git diff --name-only --no-renames -z "$BASE" "$RECOVERY_COMMIT" -- "${PATHS[@]}" \
+    > "$RECOVERY_PATHS_SCOPED"
+  if [ -z "$RECOVERY_REASON" ] && [ ! -s "$RECOVERY_PATHS_ALL" ]; then
+    RECOVERY_REASON="its commit has no scoped changes"
+  elif [ -z "$RECOVERY_REASON" ] && ! cmp -s "$RECOVERY_PATHS_ALL" "$RECOVERY_PATHS_SCOPED"; then
+    RECOVERY_REASON="its commit changes paths outside the requested scope"
+  fi
+
+  # Similarity is not provenance. Only ship itself writes this private ref after a gated commit has
+  # actually landed; without the exact receipt, a hand-made/--no-verify commit must never skip gates.
+  RECOVERY_RECEIPT=$(git rev-parse -q --verify "$RECOVERY_RECEIPT_REF^{commit}" 2>/dev/null || true)
+  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_RECEIPT" != "$RECOVERY_COMMIT" ]; then
+    RECOVERY_REASON="it has no matching prior-ship gate receipt"
+  fi
+
+  if [ -z "$RECOVERY_REASON" ]; then
+    RECOVERY_INDEX=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-index.XXXXXX")
+    rm -f "$RECOVERY_INDEX" # read-tree must create it; an empty file is not a valid index
+    GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" read-tree "$RECOVERY_COMMIT"
+    GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" add -f -A -- "${PATHS[@]}"
+    RECOVERY_TREE=$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" write-tree)
+    BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
+    if [ "$RECOVERY_TREE" != "$BRANCH_TREE" ]; then
+      RECOVERY_REASON="the current scoped files no longer match its commit"
+    fi
+  fi
+
+  if [ -n "$RECOVERY_REASON" ]; then
+    echo "branch already exists: $BR" >&2
+    echo "  cannot safely resume it: $RECOVERY_REASON" >&2
+    echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
+    exit 1
+  fi
+
+  echo "Resuming preserved ship commit ${RECOVERY_COMMIT:0:7} on $BR (gate receipt verified)." >&2
+  # Detached at the verified OID: a concurrent local branch update cannot change what this retry
+  # pushes or what the reconcile manifest records.
+  git worktree add -q --detach "$WT" "$RECOVERY_COMMIT" >&2
+else
+  BRANCH_CREATED=1
+  git worktree add -q -b "$BR" "$WT" "$BASE" >&2
+
+  # Tracked edits (modify + delete, binary-safe) -> worktree index.
+  git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
+  [ -s "$PATCH" ] && git -C "$WT" apply --index "$PATCH"
 
 # Untracked new files in scope -> copy + stage.
-git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
-  mkdir -p "$WT/$(dirname "$f")"
-  cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
-  git -C "$WT" add -- "$f"
-done
+  git -C "$ROOT" ls-files -o --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+    mkdir -p "$WT/$(dirname "$f")"
+    cp -Pp "$ROOT/$f" "$WT/$f"   # -P: keep a symlink a symlink; -p: preserve mode (the +x bit) regardless of umask
+    git -C "$WT" add -- "$f"
+  done
 
 # ...and the untracked files git IGNORES. `ls-files -o --exclude-standard` omits them BY DESIGN, so
 # a NEW file under a gitignored-but-force-tracked tree fell through both passes: the tracked-diff
@@ -251,52 +336,68 @@ done
 # vanished, publishing a devkit whose gate supervisor could not resolve its own import.
 # Every PATHS entry is caller-explicit (positional after --; directories rejected above), so
 # forcing them is precisely what was asked — same reasoning as reship.sh's `git add -f` (#199).
-git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
-  mkdir -p "$WT/$(dirname "$f")"
-  cp -Pp "$ROOT/$f" "$WT/$f"
-  git -C "$WT" add -f -- "$f"
-done
+  git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+    mkdir -p "$WT/$(dirname "$f")"
+    cp -Pp "$ROOT/$f" "$WT/$f"
+    git -C "$WT" add -f -- "$f"
+  done
 
 # Snapshot the index the instant staging finishes — the two assertions below hold the gate chain to
 # it. See assert-staged-set.sh for the clobber this defends against.
-. "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
-ship_record_staged_state "$WT" "$STAGED_STATE"
+  . "$(dirname "${BASH_SOURCE[0]}")/assert-staged-set.sh"
+  ship_record_staged_state "$WT" "$STAGED_STATE"
 # ...and prove the objects it names are actually readable. write-tree above cannot do this: it
 # persists a cache-tree and every later write-tree short-circuits on it, so a staged object that goes
 # missing stays invisible to the tree comparisons (sc-1420). Establishes the "present at staging"
 # end of the window; the preflight below establishes the other.
-ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
+  ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
-prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
+  prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
 
 # Link gate configs that live in the repo but aren't in this fresh checkout (an untracked config, a
 # gitignored index) so the worktree gates match a plain commit instead of silently running on defaults.
-. "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
-link_untracked_gate_configs "$WT" "$ROOT"
+  . "$(dirname "${BASH_SOURCE[0]}")/link-gate-configs.sh"
+  link_untracked_gate_configs "$WT" "$ROOT"
 
 # Commit inside the worktree (hook gates run HERE). Capture + surface the gate output so the shipping
 # agent reliably sees the verdicts — git buries them on the commit's stderr. See commit-with-gate-capture.sh.
-. "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
+  . "$(dirname "${BASH_SOURCE[0]}")/commit-with-gate-capture.sh"
 # The commit the worktree was cut from — lets in-chain gates (fallow) diff against IT, not their own
 # main-autodetect. Unconditional (not just under --base): even the default case is more precise than
 # a gate auto-detecting main, for any branch that isn't a fresh cut off main (DK-5).
-export DEVKIT_SHIP_BASE_SHA="$BASE"
-export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
-export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
+  export DEVKIT_SHIP_BASE_SHA="$BASE"
+  export DEVKIT_SHIP_MODE=ship   # tags the ship_attempt telemetry (new-ship vs reship retry)
+  export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
-ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
-ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
-commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
-# A signal can land after the gate supervisor exits but before its reap callback clears the PID.
-# The handoff records it even when forwarding finds that PID already dead; never let that narrow
-# window continue into a push or report success (sc-1538).
-[ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
+  ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+  ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
+  # Once git may create a commit, a signal must be recorded/forwarded but cannot immediately exit
+  # after the supervisor is reaped: ship first needs to checkpoint the landed commit's gate proof.
+  GATE_SIGNAL_DEFER_EXIT=1
+  COMMIT_STATUS=0
+  commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY" || COMMIT_STATUS=$?
 # Post-commit, pre-push: the gate chain ran with this worktree's index reachable through the
 # GIT_INDEX_FILE git exported into the hook. Prove the commit still contains the briefed work before
 # anything leaves the machine — dry runs included, so the check is exercised on every ship path.
-ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+  SHIP_COMMIT=$(git -C "$WT" rev-parse HEAD)
+  if [ "$SHIP_COMMIT" != "$BASE" ]; then
+    ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+    # Persist proof when the commit completed but the supervisor subsequently reported its defined
+    # timeout/signal statuses. Never mint a receipt for rc=1: run_gates_with_capture deliberately
+    # changes a successful child to 1 when mandatory gate-log persistence fails, and retry must keep
+    # failing closed in that case. A later retry may skip gates only when this ref names its exact tip.
+    case "$COMMIT_STATUS" in
+      0|124|129|130|131|137|143) git update-ref "$RECOVERY_RECEIPT_REF" "$SHIP_COMMIT" ;;
+    esac
+  fi
+  # A signal can land after the gate supervisor exits but before its reap callback clears the PID.
+  # Record any proven landed commit above, then honor the signal before push or success (sc-1538).
+  GATE_SIGNAL_DEFER_EXIT=
+  [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
+  [ "$COMMIT_STATUS" -eq 0 ] || exit "$COMMIT_STATUS"
+fi
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally on $BR, skipped push + PR." >&2
@@ -308,7 +409,12 @@ fi
 # typecheck + test:run for this one commit (CI's gate.yml re-runs both on the PR). Command-scoped —
 # nothing else inherits it — and content-keyed: the hook fails closed and runs the full suite for any
 # ref whose oid is not this sha, so a plain `git push` (no env) is unchanged.
-DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
+if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$RECOVERY_COMMIT" \
+    git -C "$WT" push origin "$RECOVERY_COMMIT:refs/heads/$BR"
+else
+  DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push -u origin "$BR"
+fi
 
 # Push succeeded → the branch is live on the remote and reconcilable NOW, whatever the PR step does.
 # Open the PR, but a create FAILURE must NOT skip the manifest write below: recording on PR-create
@@ -364,4 +470,13 @@ fi
 # Drop it now (worktree first — a branch checked out in a worktree can't be deleted).
 # Only reached on full success; any earlier failure keeps the branch for recovery.
 git worktree remove --force "$WT" 2>/dev/null || true
-git branch -D "$BR" 2>/dev/null || true
+if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
+  # The preserved local branch is redundant only while it still names the commit just published.
+  # A concurrent update belongs to somebody else and must survive this retry's cleanup.
+  # Compare-and-delete in one ref transaction. A read followed by `git branch -D` could erase a
+  # concurrent update that landed between those commands.
+  git update-ref -d "refs/heads/$BR" "$RECOVERY_COMMIT" 2>/dev/null || true
+else
+  git branch -D "$BR" 2>/dev/null || true
+fi
+git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}" 2>/dev/null || true

@@ -39,7 +39,7 @@ devkit command.
 | A commit was **denied on a protected branch**, or you're on `main`/`master` and need to land a change | `devkit ship <branch> "<title>" -- <paths>` | `git switch -c` + commit + push **moves the shared checkout's HEAD**, disturbing parallel agents; `ship` commits in an ephemeral worktree and opens a PR without moving HEAD |
 | You need to preview a hot file's real line ceiling before shipping | `guard-size preflight --base origin/<branch> -- <paths>` | It reads `size-lines.json` from the requested base, prints current lines / effective cap / headroom, and names any stale working-tree baseline. `devkit ship` runs the same preflight automatically before creating its gate worktree. |
 | The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
-| You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself, and a branch that already exists is the one state it cannot recover from |
+| You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself. An unrelated existing branch is rejected; only the exact local commit with a gate receipt from a prior post-commit failure can resume. |
 | Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
@@ -57,10 +57,12 @@ devkit command.
   the run died ~180 lines later inside an internal git call with `error: unknown option 'base'` —
   naming neither the ordering rule nor the arguments at fault. Five of six recorded agent sessions
   wrote the flags-first form *after* reading `devkit help ship`, so do not trust your recall here.
-- **Ship CREATES the positional `<branch>` — it must not already exist** locally or on origin. Never
-  `git switch -c` the branch you intend to ship to. Already sitting on some *other* branch is fine
-  and normal: ship reads file **content** from your working tree, so uncommitted work ships
-  correctly without a single commit of your own.
+- **Ship CREATES the positional `<branch>`; do not create it yourself.** An unrelated local branch or
+  any branch on origin is rejected. The sole local exception is an exact commit preserved by a prior
+  post-commit ship failure: an identical retry verifies its ship-owned gate receipt, base, message,
+  paths, and current scoped tree before resuming push + PR creation. Already sitting on some *other* branch is fine and normal:
+  ship reads file **content** from your working tree, so uncommitted work ships correctly without a
+  single commit of your own.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
@@ -77,6 +79,8 @@ devkit command.
 - **A timed-out ship (exit 124) is NOT stuck at zero — re-run the SAME command.** Reviewer PASSes
   checkpoint as they land, cleared decisions judgements and the deterministic gate prefix are cached,
   so a re-run only pays for the unfinished work; the timeout banner names the stage that was mid-flight.
+  If the commit landed before the timeout surfaced, the retry verifies its gate receipt and publishes
+  that preserved commit without re-running gates; it never adopts a merely same-named or hand-made commit.
   Do not respond to a 124 by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) — that defeats the ship.
 - **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
   SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can

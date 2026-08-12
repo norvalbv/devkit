@@ -11,260 +11,46 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { devkitVersion } from '../../gate-engine/devkit-version.mts';
 import {
   assertInterruptedGateKeepsWorktree,
   testExecFileSync as execFileSync,
-  hasAnyCommand,
   testSpawnSync as spawnSync,
 } from './_helpers.mts';
-
-// Hermetic coverage for ship-branch.sh resolution, isolation, argument parsing, and real worktree
-// commits. The origin-derived repo assertions prevent a fork's upstream from hijacking PR creation;
-// fixtures use throwaway repos and dry-run seams, with no GitHub or network dependency.
-
-const scriptPath = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
-const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
-const packagedApiSecurityAgent = fileURLToPath(
-  new URL('../../agents/api-security-reviewer.md', import.meta.url),
-);
-const packagedApiSecurityChecklist = fileURLToPath(
-  new URL('../../skills/api-security/scripts/checklist.mjs', import.meta.url),
-);
-const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
-const REPO_RE = /REPO=(.*)/;
-const BASE_REF_RE = /BASE_REF=(.*)/;
-const DETACHED_RE = /detached HEAD/;
-const DIR_RE = /directory path not allowed/;
-const FLAG_RE = /unknown flag/;
-const NOTHING_RE = /nothing to commit: no changes in/;
-const GATE_RAN_RE = /GATE_RAN/;
-const DELETED_BRANCH_RE = /Deleted branch/;
-const EPHEMERAL_WT_RE = /devkit-ship-/;
-// Matches the dry-run "worktree kept" line of BOTH scripts: ship-branch prints "… (branch <br>)",
-// reship prints "… . Remove with:" — so dropWorktree cleans either (reship worktrees leaked before).
-const WT_RE = /worktree kept at (.+?)(?: \(branch|\. Remove)/;
-const NOTE_RE = /note\.txt/;
-const EXEC_MODE_RE = /^100755/; // git mode for an executable blob
-const dirs = [];
-
-// The commit-failure cleanup test runs the REAL non-dry path, which needs `gh` on PATH
-// for the preflight (it never calls gh — the commit fails first). Skip where gh is absent.
-const hasGh = hasAnyCommand('gh');
-
-afterAll(() => {
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-});
-
-/** A throwaway repo on `branch` with `origin` set; returns the script's resolved {repo, baseRef}. */
-function buildAndRun(
-  branch,
-  origin,
-  // `argv` overrides the whole argument vector (default: the usual <branch> <title> … <path> form) so
-  // a test can drive a MALFORMED invocation — e.g. flags before the positionals. `script` swaps in
-  // reship.sh, which shares the positional guard.
-  {
-    detached = false,
-    mkdir,
-    pathArg = 'dummy-path',
-    extraArgs = [],
-    argv,
-    script = scriptPath,
-  } = {},
-) {
-  const dir = mkdtempSync(join(tmpdir(), 'shipres-'));
-  dirs.push(dir);
-  const git = (args) =>
-    execFileSync('git', args, { cwd: dir, stdio: 'ignore', env: { ...process.env, ...GIT_ENV } });
-  git(['init', '-q', '-b', branch]);
-  git(['config', 'user.email', 'a@b.c']);
-  git(['config', 'user.name', 'a']);
-  git(['commit', '-q', '--allow-empty', '-m', 'base']);
-  git(['remote', 'add', 'origin', origin]);
-  if (mkdir) mkdirSync(join(dir, mkdir), { recursive: true });
-  if (detached) git(['checkout', '-q', '--detach']);
-
-  return spawnSync(
-    '/bin/bash',
-    [script, ...(argv ?? ['feat/__resolve_test__', 'title', ...extraArgs, pathArg])],
-    {
-      cwd: dir,
-      input: '',
-      encoding: 'utf8',
-      env: { ...process.env, ...GIT_ENV, SHIP_DRY_RUN: '1', SHIP_RESOLVE_ONLY: '1' },
-    },
-  );
-}
-
-function resolve(branch, origin, opts) {
-  const r = buildAndRun(branch, origin, opts);
-  expect(r.status, `script must exit 0 (stderr: ${r.stderr})`).toBe(0);
-  return {
-    repo: REPO_RE.exec(r.stdout)?.[1],
-    baseRef: BASE_REF_RE.exec(r.stdout)?.[1],
-  };
-}
-
-/**
- * A repo with a husky stub (the gitignored _ runner is untracked, mirroring the real repo) so the
- * worktree commit actually fires a hook. `hookBody` is the pre-commit script; `origin` defaults to a
- * GitHub URL but a bare local path drives the non-dry push path with no network.
- */
-function seedShipRepo({ hookBody = 'exit 0', origin = 'git@github.com:acme/app.git' } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'shipwt-'));
-  dirs.push(dir);
-  const env = { ...process.env, ...GIT_ENV };
-  const git = (args, opts = {}) =>
-    execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', ...opts });
-  mkdirSync(join(dir, '.husky'), { recursive: true });
-  writeFileSync(join(dir, '.husky/.keep'), '');
-  for (const a of [
-    ['init', '-q', '-b', 'work'],
-    ['config', 'user.email', 'a@b.c'],
-    ['config', 'user.name', 'a'],
-    ['config', 'commit.gpgsign', 'false'],
-    ['add', '.husky/.keep'],
-    ['commit', '-q', '-m', 'base'],
-    ['config', 'core.hooksPath', '.husky/_'],
-    ['remote', 'add', 'origin', origin],
-  ])
-    git(a, { stdio: 'ignore' });
-  mkdirSync(join(dir, '.husky/_'), { recursive: true });
-  writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
-  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
-  return { dir, env, git };
-}
-
-/** dry-run keeps the worktree — remove it so afterAll's rm of the repo dir isn't blocked. */
-function dropWorktree(git, stderr) {
-  const wt = WT_RE.exec(stderr)?.[1];
-  if (wt) {
-    try {
-      git(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
-    } catch {
-      /* best-effort */
-    }
-  }
-}
-
-/** A deterministic timeout fixture for banner/attribution tests. The first supervisor invocation
- * emits the same gate artifacts as a timed-out reviewer and exits 124; the cleanup invocation passes
- * through to real Node. This tests the timeout-handling contract without racing a wall clock. */
-function reviewerTimeoutEnv(dir, env) {
-  const bin = join(dir, 'timeout-supervisor-bin');
-  const timedOut = join(dir, 'timeout-supervisor-fired');
-  mkdirSync(bin);
-  const node = join(bin, 'node');
-  writeFileSync(
-    node,
-    [
-      '#!/bin/bash',
-      'if [[ $1 == *gate-supervisor.* && ! -e "$TEST_TIMEOUT_MARKER" ]]; then',
-      '  : > "$TEST_TIMEOUT_MARKER"',
-      '  echo "🔍 Reviewer gate (headless domain judges)..."',
-      `  printf '%s' '{"running":["api-security-reviewer","commit-guard"],"completed":["api-security-reviewer"]}' > "$DEVKIT_REVIEW_PROGRESS"`,
-      '  exit 124',
-      'fi',
-      'exec "$REAL_NODE" "$@"',
-    ].join('\n'),
-  );
-  chmodSync(node, 0o755);
-  return {
-    ...env,
-    PATH: `${bin}:${env.PATH ?? ''}`,
-    REAL_NODE: process.execPath,
-    TEST_TIMEOUT_MARKER: timedOut,
-  };
-}
-
-/**
- * A ship repo whose `origin` is a LOCAL bare repo at an ABSOLUTE `…/github.com/acme/app.git` path: the
- * `…github.com/` prefix makes ship-branch's origin→owner/repo sed resolve REPO to `acme/app` (a plain
- * bare path fails its shape check), while the absolute path stays reachable from BOTH ROOT (ls-remote)
- * and the ephemeral $WT (push) with no network. Drives the real non-dry push + manifest path offline.
- */
-function seedShipRepoLocalRemote({ hookBody } = {}) {
-  const ghRoot = mkdtempSync(join(tmpdir(), 'shipgh-'));
-  dirs.push(ghRoot);
-  const bare = join(ghRoot, 'github.com', 'acme', 'app.git');
-  mkdirSync(join(ghRoot, 'github.com', 'acme'), { recursive: true });
-  execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
-  return { ...seedShipRepo({ origin: bare, ...(hookBody ? { hookBody } : {}) }), bare };
-}
-
-/**
- * Turn a seeded ship repo `dir` into an OVERLAY install: a git-ignored `.devkit/config.json`
- * (`overlay:true`) + an executable `.devkit/hooks/pre-commit`. `overlayHook === null` writes NO hook
- * (models a broken/absent overlay hook → ship must fail closed). The overlay hook is git-ignored in a
- * real repo; here it just stays untracked. The seed keeps `.husky/_` (the fail-closed husky guard),
- * but ship forces core.hooksPath=.devkit/hooks so the OVERLAY hook is the one that runs.
- */
-function addOverlay(dir, overlayHook) {
-  mkdirSync(join(dir, '.devkit/hooks'), { recursive: true });
-  writeFileSync(
-    join(dir, '.devkit/config.json'),
-    `${JSON.stringify({ overlay: true }, null, 2)}\n`,
-  );
-  if (overlayHook !== null) {
-    const pre = join(dir, '.devkit/hooks/pre-commit');
-    writeFileSync(pre, `#!/bin/sh\n${overlayHook}\n`);
-    chmodSync(pre, 0o755);
-  }
-}
-
-/** A ship repo whose `origin` is a local bare remote that ALREADY has the PR branch `pr-open` (the
- *  existing-branch precondition `ship --pr` requires). Returns {dir, env, git, bare}. */
-function seedReshipRepo() {
-  const bare = mkdtempSync(join(tmpdir(), 'reshipbare-'));
-  dirs.push(bare);
-  execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
-  const seeded = seedShipRepo({ origin: bare });
-  seeded.git(['push', '-q', 'origin', 'work:pr-open'], { stdio: 'ignore' }); // the open PR's head branch
-  return { ...seeded, bare };
-}
-
-/** A `gh` stub on a fresh PATH dir: runs `prBody` for `gh pr …`, exits 0 for anything else (clears the
- * `command -v gh` preflight). Returns the dir to prepend to PATH. */
-function ghStub(prBody) {
-  const stubBin = mkdtempSync(join(tmpdir(), 'ship-bin-'));
-  dirs.push(stubBin);
-  writeFileSync(
-    join(stubBin, 'gh'),
-    `#!/bin/sh\ncase "$1" in\n  pr) ${prBody} ;;\n  *) exit 0 ;;\nesac\n`,
-  );
-  chmodSync(join(stubBin, 'gh'), 0o755);
-  return stubBin;
-}
-
-/** True iff branch `br` exists locally in repo dir (via the seedShipRepo `git` helper). */
-function localBranchExists(git, br) {
-  try {
-    return Boolean(git(['rev-parse', '--verify', '--quiet', br], { stdio: 'pipe' }).trim());
-  } catch {
-    return false; // rev-parse --verify exits non-zero when the ref is absent
-  }
-}
-
-/** The parsed reconcile manifest written into repo `dir`. */
-function manifestOf(dir) {
-  return JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
-}
-
-/** True iff branch `br` exists on the bare remote at `bare`. */
-function remoteBranchExists(bare, br) {
-  try {
-    return Boolean(
-      execFileSync('git', ['-C', bare, 'rev-parse', '--verify', '--quiet', br], {
-        env: { ...process.env, ...GIT_ENV },
-        encoding: 'utf8',
-      }).trim(),
-    );
-  } catch {
-    return false;
-  }
-}
+import {
+  addOverlay,
+  buildAndRun,
+  createPreservedCommit,
+  DELETED_BRANCH_RE,
+  DETACHED_RE,
+  DIR_RE,
+  dirs,
+  dropWorktree,
+  EPHEMERAL_WT_RE,
+  EXEC_MODE_RE,
+  FLAG_RE,
+  GATE_RAN_RE,
+  GIT_ENV,
+  ghStub,
+  hasGh,
+  linkGateConfigsScript,
+  localBranchExists,
+  manifestOf,
+  NOTE_RE,
+  NOTHING_RE,
+  packagedApiSecurityAgent,
+  packagedApiSecurityChecklist,
+  remoteBranchExists,
+  reshipScript,
+  resolve,
+  reviewerTimeoutEnv,
+  scriptPath,
+  seedReshipRepo,
+  seedShipRepo,
+  seedShipRepoLocalRemote,
+  WT_RE,
+} from './_ship-branch-fixture.mts';
 
 describe('ship-branch.sh — origin → owner/repo resolution (the fork-upstream bug)', () => {
   const urls = [
@@ -998,6 +784,221 @@ describe('ship-branch.sh — worktree integration', () => {
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
   });
 
+  it('an identical retry publishes the preserved commit after a post-commit timeout', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote({
+      // The hook exits successfully but leaks a pipe-holding child. Git lands the commit; the gate
+      // supervisor then returns 124 while reaping that descendant — the reported Story #1550 state.
+      hookBody: 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &',
+    });
+    const hookCount = join(dir, 'hook-count');
+    const stubBin = ghStub('echo https://github.com/acme/app/pull/42');
+    const publishEnv = {
+      ...env,
+      PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}`,
+      TEST_HOOK_COUNT: hookCount,
+    };
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    const first = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/post-commit-timeout', 'ship it', '--', './note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body  \n', // Git strips these spaces; the identical retry must normalize likewise.
+        encoding: 'utf8',
+        timeout: 45_000,
+        env: { ...publishEnv, SHIP_COMMIT_TIMEOUT: '15' },
+      },
+    );
+
+    expect(first.status, first.stderr).toBe(124);
+    expect(first.stderr).toMatch(/Re-run the same devkit ship command to converge/);
+    expect(first.stdout).not.toContain('https://github.com/acme/app/pull/42');
+    expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(true);
+    expect(remoteBranchExists(bare, 'feat/post-commit-timeout')).toBe(false);
+    const preserved = git(['rev-parse', 'feat/post-commit-timeout']).trim();
+    expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/post-commit-timeout']).trim()).toBe(
+      preserved,
+    );
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/post-commit-timeout', 'ship it', '--', './note.txt'],
+      { cwd: dir, input: 'pr body  \n', encoding: 'utf8', env: publishEnv },
+    );
+
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('gate receipt verified');
+    expect(retry.stdout).toContain('https://github.com/acme/app/pull/42');
+    expect(remoteBranchExists(bare, 'feat/post-commit-timeout')).toBe(true);
+    expect(
+      execFileSync('git', ['--git-dir', bare, 'rev-parse', 'feat/post-commit-timeout'], {
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe(preserved);
+    expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(false);
+    expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1);
+    expect(manifestOf(dir).branches['feat/post-commit-timeout'].prNumber).toBe(42);
+  });
+
+  it('does not treat a matching hand-made commit as proof that ship gates ran', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    const stubBin = ghStub('echo should-not-run; exit 9');
+    createPreservedCommit({
+      dir,
+      env,
+      git,
+      branch: 'feat/unproved',
+      tempPrefix: 'ship-unproved-',
+    });
+
+    const retry = spawnSync('/bin/bash', [scriptPath, 'feat/unproved', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}` },
+    });
+
+    expect(retry.status, retry.stderr).toBe(1);
+    expect(retry.stderr).toContain('no matching prior-ship gate receipt');
+    expect(retry.stdout).not.toContain('should-not-run');
+    expect(localBranchExists(git, 'feat/unproved')).toBe(true);
+  });
+
+  it('does not mint a gate receipt when mandatory gate-log persistence fails', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const stubBin = ghStub('echo should-not-run; exit 9');
+    const realTee = execFileSync('/bin/sh', ['-c', 'command -v tee'], {
+      env,
+      encoding: 'utf8',
+    }).trim();
+    writeFileSync(join(stubBin, 'tee'), `#!/bin/sh\n"${realTee}" "$@"\nexit 1\n`);
+    chmodSync(join(stubBin, 'tee'), 0o755);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    const first = spawnSync('/bin/bash', [scriptPath, 'feat/log-failed', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}` },
+    });
+
+    expect(first.status, first.stderr).toBe(1);
+    expect(first.stderr).toContain('could not persist gate output');
+    expect(localBranchExists(git, 'feat/log-failed')).toBe(true);
+    expect(localBranchExists(git, 'refs/devkit/ship-receipts/feat/log-failed')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/log-failed')).toBe(false);
+    expect(first.stdout).not.toContain('should-not-run');
+  });
+
+  it('checkpoints a landed commit before honoring a post-supervisor signal', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const stubBin = ghStub('echo https://github.com/acme/app/pull/44');
+    const realTee = execFileSync('/bin/sh', ['-c', 'command -v tee'], {
+      env,
+      encoding: 'utf8',
+    }).trim();
+    // tee observes EOF only after the supervisor is reaped. Signalling its parent at that point
+    // deterministically exercises the post-commit/reaped drain window from the correctness review.
+    writeFileSync(
+      join(stubBin, 'tee'),
+      `#!/bin/sh\n"${realTee}" "$@"\nkill -TERM "$PPID"\nexit 0\n`,
+    );
+    chmodSync(join(stubBin, 'tee'), 0o755);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+    const publishEnv = {
+      ...env,
+      PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}`,
+    };
+
+    const first = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/post-reap-signal', 'ship it', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: publishEnv,
+      },
+    );
+
+    expect(first.status, first.stderr).toBe(143);
+    const preserved = git(['rev-parse', 'feat/post-reap-signal']).trim();
+    expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/post-reap-signal']).trim()).toBe(
+      preserved,
+    );
+    expect(remoteBranchExists(bare, 'feat/post-reap-signal')).toBe(false);
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/post-reap-signal', 'ship it', 'note.txt'],
+      { cwd: dir, input: 'pr body\n', encoding: 'utf8', env: publishEnv },
+    );
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).toContain('gate receipt verified');
+    expect(remoteBranchExists(bare, 'feat/post-reap-signal')).toBe(true);
+  });
+
+  it('does not delete a concurrent local branch update after publishing the preserved commit', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const base = git(['rev-parse', 'work']).trim();
+    const preserved = createPreservedCommit({
+      dir,
+      env,
+      git,
+      branch: 'feat/concurrent-update',
+      tempPrefix: 'ship-concurrent-update-',
+    });
+    git(['update-ref', 'refs/devkit/ship-receipts/feat/concurrent-update', preserved]);
+    const stubBin = ghStub(
+      'git update-ref refs/heads/feat/concurrent-update "$TEST_CONCURRENT_TIP"\n' +
+        'echo https://github.com/acme/app/pull/43',
+    );
+
+    const retry = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/concurrent-update', 'ship it', 'note.txt'],
+      {
+        cwd: dir,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: {
+          ...env,
+          PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}`,
+          TEST_CONCURRENT_TIP: base,
+        },
+      },
+    );
+
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(
+      execFileSync('git', ['--git-dir', bare, 'rev-parse', 'feat/concurrent-update'], {
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe(preserved);
+    expect(git(['rev-parse', 'feat/concurrent-update']).trim()).toBe(base);
+  });
+
+  it('still rejects an unrelated existing local branch', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    const stubBin = ghStub('echo should-not-run; exit 9');
+    git(['branch', 'feat/unrelated']);
+    writeFileSync(join(dir, 'note.txt'), 'hi\n');
+
+    const r = spawnSync('/bin/bash', [scriptPath, 'feat/unrelated', 'ship it', 'note.txt'], {
+      cwd: dir,
+      input: 'pr body\n',
+      encoding: 'utf8',
+      env: { ...env, PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}` },
+    });
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('branch already exists: feat/unrelated');
+    expect(r.stderr).toContain('cannot safely resume it');
+    expect(r.stdout).not.toContain('should-not-run');
+    expect(git(['rev-parse', 'feat/unrelated']).trim()).toBe(git(['rev-parse', 'work']).trim());
+  });
+
   it('keeps the new-ship worktree alive until an interrupted gate is fully reaped', async () => {
     const { dir, env, git } = seedShipRepo();
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
@@ -1575,10 +1576,7 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
   // The candidates array is the whole gate-parity contract, and dropping an entry breaks it SILENTLY
   // (the gate falls to defaults and still reports a pass). Pin the set so a deletion fails loudly.
   it('pins the fixed gate-artifact candidate set (a dropped entry silently weakens every ship)', () => {
-    const src = readFileSync(
-      fileURLToPath(new URL('../lib/ship/link-gate-configs.sh', import.meta.url)),
-      'utf8',
-    );
+    const src = readFileSync(linkGateConfigsScript, 'utf8');
     const block = /GATE_PROJECTION_FIXED_CANDIDATES=\(\n([\s\S]*?)\n\)/.exec(src);
     expect(block, 'candidate registry not found — did the helper get restructured?').toBeTruthy();
     expect(
