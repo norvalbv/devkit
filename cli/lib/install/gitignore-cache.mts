@@ -1,8 +1,6 @@
 /**
- * .gitignore wiring for devkit's regenerated gate caches — the per-repo artifacts the gate engine
- * writes under `.devkit/`: the deterministic-prefix cache, the decisions + review verdict caches,
- * the per-branch ship log, and the reconcile manifest. All are rebuildable and keyed on a tree/
- * evidence/branch hash, so they are never committed.
+ * .gitignore wiring for devkit's generated `.devkit/` state: ignore regenerated gate caches while
+ * keeping durable manifests trackable even when a consumer carries a broad `.devkit/*` rule.
  *
  * SPECIFIC filenames only — `.devkit/` ALSO holds TRACKED artifacts (agents-manifest.json,
  * skills-manifest.json) and, in standalone mode, vendored configs (.devkit/biome, .devkit/tsconfig).
@@ -32,35 +30,47 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/adhd-off',
 ];
 
-// Append any missing cache-ignore line to <cwd>/.gitignore (idempotent). Mirrors ensureFallowGitignore.
+export const DEVKIT_TRACKED_UNIGNORES = ['!.devkit/agent-hook-registrations-manifest.json'];
+
+const DEVKIT_GITIGNORE_LINES = [...DEVKIT_CACHE_IGNORES, ...DEVKIT_TRACKED_UNIGNORES];
+const TRACKED_UNIGNORE_SET = new Set(DEVKIT_TRACKED_UNIGNORES);
+
+// Append cache rules and keep tracked-state negations at the effective tail (gitignore is last-match
+// wins, so presence alone is insufficient when a consumer later appends a broad `.devkit/*` rule).
 export function ensureDevkitCacheGitignore(cwd: string, dryRun: boolean): void {
   const giPath = join(cwd, '.gitignore');
   const existing = existsSync(giPath) ? readFileSync(giPath, 'utf8') : '';
   const have = new Set(existing.split('\n').map((l) => l.trim()));
-  const missing = DEVKIT_CACHE_IGNORES.filter((l) => !have.has(l));
-  if (missing.length === 0) return;
+  const missingCaches = DEVKIT_CACHE_IGNORES.filter((line) => !have.has(line));
+  const kept = existing
+    .split('\n')
+    .filter((line) => !TRACKED_UNIGNORE_SET.has(line.trim()))
+    .join('\n');
+  const additions = [...missingCaches, ...DEVKIT_TRACKED_UNIGNORES];
+  const separator = kept && !kept.endsWith('\n') ? '\n' : '';
+  const next = `${kept}${separator}${additions.join('\n')}\n`;
+  if (next === existing) return;
   if (dryRun) {
-    console.log(`  [dry-run] ensure ${missing.length} devkit cache line(s) in .gitignore`);
+    console.log(`  [dry-run] ensure ${additions.length} devkit .gitignore line(s)`);
     return;
   }
-  const sep = existing && !existing.endsWith('\n') ? '\n' : '';
-  writeFileSync(giPath, `${existing}${sep}${missing.join('\n')}\n`);
-  console.log(`  ✓ ensured ${missing.length} devkit cache line(s) in .gitignore`);
+  writeFileSync(giPath, next);
+  console.log(`  ✓ ensured ${additions.length} devkit .gitignore line(s)`);
 }
 
-// Remove the cache-ignore lines from <root>/.gitignore (clean reversal). No-op when none present.
+// Remove the generated-state lines from <root>/.gitignore (clean reversal). No-op when absent.
 export function pruneDevkitCacheGitignore(root: string, dryRun: boolean): void {
   const giPath = join(root, '.gitignore');
   if (!existsSync(giPath)) return;
   const raw = readFileSync(giPath, 'utf8');
-  const drop = new Set(DEVKIT_CACHE_IGNORES);
+  const drop = new Set(DEVKIT_GITIGNORE_LINES);
   const lines = raw.split('\n');
   const kept = lines.filter((l) => !drop.has(l.trim()));
   if (kept.length === lines.length) return;
   if (dryRun) {
-    console.log('  [dry-run] prune devkit cache lines from .gitignore');
+    console.log('  [dry-run] prune devkit .gitignore lines');
     return;
   }
   writeFileSync(giPath, kept.join('\n'));
-  console.log('  ✓ pruned devkit cache lines from .gitignore');
+  console.log('  ✓ pruned devkit .gitignore lines');
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEVKIT_CACHE_IGNORES,
+  DEVKIT_TRACKED_UNIGNORES,
   ensureDevkitCacheGitignore,
   pruneDevkitCacheGitignore,
 } from '../lib/install/gitignore-cache.mts';
@@ -24,11 +25,12 @@ describe('ensureDevkitCacheGitignore', () => {
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/');
   });
 
-  it('appends every cache pattern when .gitignore is absent', () => {
+  it('appends every generated-state rule when .gitignore is absent', () => {
     const d = tmp();
     ensureDevkitCacheGitignore(d, false);
     const gi = readFileSync(join(d, '.gitignore'), 'utf8');
     for (const line of DEVKIT_CACHE_IGNORES) expect(gi).toContain(line);
+    for (const line of DEVKIT_TRACKED_UNIGNORES) expect(gi).toContain(line);
   });
 
   it('is idempotent, preserves existing lines, never duplicates', () => {
@@ -40,9 +42,21 @@ describe('ensureDevkitCacheGitignore', () => {
     const second = readFileSync(join(d, '.gitignore'), 'utf8');
     expect(second).toBe(first);
     expect(second).toContain('node_modules');
-    for (const line of DEVKIT_CACHE_IGNORES) {
+    for (const line of [...DEVKIT_CACHE_IGNORES, ...DEVKIT_TRACKED_UNIGNORES]) {
       expect(second.split('\n').filter((l) => l === line)).toHaveLength(1);
     }
+  });
+
+  it('moves tracked-state negations after a later broad ignore rule', () => {
+    const d = tmp();
+    const tracked = DEVKIT_TRACKED_UNIGNORES[0];
+    writeFileSync(join(d, '.gitignore'), `${tracked}\n.devkit/*\n`);
+
+    ensureDevkitCacheGitignore(d, false);
+
+    const lines = readFileSync(join(d, '.gitignore'), 'utf8').trimEnd().split('\n');
+    expect(lines.at(-1)).toBe(tracked);
+    expect(lines.filter((line) => line === tracked)).toHaveLength(1);
   });
 
   it('dry-run writes nothing', () => {
@@ -58,6 +72,7 @@ describe('ensureDevkitCacheGitignore', () => {
     expect(gi).not.toMatch(/^\.devkit\/?$/m);
     expect(gi).not.toContain('.devkit/agents-manifest.json');
     expect(gi).not.toContain('.devkit/skills-manifest.json');
+    expect(gi).toContain('!.devkit/agent-hook-registrations-manifest.json');
   });
 });
 
@@ -69,7 +84,8 @@ describe('pruneDevkitCacheGitignore', () => {
     pruneDevkitCacheGitignore(d, false);
     const gi = readFileSync(join(d, '.gitignore'), 'utf8');
     expect(gi).toContain('node_modules');
-    for (const line of DEVKIT_CACHE_IGNORES) expect(gi).not.toContain(line);
+    for (const line of [...DEVKIT_CACHE_IGNORES, ...DEVKIT_TRACKED_UNIGNORES])
+      expect(gi).not.toContain(line);
   });
 
   it('no-ops when .gitignore is absent', () => {
