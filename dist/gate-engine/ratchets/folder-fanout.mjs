@@ -111,7 +111,7 @@ function runCli(cmd) {
     if (cmd === 'freeze') {
         if (Object.keys(offenders).length > 0) {
             // Read the OUTGOING baseline before clobbering it, so the refresh can name what it is newly
-            // grandfathering. Deliberately NOT shrink-only (unlike size-disable's freezeLines min()):
+            // grandfathering. Deliberately NOT shrink-only, matching an explicit guard-size refresh:
             // recording legitimate drift is the operation a stale baseline actually needs. Loud, not
             // forbidden — a blind `freeze` must not quietly absorb a folder that just went over-cap.
             const prior = existsSync(baselineFile)
