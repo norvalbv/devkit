@@ -292,16 +292,26 @@ if [ -n "$DK_FMT" ] && [ -f biome.devkit.jsonc ] && [ -x node_modules/.bin/biome
     echo "🎨 devkit biome overlay (staged)..."
     echo "$DK_FMT" | xargs node_modules/.bin/biome check --config-path biome.devkit.jsonc || exit 1
 fi`;
-// Overlay shadows fallow's installed hook, so its optional audit must run inline here.
+// Overlay shadows fallow's installed hook, so its optional audit must run inline here. Scope the
+// audit to the index: ship refreshes reviewer assets in its worktree AFTER staging, and a base-wide
+// audit would otherwise attribute those unstaged runtime files to the caller's commit (sc-1549).
 const FALLOW_OVERLAY_GATE = `# devkit fallow gate (overlay) — normal commits fail-open if fallow isn't installed.
 if [ "\${DEVKIT_RUN_MODE:-}" = "review" ]; then
     __dk_review_baseline_gate fallow || exit 1
 else
-    # Pin ships to their exact worktree base (DK-5); plain commits retain Fallow's base discovery.
-    FALLOW_BASE_ARGS=""
-    [ -n "\${DEVKIT_SHIP_BASE_SHA:-}" ] && FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"
-    # __dk_no_git_env: fallow's base-snapshot is a git worktree, and it has clobbered a ship one before.
-    command -v fallow >/dev/null 2>&1 && { __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || exit 1; }
+    if command -v fallow >/dev/null 2>&1; then
+        DK_FALLOW_DIFF="$(mktemp)" || exit 1
+        if ! git diff --cached --binary --full-index --find-renames --relative >"$DK_FALLOW_DIFF"; then
+            rm -f "$DK_FALLOW_DIFF"
+            exit 1
+        fi
+        # __dk_no_git_env: fallow's snapshot machinery has clobbered a ship worktree before. The
+        # staged diff is already captured with the committing index's git environment intact.
+        DK_FALLOW_RC=0
+        __dk_no_git_env fallow audit --diff-stdin <"$DK_FALLOW_DIFF" || DK_FALLOW_RC=$?
+        rm -f "$DK_FALLOW_DIFF"
+        [ "$DK_FALLOW_RC" -eq 0 ] || exit 1
+    fi
 fi`;
 /**
  * Build the OVERLAY hook — a complete, self-contained file devkit fully owns (written to a
