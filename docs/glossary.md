@@ -26,8 +26,9 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   - **fanout** (`guard-fanout`) — caps the number of impl files in one folder (`fanoutCap`). Over the cap →
     split the folder into cohesive kebab-named subfolders.
   - **size** (`guard-size`) — the count of `eslint-disable max-lines` may only go down.
-- **baseline** — a one-time snapshot of pre-existing violations (`eslint/baselines/*.mjs`) that are
-  grandfathered in. Generated **once**, then shrink-only — devkit never re-snapshots to "launder" new debt.
+- **baseline** — a snapshot of pre-existing violations (`eslint/baselines/*`) that are grandfathered
+  in. Automatic init/upgrade never re-snapshots an adopted repo. After auditing legitimate drift, an
+  explicit `guard-size freeze` / `guard-fanout freeze` refreshes it and names every raised ceiling.
 - **fail-open** — a gate that, when it can't run (missing index, missing dep), **allows** the commit rather
   than blocking. Standalone hooks are fail-open by design. A gate that fails open is **named** in
   guard-deterministic's report even on a green run, and emits a `could_not_run` telemetry event — it

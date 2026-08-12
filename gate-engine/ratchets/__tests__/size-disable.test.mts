@@ -567,21 +567,41 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(pr.stderr).toContain('pull-request base is unavailable');
   });
 
-  it('freeze is monotone-down: never raises a recorded ceiling (anti-laundering)', () => {
+  it('automatic freezeLines stays monotone-down and never raises a recorded ceiling', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
     write(root, 'src/legacy.ts', big(80)); // 80 lines on disk
-    // Pre-seed a lower ceiling as if a --no-verify growth is now being re-frozen.
     write(
       root,
       'eslint/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
     );
-    expect(run(root, 'freeze').status).toBe(0);
+    expect(freezeLines(root)).toBe(1);
     const baseline = JSON.parse(
       readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(60); // stayed 60, NOT raised to 80
+  });
+
+  it('explicit guard-size freeze refreshes legitimate drift and names every raised ceiling', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    );
+
+    const result = run(root, 'freeze');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('1 file(s) grew since the last freeze');
+    expect(result.stdout).toContain('src/legacy.ts: 60 → 80');
+    const baseline = JSON.parse(
+      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(baseline.files['src/legacy.ts']).toBe(80);
   });
 
   it('freezeLines grandfathers over-cap files into size-lines.json and NEVER touches size.json', () => {
