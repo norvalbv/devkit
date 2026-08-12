@@ -36,13 +36,16 @@ const write = (root: string, rel: string, body: string): void => {
 /** Package-relative asset paths for one reviewer, mirroring runtime.mts's own contract. */
 function assetPaths(reviewer: Reviewer): string[] {
   const paths = [`agents/${reviewer.name}.md`];
-  if (hasChecklist(reviewer))
+  if (hasChecklist(reviewer)) {
     paths.push(
       `skills/${reviewer.skill}/SKILL.md`,
       checklistAssetPath(reviewer),
       'skills/_devkit/review-roots.mjs',
       'skills/_devkit/checklist-store.mjs',
     );
+    if (reviewer.skill === 'commit-guard')
+      paths.push('skills/commit-guard/references/co-occurrence.md');
+  }
   return paths;
 }
 
@@ -113,6 +116,28 @@ describe('consumerReviewerIdentity', () => {
 
     expect(consumerReviewerIdentity(root, cfg, target)).not.toBe(before[0]);
     expect(consumerReviewerIdentity(root, cfg, other)).toBe(before[1]);
+  });
+
+  it('changes the commit-guard identity when its heavy reference changes', () => {
+    const { root } = consumerFixture();
+    const cfg = resolveGuardConfig(root);
+    const commitGuard = REVIEWERS.find((reviewer) => reviewer.skill === 'commit-guard');
+    const other = REVIEWERS.find((reviewer) => reviewer.skill === 'backend-performance');
+    expect(commitGuard).toBeDefined();
+    expect(other).toBeDefined();
+    const beforeCommitGuard = consumerReviewerIdentity(root, cfg, commitGuard as Reviewer);
+    const beforeOther = consumerReviewerIdentity(root, cfg, other as Reviewer);
+
+    write(
+      root,
+      '.claude/skills/commit-guard/references/co-occurrence.md',
+      '# edited detector contract\n',
+    );
+
+    expect(consumerReviewerIdentity(root, cfg, commitGuard as Reviewer)).not.toBe(
+      beforeCommitGuard,
+    );
+    expect(consumerReviewerIdentity(root, cfg, other as Reviewer)).toBe(beforeOther);
   });
 
   it('is stable across repeated calls on unchanged assets', () => {
