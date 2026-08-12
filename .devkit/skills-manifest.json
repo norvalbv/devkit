@@ -1,6 +1,6 @@
 {
-  "devkitRef": "v0.50.0",
-  "generatedAt": "2026-08-07T11:47:22.452Z",
+  "devkitRef": "v0.51.0",
+  "generatedAt": "2026-08-12T13:33:41.449Z",
   "targets": [
     "claude",
     "cursor"
@@ -14,9 +14,10 @@
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
     "backend-performance/scripts/checklist.mjs": "23b506a7f2d5d0f68723d75fe381b611574b727fd672f7cc5fe223127d86513c",
     "brainstorming/SKILL.md": "1c25870729d5cb4ba17682a2ef251f6902a715d69aee0f20c4f548ea2715be5e",
-    "commit-guard/SKILL.md": "9a5310f972f70d625db1c4fd2c149c899eff081ee2ff11fc372d7450dbffb5ce",
+    "commit-guard/SKILL.md": "8c5e02bd1ed3c53cb47cdb11f444894f5880d6cb842822d1108bf6b7ab1bd8d8",
+    "commit-guard/references/co-occurrence.md": "0225034aeb87a8be80d59e4121aa67a99129f6ee8388a9605e0db484e7d767d4",
     "commit-guard/scripts/checklist.mjs": "dc57c1f1407a0fe7503ebe72e30e9167b29bdf1154ab44e68de82b6d558770e1",
-    "correctness/SKILL.md": "16fca786d4b2fa85c2588aee13d14f4cf6a71a30014cbcc24993f526f67770c7",
+    "correctness/SKILL.md": "4e8b656b3ee95934a7dc9f0fcd20d4eb5f1eb3be4112a182eea1f941f1b2fc82",
     "correctness/scripts/checklist.mjs": "adb9777dc7b3fdeb5e4dc31bc5e231c2f947b0bca235b0d04b54f81c3180c427",
     "decisions/SKILL.md": "9bdad17d600fed8c0bc5be1bb6f04822ed03327635629b266e2b5e07cb92b498",
     "dup-detection/SKILL.md": "74a4964795bbb27ce2bda0e13b91da00f04a01a989bcbf6149d10ff9c3688a4c",

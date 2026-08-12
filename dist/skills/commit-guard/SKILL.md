@@ -54,4 +54,4 @@ This skill's agent runs both as a best-effort EARLY surface (step 3 searchCode =
 
 For the allowlist model (decay, fragmentHash, symFileKey), CLI reference, burn-down workflow, mirror gotcha, and `reconcile` vs `prune`: **`dup-detection` skill**.
 
-→ **Heavy reference:** [`scripts/co-occurrence/README.md`](../../../scripts/co-occurrence/README.md).
+→ **Heavy reference:** [co-occurrence detector architecture and operations](references/co-occurrence.md).
