@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,6 @@ import {
   removeGuardBlock,
   replaceGuardBlock,
 } from '../lib/husky/husky-block.mts';
-import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 
 const ALL = { biome: true, guards: [...GUARD_IDS] };
 
@@ -405,20 +405,19 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
   });
 });
 
-// DK-5: overlay's fallow gate BLOCKS on new findings (unlike the self-host advisory twin), and it
-// runs inline (core.hooksPath shadows fallow's own installed hook), so it must see the same
-// DEVKIT_SHIP_BASE_SHA scoping — else a --base ship off a stacked branch fails the audit on that
-// branch's own pre-existing findings vs main.
+// sc-1549: overlay's fallow gate BLOCKS on new findings (unlike the self-host advisory twin), and
+// runs inline because core.hooksPath shadows fallow's installed hook. It must therefore reproduce
+// fallow's staged-diff contract itself: ship projects reviewer assets AFTER staging, and a base-wide
+// audit falsely attributes that runtime projection to the caller's patch.
 describe('buildOverlayHook — fallow gate (overlay)', () => {
   const hook = buildOverlayHook({ guards: [...GUARD_IDS] }, '.husky/pre-commit', '', {
     fallow: true,
   });
 
-  it('emits the fallow gate scoped by DEVKIT_SHIP_BASE_SHA', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
-    expect(hook).toContain('[ -n "${DEVKIT_SHIP_BASE_SHA:-}" ]');
-    expect(hook).toContain('FALLOW_BASE_ARGS="--base $DEVKIT_SHIP_BASE_SHA"');
-    expect(hook).toContain('fallow audit $FALLOW_BASE_ARGS || exit 1');
+  it('captures the committing index and hands that exact diff to fallow', () => {
+    expect(hook).toContain('git diff --cached --binary --full-index --find-renames --relative');
+    expect(hook).toContain('fallow audit --diff-stdin <"$DK_FALLOW_DIFF"');
+    expect(hook).not.toContain('FALLOW_BASE_ARGS');
   });
 
   it('omits the fallow gate entirely when fallow is not opted in', () => {
@@ -426,41 +425,62 @@ describe('buildOverlayHook — fallow gate (overlay)', () => {
     expect(withoutFallow).not.toContain('fallow audit');
   });
 
-  it('passes the ship base through to a stubbed fallow, with the git env stripped', () => {
-    const fragment = hook.match(
-      /# devkit fallow gate \(overlay\)[\s\S]*?fallow audit \$FALLOW_BASE_ARGS \|\| exit 1; \}\nfi/,
-    )?.[0];
-    expect(fragment).toBeDefined();
-    // A REAL stub on PATH, not a shell function: the gate runs through `env`, which execs a binary
-    // and cannot see functions or aliases. Every wrapped target in the generated hooks is a binary
-    // (bunx, guard-*, fallow, node) — this test is what keeps that true for the fallow arm.
-    const binDir = mkdtempSync(join(tmpdir(), 'fallow-stub-'));
-    const stub = join(binDir, 'fallow');
-    writeFileSync(
-      stub,
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
-      '#!/bin/sh\necho "FALLOW_ARGS:$*"\necho "GIT_DIR:${GIT_DIR:-unset} GIT_INDEX_FILE:${GIT_INDEX_FILE:-unset}"\n',
-    );
-    chmodSync(stub, 0o755);
-    const script = `${DK_NO_GIT_ENV_HELPER}\n${fragment}`;
-    const run = (extra) =>
-      execFileSync('sh', ['-c', script], {
+  it('ignores an unstaged reviewer projection while auditing the staged patch', () => {
+    const root = mkdtempSync(join(tmpdir(), 'fallow-overlay-staged-'));
+    const binDir = join(root, 'bin');
+    const hookPath = join(root, 'pre-commit');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    try {
+      git('init', '-q');
+      git('config', 'user.email', 't@t.t');
+      git('config', 'user.name', 't');
+      mkdirSync(join(root, '.claude/agents'), { recursive: true });
+      writeFileSync(join(root, 'note.ts'), 'export const note = 1;\n');
+      writeFileSync(join(root, '.claude/agents/reviewer.md'), 'tracked reviewer\n');
+      git('add', '-A');
+      git('-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'base');
+
+      writeFileSync(join(root, 'note.ts'), 'export const note = 2;\n');
+      git('add', 'note.ts');
+      // This models refresh_ship_reviewer_assets: runtime content changes after ship records the
+      // staged set. A whole-worktree fallow invocation sees it and the stub deliberately fails.
+      writeFileSync(join(root, '.claude/agents/reviewer.md'), 'projected package reviewer\n');
+
+      mkdirSync(binDir);
+      writeFileSync(
+        join(binDir, 'fallow'),
+        [
+          '#!/bin/sh',
+          'echo "FALLOW_ARGS:$*"',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: shell ${VAR:-default}, not a JS template
+          'echo "GIT_DIR:${GIT_DIR:-unset} GIT_INDEX_FILE:${GIT_INDEX_FILE:-unset}"',
+          'case " $* " in',
+          '  *" --diff-stdin "*) cat ;;',
+          '  *) git diff --quiet -- .claude/agents || exit 1 ;;',
+          'esac',
+        ].join('\n'),
+      );
+      chmodSync(join(binDir, 'fallow'), 0o755);
+      writeFileSync(hookPath, buildOverlayHook({}, '.husky/missing', '', { fallow: true }));
+
+      const out = execFileSync('sh', ['-e', hookPath], {
+        cwd: root,
         encoding: 'utf8',
-        env: { PATH: `${binDir}:${process.env.PATH}`, ...extra },
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH}`,
+          GIT_DIR: '.git',
+          GIT_INDEX_FILE: '.git/index',
+        },
       });
 
-    expect(run({}).split('\n')[0]).toBe('FALLOW_ARGS:audit');
-    expect(run({ DEVKIT_SHIP_BASE_SHA: 'deadbeef' }).split('\n')[0]).toBe(
-      'FALLOW_ARGS:audit --base deadbeef',
-    );
-
-    // The point of the wrapper: git's linked-worktree hook env must not reach the gate, or fallow's
-    // own worktree machinery writes the SHIP worktree's index/HEAD instead of its own.
-    const leaked = run({
-      GIT_DIR: '/repo/.git/worktrees/devkit-ship-x',
-      GIT_INDEX_FILE: '/repo/.git/worktrees/devkit-ship-x/index',
-    });
-    expect(leaked).toContain('GIT_DIR:unset GIT_INDEX_FILE:unset');
+      expect(out).toContain('FALLOW_ARGS:audit --diff-stdin');
+      expect(out).toContain('diff --git a/note.ts b/note.ts');
+      expect(out).not.toContain('.claude/agents/reviewer.md');
+      expect(out).toContain('GIT_DIR:unset GIT_INDEX_FILE:unset');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
