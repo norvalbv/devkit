@@ -46,6 +46,7 @@ const EXPECTED_ASSETS = [
   'skills/backend-performance/SKILL.md',
   'skills/backend-performance/scripts/checklist.mjs',
   'skills/commit-guard/SKILL.md',
+  'skills/commit-guard/references/co-occurrence.md',
   'skills/commit-guard/scripts/checklist.mjs',
   'skills/correctness/SKILL.md',
   'skills/correctness/scripts/checklist.mjs',
@@ -131,6 +132,19 @@ describe('packaged reviewer asset runtime', () => {
       expect(source).toContain('guard-clone');
       expect(source).toContain('commit-guard checklist unavailable: run devkit sync-skills');
     }
+  });
+
+  it('packages the commit-guard heavy reference used by projected skills', () => {
+    const skill = readFileSync(join(HERE, '../../skills/commit-guard/SKILL.md'), 'utf8');
+    const referencePath = 'skills/commit-guard/references/co-occurrence.md';
+
+    expect(skill).toContain('(references/co-occurrence.md)');
+    expect(PACKAGED_REVIEW_ASSET_PATHS).toContain(referencePath);
+
+    const reference = readFileSync(join(HERE, '../..', referencePath), 'utf8');
+    expect(reference).toContain('guard-dup');
+    expect(reference).toContain('guard-clone');
+    expect(reference).toContain('guard-dup-allowlist');
   });
 
   it('makes correctness checklist discovery portable across agent providers', () => {

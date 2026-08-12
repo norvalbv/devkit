@@ -26,6 +26,9 @@ function reviewerAssetPaths(reviewer) {
     const paths = [`agents/${reviewer.name}.md`];
     if (hasChecklist(reviewer)) {
         paths.push(`skills/${reviewer.skill}/SKILL.md`, checklistAssetPath(reviewer), REVIEW_ROOTS_HELPER, CHECKLIST_STORE_HELPER);
+        if (reviewer.skill === 'commit-guard') {
+            paths.push('skills/commit-guard/references/co-occurrence.md');
+        }
     }
     return paths;
 }
@@ -81,8 +84,8 @@ export function agentBody(cwd, cfg, name, assetRoot) {
     }
 }
 /**
- * The identity of one reviewer's execution inputs: its brief, its registry entry, its checklist
- * trio when it has one, and the config subset that changes WHAT it reviews.
+ * The identity of one reviewer's execution inputs: its brief, its registry entry, every registered
+ * reviewer asset, and the config subset that changes WHAT it reviews.
  *
  * Deliberately shared by the packaged review-mode preflight and the consumer-path telemetry stamp:
  * one formula means a review-mode identity and a ship-mode identity are COMPARABLE whenever the
@@ -90,16 +93,12 @@ export function agentBody(cwd, cfg, name, assetRoot) {
  * incomparable namespaces and every cross-mode rate would be a blend.
  */
 function hashReviewerIdentity(readAsset, reviewer, cfg) {
-    const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
+    const [brief, ...executionAssets] = reviewerAssetPaths(reviewer);
     const hash = createHash('sha256')
         .update(readAsset(brief))
         .update(JSON.stringify(reviewer));
-    if (hasChecklist(reviewer)) {
-        hash.update(readAsset(skill));
-        hash.update(readAsset(checklist));
-        hash.update(readAsset(REVIEW_ROOTS_HELPER));
-        hash.update(readAsset(CHECKLIST_STORE_HELPER));
-    }
+    for (const asset of executionAssets)
+        hash.update(readAsset(asset));
     hash.update(JSON.stringify({
         scanRoots: cfg.scanRoots,
         sourceExtensions: cfg.sourceExtensions,

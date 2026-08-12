@@ -47,6 +47,9 @@ function reviewerAssetPaths(reviewer: Reviewer): string[] {
       REVIEW_ROOTS_HELPER,
       CHECKLIST_STORE_HELPER,
     );
+    if (reviewer.skill === 'commit-guard') {
+      paths.push('skills/commit-guard/references/co-occurrence.md');
+    }
   }
   return paths;
 }
@@ -188,8 +191,8 @@ export function agentBody(
 type ReviewAssetReader = (relativePath: string) => Buffer;
 
 /**
- * The identity of one reviewer's execution inputs: its brief, its registry entry, its checklist
- * trio when it has one, and the config subset that changes WHAT it reviews.
+ * The identity of one reviewer's execution inputs: its brief, its registry entry, every registered
+ * reviewer asset, and the config subset that changes WHAT it reviews.
  *
  * Deliberately shared by the packaged review-mode preflight and the consumer-path telemetry stamp:
  * one formula means a review-mode identity and a ship-mode identity are COMPARABLE whenever the
@@ -201,16 +204,11 @@ function hashReviewerIdentity(
   reviewer: Reviewer,
   cfg: GuardConfig,
 ): string {
-  const [brief, skill, checklist] = reviewerAssetPaths(reviewer);
+  const [brief, ...executionAssets] = reviewerAssetPaths(reviewer);
   const hash = createHash('sha256')
     .update(readAsset(brief as string))
     .update(JSON.stringify(reviewer));
-  if (hasChecklist(reviewer)) {
-    hash.update(readAsset(skill as string));
-    hash.update(readAsset(checklist as string));
-    hash.update(readAsset(REVIEW_ROOTS_HELPER));
-    hash.update(readAsset(CHECKLIST_STORE_HELPER));
-  }
+  for (const asset of executionAssets) hash.update(readAsset(asset));
   hash.update(
     JSON.stringify({
       scanRoots: cfg.scanRoots,

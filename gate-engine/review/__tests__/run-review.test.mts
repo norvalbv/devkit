@@ -26,6 +26,18 @@ import { REVIEWERS } from '../reviewers.mts';
 import { runReviewGate } from '../run-review.mts';
 import { parallelMakespan } from '../telemetry/timing.mts';
 import { runWaive } from '../valve/waive.mts';
+import {
+  cleanupReviewFixtures,
+  concurrencyProbe,
+  consumerRepo,
+  mkExec,
+  passWithArtifact,
+  reviewAssets,
+  reviewerFromLabel,
+  syncSkillAssets,
+  trackReviewFixtureDir,
+  writeArtifact,
+} from './run-review-fixtures.mts';
 
 // Env hygiene: the gate reads GUARD_*/FRINK_* — a developer's real env must not steer assertions.
 const ENV_KEYS = [
@@ -72,14 +84,6 @@ const ENV_KEYS = [
   'DEVKIT_SHIP_BRANCH',
 ];
 const saved = {};
-const COMMIT_GUARD_INIT_SCRIPT = `
-import { mkdirSync, writeFileSync } from 'node:fs';
-mkdirSync('.claude', { recursive: true });
-writeFileSync(
-  '.claude/.pre-commit-review.json',
-  JSON.stringify({ files: [{ path: 'src/fixture.ts', status: 'pending', issues: [] }] }),
-);
-`;
 beforeEach(() => {
   for (const k of ENV_KEYS) {
     saved[k] = process.env[k];
@@ -93,9 +97,8 @@ beforeEach(() => {
   process.env.GUARD_CORRECTNESS_SPLIT = 'off';
 });
 
-const dirs = [];
 afterEach(() => {
-  while (dirs.length) rmSync(dirs.pop(), { recursive: true, force: true });
+  cleanupReviewFixtures();
   for (const k of ENV_KEYS) {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
@@ -103,157 +106,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// A consumer repo with a backend/frontend topology, synced agent briefs, and one staged file
-// per requested domain. Returns its root.
-function consumerRepo({
-  backend = false,
-  frontend = false,
-  styles = false,
-  emptyFrontendRoots = false,
-} = {}) {
-  const repo = mkdtempSync(join(tmpdir(), 'guard-review-gate-'));
-  dirs.push(repo);
-  execSync('git init -q', { cwd: repo });
-  writeFileSync(
-    join(repo, 'guard.config.json'),
-    JSON.stringify({
-      scanRoots: ['src'],
-      review: {
-        backendRoots: ['src/main'],
-        // The shipped templates/generic shape on a frontend repo: the domain is live, its roots
-        // are not declared, and the two frontend reviewers are therefore never selected.
-        frontendRoots: emptyFrontendRoots ? [] : ['src/renderer'],
-      },
-    }),
-  );
-  const agents = join(repo, '.claude', 'agents');
-  mkdirSync(agents, { recursive: true });
-  for (const name of [
-    'api-security-reviewer',
-    'backend-performance-reviewer',
-    'frontend-security-reviewer',
-    'frontend-performance-reviewer',
-    'commit-guard',
-    'correctness-reviewer',
-    'conventions-reviewer',
-    'feature-completeness-reviewer',
-  ]) {
-    writeFileSync(join(agents, `${name}.md`), `---\nname: ${name}\n---\nBrief for ${name}.`);
-  }
-  const commitGuardScript = join(
-    repo,
-    '.claude',
-    'skills',
-    'commit-guard',
-    'scripts',
-    'checklist.mjs',
-  );
-  mkdirSync(join(repo, '.claude', 'skills', 'commit-guard', 'scripts'), { recursive: true });
-  writeFileSync(commitGuardScript, COMMIT_GUARD_INIT_SCRIPT);
-  if (backend) {
-    mkdirSync(join(repo, 'src', 'main'), { recursive: true });
-    writeFileSync(join(repo, 'src', 'main', 'db.ts'), 'export const q = 1;\n');
-  }
-  if (frontend) {
-    mkdirSync(join(repo, 'src', 'renderer'), { recursive: true });
-    writeFileSync(join(repo, 'src', 'renderer', 'App.tsx'), 'export const A = 1;\n');
-  }
-  if (styles) {
-    mkdirSync(join(repo, 'src', 'renderer'), { recursive: true });
-    writeFileSync(join(repo, 'src', 'renderer', 'theme.scss'), '.a { color: red; }\n');
-  }
-  execSync('git add .', { cwd: repo });
-  return repo;
-}
-
-function reviewAssets(): string {
-  const root = mkdtempSync(join(tmpdir(), 'guard-review-assets-'));
-  dirs.push(root);
-  mkdirSync(join(root, 'agents'), { recursive: true });
-  mkdirSync(join(root, 'skills', '_devkit'), { recursive: true });
-  writeFileSync(join(root, 'skills', '_devkit', 'review-roots.mjs'), '// shared support\n');
-  writeFileSync(join(root, 'skills', '_devkit', 'checklist-store.mjs'), '// shared store\n');
-  for (const reviewer of REVIEWERS) {
-    writeFileSync(
-      join(root, 'agents', `${reviewer.name}.md`),
-      `---\nname: ${reviewer.name}\n---\nPACKAGED brief for ${reviewer.name}.`,
-    );
-    if (!reviewer.skill) continue;
-    mkdirSync(join(root, 'skills', reviewer.skill, 'scripts'), { recursive: true });
-    writeFileSync(join(root, 'skills', reviewer.skill, 'SKILL.md'), `# ${reviewer.skill}\n`);
-    writeFileSync(
-      join(root, 'skills', reviewer.skill, 'scripts', 'checklist.mjs'),
-      reviewer.name === 'commit-guard' ? COMMIT_GUARD_INIT_SCRIPT : '#!/usr/bin/env node\n',
-    );
-  }
-  return root;
-}
-
-// Fake judge runners. Each returns a Promise<string|null> like execJudgeAsync.
-const mkExec = (impl) => vi.fn(impl);
-
-// A real judge leaves a checklist state-file artifact behind (the anti-hallucination contract) —
-// fake judges must too, or every PASS is voided to inconclusive. Reviewer identity rides the label.
-const reviewerFromLabel = (label) =>
-  REVIEWERS.find((r) => label === `review:${r.name}` || label === `review:${r.name}:escalate`);
-function writeArtifact(repo, label, { pending = 0, failed = 0 } = {}) {
-  const reviewer = reviewerFromLabel(label);
-  // A skill-less reviewer (conventions-reviewer) has no checklist stateFile — nothing to write;
-  // its PASS is trusted directly (see run-review.mts's `hasChecklist` branch).
-  if (!reviewer?.stateFile) return;
-  const key = reviewer.name === 'commit-guard' ? 'files' : 'items';
-  const mk = (status, i) =>
-    reviewer.name === 'commit-guard'
-      ? { path: `src/f${i}.ts`, status, issues: [] }
-      : { name: `check-${status}-${i}`, category: 'X', status, issues: [] };
-  const rows = [
-    mk('pass', 0),
-    ...Array.from({ length: pending }, (_, i) => mk('pending', i + 1)),
-    ...Array.from({ length: failed }, (_, i) => mk('fail', i + 1)),
-  ];
-  writeFileSync(join(repo, reviewer.stateFile), JSON.stringify({ [key]: rows }));
-}
-
-// PASS judge that honours the checklist contract (writes a complete artifact).
-const passWithArtifact = (repo) =>
-  mkExec(async ({ label }) => {
-    writeArtifact(repo, label);
-    return 'looks fine\nVERDICT: PASS';
-  });
-
-// A judge that brackets each invocation with an in-flight counter so a test can assert the gate's
-// concurrency cap. The `await` on a macrotask (setTimeout) forces overlap: without a cap all selected
-// reviewers would sit in-flight together. `failFirst` returns null on the FIRST call per label (an
-// outage that earns the strict retry) then passes — so the retry is a second sequential exec inside
-// the SAME cascade slot, proving the cap counts cascades, not raw exec calls.
-function concurrencyProbe(repo, { failFirst = false } = {}) {
-  let inflight = 0;
-  let max = 0;
-  const failed = new Set();
-  const exec = mkExec(async ({ label }) => {
-    inflight++;
-    max = Math.max(max, inflight);
-    try {
-      await new Promise((r) => setTimeout(r));
-      if (failFirst && !failed.has(label)) {
-        failed.add(label);
-        return null;
-      }
-      writeArtifact(repo, label);
-      return 'VERDICT: PASS';
-    } finally {
-      inflight--;
-    }
-  });
-  return { exec, maxInflight: () => max };
-}
-
 describe('runReviewGate — cascade + exit contract', () => {
   it('review mode uses current packaged briefs instead of target-controlled .claude copies', async () => {
     const repo = consumerRepo({ backend: true });
     const assets = reviewAssets();
     const dataRoot = realpathSync(mkdtempSync(join(tmpdir(), 'guard-managed-review-data-')));
-    dirs.push(dataRoot);
+    trackReviewFixtureDir(dataRoot);
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ID = 'managed-review';
     process.env.DEVKIT_REVIEW_DATA_ROOT = dataRoot;
@@ -628,32 +486,9 @@ describe('runReviewGate — cascade + exit contract', () => {
   // no row naming the FILES and BYTES it covered, so a later "did this reviewer look at this file"
   // question reads a cached PASS as absence. review_scope is that row, and it fires on both branches.
 
-  // prompt_identity hashes the four SYNCED assets a checklist reviewer runs with. consumerRepo is a
-  // minimal fixture that stages only briefs, so identity there is honestly null; a real consumer has
-  // devkit's synced skills. This writes that shape for the tests that assert on identity.
-  function syncSkillAssets(repo) {
-    mkdirSync(join(repo, '.claude', 'skills', '_devkit'), { recursive: true });
-    writeFileSync(join(repo, '.claude', 'skills', '_devkit', 'review-roots.mjs'), 'export {};\n');
-    writeFileSync(
-      join(repo, '.claude', 'skills', '_devkit', 'checklist-store.mjs'),
-      'export {};\n',
-    );
-    for (const skill of [
-      'api-security',
-      'backend-performance',
-      'frontend-security',
-      'frontend-performance',
-      'commit-guard',
-      'correctness',
-    ]) {
-      mkdirSync(join(repo, '.claude', 'skills', skill, 'scripts'), { recursive: true });
-      writeFileSync(join(repo, '.claude', 'skills', skill, 'SKILL.md'), `# ${skill}\n`);
-      writeFileSync(
-        join(repo, '.claude', 'skills', skill, 'scripts', 'checklist.mjs'),
-        skill === 'commit-guard' ? COMMIT_GUARD_INIT_SCRIPT : `// ${skill} checklist\n`,
-      );
-    }
-  }
+  // prompt_identity hashes every registered synced asset a checklist reviewer runs with.
+  // consumerRepo stages only briefs, so identity there is honestly null; syncSkillAssets adds the
+  // real consumer shape for tests that assert on identity.
 
   it('emits a review_scope row for a cached PASS, naming the files and bytes it covered', async () => {
     const repo = consumerRepo({ backend: true });
@@ -1863,7 +1698,7 @@ describe('review progress JSON — the ship banner contract (engine → file →
     const repo = consumerRepo({ backend: true });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const pdir = mkdtempSync(join(tmpdir(), 'review-progress-'));
-    dirs.push(pdir);
+    trackReviewFixtureDir(pdir);
     const progressFile = join(pdir, 'p.json');
     process.env.DEVKIT_REVIEW_PROGRESS = progressFile;
     // Capture the `running` set the instant the engine wrote it (before any completion), by reading the
@@ -1885,7 +1720,7 @@ describe('review progress JSON — the ship banner contract (engine → file →
 
   it('a partial file → unfinishedReviewers = running − completed (what the banner prints)', () => {
     const pdir = mkdtempSync(join(tmpdir(), 'review-progress-'));
-    dirs.push(pdir);
+    trackReviewFixtureDir(pdir);
     const progressFile = join(pdir, 'p.json');
     writeProgress(progressFile, {
       running: ['api-security-reviewer', 'backend-performance-reviewer', 'commit-guard'],
