@@ -106,6 +106,25 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(read(join(root, '.devkit', 'config.json'))).toBe(cfgBefore);
   });
 
+  it('makes the hook registration ledger trackable under a broad .devkit ignore', () => {
+    const root = initFixture(['--no-cursor']);
+    const ledger = '.devkit/agent-hook-registrations-manifest.json';
+    expect(spawnSync('git', ['init', '-q'], { cwd: root }).status).toBe(0);
+    writeFileSync(
+      join(root, '.gitignore'),
+      '!.devkit/agent-hook-registrations-manifest.json\n.devkit/*\n!.devkit/agent-hooks-manifest.json\n',
+    );
+    expect(spawnSync('git', ['check-ignore', '-q', ledger], { cwd: root }).status).toBe(0);
+
+    const up = run(root, 'upgrade');
+    expect(up.stdout).toMatch(/hook registrations: OK/);
+
+    expect(spawnSync('git', ['check-ignore', '-q', ledger], { cwd: root }).status).toBe(1);
+    expect(
+      spawnSync('git', ['status', '--short', '--', ledger], { cwd: root, encoding: 'utf8' }).stdout,
+    ).toContain(ledger);
+  });
+
   it('--dry-run writes nothing (stale pin unchanged) and skips the verify', () => {
     const root = initFixture(['--no-cursor']);
     driftRepo(root);
