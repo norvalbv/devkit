@@ -18,8 +18,10 @@ Usage:
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
   below are optional, NOT free-floating: \`ship --base main <branch> "<title>"\` binds the branch
-  name to --base and is rejected. Ship CREATES <branch> — it must not already exist (on origin, use
-  --pr to append to that branch's open PR instead).
+  name to --base and is rejected. Ship CREATES <branch>. An unrelated local branch is rejected; an
+  exact commit preserved by a prior post-commit failure is resumed after its ship gate receipt, base,
+  message, paths and current scoped tree are verified. On origin, use --pr to append to the existing
+  PR branch instead.
 
   --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
                       HEAD / current branch. <path...> content is still read from your working tree,
@@ -51,8 +53,8 @@ Env:
                       every other deterministic gate active. Prefer exporting it on its own line.
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
-that lands but fails to push KEEPS the branch (recovery line on stderr); a commit that never lands
-auto-deletes the empty branch.`,
+that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
+A commit that never lands auto-deletes the empty branch.`,
 };
 export default function ship(args, cwd) {
     if (args.length === 0) {
