@@ -37,6 +37,40 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   .qavis/receipt.json
 )
 
+# Candidates whose bytes are a rebuildable, content-addressed CACHE rather than source. Committing one
+# is always a mistake — the sha it attests covers a change set that stops being the one being shipped
+# the instant anything else changes — but the link loop below skips any path the base checkout already
+# put in $WT. So a cache that got committed by accident SILENTLY shadows the live one, and the gate
+# that reads it can never be cleared by doing the work it asks for: in frink a tracked .qavis/receipt.json
+# made every strict ship of a UI-affecting change unsatisfiable-by-compliance, GUARD_QAVIS_OK=1 the only
+# exit, however many real `qavis qa` passes preceded it (sc-1489). These entries overwrite instead, loudly.
+GATE_PROJECTION_CACHE_CANDIDATES=(
+  .qavis/receipt.json
+)
+
+gate_projection_is_cache_candidate() {
+  local rel=$1 cache
+  for cache in "${GATE_PROJECTION_CACHE_CANDIDATES[@]}"; do
+    [ "$rel" = "$cache" ] && return 0
+  done
+  return 1
+}
+
+# gate_projection_cache_is_shadowed <worktree> <repo-relative-path>
+#
+# True only for the accident above: a cache candidate that the BASE CHECKOUT materialised, i.e. a real
+# file git tracks at $WT's HEAD (the ship base — the commit is still ahead of us). Deliberately NOT:
+#   - a symlink — we placed it ourselves on an earlier pass; overwriting would be a no-op at best.
+#   - a path absent from HEAD — change-application put it there from the invoking checkout, so those
+#     bytes ARE the live ones. Nothing to prefer.
+gate_projection_cache_is_shadowed() {
+  local wt=$1 rel=$2
+  gate_projection_is_cache_candidate "$rel" || return 1
+  [ -L "$wt/$rel" ] && return 1
+  [ -f "$wt/$rel" ] || return 1
+  git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null
+}
+
 gate_config_path_emitter() {
   local self_dir emitter
   self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -93,9 +127,9 @@ gate_projection_source_is_ignored() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
-  local main_root='' candidate_root=$root source=''
+  local main_root='' candidate_root=$root source='' shadowed=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() linked_sources=() candidates=()
+  local linked=() linked_sources=() linked_shadowed=() candidates=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -169,6 +203,7 @@ link_untracked_gate_configs() {
       [ -e "$root/$rel" ] && [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
       linked+=("$rel")
       linked_sources+=("$root/$rel")
+      linked_shadowed+=('')
     done
     {
       if [ "${#linked[@]}" -gt 0 ]; then
@@ -181,11 +216,21 @@ link_untracked_gate_configs() {
       # -L guard also skips a pre-existing symlink so `ln` never aborts on it. Empty local projection
       # dirs are unusable, so a populated main-worktree copy wins; files keep root-first precedence.
       source=$(gate_link_source "$root" "$main_root" "$rel" prefer-populated) || continue
-      [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+      shadowed=''
+      if [ -e "$wt/$rel" ] || [ -L "$wt/$rel" ]; then
+        gate_projection_cache_is_shadowed "$wt" "$rel" || continue
+        # WORKTREE-ONLY removal. The index is not touched: assert-staged-set.sh holds the ship to an
+        # exact `write-tree` equality across this window and the commit is index-only (no -a), so this
+        # changes what the GATES read and nothing about what is shipped. A caller who also shipped this
+        # path keeps their staged blob — the link just points the gate at the same live bytes.
+        rm -f "$wt/$rel"
+        shadowed=1
+      fi
       mkdir -p "$wt/$(dirname "$rel")"
       ln -s "$source" "$wt/$rel"
       linked+=("$rel")
       linked_sources+=("$source")
+      linked_shadowed+=("$shadowed")
     done
   fi
 
@@ -193,6 +238,8 @@ link_untracked_gate_configs() {
   # under `set -u`; cf. commit-with-gate-capture.sh).
   [ "${#linked[@]}" -eq 0 ] && return 0
   {
+    # "absent from" covers every entry but a shadowed cache, which is present-but-stale. The per-entry
+    # line below says which it was, so the count stays one number instead of two headline clauses.
     echo "⚠️  ship: ${#linked[@]} gate config(s) present in the repo but absent from the committed tree —"
     if is_review_projection_purpose "$purpose"; then
       echo "   copied into the isolated review worktree so gates match the target (not defaults):"
@@ -202,7 +249,10 @@ link_untracked_gate_configs() {
     local linked_index=0
     for rel in "${linked[@]}"; do
       # `check-ignore -q` inside the `if` → its exit-1 "not ignored" is errexit-safe.
-      if gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
+      if [ -n "${linked_shadowed[$linked_index]:-}" ]; then
+        echo "   - $rel (a COMMITTED copy shadowed the live cache — overridden for the gates only;"
+        echo "     run \`git rm --cached $rel\` and gitignore it, or the gate reading it stays stale)"
+      elif gate_projection_source_is_ignored "$root" "${linked_sources[$linked_index]}" "$rel"; then
         echo "   - $rel (gitignored cache — normal)"
       else
         echo "   - $rel (untracked — commit it so gates are consistent for everyone)"

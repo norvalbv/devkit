@@ -121,9 +121,11 @@ _ship_report_object_environment() {
 }
 
 # ship_assert_staged_unchanged <worktree> <state-file>
-# Preflight, run immediately before the commit: nothing between staging and here may touch the index
-# (prepare_gate_worktree and link_untracked_gate_configs only create UNTRACKED symlinks), so this is
-# an exact equality check. Catches a clobber that lands before the gate chain even starts.
+# Preflight, run immediately before the commit: nothing between staging and here may touch the index,
+# so this is an exact equality check. Catches a clobber that lands before the gate chain even starts.
+# prepare_gate_worktree and link_untracked_gate_configs only write the WORKING TREE — symlinks at
+# untracked paths, plus (sc-1489) one replacing a committed cache that would otherwise shadow the live
+# one. Neither runs `git add`/`rm`, and the commit is index-only (no -a), so write-tree is invariant.
 ship_assert_staged_unchanged() {
   local wt=$1 state=$2 expected actual
   expected=$(_ship_state_tree "$state")
