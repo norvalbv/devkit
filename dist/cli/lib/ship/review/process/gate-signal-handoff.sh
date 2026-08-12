@@ -9,6 +9,7 @@ gate_signal_handoff_init() {
   GATE_LAUNCHING=0
   REQUESTED_SIGNAL_STATUS=0
   REQUESTED_SIGNAL=
+  GATE_SIGNAL_DEFER_EXIT=
   trap 'forward_gate_signal 129 HUP' HUP
   trap 'forward_gate_signal 130 INT' INT
   trap 'forward_gate_signal 131 QUIT' QUIT
@@ -24,6 +25,9 @@ forward_gate_signal() {
     return 0
   fi
   [ "$GATE_LAUNCHING" -eq 0 ] || return 0
+  # ship may need to checkpoint proof for a commit that already landed after the supervisor was
+  # reaped. It opts into this tiny critical section; the recorded status is still honored before push.
+  [ -z "$GATE_SIGNAL_DEFER_EXIT" ] || return 0
   exit "$status"
 }
 
