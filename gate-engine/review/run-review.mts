@@ -157,6 +157,14 @@ export async function runReviewGate(
   // (ship-gates-converge-not-restart: amended-message retries must reuse cached PASSes).
   const ctx = await loadReviewerContext(cwd, stagedFiles(cwd));
   const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock);
+  // Prompt wrappers do not otherwise participate in this cache key. Re-run conventions once so
+  // cached verdicts earned from capped evidence receive the explicit Read recovery contract.
+  for (const { reviewer } of selected)
+    if (reviewer.name === 'conventions-reviewer')
+      targetSalts.set(
+        reviewer.name,
+        `${targetSalts.get(reviewer.name) ?? ''}\0conventions-capped-evidence-read-v1`,
+      );
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
   const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey);
   for (const s of plan.scope)
