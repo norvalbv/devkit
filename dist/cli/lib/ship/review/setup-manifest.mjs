@@ -1,7 +1,7 @@
 /** Stable, typed capture of the target-controlled setup that `devkit review` will execute. */
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from "../../atomic-write.mjs";
 import { detectGitRoot } from "../../detect-git-root.mjs";
 import { reviewHookDrift } from "../../husky/review-drift.mjs";
@@ -187,7 +187,9 @@ function effectiveHooksPath(root, overlay, context) {
     const value = readHooksPath(root);
     if (!overlay) {
         if (value !== '.husky/_')
-            fail(`core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected .husky/_ — ${DOCTOR}`);
+            fail(`core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected .husky/_ — ${isAbsolute(value)
+                ? `run 'devkit doctor' for the ownership diagnosis, then 'devkit sync-hook-runner' to repair a proven sibling-worktree pin; otherwise repoint it explicitly: git config core.hooksPath .husky/_`
+                : DOCTOR}`);
         return value;
     }
     const rejection = overlayHooksPathRejection(value, context);

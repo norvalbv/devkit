@@ -1,7 +1,9 @@
 /**
- * The two pre-commit hook health checks, kept together because they answer complementary halves of
+ * The three pre-commit hook health checks, kept together because they answer complementary parts of
  * one question: `checkHusky` asks whether the hook exists and still calls the selected gates in THIS
- * checkout; `checkHookRunner` asks whether that hook survives `git worktree add` at all.
+ * checkout; `checkHookRunner` asks whether that hook survives `git worktree add` at all; and
+ * `checkHooksPathOwner` asks whose hook a commit made HERE actually runs — delivery into a new
+ * checkout and ownership of the current one being different failures with the same symptom.
  *
  * They live here beside the other doctor checks (see `asset-checks.mts`) rather than in
  * `doctor.mts`, which is at its line budget.
@@ -16,6 +18,15 @@ import { markEnd, markStart } from '../husky/husky.mts';
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
 import { firstLine } from '../standalone.mts';
 import { type CheckResult, check } from './check-result.mts';
+import {
+  foreignPin,
+  hooksDir,
+  isInside,
+  isInsideResolved,
+  sharedHooksPath,
+  worktreeHooksPathState,
+  worktreeScopedPin,
+} from './hooks-path.mts';
 import { strayGateCalls } from './stray-gate-calls.mts';
 import { checkFailOpenGuards } from './unguarded-gate-calls.mts';
 
@@ -125,6 +136,10 @@ export function checkHusky(cwd: string, selectedGuards: string[]): CheckResult {
 }
 
 const RUNNER = 'hook runner (worktree-safe)';
+// Named apart from RUNNER on purpose: the two answer different questions and would read as
+// contradictory duplicates side by side. RUNNER judges DELIVERY into a new checkout; OWNER judges
+// which checkout's hooks run in THIS one.
+const OWNER = 'hooksPath owner';
 
 /** Git's hook names — the same set husky generates stubs for. Used to tell a real hook apart from
  * an unrelated file sitting in the hooks directory. */
@@ -144,19 +159,6 @@ const GIT_HOOKS = new Set([
   'pre-auto-gc',
   'post-rewrite',
 ]);
-
-/** A `core.hooksPath` at one config scope. Absent/unreadable (e.g. `--worktree` without
- * `extensions.worktreeConfig`) reads as ''. */
-function hooksPathAt(gitRoot: string, scope: '--local' | '--worktree'): string {
-  try {
-    return execFileSync('git', ['-C', gitRoot, 'config', scope, '--get', 'core.hooksPath'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return '';
-  }
-}
 
 function gitSucceeds(gitRoot: string, args: string[]): boolean {
   try {
@@ -186,6 +188,23 @@ function defaultHookDelegatesToHusky(gitRoot: string): boolean {
   }
 }
 
+/**
+ * Does this checkout gate itself — would the hooks that run once the pin is gone actually be its
+ * own, and actually run?
+ *
+ * Reuses `checkHookRunner`'s whole verdict rather than a second existence test, because a runner
+ * DIRECTORY can be there while nothing runs: an empty runner dir, or a hook declared in `.husky/`
+ * whose stub was never generated, are both states it already reports and `existsSync` cannot see.
+ * Clearing a pin in either state would swap the sibling checkout's working hook for nothing at all.
+ * The containment test is separate and comes first: `checkHookRunner` judges the shared value's
+ * health, not whether that value points at US.
+ */
+function selfGated(cwd: string, gitRoot: string): boolean {
+  const shared = sharedHooksPath(gitRoot);
+  if (!shared || !isInside(gitRoot, hooksDir(gitRoot, shared))) return false;
+  return checkHookRunner(cwd).status === 'OK';
+}
+
 // A file reaches a new worktree iff it is TRACKED. Merely-untracked is transient (the next commit
 // carries it), but untracked AND IGNORED is permanent: no ordinary `git add` can ever pick it up.
 // That pairing — load-bearing yet unreachable — is the actual defect.
@@ -204,7 +223,7 @@ function isUnreachable(gitRoot: string, relPath: string): boolean {
  * already-reviewed check's shape stays untouched.
  */
 export function unreachableRunnerFiles(gitRoot: string): string[] {
-  const shared = hooksPathAt(gitRoot, '--local');
+  const shared = sharedHooksPath(gitRoot);
   if (!shared || isAbsolute(shared) || !existsSync(join(gitRoot, shared))) return [];
   const huskyDir = join(gitRoot, '.husky');
   const runnerDir = join(gitRoot, shared);
@@ -231,7 +250,15 @@ export function unreachableRunnerFiles(gitRoot: string): string[] {
 // Detection only (never `fixable`): the repair stages files, which `--fix` must not do unasked.
 export function checkHookRunner(cwd: string): CheckResult {
   const { gitRoot } = detectGitRoot(cwd);
-  const shared = hooksPathAt(gitRoot, '--local');
+  const scopedState = worktreeHooksPathState(gitRoot);
+  if (scopedState.status === 'ambiguous' || scopedState.status === 'unreadable')
+    return check(
+      RUNNER,
+      'DRIFT',
+      `cannot determine the effective worktree core.hooksPath: ${scopedState.detail}`,
+      'inspect `git config --show-origin --show-scope --get-all core.hooksPath`',
+    );
+  const shared = sharedHooksPath(gitRoot);
   // Unset → git's default hooks dir, which every linked worktree shares via the common dir.
   if (!shared) {
     // ...but an INSTALLED hook that git will never reach is the same silent-no-gates failure, one
@@ -251,14 +278,25 @@ export function checkHookRunner(cwd: string): CheckResult {
         'run `bun install` (husky sets core.hooksPath), or `devkit init` for a husky-less install',
       );
     }
-    const scoped = hooksPathAt(gitRoot, '--worktree');
-    return check(
-      RUNNER,
-      'OK',
-      scoped
-        ? `shared core.hooksPath unset (git default); this worktree overrides to ${scoped}`
-        : 'core.hooksPath unset (git default, shared with worktrees)',
-    );
+    const scoped = worktreeScopedPin(gitRoot);
+    if (!scoped)
+      return check(RUNNER, 'OK', 'core.hooksPath unset (git default, shared with worktrees)');
+    // A per-checkout override is healthy only while it points at something this checkout owns. With
+    // no shared value behind it, an override at a SIBLING checkout means the only hooks that run
+    // here are someone else's — reporting that as OK would state the defect as health, and would
+    // also hand `sync-hook-runner` a false licence to clear the one thing still gating.
+    return foreignPin(gitRoot)
+      ? check(
+          RUNNER,
+          'DRIFT',
+          `shared core.hooksPath unset; this checkout overrides to ${scoped}, which is not its own`,
+          `see the "${OWNER}" check`,
+        )
+      : check(
+          RUNNER,
+          'OK',
+          `shared core.hooksPath unset (git default); this checkout overrides to ${scoped}`,
+        );
   }
   // Absolute → inherited verbatim by every worktree; it only has to exist.
   if (isAbsolute(shared)) {
@@ -332,10 +370,126 @@ export function checkHookRunner(cwd: string): CheckResult {
 }
 
 /**
+ * Whose hooks a commit made HERE actually runs.
+ *
+ * Returns a LIST so the call site is one line: `doctor.mts` is at its recorded line ceiling, and the
+ * `CheckResult | null` shape used elsewhere costs two. Empty for every healthy repo, so ordinary
+ * `devkit doctor` output does not grow a row.
+ *
+ * Inspects the repo-wide (`--local`) and per-checkout (`config.worktree`) scopes only — the two
+ * devkit and husky write. A `core.hooksPath` arriving via `GIT_CONFIG_*`, `--global` or `--system`
+ * is invisible here, while `devkit review` reads the fully merged value and does see it; that split
+ * is documented in `docs/troubleshooting.md` rather than guessed at from this check's silence.
+ */
+export function checkHooksPathOwner(cwd: string): CheckResult[] {
+  const { gitRoot } = detectGitRoot(cwd);
+  const state = worktreeHooksPathState(gitRoot);
+  if (state.status === 'ambiguous' || state.status === 'unreadable')
+    return [
+      check(
+        OWNER,
+        'DRIFT',
+        `cannot establish this checkout's core.hooksPath ownership: ${state.detail}`,
+        'inspect `git config --show-origin --show-scope --get-all core.hooksPath`; devkit will not repair an ambiguous value',
+        false,
+      ),
+    ];
+  const pin = foreignPin(gitRoot);
+  if (!pin) {
+    // A benign per-checkout pin still shadows every repo-wide write — `devkit init`, `devkit clean`,
+    // and husky's own `prepare` all write at `--local` and would silently fail to take effect here.
+    // It is invisible to `git config --get`, so surface it even though nothing is wrong.
+    if (state.status !== 'single') return [];
+    const dir = hooksDir(gitRoot, state.value);
+    if (!isInsideResolved(gitRoot, dir))
+      return existsSync(dir)
+        ? [
+            check(
+              OWNER,
+              'OK',
+              `this checkout pins an external core.hooksPath (${state.value}); it is not attributable to another checkout and is left unchanged`,
+            ),
+          ]
+        : [
+            check(
+              OWNER,
+              'MISSING',
+              `this checkout pins core.hooksPath at ${state.value}, which is external to every registered checkout and resolves to nothing`,
+              'restore that external hooks directory or explicitly repoint this checkout; devkit cannot prove ownership and will not replace it',
+              false,
+            ),
+          ];
+    return [check(OWNER, 'OK', `this checkout pins its own core.hooksPath (${state.value})`)];
+  }
+  const scopeLabel = pin.scope === '--worktree' ? 'this checkout pins' : 'this repo pins';
+  const shared = sharedHooksPath(gitRoot);
+  const manual =
+    pin.scope === '--worktree'
+      ? `git config --worktree core.hooksPath ${shared || '.husky/_'}`
+      : 'git config --unset core.hooksPath';
+  // `--fix` is deliberately not offered: it regenerates FILE content from the recorded selection and
+  // never mutates git state. `sync-hook-runner` is devkit's one sanctioned mutator, and it refuses
+  // to clear anything until this checkout provably gates itself — so when it does not, the remedy
+  // has to be the ordered sequence that gets it there. Pointing straight at sync-hook-runner would
+  // send the user to a guaranteed no-op: it stages nothing while the shared value is unset.
+  const remedy =
+    pin.scope === '--local'
+      ? // Repo-wide: the pin IS the shared value, so there is no local fallback to be gated by and
+        // no per-checkout override to drop. Repointing it is a decision for the repo, not for us.
+        `${manual} — repo-wide, so devkit will not replace it for you; repoint it at a runner each checkout carries (e.g. .husky/_)`
+      : // Not self-gated YET is still sync-hook-runner's job whenever the reason is a runner it can
+        // stage: it stages first and re-reads, so one run tracks the runner and then drops the pin.
+        // Only when there is nothing to stage does the user have to go and produce a runner first.
+        selfGated(cwd, gitRoot) || unreachableRunnerFiles(gitRoot).length
+        ? `devkit sync-hook-runner (stages this checkout's own runner if needed, then replaces the sibling pin with ${shared}), or: ${manual}`
+        : 'this checkout has no runner of its own to fall back on — run `bun install` here (husky generates it and sets core.hooksPath), then `devkit sync-hook-runner`, then `devkit doctor`';
+  return [
+    check(
+      OWNER,
+      pin.exists ? 'DRIFT' : 'MISSING',
+      `${scopeLabel} core.hooksPath at ${pin.dir} — owned by sibling checkout ${pin.siblingRoot}${pin.exists ? '' : ' (now missing)'}, so commits made here ${pin.exists ? 'run ITS hooks' : 'run no hooks'}, not this checkout's own ${shared || '(none)'}`,
+      remedy,
+      false,
+    ),
+  ];
+}
+
+/**
+ * The per-checkout `core.hooksPath` that `devkit sync-hook-runner` may safely replace, or null.
+ *
+ * Four conditions, all load-bearing. The pin must be structurally per-checkout, because changing a
+ * repo-wide value would silently re-wire every other checkout too. It must point somewhere that is
+ * positively owned by an enumerated sibling, rather than an intentional external hook directory.
+ * The shared fallback must be relative and stay inside this checkout. And this checkout must already
+ * gate itself, or the "heal" swaps a working sibling hook for no hook at all — on every `bun install`,
+ * since the command is chained into the generated `prepare`.
+ */
+export interface ReplaceableHooksPathPin {
+  from: string;
+  to: string;
+}
+
+export function replaceableHooksPathPin(cwd: string): ReplaceableHooksPathPin | null {
+  const { gitRoot } = detectGitRoot(cwd);
+  const pin = foreignPin(gitRoot);
+  if (pin?.scope !== '--worktree') return null;
+  const shared = sharedHooksPath(gitRoot);
+  if (!shared || isAbsolute(shared)) return null;
+  const fallback = hooksDir(gitRoot, shared);
+  if (!isInside(gitRoot, fallback)) return null;
+  return selfGated(cwd, gitRoot) ? { from: pin.value, to: shared } : null;
+}
+
+/**
  * Every hook-shaped check, as one list. Exists so `devkit doctor` can gain a hook check without
  * growing its own call site — cli/commands/doctor.mts sits on its recorded size budget and the
  * ratchet is shrink-only.
  */
 export function hookChecks(cwd: string, guards: string[]): CheckResult[] {
-  return [checkHusky(cwd, guards), checkHookRunner(cwd), checkFailOpenGuards(cwd)];
+  return [
+    checkHusky(cwd, guards),
+    checkHookRunner(cwd),
+    ...checkHooksPathOwner(cwd),
+    checkFailOpenGuards(cwd),
+  ];
 }
