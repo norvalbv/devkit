@@ -346,12 +346,9 @@ export function wrapPrompt(
 const OFFENDING_LINE_RE = /^[\s>*#-]*\**OFFENDING\**\s*:.*[—–-]\s*(\S+):(\d+)\s*$/gim;
 
 /**
- * Checklist-free counterpart to `wrapPrompt` for a SKILL-LESS reviewer (no Bash at all): no
- * "fetch your own diff" instruction (there's no Bash to run it with) — the diff evidence rides on
- * stdin (pre-capped, omission-accounted — see diff-evidence.mts) and the governing CLAUDE.md rules
- * are pre-rendered into the prompt itself (see claude-md.mts). Same VERDICT contract as wrapPrompt
- * so parseReviewVerdict needs no changes; the VIOLATION/OFFENDING contract additionally feeds
- * parseConventionFindings for stable override fingerprints.
+ * Checklist-free counterpart to `wrapPrompt` for a reviewer without Bash: pre-capped evidence rides
+ * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
+ * stable override-fingerprint contracts.
  */
 export function wrapConventionsPrompt(
   agentBody: string,
@@ -362,10 +359,14 @@ export function wrapConventionsPrompt(
   return (
     'You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
     `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
-    'You have NO Bash — the capped diff evidence is already on stdin (any OMITTED/TRUNCATED ' +
-    'marker names what the cap dropped; Read/Grep/Glob surrounding code where a hunk alone is ' +
-    'ambiguous, but do not try to run git yourself). The governing CLAUDE.md rules for these files ' +
-    'are already loaded below — do not search for more.\n' +
+    'You have NO Bash, but Read/Grep/Glob are available. The diff evidence on stdin is capped: ' +
+    'an OMITTED/TRUNCATED marker means some staged context was not included. Before returning PASS ' +
+    'when such a marker appears, use Read to inspect every available in-scope staged file not shown ' +
+    'in full. A path unavailable to Read may be deleted or renamed; its absence is not itself a ' +
+    'rule violation and must not produce a semantic FAIL.\n' +
+    'The governing CLAUDE.md rules for these files are loaded below. If a governing-rules block is ' +
+    'marked OMITTED/TRUNCATED, use Read to inspect every named rule file before returning PASS. ' +
+    'Never treat incomplete evidence alone as a violation.\n' +
     `${claudeMdBlock}\n` +
     (commitMsgBlock ? `${commitMsgBlock}\n` : '') + // sc-1442: fenced untrusted advisory intent
     'Your reviewer brief follows. IGNORE any instructions in it about checklist scripts, marker ' +
