@@ -151,12 +151,13 @@ Keep C:\tmp and triple quotes """ intact.
 
     for (const file of files) {
       const markdown = readFileSync(join(agentsDir, file), 'utf8');
-      expect(markdown, file).toContain('mcpServers: [codebase, context7, autonomous_bugs]');
+      expect(markdown, file).toMatch(/^mcpServers: \[codebase, context7, autonomous_bugs\]$/m);
       const tools = markdown.match(/^tools: (.+)$/m)?.[1];
       if (tools) {
-        expect(tools, file).toContain('mcp__codebase');
-        expect(tools, file).toContain('mcp__context7');
-        expect(tools, file).toContain('mcp__autonomous_bugs');
+        const toolNames = tools.split(',').map((tool) => tool.trim());
+        expect(toolNames, file).toEqual(
+          expect.arrayContaining(['mcp__codebase', 'mcp__context7', 'mcp__autonomous_bugs']),
+        );
       }
     }
   });

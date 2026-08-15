@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  judgeMcpCapabilityFingerprint,
   namedAgentMcpProfile,
   prepareJudgeMcpProfile,
   withNamedAgentMcpTools,
@@ -56,9 +57,9 @@ describe('judge MCP profiles', () => {
     expect(prepared.serverNames).toEqual([]);
   });
 
-  it('selects only baseline and configured-tool servers from a trusted machine registry', () => {
+  it('selects only baseline servers from a trusted machine registry', () => {
     writeRegistry();
-    const profile = namedAgentMcpProfile('Read,mcp__alternate__query');
+    const profile = namedAgentMcpProfile();
     const prepared = prepareJudgeMcpProfile(profile, {
       cwd: repo,
       registryPath: registry,
@@ -70,7 +71,6 @@ describe('judge MCP profiles', () => {
       mcpServers: Record<string, unknown>;
     };
     expect(Object.keys(config.mcpServers).sort()).toEqual([
-      'alternate',
       'autonomous_bugs',
       'codebase',
       'context7',
@@ -81,6 +81,39 @@ describe('judge MCP profiles', () => {
     expect(prepared.args.join(' ')).not.toContain('TOKEN_FILE');
     prepared.cleanup();
     expect(() => statSync(configPath)).toThrow();
+  });
+
+  it('does not let an allowed repository-configured tool activate another MCP server', () => {
+    writeRegistry();
+    const profile = namedAgentMcpProfile();
+    const prepared = prepareJudgeMcpProfile(profile, {
+      cwd: repo,
+      registryPath: registry,
+      projectRoots: [repo],
+      temporaryRoot: root,
+    });
+    const config = JSON.parse(readFileSync(prepared.args[1] as string, 'utf8')) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(withNamedAgentMcpTools('Read', 'mcp__alternate__query')).toContain(
+      'mcp__alternate__query',
+    );
+    expect(config.mcpServers).not.toHaveProperty('alternate');
+    prepared.cleanup();
+  });
+
+  it('changes the capability fingerprint when a selected trusted server definition changes', () => {
+    writeRegistry();
+    const options = { cwd: repo, registryPath: registry, projectRoots: [repo] };
+    const first = judgeMcpCapabilityFingerprint(namedAgentMcpProfile(), 'Read', options);
+    writeRegistry({
+      projects: {
+        [realpathSync(repo)]: {
+          mcpServers: { codebase: { type: 'stdio', command: 'search-code', args: ['mcp', 'v2'] } },
+        },
+      },
+    });
+    expect(judgeMcpCapabilityFingerprint(namedAgentMcpProfile(), 'Read', options)).not.toBe(first);
   });
 
   it('never trusts a repository-controlled config or a symlinked override', () => {

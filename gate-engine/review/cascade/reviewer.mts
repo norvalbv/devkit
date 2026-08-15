@@ -117,7 +117,7 @@ async function cascadeVerdict(
     : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
   const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
   const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
-  const mcpProfile = namedAgentMcpProfile(allowedTools);
+  const mcpProfile = namedAgentMcpProfile();
   const args = (promptBody: string, model: string): string[] => [
     '-p',
     promptBody,

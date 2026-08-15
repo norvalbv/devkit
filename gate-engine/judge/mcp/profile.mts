@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   lstatSync,
@@ -174,20 +175,10 @@ function selectedServers(
   return selected;
 }
 
-function serverNamesFromTools(tools: string): string[] {
-  const result: string[] = [];
-  const pattern = /mcp__([A-Za-z0-9_-]+?)(?:__|(?=[,\s]|$))/g;
-  for (const match of tools.matchAll(pattern)) {
-    const name = match[1];
-    if (name && !result.includes(name)) result.push(name);
-  }
-  return result;
-}
-
-export function namedAgentMcpProfile(allowedTools = ''): NamedAgentMcpProfile {
+export function namedAgentMcpProfile(): NamedAgentMcpProfile {
   return {
     kind: 'named-agent',
-    serverNames: [...new Set([...BASELINE_SERVER_NAMES, ...serverNamesFromTools(allowedTools)])],
+    serverNames: BASELINE_SERVER_NAMES,
   };
 }
 
@@ -197,6 +188,38 @@ export function withNamedAgentMcpTools(tools: string, ...extraTools: string[]): 
     .map((value) => value.trim())
     .filter(Boolean);
   return [...new Set(values)].join(',');
+}
+
+/**
+ * Stable, secret-safe cache partition for the capabilities a named judge can actually receive.
+ * The digest includes the declared tool set, trusted registry location, and selected definitions;
+ * cache entries therefore never survive a capability change, while secret-bearing config is never
+ * written to the cache itself.
+ */
+export function judgeMcpCapabilityFingerprint(
+  profile: JudgeMcpProfile,
+  allowedTools: string,
+  options: PrepareJudgeMcpOptions,
+): string {
+  const env = options.env ?? process.env;
+  const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
+  const requested =
+    options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
+  const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
+  const registry = registryPath ? readRegistry(registryPath) : null;
+  const servers =
+    profile.kind === 'named-agent' && registry
+      ? selectedServers(
+          registry,
+          profile.serverNames,
+          projectCandidates(options.cwd, env, options.projectRoots),
+        )
+      : {};
+  return createHash('sha256')
+    .update(
+      JSON.stringify({ allowedTools, profile, registryPath: registryPath ?? requested, servers }),
+    )
+    .digest('hex');
 }
 
 function emptyProfile(): PreparedJudgeMcpProfile {

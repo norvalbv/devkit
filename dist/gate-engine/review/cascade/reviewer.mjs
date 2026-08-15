@@ -55,7 +55,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
     const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
     const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
-    const mcpProfile = namedAgentMcpProfile(allowedTools);
+    const mcpProfile = namedAgentMcpProfile();
     const args = (promptBody, model) => [
         '-p',
         promptBody,

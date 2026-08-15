@@ -38,7 +38,7 @@ import { renderTargets } from "./evidence/targets-block.mjs";
 export { renderTargets } from "./evidence/targets-block.mjs";
 import { emitCacheHit, finishGateTiming } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
-import { namedAgentMcpProfile, withNamedAgentMcpTools } from "../judge/mcp/profile.mjs";
+import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from "../judge/mcp/profile.mjs";
 import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache, savePasses } from "./cache.mjs";
@@ -107,12 +107,15 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     let prompt;
     let diff;
     let allowedTools = withNamedAgentMcpTools(TOOLS);
+    const mcpProfile = namedAgentMcpProfile();
+    let capabilityFingerprint = '';
     let stickyKey = '';
     try {
         const cfg = resolveGuardConfig(cwd);
         if (cfg.noLlm)
             return finish(0);
         allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+        capabilityFingerprint = judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd });
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
         const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
             .split('\n')
@@ -137,7 +140,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         // A FAIL is never sticky (only the confident-PASS save below writes this key), so a found gap
         // must genuinely be re-judged closed. Checked before scopedTargets/diff assembly — a sticky
         // hit skips the retrieval work too, not just the judge.
-        stickyKey = cacheKey('completeness-intent', `${verdictBranch(cwd)}\u0000${message}`, body);
+        stickyKey = cacheKey('completeness-intent', `${verdictBranch(cwd)}\u0000${message}`, `${body}\u0000${capabilityFingerprint}`);
         const sticky = loadCache(cwd)[stickyKey];
         if (sticky) {
             console.error('guard-review: completeness — cached PASS (same branch + message; a retry-reshaped diff is not re-judged)');
@@ -177,7 +180,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     // (docs/decisions/ship-gates-converge-not-restart.md), and completeness was outside it.
     // Key = every byte the judge reads: the prompt (message, governing Targets, brief) plus the
     // capped stdin evidence. An amended message or a re-staged hunk therefore MISSES and re-judges.
-    const key = cacheKey('completeness', diff, prompt);
+    const key = cacheKey('completeness', diff, `${prompt}\u0000${capabilityFingerprint}`);
     const hit = loadCache(cwd)[key];
     if (hit) {
         console.error('guard-review: completeness — cached PASS (identical judgement)');
@@ -193,7 +196,7 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         input: diff,
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
-        mcpProfile: namedAgentMcpProfile(allowedTools),
+        mcpProfile,
         onOutage: (kind) => {
             outage = kind;
         },

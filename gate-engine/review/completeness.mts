@@ -41,7 +41,11 @@ export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
 
 import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
-import { namedAgentMcpProfile, withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
+import {
+  judgeMcpCapabilityFingerprint,
+  namedAgentMcpProfile,
+  withNamedAgentMcpTools,
+} from '../judge/mcp/profile.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
@@ -125,11 +129,14 @@ export async function runCompleteness(
   let prompt: string;
   let diff: string;
   let allowedTools = withNamedAgentMcpTools(TOOLS);
+  const mcpProfile = namedAgentMcpProfile();
+  let capabilityFingerprint = '';
   let stickyKey = '';
   try {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
     allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
+    capabilityFingerprint = judgeMcpCapabilityFingerprint(mcpProfile, allowedTools, { cwd });
     const message = normalizeCommitMessage(
       readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
@@ -157,7 +164,11 @@ export async function runCompleteness(
     // A FAIL is never sticky (only the confident-PASS save below writes this key), so a found gap
     // must genuinely be re-judged closed. Checked before scopedTargets/diff assembly — a sticky
     // hit skips the retrieval work too, not just the judge.
-    stickyKey = cacheKey('completeness-intent', `${verdictBranch(cwd)}\u0000${message}`, body);
+    stickyKey = cacheKey(
+      'completeness-intent',
+      `${verdictBranch(cwd)}\u0000${message}`,
+      `${body}\u0000${capabilityFingerprint}`,
+    );
     const sticky = loadCache(cwd)[stickyKey];
     if (sticky) {
       console.error(
@@ -207,7 +218,7 @@ export async function runCompleteness(
   // (docs/decisions/ship-gates-converge-not-restart.md), and completeness was outside it.
   // Key = every byte the judge reads: the prompt (message, governing Targets, brief) plus the
   // capped stdin evidence. An amended message or a re-staged hunk therefore MISSES and re-judges.
-  const key = cacheKey('completeness', diff, prompt);
+  const key = cacheKey('completeness', diff, `${prompt}\u0000${capabilityFingerprint}`);
   const hit = loadCache(cwd)[key];
   if (hit) {
     console.error('guard-review: completeness — cached PASS (identical judgement)');
@@ -224,7 +235,7 @@ export async function runCompleteness(
     input: diff,
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
-    mcpProfile: namedAgentMcpProfile(allowedTools),
+    mcpProfile,
     onOutage: (kind) => {
       outage = kind;
     },
