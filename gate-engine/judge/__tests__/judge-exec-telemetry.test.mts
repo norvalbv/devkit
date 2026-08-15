@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execJudge, execJudgeAsync, recordAgentRun } from '../run-judge.mts';
 import { DIFF_HEADER, OUTPUT_HEADER, readTranscript } from '../transcript-store.mts';
 
-const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_SHIP_ID', 'PATH'];
+const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_JUDGE_MCP_CONFIG', 'DEVKIT_SHIP_ID', 'PATH'];
 const saved: Record<string, string | undefined> = {};
 let dir: string;
 let sink: string;
@@ -63,6 +63,16 @@ afterEach(() => {
 });
 
 describe('judge_exec telemetry', () => {
+  it('strictly disables inherited MCP servers for an unprofiled judge', () => {
+    fakeClaude('printf \'%s\\n\' "$*"');
+    const out = execJudge({
+      label: 'detect',
+      args: ['-p', 'judge this'],
+      timeout: 30000,
+    });
+    expect(out).toContain('--mcp-config {"mcpServers":{}} --strict-mcp-config');
+  });
+
   it('success emits one ok event with model/duration/sizes AND a transcript by default', () => {
     fakeClaude('echo FIT');
     const out = execJudge({

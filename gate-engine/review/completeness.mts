@@ -41,6 +41,7 @@ export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
 
 import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
+import { namedAgentMcpProfile, withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache, savePasses } from './cache.mts';
@@ -123,10 +124,12 @@ export async function runCompleteness(
   if (envFlag('NO_COMPLETENESS')) return finish(0);
   let prompt: string;
   let diff: string;
+  let allowedTools = withNamedAgentMcpTools(TOOLS);
   let stickyKey = '';
   try {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm) return finish(0);
+    allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
     const message = normalizeCommitMessage(
       readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'),
     );
@@ -217,10 +220,11 @@ export async function runCompleteness(
   let outage: 'timeout' | 'transient' | 'empty' | undefined;
   const raw = await exec({
     label: 'review:completeness',
-    args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', TOOLS],
+    args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
     input: diff,
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
+    mcpProfile: namedAgentMcpProfile(allowedTools),
     onOutage: (kind) => {
       outage = kind;
     },

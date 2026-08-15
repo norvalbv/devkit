@@ -42,6 +42,7 @@ describe('agent asset projections', () => {
       'name: quote-reviewer',
       String.raw`description: "Quotes: \"yes\"; path C:\\tmp; literal \\n marker" # metadata comment`,
       'tools: Read, Grep, Bash',
+      'mcpServers: [codebase, context7, autonomous_bugs]',
       'model: opus',
       'color: blue',
       '---',
@@ -64,6 +65,7 @@ Keep C:\tmp and triple quotes """ intact.
 `,
     });
     expect(toml).not.toContain('tools =');
+    expect(toml).not.toContain('mcpServers =');
     expect(toml).not.toContain('model =');
     expect(toml).not.toContain('color =');
 
@@ -104,6 +106,14 @@ Keep C:\tmp and triple quotes """ intact.
     ['tagged indented block scalar', '---\nname: reviewer\ndescription: !!str |2\n---\nbody'],
     ['tagged anchor', '---\nname: reviewer\ndescription: !!str &label true\n---\nbody'],
     ['collection description', '---\nname: reviewer\ndescription: [not, a, string]\n---\nbody'],
+    [
+      'block MCP server list',
+      '---\nname: reviewer\ndescription: valid\nmcpServers:\n  - codebase\n---\nbody',
+    ],
+    [
+      'invalid MCP server name',
+      '---\nname: reviewer\ndescription: valid\nmcpServers: [codebase, ../bad]\n---\nbody',
+    ],
     ['empty body', '---\nname: reviewer\ndescription: valid\n---\n'],
     ['malformed field', '---\nname reviewer\ndescription: valid\n---\nbody'],
     ['malformed quoted scalar', '---\nname: reviewer\ndescription: "bad\\q"\n---\nbody'],
@@ -132,6 +142,22 @@ Keep C:\tmp and triple quotes """ intact.
         'description',
         'developer_instructions',
       ]);
+    }
+  });
+
+  it('gives every bundled Claude agent only the shared MCP baseline', () => {
+    const agentsDir = join(packageDir(), 'agents');
+    const files = readdirSync(agentsDir).filter((name) => name.endsWith('.md'));
+
+    for (const file of files) {
+      const markdown = readFileSync(join(agentsDir, file), 'utf8');
+      expect(markdown, file).toContain('mcpServers: [codebase, context7, autonomous_bugs]');
+      const tools = markdown.match(/^tools: (.+)$/m)?.[1];
+      if (tools) {
+        expect(tools, file).toContain('mcp__codebase');
+        expect(tools, file).toContain('mcp__context7');
+        expect(tools, file).toContain('mcp__autonomous_bugs');
+      }
     }
   });
 });

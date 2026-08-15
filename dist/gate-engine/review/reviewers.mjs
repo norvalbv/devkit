@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { sourceMatchers } from "../config.mjs";
 import { devkitVersion } from "../devkit-version.mjs";
+import { withNamedAgentMcpTools } from "../judge/mcp/profile.mjs";
 import { checklistContractFor } from "./lens/split.mjs";
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
@@ -186,23 +187,21 @@ export function selectReviewers(stagedFiles, cfg) {
  * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
  * script (the one non-git Bash prefix a judge gets — scoped to that exact script path, so the
  * judge can drive its checklist but still cannot write files, stage, or commit), PLUS the
- * consumer's semantic search tool for commit-guard.
+ * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
  */
 export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
-    // A skill-less reviewer (e.g. conventions-reviewer) has no checklist script to grant Bash for,
-    // and its AC forbids Bash entirely — Read/Grep/Glob only, full stop, no BASE_TOOLS git-diff Bash
-    // either (its evidence is pre-rendered onto stdin/prompt instead — see wrapConventionsPrompt).
+    // A skill-less reviewer has no checklist script; its evidence is pre-rendered onto stdin/prompt.
     if (!hasChecklist(reviewer))
-        return 'Read,Grep,Glob';
+        return withNamedAgentMcpTools('Read,Grep,Glob');
     const tools = `${BASE_TOOLS},Bash(node ${checklistScriptAt(reviewer, assetRoot)}:*)`;
     if (reviewer.domain === 'code')
-        return `${tools},${cfg.searchTool}`;
+        return withNamedAgentMcpTools(tools, cfg.searchTool);
     // The correctness reviewer's writer/reader-contract lens benefits from semantic search, but
     // only when the consumer actually wired an index (indexPath set) — otherwise cfg.searchTool is
     // a generic default naming an MCP tool the judge doesn't have, and Grep is the core mechanism.
     if (reviewer.domain === 'all' && cfg.indexPath)
-        return `${tools},${cfg.searchTool}`;
-    return tools;
+        return withNamedAgentMcpTools(tools, cfg.searchTool);
+    return withNamedAgentMcpTools(tools);
 }
 /** Strip a leading YAML frontmatter block from an agent .md. */
 export function stripFrontmatter(md) {

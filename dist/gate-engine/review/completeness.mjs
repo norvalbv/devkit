@@ -38,6 +38,7 @@ import { renderTargets } from "./evidence/targets-block.mjs";
 export { renderTargets } from "./evidence/targets-block.mjs";
 import { emitCacheHit, finishGateTiming } from "../judge/gate-events.mjs";
 import { JUDGE_ISOLATION } from "../judge/judge-isolation.mjs";
+import { namedAgentMcpProfile, withNamedAgentMcpTools } from "../judge/mcp/profile.mjs";
 import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync, strictRemedy } from "../judge/run-judge.mjs";
 import { loadCache, savePasses } from "./cache.mjs";
@@ -105,11 +106,13 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
         return finish(0);
     let prompt;
     let diff;
+    let allowedTools = withNamedAgentMcpTools(TOOLS);
     let stickyKey = '';
     try {
         const cfg = resolveGuardConfig(cwd);
         if (cfg.noLlm)
             return finish(0);
+        allowedTools = withNamedAgentMcpTools(TOOLS, cfg.indexPath ? cfg.searchTool : '');
         const message = normalizeCommitMessage(readFileSync(path.isAbsolute(msgFile) ? msgFile : path.resolve(cwd, msgFile), 'utf8'));
         const files = execSync('git diff --cached --name-only', { cwd, encoding: 'utf8' })
             .split('\n')
@@ -186,10 +189,11 @@ export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = exe
     let outage;
     const raw = await exec({
         label: 'review:completeness',
-        args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', TOOLS],
+        args: ['-p', prompt, '--model', 'opus', ...JUDGE_ISOLATION, '--allowedTools', allowedTools],
         input: diff,
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
+        mcpProfile: namedAgentMcpProfile(allowedTools),
         onOutage: (kind) => {
             outage = kind;
         },

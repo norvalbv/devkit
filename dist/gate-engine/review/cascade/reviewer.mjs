@@ -1,4 +1,5 @@
 import { JUDGE_ISOLATION } from "../../judge/judge-isolation.mjs";
+import { namedAgentMcpProfile } from "../../judge/mcp/profile.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from "../../judge/run-judge.mjs";
 import { renderGoverningClaudeMd } from "../claude-md.mjs";
 import { buildCappedDiffEvidence } from "../diff-evidence.mjs";
@@ -53,6 +54,8 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras, checklistRoot)
         : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
     const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
+    const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
+    const mcpProfile = namedAgentMcpProfile(allowedTools);
     const args = (promptBody, model) => [
         '-p',
         promptBody,
@@ -60,7 +63,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         model,
         ...JUDGE_ISOLATION,
         '--allowedTools',
-        allowedToolsFor(reviewer, cfg, checklistRoot),
+        allowedTools,
     ];
     const passModel = reviewer.model ?? firstModel;
     let firstOutage;
@@ -71,6 +74,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         transcript: false,
+        mcpProfile,
         env,
         onOutage: (kind) => {
             firstOutage = kind;
@@ -127,6 +131,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
         transcript: false,
+        mcpProfile,
         env,
         onOutage: (kind) => {
             secondOutage = kind;

@@ -19,6 +19,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from "./claude-result.mjs";
 import { emitGateEvent } from "./gate-events.mjs";
 import { withoutGitEnv } from "./judge-isolation.mjs";
+import { prepareJudgeMcpProfile } from "./mcp/profile.mjs";
 import { composeTranscript, saveTranscriptUnique } from "./transcript-store.mjs";
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
@@ -184,8 +185,12 @@ function readJudgeOutput(stdout) {
 export function execJudge(opts) {
     const { label, args, input, timeout, cwd, env, onOutage } = opts;
     const startedAt = Date.now();
+    const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
+        cwd: cwd ?? process.cwd(),
+        env,
+    });
     try {
-        const out = execFileSync('claude', withResultArgs(args), {
+        const out = execFileSync('claude', withResultArgs([...mcp.args, ...args]), {
             cwd,
             // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
             // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
@@ -216,6 +221,9 @@ export function execJudge(opts) {
         onOutage?.(kind);
         return null;
     }
+    finally {
+        mcp.cleanup();
+    }
 }
 /**
  * Async twin of execJudge — same contract (raw stdout, or `null` after ONE stderr warning), but
@@ -231,6 +239,10 @@ export function execJudge(opts) {
 export function execJudgeAsync(opts) {
     const { label, args, input, timeout, cwd, env, onOutage } = opts;
     const startedAt = Date.now();
+    const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
+        cwd: cwd ?? process.cwd(),
+        env,
+    });
     return new Promise((resolve) => {
         // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
         // out-of-range `timeout` validates and throws before spawn even starts, sc-1317) both resolve
@@ -239,6 +251,7 @@ export function execJudgeAsync(opts) {
         // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
         // already had this same guard via its enclosing try/catch.
         const fail = (err) => {
+            mcp.cleanup();
             warnUnavailable(label, err, timeout);
             const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
             emitJudgeExec(opts, kind, startedAt);
@@ -246,7 +259,7 @@ export function execJudgeAsync(opts) {
             resolve(null);
         };
         try {
-            const child = execFile('claude', withResultArgs(args), {
+            const child = execFile('claude', withResultArgs([...mcp.args, ...args]), {
                 cwd,
                 // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
                 env: withoutGitEnv(env),
@@ -260,6 +273,7 @@ export function execJudgeAsync(opts) {
                     fail(err);
                     return;
                 }
+                mcp.cleanup();
                 if (!stdout || !String(stdout).trim()) {
                     warnNoOutput(label);
                     emitJudgeExec(opts, 'empty', startedAt);
