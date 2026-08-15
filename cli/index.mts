@@ -54,6 +54,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   update: () => import('./commands/update.mts'),
   upgrade: () => import('./commands/upgrade.mts'),
   move: () => import('./commands/move.mts'),
+  oxc: () => import('./commands/oxc/oxc.mts'),
   reconcile: () => import('./commands/reconcile.mts'),
   ship: () => import('./commands/ship.mts'),
   review: () => import('./commands/review.mts'),
@@ -130,7 +131,10 @@ async function main() {
 
   const cmdArgs = process.argv.slice(3);
   // Generic per-command help: every command gets `devkit <cmd> --help` for free.
-  if (cmdArgs.includes('--help') || cmdArgs.includes('-h')) {
+  // Oxc has one extra verb level, so `devkit oxc lint --help` / `fmt --help` belong to the pinned
+  // tool; bare `devkit oxc --help` still describes Devkit's wrapper.
+  const oxcToolHelp = cmd === 'oxc' && ['lint', 'fmt', 'format'].includes(cmdArgs[0] ?? '');
+  if (!oxcToolHelp && (cmdArgs.includes('--help') || cmdArgs.includes('-h'))) {
     console.log(renderCommandHelp((await loader()).meta));
     process.exit(0);
   }

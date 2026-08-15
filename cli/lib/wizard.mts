@@ -93,6 +93,12 @@ const ADHD_OPTION = {
   hint: 'ADHD-friendly output style, invoked with /i-have-adhd (off by default; needs Agent skills)',
 };
 
+const OXC_OPTION = {
+  id: 'oxc',
+  label: 'Oxc toolchain',
+  hint: 'pinned Oxlint/Oxfmt runtime + repository config (off by default)',
+};
+
 // prior-art gate: same opt-in shape as adhd, and kept out of COMPONENTS for the same reason — it
 // denies harness tool calls (deny-once per session), so it only ever arrives because someone ticked
 // this box. The id is the camelCase Selection key so installedOptional seeding matches on re-runs.
@@ -229,7 +235,7 @@ export async function runWizard({
       ],
       initialValues: [
         ...choices.filter((c) => c.recommended).map((c) => c.id),
-        ...installedOptional,
+        ...installedOptional.filter((id) => id !== 'oxc'),
       ],
       required: false,
     });
@@ -252,6 +258,7 @@ export async function runWizard({
         componentOption(SEARCHCODE_OPTION),
         componentOption(ADHD_OPTION),
         componentOption(PRIOR_ART_GATE_OPTION),
+        componentOption(OXC_OPTION),
       ],
       initialValues: [
         ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
@@ -266,6 +273,7 @@ export async function runWizard({
     selection.searchCode = chosen.has('search-code');
     selection.adhd = chosen.has('adhd');
     selection.priorArtGate = chosen.has('priorArtGate');
+    selection.oxc = chosen.has('oxc');
     if (!structAvail) selection.structure = false;
   }
 
@@ -430,6 +438,7 @@ function summarize(
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
   lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
   lines.push(`${selection.priorArtGate ? '✓' : '·'} ${PRIOR_ART_GATE_OPTION.label}`);
+  lines.push(`${selection.oxc ? '✓' : '·'} ${OXC_OPTION.label}`);
   lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
     lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);

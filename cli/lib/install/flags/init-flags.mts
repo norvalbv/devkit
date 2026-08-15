@@ -14,6 +14,7 @@ export interface InitFlags extends ReviewFlagValues {
   stack: string | null;
   removeDeselected: boolean;
   fallow: boolean;
+  oxc: boolean;
   searchSteering: boolean;
   agentHooks: boolean;
   searchCode: boolean;
@@ -37,6 +38,7 @@ export function parseFlags(args: string[]): InitFlags {
     stack: null,
     removeDeselected: false,
     fallow: false,
+    oxc: false,
     searchSteering: false,
     agentHooks: false,
     searchCode: false,
@@ -57,6 +59,7 @@ export function parseFlags(args: string[]): InitFlags {
     else if (a === '--force') flags.force = true;
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
+    else if (a === '--oxc') flags.oxc = true;
     else if (a === '--search-steering') flags.searchSteering = true;
     else if (a === '--agent-hooks') flags.agentHooks = true;
     else if (a === '--search-code') flags.searchCode = true;
@@ -93,6 +96,7 @@ export function selectionFromFlags(flags: InitFlags): Selection {
   if (flags.no.has('line-growth')) sel.lineGrowth = false;
   // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
   sel.fallow = flags.fallow && !flags.no.has('fallow');
+  sel.oxc = flags.oxc && !flags.no.has('oxc');
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');

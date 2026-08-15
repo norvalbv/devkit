@@ -77,11 +77,14 @@ describe('devkit upgrade — optional component offer', () => {
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
 
-    expect(up.stdout).toContain('3c. newly bundled optional skills');
+    expect(up.stdout).toContain('3c. newly bundled optional skills / hooks / tools');
     expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
+    expect(up.stdout).toMatch(/devkit bundles the Oxc tool/i);
     expect(up.stdout).toContain('--adhd');
+    expect(up.stdout).toContain('--oxc');
     // Reported, not applied.
     expect(existsSync(join(root, '.claude', 'skills', 'i-have-adhd'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'oxc'))).toBe(false);
   });
 
   it('names WHAT is on offer, never devkit\'s internal word "component"', () => {
@@ -105,6 +108,7 @@ describe('devkit upgrade — optional component offer', () => {
     const root = legacyFixture();
     expect(run(root, 'upgrade').status).toBe(0);
     expect(config(root).components.adhd).toBeUndefined();
+    expect(config(root).components.oxc).toBeUndefined();
 
     // Still offered on the next run — the notice is not a one-shot.
     expect(run(root, 'upgrade').stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
@@ -115,11 +119,13 @@ describe('devkit upgrade — optional component offer', () => {
     // A plain --yes init records adhd:false — an explicit init IS a decision.
     expect(run(root, 'init', '--stack', 'generic', '--yes', '--no-cursor').status).toBe(0);
     expect(config(root).components.adhd).toBe(false);
+    expect(config(root).components.oxc).toBe(false);
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toContain('none — selection unchanged');
     expect(up.stdout).not.toMatch(/devkit bundles the i-have-adhd skill/i);
+    expect(up.stdout).not.toMatch(/devkit bundles the Oxc tool/i);
   });
 
   it('preserves an accepted component across upgrade', () => {
@@ -150,6 +156,8 @@ describe('devkit upgrade — optional component offer', () => {
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
     expect(config(root).components.adhd).toBeUndefined();
+    expect(up.stdout).not.toMatch(/devkit bundles the Oxc tool/i);
+    expect(config(root).components.oxc).toBeUndefined();
   });
 
   it('--dry-run announces the offer and writes nothing', () => {
@@ -157,6 +165,8 @@ describe('devkit upgrade — optional component offer', () => {
     const up = run(root, 'upgrade', '--dry-run');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toMatch(/\[dry-run\] would offer the i-have-adhd skill/);
+    expect(up.stdout).toMatch(/\[dry-run\] would offer the Oxc tool/);
     expect(config(root).components.adhd).toBeUndefined();
+    expect(config(root).components.oxc).toBeUndefined();
   });
 });

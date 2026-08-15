@@ -179,7 +179,9 @@ export default async function upgrade(args, cwd) {
         // Overlay repos get the SAME one-time offer as package repos — and, critically, the same
         // `undecided` pass-through: applyOverlay writes its own components block, so without it an
         // overlay upgrade records a decline nobody made and the offer never fires again.
-        const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun);
+        const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
+            unavailable: ['oxc'],
+        });
         await applyInit(cwd, {
             stack,
             selection: sel,
