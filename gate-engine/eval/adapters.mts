@@ -4,6 +4,7 @@ import {
 } from '../decisions/eval/acceptance.mts';
 import { wilsonScoreInterval } from './statistics.mts';
 import { parseDeterministic as parseDeterministicBaseline } from './suite-adapters/deterministic.mts';
+import { parsePerformanceBaseline } from './suite-adapters/performance.mts';
 import { parsePriorArtBaseline } from './suite-adapters/prior-art.mts';
 import type { MetricObservation, ParsedBaseline } from './types.mts';
 
@@ -474,10 +475,8 @@ export function parseEdgeCases(input: Json): ParsedBaseline {
 
 export const parseDeterministic = (input: Json): ParsedBaseline =>
   parseDeterministicBaseline(input, { ratio, scalar });
-
 export const parsePriorArt = (input: Json): ParsedBaseline =>
   parsePriorArtBaseline(input, { ratio, rows });
-
 const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   critique: parseCritique,
   completeness: parseCompleteness,
@@ -488,6 +487,7 @@ const ADAPTERS: Record<string, (input: Json) => ParsedBaseline> = {
   deterministic: parseDeterministic,
   'edge-cases': parseEdgeCases,
   'prior-art': parsePriorArt,
+  performance: parsePerformanceBaseline,
 };
 
 export function parseBaseline(adapter: string, input: unknown): ParsedBaseline {

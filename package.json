@@ -63,6 +63,7 @@
     "benchmarks:check": "bun gate-engine/eval/cli.mts check",
     "benchmarks:render": "bun gate-engine/eval/cli.mts render",
     "benchmarks:typecheck": "tsc -p gate-engine/eval/tsconfig.json",
+    "benchmarks:quality-gates": "node gate-engine/eval/performance/bench.mts",
     "search-eval:check": "node gate-engine/search-tool/eval/eval.mts --fail",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",

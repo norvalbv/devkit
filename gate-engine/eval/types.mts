@@ -4,7 +4,14 @@ export const FRESHNESS_STATES = ['current', 'stale', 'unknown'] as const;
 export const CHANGE_TYPES = ['quality', 'coverage', 'methodology-reset', 'no-ship'] as const;
 export const ASSESSMENTS = ['improved', 'regressed', 'flat', 'mixed', 'unknown'] as const;
 export const METRIC_DIRECTIONS = ['higher', 'lower', 'target'] as const;
-export const METRIC_UNITS = ['ratio', 'count', 'score', 'seconds', 'percentage-points'] as const;
+export const METRIC_UNITS = [
+  'ratio',
+  'count',
+  'score',
+  'seconds',
+  'bytes',
+  'percentage-points',
+] as const;
 
 export type Lifecycle = (typeof LIFECYCLES)[number];
 export type EvidenceMode = (typeof EVIDENCE_MODES)[number];
