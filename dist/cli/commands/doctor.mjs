@@ -20,6 +20,7 @@ import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../lib/husky/husky-block.m
 import { checkAdhdSkill } from "../lib/install/adhd-skill.mjs";
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-assets/agent-providers.mjs";
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
+import { checkOxcCapability, syncOxcCapability } from "../lib/install/oxc/lifecycle.mjs";
 import { cmpSemver, fetchLatestTag } from "./update.mjs";
 // Devkit modules are .mts in source and .mjs when installed; runtime string paths need the live ext.
 const SELF_EXT = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
@@ -117,6 +118,7 @@ function selectionFlags(sel) {
         ['searchCode', '--search-code'],
         ['adhd', '--adhd'],
         ['priorArtGate', '--prior-art-gate'],
+        ['oxc', '--oxc'],
     ])
         if (sel[id])
             flags.push(flag);
@@ -145,8 +147,18 @@ function applyFix(cwd, results, sel, stack, standalone) {
         }
     }
     // MISSING template files / husky drift → init for the recorded selection (idempotent).
+    const OXC_CHECKS = new Set([
+        'Oxc manifest',
+        'Oxc runtime',
+        'Oxlint base',
+        'oxlint config',
+        'oxfmt config',
+    ]);
+    const needsOxcSync = Boolean(sel.oxc) &&
+        results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
     const needsInit = results.some((r) => r.fixable &&
         r.status === 'MISSING' &&
+        !OXC_CHECKS.has(r.name) &&
         r.name !== 'baselines' &&
         r.name !== 'skills' &&
         r.name !== 'agents');
@@ -174,6 +186,8 @@ function applyFix(cwd, results, sel, stack, standalone) {
             stdio: 'inherit',
         });
     }
+    if (needsOxcSync)
+        syncOxcCapability(cwd);
     const skills = results.find((r) => r.name === 'skills');
     if (skills?.fixable && skills.status !== 'OK') {
         execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -271,6 +285,8 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkAdhdSkill(cwd));
     if (sel.searchSteering)
         results.push(checkSearchToolBins());
+    if (sel.oxc)
+        results.push(...checkOxcCapability(cwd));
     if (surfaces.length)
         results.push(checkRegistrations(cwd, hooks.components, surfaces));
     if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))

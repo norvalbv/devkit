@@ -108,6 +108,12 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow', '--no-fallow'])).fallow).toBe(false);
   });
 
+  it('Oxc is OPT-IN: off by default, on with --oxc, off again with --no-oxc', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).oxc).toBe(false);
+    expect(selectionFromFlags(parseFlags(['--yes', '--oxc'])).oxc).toBe(true);
+    expect(selectionFromFlags(parseFlags(['--yes', '--oxc', '--no-oxc'])).oxc).toBe(false);
+  });
+
   it('lineGrowth is recommended-ON: default true, off with --no-line-growth', () => {
     expect(selectionFromFlags(parseFlags(['--yes'])).lineGrowth).toBe(true);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-line-growth'])).lineGrowth).toBe(false);

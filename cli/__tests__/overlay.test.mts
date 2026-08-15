@@ -914,6 +914,7 @@ describe('overlay (local-only) install', () => {
       structure: true,
       searchSteering: true,
       searchCode: true,
+      oxc: true,
       husky: false,
       skills: true,
       agents: false, // user opted OUT — must be preserved
@@ -925,6 +926,7 @@ describe('overlay (local-only) install', () => {
     expect(sel.structure).toBe(false);
     expect(sel.searchSteering).toBe(false);
     expect(sel.searchCode).toBe(false);
+    expect(sel.oxc).toBe(false);
     expect(sel.husky).toBe(true);
     // viable choices pass through untouched (overlay offers the same opt-in choices as package)
     expect(sel.skills).toBe(true);

@@ -131,6 +131,20 @@ export const GUARD_OPTIONS = [
         hint: 'coverage floor from guard.config.json (needs test:run:coverage + a coverage provider)',
     },
 ];
+/** Recorded component flags whose truthy values count as installed on a config-backed repo. */
+export const RECORDED_COMPONENT_IDS = [
+    'biome',
+    'tsconfig',
+    'skills',
+    'agents',
+    'searchSteering',
+    'agentHooks',
+    'husky',
+    'structure',
+    'adhd',
+    'priorArtGate',
+    'oxc',
+];
 /**
  * The all-recommended selection: every component on, every guard on. This is the EXACT
  * behaviour of `--yes` (and of a non-TTY run), preserving the pre-wizard default.
@@ -150,6 +164,8 @@ export function defaultSelection() {
         husky: true,
         structure: true,
         fallow: false,
+        // Toolchain migration is incremental: capability arrives only when explicitly selected.
+        oxc: false,
         searchCode: false,
         // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
         // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
@@ -180,6 +196,7 @@ export function applyOverlayConstraints(sel) {
         structure: false,
         searchSteering: false,
         searchCode: false,
+        oxc: false,
         husky: true,
     };
 }
@@ -269,6 +286,14 @@ export const OPTIONAL_COMPONENTS = [
         hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
         flag: '--prior-art-gate',
         since: '0.51.0',
+    },
+    {
+        id: 'oxc',
+        kind: 'tool',
+        label: 'Oxc',
+        hint: 'pinned Oxlint/Oxfmt runtime + repository config (optional, off by default)',
+        flag: '--oxc',
+        since: '0.52.0',
     },
 ];
 /**

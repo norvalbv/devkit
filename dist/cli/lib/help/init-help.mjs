@@ -10,7 +10,7 @@ Usage:
   --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
-                         --no-structure --no-guards --no-fallow --no-adhd.
+                         --no-structure --no-guards --no-fallow --no-adhd --no-oxc.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,decisions,
                          qavis-advisory,review,sentry; review + sentry are opt-in, off by default).
   --review               Enable \`devkit review\` with an explicit local gate profile.
@@ -21,6 +21,8 @@ Usage:
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).
+  --oxc                  Activate Devkit's pinned Oxlint/Oxfmt runtime and repository configs
+                         (off by default; package/standalone only). Use \`devkit oxc lint|fmt\`.
   --search-code          Opt this repo in to the semantic search index (off by default).
   --adhd                 Sync the i-have-adhd SKILL — an ADHD-friendly output style — and
                          keep it ALWAYS ON via a SessionStart hook (off by default;

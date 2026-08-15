@@ -176,6 +176,8 @@ export interface Selection {
   husky: boolean;
   structure: boolean;
   fallow: boolean;
+  /** Pinned Oxlint/Oxfmt runtime plus repository-local Oxc configuration. Opt-in. */
+  oxc: boolean;
   searchCode: boolean;
   /**
    * The per-file line-growth block: when on, `maxLines` is written into guard.config.json so the
@@ -201,6 +203,21 @@ export interface Selection {
   guards: string[];
 }
 
+/** Recorded component flags whose truthy values count as installed on a config-backed repo. */
+export const RECORDED_COMPONENT_IDS = [
+  'biome',
+  'tsconfig',
+  'skills',
+  'agents',
+  'searchSteering',
+  'agentHooks',
+  'husky',
+  'structure',
+  'adhd',
+  'priorArtGate',
+  'oxc',
+] as const satisfies readonly (keyof Selection)[];
+
 /** The `Selection` keys that are plain on/off components (excludes the guards/agentTargets arrays). */
 export type ComponentToggleId = {
   [K in keyof Selection]: Selection[K] extends boolean ? K : never;
@@ -225,6 +242,8 @@ export function defaultSelection(): Selection {
     husky: true,
     structure: true,
     fallow: false,
+    // Toolchain migration is incremental: capability arrives only when explicitly selected.
+    oxc: false,
     searchCode: false,
     // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
     // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
@@ -256,6 +275,7 @@ export function applyOverlayConstraints(sel: Selection): Selection {
     structure: false,
     searchSteering: false,
     searchCode: false,
+    oxc: false,
     husky: true,
   };
 }
@@ -335,7 +355,7 @@ export interface OptionalComponent {
    * it says nothing about the thing being installed, so every user-facing string is rendered from
    * this instead ("the i-have-adhd skill", not "the adhd component").
    */
-  kind: 'skill' | 'hook';
+  kind: 'skill' | 'hook' | 'tool';
   label: string;
   hint: string;
   /** The `devkit init` flag that enables it — printed in the non-TTY notice. */
@@ -372,6 +392,14 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     hint: 'deny-once PreToolUse gate: plans must run (or explicitly skip) step-0 prior-art',
     flag: '--prior-art-gate',
     since: '0.51.0',
+  },
+  {
+    id: 'oxc',
+    kind: 'tool',
+    label: 'Oxc',
+    hint: 'pinned Oxlint/Oxfmt runtime + repository config (optional, off by default)',
+    flag: '--oxc',
+    since: '0.52.0',
   },
 ];
 
