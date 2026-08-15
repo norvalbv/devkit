@@ -4,6 +4,6 @@
     "noEmit": true,
     "rootDir": "../.."
   },
-  "include": ["./*.mts", "./performance/**/*.mts"],
+  "include": ["./*.mts"],
   "exclude": ["../../node_modules", "./__tests__"]
 }

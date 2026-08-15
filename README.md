@@ -151,7 +151,6 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| Quality-gate command performance | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
 
 ### Shipped-agent coverage

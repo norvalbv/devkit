@@ -89,7 +89,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Semantic search retrieval | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Duplication matcher | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Commit-guard retrieval | shipped | evidence-only | unknown | quality | ? unknown | Clone retrieval recall at 10: 59.0% · Semantic retrieval recall at 10: 25.0% |
-| Quality-gate command performance | experimental | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | qavis visual QA | shipped | external-required | unknown | — | ? unknown | No accepted local checkpoint |
 
 ## Complete subject inventory
@@ -137,7 +136,6 @@ Committed evidence rejects raw prompts, transcripts, absolute paths, email addre
 | Decision-log retrieval recall | benchmark | experimental | none | decisions-recall |
 | Decision-log save quality | benchmark | experimental | none | decisions-save-quality |
 | Semantic search retrieval | benchmark | experimental | evidence-only | search-tool |
-| Quality-gate command performance | benchmark | experimental | evidence-only | quality-gate-performance |
 | Edge-case autonomy study | benchmark | no-ship | accepted | edge-cases |
 
 ## Provenance-tiered historical audit

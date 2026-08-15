@@ -434,16 +434,6 @@
       ]
     },
     {
-      "id": "benchmark-quality-gates",
-      "label": "Quality-gate command performance",
-      "kind": "benchmark",
-      "lifecycle": "experimental",
-      "evidence": "evidence-only",
-      "suiteIds": [
-        "quality-gate-performance"
-      ]
-    },
-    {
       "id": "benchmark-edge-cases",
       "label": "Edge-case autonomy study",
       "kind": "benchmark",
@@ -966,46 +956,6 @@
         "corpus": [],
         "scorer": [],
         "runner": []
-      }
-    },
-    {
-      "id": "quality-gate-performance",
-      "label": "Quality-gate command performance",
-      "adapter": "performance",
-      "subjectIds": [
-        "benchmark-quality-gates"
-      ],
-      "runner": "gate-engine/eval/performance/bench.mts",
-      "baseline": "gate-engine/eval/performance/results.baseline.json",
-      "lifecycle": "experimental",
-      "acceptance": "Three warmups and ten measured samples per contender; stable manifests, exits, diagnostics, and qualified resource accounting",
-      "hashes": {
-        "implementation": [
-          "gate-engine/eval/performance/**/*.mts",
-          "cli/lib/ship/review/process/gate-supervisor.mts",
-          "cli/lib/ship/review/process/process-table.mts"
-        ],
-        "corpus": [
-          "gate-engine/eval/performance/spec.json",
-          "guard.config.json",
-          "biome.jsonc",
-          "eslint.config.mjs",
-          "tsconfig.json",
-          "cli/**/*.mts",
-          "gate-engine/**/*.mts"
-        ],
-        "scorer": [
-          "gate-engine/eval/performance/diagnostics.mts",
-          "gate-engine/eval/suite-adapters/performance.mts"
-        ],
-        "runner": [
-          "gate-engine/eval/performance/bench.mts",
-          "gate-engine/eval/performance/cli.mts",
-          "gate-engine/eval/performance/runner.mts",
-          "gate-engine/eval/performance/fixture.mts",
-          "gate-engine/eval/performance/time.mts",
-          "gate-engine/eval/performance/measurement-child.mts"
-        ]
       }
     },
     {
