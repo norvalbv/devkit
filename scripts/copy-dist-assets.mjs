@@ -21,7 +21,7 @@ if (!existsSync(join(dist, 'cli')) || !existsSync(join(dist, 'gate-engine'))) {
 }
 
 // Whole root asset dirs + files consumed via packageDir() / the exports map.
-const ROOT_DIRS = ['biome', 'tsconfig', 'templates', 'skills', 'agents', 'agents-hooks'];
+const ROOT_DIRS = ['biome', 'tsconfig', 'oxc', 'templates', 'skills', 'agents', 'agents-hooks'];
 const ROOT_FILES = ['package.json', 'README.md'];
 for (const d of ROOT_DIRS) cpSync(join(root, d), join(dist, d), { recursive: true });
 for (const f of ROOT_FILES) if (existsSync(join(root, f))) cpSync(join(root, f), join(dist, f));

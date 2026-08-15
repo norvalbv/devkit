@@ -25,6 +25,7 @@ import {
 import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { removeSearchCode } from '../lib/install/install-search-code.mts';
+import { removeOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { removeHealAlias } from '../lib/overlay.mts';
 import { removeGlobalHook } from '../lib/overlay-global-hook.mts';
 import { removeAgents, removeSkills } from '../lib/sync-manifest.mts';
@@ -36,6 +37,7 @@ interface DevkitComponents {
   agentHooks?: boolean;
   searchSteering?: boolean;
   fallow?: boolean;
+  oxc?: boolean;
   searchCode?: boolean;
   guards?: string[];
   agentTargets?: string[];
@@ -342,6 +344,10 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
     removeSearchCode(cwd, dryRun);
     pruneGitignoreLine(gitRoot, '.search-code/', dryRun);
   }
+  // The manifest is its own provenance record. Use it as a recovery signal when init created the
+  // capability but a later config write failed (or an older config lost the component key).
+  if (cfg.components?.oxc || existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
+    removeOxcCapability(cwd, dryRun);
   // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install
   // (the gate engine writes them regardless of components), so reverse them unconditionally.
   pruneDevkitCacheGitignore(cwd, dryRun);

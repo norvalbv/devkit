@@ -24,6 +24,7 @@ import {
   dropUndecided,
   GUARD_IDS,
   normalizeReviewProfile,
+  RECORDED_COMPONENT_IDS,
   type ReviewProfile,
   type Selection,
   structureCmdFor,
@@ -58,6 +59,7 @@ import {
   wireFallowHooks,
 } from '../lib/install/install-fallow.mts';
 import { installSearchCode } from '../lib/install/install-search-code.mts';
+import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
 import { installOverlay } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
@@ -114,6 +116,7 @@ interface RecordedComponents {
   husky?: boolean;
   structure?: boolean;
   fallow?: boolean;
+  oxc?: boolean;
   searchCode?: boolean;
   lineGrowth?: boolean;
   adhd?: boolean;
@@ -197,18 +200,7 @@ function detectInstalled(cwd: string) {
   const recorded = cfg?.components;
   if (cfg?.review?.enabled) installed.add('devkit-review');
   if (recorded) {
-    for (const id of [
-      'biome',
-      'tsconfig',
-      'skills',
-      'agents',
-      'searchSteering',
-      'agentHooks',
-      'husky',
-      'structure',
-      'adhd',
-      'priorArtGate',
-    ] as const) {
+    for (const id of RECORDED_COMPONENT_IDS) {
       if (recorded[id]) installed.add(id);
     }
     if (recorded.guards?.length) installed.add('guards');
@@ -219,6 +211,7 @@ function detectInstalled(cwd: string) {
   if (existsSync(join(cwd, 'biome.jsonc'))) installed.add('biome');
   if (existsSync(join(cwd, 'tsconfig.json'))) installed.add('tsconfig');
   if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
+  if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json'))) installed.add('oxc');
   const { gitRoot } = detectGitRoot(cwd);
   if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) installed.add('skills');
   if (existsSync(join(gitRoot, '.devkit', 'agents-manifest.json'))) installed.add('agents');
@@ -713,6 +706,7 @@ function applyRemovals(
   // removal pass. Re-removing them here would also delete a decisions-owned hook that survives a
   // general agentHooks deselection.
   if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
+  if (remove.includes('oxc')) oxcLifecycle.removeOxcCapability(cwd, dryRun);
   if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
 
@@ -757,6 +751,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       agentHooks: Boolean(selection.agentHooks),
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
       fallow: fallowWired,
+      oxc: false,
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
@@ -976,11 +971,13 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     installSearchCode(cwd, dryRun);
   }
 
+  if (selection.oxc && !selfHost) oxcLifecycle.syncOxcCapability(cwd, { dryRun });
+
   // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
   // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
   // previously-installed copy, and syncSurfaces above has already reclaimed the `.claude/skills/`
   // copy older releases wrote (skillNamesForSelection now excludes it), which is the whole migration.
-  if (selection.adhd) console.log(`8c. i-have-adhd → ${ADHD_SKILL_DIR}/`);
+  if (selection.adhd) console.log(`8d. i-have-adhd → ${ADHD_SKILL_DIR}/`);
   syncAdhdSkill(gitRoot, Boolean(selection.adhd), dryRun);
 
   // Removals (deselected + present).
@@ -998,6 +995,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     husky: selection.husky,
     structure: isStructure,
     fallow: Boolean(selection.fallow),
+    oxc: Boolean(selection.oxc && !selfHost),
     searchCode: Boolean(selection.searchCode),
     lineGrowth: Boolean(selection.lineGrowth),
     // Always written, including `false` — an ABSENT key is what marks a repo as never-offered, so
@@ -1136,6 +1134,7 @@ export default async function run(args: string[], cwd: string) {
   }
 
   // Resolve overlay invariants before consumers validate or record them (Husky is always effective).
+  oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
   if (mode === 'overlay') selection = applyOverlayConstraints(selection);
   if (!selfHost && !interactive) {
     const reviewPlan = reviewPlanFromFlags(flags, selection);

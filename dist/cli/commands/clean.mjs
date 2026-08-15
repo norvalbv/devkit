@@ -21,6 +21,7 @@ import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../li
 import { pruneDevkitCacheGitignore } from "../lib/install/gitignore-cache.mjs";
 import { removeHookRegistrations, removeHookScripts } from "../lib/install/install-hooks.mjs";
 import { removeSearchCode } from "../lib/install/install-search-code.mjs";
+import { removeOxcCapability } from "../lib/install/oxc/lifecycle.mjs";
 import { removeHealAlias } from "../lib/overlay.mjs";
 import { removeGlobalHook } from "../lib/overlay-global-hook.mjs";
 import { removeAgents, removeSkills } from "../lib/sync-manifest.mjs";
@@ -305,6 +306,10 @@ function cleanPackage(cwd, cfg, dryRun) {
         removeSearchCode(cwd, dryRun);
         pruneGitignoreLine(gitRoot, '.search-code/', dryRun);
     }
+    // The manifest is its own provenance record. Use it as a recovery signal when init created the
+    // capability but a later config write failed (or an older config lost the component key).
+    if (cfg.components?.oxc || existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
+        removeOxcCapability(cwd, dryRun);
     // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install
     // (the gate engine writes them regardless of components), so reverse them unconditionally.
     pruneDevkitCacheGitignore(cwd, dryRun);

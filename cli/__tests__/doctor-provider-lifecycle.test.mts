@@ -16,6 +16,7 @@ describe('doctor provider lifecycle', () => {
       searchSteering: true,
       agentHooks: true,
       searchCode: true,
+      oxc: true,
       guards: [],
       agentTargets: ['claude'],
     });
@@ -27,6 +28,7 @@ describe('doctor provider lifecycle', () => {
         '--search-steering',
         '--agent-hooks',
         '--search-code',
+        '--oxc',
         '--no-guards',
         '--no-codex',
         '--no-cursor',

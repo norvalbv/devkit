@@ -22,7 +22,7 @@ import {
   LINE_CAP,
   previewGrandfather,
 } from '../../../gate-engine/ratchets/size-disable.mts';
-import type { OptionalComponent } from '../components.mts';
+import type { ComponentToggleId, OptionalComponent } from '../components.mts';
 import { type Selection, unofferedComponents } from '../components.mts';
 
 const interactive = () => Boolean(process.stdout.isTTY && process.stdin.isTTY);
@@ -103,8 +103,13 @@ export async function offerOptionalComponents(
   recorded: Partial<Selection> | undefined,
   sel: Selection,
   dryRun: boolean,
+  { unavailable = [] }: { unavailable?: ComponentToggleId[] } = {},
 ): Promise<string[]> {
-  const unoffered = unofferedComponents(recorded);
+  const allUnoffered = unofferedComponents(recorded);
+  const unavailableIds = allUnoffered
+    .filter((component) => unavailable.includes(component.id))
+    .map((component) => component.id as string);
+  const unoffered = allUnoffered.filter((component) => !unavailable.includes(component.id));
   // Name what these ARE (skills, …) rather than "components" — that is the internal word for the
   // selection toggle, and telling a user they can install a "component" says nothing. See
   // OptionalComponent.kind.
@@ -112,13 +117,13 @@ export async function offerOptionalComponents(
   console.log(`\n3c. newly bundled optional ${kinds}`);
   if (!unoffered.length) {
     console.log('  • none — selection unchanged');
-    return [];
+    return unavailableIds;
   }
   const ids = unoffered.map((c) => c.id as string);
   const describe = (c: OptionalComponent) => `the ${c.label} ${c.kind}`;
   if (dryRun) {
     for (const c of unoffered) console.log(`  [dry-run] would offer ${describe(c)} (${c.hint})`);
-    return ids;
+    return [...ids, ...unavailableIds];
   }
   if (!interactive()) {
     // Non-TTY: REPORT, never auto-add — the same policy as step 3. Deliberately leaves the keys
@@ -127,7 +132,7 @@ export async function offerOptionalComponents(
       console.log(
         `  • devkit bundles ${describe(c)} (${c.hint}) — enable with 'devkit init ${c.flag}'`,
       );
-    return ids;
+    return [...ids, ...unavailableIds];
   }
 
   const picked = await multiselect({
@@ -140,7 +145,7 @@ export async function offerOptionalComponents(
   if (isCancel(picked)) {
     // Leave every key ABSENT so the offer fires again — a cancel is "ask me later", not a decline.
     console.log('  • skipped — will offer again on the next upgrade');
-    return ids;
+    return [...ids, ...unavailableIds];
   }
   const chosen = new Set(picked as string[]);
   for (const c of unoffered) sel[c.id] = chosen.has(c.id);
@@ -149,5 +154,5 @@ export async function offerOptionalComponents(
       ? `  ✓ added: ${[...chosen].join(', ')}`
       : '  • none selected (recorded — this will not be offered again)',
   );
-  return []; // answered — every id now records its value, including the declines
+  return unavailableIds; // answered eligible ids record; unavailable ids stay absent for the future
 }

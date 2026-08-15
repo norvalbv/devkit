@@ -13,6 +13,7 @@ export function parseFlags(args) {
         stack: null,
         removeDeselected: false,
         fallow: false,
+        oxc: false,
         searchSteering: false,
         agentHooks: false,
         searchCode: false,
@@ -38,6 +39,8 @@ export function parseFlags(args) {
             flags.removeDeselected = true;
         else if (a === '--fallow')
             flags.fallow = true;
+        else if (a === '--oxc')
+            flags.oxc = true;
         else if (a === '--search-steering')
             flags.searchSteering = true;
         else if (a === '--agent-hooks')
@@ -89,6 +92,7 @@ export function selectionFromFlags(flags) {
         sel.lineGrowth = false;
     // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
     sel.fallow = flags.fallow && !flags.no.has('fallow');
+    sel.oxc = flags.oxc && !flags.no.has('oxc');
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');

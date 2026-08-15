@@ -76,8 +76,12 @@ export async function offerLineGrowth(cwd, sel, dryRun) {
  * pass to applyInit as `undecided` — otherwise step 4's broad refresh records the normalized `false`
  * as a decision nobody made and suppresses the offer permanently.
  */
-export async function offerOptionalComponents(recorded, sel, dryRun) {
-    const unoffered = unofferedComponents(recorded);
+export async function offerOptionalComponents(recorded, sel, dryRun, { unavailable = [] } = {}) {
+    const allUnoffered = unofferedComponents(recorded);
+    const unavailableIds = allUnoffered
+        .filter((component) => unavailable.includes(component.id))
+        .map((component) => component.id);
+    const unoffered = allUnoffered.filter((component) => !unavailable.includes(component.id));
     // Name what these ARE (skills, …) rather than "components" — that is the internal word for the
     // selection toggle, and telling a user they can install a "component" says nothing. See
     // OptionalComponent.kind.
@@ -85,21 +89,21 @@ export async function offerOptionalComponents(recorded, sel, dryRun) {
     console.log(`\n3c. newly bundled optional ${kinds}`);
     if (!unoffered.length) {
         console.log('  • none — selection unchanged');
-        return [];
+        return unavailableIds;
     }
     const ids = unoffered.map((c) => c.id);
     const describe = (c) => `the ${c.label} ${c.kind}`;
     if (dryRun) {
         for (const c of unoffered)
             console.log(`  [dry-run] would offer ${describe(c)} (${c.hint})`);
-        return ids;
+        return [...ids, ...unavailableIds];
     }
     if (!interactive()) {
         // Non-TTY: REPORT, never auto-add — the same policy as step 3. Deliberately leaves the keys
         // absent so the repo still gets a real offer the next time someone upgrades interactively.
         for (const c of unoffered)
             console.log(`  • devkit bundles ${describe(c)} (${c.hint}) — enable with 'devkit init ${c.flag}'`);
-        return ids;
+        return [...ids, ...unavailableIds];
     }
     const picked = await multiselect({
         message: `New optional ${kinds} available since your last install — select any to add`,
@@ -111,7 +115,7 @@ export async function offerOptionalComponents(recorded, sel, dryRun) {
     if (isCancel(picked)) {
         // Leave every key ABSENT so the offer fires again — a cancel is "ask me later", not a decline.
         console.log('  • skipped — will offer again on the next upgrade');
-        return ids;
+        return [...ids, ...unavailableIds];
     }
     const chosen = new Set(picked);
     for (const c of unoffered)
@@ -119,5 +123,5 @@ export async function offerOptionalComponents(recorded, sel, dryRun) {
     console.log(chosen.size
         ? `  ✓ added: ${[...chosen].join(', ')}`
         : '  • none selected (recorded — this will not be offered again)');
-    return []; // answered — every id now records its value, including the declines
+    return unavailableIds; // answered eligible ids record; unavailable ids stay absent for the future
 }
