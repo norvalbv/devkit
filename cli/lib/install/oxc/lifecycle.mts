@@ -45,7 +45,7 @@ interface SyncOptions {
 
 /** Explain why an explicitly requested capability cannot activate in a non-repository mode. */
 export function warnIfOxcUnavailable(mode: string, requested: boolean): void {
-  if (!requested || (mode !== 'overlay' && mode !== 'self-host')) return;
+  if (!requested || mode !== 'overlay') return;
   console.warn(
     `devkit init --${mode}: --oxc is unavailable because Oxc activation writes tracked repository config; skipping it.`,
   );

@@ -1,16 +1,14 @@
 {
-  "devkitRef": "v0.49.1",
-  "generatedAt": "2026-08-07T09:41:05.312Z",
-  "targets": [
-    "claude",
-    "cursor"
-  ],
+  "schemaVersion": 2,
+  "kind": "agents",
+  "devkitRef": "v0.51.1",
+  "generatedAt": "2026-08-16T02:26:52.084Z",
   "files": {
     "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
     "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
     "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
     "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
-    "correctness-reviewer.md": "227246dbdaea499c97d1857f23910a3c61e5f0ae314442c4a93886e215f8d6bf",
+    "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
     "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
     "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
     "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
@@ -18,5 +16,39 @@
     "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
     "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
     "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+  },
+  "providers": {
+    "claude": {
+      "files": {
+        "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
+        "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
+        "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
+        "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
+        "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
+        "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
+        "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
+        "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
+        "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
+        "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
+        "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
+        "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+      }
+    },
+    "cursor": {
+      "files": {
+        "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
+        "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
+        "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
+        "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
+        "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
+        "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
+        "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
+        "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
+        "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
+        "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
+        "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
+        "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+      }
+    }
   }
 }

@@ -1,0 +1,16 @@
+{
+  "overrides": [
+    {
+      "files": [
+        ".devkit/anti-slop/probe.ts"
+      ],
+      "globals": {
+        "__DEVKIT_OXC_BASE_1_78_0_MANAGED_PROBE__": "readonly"
+      }
+    }
+  ],
+  "rules": {},
+  "extends": [
+    "../anti-slop/oxlint.json"
+  ]
+}

@@ -20,7 +20,7 @@ const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
 /** Explain why an explicitly requested capability cannot activate in a non-repository mode. */
 export function warnIfOxcUnavailable(mode, requested) {
-    if (!requested || (mode !== 'overlay' && mode !== 'self-host'))
+    if (!requested || mode !== 'overlay')
         return;
     console.warn(`devkit init --${mode}: --oxc is unavailable because Oxc activation writes tracked repository config; skipping it.`);
 }
