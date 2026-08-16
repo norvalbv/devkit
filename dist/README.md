@@ -188,6 +188,7 @@ bun install --frozen-lockfile
 bun run devkit -- <command>
 bun run test:run
 bun run typecheck
+bun run format:check
 bun run lint
 bun run lint:structure
 bun run benchmarks:check

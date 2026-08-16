@@ -67,8 +67,8 @@ export function walkTree(treeSpec: TreeSpec, absRoot: string, exts: string[]): s
     const fileOK = resolvePatterns(node.files, exts);
     const nodeBroken = Boolean(
       broken ||
-        (node.enforceExistence &&
-          !entries.some((e) => e.isFile() && e.name === node.enforceExistence)),
+      (node.enforceExistence &&
+        !entries.some((e) => e.isFile() && e.name === node.enforceExistence)),
     );
 
     for (const e of entries) {

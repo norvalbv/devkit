@@ -99,10 +99,10 @@ __dk_review_baseline_gate() {
 }
 
 # devkit:biome-format
-# Format staged files with biome, then re-stage exactly those (scoped — never a blanket
+# Format staged files with Oxfmt, then re-stage exactly those (scoped — never a blanket
 # `git add -u`, which would sweep unrelated working-tree changes into the commit). Only
 # re-add files with NO unstaged edits, so partially-staged files commit exactly as staged.
-STAGED_FMT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(tsx?|jsx?|css|json|jsonc|mjs)$' || true)
+STAGED_FMT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^((cli|gate-engine)/.*\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\.jsonc?|skills/.*\.mjs|\.co-occurrence-allowlist\.json|\.fallowrc\.jsonc|\.oxfmtrc\.json|biome\.jsonc|eslint\.config\.mjs|guard\.config(\.example)?\.json|package\.json|search-code\.config\.json|tsconfig(\.build)?\.json|vitest(\.e2e)?\.config\.mjs|vitest\.setup\.mjs)$' || true)
 if [ -n "$STAGED_FMT" ]; then
     UNSTAGED_FMT_FILE=$(mktemp)
     git diff --name-only | sort -u >"$UNSTAGED_FMT_FILE"
@@ -110,7 +110,7 @@ if [ -n "$STAGED_FMT" ]; then
     rm -f "$UNSTAGED_FMT_FILE"
     if [ -n "$FMT_SAFE" ]; then
         echo "🎨 Formatting staged files..."
-        echo "$FMT_SAFE" | xargs bunx biome format --write 2>/dev/null || true
+        echo "$FMT_SAFE" | xargs node_modules/.bin/oxfmt --threads 1 --write || exit 1
         echo "$FMT_SAFE" | xargs git add -f
     fi
 fi
