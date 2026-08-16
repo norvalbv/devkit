@@ -178,6 +178,8 @@ export interface Selection {
   fallow: boolean;
   /** Pinned Oxlint/Oxfmt runtime plus repository-local Oxc configuration. Opt-in. */
   oxc: boolean;
+  /** Vendored anti-slop Oxlint plugin plus explicit shrink-only baseline workflow. Opt-in. */
+  antiSlop: boolean;
   searchCode: boolean;
   /**
    * The per-file line-growth block: when on, `maxLines` is written into guard.config.json so the
@@ -216,6 +218,7 @@ export const RECORDED_COMPONENT_IDS = [
   'adhd',
   'priorArtGate',
   'oxc',
+  'antiSlop',
 ] as const satisfies readonly (keyof Selection)[];
 
 /** The `Selection` keys that are plain on/off components (excludes the guards/agentTargets arrays). */
@@ -244,6 +247,8 @@ export function defaultSelection(): Selection {
     fallow: false,
     // Toolchain migration is incremental: capability arrives only when explicitly selected.
     oxc: false,
+    // Policy-heavy rules and their debt baseline must never arrive without an explicit choice.
+    antiSlop: false,
     searchCode: false,
     // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
     // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
@@ -276,6 +281,7 @@ export function applyOverlayConstraints(sel: Selection): Selection {
     searchSteering: false,
     searchCode: false,
     oxc: false,
+    antiSlop: false,
     husky: true,
   };
 }
@@ -283,7 +289,7 @@ export function applyOverlayConstraints(sel: Selection): Selection {
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial: Partial<Selection> = {}): Selection {
   const base = defaultSelection();
-  return {
+  const normalized = {
     ...base,
     ...partial,
     agentTargets: Array.isArray(partial.agentTargets)
@@ -291,6 +297,10 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
       : base.agentTargets,
     guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
   };
+  // The plugin is executed by the pinned Oxc capability; an impossible anti-slop-without-Oxc
+  // recording self-heals to the only runnable selection.
+  if (normalized.antiSlop) normalized.oxc = true;
+  return normalized;
 }
 
 /**
@@ -399,6 +409,14 @@ export const OPTIONAL_COMPONENTS: OptionalComponent[] = [
     label: 'Oxc',
     hint: 'pinned Oxlint/Oxfmt runtime + repository config (optional, off by default)',
     flag: '--oxc',
+    since: '0.52.0',
+  },
+  {
+    id: 'antiSlop',
+    kind: 'tool',
+    label: 'anti-slop',
+    hint: '15 vendored Oxlint rules + explicit shrink-only baseline (includes Oxc)',
+    flag: '--anti-slop',
     since: '0.52.0',
   },
 ];

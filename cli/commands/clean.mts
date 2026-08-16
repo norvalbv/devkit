@@ -22,6 +22,7 @@ import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../lib/install/agent-assets/agent-providers.mts';
+import { removeAntiSlopCapability } from '../lib/install/anti-slop/lifecycle.mts';
 import { pruneDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import { removeHookRegistrations, removeHookScripts } from '../lib/install/install-hooks.mts';
 import { removeSearchCode } from '../lib/install/install-search-code.mts';
@@ -38,6 +39,7 @@ interface DevkitComponents {
   searchSteering?: boolean;
   fallow?: boolean;
   oxc?: boolean;
+  antiSlop?: boolean;
   searchCode?: boolean;
   guards?: string[];
   agentTargets?: string[];
@@ -348,6 +350,8 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
   // capability but a later config write failed (or an older config lost the component key).
   if (cfg.components?.oxc || existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
     removeOxcCapability(cwd, dryRun);
+  if (cfg.components?.antiSlop || existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
+    removeAntiSlopCapability(cwd, dryRun);
   // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install
   // (the gate engine writes them regardless of components), so reverse them unconditionally.
   pruneDevkitCacheGitignore(cwd, dryRun);

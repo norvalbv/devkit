@@ -108,7 +108,9 @@ export default { meta: { name: 'local' }, rules: { 'max-classes': rule } };
     writeFileSync(managedBase, '{ "rules": { "no-debugger": "warn" } }\n');
     const upgrade = fx.run('devkit', ['upgrade']);
     expect(upgrade.status, out(upgrade)).toBe(0);
-    expect(readFileSync(managedBase, 'utf8')).toBe('{\n  "rules": {}\n}\n');
+    expect(readFileSync(managedBase, 'utf8')).toBe(
+      readFileSync(new URL('../oxc/oxlint.base.json', import.meta.url), 'utf8'),
+    );
     expect(readFileSync(join(fx.repoDir, '.oxlintrc.json'), 'utf8')).toBe(customizedConfig);
 
     writeFileSync(join(fx.repoDir, 'format-target.ts'), 'const value={answer:42}\n');
