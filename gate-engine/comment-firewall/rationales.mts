@@ -12,7 +12,6 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { withStoreLock } from '../judge/verdict-store.mts';
-import { gitPrefix } from '../ratchets/git-index.mts';
 import type { CommentRationale, RationaleStore } from './types.mts';
 
 export const RATIONALES_FILE = '.devkit/comment-firewall-rationales.json';
@@ -67,25 +66,39 @@ function parseStore(raw: string, label: string): RationaleStore {
     ) {
       throw new Error(`${label} contains malformed evidence for finding ${id}`);
     }
-    entries[id] = {
-      rationale: entry.rationale.trim(),
-      at: entry.at,
-      ...(typeof entry.ticket === 'string' && entry.ticket.trim()
-        ? { ticket: entry.ticket.trim() }
-        : {}),
-    };
+    try {
+      const rationale = validRationale(entry.rationale);
+      const ticket = typeof entry.ticket === 'string' ? validTicket(entry.ticket) : undefined;
+      entries[id] = {
+        rationale,
+        at: entry.at,
+        ...(ticket ? { ticket } : {}),
+      };
+    } catch (cause) {
+      throw new Error(
+        `${label} contains malformed evidence for finding ${id}: ${cause instanceof Error ? cause.message : cause}`,
+      );
+    }
   }
   return { version: 1, entries };
 }
 
-function indexPath(cwd: string): string {
-  return `${gitPrefix(cwd)}${RATIONALES_FILE}`;
+function repositoryRoot(cwd: string): string {
+  return execFileSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+function workingPath(cwd: string): string {
+  return path.join(repositoryRoot(cwd), RATIONALES_FILE);
 }
 
 /** Authorization reads staged bytes so unstaged rationale edits cannot approve the pending commit. */
 export function loadStagedRationales(cwd: string): RationaleStore {
   try {
-    const raw = execFileSync('git', ['show', `:${indexPath(cwd)}`], {
+    const raw = execFileSync('git', ['show', `:${RATIONALES_FILE}`], {
       cwd,
       encoding: 'utf8',
       maxBuffer: STORE_MAX_BYTES,
@@ -95,7 +108,7 @@ export function loadStagedRationales(cwd: string): RationaleStore {
   } catch (cause) {
     /* Absence is the pre-first-rationale state; staged corruption must never become empty approval. */
     try {
-      execFileSync('git', ['cat-file', '-e', `:${indexPath(cwd)}`], {
+      execFileSync('git', ['cat-file', '-e', `:${RATIONALES_FILE}`], {
         cwd,
         stdio: 'ignore',
       });
@@ -107,7 +120,7 @@ export function loadStagedRationales(cwd: string): RationaleStore {
 }
 
 export function loadWorkingRationales(cwd: string): RationaleStore {
-  const file = path.resolve(cwd, RATIONALES_FILE);
+  const file = workingPath(cwd);
   if (!existsSync(file)) return emptyStore();
   const stat = statSync(file);
   if (!stat.isFile() || stat.size > STORE_MAX_BYTES) {
@@ -140,7 +153,7 @@ function validTicket(ticket: string | undefined): string | undefined {
 }
 
 function persistWorking(cwd: string, store: RationaleStore, handle: { owns: () => boolean }): void {
-  const file = path.resolve(cwd, RATIONALES_FILE);
+  const file = workingPath(cwd);
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -176,13 +189,14 @@ export function recordRationale(
     at: now,
     ...(canonicalTicket ? { ticket: canonicalTicket } : {}),
   };
-  const file = path.resolve(cwd, RATIONALES_FILE);
+  const file = workingPath(cwd);
+  const root = repositoryRoot(cwd);
   const completed = withStoreLock(file, {}, (handle) => {
     const store = loadWorkingRationales(cwd);
     options.afterLoad?.();
     store.entries[findingId] = entry;
     persistWorking(cwd, store, handle);
-    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
   });
   if (!completed) throw new Error('could not acquire or retain the comment-rationale lock');
   return entry;
@@ -195,7 +209,8 @@ export function listRationales(cwd: string): Array<[string, CommentRationale]> {
 }
 
 export function pruneRationales(cwd: string, currentIds: ReadonlySet<string>): number {
-  const file = path.resolve(cwd, RATIONALES_FILE);
+  const file = workingPath(cwd);
+  const root = repositoryRoot(cwd);
   let removed = 0;
   const completed = withStoreLock(file, {}, (handle) => {
     const store = loadWorkingRationales(cwd);
@@ -206,7 +221,7 @@ export function pruneRationales(cwd: string, currentIds: ReadonlySet<string>): n
     }
     if (removed === 0) return;
     persistWorking(cwd, store, handle);
-    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
   });
   if (!completed) throw new Error('could not acquire or retain the comment-rationale lock');
   return removed;

@@ -6,6 +6,7 @@ import type { CommentFinding, CommentJudgeResult, CommentRationale } from './typ
 export const COMMENT_JUDGE_POLICY = 'comment-exception-v1';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-15.1';
 export const COMMENT_JUDGE_SCHEMA_VERSION = 1;
+export const COMMENT_JUDGE_CAPABILITY_PROFILE = 'strict-empty-mcp-v1';
 const DEFAULT_MODEL = 'haiku';
 const TIMEOUT_MS = 120_000;
 const FENCED_JSON = /^```(?:json)?\s*\n([\s\S]*?)\n```(?:\s*([\s\S]*))?$/i;
@@ -92,6 +93,7 @@ export function judgeComment(
     input: judgeInput(finding, rationale),
     timeout: TIMEOUT_MS,
     cwd,
+    mcpProfile: { kind: 'none' },
   });
   if (raw === null) return null;
   const parsed = parseCommentJudge(raw);
@@ -105,6 +107,7 @@ export function receiptKey(
   finding: CommentFinding,
   rationale: CommentRationale,
   model = commentJudgeModel(),
+  capabilityProfile = COMMENT_JUDGE_CAPABILITY_PROFILE,
 ): string {
   return createHash('sha256')
     .update(
@@ -112,6 +115,7 @@ export function receiptKey(
         receiptSchema: COMMENT_JUDGE_SCHEMA_VERSION,
         policy: COMMENT_JUDGE_POLICY,
         prompt: COMMENT_JUDGE_PROMPT_VERSION,
+        capabilities: capabilityProfile,
         model,
         finding: {
           id: finding.id,

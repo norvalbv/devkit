@@ -87,7 +87,13 @@ esac
   let stdout = '';
   try {
     stdout = execFileSync(shell, ['-e', hookPath], {
-      env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin', ...env },
+      env: {
+        ...process.env,
+        DEVKIT_COMMIT_MSG_FILE: '',
+        HOME: home,
+        PATH: '/usr/bin:/bin',
+        ...env,
+      },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -184,7 +190,10 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
   });
 
   it('guard-comments distinguishes fail-open outage from strict/unreadable evidence', () => {
-    expect(runHook({ COMMENTS_RC: '2' }).status).toBe(0);
+    const r = runHook({ COMMENTS_RC: '2' });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-decisions');
+    expect(r.calls).toContain('guard-review');
     expect(runHook({ COMMENTS_RC: '3' }).status).toBe(1);
     expect(runHook({ COMMENTS_RC: '4' }).status).toBe(1);
   });

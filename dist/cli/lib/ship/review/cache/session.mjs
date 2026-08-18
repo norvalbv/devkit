@@ -14,6 +14,7 @@ export const REVIEW_CACHE_STORE_NAMES = [
     'decisions-verdict-cache.json',
     'prefix-cache.json',
     'sentry-verdict-cache.json',
+    'comment-firewall-receipts.json',
 ];
 function physicalRoot(requestedPath, label) {
     if (!requestedPath || requestedPath.includes('\0'))

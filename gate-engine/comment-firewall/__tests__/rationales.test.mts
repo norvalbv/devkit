@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForPath } from '../../../cli/__tests__/_helpers.mts';
 import {
+  listRationales,
   loadStagedRationales,
   loadWorkingRationales,
   pruneRationales,
@@ -107,6 +108,56 @@ describe('comment rationale store', () => {
         'some words',
       ),
     ).toThrow(/ticket/);
+  });
+
+  it('rejects manually staged rationale values that bypass the CLI policy', () => {
+    const root = repo();
+    mkdirSync(path.join(root, '.devkit'));
+    const file = path.join(root, RATIONALES_FILE);
+    writeFileSync(
+      file,
+      `${JSON.stringify({
+        version: 1,
+        entries: {
+          a1b2c3d4e5f6: { rationale: 'x', at: '2026-08-18T00:00:00.000Z' },
+        },
+      })}\n`,
+    );
+    execFileSync('git', ['add', RATIONALES_FILE], { cwd: root });
+    expect(() => loadStagedRationales(root)).toThrow(/malformed evidence.*specific/);
+
+    writeFileSync(
+      file,
+      `${JSON.stringify({
+        version: 1,
+        entries: {
+          a1b2c3d4e5f6: {
+            rationale: 'A specific rationale long enough to satisfy the content policy.',
+            at: '2026-08-18T00:00:00.000Z',
+            ticket: 'not a canonical ticket',
+          },
+        },
+      })}\n`,
+    );
+    execFileSync('git', ['add', RATIONALES_FILE], { cwd: root });
+    expect(() => loadStagedRationales(root)).toThrow(/malformed evidence.*ticket/);
+  });
+
+  it('reads, records, lists, and prunes the root store from a nested directory', () => {
+    const root = repo();
+    const nested = path.join(root, 'packages', 'consumer');
+    mkdirSync(nested, { recursive: true });
+    recordRationale(
+      nested,
+      'a1b2c3d4e5f6',
+      'A durable protocol constraint applies to every package in this repository.',
+    );
+    expect(existsSync(path.join(root, RATIONALES_FILE))).toBe(true);
+    expect(existsSync(path.join(nested, RATIONALES_FILE))).toBe(false);
+    expect(listRationales(nested).map(([id]) => id)).toEqual(['a1b2c3d4e5f6']);
+    expect(loadStagedRationales(nested).entries.a1b2c3d4e5f6).toBeDefined();
+    expect(pruneRationales(nested, new Set())).toBe(1);
+    expect(loadStagedRationales(nested).entries).toEqual({});
   });
 
   it('prunes obsolete evidence while retaining current staged findings', () => {

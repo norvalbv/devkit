@@ -62,7 +62,7 @@ export function runCorpus(cwd = process.cwd()): number {
     );
   }
   const accuracy = correct / rows.length;
-  const approvalPrecision = predictedPass === 0 ? 0 : correctPass / predictedPass;
+  const approvalPrecision = predictedPass === 0 ? 1 : correctPass / predictedPass;
   console.log(
     `comment-firewall eval: ${correct}/${rows.length} accuracy=${accuracy.toFixed(3)} approval_precision=${approvalPrecision.toFixed(3)}`,
   );

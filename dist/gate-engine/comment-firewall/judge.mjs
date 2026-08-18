@@ -4,6 +4,7 @@ import { execJudge } from "../judge/run-judge.mjs";
 export const COMMENT_JUDGE_POLICY = 'comment-exception-v1';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-15.1';
 export const COMMENT_JUDGE_SCHEMA_VERSION = 1;
+export const COMMENT_JUDGE_CAPABILITY_PROFILE = 'strict-empty-mcp-v1';
 const DEFAULT_MODEL = 'haiku';
 const TIMEOUT_MS = 120_000;
 const FENCED_JSON = /^```(?:json)?\s*\n([\s\S]*?)\n```(?:\s*([\s\S]*))?$/i;
@@ -76,6 +77,7 @@ export function judgeComment(cwd, finding, rationale) {
         input: judgeInput(finding, rationale),
         timeout: TIMEOUT_MS,
         cwd,
+        mcpProfile: { kind: 'none' },
     });
     if (raw === null)
         return null;
@@ -85,12 +87,13 @@ export function judgeComment(cwd, finding, rationale) {
     }
     return parsed;
 }
-export function receiptKey(finding, rationale, model = commentJudgeModel()) {
+export function receiptKey(finding, rationale, model = commentJudgeModel(), capabilityProfile = COMMENT_JUDGE_CAPABILITY_PROFILE) {
     return createHash('sha256')
         .update(JSON.stringify({
         receiptSchema: COMMENT_JUDGE_SCHEMA_VERSION,
         policy: COMMENT_JUDGE_POLICY,
         prompt: COMMENT_JUDGE_PROMPT_VERSION,
+        capabilities: capabilityProfile,
         model,
         finding: {
             id: finding.id,

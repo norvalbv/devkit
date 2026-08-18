@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { commentJudgeDisabled, judgeInput, parseCommentJudge, receiptKey } from '../judge.mts';
+import {
+  COMMENT_JUDGE_CAPABILITY_PROFILE,
+  commentJudgeDisabled,
+  judgeInput,
+  parseCommentJudge,
+  receiptKey,
+} from '../judge.mts';
 import type { CommentFinding, CommentRationale } from '../types.mts';
 
 const finding = (overrides: Partial<CommentFinding> = {}): CommentFinding => ({
@@ -56,11 +62,13 @@ describe('comment judge contract', () => {
   });
 
   it('invalidates receipts on relevant evidence or policy inputs, not timestamps', () => {
+    expect(COMMENT_JUDGE_CAPABILITY_PROFILE).toBe('strict-empty-mcp-v1');
     const key = receiptKey(finding(), rationale, 'haiku');
     expect(receiptKey(finding(), { ...rationale, at: 'later' }, 'haiku')).toBe(key);
     expect(receiptKey(finding({ context: 'changed code' }), rationale, 'haiku')).not.toBe(key);
     expect(receiptKey(finding(), { ...rationale, ticket: 'SC-123' }, 'haiku')).not.toBe(key);
     expect(receiptKey(finding(), rationale, 'sonnet')).not.toBe(key);
+    expect(receiptKey(finding(), rationale, 'haiku', 'strict-empty-mcp-v2')).not.toBe(key);
   });
 
   it('does not inherit the decisions-only no-LLM override', () => {

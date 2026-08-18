@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
 import { withStoreLock } from "../judge/verdict-store.mjs";
-import { gitPrefix } from "../ratchets/git-index.mjs";
 export const RATIONALES_FILE = '.devkit/comment-firewall-rationales.json';
 const STORE_MAX_BYTES = 1024 * 1024;
 const RATIONALE_MAX_CHARS = 2_000;
@@ -52,23 +51,35 @@ function parseStore(raw, label) {
             (entry.ticket !== undefined && typeof entry.ticket !== 'string')) {
             throw new Error(`${label} contains malformed evidence for finding ${id}`);
         }
-        entries[id] = {
-            rationale: entry.rationale.trim(),
-            at: entry.at,
-            ...(typeof entry.ticket === 'string' && entry.ticket.trim()
-                ? { ticket: entry.ticket.trim() }
-                : {}),
-        };
+        try {
+            const rationale = validRationale(entry.rationale);
+            const ticket = typeof entry.ticket === 'string' ? validTicket(entry.ticket) : undefined;
+            entries[id] = {
+                rationale,
+                at: entry.at,
+                ...(ticket ? { ticket } : {}),
+            };
+        }
+        catch (cause) {
+            throw new Error(`${label} contains malformed evidence for finding ${id}: ${cause instanceof Error ? cause.message : cause}`);
+        }
     }
     return { version: 1, entries };
 }
-function indexPath(cwd) {
-    return `${gitPrefix(cwd)}${RATIONALES_FILE}`;
+function repositoryRoot(cwd) {
+    return execFileSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel'], {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+}
+function workingPath(cwd) {
+    return path.join(repositoryRoot(cwd), RATIONALES_FILE);
 }
 /** Authorization reads staged bytes so unstaged rationale edits cannot approve the pending commit. */
 export function loadStagedRationales(cwd) {
     try {
-        const raw = execFileSync('git', ['show', `:${indexPath(cwd)}`], {
+        const raw = execFileSync('git', ['show', `:${RATIONALES_FILE}`], {
             cwd,
             encoding: 'utf8',
             maxBuffer: STORE_MAX_BYTES,
@@ -79,7 +90,7 @@ export function loadStagedRationales(cwd) {
     catch (cause) {
         /* Absence is the pre-first-rationale state; staged corruption must never become empty approval. */
         try {
-            execFileSync('git', ['cat-file', '-e', `:${indexPath(cwd)}`], {
+            execFileSync('git', ['cat-file', '-e', `:${RATIONALES_FILE}`], {
                 cwd,
                 stdio: 'ignore',
             });
@@ -91,7 +102,7 @@ export function loadStagedRationales(cwd) {
     }
 }
 export function loadWorkingRationales(cwd) {
-    const file = path.resolve(cwd, RATIONALES_FILE);
+    const file = workingPath(cwd);
     if (!existsSync(file))
         return emptyStore();
     const stat = statSync(file);
@@ -119,7 +130,7 @@ function validTicket(ticket) {
     return value;
 }
 function persistWorking(cwd, store, handle) {
-    const file = path.resolve(cwd, RATIONALES_FILE);
+    const file = workingPath(cwd);
     mkdirSync(path.dirname(file), { recursive: true });
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
@@ -145,13 +156,14 @@ export function recordRationale(cwd, findingId, rationale, ticket, now = new Dat
         at: now,
         ...(canonicalTicket ? { ticket: canonicalTicket } : {}),
     };
-    const file = path.resolve(cwd, RATIONALES_FILE);
+    const file = workingPath(cwd);
+    const root = repositoryRoot(cwd);
     const completed = withStoreLock(file, {}, (handle) => {
         const store = loadWorkingRationales(cwd);
         options.afterLoad?.();
         store.entries[findingId] = entry;
         persistWorking(cwd, store, handle);
-        execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
     });
     if (!completed)
         throw new Error('could not acquire or retain the comment-rationale lock');
@@ -161,7 +173,8 @@ export function listRationales(cwd) {
     return Object.entries(loadWorkingRationales(cwd).entries).sort(([, left], [, right]) => right.at.localeCompare(left.at));
 }
 export function pruneRationales(cwd, currentIds) {
-    const file = path.resolve(cwd, RATIONALES_FILE);
+    const file = workingPath(cwd);
+    const root = repositoryRoot(cwd);
     let removed = 0;
     const completed = withStoreLock(file, {}, (handle) => {
         const store = loadWorkingRationales(cwd);
@@ -174,7 +187,7 @@ export function pruneRationales(cwd, currentIds) {
         if (removed === 0)
             return;
         persistWorking(cwd, store, handle);
-        execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
     });
     if (!completed)
         throw new Error('could not acquire or retain the comment-rationale lock');
