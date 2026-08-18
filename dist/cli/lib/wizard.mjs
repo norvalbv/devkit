@@ -66,6 +66,11 @@ const OXC_OPTION = {
     label: 'Oxc toolchain',
     hint: 'pinned Oxlint/Oxfmt runtime + repository config (off by default)',
 };
+const ANTI_SLOP_OPTION = {
+    id: 'antiSlop',
+    label: 'anti-slop rules',
+    hint: '15 vendored Oxlint rules + explicit shrink-only baseline (includes Oxc)',
+};
 // prior-art gate: same opt-in shape as adhd, and kept out of COMPONENTS for the same reason — it
 // denies harness tool calls (deny-once per session), so it only ever arrives because someone ticked
 // this box. The id is the camelCase Selection key so installedOptional seeding matches on re-runs.
@@ -157,7 +162,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
             ],
             initialValues: [
                 ...choices.filter((c) => c.recommended).map((c) => c.id),
-                ...installedOptional.filter((id) => id !== 'oxc'),
+                ...installedOptional.filter((id) => id !== 'oxc' && id !== 'antiSlop'),
             ],
             required: false,
         });
@@ -184,6 +189,7 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
                 componentOption(ADHD_OPTION),
                 componentOption(PRIOR_ART_GATE_OPTION),
                 componentOption(OXC_OPTION),
+                componentOption(ANTI_SLOP_OPTION),
             ],
             initialValues: [
                 ...componentChoices.filter((c) => c.recommended).map((c) => c.id),
@@ -200,7 +206,8 @@ export async function runWizard({ detectedStack, detectedMode = 'package', struc
         selection.searchCode = chosen.has('search-code');
         selection.adhd = chosen.has('adhd');
         selection.priorArtGate = chosen.has('priorArtGate');
-        selection.oxc = chosen.has('oxc');
+        selection.antiSlop = chosen.has('antiSlop');
+        selection.oxc = chosen.has('oxc') || selection.antiSlop;
         if (!structAvail)
             selection.structure = false;
     }
@@ -349,6 +356,7 @@ function summarize(mode, selection, structureAvailable, deselected) {
     lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
     lines.push(`${selection.priorArtGate ? '✓' : '·'} ${PRIOR_ART_GATE_OPTION.label}`);
     lines.push(`${selection.oxc ? '✓' : '·'} ${OXC_OPTION.label}`);
+    lines.push(`${selection.antiSlop ? '✓' : '·'} ${ANTI_SLOP_OPTION.label}`);
     lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
     if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {
         lines.push(`  agent surface(s): ${(selection.agentTargets ?? AGENT_TARGETS).join(', ')}`);
