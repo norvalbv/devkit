@@ -499,7 +499,7 @@ function removeOwnedLock(handle: LockHandle, options: SaveEntriesOptions): void 
   if (!sameOwner(captured, handle.owner)) restoreClaim(claimed, handle.lockDir);
   else removeClaimedLock(claimed);
 }
-function withStoreLock(
+export function withStoreLock(
   file: string,
   options: SaveEntriesOptions,
   mutation: (handle: LockHandle) => void,

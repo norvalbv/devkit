@@ -41,6 +41,7 @@ const CASES: Case[] = [
   { bin: 'devkit', args: ['--version'], expect: PKG.version },
   // The two bins the report was filed against — given REAL work, not a usage path.
   { bin: 'guard-clone', args: ['scan', '--gate'], expect: 'jscpd' },
+  { bin: 'guard-comments', args: [], expect: 'Usage:' },
   { bin: 'guard-dup-allowlist', args: ['list'], expect: 'pair(s)' },
   { bin: 'guard-coverage', args: [], expect: 'Coverage gate' },
   { bin: 'guard-decisions', args: [], expect: 'Commands:' },

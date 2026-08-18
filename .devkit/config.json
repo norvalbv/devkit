@@ -30,6 +30,7 @@
       "fanout",
       "dup",
       "clone",
+      "comments",
       "decisions",
       "qavis-advisory",
       "review"
@@ -42,6 +43,7 @@
       "fanout",
       "dup",
       "clone",
+      "comments",
       "decisions",
       "qavis-advisory",
       "review"

@@ -218,6 +218,7 @@ describe('init --yes (all recommended)', () => {
       'fanout',
       'dup',
       'clone',
+      'comments',
       'decisions',
       'qavis-advisory',
     ]);

@@ -149,7 +149,7 @@ describe('review cache session', () => {
     expect(prepared.status, prepared.stderr.toString()).toBe(0);
     expect(prepared.stdout.toString().split('\0')).toEqual([
       'devkit-review-cache-session-v1',
-      '4',
+      '5',
       'review-cache.json',
       '',
       'decisions-verdict-cache.json',
@@ -157,6 +157,8 @@ describe('review cache session', () => {
       'prefix-cache.json',
       '',
       'sentry-verdict-cache.json',
+      '',
+      'comment-firewall-receipts.json',
       '',
       '',
     ]);

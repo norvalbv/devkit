@@ -19,6 +19,7 @@ export const DEVKIT_CACHE_IGNORES = [
     '.devkit/decisions-verdict-cache.json',
     '.devkit/review-cache.json',
     '.devkit/sentry-verdict-cache.json',
+    '.devkit/comment-firewall-receipts.json',
     '.devkit/review-progress-*.json',
     '.devkit/review-runs/',
     '.devkit/last-ship-gates-*.log',
@@ -28,7 +29,10 @@ export const DEVKIT_CACHE_IGNORES = [
     // preference on everyone who clones the repo.
     '.devkit/adhd-off',
 ];
-export const DEVKIT_TRACKED_UNIGNORES = ['!.devkit/agent-hook-registrations-manifest.json'];
+export const DEVKIT_TRACKED_UNIGNORES = [
+    '!.devkit/agent-hook-registrations-manifest.json',
+    '!.devkit/comment-firewall-rationales.json',
+];
 const DEVKIT_GITIGNORE_LINES = [...DEVKIT_CACHE_IGNORES, ...DEVKIT_TRACKED_UNIGNORES];
 const TRACKED_UNIGNORE_SET = new Set(DEVKIT_TRACKED_UNIGNORES);
 // Append cache rules and keep tracked-state negations at the effective tail (gitignore is last-match

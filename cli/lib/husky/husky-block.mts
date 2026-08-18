@@ -10,11 +10,11 @@
  * brittle regex against shell prose.
  */
 
+import { GUARD_FRAGMENTS } from './ai-guard-fragments.mts';
 import { buildCommitTerminalFragment } from './commit-terminal.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   DK_HOOK_HELPERS,
-  DK_NO_GIT_ENV_INLINE,
   DK_REVIEW_BASELINE_HELPER,
   selectedFragment,
 } from './review-fragments.mts';
@@ -50,101 +50,10 @@ echo "🚧 Deterministic gates (aggregated)..."
 __dk_no_git_env bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1
 # /devkit:deterministic`;
 
-// The AI-guard fragments, keyed by guard id (GUARD_IDS in components.mjs). AI gates (decisions,
-// review) stay FAIL-FAST and OUTSIDE the deterministic orchestrator — an aggregated wall of AI
-// findings confuses the fixing agent, so they surface one at a time — and exit 3 (strict ship
-// mode failing closed on a judge outage) gets its own remedy, never rendered as a violation.
-const GUARD_FRAGMENTS = {
-  decisions: `# devkit:guard-decisions
-echo "🧭 Decision-log gate..."
-ddrc=0
-__dk_no_git_env bunx guard-decisions detect --gate || ddrc=$?
-if [ "$ddrc" -eq 1 ]; then
-    echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
-    exit 1
-elif [ "$ddrc" -eq 3 ]; then
-    echo "   guard-decisions: judge unavailable — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
-    exit 1
-elif [ "$ddrc" -ne 0 ] && [ "$ddrc" -ne 2 ]; then
-    echo "   guard-decisions: unexpected exit $ddrc — blocking the commit."
-    exit 1
-fi
-# ddrc 0 = clean / staged / routine / bypassed, ddrc 2 = fail-open → continue; any other code blocks.
-# /devkit:guard-decisions`,
-  review: `# devkit:guard-review
-echo "🔍 Reviewer gate (headless domain judges)..."
-# Ship path only (sc-1442 message file present): start the completeness judge NOW, in parallel
-# with the reviewer fleet, instead of serially at commit-msg. Its confident PASS lands in the
-# shared verdict store, so the commit-msg gate re-judges it as a cache hit — the serial ~4min of
-# opus overlaps the fleet instead of following it. Interactive commits (no message yet) are
-# unchanged. Lifetime is scoped to this hook: the judge is either wait'ed on or killed AND reaped
-# below — nothing outlives the hook to hold git's output pipe open. Review mode is excluded — it
-# exports the SAME env as its reviewer intent file (review-target.sh), but completeness is a
-# commit gate, not part of a range review.
-#
-# DK_NO_GIT_ENV_INLINE, not the __dk_no_git_env function: backgrounding a function forks a
-# subshell, which would make $! a wrapper whose death leaves the judge orphaned and running. See
-# review-fragments.mts.
-comp_pid=""
-if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
-    echo "🧩 Completeness judge started in parallel (ship message known)..."
-    ${DK_NO_GIT_ENV_INLINE} bunx guard-review completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
-fi
-rrc=0
-__dk_no_git_env bunx guard-review --gate || rrc=$?
-crc=0
-if [ -n "$comp_pid" ]; then
-    if [ "$rrc" -eq 0 ] || [ "$rrc" -eq 2 ]; then
-        wait "$comp_pid" || crc=$?
-    else
-        # The fleet already blocked this commit — stop paying for a judgement of a diff that is
-        # about to change. (The verdict would be keyed to THIS diff; the fix invalidates it.)
-        # SIGNAL THEN REAP, never signal alone: the judge inherited git's stdout/stderr, so the
-        # ship capture pipeline only unblocks once every copy of that write-end is closed. A hook
-        # that returns while a signalled child is still winding down leaves the reader waiting on
-        # a pipe nobody will write to again — the exact hang commit-with-gate-capture.sh's R3
-        # supervisor exists to bound. Both lines are status-tested (|| true) because a reaped
-        # job's status IS the signal (143), and under sh -e an untested non-zero would abort the
-        # hook here, before it reports its own verdict below.
-        kill "$comp_pid" 2>/dev/null || true
-        wait "$comp_pid" 2>/dev/null || true
-    fi
-fi
-if [ "$rrc" -eq 1 ]; then
-    echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
-    exit 1
-elif [ "$rrc" -eq 3 ]; then
-    echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (completed verdicts are cached)."
-    exit 1
-elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then
-    echo "   guard-review: unexpected exit $rrc — blocking the commit."
-    exit 1
-fi
-# Same exit contract as the commit-msg fragment (commit-msg-block.mts) — a completeness verdict
-# means the same thing regardless of WHERE it was judged, just earlier here.
-if [ "$crc" -eq 1 ]; then
-    echo "   Confirmed completeness gap (hard-by-default; findings above)."
-    echo "   Fix the gap, or — with the user's explicit OK — GUARD_NO_COMPLETENESS=1 git commit ..."
-    exit 1
-elif [ "$crc" -eq 4 ]; then
-    echo "   NOT a gate rejection — no defect was named; the staged content itself is unreadable."
-    exit 1
-elif [ "$crc" -eq 3 ]; then
-    echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
-    exit 1
-fi
-# rrc 0 = pass/cached/nothing-to-do, rrc 2 = inconclusive (non-strict fail-open) → continue.
-# crc 0 = pass (now cached for the commit-msg gate) / skipped, crc 2 = fail-open → continue.
-# /devkit:guard-review`,
-};
-
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
 const DETERMINISTIC_GUARD_IDS = ['size', 'fanout', 'dup', 'clone'];
-const AI_GUARD_IDS = ['decisions', 'review'] as const;
+const AI_GUARD_IDS = ['comments', 'decisions', 'review'] as const;
 
 // qavis-advisory runs last with its own 0/3 exit contract; routing and pass receipts live in qavis.
 // This wrapper stays fail-open when qavis/the bin is absent, matching the fallow precedent.
@@ -263,6 +172,7 @@ export function buildFullHook(selection: HookSelection, pkgRel = ''): string {
 // `bun add -g`); the block fail-opens per gate so a repo whose committer doesn't have devkit is
 // never blocked — exactly fallow's `command -v fallow || exit 0`.
 const STANDALONE_GATES = {
+  comments: ['guard-comments', 'gate'],
   decisions: ['guard-decisions', 'detect', '--gate'],
   review: ['guard-review', '--gate'],
 };

@@ -26,7 +26,7 @@ afterEach(() => {
   while (homes.length) rmSync(homes.pop(), { recursive: true, force: true });
 });
 
-const ALL_GUARDS = ['size', 'fanout', 'dup', 'clone', 'decisions', 'review'];
+const ALL_GUARDS = ['size', 'fanout', 'dup', 'clone', 'comments', 'decisions', 'review'];
 
 // Hooks run under whatever /bin/sh the OS ships — dash on Debian/Ubuntu, bash on macOS. The
 // fragments are POSIX sh; prove it where dash is installed instead of assuming.
@@ -55,6 +55,7 @@ tool="$1"; shift
 echo "$tool $*" >> "$HOME/calls.log"
 case "$tool" in
   guard-deterministic) exit \${DET_RC:-0};;
+  guard-comments) exit \${COMMENTS_RC:-0};;
   guard-decisions) exit \${DEC_RC:-0};;
   guard-review)
     case "$1" in
@@ -86,7 +87,13 @@ esac
   let stdout = '';
   try {
     stdout = execFileSync(shell, ['-e', hookPath], {
-      env: { ...process.env, HOME: home, PATH: '/usr/bin:/bin', ...env },
+      env: {
+        ...process.env,
+        DEVKIT_COMMIT_MSG_FILE: '',
+        HOME: home,
+        PATH: '/usr/bin:/bin',
+        ...env,
+      },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -110,6 +117,7 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
     // `guard-deterministic … || exit 1` — a doomed commit never pays for a judge.
+    expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
   });
@@ -118,6 +126,7 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     const r = runHook({ DET_RC: '0' });
     expect(r.status).toBe(0);
     expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-comments gate');
     expect(r.calls).toContain('guard-decisions');
     expect(r.calls).toContain('guard-review');
   });
@@ -170,6 +179,23 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
     expect(r.stdout).not.toContain('Record the decision target');
+  });
+
+  it('guard-comments blocks before later AI gates on an unresolved finding', () => {
+    const r = runHook({ COMMENTS_RC: '1' });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).not.toContain('guard-decisions');
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('guard-comments distinguishes fail-open outage from strict/unreadable evidence', () => {
+    const r = runHook({ COMMENTS_RC: '2' });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-decisions');
+    expect(r.calls).toContain('guard-review');
+    expect(runHook({ COMMENTS_RC: '3' }).status).toBe(1);
+    expect(runHook({ COMMENTS_RC: '4' }).status).toBe(1);
   });
 });
 

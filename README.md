@@ -134,6 +134,7 @@ not accumulate in this config; they remain Markdown under `decisionsDir`.
 - Folder fan-out, source-size, and project-structure ratchets
 - Deterministic gate checkpointing for safe ship retries
 - Sentry-capture review for swallowed runtime failures
+- Changed-comment firewall with staged rationales and independent exception review
 - Optional qavis advisory routing for UI changes
 
 Every path the engine touches resolves from the consumer repository’s working directory. devkit ships mechanisms, not a consumer’s baselines, allowlists, decision history, or `guard.config.json`.
@@ -162,6 +163,7 @@ The tracker separates lifecycle, evidence provenance, freshness, change type, an
 | Frontend security reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 11/11 (100.0%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 8/8 (100.0%) |
 | Frontend performance reviewer | shipped | accepted | stale | coverage | ? unknown | first-pass FAIL recall: 10/11 (90.9%) · first-pass clean pass: 7/8 (87.5%) · block recall: 10/11 (90.9%) · clean pass: 7/8 (87.5%) |
 | Correctness reviewer | shipped | accepted | stale | coverage | ↕ mixed | first-pass FAIL recall: 56/69 (81.2%) · first-pass clean pass: 49/59 (83.1%) |
+| Changed-comment rationale review | shipped | evidence-only | unknown | — | ? unknown | No accepted local checkpoint |
 | Decision governance | shipped | evidence-only | unknown | quality | ↑ improved | Detect accuracy: 45/49 (91.8%) · DECISION recall: 8/9 (88.9%) |
 | Sentry capture judge | shipped | evidence-only | unknown | quality | ↑ improved | Commit-message F1: 56/100 (56.0%) · Focused-diff F1: 87/100 (87.0%) |
 | Edge-case autonomy | no-ship | accepted | stale | no-ship | ? unknown | Judge-free ceiling: 51.2% · Pre-registered target: 35.0% |

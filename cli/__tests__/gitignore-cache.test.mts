@@ -22,6 +22,8 @@ afterEach(() => {
 describe('ensureDevkitCacheGitignore', () => {
   it('manages the review run directory without ignoring tracked devkit state', () => {
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/review-runs/');
+    expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/comment-firewall-receipts.json');
+    expect(DEVKIT_TRACKED_UNIGNORES).toContain('!.devkit/comment-firewall-rationales.json');
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/');
   });
 
@@ -55,7 +57,7 @@ describe('ensureDevkitCacheGitignore', () => {
     ensureDevkitCacheGitignore(d, false);
 
     const lines = readFileSync(join(d, '.gitignore'), 'utf8').trimEnd().split('\n');
-    expect(lines.at(-1)).toBe(tracked);
+    expect(lines.slice(-DEVKIT_TRACKED_UNIGNORES.length)).toEqual(DEVKIT_TRACKED_UNIGNORES);
     expect(lines.filter((line) => line === tracked)).toHaveLength(1);
   });
 

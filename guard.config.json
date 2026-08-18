@@ -49,6 +49,7 @@
         "libDomains": {
           "@root": [
             "co-occurrence",
+            "comment-firewall",
             "coverage",
             "decisions",
             "deterministic",
