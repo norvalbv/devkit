@@ -83,6 +83,27 @@ describe('Oxc capability lifecycle', () => {
     expect(checkOxcCapability(root).every((result) => result.status === 'OK')).toBe(true);
   });
 
+  it('unwires anti-slop from the managed base from explicit selection, not stale files', () => {
+    const root = tempRoot();
+    mkdirSync(join(root, '.devkit/anti-slop'), { recursive: true });
+    writeFileSync(join(root, '.devkit/anti-slop/manifest.json'), '{}\n');
+    writeFileSync(join(root, '.devkit/anti-slop/oxlint.json'), '{}\n');
+
+    syncOxcCapability(root, { antiSlop: true });
+    expect(readFileSync(join(root, '.devkit/oxc/oxlint.base.json'), 'utf8')).toContain(
+      '../anti-slop/oxlint.json',
+    );
+
+    syncOxcCapability(root, { antiSlop: false });
+    expect(readFileSync(join(root, '.devkit/oxc/oxlint.base.json'), 'utf8')).not.toContain(
+      '../anti-slop/oxlint.json',
+    );
+    expect(JSON.parse(readFileSync(join(root, '.devkit/oxc/manifest.json'), 'utf8'))).toMatchObject(
+      { antiSlop: false },
+    );
+    expect(checkOxcCapability(root).every((result) => result.status === 'OK')).toBe(true);
+  });
+
   it('serializes lifecycle ownership updates with the Oxc manifest lock', async () => {
     const root = tempRoot();
     syncOxcCapability(root);

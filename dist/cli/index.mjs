@@ -38,6 +38,7 @@ const COMMANDS = {
     upgrade: () => import("./commands/upgrade.mjs"),
     move: () => import("./commands/move.mjs"),
     oxc: () => import("./commands/oxc/oxc.mjs"),
+    'anti-slop': () => import("./commands/oxc/anti-slop.mjs"),
     reconcile: () => import("./commands/reconcile.mjs"),
     ship: () => import("./commands/ship.mjs"),
     review: () => import("./commands/review.mjs"),

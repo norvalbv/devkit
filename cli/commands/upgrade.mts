@@ -228,7 +228,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     // `undecided` pass-through: applyOverlay writes its own components block, so without it an
     // overlay upgrade records a decline nobody made and the offer never fires again.
     const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
-      unavailable: ['oxc'],
+      unavailable: ['oxc', 'antiSlop'],
     });
     await applyInit(cwd, {
       stack,

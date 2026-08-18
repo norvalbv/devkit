@@ -114,6 +114,22 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes', '--oxc', '--no-oxc'])).oxc).toBe(false);
   });
 
+  it('anti-slop is OPT-IN, implies Oxc, and yields to an explicit --no-oxc', () => {
+    expect(selectionFromFlags(parseFlags(['--yes'])).antiSlop).toBe(false);
+    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop']))).toMatchObject({
+      antiSlop: true,
+      oxc: true,
+    });
+    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop', '--no-oxc']))).toMatchObject({
+      antiSlop: false,
+      oxc: false,
+    });
+    expect(normalizeSelection({ antiSlop: true, oxc: false })).toMatchObject({
+      antiSlop: true,
+      oxc: true,
+    });
+  });
+
   it('lineGrowth is recommended-ON: default true, off with --no-line-growth', () => {
     expect(selectionFromFlags(parseFlags(['--yes'])).lineGrowth).toBe(true);
     expect(selectionFromFlags(parseFlags(['--yes', '--no-line-growth'])).lineGrowth).toBe(false);
@@ -556,9 +572,12 @@ describe('detectInstalled', () => {
   it('falls back to on-disk detection without a components block', () => {
     const root = tmpRepo();
     writeFileSync(join(root, 'biome.jsonc'), '{}');
+    mkdirSync(join(root, '.devkit/anti-slop'), { recursive: true });
+    writeFileSync(join(root, '.devkit/anti-slop/manifest.json'), '{}');
     const installed = detectInstalled(root);
     expect(installed.has('biome')).toBe(true);
     expect(installed.has('tsconfig')).toBe(false);
+    expect(installed.has('antiSlop')).toBe(true);
   });
 });
 

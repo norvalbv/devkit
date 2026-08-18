@@ -33,12 +33,14 @@ interface ConfigOwnership {
 interface OxcManifest {
   schemaVersion: 1;
   pins: { oxlint: string; oxfmt: string };
+  antiSlop: boolean;
   baseDigest: string;
   configs: { oxlint: ConfigOwnership; oxfmt: ConfigOwnership };
 }
 
 interface SyncOptions {
   dryRun?: boolean;
+  antiSlop?: boolean;
 }
 
 /** Explain why an explicitly requested capability cannot activate in a non-repository mode. */
@@ -52,7 +54,13 @@ export function warnIfOxcUnavailable(mode: string, requested: boolean): void {
 const digest = (content: string | Buffer): string =>
   createHash('sha256').update(content).digest('hex');
 const fileDigest = (path: string): string => digest(readFileSync(path));
-const baseSource = (): string => join(packageDir(), 'oxc', 'oxlint.base.json');
+function baseContent(antiSlop: boolean): string {
+  const source = readFileSync(join(packageDir(), 'oxc', 'oxlint.base.json'), 'utf8');
+  if (!antiSlop) return source;
+  const parsed = JSON.parse(source) as Record<string, unknown>;
+  parsed.extends = ['../anti-slop/oxlint.json'];
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
 
 function isOwnership(value: unknown): value is ConfigOwnership {
   if (!value || typeof value !== 'object') return false;
@@ -67,14 +75,14 @@ function readManifest(cwd: string): OxcManifest | null {
   const path = join(cwd, MANIFEST_REL);
   if (!existsSync(path)) return null;
   try {
-    const value = JSON.parse(readFileSync(path, 'utf8')) as OxcManifest;
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<OxcManifest>;
     return value.schemaVersion === 1 &&
       typeof value.pins?.oxlint === 'string' &&
       typeof value.pins?.oxfmt === 'string' &&
       typeof value.baseDigest === 'string' &&
       isOwnership(value.configs?.oxlint) &&
       isOwnership(value.configs?.oxfmt)
-      ? value
+      ? ({ ...value, antiSlop: value.antiSlop === true } as OxcManifest)
       : null;
   } catch {
     return null;
@@ -94,6 +102,28 @@ function assertNoConfigCollisions(cwd: string): void {
   }
 }
 
+/** Read-only preflight used before a dependent capability publishes managed state. */
+export function assertOxcCapabilityReady(cwd: string): void {
+  const lint = probeOxcRuntime('lint');
+  const fmt = probeOxcRuntime('fmt');
+  if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
+    throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
+  }
+  assertNoConfigCollisions(cwd);
+}
+
+/** Require the managed base bytes and recorded digest to match the current selected capabilities. */
+export function oxcBaseCapabilityIssue(cwd: string): string | null {
+  const manifest = readManifest(cwd);
+  if (!manifest) return 'managed Oxc manifest is missing or invalid';
+  const expected = digest(baseContent(manifest.antiSlop));
+  if (manifest.baseDigest !== expected) return 'managed Oxlint base manifest digest is stale';
+  const path = join(cwd, BASE_REL);
+  if (!existsSync(path) || fileDigest(path) !== expected)
+    return 'managed Oxlint base is missing or drifted';
+  return null;
+}
+
 function ownershipFor(
   cwd: string,
   names: string[],
@@ -111,7 +141,7 @@ function ownershipFor(
   return { path: starterPath, createdDigest: digest(starter) };
 }
 
-function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean): void {
+function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean, antiSlop: boolean): void {
   const previous = readManifest(cwd);
   const lint = probeOxcRuntime('lint');
   const fmt = probeOxcRuntime('fmt');
@@ -121,7 +151,7 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean): void {
   // Validate both tools before creating either starter: a formatter collision must not leave a
   // half-installed linter config (and vice versa).
   assertNoConfigCollisions(cwd);
-  const base = readFileSync(baseSource(), 'utf8');
+  const base = baseContent(antiSlop);
   if (!dryRun) {
     mkdirSync(join(cwd, '.devkit', 'oxc'), { recursive: true });
     writeFileAtomic(join(cwd, BASE_REL), base);
@@ -151,6 +181,7 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean): void {
     const manifest: OxcManifest = {
       schemaVersion: 1,
       pins: { oxlint: lint.runtime.expectedVersion, oxfmt: fmt.runtime.expectedVersion },
+      antiSlop,
       baseDigest: digest(base),
       configs: { oxlint, oxfmt },
     };
@@ -176,13 +207,16 @@ function syncOxcCapabilityUnlocked(cwd: string, dryRun: boolean): void {
 }
 
 /** Install or upgrade managed base/provenance while preserving every existing root config byte. */
-export function syncOxcCapability(cwd: string, { dryRun = false }: SyncOptions = {}): void {
+export function syncOxcCapability(
+  cwd: string,
+  { dryRun = false, antiSlop = false }: SyncOptions = {},
+): void {
   if (dryRun) {
-    syncOxcCapabilityUnlocked(cwd, true);
+    syncOxcCapabilityUnlocked(cwd, true, antiSlop);
     return;
   }
   mkdirSync(join(cwd, '.devkit'), { recursive: true });
-  withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false));
+  withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, antiSlop));
 }
 
 function parseJsonConfig(cwd: string, ownership: ConfigOwnership): string | null {
@@ -261,8 +295,7 @@ export function checkOxcCapability(cwd: string): CheckResult[] {
         'reinstall the pinned @norvalbv/devkit package with optional platform dependencies',
       );
   const basePath = join(cwd, BASE_REL);
-  const desiredBase = readFileSync(baseSource());
-  const baseCurrent = existsSync(basePath) && fileDigest(basePath) === digest(desiredBase);
+  const baseCurrent = oxcBaseCapabilityIssue(cwd) === null;
   const base = baseCurrent
     ? check('Oxlint base', 'OK', BASE_REL)
     : check(

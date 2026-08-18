@@ -18,6 +18,6 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["cli/**/*.mts", "gate-engine/**/*.mts"],
+  "include": ["anti-slop/**/*.ts", "cli/**/*.mts", "gate-engine/**/*.mts"],
   "exclude": ["node_modules", "templates", "dist", "**/*.test.mts", "**/__tests__/**", "**/eval/**"]
 }

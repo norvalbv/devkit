@@ -120,6 +120,8 @@ export async function offerOptionalComponents(recorded, sel, dryRun, { unavailab
     const chosen = new Set(picked);
     for (const c of unoffered)
         sel[c.id] = chosen.has(c.id);
+    if (sel.antiSlop)
+        sel.oxc = true;
     console.log(chosen.size
         ? `  ✓ added: ${[...chosen].join(', ')}`
         : '  • none selected (recorded — this will not be offered again)');

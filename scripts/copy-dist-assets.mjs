@@ -9,7 +9,7 @@
  *
  * Run by `bun run build` after tsc. Idempotent.
  */
-import { cpSync, existsSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,10 +21,26 @@ if (!existsSync(join(dist, 'cli')) || !existsSync(join(dist, 'gate-engine'))) {
 }
 
 // Whole root asset dirs + files consumed via packageDir() / the exports map.
-const ROOT_DIRS = ['biome', 'tsconfig', 'oxc', 'templates', 'skills', 'agents', 'agents-hooks'];
+const ROOT_DIRS = [
+  'biome',
+  'tsconfig',
+  'oxc',
+  'templates',
+  'skills',
+  'agents',
+  'agents-hooks',
+];
 const ROOT_FILES = ['package.json', 'README.md'];
 for (const d of ROOT_DIRS) cpSync(join(root, d), join(dist, d), { recursive: true });
 for (const f of ROOT_FILES) if (existsSync(join(root, f))) cpSync(join(root, f), join(dist, f));
+for (const f of ['LICENSE', 'UPSTREAM.md'])
+  cpSync(join(root, 'anti-slop', f), join(dist, 'anti-slop', f));
+for (const entry of readdirSync(join(dist, 'anti-slop', 'src'), {
+  recursive: true,
+  withFileTypes: true,
+})) {
+  if (entry.isFile() && entry.name.endsWith('.ts')) rmSync(join(entry.parentPath, entry.name));
+}
 
 // Non-TS files that live UNDER cli/ or gate-engine/ (the .sh ship scripts, config .json) — mirror
 // each to its dist/ path. tsc never emits these. Skip tests + eval (dev-only, not shipped-run).

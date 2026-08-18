@@ -149,6 +149,7 @@ export async function offerOptionalComponents(
   }
   const chosen = new Set(picked as string[]);
   for (const c of unoffered) sel[c.id] = chosen.has(c.id);
+  if (sel.antiSlop) sel.oxc = true;
   console.log(
     chosen.size
       ? `  ✓ added: ${[...chosen].join(', ')}`

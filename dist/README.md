@@ -12,6 +12,7 @@ A versioned developer toolkit that keeps agent instructions, project conventions
 | Shared configuration | Biome and strict TypeScript presets for common stacks | Stable package export paths |
 | Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
 | Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
+| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, and incremental debt adoption | Opt-in managed capability |
 
 The package and agent assets use the same release tag. A prompt or skill cannot silently drift away from the installer and gate implementation that consumes it.
 
@@ -70,8 +71,23 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | `devkit review` | Run the configured gate chain against a trusted checkout without committing |
 | `devkit reconcile` | Refresh a shared checkout after shipped work merges |
 | `devkit clean` | Remove the recorded installation |
+| `devkit anti-slop create/check/inspect/prune` | Manage the explicit shrink-only anti-slop baseline |
 
 Run `devkit help` for the command index and `devkit help <command>` for authoritative options.
+
+### Adopt anti-slop incrementally
+
+```bash
+devkit init --anti-slop
+devkit anti-slop create
+devkit anti-slop check
+```
+
+`--anti-slop` implies the opt-in Oxc capability. Rules load beside the repository's other
+Oxlint rules; their severities and scoped overrides stay in the ordinary Oxlint config. Baseline
+creation is always explicit, normal checks are read-only, and pruning can only remove fixed debt.
+See the [anti-slop capability guide](docs/anti-slop.md) for provenance, the complete rule matrix,
+and the fingerprint contract.
 
 ### Review a trusted checkout
 

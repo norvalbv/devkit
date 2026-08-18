@@ -4,7 +4,10 @@
  * the apply layer); review-policy flags stay in review-profile.mts and compose in here.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { AGENT_TARGETS, defaultSelection, GUARD_IDS, type Selection } from '../../components.mts';
+import { readJson } from '../../fs-helpers.mts';
 import { parseReviewFlags, type ReviewFlagValues } from './review-profile.mts';
 
 export interface InitFlags extends ReviewFlagValues {
@@ -15,6 +18,7 @@ export interface InitFlags extends ReviewFlagValues {
   removeDeselected: boolean;
   fallow: boolean;
   oxc: boolean;
+  antiSlop: boolean;
   searchSteering: boolean;
   agentHooks: boolean;
   searchCode: boolean;
@@ -39,6 +43,7 @@ export function parseFlags(args: string[]): InitFlags {
     removeDeselected: false,
     fallow: false,
     oxc: false,
+    antiSlop: false,
     searchSteering: false,
     agentHooks: false,
     searchCode: false,
@@ -60,6 +65,7 @@ export function parseFlags(args: string[]): InitFlags {
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
     else if (a === '--oxc') flags.oxc = true;
+    else if (a === '--anti-slop') flags.antiSlop = true;
     else if (a === '--search-steering') flags.searchSteering = true;
     else if (a === '--agent-hooks') flags.agentHooks = true;
     else if (a === '--search-code') flags.searchCode = true;
@@ -96,7 +102,11 @@ export function selectionFromFlags(flags: InitFlags): Selection {
   if (flags.no.has('line-growth')) sel.lineGrowth = false;
   // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
   sel.fallow = flags.fallow && !flags.no.has('fallow');
-  sel.oxc = flags.oxc && !flags.no.has('oxc');
+  sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop') && !flags.no.has('oxc');
+  sel.oxc = (flags.oxc || sel.antiSlop) && !flags.no.has('oxc');
+  if (flags.antiSlop && flags.no.has('oxc')) {
+    console.warn('  ! anti-slop skipped: --no-oxc disables its required runtime');
+  }
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
@@ -115,4 +125,29 @@ export function selectionFromFlags(flags: InitFlags): Selection {
     );
   }
   return sel;
+}
+
+/** Recover managed capabilities published before an interrupted init wrote its component record. */
+export function recoverInterruptedCapabilitySelection(
+  cwd: string,
+  flags: Pick<InitFlags, 'no'>,
+  selection: Selection,
+): Selection {
+  const recorded = readJson(join(cwd, '.devkit', 'config.json')) as {
+    components?: unknown;
+  } | null;
+  if (recorded?.components) return selection;
+
+  if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')) && !flags.no.has('oxc')) {
+    selection.oxc = true;
+  }
+  if (
+    existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')) &&
+    !flags.no.has('anti-slop') &&
+    !flags.no.has('oxc')
+  ) {
+    selection.antiSlop = true;
+    selection.oxc = true;
+  }
+  return selection;
 }

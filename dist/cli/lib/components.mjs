@@ -144,6 +144,7 @@ export const RECORDED_COMPONENT_IDS = [
     'adhd',
     'priorArtGate',
     'oxc',
+    'antiSlop',
 ];
 /**
  * The all-recommended selection: every component on, every guard on. This is the EXACT
@@ -166,6 +167,8 @@ export function defaultSelection() {
         fallow: false,
         // Toolchain migration is incremental: capability arrives only when explicitly selected.
         oxc: false,
+        // Policy-heavy rules and their debt baseline must never arrive without an explicit choice.
+        antiSlop: false,
         searchCode: false,
         // Recommended-on: a fresh repo has no giants (or they're grandfathered by init's freeze), so the
         // cap is pure upside. Deselectable in the wizard / via --no-line-growth.
@@ -197,13 +200,14 @@ export function applyOverlayConstraints(sel) {
         searchSteering: false,
         searchCode: false,
         oxc: false,
+        antiSlop: false,
         husky: true,
     };
 }
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {
     const base = defaultSelection();
-    return {
+    const normalized = {
         ...base,
         ...partial,
         agentTargets: Array.isArray(partial.agentTargets)
@@ -211,6 +215,11 @@ export function normalizeSelection(partial = {}) {
             : base.agentTargets,
         guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
     };
+    // The plugin is executed by the pinned Oxc capability; an impossible anti-slop-without-Oxc
+    // recording self-heals to the only runnable selection.
+    if (normalized.antiSlop)
+        normalized.oxc = true;
+    return normalized;
 }
 /**
  * Bundled gates absent from a RECORDED selection, split by recommend-status. `normalizeSelection`
@@ -293,6 +302,14 @@ export const OPTIONAL_COMPONENTS = [
         label: 'Oxc',
         hint: 'pinned Oxlint/Oxfmt runtime + repository config (optional, off by default)',
         flag: '--oxc',
+        since: '0.52.0',
+    },
+    {
+        id: 'antiSlop',
+        kind: 'tool',
+        label: 'anti-slop',
+        hint: '15 vendored Oxlint rules + explicit shrink-only baseline (includes Oxc)',
+        flag: '--anti-slop',
         since: '0.52.0',
     },
 ];

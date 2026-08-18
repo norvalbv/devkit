@@ -28,6 +28,10 @@ import {
   resolveExistingAgentProviders,
   SUPPORTED_AGENT_PROVIDERS,
 } from '../lib/install/agent-assets/agent-providers.mts';
+import {
+  checkAntiSlopCapability,
+  syncAntiSlopCapability,
+} from '../lib/install/anti-slop/lifecycle.mts';
 import { selectedHookAssets } from '../lib/install/hook-registration-ledger/selection.mts';
 import { checkOxcCapability, syncOxcCapability } from '../lib/install/oxc/lifecycle.mts';
 import { cmpSemver, fetchLatestTag } from './update.mts';
@@ -173,6 +177,7 @@ function selectionFlags(sel: Partial<Selection>): string[] {
     ['adhd', '--adhd'],
     ['priorArtGate', '--prior-art-gate'],
     ['oxc', '--oxc'],
+    ['antiSlop', '--anti-slop'],
   ] as const)
     if (sel[id]) flags.push(flag);
   if (!sel.guards?.length) flags.push('--no-guards');
@@ -216,6 +221,9 @@ function applyFix(
   const needsOxcSync =
     Boolean(sel.oxc) &&
     results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
+  const needsAntiSlopSync =
+    Boolean(sel.antiSlop) &&
+    results.some((r) => r.name.startsWith('anti-slop') && r.fixable && r.status !== 'OK');
   const needsInit = results.some(
     (r) =>
       r.fixable &&
@@ -253,7 +261,9 @@ function applyFix(
       stdio: 'inherit',
     });
   }
-  if (needsOxcSync) syncOxcCapability(cwd);
+  if (needsAntiSlopSync) syncAntiSlopCapability(cwd);
+  if (needsOxcSync && !needsAntiSlopSync)
+    syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true });
   const skills = results.find((r) => r.name === 'skills');
   if (skills?.fixable && skills.status !== 'OK') {
     execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -359,6 +369,7 @@ async function collectResults(
   if (sel.adhd) results.push(checkAdhdSkill(cwd));
   if (sel.searchSteering) results.push(checkSearchToolBins());
   if (sel.oxc) results.push(...checkOxcCapability(cwd));
+  if (sel.antiSlop) results.push(...checkAntiSlopCapability(cwd));
   if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))
     results.push(checkBaselines(cwd));
