@@ -259,7 +259,8 @@ describe('allowedToolsFor', () => {
     const tools = allowedToolsFor(REVIEWERS[0], cfg);
     expect(tools).toBe(
       'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*),' +
-        'Bash(node .claude/skills/api-security/scripts/checklist.mjs:*)',
+        'Bash(node .claude/skills/api-security/scripts/checklist.mjs:*),' +
+        'mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
     );
     expect(tools).not.toMatch(/(^|,)Bash(,|$)/); // never an unscoped Bash
     expect(tools).not.toMatch(/Write|Edit/);
@@ -275,9 +276,12 @@ describe('allowedToolsFor', () => {
     expect(tools).toContain('Bash(node .agents/skills/api-security/scripts/checklist.mjs:*)');
     expect(tools).not.toContain('Bash(node .claude/skills/api-security/scripts/checklist.mjs:*)');
   });
-  it('a skill-less reviewer (conventions) gets EXACTLY Read,Grep,Glob — no Bash at all, per its AC', () => {
+  it('a skill-less reviewer gets read tools plus the three named MCPs, but no Bash', () => {
     const conv = REVIEWERS.find((r) => r.name === 'conventions-reviewer');
-    expect(allowedToolsFor(conv, cfg)).toBe('Read,Grep,Glob');
+    expect(allowedToolsFor(conv, cfg)).toBe(
+      'Read,Grep,Glob,mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
+    );
+    expect(allowedToolsFor(conv, cfg)).not.toContain('Bash');
   });
 });
 

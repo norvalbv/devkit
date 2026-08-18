@@ -25,6 +25,7 @@ import {
 } from './claude-result.mts';
 import { emitGateEvent } from './gate-events.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
+import { type JudgeMcpProfile, prepareJudgeMcpProfile } from './mcp/profile.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
 // The error thrown/handed back by a `claude` spawn — a Node exec error augmented with these fields.
@@ -170,6 +171,8 @@ interface ExecJudgeOpts {
   env?: NodeJS.ProcessEnv;
   onOutage?: (kind: 'timeout' | 'transient' | 'empty') => void;
   transcript?: boolean;
+  /** Strict MCP profile. Omitted means a pure/internal judge with no MCP servers. */
+  mcpProfile?: JudgeMcpProfile;
 }
 
 /** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
@@ -279,8 +282,12 @@ function readJudgeOutput(stdout: string): { text: string; usage: JudgeUsage | nu
 export function execJudge(opts: ExecJudgeOpts): string | null {
   const { label, args, input, timeout, cwd, env, onOutage } = opts;
   const startedAt = Date.now();
+  const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
+    cwd: cwd ?? process.cwd(),
+    env,
+  });
   try {
-    const out = execFileSync('claude', withResultArgs(args), {
+    const out = execFileSync('claude', withResultArgs([...mcp.args, ...args]), {
       cwd,
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
       // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
@@ -309,6 +316,8 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     emitJudgeExec(opts, kind, startedAt);
     onOutage?.(kind);
     return null;
+  } finally {
+    mcp.cleanup();
   }
 }
 
@@ -326,6 +335,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
 export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
   const { label, args, input, timeout, cwd, env, onOutage } = opts;
   const startedAt = Date.now();
+  const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
+    cwd: cwd ?? process.cwd(),
+    env,
+  });
   return new Promise((resolve) => {
     // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
     // out-of-range `timeout` validates and throws before spawn even starts, sc-1317) both resolve
@@ -334,6 +347,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
     // already had this same guard via its enclosing try/catch.
     const fail = (err: unknown) => {
+      mcp.cleanup();
       warnUnavailable(label, err, timeout);
       const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
       emitJudgeExec(opts, kind, startedAt);
@@ -343,7 +357,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       const child = execFile(
         'claude',
-        withResultArgs(args),
+        withResultArgs([...mcp.args, ...args]),
         {
           cwd,
           // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
@@ -359,6 +373,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
             fail(err);
             return;
           }
+          mcp.cleanup();
           if (!stdout || !String(stdout).trim()) {
             warnNoOutput(label);
             emitJudgeExec(opts, 'empty', startedAt);

@@ -1,5 +1,6 @@
 import type { GuardConfig } from '../../config.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
+import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
@@ -115,6 +116,8 @@ async function cascadeVerdict(
       )
     : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
   const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
+  const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
+  const mcpProfile = namedAgentMcpProfile();
   const args = (promptBody: string, model: string): string[] => [
     '-p',
     promptBody,
@@ -122,7 +125,7 @@ async function cascadeVerdict(
     model,
     ...JUDGE_ISOLATION,
     '--allowedTools',
-    allowedToolsFor(reviewer, cfg, checklistRoot),
+    allowedTools,
   ];
   const passModel = reviewer.model ?? firstModel;
   let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
@@ -133,6 +136,7 @@ async function cascadeVerdict(
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
     transcript: false,
+    mcpProfile,
     env,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       firstOutage = kind;
@@ -191,6 +195,7 @@ async function cascadeVerdict(
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,
     transcript: false,
+    mcpProfile,
     env,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       secondOutage = kind;
