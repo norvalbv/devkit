@@ -77,6 +77,7 @@ describe('selfHostSelection', () => {
     for (const g of ['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory', 'review'])
       expect(sel.guards).toContain(g);
     expect(sel.husky).toBe(true);
+    expect(sel).toMatchObject({ oxc: true, antiSlop: true });
   });
 
   // sc-1529. The fixed selection used to reset every opt-in on upgrade, so a dogfood repo running
@@ -93,6 +94,10 @@ describe('selfHostSelection', () => {
   it('still lets a recorded OFF win over a default-on component', () => {
     expect(selfHostSelection({ lineGrowth: false }).lineGrowth).toBe(false);
     expect(selfHostSelection().lineGrowth).toBe(true);
+    expect(selfHostSelection({ oxc: false, antiSlop: false })).toMatchObject({
+      oxc: true,
+      antiSlop: true,
+    });
   });
 
   // The guards half of the fixed selection is deliberate and must NOT follow the recorded value:
@@ -118,6 +123,7 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('node gate-engine/decisions/cli.mts detect --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
+    expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
     expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
     expect(hook).toContain('--structure "bun run lint:structure"');
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');

@@ -789,9 +789,9 @@ export async function applyInit(cwd, plan) {
         console.log('8b. search-code (opt-in semantic search)');
         installSearchCode(cwd, dryRun);
     }
-    if (selection.oxc && !selection.antiSlop && !selfHost)
+    if (selection.oxc && !selection.antiSlop)
         oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
-    if (selection.antiSlop && !selfHost)
+    if (selection.antiSlop)
         antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
     // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
     // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
@@ -814,8 +814,8 @@ export async function applyInit(cwd, plan) {
         husky: selection.husky,
         structure: isStructure,
         fallow: Boolean(selection.fallow),
-        oxc: Boolean(selection.oxc && !selfHost),
-        antiSlop: Boolean(selection.antiSlop && !selfHost),
+        oxc: Boolean(selection.oxc),
+        antiSlop: Boolean(selection.antiSlop),
         searchCode: Boolean(selection.searchCode),
         lineGrowth: Boolean(selection.lineGrowth),
         // Always written, including `false` — an ABSENT key is what marks a repo as never-offered, so
@@ -917,7 +917,8 @@ export default async function run(args, cwd) {
     const selfHost = isDevkitRepo(cwd);
     if (selfHost) {
         mode = 'self-host';
-        selection = selfHostSelection();
+        const recorded = readJson(join(cwd, '.devkit', 'config.json'));
+        selection = selfHostSelection(recorded?.components);
     }
     else if (interactive) {
         const installed = detectInstalled(cwd);

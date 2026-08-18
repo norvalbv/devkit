@@ -1,0 +1,8 @@
+{
+  "extends": [
+    "./.devkit/oxc/oxlint.base.json"
+  ],
+  "jsPlugins": [],
+  "overrides": [],
+  "rules": {}
+}

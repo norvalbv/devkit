@@ -92,7 +92,7 @@ function readManifest(cwd) {
 }
 /** Explain why an explicit request cannot activate in a non-repository mode. */
 export function warnIfAntiSlopUnavailable(mode, requested) {
-    if (!requested || (mode !== 'overlay' && mode !== 'self-host'))
+    if (!requested || mode !== 'overlay')
         return;
     console.warn(`devkit init --${mode}: --anti-slop is unavailable because it requires the tracked Oxc capability; skipping it.`);
 }

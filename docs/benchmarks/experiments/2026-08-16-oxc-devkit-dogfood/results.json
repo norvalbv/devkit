@@ -1,0 +1,483 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-16T03:58:48.568Z",
+  "source": {
+    "controlRef": "origin/main",
+    "controlCommit": "4d624d059c8974aa58e0f3a27277cd6fd90383a4",
+    "candidateTree": "44b64383172500584abd31392c0d43a43ef52186"
+  },
+  "host": {
+    "uname": "Darwin Benji-mac 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:26 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8132 arm64",
+    "node": "v24.19.0",
+    "bun": "1.3.1",
+    "logicalCpuCount": 10
+  },
+  "protocol": {
+    "warmups": 3,
+    "samples": 10,
+    "order": "alternating control-first/candidate-first",
+    "control": "clean origin/main archive",
+    "candidate": "exact staged index exported with git checkout-index",
+    "dependencies": "shared installed node_modules, excluded from timing",
+    "localFixture": "one extra trailing blank line staged in skills/_devkit/checklist-store.mjs before every sample",
+    "scope": "unchanged ratchet, benchmark-evidence, test, reviewer, and completeness lanes excluded from both sides",
+    "rss": "10ms sampling; sum RSS of /usr/bin/time wrapper and all descendants",
+    "cpu": "/usr/bin/time -lp aggregate user + sys"
+  },
+  "lanes": {
+    "local": {
+      "name": "local deterministic quality segment",
+      "commands": {
+        "control": "sh \"$DEVKIT_FORMAT_FRAGMENT\" && bun run lint && bun run lint:structure && bun run benchmarks:check -- --mode staged",
+        "candidate": "sh \"$DEVKIT_FORMAT_FRAGMENT\" && bun run lint && node cli/index.mts anti-slop check --staged && bun run lint:structure && bun run benchmarks:check -- --mode staged"
+      },
+      "samples": {
+        "control": [
+          {
+            "wallMs": 5241.345416000004,
+            "cpuMs": 10410,
+            "userMs": 5220,
+            "systemMs": 5190,
+            "treePeakRssBytes": 228786176,
+            "directPeakRssBytes": 193347584
+          },
+          {
+            "wallMs": 6143.276458,
+            "cpuMs": 11460,
+            "userMs": 6100,
+            "systemMs": 5360,
+            "treePeakRssBytes": 228966400,
+            "directPeakRssBytes": 197476352
+          },
+          {
+            "wallMs": 4824.627832999999,
+            "cpuMs": 9910,
+            "userMs": 4790,
+            "systemMs": 5120,
+            "treePeakRssBytes": 229097472,
+            "directPeakRssBytes": 196902912
+          },
+          {
+            "wallMs": 5890.852415999994,
+            "cpuMs": 11210,
+            "userMs": 5870,
+            "systemMs": 5340,
+            "treePeakRssBytes": 228950016,
+            "directPeakRssBytes": 194838528
+          },
+          {
+            "wallMs": 5639.5947920000035,
+            "cpuMs": 10880,
+            "userMs": 5600,
+            "systemMs": 5280,
+            "treePeakRssBytes": 229195776,
+            "directPeakRssBytes": 197705728
+          },
+          {
+            "wallMs": 5689.496499999994,
+            "cpuMs": 10910,
+            "userMs": 5660,
+            "systemMs": 5250,
+            "treePeakRssBytes": 229376000,
+            "directPeakRssBytes": 198426624
+          },
+          {
+            "wallMs": 4697.918833000003,
+            "cpuMs": 9590,
+            "userMs": 4670,
+            "systemMs": 4920,
+            "treePeakRssBytes": 228556800,
+            "directPeakRssBytes": 195526656
+          },
+          {
+            "wallMs": 5447.233334000004,
+            "cpuMs": 10590,
+            "userMs": 5420,
+            "systemMs": 5170,
+            "treePeakRssBytes": 228573184,
+            "directPeakRssBytes": 197607424
+          },
+          {
+            "wallMs": 5212.365124999982,
+            "cpuMs": 10330,
+            "userMs": 5180,
+            "systemMs": 5150,
+            "treePeakRssBytes": 228425728,
+            "directPeakRssBytes": 195379200
+          },
+          {
+            "wallMs": 5215.986791000003,
+            "cpuMs": 10340,
+            "userMs": 5190,
+            "systemMs": 5150,
+            "treePeakRssBytes": 229195776,
+            "directPeakRssBytes": 195117056
+          }
+        ],
+        "candidate": [
+          {
+            "wallMs": 4616.986791000003,
+            "cpuMs": 9140,
+            "userMs": 4600,
+            "systemMs": 4540,
+            "treePeakRssBytes": 222642176,
+            "directPeakRssBytes": 196116480
+          },
+          {
+            "wallMs": 5746.278042000005,
+            "cpuMs": 10640,
+            "userMs": 5720,
+            "systemMs": 4920,
+            "treePeakRssBytes": 222478336,
+            "directPeakRssBytes": 188579840
+          },
+          {
+            "wallMs": 5974.577917000002,
+            "cpuMs": 11000,
+            "userMs": 5940,
+            "systemMs": 5060,
+            "treePeakRssBytes": 222445568,
+            "directPeakRssBytes": 202424320
+          },
+          {
+            "wallMs": 6597.797040999998,
+            "cpuMs": 11890,
+            "userMs": 6560,
+            "systemMs": 5330,
+            "treePeakRssBytes": 222838784,
+            "directPeakRssBytes": 201801728
+          },
+          {
+            "wallMs": 6235.094375000001,
+            "cpuMs": 11150,
+            "userMs": 6210,
+            "systemMs": 4940,
+            "treePeakRssBytes": 223215616,
+            "directPeakRssBytes": 197394432
+          },
+          {
+            "wallMs": 5832.557667000001,
+            "cpuMs": 10850,
+            "userMs": 5810,
+            "systemMs": 5040,
+            "treePeakRssBytes": 223035392,
+            "directPeakRssBytes": 199852032
+          },
+          {
+            "wallMs": 4968.190166,
+            "cpuMs": 9460,
+            "userMs": 4940,
+            "systemMs": 4520,
+            "treePeakRssBytes": 222478336,
+            "directPeakRssBytes": 196280320
+          },
+          {
+            "wallMs": 4778.127916999991,
+            "cpuMs": 9260,
+            "userMs": 4750,
+            "systemMs": 4510,
+            "treePeakRssBytes": 223133696,
+            "directPeakRssBytes": 196886528
+          },
+          {
+            "wallMs": 5125.3540840000205,
+            "cpuMs": 9740,
+            "userMs": 5090,
+            "systemMs": 4650,
+            "treePeakRssBytes": 222740480,
+            "directPeakRssBytes": 196198400
+          },
+          {
+            "wallMs": 4783.438125000015,
+            "cpuMs": 9460,
+            "userMs": 4750,
+            "systemMs": 4710,
+            "treePeakRssBytes": 223215616,
+            "directPeakRssBytes": 196198400
+          }
+        ]
+      },
+      "summary": {
+        "control": {
+          "wallMs": {
+            "median": 5344.289375000004,
+            "p95": 6143.276458
+          },
+          "cpuMs": {
+            "median": 10500,
+            "p95": 11460
+          },
+          "userMs": {
+            "median": 5320,
+            "p95": 6100
+          },
+          "systemMs": {
+            "median": 5180,
+            "p95": 5360
+          },
+          "treePeakRssBytes": {
+            "median": 228958208,
+            "p95": 229376000
+          },
+          "directPeakRssBytes": {
+            "median": 196214784,
+            "p95": 198426624
+          }
+        },
+        "candidate": {
+          "wallMs": {
+            "median": 5435.816063000013,
+            "p95": 6597.797040999998
+          },
+          "cpuMs": {
+            "median": 10190,
+            "p95": 11890
+          },
+          "userMs": {
+            "median": 5405,
+            "p95": 6560
+          },
+          "systemMs": {
+            "median": 4815,
+            "p95": 5330
+          },
+          "treePeakRssBytes": {
+            "median": 222789632,
+            "p95": 223215616
+          },
+          "directPeakRssBytes": {
+            "median": 196583424,
+            "p95": 202424320
+          }
+        }
+      }
+    },
+    "full": {
+      "name": "full repository static-quality segment",
+      "commands": {
+        "control": "bun run lint && bun run lint:structure && bun run typecheck",
+        "candidate": "bun run format:check && bun run lint && bun run lint:anti-slop && bun run lint:structure && bun run typecheck"
+      },
+      "samples": {
+        "control": [
+          {
+            "wallMs": 2176.905708999984,
+            "cpuMs": 8170,
+            "userMs": 2150,
+            "systemMs": 6020,
+            "treePeakRssBytes": 497598464,
+            "directPeakRssBytes": 487440384
+          },
+          {
+            "wallMs": 2859.8013329999812,
+            "cpuMs": 9750,
+            "userMs": 2830,
+            "systemMs": 6920,
+            "treePeakRssBytes": 505430016,
+            "directPeakRssBytes": 495075328
+          },
+          {
+            "wallMs": 2275.4988329999906,
+            "cpuMs": 8390,
+            "userMs": 2250,
+            "systemMs": 6140,
+            "treePeakRssBytes": 485949440,
+            "directPeakRssBytes": 475758592
+          },
+          {
+            "wallMs": 2223.189458000008,
+            "cpuMs": 8370,
+            "userMs": 2200,
+            "systemMs": 6170,
+            "treePeakRssBytes": 494141440,
+            "directPeakRssBytes": 483917824
+          },
+          {
+            "wallMs": 2595.494207999989,
+            "cpuMs": 9210,
+            "userMs": 2570,
+            "systemMs": 6640,
+            "treePeakRssBytes": 487276544,
+            "directPeakRssBytes": 477052928
+          },
+          {
+            "wallMs": 2249.1377090000024,
+            "cpuMs": 8300,
+            "userMs": 2230,
+            "systemMs": 6070,
+            "treePeakRssBytes": 490668032,
+            "directPeakRssBytes": 480428032
+          },
+          {
+            "wallMs": 2804.832374999998,
+            "cpuMs": 9690,
+            "userMs": 2780,
+            "systemMs": 6910,
+            "treePeakRssBytes": 488488960,
+            "directPeakRssBytes": 478101504
+          },
+          {
+            "wallMs": 2160.6835409999767,
+            "cpuMs": 8190,
+            "userMs": 2130,
+            "systemMs": 6060,
+            "treePeakRssBytes": 489553920,
+            "directPeakRssBytes": 479264768
+          },
+          {
+            "wallMs": 2140.4600840000203,
+            "cpuMs": 8130,
+            "userMs": 2110,
+            "systemMs": 6020,
+            "treePeakRssBytes": 493780992,
+            "directPeakRssBytes": 483491840
+          },
+          {
+            "wallMs": 2213.76449999999,
+            "cpuMs": 8230,
+            "userMs": 2190,
+            "systemMs": 6040,
+            "treePeakRssBytes": 501235712,
+            "directPeakRssBytes": 490864640
+          }
+        ],
+        "candidate": [
+          {
+            "wallMs": 4202.810083999997,
+            "cpuMs": 12890,
+            "userMs": 4180,
+            "systemMs": 8710,
+            "treePeakRssBytes": 518504448,
+            "directPeakRssBytes": 508329984
+          },
+          {
+            "wallMs": 3526.3294590000005,
+            "cpuMs": 11380,
+            "userMs": 3500,
+            "systemMs": 7880,
+            "treePeakRssBytes": 524632064,
+            "directPeakRssBytes": 514473984
+          },
+          {
+            "wallMs": 3909.8047500000102,
+            "cpuMs": 12140,
+            "userMs": 3880,
+            "systemMs": 8260,
+            "treePeakRssBytes": 522731520,
+            "directPeakRssBytes": 512458752
+          },
+          {
+            "wallMs": 3312.964041999978,
+            "cpuMs": 10850,
+            "userMs": 3290,
+            "systemMs": 7560,
+            "treePeakRssBytes": 531152896,
+            "directPeakRssBytes": 521027584
+          },
+          {
+            "wallMs": 4335.600791000004,
+            "cpuMs": 13390,
+            "userMs": 4310,
+            "systemMs": 9080,
+            "treePeakRssBytes": 535379968,
+            "directPeakRssBytes": 529301504
+          },
+          {
+            "wallMs": 4122.333416999987,
+            "cpuMs": 12790,
+            "userMs": 4090,
+            "systemMs": 8700,
+            "treePeakRssBytes": 516423680,
+            "directPeakRssBytes": 506052608
+          },
+          {
+            "wallMs": 3924.252625000023,
+            "cpuMs": 11820,
+            "userMs": 3900,
+            "systemMs": 7920,
+            "treePeakRssBytes": 534413312,
+            "directPeakRssBytes": 524189696
+          },
+          {
+            "wallMs": 3564.033666000003,
+            "cpuMs": 11420,
+            "userMs": 3540,
+            "systemMs": 7880,
+            "treePeakRssBytes": 524206080,
+            "directPeakRssBytes": 518029312
+          },
+          {
+            "wallMs": 3372.5224160000216,
+            "cpuMs": 11020,
+            "userMs": 3350,
+            "systemMs": 7670,
+            "treePeakRssBytes": 516702208,
+            "directPeakRssBytes": 510443520
+          },
+          {
+            "wallMs": 3356.1503750000265,
+            "cpuMs": 11030,
+            "userMs": 3330,
+            "systemMs": 7700,
+            "treePeakRssBytes": 526221312,
+            "directPeakRssBytes": 515751936
+          }
+        ]
+      },
+      "summary": {
+        "control": {
+          "wallMs": {
+            "median": 2236.163583500005,
+            "p95": 2859.8013329999812
+          },
+          "cpuMs": {
+            "median": 8335,
+            "p95": 9750
+          },
+          "userMs": {
+            "median": 2215,
+            "p95": 2830
+          },
+          "systemMs": {
+            "median": 6105,
+            "p95": 6920
+          },
+          "treePeakRssBytes": {
+            "median": 492224512,
+            "p95": 505430016
+          },
+          "directPeakRssBytes": {
+            "median": 481959936,
+            "p95": 495075328
+          }
+        },
+        "candidate": {
+          "wallMs": {
+            "median": 3736.9192080000066,
+            "p95": 4335.600791000004
+          },
+          "cpuMs": {
+            "median": 11620,
+            "p95": 13390
+          },
+          "userMs": {
+            "median": 3710,
+            "p95": 4310
+          },
+          "systemMs": {
+            "median": 7900,
+            "p95": 9080
+          },
+          "treePeakRssBytes": {
+            "median": 524419072,
+            "p95": 535379968
+          },
+          "directPeakRssBytes": {
+            "median": 515112960,
+            "p95": 529301504
+          }
+        }
+      }
+    }
+  }
+}

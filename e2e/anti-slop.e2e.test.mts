@@ -169,6 +169,68 @@ describe('e2e: packed anti-slop capability', () => {
     expect(checked.status, out(checked)).toBe(0);
   });
 
+  it('checks exact staged bytes, rejects growth, and persists Git renames durably', async () => {
+    const fx = await fixture();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    expect(fx.git('add', '-A').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'bootstrap').status).toBe(0);
+
+    const staged = join(fx.repoDir, 'staged.ts');
+    writeFileSync(staged, 'function staged(value: object) { return value; }\n');
+    expect(fx.git('add', 'staged.ts').status).toBe(0);
+    writeFileSync(staged, 'export const workingTreeIsClean = true;\n');
+    const stagedBad = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(stagedBad.status, out(stagedBad)).toBe(1);
+    expect(out(stagedBad)).toContain('anti-slop/no-object-parameters');
+
+    expect(fx.git('reset', '-q', 'HEAD', '--', 'staged.ts').status).toBe(0);
+    writeFileSync(staged, 'export const stagedIsClean = true;\n');
+    expect(fx.git('add', 'staged.ts').status).toBe(0);
+    writeFileSync(staged, 'function working(value: object) { return value; }\n');
+    const stagedClean = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(stagedClean.status, out(stagedClean)).toBe(0);
+
+    expect(fx.git('reset', '-q', 'HEAD', '--', 'staged.ts').status).toBe(0);
+    rmSync(staged, { force: true });
+    writeFileSync(join(fx.repoDir, 'adopted.ts'), 'function adopted(value: object) { return value; }\n');
+    expect(fx.run('devkit', ['anti-slop', 'create', '--force']).status).toBe(0);
+    expect(fx.git('add', 'adopted.ts', '.anti-slop-baseline.json').status).toBe(0);
+    const laundered = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(laundered.status, out(laundered)).toBe(1);
+    expect(out(laundered)).toContain('BASELINE-GROWTH');
+    const ciLaundered = fx.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']);
+    expect(ciLaundered.status, out(ciLaundered)).toBe(1);
+    expect(out(ciLaundered)).toContain('BASELINE-GROWTH');
+
+    const renamed = await fixture();
+    expect(renamed.run('devkit', packageArgs).status).toBe(0);
+    writeFileSync(
+      join(renamed.repoDir, 'legacy.ts'),
+      'function legacy(value: object) { return value; }\n',
+    );
+    expect(renamed.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    expect(renamed.git('add', '-A').status).toBe(0);
+    expect(renamed.git('commit', '-qm', 'adopt legacy debt').status).toBe(0);
+    expect(renamed.git('mv', 'legacy.ts', 'renamed.ts').status).toBe(0);
+    const staleRenameCheck = renamed.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(staleRenameCheck.status, out(staleRenameCheck)).toBe(1);
+    expect(out(staleRenameCheck)).toContain('BASELINE-RENAME');
+    expect(renamed.run('devkit', ['anti-slop', 'create', '--force']).status).toBe(0);
+    expect(renamed.git('add', '.anti-slop-baseline.json').status).toBe(0);
+    const renameCheck = renamed.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(renameCheck.status, out(renameCheck)).toBe(0);
+    const ciRenameCheck = renamed.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']);
+    expect(ciRenameCheck.status, out(ciRenameCheck)).toBe(0);
+    expect(renamed.git('commit', '-qm', 'persist renamed debt').status).toBe(0);
+    expect(renamed.run('devkit', ['anti-slop', 'check']).status).toBe(0);
+    writeFileSync(join(renamed.repoDir, 'unrelated.ts'), 'export const unrelated = true;\n');
+    expect(renamed.git('add', 'unrelated.ts').status).toBe(0);
+    expect(renamed.run('devkit', ['anti-slop', 'check', '--staged']).status).toBe(0);
+    expect(renamed.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']).status).toBe(0);
+  });
+
   it('vendors all rules and enforces an explicit deterministic shrink-only adoption flow', async () => {
     const fx = await fixture();
     const init = fx.run('devkit', INIT_ARGS);

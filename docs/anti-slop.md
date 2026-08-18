@@ -26,6 +26,8 @@ Baseline creation is deliberately never implicit:
 devkit anti-slop create [paths...]          # refuses an existing baseline
 devkit anti-slop create --force [paths...]  # explicit replacement
 devkit anti-slop check [paths...]           # read-only; CI/agent-loop gate
+devkit anti-slop check --staged             # exact Git-index snapshot against HEAD
+devkit anti-slop check --base <git-ref>     # full CI scan + baseline monotonicity
 devkit anti-slop inspect [--json]           # read-only debt inventory
 devkit anti-slop prune [paths...]           # shrink existing debt only
 ~~~
@@ -39,6 +41,19 @@ Prune refuses to write while a new error exists, removes fixed fingerprints, and
 count when one of several identical occurrences is fixed. It cannot add a current finding.
 Devkit clean deliberately keeps the baseline because it is the repository's debt record, not
 replaceable Devkit state.
+
+The staged gate materializes `git write-tree` into a disposable directory. Source files, the root
+Oxlint config, managed plugin/config bytes, and the candidate baseline are therefore all read from
+the index rather than a partially staged working tree. A root config, managed capability, or
+baseline change forces a full scan; otherwise only staged JavaScript/TypeScript postimages are
+linted. Deleted and unrelated files no-op.
+
+`--staged` compares the candidate baseline with `HEAD`; `--base` compares it with the named CI base.
+Once a base baseline exists, candidate fingerprints and counts may only stay equal or shrink. A base
+with no baseline is the sole bootstrap exception. A Git-detected rename of a file with adopted debt
+must persist that debt under the new path in the same commit: run `devkit anti-slop create --force`,
+stage the resulting baseline, and check again. The base debt is migrated in memory only to verify
+that the persisted count did not grow. This keeps the baseline valid after merge; checks never write.
 
 Occurrences with the same rule, repository-relative file, normalized diagnostic, and normalized
 source line are intentionally fungible and share one counted fingerprint. The ratchet prevents that
@@ -112,7 +127,9 @@ repository root to managed Oxc base link and the managed base to anti-slop plugi
 
 The packed E2E fixture asserts that all 15 namespaced diagnostics load from the emitted package,
 that off, warn, error, and scoped overrides work, and that create to new violation to fix to prune
-preserves the shrink-only contract.
+preserves the shrink-only contract. It also proves both partial-staging directions, baseline-growth
+rejection, same-commit baseline persistence for Git renames, and a post-merge check against the
+packed consumer binary.
 
 ## Intentional differences and limits
 

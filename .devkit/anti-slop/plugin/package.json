@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#oxlint-plugins": "./oxlint-plugins-api/index.js"
+  }
+}

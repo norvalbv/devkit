@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "upstreamCommit": "446268e5d15baa968eaec669ff65358d36ae6259",
+  "pluginApiVersion": "1.78.0",
+  "ruleIds": [
+    "anti-slop/no-chained-type-assertions",
+    "anti-slop/no-conditional-empty-object-spread",
+    "anti-slop/no-known-value-widening",
+    "anti-slop/no-module-mocking",
+    "anti-slop/no-object-parameters",
+    "anti-slop/no-reflect-apply",
+    "anti-slop/no-reflect-get",
+    "anti-slop/no-runtime-typeof",
+    "anti-slop/no-shape-in-symbol-names",
+    "anti-slop/no-unknown-parameters",
+    "anti-slop/no-unknown-returns",
+    "anti-slop/no-unknown-type-aliases",
+    "anti-slop/no-unsafe-dictionary-type",
+    "anti-slop/no-widen-then-assert",
+    "anti-slop/require-safety-comment-for-type-assertion"
+  ],
+  "pluginDigest": "40a480e9670b4c28fed3ec7577e1b1f4321c58ab41ddacd46709fe21a5a15f96",
+  "configDigest": "a1755ce4c9bd74b4800717f1f316b1047d638dc59d6277c4844b59c55306c496",
+  "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
+  "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"
+}

@@ -29,6 +29,18 @@ jobs:
       - name: Lint and assist (Biome)
         run: bun run lint
 
+      - name: Anti-slop (Oxlint, baseline-aware)
+        env:
+          ANTI_SLOP_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          ANTI_SLOP_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ -z "$ANTI_SLOP_BASE" || "$ANTI_SLOP_BASE" =~ ^0+$ ]]; then
+            ANTI_SLOP_BASE="$(git mktree </dev/null)"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            ANTI_SLOP_BASE="$(git merge-base "$ANTI_SLOP_BASE" "$ANTI_SLOP_HEAD")"
+          fi
+          node cli/index.mts anti-slop check --base "$ANTI_SLOP_BASE"
+
       - name: Structure governance (folder-structure)
         run: bun run lint:structure
 
