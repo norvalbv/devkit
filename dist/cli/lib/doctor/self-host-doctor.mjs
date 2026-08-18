@@ -10,7 +10,11 @@ import { detectGitRoot } from "../detect-git-root.mjs";
 import { extractGuardBlock } from "../husky/husky-block.mjs";
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
 import { checkAdhdSkill } from "../install/adhd-skill.mjs";
+import { readBaseline } from "../install/anti-slop/baseline.mjs";
+import { checkAntiSlopCapability, syncAntiSlopCapability, } from "../install/anti-slop/lifecycle.mjs";
+import { checkOxcCapability } from "../install/oxc/lifecycle.mjs";
 import { checkAgents, checkSkills } from "./asset-checks.mjs";
+import { check } from "./check-result.mjs";
 import { adviseSearchIndex } from "./guard-config-checks.mjs";
 import { checkHookRunner, checkHooksPathOwner } from "./hook-checks.mjs";
 import { printStrayGateCalls } from "./stray-gate-calls.mjs";
@@ -19,19 +23,44 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const hookPath = join(gitRoot, '.husky', 'pre-commit');
     console.log('devkit doctor — self-host (source-mode dogfood)\n');
+    const selection = selfHostSelection(cfg.components);
+    let capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+    if (fix && capabilityResults.some((result) => result.status !== 'OK')) {
+        syncAntiSlopCapability(cwd);
+        capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+    }
+    for (const result of capabilityResults) {
+        const glyph = result.status === 'OK' ? '✓' : result.status === 'MISSING' ? '✗' : '⚠';
+        console.log(`  ${glyph} ${result.name}: ${result.detail}`);
+        if (result.status !== 'OK' && result.remediation)
+            console.log(`      → ${result.remediation}`);
+    }
+    let baselineResult;
+    try {
+        const baseline = readBaseline(cwd);
+        baselineResult = baseline
+            ? check('anti-slop baseline', 'OK', `${baseline.entries.reduce((sum, entry) => sum + entry.count, 0)} adopted finding(s)`)
+            : check('anti-slop baseline', 'MISSING', '.anti-slop-baseline.json', 'run `devkit anti-slop create` explicitly');
+    }
+    catch (error) {
+        baselineResult = check('anti-slop baseline', 'DRIFT', error instanceof Error ? error.message : String(error), 'inspect and explicitly recreate the baseline');
+    }
+    console.log(`  ${baselineResult.status === 'OK' ? '✓' : baselineResult.status === 'MISSING' ? '✗' : '⚠'} ${baselineResult.name}: ${baselineResult.detail}`);
+    if (baselineResult.status !== 'OK' && baselineResult.remediation)
+        console.log(`      → ${baselineResult.remediation}`);
     let hookOk = false;
     if (!existsSync(hookPath)) {
         console.log('  ✗ .husky/pre-commit MISSING — run `devkit init` (self-host)');
     }
     else {
         const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
-        const expectedBlock = buildSelfHostBlock({ ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS }, pkgRel, cwd);
+        const expectedBlock = buildSelfHostBlock({ ...selection, structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS }, pkgRel, cwd);
         if (currentBlock !== null && currentBlock.trim() === expectedBlock.trim()) {
             hookOk = true;
             console.log('  ✓ .husky/pre-commit in sync with the generator');
         }
         else if (fix) {
-            installSelfHostHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
+            installSelfHostHook(gitRoot, pkgRel, selection, false, cwd);
             hookOk = true;
             console.log('  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)');
         }
@@ -79,5 +108,11 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
         if (r.status !== 'OK')
             console.log(`      → ${r.remediation}`);
     }
-    return hookOk && hookState.every((r) => r.status === 'OK') ? 0 : 1;
+    const capabilitiesOk = capabilityResults.every((result) => result.status === 'OK');
+    return hookOk &&
+        hookState.every((r) => r.status === 'OK') &&
+        capabilitiesOk &&
+        baselineResult.status === 'OK'
+        ? 0
+        : 1;
 }

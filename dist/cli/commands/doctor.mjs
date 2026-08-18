@@ -19,6 +19,7 @@ import { checkCommitMsgHook, commitMsgGuards } from "../lib/husky/commit-msg-blo
 import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../lib/husky/husky-block.mjs";
 import { checkAdhdSkill } from "../lib/install/adhd-skill.mjs";
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../lib/install/agent-assets/agent-providers.mjs";
+import { checkAntiSlopCapability, syncAntiSlopCapability, } from "../lib/install/anti-slop/lifecycle.mjs";
 import { selectedHookAssets } from "../lib/install/hook-registration-ledger/selection.mjs";
 import { checkOxcCapability, syncOxcCapability } from "../lib/install/oxc/lifecycle.mjs";
 import { cmpSemver, fetchLatestTag } from "./update.mjs";
@@ -119,6 +120,7 @@ function selectionFlags(sel) {
         ['adhd', '--adhd'],
         ['priorArtGate', '--prior-art-gate'],
         ['oxc', '--oxc'],
+        ['antiSlop', '--anti-slop'],
     ])
         if (sel[id])
             flags.push(flag);
@@ -156,6 +158,8 @@ function applyFix(cwd, results, sel, stack, standalone) {
     ]);
     const needsOxcSync = Boolean(sel.oxc) &&
         results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
+    const needsAntiSlopSync = Boolean(sel.antiSlop) &&
+        results.some((r) => r.name.startsWith('anti-slop') && r.fixable && r.status !== 'OK');
     const needsInit = results.some((r) => r.fixable &&
         r.status === 'MISSING' &&
         !OXC_CHECKS.has(r.name) &&
@@ -186,8 +190,10 @@ function applyFix(cwd, results, sel, stack, standalone) {
             stdio: 'inherit',
         });
     }
-    if (needsOxcSync)
-        syncOxcCapability(cwd);
+    if (needsAntiSlopSync)
+        syncAntiSlopCapability(cwd);
+    if (needsOxcSync && !needsAntiSlopSync)
+        syncOxcCapability(cwd, { antiSlop: sel.antiSlop === true });
     const skills = results.find((r) => r.name === 'skills');
     if (skills?.fixable && skills.status !== 'OK') {
         execFileSync(process.execPath, [join(packageDir(), 'cli', `index${SELF_EXT}`), 'sync-skills'], {
@@ -287,6 +293,8 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkSearchToolBins());
     if (sel.oxc)
         results.push(...checkOxcCapability(cwd));
+    if (sel.antiSlop)
+        results.push(...checkAntiSlopCapability(cwd));
     if (surfaces.length)
         results.push(checkRegistrations(cwd, hooks.components, surfaces));
     if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))

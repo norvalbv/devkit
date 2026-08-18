@@ -20,13 +20,20 @@ const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
 /** Explain why an explicitly requested capability cannot activate in a non-repository mode. */
 export function warnIfOxcUnavailable(mode, requested) {
-    if (!requested || (mode !== 'overlay' && mode !== 'self-host'))
+    if (!requested || mode !== 'overlay')
         return;
     console.warn(`devkit init --${mode}: --oxc is unavailable because Oxc activation writes tracked repository config; skipping it.`);
 }
 const digest = (content) => createHash('sha256').update(content).digest('hex');
 const fileDigest = (path) => digest(readFileSync(path));
-const baseSource = () => join(packageDir(), 'oxc', 'oxlint.base.json');
+function baseContent(antiSlop) {
+    const source = readFileSync(join(packageDir(), 'oxc', 'oxlint.base.json'), 'utf8');
+    if (!antiSlop)
+        return source;
+    const parsed = JSON.parse(source);
+    parsed.extends = ['../anti-slop/oxlint.json'];
+    return `${JSON.stringify(parsed, null, 2)}\n`;
+}
 function isOwnership(value) {
     if (!value || typeof value !== 'object')
         return false;
@@ -46,7 +53,7 @@ function readManifest(cwd) {
             typeof value.baseDigest === 'string' &&
             isOwnership(value.configs?.oxlint) &&
             isOwnership(value.configs?.oxfmt)
-            ? value
+            ? { ...value, antiSlop: value.antiSlop === true }
             : null;
     }
     catch {
@@ -64,6 +71,28 @@ function assertNoConfigCollisions(cwd) {
         }
     }
 }
+/** Read-only preflight used before a dependent capability publishes managed state. */
+export function assertOxcCapabilityReady(cwd) {
+    const lint = probeOxcRuntime('lint');
+    const fmt = probeOxcRuntime('fmt');
+    if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
+        throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
+    }
+    assertNoConfigCollisions(cwd);
+}
+/** Require the managed base bytes and recorded digest to match the current selected capabilities. */
+export function oxcBaseCapabilityIssue(cwd) {
+    const manifest = readManifest(cwd);
+    if (!manifest)
+        return 'managed Oxc manifest is missing or invalid';
+    const expected = digest(baseContent(manifest.antiSlop));
+    if (manifest.baseDigest !== expected)
+        return 'managed Oxlint base manifest digest is stale';
+    const path = join(cwd, BASE_REL);
+    if (!existsSync(path) || fileDigest(path) !== expected)
+        return 'managed Oxlint base is missing or drifted';
+    return null;
+}
 function ownershipFor(cwd, names, starterPath, starter, previous, dryRun) {
     const found = candidates(cwd, names);
     if (found.length === 1) {
@@ -74,7 +103,7 @@ function ownershipFor(cwd, names, starterPath, starter, previous, dryRun) {
         writeFileAtomic(join(cwd, starterPath), starter);
     return { path: starterPath, createdDigest: digest(starter) };
 }
-function syncOxcCapabilityUnlocked(cwd, dryRun) {
+function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop) {
     const previous = readManifest(cwd);
     const lint = probeOxcRuntime('lint');
     const fmt = probeOxcRuntime('fmt');
@@ -84,7 +113,7 @@ function syncOxcCapabilityUnlocked(cwd, dryRun) {
     // Validate both tools before creating either starter: a formatter collision must not leave a
     // half-installed linter config (and vice versa).
     assertNoConfigCollisions(cwd);
-    const base = readFileSync(baseSource(), 'utf8');
+    const base = baseContent(antiSlop);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit', 'oxc'), { recursive: true });
         writeFileAtomic(join(cwd, BASE_REL), base);
@@ -102,6 +131,7 @@ function syncOxcCapabilityUnlocked(cwd, dryRun) {
         const manifest = {
             schemaVersion: 1,
             pins: { oxlint: lint.runtime.expectedVersion, oxfmt: fmt.runtime.expectedVersion },
+            antiSlop,
             baseDigest: digest(base),
             configs: { oxlint, oxfmt },
         };
@@ -126,13 +156,13 @@ function syncOxcCapabilityUnlocked(cwd, dryRun) {
     }
 }
 /** Install or upgrade managed base/provenance while preserving every existing root config byte. */
-export function syncOxcCapability(cwd, { dryRun = false } = {}) {
+export function syncOxcCapability(cwd, { dryRun = false, antiSlop = false } = {}) {
     if (dryRun) {
-        syncOxcCapabilityUnlocked(cwd, true);
+        syncOxcCapabilityUnlocked(cwd, true, antiSlop);
         return;
     }
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false));
+    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, antiSlop));
 }
 function parseJsonConfig(cwd, ownership) {
     if (!ownership.path.endsWith('.json'))
@@ -188,8 +218,7 @@ export function checkOxcCapability(cwd) {
         ? check('Oxc runtime', 'OK', `${lint.detail}; ${fmt.detail}`)
         : check('Oxc runtime', 'DRIFT', `${lint.detail}; ${fmt.detail}`, 'reinstall the pinned @norvalbv/devkit package with optional platform dependencies');
     const basePath = join(cwd, BASE_REL);
-    const desiredBase = readFileSync(baseSource());
-    const baseCurrent = existsSync(basePath) && fileDigest(basePath) === digest(desiredBase);
+    const baseCurrent = oxcBaseCapabilityIssue(cwd) === null;
     const base = baseCurrent
         ? check('Oxlint base', 'OK', BASE_REL)
         : check('Oxlint base', existsSync(basePath) ? 'DRIFT' : 'MISSING', BASE_REL, 'run `devkit doctor --fix`', true);

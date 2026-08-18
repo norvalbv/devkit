@@ -118,7 +118,7 @@ fi
 
 # devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_no_git_env node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
+__dk_no_git_env node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "anti-slop=node cli/index.mts anti-slop check --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
 # /devkit:deterministic
 
 if __dk_gate_selected comments; then

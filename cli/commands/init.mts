@@ -49,7 +49,8 @@ import { installSelfHostHook, isDevkitRepo, selfHostSelection } from '../lib/hus
 import { ADHD_SKILL_DIR, syncAdhdSkill } from '../lib/install/adhd-skill.mts';
 import { installAgentSurfaces as syncSurfaces } from '../lib/install/agent-assets/agent-surfaces.mts';
 import { resolveAssetConflicts } from '../lib/install/agent-assets/asset-conflict-picker.mts';
-import { parseFlags, selectionFromFlags } from '../lib/install/flags/init-flags.mts';
+import * as antiSlopLifecycle from '../lib/install/anti-slop/lifecycle.mts';
+import * as initFlags from '../lib/install/flags/init-flags.mts';
 import { reviewPlanFromFlags } from '../lib/install/flags/review-profile.mts';
 import { ensureDevkitCacheGitignore } from '../lib/install/gitignore-cache.mts';
 import {
@@ -117,6 +118,7 @@ interface RecordedComponents {
   structure?: boolean;
   fallow?: boolean;
   oxc?: boolean;
+  antiSlop?: boolean;
   searchCode?: boolean;
   lineGrowth?: boolean;
   adhd?: boolean;
@@ -194,7 +196,7 @@ type HookSelectionInput = Selection & { structureCmd?: string };
 
 // Which components are currently wired? Read the recorded set first (authoritative), then
 // fall back to on-disk detection for a pre-wizard repo with no `components` block.
-function detectInstalled(cwd: string) {
+export function detectInstalled(cwd: string) {
   const cfg = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
   const installed = new Set<string>();
   const recorded = cfg?.components;
@@ -212,6 +214,7 @@ function detectInstalled(cwd: string) {
   if (existsSync(join(cwd, 'tsconfig.json'))) installed.add('tsconfig');
   if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
   if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json'))) installed.add('oxc');
+  if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json'))) installed.add('antiSlop');
   const { gitRoot } = detectGitRoot(cwd);
   if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) installed.add('skills');
   if (existsSync(join(gitRoot, '.devkit', 'agents-manifest.json'))) installed.add('agents');
@@ -682,7 +685,6 @@ function removeStructure(cwd: string, prevConfig: DevkitConfig | null, dryRun: b
   }
 }
 
-// Reason: flat removal dispatch: one `if (remove.includes(id)) removeX()` per component, ordered so guards (line-level) precede husky (block-level); high branch COUNT mirrors the component list, each branch a single delegated call
 // fallow-ignore-next-line complexity
 function applyRemovals(
   cwd: string,
@@ -703,10 +705,10 @@ function applyRemovals(
   if (remove.includes('skills')) removeSkills(gitRoot, dryRun);
   if (remove.includes('agents')) removeAgents(gitRoot, dryRun);
   // Agent-hook scripts + registrations are exact-reconciled by installAgentSurfaces before this
-  // removal pass. Re-removing them here would also delete a decisions-owned hook that survives a
-  // general agentHooks deselection.
+  // Avoid deleting a decisions-owned hook that survives a general agentHooks deselection.
   if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
   if (remove.includes('oxc')) oxcLifecycle.removeOxcCapability(cwd, dryRun);
+  if (remove.includes('antiSlop')) antiSlopLifecycle.removeAntiSlopCapability(cwd, dryRun);
   if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
 
@@ -752,6 +754,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
       fallow: fallowWired,
       oxc: false,
+      antiSlop: false,
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
@@ -838,11 +841,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     selection.structure &&
     STRUCTURE_STACKS.has(stack) &&
     (!standalone || CONFIG_DRIVEN_STRUCTURE.has(stack));
-  // The stack-resolved structure-lint command, joined to the deterministic orchestrator via
-  // `--structure` (so a structure violation lands in the SAME aggregated report as the guards).
-  // Config-driven stacks run devkit's own `guard-structure` bin (no consumer eslint dep — the
-  // orchestrator resolves it as a sibling module); electron keeps its consumer-side `bunx eslint
-  // src`. Undefined when structure is off → no `--structure` arg emitted.
+  // Resolve the structure command once so hook generation and the recorded selection agree.
   const structureCmd = isStructure ? structureCmdFor(stack) : undefined;
   const devkitPkg = readJson(join(packageDir(), 'package.json')) as {
     version?: string;
@@ -970,8 +969,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     console.log('8b. search-code (opt-in semantic search)');
     installSearchCode(cwd, dryRun);
   }
-
-  if (selection.oxc && !selfHost) oxcLifecycle.syncOxcCapability(cwd, { dryRun });
+  if (selection.oxc && !selection.antiSlop)
+    oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
+  if (selection.antiSlop) antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
 
   // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
   // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
@@ -995,7 +995,8 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     husky: selection.husky,
     structure: isStructure,
     fallow: Boolean(selection.fallow),
-    oxc: Boolean(selection.oxc && !selfHost),
+    oxc: Boolean(selection.oxc),
+    antiSlop: Boolean(selection.antiSlop),
     searchCode: Boolean(selection.searchCode),
     lineGrowth: Boolean(selection.lineGrowth),
     // Always written, including `false` — an ABSENT key is what marks a repo as never-offered, so
@@ -1075,7 +1076,7 @@ export const meta = {
 // Reason: flat CLI dispatch: resolves one `selection` via three converging paths (interactive wizard / --yes flags / non-TTY) then hands a fully-resolved plan to applyInit; the branches ARE the resolution-mode fork, each path linear with no shared nesting
 // fallow-ignore-next-line complexity
 export default async function run(args: string[], cwd: string) {
-  const flags = parseFlags(args);
+  const flags = initFlags.parseFlags(args);
   const detectedStack = flags.stack ?? detectStack(cwd);
   // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
   const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';
@@ -1110,11 +1111,11 @@ export default async function run(args: string[], cwd: string) {
     return 0;
   }
 
-  // Self-host is package-name detected and deterministic, bypassing wizard/flags to preserve its bespoke config.
   const selfHost = isDevkitRepo(cwd);
   if (selfHost) {
     mode = 'self-host';
-    selection = selfHostSelection();
+    const recorded = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
+    selection = selfHostSelection(recorded?.components);
   } else if (interactive) {
     const installed = detectInstalled(cwd);
     const result = await runWizard({
@@ -1127,14 +1128,14 @@ export default async function run(args: string[], cwd: string) {
     });
     if (!result) return 0; // cancelled — nothing written
     ({ mode, stack, remove, review } = result);
-    // The wizard returns a complete selection after overlay constraints fill package-only fields.
     selection = result.selection as Selection;
   } else {
-    selection = selectionFromFlags(flags);
+    selection = initFlags.selectionFromFlags(flags);
+    selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
   }
 
-  // Resolve overlay invariants before consumers validate or record them (Husky is always effective).
   oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
+  antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
   if (mode === 'overlay') selection = applyOverlayConstraints(selection);
   if (!selfHost && !interactive) {
     const reviewPlan = reviewPlanFromFlags(flags, selection);
@@ -1182,6 +1183,5 @@ export default async function run(args: string[], cwd: string) {
   return 0;
 }
 
-// parseFlags/selectionFromFlags re-exported for existing test importers; they live in
-// cli/lib/install/flags/init-flags.mts now.
-export { detectInstalled, parseFlags, selectionFromFlags };
+// Re-export flag helpers for existing test importers; their implementation lives under install/flags.
+export { parseFlags, selectionFromFlags } from '../lib/install/flags/init-flags.mts';

@@ -55,6 +55,7 @@ const COMMANDS: Record<string, CommandLoader> = {
   upgrade: () => import('./commands/upgrade.mts'),
   move: () => import('./commands/move.mts'),
   oxc: () => import('./commands/oxc/oxc.mts'),
+  'anti-slop': () => import('./commands/oxc/anti-slop.mts'),
   reconcile: () => import('./commands/reconcile.mts'),
   ship: () => import('./commands/ship.mts'),
   review: () => import('./commands/review.mts'),

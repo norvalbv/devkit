@@ -53,6 +53,20 @@ describe('clean (package mode)', () => {
     expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
   });
 
+  it('removes Oxc before anti-slop so a config collision cannot strand a partial clean', () => {
+    const root = tmpRepo();
+    expect(
+      devkit(root, 'init', '--stack', 'generic', '--yes', '--anti-slop', '--no-husky').status,
+    ).toBe(0);
+    writeFileSync(join(root, 'oxlint.config.ts'), 'export default {};\n');
+
+    const result = devkit(root, 'clean', '--yes');
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(root, '.devkit'))).toBe(false);
+    expect(existsSync(join(root, 'oxlint.config.ts'))).toBe(true);
+  });
+
   it('exposes Codex-only overlay remnants when their ownership records are gone', () => {
     const root = tmpRepo();
     execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' });

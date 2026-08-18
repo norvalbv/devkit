@@ -43,6 +43,7 @@ import {
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS: Array<{ label: string; cmd: string }> = [
   { label: 'lint', cmd: 'bun run lint' },
+  { label: 'anti-slop', cmd: 'node cli/index.mts anti-slop check --staged' },
   { label: 'benchmarks', cmd: 'bun run benchmarks:check -- --mode staged' },
 ];
 
@@ -146,6 +147,10 @@ export function selfHostSelection(recorded?: Partial<Selection>): Selection {
     // claimed was on. Undefined entries are dropped so an absent key falls through to the default
     // rather than overwriting it with undefined.
     ...definedOnly(recorded),
+    // Devkit is the soak environment for the exact-pinned Oxc + vendored anti-slop stack. These
+    // stay on even when an older recorded config predates them or explicitly recorded them off.
+    oxc: true,
+    antiSlop: true,
     // Guards stay FIXED even so: that is the deliberate part (see upgrade.mts) — a future
     // RECOMMENDED_GUARD_IDS addition must not open an interactive multiselect in the dogfood repo.
     guards: [...RECOMMENDED_GUARD_IDS, 'review'],
