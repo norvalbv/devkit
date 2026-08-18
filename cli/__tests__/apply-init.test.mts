@@ -824,8 +824,14 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
+    expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
     expect(hook).not.toMatch(/bunx guard-/);
 
-    expect(config(root).selfHost).toBe(true);
+    expect(config(root)).toMatchObject({
+      selfHost: true,
+      components: { oxc: true, antiSlop: true },
+    });
+    expect(existsSync(join(root, '.devkit', 'oxc', 'manifest.json'))).toBe(true);
+    expect(existsSync(join(root, '.devkit', 'anti-slop', 'manifest.json'))).toBe(true);
   });
 });

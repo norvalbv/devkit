@@ -18,8 +18,14 @@ import {
   selfHostSelection,
 } from '../husky/self-host.mts';
 import { checkAdhdSkill } from '../install/adhd-skill.mts';
+import { readBaseline } from '../install/anti-slop/baseline.mts';
+import {
+  checkAntiSlopCapability,
+  syncAntiSlopCapability,
+} from '../install/anti-slop/lifecycle.mts';
+import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { checkAgents, checkSkills } from './asset-checks.mts';
-import type { CheckResult } from './check-result.mts';
+import { type CheckResult, check } from './check-result.mts';
 import { adviseSearchIndex } from './guard-config-checks.mts';
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
@@ -38,6 +44,46 @@ export async function runSelfHostDoctor(
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   console.log('devkit doctor — self-host (source-mode dogfood)\n');
+  const selection = selfHostSelection(cfg.components);
+
+  let capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+  if (fix && capabilityResults.some((result) => result.status !== 'OK')) {
+    syncAntiSlopCapability(cwd);
+    capabilityResults = [...checkOxcCapability(cwd), ...checkAntiSlopCapability(cwd)];
+  }
+  for (const result of capabilityResults) {
+    const glyph = result.status === 'OK' ? '✓' : result.status === 'MISSING' ? '✗' : '⚠';
+    console.log(`  ${glyph} ${result.name}: ${result.detail}`);
+    if (result.status !== 'OK' && result.remediation) console.log(`      → ${result.remediation}`);
+  }
+  let baselineResult: CheckResult;
+  try {
+    const baseline = readBaseline(cwd);
+    baselineResult = baseline
+      ? check(
+          'anti-slop baseline',
+          'OK',
+          `${baseline.entries.reduce((sum, entry) => sum + entry.count, 0)} adopted finding(s)`,
+        )
+      : check(
+          'anti-slop baseline',
+          'MISSING',
+          '.anti-slop-baseline.json',
+          'run `devkit anti-slop create` explicitly',
+        );
+  } catch (error: unknown) {
+    baselineResult = check(
+      'anti-slop baseline',
+      'DRIFT',
+      error instanceof Error ? error.message : String(error),
+      'inspect and explicitly recreate the baseline',
+    );
+  }
+  console.log(
+    `  ${baselineResult.status === 'OK' ? '✓' : baselineResult.status === 'MISSING' ? '✗' : '⚠'} ${baselineResult.name}: ${baselineResult.detail}`,
+  );
+  if (baselineResult.status !== 'OK' && baselineResult.remediation)
+    console.log(`      → ${baselineResult.remediation}`);
 
   let hookOk = false;
   if (!existsSync(hookPath)) {
@@ -45,7 +91,7 @@ export async function runSelfHostDoctor(
   } else {
     const currentBlock = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
     const expectedBlock = buildSelfHostBlock(
-      { ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS },
+      { ...selection, structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS },
       pkgRel,
       cwd,
     );
@@ -53,7 +99,7 @@ export async function runSelfHostDoctor(
       hookOk = true;
       console.log('  ✓ .husky/pre-commit in sync with the generator');
     } else if (fix) {
-      installSelfHostHook(gitRoot, pkgRel, selfHostSelection(), false, cwd);
+      installSelfHostHook(gitRoot, pkgRel, selection, false, cwd);
       hookOk = true;
       console.log(
         '  ✓ .husky/pre-commit regenerated (was stale — refreshed to the current generator)',
@@ -104,5 +150,11 @@ export async function runSelfHostDoctor(
     if (r.status !== 'OK') console.log(`      → ${r.remediation}`);
   }
 
-  return hookOk && hookState.every((r) => r.status === 'OK') ? 0 : 1;
+  const capabilitiesOk = capabilityResults.every((result) => result.status === 'OK');
+  return hookOk &&
+    hookState.every((r) => r.status === 'OK') &&
+    capabilitiesOk &&
+    baselineResult.status === 'OK'
+    ? 0
+    : 1;
 }

@@ -2,8 +2,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock } from "../../lib/atomic-write.mjs";
-import { baselineFromGroups, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from "../../lib/install/anti-slop/baseline.mjs";
+import { baselineFromGroups, baselineIncreases, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from "../../lib/install/anti-slop/baseline.mjs";
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from "../../lib/install/anti-slop/constants.mjs";
+import { gitBaselineEnvelope, withStagedAntiSlopSnapshot, } from "../../lib/install/anti-slop/git-snapshot.mjs";
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from "../../lib/install/anti-slop/runner.mjs";
 export const meta = {
     name: 'anti-slop',
@@ -12,7 +13,9 @@ export const meta = {
 
 Usage:
   devkit anti-slop create [--force] [paths...]   Explicitly snapshot current findings
-  devkit anti-slop check [paths...]              Fail on new error-severity findings (read-only)
+  devkit anti-slop check [paths...]              Check working-tree findings (read-only)
+  devkit anti-slop check --staged                Check the exact Git index against HEAD
+  devkit anti-slop check --base <git-ref>         Full check + baseline monotonicity for CI
   devkit anti-slop inspect [--json]              Inspect baseline debt without linting
   devkit anti-slop prune [paths...]              Remove fixed debt; never add findings
 
@@ -67,10 +70,36 @@ function create(cwd, args, force) {
         return 0;
     });
 }
-function check(cwd, args) {
+function checkBaselineEnvelope(candidate, envelope) {
+    if (!envelope?.base)
+        return 0; // one-time bootstrap: the base commit has no baseline
+    const staleRenames = candidate.entries.flatMap((entry) => {
+        const nextFile = envelope.renames.get(entry.file);
+        return nextFile ? [{ ...entry, nextFile }] : [];
+    });
+    if (staleRenames.length > 0) {
+        for (const entry of staleRenames) {
+            console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
+        }
+        console.error('anti-slop: FAIL — persist renamed debt with `devkit anti-slop create --force`, then stage the baseline');
+        return 1;
+    }
+    const increases = baselineIncreases(envelope.base, candidate, envelope.renames);
+    if (increases.length === 0)
+        return 0;
+    for (const entry of increases) {
+        console.error(`BASELINE-GROWTH ${entry.ruleId} ${entry.file} (+${entry.additionalCount} adopted finding(s))`);
+    }
+    console.error('anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it');
+    return 1;
+}
+function check(cwd, args, envelope = null) {
     const baseline = baselineOrExplain(cwd);
     if (!baseline)
         return 2;
+    const envelopeStatus = checkBaselineEnvelope(baseline, envelope);
+    if (envelopeStatus !== 0)
+        return envelopeStatus;
     const scope = resolveAntiSlopScope(cwd, args);
     const selected = {
         ...baseline,
@@ -143,8 +172,20 @@ export default function run(args, cwd) {
     const trailingPaths = separator >= 0 ? rest.slice(separator + 1) : [];
     const force = options.includes('--force');
     const json = options.includes('--json');
+    const staged = options.includes('--staged');
+    const baseIndex = options.indexOf('--base');
+    const baseRef = baseIndex >= 0 ? options[baseIndex + 1] : undefined;
+    if (baseIndex >= 0 && (!baseRef || baseRef.startsWith('-'))) {
+        console.error('anti-slop: --base requires a Git ref');
+        return 2;
+    }
+    const consumed = new Set();
+    if (baseIndex >= 0) {
+        consumed.add(baseIndex);
+        consumed.add(baseIndex + 1);
+    }
     const paths = [
-        ...options.filter((arg) => arg !== '--force' && arg !== '--json'),
+        ...options.filter((arg, index) => arg !== '--force' && arg !== '--json' && arg !== '--staged' && !consumed.has(index)),
         ...(separator >= 0 ? ['--', ...trailingPaths] : []),
     ];
     if (force && operation !== 'create') {
@@ -155,10 +196,33 @@ export default function run(args, cwd) {
         console.error('anti-slop: --json is accepted only by inspect');
         return 2;
     }
+    if (staged && operation !== 'check') {
+        console.error('anti-slop: --staged is accepted only by check');
+        return 2;
+    }
+    if (baseRef && operation !== 'check') {
+        console.error('anti-slop: --base is accepted only by check');
+        return 2;
+    }
+    if (staged && (baseRef || paths.length > 0)) {
+        console.error('anti-slop: --staged uses the complete Git index and accepts no paths or --base');
+        return 2;
+    }
     if (operation === 'create')
         return create(cwd, paths, force);
-    if (operation === 'check')
-        return check(cwd, paths);
+    if (operation === 'check' && staged) {
+        return withStagedAntiSlopSnapshot(cwd, (snapshot) => {
+            if (snapshot.skipped) {
+                console.log('anti-slop: PASS — no relevant staged files or configuration changes');
+                return 0;
+            }
+            return check(snapshot.cwd, snapshot.paths, snapshot);
+        });
+    }
+    if (operation === 'check') {
+        const envelope = baseRef ? gitBaselineEnvelope(cwd, baseRef) : null;
+        return check(cwd, paths, envelope);
+    }
     if (operation === 'inspect') {
         if (paths.length > 0 || force) {
             console.error('anti-slop inspect accepts only --json');

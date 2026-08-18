@@ -81,11 +81,14 @@ Run `devkit help` for the command index and `devkit help <command>` for authorit
 devkit init --anti-slop
 devkit anti-slop create
 devkit anti-slop check
+devkit anti-slop check --staged
 ```
 
 `--anti-slop` implies the opt-in Oxc capability. Rules load beside the repository's other
 Oxlint rules; their severities and scoped overrides stay in the ordinary Oxlint config. Baseline
 creation is always explicit, normal checks are read-only, and pruning can only remove fixed debt.
+The staged form reads the exact Git index, and CI can pass `--base <ref>` to prevent a candidate
+baseline from growing relative to its base commit.
 See the [anti-slop capability guide](docs/anti-slop.md) for provenance, the complete rule matrix,
 and the fingerprint contract.
 
@@ -206,6 +209,7 @@ bun run test:run
 bun run typecheck
 bun run format:check
 bun run lint
+bun run lint:anti-slop
 bun run lint:structure
 bun run benchmarks:check
 ```
@@ -214,6 +218,12 @@ bun run benchmarks:check
 commands use the current source instead of the last compiled package bin. Benchmark tracker
 development additionally uses `bun run benchmarks:typecheck`. Release builds compile `.mts` sources
 into `dist/`; day-to-day changes should not hand-edit generated `dist` files.
+
+Devkit self-host mode always dogfoods its pinned Oxc and vendored anti-slop capabilities. The
+managed `.devkit/oxc/` and `.devkit/anti-slop/` trees plus `.anti-slop-baseline.json` are committed;
+the generated hook checks staged postimages while CI performs the full baseline-aware scan. See the
+[assembled quality-stack benchmark](docs/benchmarks/experiments/2026-08-16-oxc-devkit-dogfood/README.md)
+for the final ownership and performance rationale.
 
 ## Documentation
 

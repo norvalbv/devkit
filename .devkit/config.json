@@ -1,6 +1,6 @@
 {
   "stack": "node-service",
-  "devkitRef": "v0.49.1",
+  "devkitRef": "v0.51.1",
   "initVersion": 2,
   "pkgRel": "",
   "standalone": false,
@@ -15,9 +15,12 @@
     "husky": true,
     "structure": false,
     "fallow": false,
+    "oxc": true,
+    "antiSlop": true,
     "searchCode": false,
     "lineGrowth": true,
     "adhd": true,
+    "priorArtGate": false,
     "agentTargets": [
       "claude",
       "cursor"
