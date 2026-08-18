@@ -26,7 +26,7 @@ jobs:
       - name: Format (Oxfmt)
         run: bun run format:check
 
-      - name: Lint and assist (Biome)
+      - name: Lint and assist (Oxlint + Biome retained lanes)
         run: bun run lint
 
       - name: Anti-slop (Oxlint, baseline-aware)

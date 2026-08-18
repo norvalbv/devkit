@@ -1,0 +1,30 @@
+{
+  "$schema": "../node_modules/@biomejs/biome/configuration_schema.json",
+  "extends": ["../biome.jsonc"],
+  // Tests intentionally use inline regexes in assertions, and the former Biome
+  // profile explicitly exempted them. Keep that policy while the dedicated
+  // profile checks the production paths.
+  "files": {
+    "includes": ["!**/*.test.mts"]
+  },
+  "javascript": {
+    "linter": {
+      "enabled": true
+    }
+  },
+  "linter": {
+    "rules": {
+      // This is a deliberately single-rule profile. It avoids re-running the
+      // JS/TS policy that Oxlint owns, while retaining the one Biome-only rule.
+      "recommended": false,
+      "correctness": {
+        "noUnusedImports": "off",
+        "noUnusedVariables": "off",
+        "useHookAtTopLevel": "off"
+      },
+      "performance": {
+        "useTopLevelRegex": "error"
+      }
+    }
+  }
+}

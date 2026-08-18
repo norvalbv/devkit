@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-18T15:37:35.860Z",
+  "source": {
+    "controlRef": "origin/main",
+    "controlCommit": "8f562e02c7bef763b2aee1903040d05c67e22f70",
+    "candidateCommit": "8f562e02c7bef763b2aee1903040d05c67e22f70",
+    "candidateState": "the worktree changes documented by this experiment"
+  },
+  "host": {
+    "os": "Darwin 25.5.0 arm64",
+    "node": "24.19.0",
+    "bun": "1.3.1",
+    "logicalCpuCount": 10
+  },
+  "protocol": {
+    "warmups": 3,
+    "samples": 10,
+    "order": "alternating control-first/candidate-first",
+    "control": "clean origin/main archive with its original bun run lint script",
+    "candidate": "this candidate worktree with its proposed bun run lint script",
+    "dependencies": "shared installed node_modules, excluded from timing",
+    "cpu": "/usr/bin/time -lp aggregate user + sys; primary decision metric",
+    "rss": "10ms sampling; sum RSS of /usr/bin/time wrapper and all descendants"
+  },
+  "columns": ["wallMs", "cpuMs", "treePeakRssBytes"],
+  "samples": {
+    "control": [
+      [406.646, 2320, 215187456],
+      [505.921, 2570, 215941120],
+      [418.972, 2350, 215678976],
+      [378.655, 2300, 216514560],
+      [422.761, 2210, 214925312],
+      [436.629, 2400, 215728128],
+      [412.069, 2340, 216006656],
+      [396.798, 2330, 215924736],
+      [378.388, 2310, 215695360],
+      [517.018, 2470, 212729856]
+    ],
+    "candidate": [
+      [264.393, 690, 106577920],
+      [256.342, 710, 126025728],
+      [261.845, 680, 123158528],
+      [263.855, 700, 135086080],
+      [284.782, 730, 133087232],
+      [266.489, 700, 143523840],
+      [258.507, 690, 116998144],
+      [238.646, 690, 143048704],
+      [227.035, 670, 142737408],
+      [298.408, 720, 142802944]
+    ]
+  },
+  "summary": {
+    "control": {
+      "wallMs": { "median": 415.520, "p95": 517.018 },
+      "cpuMs": { "median": 2335, "p95": 2570 },
+      "treePeakRssBytes": { "median": 215711744, "p95": 216514560 }
+    },
+    "candidate": {
+      "wallMs": { "median": 262.850, "p95": 298.408 },
+      "cpuMs": { "median": 695, "p95": 730 },
+      "treePeakRssBytes": { "median": 134086656, "p95": 143523840 }
+    }
+  }
+}

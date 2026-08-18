@@ -36,6 +36,14 @@
       "!!dist"
     ]
   },
+  // Native Oxlint owns Devkit's general JS/TS lint policy. Biome keeps its editor assist config
+  // plus JSON/CSS diagnostics; lint:regex invokes its one JS-only retained rule from
+  // biome/regex.jsonc.
+  "javascript": {
+    "linter": {
+      "enabled": false
+    }
+  },
   "overrides": [
     {
       // The gate-engine bins are CLIs — console output is their legitimate UX, not a
