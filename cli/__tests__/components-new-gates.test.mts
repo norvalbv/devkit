@@ -1,8 +1,3 @@
-/**
- * The gate registry after promoting `qavis-advisory` to recommended, plus `newBundledGates` — the
- * pure reconcile helper `upgrade` uses to detect gates a recorded selection predates (the fix for
- * `devkit upgrade` silently dropping a newly-bundled gate).
- */
 import { describe, expect, it } from 'vitest';
 import { GUARD_IDS, newBundledGates, RECOMMENDED_GUARD_IDS } from '../lib/components.mts';
 
@@ -29,7 +24,7 @@ describe('newBundledGates', () => {
   it('splits gates missing from a recorded selection into recommended vs opt-in', () => {
     const recorded = ['size', 'fanout', 'dup', 'clone', 'decisions']; // a pre-qavis selection
     const { recommended, optIn } = newBundledGates(recorded);
-    expect(recommended).toEqual(['qavis-advisory']); // newly recommended, absent
+    expect(recommended).toEqual(['comments', 'qavis-advisory']);
     expect(optIn).toEqual(['review', 'sentry', 'coverage']); // bundled but never selected
   });
 

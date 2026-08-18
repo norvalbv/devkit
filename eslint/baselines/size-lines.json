@@ -4,7 +4,6 @@
   "files": {
     "cli/commands/init.mts": 1188,
     "cli/lib/generate/generate-structure-baseline.mts": 876,
-    "cli/lib/husky/husky-block.mts": 510,
     "cli/lib/overlay.mts": 558,
     "gate-engine/co-occurrence/matcher.mts": 540,
     "gate-engine/critique/eval/bench.mts": 1165,

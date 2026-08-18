@@ -11,6 +11,7 @@ import { isQuotedOrCommented } from "./hook-gate-scan.mjs";
 // is (almost always) a hand-written copy that predates devkit owning the gate.
 const DEVKIT_GATE_BINS = [
     'guard-deterministic',
+    'guard-comments',
     'guard-decisions',
     'guard-review',
     'guard-qavis-advisory',

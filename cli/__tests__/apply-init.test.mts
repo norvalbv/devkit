@@ -43,7 +43,15 @@ describe('selection helpers', () => {
       husky: true,
       structure: true,
     });
-    expect(s.guards).toEqual(['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory']);
+    expect(s.guards).toEqual([
+      'size',
+      'fanout',
+      'dup',
+      'clone',
+      'comments',
+      'decisions',
+      'qavis-advisory',
+    ]);
     expect(s.agentTargets).toEqual(['claude', 'codex', 'cursor']);
   });
 
@@ -797,6 +805,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
           name: '@norvalbv/devkit',
           bin: {
             'guard-deterministic': './dist/gate-engine/deterministic/run.mjs',
+            'guard-comments': './dist/gate-engine/comment-firewall/cli.mjs',
             'guard-decisions': './dist/gate-engine/decisions/cli.mjs',
             'guard-review': './dist/gate-engine/review/cli.mjs',
             'guard-qavis-advisory': './dist/gate-engine/qavis-advisory/cli.mjs',

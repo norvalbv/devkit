@@ -15,6 +15,7 @@ node_modules
 .devkit/review-runs/
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
+.devkit/comment-firewall-receipts.json
 # ...and the `.generation` sidecars those caches write. Untracked-but-not-ignored, they were enough
 # to make `devkit release` refuse ("working tree not clean") in the repo that ships devkit itself.
 .devkit/*.generation
