@@ -139,17 +139,15 @@ describe('judge MCP profiles', () => {
     expect(fromLink.serverNames).toEqual([]);
   });
 
-  it('grants the complete autonomous_bugs server namespace to named agents', () => {
+  it('grants the complete named MCP server namespaces to named agents', () => {
     const tools = withNamedAgentMcpTools('Read,Grep', 'mcp__alternate__query');
-    expect(tools.split(',')).toEqual(
-      expect.arrayContaining([
-        'Read',
-        'Grep',
-        'mcp__codebase',
-        'mcp__context7',
-        'mcp__autonomous_bugs',
-        'mcp__alternate__query',
-      ]),
-    );
+    expect(tools.split(',')).toEqual([
+      'Read',
+      'Grep',
+      'mcp__codebase__*',
+      'mcp__context7__*',
+      'mcp__autonomous_bugs__*',
+      'mcp__alternate__query',
+    ]);
   });
 });

@@ -2,7 +2,7 @@
 name: conventions-reviewer
 mcpServers: [codebase, context7, autonomous_bugs]
 description: "Use this agent to check a diff against the governing CLAUDE.md files of the repo it's installed in. Flags a violation only when it can quote both the exact rule and the exact offending line; otherwise stays silent. No style opinions.\\n\\n<example>\\nContext: A CLAUDE.md rule says never hand-edit generated files.\\nuser: \"Updated the generated icon exports directly\"\\nassistant: \"I'll run the conventions-reviewer agent to check whether that edit violates the repo's own generated-file rule.\"\\n<commentary>\\nA written CLAUDE.md rule with an unhedged directive and a concrete offending line is exactly what this reviewer exists to catch.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: A nested package has its own CLAUDE.md scoping a rule to that package only.\\nuser: \"Added a new file under packages/api\"\\nassistant: \"Let me invoke the conventions-reviewer agent — packages/api's own CLAUDE.md may govern this file, on top of the repo root's.\"\\n<commentary>\\nScoping matters: a rule in one package's CLAUDE.md never governs a sibling package's files.\\n</commentary>\\n</example>"
-tools: Read, Grep, Glob, mcp__codebase, mcp__context7, mcp__autonomous_bugs
+tools: Read, Grep, Glob, mcp__codebase__*, mcp__context7__*, mcp__autonomous_bugs__*
 model: haiku
 color: cyan
 ---

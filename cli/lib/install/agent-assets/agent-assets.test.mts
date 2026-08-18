@@ -156,7 +156,11 @@ Keep C:\tmp and triple quotes """ intact.
       if (tools) {
         const toolNames = tools.split(',').map((tool) => tool.trim());
         expect(toolNames, file).toEqual(
-          expect.arrayContaining(['mcp__codebase', 'mcp__context7', 'mcp__autonomous_bugs']),
+          expect.arrayContaining([
+            'mcp__codebase__*',
+            'mcp__context7__*',
+            'mcp__autonomous_bugs__*',
+          ]),
         );
       }
     }

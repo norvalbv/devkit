@@ -15,7 +15,9 @@ import path from 'node:path';
 import { withoutGitEnv } from '../judge-isolation.mts';
 
 const BASELINE_SERVER_NAMES = ['codebase', 'context7', 'autonomous_bugs'] as const;
-const BASELINE_TOOL_PREFIXES = BASELINE_SERVER_NAMES.map((name) => `mcp__${name}`);
+// Claude Code matches server-wide MCP permissions with the explicit `__*` suffix.
+// A bare `mcp__<server>` is an exact tool name, not a namespace grant.
+const BASELINE_TOOL_PREFIXES = BASELINE_SERVER_NAMES.map((name) => `mcp__${name}__*`);
 const EMPTY_MCP_CONFIG = '{"mcpServers":{}}';
 const REGISTRY_ENV = 'DEVKIT_JUDGE_MCP_CONFIG';
 
