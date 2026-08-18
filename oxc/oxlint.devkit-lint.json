@@ -1,0 +1,37 @@
+{
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "oxc", "react"],
+  "categories": {
+    "correctness": "deny",
+    "perf": "deny",
+    "suspicious": "deny",
+    "pedantic": "allow",
+    "restriction": "allow",
+    "style": "allow",
+    "nursery": "allow"
+  },
+  "rules": {
+    "eslint/no-await-in-loop": "allow",
+    "eslint/no-console": "allow",
+    "eslint/no-extend-native": "allow",
+    "eslint/no-shadow": "allow",
+    "eslint/no-underscore-dangle": "allow",
+    "eslint/preserve-caught-error": "allow",
+    "oxc/no-map-spread": "allow",
+    "react/rules-of-hooks": "deny"
+  },
+  "overrides": [
+    {
+      "files": ["**/upstream-sync/scripts/sync.mjs"],
+      "rules": {
+        "eslint/no-unused-vars": "allow"
+      }
+    },
+    {
+      "files": ["**/comment-firewall/__tests__/detect.test.mts"],
+      "rules": {
+        "eslint/no-useless-concat": "allow"
+      }
+    }
+  ]
+}
