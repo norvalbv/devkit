@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import type { CommentFinding, CommentJudgeResult, CommentRationale } from './types.mts';
+import { isJsonObject, isJsonString, parseJson } from './types.mts';
 
 export const COMMENT_JUDGE_POLICY = 'comment-exception-v1';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-15.1';
@@ -57,10 +58,11 @@ export function parseCommentJudge(raw: string): CommentJudgeResult | null {
     const fenced = trimmed.match(FENCED_JSON);
     const tail = fenced?.[2]?.trim() ?? '';
     if (tail && (VERDICT_WORD.test(tail) || STRUCTURED_TAIL.test(tail))) return null;
-    const value = JSON.parse(fenced?.[1] ?? trimmed) as Record<string, unknown>;
+    const value = parseJson(fenced?.[1] ?? trimmed);
     if (
+      !isJsonObject(value) ||
       (value.verdict !== 'PASS' && value.verdict !== 'FAIL') ||
-      typeof value.reason !== 'string' ||
+      !isJsonString(value.reason) ||
       !value.reason.trim() ||
       value.reason.length > 1_000 ||
       Object.keys(value).some((key) => key !== 'verdict' && key !== 'reason')

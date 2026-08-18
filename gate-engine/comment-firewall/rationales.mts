@@ -12,7 +12,8 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { withStoreLock } from '../judge/verdict-store.mts';
-import type { CommentRationale, RationaleStore } from './types.mts';
+import type { CommentRationale, JsonValue, RationaleStore } from './types.mts';
+import { isJsonObject, isJsonString, parseJson } from './types.mts';
 
 export const RATIONALES_FILE = '.devkit/comment-firewall-rationales.json';
 const STORE_MAX_BYTES = 1024 * 1024;
@@ -36,44 +37,43 @@ const PLACEHOLDERS = new Set([
 const emptyStore = (): RationaleStore => ({ version: 1, entries: {} });
 
 function parseStore(raw: string, label: string): RationaleStore {
-  let value: unknown;
+  let value: JsonValue;
   try {
-    value = JSON.parse(raw);
+    value = parseJson(raw);
   } catch (cause) {
     throw new Error(
       `${label} is not valid JSON: ${cause instanceof Error ? cause.message : cause}`,
     );
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isJsonObject(value)) {
     throw new Error(`${label} must be a JSON object`);
   }
-  const candidate = value as { version?: unknown; entries?: unknown };
-  if (candidate.version !== 1 || !candidate.entries || typeof candidate.entries !== 'object') {
+  if (value.version !== 1 || !isJsonObject(value.entries)) {
     throw new Error(`${label} must use schema { version: 1, entries: { ... } }`);
   }
   const entries: Record<string, CommentRationale> = {};
-  for (const [id, rawEntry] of Object.entries(candidate.entries)) {
-    if (!FINDING_ID.test(id) || !rawEntry || typeof rawEntry !== 'object') {
+  for (const [id, entry] of Object.entries(value.entries)) {
+    if (!FINDING_ID.test(id) || !isJsonObject(entry)) {
       throw new Error(`${label} contains an invalid finding entry: ${id}`);
     }
-    const entry = rawEntry as Record<string, unknown>;
     if (
-      typeof entry.rationale !== 'string' ||
+      !isJsonString(entry.rationale) ||
       !entry.rationale.trim() ||
-      typeof entry.at !== 'string' ||
+      !isJsonString(entry.at) ||
       !entry.at.trim() ||
-      (entry.ticket !== undefined && typeof entry.ticket !== 'string')
+      (entry.ticket !== undefined && !isJsonString(entry.ticket))
     ) {
       throw new Error(`${label} contains malformed evidence for finding ${id}`);
     }
     try {
       const rationale = validRationale(entry.rationale);
-      const ticket = typeof entry.ticket === 'string' ? validTicket(entry.ticket) : undefined;
-      entries[id] = {
+      const ticket = isJsonString(entry.ticket) ? validTicket(entry.ticket) : undefined;
+      const parsed: CommentRationale = {
         rationale,
         at: entry.at,
-        ...(ticket ? { ticket } : {}),
       };
+      if (ticket) parsed.ticket = ticket;
+      entries[id] = parsed;
     } catch (cause) {
       throw new Error(
         `${label} contains malformed evidence for finding ${id}: ${cause instanceof Error ? cause.message : cause}`,
@@ -187,8 +187,8 @@ export function recordRationale(
   const entry: CommentRationale = {
     rationale: validRationale(rationale),
     at: now,
-    ...(canonicalTicket ? { ticket: canonicalTicket } : {}),
   };
+  if (canonicalTicket) entry.ticket = canonicalTicket;
   const file = workingPath(cwd);
   const root = repositoryRoot(cwd);
   const completed = withStoreLock(file, {}, (handle) => {
