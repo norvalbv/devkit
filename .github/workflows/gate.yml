@@ -23,7 +23,10 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Lint (Biome)
+      - name: Format (Oxfmt)
+        run: bun run format:check
+
+      - name: Lint and assist (Biome)
         run: bun run lint
 
       - name: Structure governance (folder-structure)

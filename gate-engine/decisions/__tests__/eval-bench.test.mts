@@ -377,24 +377,28 @@ describe('sub-benches (stubbed claude)', () => {
   });
 
   // 3 fixture repos + 3 stub judges — legitimately slow under full-suite load, hence the budget.
-  it('alignment: a partial outage scores that row NULL and continues; all-outage aborts (2)', {
-    timeout: 30000,
-  }, () => {
-    // The stub crashes only for the target whose ruling mentions "flaky".
-    useStub(
-      'case "$*" in\n  *"flaky ruling"*) exit 3;;\n  *) printf "VERDICT: ALIGN\\n";;\nesac\n',
-    );
-    const s = runAlignmentBench(
-      [alignRow('ok', 'stay generic', 'ALIGN'), alignRow('down', 'flaky ruling', 'ALIGN')],
-      { cascade: false },
-    );
-    expect(s.outages).toBe(1);
-    expect(s.results.find((r) => r.id === 'down').final).toBe('NULL');
-    useStub('exit 3\n');
-    expect(() =>
-      runAlignmentBench([alignRow('all-down', 'stay generic', 'ALIGN')], { cascade: false }),
-    ).toThrow(BenchAbort);
-  });
+  it(
+    'alignment: a partial outage scores that row NULL and continues; all-outage aborts (2)',
+    {
+      timeout: 30000,
+    },
+    () => {
+      // The stub crashes only for the target whose ruling mentions "flaky".
+      useStub(
+        'case "$*" in\n  *"flaky ruling"*) exit 3;;\n  *) printf "VERDICT: ALIGN\\n";;\nesac\n',
+      );
+      const s = runAlignmentBench(
+        [alignRow('ok', 'stay generic', 'ALIGN'), alignRow('down', 'flaky ruling', 'ALIGN')],
+        { cascade: false },
+      );
+      expect(s.outages).toBe(1);
+      expect(s.results.find((r) => r.id === 'down').final).toBe('NULL');
+      useStub('exit 3\n');
+      expect(() =>
+        runAlignmentBench([alignRow('all-down', 'stay generic', 'ALIGN')], { cascade: false }),
+      ).toThrow(BenchAbort);
+    },
+  );
 });
 
 // ─── Small-n statistics ───────────────────────────────────────────────────────────

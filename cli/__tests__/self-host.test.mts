@@ -7,16 +7,18 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
+import { buildFullHook, extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
   buildSelfHostBlock,
@@ -51,14 +53,21 @@ describe('self-host bin rewrite', () => {
     expect(() => sourceBinFor(ROOT, 'guard-nope')).toThrow(/no bin/);
   });
 
-  it('toSelfHost rewrites `bunx guard-*` to `node <source>` and leaves `bunx biome` alone', () => {
+  it('toSelfHost rewrites source gates and the self-host formatter without changing consumers', () => {
     const input =
       'bunx guard-review --gate\nbunx biome format --write\nbunx guard-deterministic --hook x';
     const out = toSelfHost(input, ROOT);
     expect(out).toContain('node gate-engine/review/cli.mts --gate');
     expect(out).toContain('node gate-engine/deterministic/run.mts --hook x');
-    expect(out).toContain('bunx biome format --write'); // real devDep — untouched
+    expect(out).toContain('node_modules/.bin/oxfmt --threads 1 --write');
+    expect(out).not.toContain('bunx biome format --write');
     expect(out).not.toContain('bunx guard-');
+  });
+
+  it('leaves the generic consumer hook on Biome until that repository proves parity', () => {
+    const hook = buildFullHook({ biome: true, guards: [] });
+    expect(hook).toContain('bunx biome format --write');
+    expect(hook).not.toContain('node_modules/.bin/oxfmt');
   });
 });
 
@@ -111,8 +120,77 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).toContain('--extra "benchmarks=bun run benchmarks:check -- --mode staged"');
     expect(hook).toContain('--structure "bun run lint:structure"');
+    expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write');
+    expect(hook).toContain('(cli|gate-engine)/');
+    expect(hook).toContain('skills/.*\\.mjs');
+    expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write || exit 1');
+    expect(hook).not.toContain('oxfmt --threads 1 --write 2>/dev/null || true');
+    expect(hook).not.toContain("grep -E '\\.(tsx?|jsx?|css|json|jsonc|mjs|mts)$'");
+    expect(hook).not.toContain('bunx biome format --write');
     expect(hook).not.toMatch(/bunx guard-/);
     expect(hook).not.toContain('@norvalbv/devkit');
+  });
+
+  it('formats and re-stages only files inside the proven self-host scope', () => {
+    const root = mkdtempSync(join(tmpdir(), 'self-host-oxfmt-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    symlinkSync(join(ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(root, 'docs', 'benchmarks'), { recursive: true });
+    writeFileSync(join(root, '.oxfmtrc.json'), '{}\n');
+    writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
+    writeFileSync(join(root, 'cli', 'partial.mts'), 'const partial={staged:true}\n');
+    writeFileSync(join(root, 'docs', 'benchmarks', 'catalog.json'), '{"evidence":true}\n');
+    execFileSync(
+      'git',
+      ['add', '.oxfmtrc.json', 'cli/sample.mts', 'cli/partial.mts', 'docs/benchmarks/catalog.json'],
+      { cwd: root },
+    );
+    writeFileSync(join(root, 'cli', 'partial.mts'), 'const partial={working:true}\n');
+
+    const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
+      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+    )?.[0];
+    expect(fragment).toBeDefined();
+    execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root });
+
+    const formatted = 'const value = { answer: 42 };\n';
+    expect(readFileSync(join(root, 'cli', 'sample.mts'), 'utf8')).toBe(formatted);
+    expect(execFileSync('git', ['show', ':cli/sample.mts'], { cwd: root, encoding: 'utf8' })).toBe(
+      formatted,
+    );
+    const evidence = '{"evidence":true}\n';
+    expect(readFileSync(join(root, 'docs', 'benchmarks', 'catalog.json'), 'utf8')).toBe(evidence);
+    expect(
+      execFileSync('git', ['show', ':docs/benchmarks/catalog.json'], {
+        cwd: root,
+        encoding: 'utf8',
+      }),
+    ).toBe(evidence);
+    expect(readFileSync(join(root, 'cli', 'partial.mts'), 'utf8')).toBe(
+      'const partial={working:true}\n',
+    );
+    expect(execFileSync('git', ['show', ':cli/partial.mts'], { cwd: root, encoding: 'utf8' })).toBe(
+      'const partial={staged:true}\n',
+    );
+  });
+
+  it('blocks the self-host hook when Oxfmt fails', () => {
+    const root = mkdtempSync(join(tmpdir(), 'self-host-oxfmt-failure-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    const oxfmt = join(root, 'node_modules', '.bin', 'oxfmt');
+    writeFileSync(oxfmt, '#!/bin/sh\nexit 7\n');
+    chmodSync(oxfmt, 0o755);
+    writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
+    execFileSync('git', ['add', 'cli/sample.mts'], { cwd: root });
+
+    const fragment = buildSelfHostHook(HOOK_SEL, '', ROOT).match(
+      /# devkit:biome-format[\s\S]*?# \/devkit:biome-format/,
+    )?.[0];
+    expect(fragment).toBeDefined();
+    expect(() => execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root })).toThrow();
   });
 
   // The `--extra` above is only as hard as the script it names, and biome exits 0 when every
@@ -126,7 +204,7 @@ describe('buildSelfHostHook', () => {
       readFileSync(join(ROOT, 'package.json'), 'utf8'),
     );
     expect(SELF_HOST_EXTRAS).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
-    expect(pkg.scripts?.lint).toContain('--error-on-warnings');
+    expect(pkg.scripts?.lint).toBe('biome check --formatter-enabled=false --error-on-warnings .');
   });
 
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {

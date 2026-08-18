@@ -216,14 +216,12 @@ export async function runReviewGate(
   const results = await mapLimit(plan.tasks, concurrency, (t, index) => {
     const t0 = Date.now();
     return runCascade(t.sel, { ...baseOpts, recovery: assetRoot ? 'defer' : undefined })
-      .catch(
-        (e): CascadeResult => ({
-          name: t.sel.reviewer.name,
-          status: reviewMode ? 'error' : 'inconclusive',
-          reason: `engine error: ${e?.message ?? e}`,
-          escalated: false,
-        }),
-      )
+      .catch((e): CascadeResult => ({
+        name: t.sel.reviewer.name,
+        status: reviewMode ? 'error' : 'inconclusive',
+        reason: `engine error: ${e?.message ?? e}`,
+        escalated: false,
+      }))
       .then((outcome) => {
         const res = settleReviewOutcome(sctx, t, outcome, Date.now() - t0);
         const reason = retryableReason(res);
@@ -241,14 +239,12 @@ export async function runReviewGate(
         retryFirst: false, // the deferred run IS the second chance — never stack the outage retry
         checklistRecoveryReason: reason,
         recovery: 'final',
-      }).catch(
-        (e): CascadeResult => ({
-          name: task.sel.reviewer.name,
-          status: reviewMode ? 'error' : 'inconclusive',
-          reason: `engine error: ${e?.message ?? e}`,
-          escalated: false,
-        }),
-      ),
+      }).catch((e): CascadeResult => ({
+        name: task.sel.reviewer.name,
+        status: reviewMode ? 'error' : 'inconclusive',
+        reason: `engine error: ${e?.message ?? e}`,
+        escalated: false,
+      })),
     gateStart,
   );
   if (progressFile) clearProgress(progressFile); // ran to completion → nothing unfinished to report

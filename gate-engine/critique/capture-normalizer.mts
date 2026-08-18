@@ -100,11 +100,10 @@ interface SanitizedText extends Sanitized<string> {
   segments: Array<{ value: string; redacted: boolean }>;
 }
 
-export interface PlanCritiqueCompletedCallbackV1
-  extends Pick<
-    PlanCritiqueCaptureInputV1,
-    'workId' | 'repository' | 'providerCompletedAt' | 'exactResponse' | 'opaqueTranscript'
-  > {
+export interface PlanCritiqueCompletedCallbackV1 extends Pick<
+  PlanCritiqueCaptureInputV1,
+  'workId' | 'repository' | 'providerCompletedAt' | 'exactResponse' | 'opaqueTranscript'
+> {
   provider: PlanCritiqueProvider;
   callbackIdentity: string;
   model: string | null;

@@ -112,7 +112,7 @@ export function parseNameStatusZ(raw: string): ChangedPath[] {
   const fields = raw.split(NUL);
   if (fields.at(-1) === '') fields.pop();
   const changes: ChangedPath[] = [];
-  for (let i = 0; i < fields.length; ) {
+  for (let i = 0; i < fields.length;) {
     const status = fields[i++];
     if (!status) fail('malformed empty status in staged name-status output');
     const kind = status[0];

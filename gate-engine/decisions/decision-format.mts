@@ -62,10 +62,10 @@ export interface TargetOptions extends AddOptions {
 export function hasTargetFields(options: AddOptions): options is TargetOptions {
   return Boolean(
     options.ruling &&
-      options.context &&
-      options.consequences &&
-      options.tradeoff &&
-      options.visionFit,
+    options.context &&
+    options.consequences &&
+    options.tradeoff &&
+    options.visionFit,
   );
 }
 

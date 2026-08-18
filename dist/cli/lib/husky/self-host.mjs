@@ -25,11 +25,13 @@ import { readJson } from "../fs-helpers.mjs";
 import { markEnd } from "./husky.mjs";
 import { buildFullHook, buildGuardBlock, extractGuardBlock, replaceGuardBlock, } from "./husky-block.mjs";
 // devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
-// and its hard biome-lint gate (`lint` = `biome check --error-on-warnings .` — biome exits 0 when
+// and its hard Biome lint/assist gate (`lint` disables Biome's formatter explicitly — Biome exits 0 when
 // every diagnostic is warn-severity, so without that flag the gate PRINTS its findings into the log
 // and passes the commit anyway). The hard-lint is folded into the deterministic orchestrator via
 // `--extra` (any non-zero blocks); both run via real devDeps
-// (eslint/biome), so toSelfHost leaves them untouched. Together with the advisory fallow fragment
+// (eslint/biome). Formatting is the one self-host-only rewrite beyond guard bins: Devkit has proven
+// its pinned Oxfmt output over its own authored scope, while consumer hooks stay on Biome until each
+// consumer completes the same parity exercise. Together with the advisory fallow fragment
 // below, the self-host hook preserves every gate the pre-self-host hand hook ran AND adds review + dup/clone.
 export const SELF_HOST_STRUCTURE_CMD = 'bun run lint:structure';
 export const SELF_HOST_EXTRAS = [
@@ -58,8 +60,19 @@ else
 fi
 # /devkit:fallow-advisory`;
 // Matches the `bunx guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
-// covered by `[a-z-]+`. `bunx biome` has no `guard-` prefix → correctly left alone.
+// covered by `[a-z-]+`. The formatter has its own exact rewrite below so consumer output is not
+// affected by the self-host-only Oxfmt adoption.
 const BUNX_GUARD_RE = /\bbunx (guard-[a-z-]+)\b/g;
+const BUNX_BIOME_FORMAT_RE = /\bbunx biome format --write\b/g;
+const BIOME_FORMAT_COMMENT_RE = /Format staged files with biome/g;
+const BIOME_FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|css|json|jsonc|mjs)$';
+const BIOME_FORMAT_FILTER = `grep -E '${BIOME_FORMAT_EXTENSIONS}'`;
+const SELF_HOST_OXFMT_BEST_EFFORT = 'node_modules/.bin/oxfmt --threads 1 --write 2>/dev/null || true';
+const SELF_HOST_OXFMT_HARD = 'node_modules/.bin/oxfmt --threads 1 --write || exit 1';
+// Keep the staged hook on the same authored-file boundary as package.json's format scripts. A
+// broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
+// generated output that the adopted 558-file parity experiment never selected.
+const SELF_HOST_FORMAT_FILTER = "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\\.jsonc?|skills/.*\\.mjs|\\.co-occurrence-allowlist\\.json|\\.fallowrc\\.jsonc|\\.oxfmtrc\\.json|biome\\.jsonc|eslint\\.config\\.mjs|guard\\.config(\\.example)?\\.json|package\\.json|search-code\\.config\\.json|tsconfig(\\.build)?\\.json|vitest(\\.e2e)?\\.config\\.mjs|vitest\\.setup\\.mjs)$'";
 // The `./dist/<...>.mjs` → `<...>.mts` transform pieces (hoisted — useTopLevelRegex).
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;
@@ -82,9 +95,18 @@ export function sourceBinFor(cwd, binName) {
         throw new Error(`self-host: no bin "${binName}" in ${join(cwd, 'package.json')}`);
     return distPath.replace(DIST_PREFIX_RE, '').replace(MJS_EXT_RE, '.mts');
 }
-/** Rewrite every `bunx guard-<x>` in a generated hook to `node <source .mts>`. */
+/** Rewrite generated consumer commands to Devkit's self-host source/pinned-runtime equivalents. */
 export function toSelfHost(hookText, cwd) {
-    return hookText.replace(BUNX_GUARD_RE, (_m, bin) => `node ${sourceBinFor(cwd, bin)}`);
+    return (hookText
+        .replace(BUNX_GUARD_RE, (_m, bin) => `node ${sourceBinFor(cwd, bin)}`)
+        .replace(BUNX_BIOME_FORMAT_RE, 'node_modules/.bin/oxfmt --threads 1 --write')
+        .replace(BIOME_FORMAT_COMMENT_RE, 'Format staged files with Oxfmt')
+        // Formatting is a hard self-host responsibility now that Biome lint runs with formatting off.
+        // Generic consumer hooks retain their existing best-effort Biome behavior.
+        .replace(SELF_HOST_OXFMT_BEST_EFFORT, SELF_HOST_OXFMT_HARD)
+        // A replacement callback keeps the regex's terminal `$'` literal; replacement strings treat
+        // `$'` as the special token for the unmatched suffix.
+        .replace(BIOME_FORMAT_FILTER, () => SELF_HOST_FORMAT_FILTER));
 }
 /**
  * The canonical devkit-dogfood selection: every recommended component + guard, PLUS `review` (the
