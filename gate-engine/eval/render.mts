@@ -41,10 +41,10 @@ export function latestEvents(events: BenchmarkEvent[]): Map<string, BenchmarkEve
 function sameHashes(a: BenchmarkEvent['hashes'], b: ReturnType<typeof suiteHashes>): boolean {
   return Boolean(
     a &&
-      a.implementation === b.implementation &&
-      a.corpus === b.corpus &&
-      a.scorer === b.scorer &&
-      a.runner === b.runner,
+    a.implementation === b.implementation &&
+    a.corpus === b.corpus &&
+    a.scorer === b.scorer &&
+    a.runner === b.runner,
   );
 }
 
