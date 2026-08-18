@@ -24,6 +24,30 @@ In **overlay mode** a plain `git commit` (or an IDE/GUI commit) runs the **repo'
 that's the **self-heal** gap. Commit via the per-clone `git ci` alias instead, or enable the opt-in global
 shim with `devkit init --overlay --global-commit-gate`. See **overlay self-heal** in the glossary.
 
+## My commit in a worktree ran a DIFFERENT checkout's hook
+Symptom: a commit made in a linked worktree is blocked by a gate that worktree's own
+`.husky/pre-commit` doesn't even contain (or sails past one it does). The hook that ran belongs to
+another checkout — usually the main one, on its branch, at its version.
+
+Diagnose in one line, from the worktree:
+
+    git config --worktree --get core.hooksPath
+
+An **absolute** path into another checkout is the fault. Some worktree tooling writes it right after
+`git worktree add`, back when husky gitignored the `.husky/_` runner and a fresh worktree genuinely
+had none — borrowing the main checkout's beat having no gates at all. Once the runner is **tracked**
+(`devkit sync-hook-runner`) every checkout carries its own, and the pin only shadows it.
+
+Fix: `devkit sync-hook-runner` in that worktree. Once the checkout provably gates itself, it replaces
+the exact sibling value with the repo's relative fallback (usually `.husky/_`) in one locked Git
+config write; `devkit doctor` reports the state as **hooksPath owner** either way. It will not replace
+an external central-hooks path, an ambiguous value, or a target Git no longer records as a sibling.
+
+Two scopes are *not* covered, by design. A **repo-wide** `core.hooksPath` (`git config --local`) is
+reported but never replaced — it belongs to the repo, not to one checkout. And a value arriving via
+`GIT_CONFIG_*`, `--global` or `--system` is invisible to `devkit doctor`, while `devkit review` reads
+the fully merged value and *does* see it — so review can fail on a hooksPath doctor calls fine.
+
 ## `devkit doctor` reports skills/agents drift
 A synced copy in `.claude/` or `.cursor/` diverged from its **manifest** (or devkit's source moved ahead).
 Re-run `devkit sync-skills` / `devkit sync-agents` (NOT a hand edit). `devkit doctor --fix` also repairs it.

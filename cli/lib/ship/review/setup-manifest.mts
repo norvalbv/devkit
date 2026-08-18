@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from '../../atomic-write.mts';
 import type { ReviewProfile } from '../../components.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
@@ -256,7 +256,11 @@ function effectiveHooksPath(
   if (!overlay) {
     if (value !== '.husky/_')
       fail(
-        `core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected .husky/_ — ${DOCTOR}`,
+        `core.hooksPath is ${JSON.stringify(value || '(unset)')}, expected .husky/_ — ${
+          isAbsolute(value)
+            ? `run 'devkit doctor' for the ownership diagnosis, then 'devkit sync-hook-runner' to repair a proven sibling-worktree pin; otherwise repoint it explicitly: git config core.hooksPath .husky/_`
+            : DOCTOR
+        }`,
       );
     return value;
   }

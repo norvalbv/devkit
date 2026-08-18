@@ -12,7 +12,7 @@ import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_ST
 import { checkAdhdSkill } from "../install/adhd-skill.mjs";
 import { checkAgents, checkSkills } from "./asset-checks.mjs";
 import { adviseSearchIndex } from "./guard-config-checks.mjs";
-import { checkHookRunner } from "./hook-checks.mjs";
+import { checkHookRunner, checkHooksPathOwner } from "./hook-checks.mjs";
 import { printStrayGateCalls } from "./stray-gate-calls.mjs";
 import { inspectHookFailOpen, renderUnguardedGateCalls } from "./unguarded-gate-calls.mjs";
 export async function runSelfHostDoctor(cwd, cfg, fix) {
@@ -71,9 +71,13 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.
-    const runner = checkHookRunner(cwd);
-    console.log(`  ${runner.status === 'OK' ? '✓' : '⚠'} ${runner.name}: ${runner.detail}`);
-    if (runner.status !== 'OK')
-        console.log(`      → ${runner.remediation}`);
-    return hookOk && runner.status === 'OK' ? 0 : 1;
+    // For the same reason it owes itself the ownership verdict: devkit is developed almost entirely
+    // from linked worktrees, which is exactly where a foreign core.hooksPath hides.
+    const hookState = [checkHookRunner(cwd), ...checkHooksPathOwner(cwd)];
+    for (const r of hookState) {
+        console.log(`  ${r.status === 'OK' ? '✓' : '⚠'} ${r.name}: ${r.detail}`);
+        if (r.status !== 'OK')
+            console.log(`      → ${r.remediation}`);
+    }
+    return hookOk && hookState.every((r) => r.status === 'OK') ? 0 : 1;
 }

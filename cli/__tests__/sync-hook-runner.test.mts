@@ -65,7 +65,9 @@ describe('devkit sync-hook-runner', () => {
       encoding: 'utf8',
     });
 
-    expect(r).toContain('nothing to stage');
+    // The command now covers both halves of "this checkout runs its own hooks" — a tracked runner
+    // AND no foreign core.hooksPath pin — so the no-op line names the guarantee, not just staging.
+    expect(r).toContain('already runs its own hooks');
   });
 
   it('--dry-run reports without staging anything', () => {
