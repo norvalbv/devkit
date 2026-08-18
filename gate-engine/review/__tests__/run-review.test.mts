@@ -1478,7 +1478,6 @@ describe('runReviewGate — per-completion checkpoints', () => {
     );
   });
 });
-
 describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
   // consumerRepo({backend, frontend}) stages one file per domain → all 7 reviewers selected
   // (backend pair, frontend pair, commit-guard, correctness, conventions).
@@ -1487,10 +1486,12 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     const probe = concurrencyProbe(repo);
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.exec).toHaveBeenCalledTimes(7);
+    expect(probe.exec.mock.calls.every(([opts]) => opts.mcpProfile?.kind === 'named-agent')).toBe(
+      true,
+    );
     expect(probe.maxInflight()).toBe(6);
     expect(Object.keys(loadCache(repo)).length).toBe(7);
   });
-
   it('GUARD_REVIEW_CONCURRENCY=1 fully serializes — never more than 1 in flight', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     process.env.GUARD_REVIEW_CONCURRENCY = '1';
@@ -1498,7 +1499,6 @@ describe('runReviewGate — bounded judge concurrency (sc-1050)', () => {
     expect(await runReviewGate(repo, { exec: probe.exec })).toBe(0);
     expect(probe.maxInflight()).toBe(1);
   });
-
   it('a cap ≥ reviewer count only BOUNDS, never pads — all 7 run at once', async () => {
     const repo = consumerRepo({ backend: true, frontend: true });
     process.env.GUARD_REVIEW_CONCURRENCY = '9';

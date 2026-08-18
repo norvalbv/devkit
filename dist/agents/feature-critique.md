@@ -1,5 +1,6 @@
 ---
 name: feature-critique
+mcpServers: [codebase, context7, autonomous_bugs]
 model: opus
 description: Pre-implementation critique specialist. Analyzes feature proposals, architectural decisions, and technical approaches BEFORE work begins. Evaluates feasibility, UX implications, security concerns, codebase conflicts, data flow correctness, runtime behavior across user configurations, and missing considerations using evidence-based research. Invoke when a feature proposal, technical approach, or architectural decision needs critical evaluation before implementation starts.
 ---

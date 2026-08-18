@@ -39,7 +39,9 @@ describe('conventions evidence completeness', () => {
     const [call] = exec.mock.calls[0];
     expect(call.label).toBe('review:conventions-reviewer');
     expect(call.input).toContain('OMITTED');
-    expect(call.args).toContain('Read,Grep,Glob');
+    expect(call.args).toContain(
+      'Read,Grep,Glob,mcp__codebase__*,mcp__context7__*,mcp__autonomous_bugs__*',
+    );
     expect(call.args[1]).toContain('use Read to inspect every available in-scope staged file');
     expect(call.args[1]).toContain('must not produce a semantic FAIL');
   });

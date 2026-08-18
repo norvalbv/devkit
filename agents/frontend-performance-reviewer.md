@@ -1,7 +1,8 @@
 ---
 name: frontend-performance-reviewer
+mcpServers: [codebase, context7, autonomous_bugs]
 description: "Use this agent to review frontend code for performance issues. Checks bundle size, image optimization, CSS efficiency, and React rendering patterns.\\n\\n<example>\\nContext: User has added new React components or modified rendering logic.\\nuser: \"Added the new dashboard widgets\"\\nassistant: \"Let me invoke the frontend-performance-reviewer agent to check for unnecessary re-renders and bundle size impact.\"\\n<commentary>\\nNew components should be reviewed for React.memo usage, proper hook dependencies, and lazy loading opportunities.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has added images or modified CSS.\\nuser: \"Added the product images to the catalog page\"\\nassistant: \"I'll run the frontend-performance-reviewer agent to verify image optimization and lazy loading.\"\\n<commentary>\\nImages need review for proper formats, dimensions, and lazy loading implementation.\\n</commentary>\\n</example>"
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__codebase__*, mcp__context7__*, mcp__autonomous_bugs__*
 model: haiku
 color: yellow
 ---

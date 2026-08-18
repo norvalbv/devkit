@@ -5,6 +5,7 @@ import { type AgentAssetKind, type AgentProvider, isAgentProvider } from './agen
 const FRONTMATTER_RE = /^(?:\uFEFF)?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m;
 const FRONTMATTER_KEY_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const AGENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const MCP_SERVER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const NUMBER_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const PLAIN_COMMENT_RE = /\s+#/;
 const NULL_RE = /^(?:null)$/i;
@@ -144,6 +145,20 @@ function parseFrontmatterScalar(raw: string, key: string): unknown {
   return parsePlainScalar(raw);
 }
 
+function parseMcpServers(raw: string): string[] {
+  if (!raw.startsWith('[') || !raw.endsWith(']'))
+    throw new Error('Agent frontmatter field "mcpServers" must be an inline string list');
+  const names = raw
+    .slice(1, -1)
+    .split(',')
+    .map((name) => name.trim());
+  if (names.length === 0 || names.some((name) => !MCP_SERVER_NAME_RE.test(name)))
+    throw new Error('Agent frontmatter field "mcpServers" contains an invalid server name');
+  if (new Set(names).size !== names.length)
+    throw new Error('Agent frontmatter field "mcpServers" contains a duplicate server name');
+  return names;
+}
+
 function requiredString(fields: Map<string, unknown>, key: string): string {
   const value = fields.get(key);
   if (typeof value !== 'string' || !value.trim())
@@ -171,7 +186,8 @@ function parseAgentFrontmatter(markdown: string): AgentFrontmatter {
       throw new Error(`Malformed agent frontmatter line ${index + 2}: ${line}`);
     }
     if (fields.has(key)) throw new Error(`Duplicate agent frontmatter field: ${key}`);
-    fields.set(key, parseFrontmatterScalar(line.slice(separator + 1).trim(), key));
+    const raw = line.slice(separator + 1).trim();
+    fields.set(key, key === 'mcpServers' ? parseMcpServers(raw) : parseFrontmatterScalar(raw, key));
   }
 
   const body = markdown.slice(match[0].length);
