@@ -461,7 +461,7 @@ function removeOwnedLock(handle, options) {
     else
         removeClaimedLock(claimed);
 }
-function withStoreLock(file, options, mutation) {
+export function withStoreLock(file, options, mutation) {
     let handle = null;
     try {
         mkdirSync(path.dirname(file), { recursive: true });

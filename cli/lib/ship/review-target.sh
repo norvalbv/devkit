@@ -725,14 +725,22 @@ node "$CACHE_SESSION_TOOL" prepare "$PERSISTENT_CACHE_ROOT" "$PRIVATE_DATA_ROOT"
   > "$CACHE_FIELDS_FILE"
 CACHE_FIELDS=()
 while IFS= read -r -d '' field; do CACHE_FIELDS+=("$field"); done < "$CACHE_FIELDS_FILE"
-[ "${#CACHE_FIELDS[@]}" -eq 10 ] && \
-  [ "${CACHE_FIELDS[0]}" = devkit-review-cache-session-v1 ] && \
-  [ "${CACHE_FIELDS[1]}" = 4 ] || {
+case "${CACHE_FIELDS[1]:-}" in
+  ''|*[!0-9]*) CACHE_COUNT=-1 ;;
+  *) CACHE_COUNT=${CACHE_FIELDS[1]} ;;
+esac
+[ "${CACHE_FIELDS[0]:-}" = devkit-review-cache-session-v1 ] && \
+  [ "$CACHE_COUNT" -ge 0 ] && \
+  [ "${#CACHE_FIELDS[@]}" -eq "$((2 + (CACHE_COUNT * 2)))" ] || {
   echo 'devkit review: cache session returned a malformed protocol.' >&2
   exit 1
 }
-CACHE_NAMES=("${CACHE_FIELDS[2]}" "${CACHE_FIELDS[4]}" "${CACHE_FIELDS[6]}" "${CACHE_FIELDS[8]}")
-CACHE_GENERATIONS=("${CACHE_FIELDS[3]}" "${CACHE_FIELDS[5]}" "${CACHE_FIELDS[7]}" "${CACHE_FIELDS[9]}")
+CACHE_NAMES=()
+CACHE_GENERATIONS=()
+for ((i = 0; i < CACHE_COUNT; i += 1)); do
+  CACHE_NAMES+=("${CACHE_FIELDS[2 + (i * 2)]}")
+  CACHE_GENERATIONS+=("${CACHE_FIELDS[3 + (i * 2)]}")
+done
 
 export DEVKIT_RUN_MODE=review
 export DEVKIT_REVIEW_GUARDS="$GUARDS"

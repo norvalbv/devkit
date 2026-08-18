@@ -45,6 +45,7 @@ const HOOK_SEL = {
 describe('self-host bin rewrite', () => {
   it('sourceBinFor maps a guard bin to its source .mts (derived from package.json bin)', () => {
     expect(sourceBinFor(ROOT, 'guard-review')).toBe('gate-engine/review/cli.mts');
+    expect(sourceBinFor(ROOT, 'guard-comments')).toBe('gate-engine/comment-firewall/cli.mts');
     expect(sourceBinFor(ROOT, 'guard-deterministic')).toBe('gate-engine/deterministic/run.mts');
     expect(sourceBinFor(ROOT, 'guard-qavis-advisory')).toBe('gate-engine/qavis-advisory/cli.mts');
   });
@@ -74,7 +75,16 @@ describe('self-host bin rewrite', () => {
 describe('selfHostSelection', () => {
   it('is the recommended guard set PLUS review', () => {
     const sel = selfHostSelection();
-    for (const g of ['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory', 'review'])
+    for (const g of [
+      'size',
+      'fanout',
+      'dup',
+      'clone',
+      'comments',
+      'decisions',
+      'qavis-advisory',
+      'review',
+    ])
       expect(sel.guards).toContain(g);
     expect(sel.husky).toBe(true);
   });
@@ -100,7 +110,16 @@ describe('selfHostSelection', () => {
   // dogfood repo, which is the whole reason the selection was pinned in the first place.
   it('keeps guards FIXED even when the config records a narrower set', () => {
     const sel = selfHostSelection({ guards: ['size'] });
-    for (const g of ['size', 'fanout', 'dup', 'clone', 'decisions', 'qavis-advisory', 'review'])
+    for (const g of [
+      'size',
+      'fanout',
+      'dup',
+      'clone',
+      'comments',
+      'decisions',
+      'qavis-advisory',
+      'review',
+    ])
       expect(sel.guards).toContain(g);
   });
 

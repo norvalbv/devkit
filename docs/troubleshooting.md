@@ -61,7 +61,27 @@ which ships **no structure preset**. Set it explicitly: `devkit init --stack rea
   `freeze` to launder it). See the **ratchet** / **baseline** entries in the glossary, and the
   `structure-governance` skill.
 - **size** — you added an `eslint-disable max-lines`; the count may only shrink. Refactor instead.
-- **decisions / dup / clone** — see each gate's message; it names the offending file and the fix.
+- **decisions / dup / clone / comments** — see each gate's message; it names the offending file and
+  the fix. For `guard-comments`, remove the explanatory workaround or run the printed
+  `guard-comments justify <id> "<specific rationale>"` command. The rationale is staged evidence,
+  not a bypass: an independent reviewer must still approve it.
+
+## `guard-comments` blocked an added or modified comment
+The gate challenges staged JS/TS-family comments that are new or changed; untouched comments,
+deletions, and pure renames remain grandfathered. Prefer fixing the implementation and deleting
+workaround narration. When a comment carries a durable constraint that code, types, assertions, or
+tests cannot express, use the exact finding ID printed by the gate:
+
+```sh
+guard-comments justify <finding-id> "why this constraint must remain"
+guard-comments justify <finding-id> "why temporary debt is unavoidable and what removes it" --ticket SC-123
+```
+
+The command stages `.devkit/comment-firewall-rationales.json`; a separate Haiku reviewer then
+decides whether the exception is valid. Exit 2 means the reviewer is temporarily unavailable in the
+ordinary fail-open policy; exit 3 means the same outage under strict policy; exit 4 means staged
+evidence, configured language support, or receipt persistence is unsafe, so the commit stays blocked.
+Run `guard-comments prune` to remove rationale entries whose finding IDs are no longer staged.
 
 ## The dup gate names a symbol my file doesn't define (extract refactor blocked)
 It can't any more, and if you see it on an older devkit: **the search-code index is stale, not your code.**

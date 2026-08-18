@@ -19,6 +19,7 @@ export const RECOMMENDED_GUARD_IDS = [
   'fanout',
   'dup',
   'clone',
+  'comments',
   'decisions',
   'qavis-advisory',
 ];
@@ -143,6 +144,11 @@ export const GUARD_OPTIONS = [
   { id: 'fanout', label: 'fanout', hint: 'folder fan-out ratchet' },
   { id: 'dup', label: 'dup', hint: 'semantic duplication (search-code)' },
   { id: 'clone', label: 'clone', hint: 'verbatim copy-paste (jscpd)' },
+  {
+    id: 'comments',
+    label: 'comments',
+    hint: 'challenge changed comments; explicit rationale gets independent Haiku review',
+  },
   { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
   { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
   {

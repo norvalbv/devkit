@@ -62,8 +62,10 @@ describe('buildGuardBlock', () => {
     expect(block).not.toContain('bunx guard-size');
     expect(block).not.toContain('bunx guard-fanout');
     // AI guards keep their own fail-fast fragments.
+    expect(block).toContain('bunx guard-comments gate');
     expect(block).toContain('bunx guard-decisions');
     expect(block).toContain('bunx guard-review');
+    expect(block).toContain('__dk_gate_selected comments');
     expect(block).toContain('__dk_gate_selected decisions');
     expect(block).toContain('__dk_gate_selected review');
     expect(block).toContain('DEVKIT_REVIEW_GUARDS');

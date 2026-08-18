@@ -21,6 +21,13 @@ describe('strayGateCalls', () => {
     expect(found[0].line).toBe(6); // shebang, open marker, 2 block lines, close marker, then this
   });
 
+  it('reports a duplicate changed-comment firewall call outside its managed fragment', () => {
+    const found = strayGateCalls(
+      hook('guard-comments gate', 'bunx guard-comments gate\nbunx guard-decisions detect --gate'),
+    );
+    expect(found.map((item) => item.bin)).toEqual(['guard-comments gate']);
+  });
+
   it('ignores calls INSIDE the managed block — that is where they belong', () => {
     expect(strayGateCalls(hook('echo done'))).toHaveLength(0);
   });
