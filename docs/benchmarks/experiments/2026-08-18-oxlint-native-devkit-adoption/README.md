@@ -12,9 +12,9 @@ The same Devkit lint command was run ten times before and after the change. The 
 
 | What you feel | Before | After | Improvement |
 | --- | ---: | ---: | ---: |
-| CPU occupied by the check | 2.32 seconds | 0.16 seconds | **93.1% less CPU** |
-| Time waiting for it to finish | 0.38 seconds | 0.09 seconds | **75.8% faster** |
-| Peak memory used by the command and children | 206 MiB | 97 MiB | 53.1% lower |
+| CPU occupied by the check | 2.41 seconds | 0.18 seconds | **92.5% less CPU** |
+| Time waiting for it to finish | 0.41 seconds | 0.10 seconds | **74.5% faster** |
+| Peak memory used by the command and children | 208 MiB | 91 MiB | 56.4% lower |
 
 CPU is the reason for the decision. Memory is only a safety measure here; an increase would have
 been acceptable if the CPU saving still made the agent loop materially faster.
@@ -77,9 +77,10 @@ work, not an invisible second lint lane.
 
 ## Measurement protocol
 
-The control is a clean archive of `origin/main` at `8f562e02c7bef763b2aee1903040d05c67e22f70`,
+The control is a clean archive of `origin/main` at `76383ff117bcd64f10cceb0d8cbea12e4d8df3a2`,
 running its original `bun run lint`. The candidate is this worktree running the new command of the
-same name. Both include normal command startup; installed dependencies are shared and excluded.
+same name. Both include normal command startup; each side installs its locked dependencies before
+timing, and that setup time is excluded.
 
 The machine was macOS arm64 with Node 24.19.0, Bun 1.3.1, and ten logical CPUs. There were three
 warm-up runs, then ten measured pairs in alternating order. CPU is user plus system time collected
@@ -87,8 +88,8 @@ by `/usr/bin/time -lp`; the memory figure samples the command and its children e
 samples and summaries are in [results.json](results.json); the reproducer is
 [benchmark.mjs](benchmark.mjs).
 
-The slowest measured candidate run still used only 0.18 seconds CPU and took 0.09 seconds wall
-time, compared with 2.36 seconds CPU and 0.38 seconds wall time for the slowest old run.
+The slowest measured candidate run still used only 0.18 seconds CPU and took 0.11 seconds wall
+time, compared with 2.48 seconds CPU and 0.44 seconds wall time for the slowest old run.
 
 ## Acceptance checks
 

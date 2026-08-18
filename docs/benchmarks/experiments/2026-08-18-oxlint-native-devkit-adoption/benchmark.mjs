@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,7 +142,13 @@ function prepareControl(tempRoot) {
   });
   const extracted = spawnSync('tar', ['-x', '-C', control], { input: archive });
   if (extracted.status !== 0) throw new Error(`control archive extraction failed: ${extracted.stderr}`);
-  symlinkSync(join(REPO_ROOT, 'node_modules'), join(control, 'node_modules'), 'dir');
+  const installed = spawnSync('bun', ['install', '--frozen-lockfile', '--ignore-scripts'], {
+    cwd: control,
+    encoding: 'utf8',
+  });
+  if (installed.status !== 0) {
+    throw new Error(`control dependency install failed: ${installed.stdout}\n${installed.stderr}`);
+  }
   return control;
 }
 
@@ -184,7 +190,8 @@ async function main() {
             order: 'alternating control-first/candidate-first',
             control: 'clean origin/main archive with its original bun run lint script',
             candidate: 'this candidate worktree with its proposed bun run lint script',
-            dependencies: 'shared installed node_modules, excluded from timing',
+            dependencies:
+              'each side has its locked dependencies installed before timing; install time excluded',
             cpu: '/usr/bin/time -lp aggregate user + sys; primary decision metric',
             rss: '10ms sampling; sum RSS of /usr/bin/time wrapper and all descendants',
           },

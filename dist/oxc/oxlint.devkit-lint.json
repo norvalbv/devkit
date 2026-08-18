@@ -26,6 +26,12 @@
       "rules": {
         "eslint/no-unused-vars": "allow"
       }
+    },
+    {
+      "files": ["**/comment-firewall/__tests__/detect.test.mts"],
+      "rules": {
+        "eslint/no-useless-concat": "allow"
+      }
     }
   ]
 }
