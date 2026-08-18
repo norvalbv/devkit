@@ -1,0 +1,1001 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-08-16T00:08:09.036Z",
+  "sourceCommit": "4d624d059c8974aa58e0f3a27277cd6fd90383a4",
+  "host": {
+    "uname": "Darwin Benji-mac 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:26 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8132 arm64",
+    "node": "v24.19.0",
+    "logicalCpuCount": 10
+  },
+  "protocol": {
+    "warmups": 3,
+    "samples": 20,
+    "order": "alternating current-first/candidate-first",
+    "fixture": {
+      "componentCount": 80,
+      "files": 481,
+      "roots": 1
+    },
+    "current": "packed @norvalbv/devkit@0.51.1 installed inside the fixture; driver invokes its runStructureGate API",
+    "rss": "10ms sampling; sum RSS of /usr/bin/time wrapper and all descendants, floored by wait4 direct-child peak RSS",
+    "cpu": "/usr/bin/time -lp aggregate user + sys"
+  },
+  "coverage": [
+    {
+      "id": "clean",
+      "expectedViolation": false,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "placement",
+      "expectedViolation": true,
+      "current": {
+        "code": 1,
+        "errorCount": 1,
+        "text": "\n/private/var/folders/9r/rmy4kywx6pl2hfzbw934txt40000gn/T/topology-benchmark-XSeBl4/src/loose.ts\n  0:1  error  🔥 File 'loose.ts' is invalid. 🔥\n\nAllowed names  = index.ts\nError location = ./src/loose.ts\n\n  project-structure/folder-structure\n\n✖ 1 problem (1 error, 0 warnings)\n\n🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.\n"
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/loose.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "required-sibling",
+      "expectedViolation": true,
+      "current": {
+        "code": 1,
+        "errorCount": 1,
+        "text": "\n/private/var/folders/9r/rmy4kywx6pl2hfzbw934txt40000gn/T/topology-benchmark-XSeBl4/src/Missing/Missing.tsx\n  0:1  error  🔥 Folder 'Missing' enforces the existence of other folders/files. 🔥\n\nEnforce existence = ./src/Missing/index.ts\nError location = ./src/Missing\n\n  project-structure/folder-structure\n\n✖ 1 problem (1 error, 0 warnings)\n\n🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.\n"
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/Missing/Missing.tsx"
+          }
+        ]
+      }
+    },
+    {
+      "id": "naming",
+      "expectedViolation": true,
+      "current": {
+        "code": 1,
+        "errorCount": 1,
+        "text": "\n/private/var/folders/9r/rmy4kywx6pl2hfzbw934txt40000gn/T/topology-benchmark-XSeBl4/src/bad-name/index.ts\n  0:1  error  🔥 Folder 'bad-name' is invalid. 🔥\n\nAllowed names  = {pascal_dir}\nError location = ./src/bad-name\n\n  project-structure/folder-structure\n\n✖ 1 problem (1 error, 0 warnings)\n\n🚫 Structure violations (folder-structure). Rename/relocate the file(s) to match the declared grammar, or (if intentional) re-grandfather via `devkit init`.\n"
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/bad-name/index.ts"
+          }
+        ]
+      }
+    },
+    {
+      "id": "css",
+      "expectedViolation": true,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/global.css"
+          }
+        ]
+      }
+    },
+    {
+      "id": "html",
+      "expectedViolation": true,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/index.html"
+          }
+        ]
+      }
+    },
+    {
+      "id": "asset",
+      "expectedViolation": true,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/logo.svg"
+          }
+        ]
+      }
+    },
+    {
+      "id": "arbitrary-extension",
+      "expectedViolation": true,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "tree": "topology",
+            "path": "src/blob.unregistered"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty-directory",
+      "expectedViolation": true,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "ignored-directory",
+      "expectedViolation": false,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "generated-baseline",
+      "expectedViolation": false,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "permanent-exemption",
+      "expectedViolation": false,
+      "current": {
+        "code": 0,
+        "errorCount": 0,
+        "text": ""
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "import-wall",
+      "expectedViolation": true,
+      "currentBroaderEslintOwner": {
+        "code": 1,
+        "diagnostics": [
+          {
+            "filePath": "/private/var/folders/9r/rmy4kywx6pl2hfzbw934txt40000gn/T/topology-benchmark-XSeBl4/src/feature-a/index.js",
+            "message": "🔥 This import is not allowed in the module 'feature-a'. 🔥\n\nFile path   = \"src/feature-a/index.js\"\nImport path = \"src/feature-b/internal.js\"\n{family}    = \"NO_FAMILY\"\n{dirname}   = \"src/feature-a\"\n\n\"\\\"allowImportsFrom:\\\\n\\\"\\\"src/feature-a/**\\\"\\n\"\n"
+          }
+        ]
+      },
+      "candidate": {
+        "code": 0,
+        "diagnostics": []
+      }
+    }
+  ],
+  "lanes": {
+    "clean": {
+      "fixtureCase": "clean",
+      "samples": {
+        "current": [
+          {
+            "wallMs": 249.0287089999997,
+            "cpuMs": 470,
+            "userMs": 210,
+            "systemMs": 260,
+            "treePeakRssBytes": 120602624,
+            "directPeakRssBytes": 120602624
+          },
+          {
+            "wallMs": 258.9182499999997,
+            "cpuMs": 500,
+            "userMs": 220,
+            "systemMs": 280,
+            "treePeakRssBytes": 121978880,
+            "directPeakRssBytes": 120782848
+          },
+          {
+            "wallMs": 253.942583,
+            "cpuMs": 500,
+            "userMs": 220,
+            "systemMs": 280,
+            "treePeakRssBytes": 120520704,
+            "directPeakRssBytes": 120520704
+          },
+          {
+            "wallMs": 246.35812499999975,
+            "cpuMs": 480,
+            "userMs": 210,
+            "systemMs": 270,
+            "treePeakRssBytes": 121864192,
+            "directPeakRssBytes": 121864192
+          },
+          {
+            "wallMs": 251.11295900000005,
+            "cpuMs": 480,
+            "userMs": 210,
+            "systemMs": 270,
+            "treePeakRssBytes": 122175488,
+            "directPeakRssBytes": 121094144
+          },
+          {
+            "wallMs": 252.43329100000028,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 121995264,
+            "directPeakRssBytes": 120946688
+          },
+          {
+            "wallMs": 247.55554200000006,
+            "cpuMs": 470,
+            "userMs": 210,
+            "systemMs": 260,
+            "treePeakRssBytes": 121798656,
+            "directPeakRssBytes": 121798656
+          },
+          {
+            "wallMs": 246.24666699999943,
+            "cpuMs": 480,
+            "userMs": 210,
+            "systemMs": 270,
+            "treePeakRssBytes": 121946112,
+            "directPeakRssBytes": 121028608
+          },
+          {
+            "wallMs": 244.8822910000008,
+            "cpuMs": 480,
+            "userMs": 210,
+            "systemMs": 270,
+            "treePeakRssBytes": 121765888,
+            "directPeakRssBytes": 120848384
+          },
+          {
+            "wallMs": 247.62233300000025,
+            "cpuMs": 480,
+            "userMs": 210,
+            "systemMs": 270,
+            "treePeakRssBytes": 121028608,
+            "directPeakRssBytes": 121028608
+          },
+          {
+            "wallMs": 258.0616250000003,
+            "cpuMs": 490,
+            "userMs": 210,
+            "systemMs": 280,
+            "treePeakRssBytes": 121241600,
+            "directPeakRssBytes": 121241600
+          },
+          {
+            "wallMs": 251.89137500000015,
+            "cpuMs": 470,
+            "userMs": 210,
+            "systemMs": 260,
+            "treePeakRssBytes": 121208832,
+            "directPeakRssBytes": 121208832
+          },
+          {
+            "wallMs": 255.6784579999994,
+            "cpuMs": 480,
+            "userMs": 220,
+            "systemMs": 260,
+            "treePeakRssBytes": 122257408,
+            "directPeakRssBytes": 121208832
+          },
+          {
+            "wallMs": 262.6339170000001,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 121880576,
+            "directPeakRssBytes": 121880576
+          },
+          {
+            "wallMs": 255.48300000000017,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 122454016,
+            "directPeakRssBytes": 121585664
+          },
+          {
+            "wallMs": 261.84049999999934,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 120782848,
+            "directPeakRssBytes": 120782848
+          },
+          {
+            "wallMs": 297.2985840000001,
+            "cpuMs": 550,
+            "userMs": 250,
+            "systemMs": 300,
+            "treePeakRssBytes": 120848384,
+            "directPeakRssBytes": 120848384
+          },
+          {
+            "wallMs": 246.64466600000014,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 121520128,
+            "directPeakRssBytes": 121520128
+          },
+          {
+            "wallMs": 275.1935830000002,
+            "cpuMs": 520,
+            "userMs": 230,
+            "systemMs": 290,
+            "treePeakRssBytes": 121372672,
+            "directPeakRssBytes": 121372672
+          },
+          {
+            "wallMs": 282.64387499999975,
+            "cpuMs": 520,
+            "userMs": 240,
+            "systemMs": 280,
+            "treePeakRssBytes": 121716736,
+            "directPeakRssBytes": 121716736
+          }
+        ],
+        "candidate": [
+          {
+            "wallMs": 91.50637499999993,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83148800,
+            "directPeakRssBytes": 83148800
+          },
+          {
+            "wallMs": 90.35912499999995,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83132416,
+            "directPeakRssBytes": 83132416
+          },
+          {
+            "wallMs": 88.08775000000014,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 82771968,
+            "directPeakRssBytes": 82771968
+          },
+          {
+            "wallMs": 88.66691700000001,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83394560,
+            "directPeakRssBytes": 83394560
+          },
+          {
+            "wallMs": 89.04191700000001,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83673088,
+            "directPeakRssBytes": 83673088
+          },
+          {
+            "wallMs": 90.60083299999997,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83263488,
+            "directPeakRssBytes": 83263488
+          },
+          {
+            "wallMs": 89.29266699999971,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83034112,
+            "directPeakRssBytes": 83034112
+          },
+          {
+            "wallMs": 86.65466599999945,
+            "cpuMs": 130,
+            "userMs": 60,
+            "systemMs": 70,
+            "treePeakRssBytes": 82755584,
+            "directPeakRssBytes": 82755584
+          },
+          {
+            "wallMs": 87.61720800000057,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 82837504,
+            "directPeakRssBytes": 82837504
+          },
+          {
+            "wallMs": 88.33441700000003,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 82608128,
+            "directPeakRssBytes": 82608128
+          },
+          {
+            "wallMs": 97.90608400000019,
+            "cpuMs": 130,
+            "userMs": 60,
+            "systemMs": 70,
+            "treePeakRssBytes": 83001344,
+            "directPeakRssBytes": 83001344
+          },
+          {
+            "wallMs": 89.542958,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82984960,
+            "directPeakRssBytes": 82984960
+          },
+          {
+            "wallMs": 89.48066700000072,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83296256,
+            "directPeakRssBytes": 83296256
+          },
+          {
+            "wallMs": 106.22491700000046,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83263488,
+            "directPeakRssBytes": 83263488
+          },
+          {
+            "wallMs": 98.57729199999994,
+            "cpuMs": 140,
+            "userMs": 70,
+            "systemMs": 70,
+            "treePeakRssBytes": 83312640,
+            "directPeakRssBytes": 83312640
+          },
+          {
+            "wallMs": 98.73154199999954,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82837504,
+            "directPeakRssBytes": 82837504
+          },
+          {
+            "wallMs": 102.19804099999965,
+            "cpuMs": 130,
+            "userMs": 60,
+            "systemMs": 70,
+            "treePeakRssBytes": 82837504,
+            "directPeakRssBytes": 82837504
+          },
+          {
+            "wallMs": 104.89750000000004,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82952192,
+            "directPeakRssBytes": 82542592
+          },
+          {
+            "wallMs": 108.96904200000063,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83427328,
+            "directPeakRssBytes": 83427328
+          },
+          {
+            "wallMs": 91.57516699999906,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83230720,
+            "directPeakRssBytes": 83230720
+          }
+        ]
+      },
+      "summary": {
+        "current": {
+          "wallMs": {
+            "median": 253.18793700000015,
+            "p95": 282.64387499999975
+          },
+          "cpuMs": {
+            "median": 490,
+            "p95": 520
+          },
+          "userMs": {
+            "median": 220,
+            "p95": 240
+          },
+          "systemMs": {
+            "median": 270,
+            "p95": 290
+          },
+          "treePeakRssBytes": {
+            "median": 121741312,
+            "p95": 122257408
+          },
+          "directPeakRssBytes": {
+            "median": 121151488,
+            "p95": 121864192
+          }
+        },
+        "candidate": {
+          "wallMs": {
+            "median": 90.47997899999996,
+            "p95": 106.22491700000046
+          },
+          "cpuMs": {
+            "median": 120,
+            "p95": 130
+          },
+          "userMs": {
+            "median": 60,
+            "p95": 60
+          },
+          "systemMs": {
+            "median": 60,
+            "p95": 70
+          },
+          "treePeakRssBytes": {
+            "median": 83083264,
+            "p95": 83427328
+          },
+          "directPeakRssBytes": {
+            "median": 83083264,
+            "p95": 83427328
+          }
+        }
+      }
+    },
+    "placement": {
+      "fixtureCase": "placement",
+      "samples": {
+        "current": [
+          {
+            "wallMs": 268.46099999999933,
+            "cpuMs": 510,
+            "userMs": 230,
+            "systemMs": 280,
+            "treePeakRssBytes": 122257408,
+            "directPeakRssBytes": 122257408
+          },
+          {
+            "wallMs": 276.23741599999994,
+            "cpuMs": 520,
+            "userMs": 240,
+            "systemMs": 280,
+            "treePeakRssBytes": 122372096,
+            "directPeakRssBytes": 121487360
+          },
+          {
+            "wallMs": 301.3277500000004,
+            "cpuMs": 560,
+            "userMs": 260,
+            "systemMs": 300,
+            "treePeakRssBytes": 121749504,
+            "directPeakRssBytes": 121749504
+          },
+          {
+            "wallMs": 253.26499999999942,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 120471552,
+            "directPeakRssBytes": 120471552
+          },
+          {
+            "wallMs": 261.3679580000007,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 120832000,
+            "directPeakRssBytes": 120832000
+          },
+          {
+            "wallMs": 259.5215840000001,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 122208256,
+            "directPeakRssBytes": 121372672
+          },
+          {
+            "wallMs": 254.39695799999936,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 121339904,
+            "directPeakRssBytes": 121339904
+          },
+          {
+            "wallMs": 270.95970900000066,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 121602048,
+            "directPeakRssBytes": 121602048
+          },
+          {
+            "wallMs": 261.33541700000023,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 122339328,
+            "directPeakRssBytes": 122339328
+          },
+          {
+            "wallMs": 274.3782080000001,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 120913920,
+            "directPeakRssBytes": 120913920
+          },
+          {
+            "wallMs": 275.2072499999995,
+            "cpuMs": 530,
+            "userMs": 240,
+            "systemMs": 290,
+            "treePeakRssBytes": 122208256,
+            "directPeakRssBytes": 121339904
+          },
+          {
+            "wallMs": 277.34375,
+            "cpuMs": 520,
+            "userMs": 240,
+            "systemMs": 280,
+            "treePeakRssBytes": 120815616,
+            "directPeakRssBytes": 120815616
+          },
+          {
+            "wallMs": 266.9014169999991,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 121159680,
+            "directPeakRssBytes": 121159680
+          },
+          {
+            "wallMs": 262.7869159999991,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 121651200,
+            "directPeakRssBytes": 120766464
+          },
+          {
+            "wallMs": 260.56333300000006,
+            "cpuMs": 490,
+            "userMs": 220,
+            "systemMs": 270,
+            "treePeakRssBytes": 120832000,
+            "directPeakRssBytes": 120832000
+          },
+          {
+            "wallMs": 274.5217499999999,
+            "cpuMs": 520,
+            "userMs": 240,
+            "systemMs": 280,
+            "treePeakRssBytes": 122306560,
+            "directPeakRssBytes": 121290752
+          },
+          {
+            "wallMs": 265.87191600000006,
+            "cpuMs": 500,
+            "userMs": 230,
+            "systemMs": 270,
+            "treePeakRssBytes": 121896960,
+            "directPeakRssBytes": 120700928
+          },
+          {
+            "wallMs": 258.45195899999817,
+            "cpuMs": 490,
+            "userMs": 230,
+            "systemMs": 260,
+            "treePeakRssBytes": 122290176,
+            "directPeakRssBytes": 121356288
+          },
+          {
+            "wallMs": 259.55433300000004,
+            "cpuMs": 480,
+            "userMs": 220,
+            "systemMs": 260,
+            "treePeakRssBytes": 122290176,
+            "directPeakRssBytes": 122290176
+          },
+          {
+            "wallMs": 256.5051249999997,
+            "cpuMs": 470,
+            "userMs": 210,
+            "systemMs": 260,
+            "treePeakRssBytes": 120455168,
+            "directPeakRssBytes": 120455168
+          }
+        ],
+        "candidate": [
+          {
+            "wallMs": 88.25637500000084,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83394560,
+            "directPeakRssBytes": 83394560
+          },
+          {
+            "wallMs": 87.69933300000048,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83181568,
+            "directPeakRssBytes": 83181568
+          },
+          {
+            "wallMs": 86.56704100000024,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83132416,
+            "directPeakRssBytes": 83132416
+          },
+          {
+            "wallMs": 97.01929199999904,
+            "cpuMs": 130,
+            "userMs": 60,
+            "systemMs": 70,
+            "treePeakRssBytes": 82640896,
+            "directPeakRssBytes": 82640896
+          },
+          {
+            "wallMs": 90.05395900000076,
+            "cpuMs": 130,
+            "userMs": 60,
+            "systemMs": 70,
+            "treePeakRssBytes": 83017728,
+            "directPeakRssBytes": 83017728
+          },
+          {
+            "wallMs": 88.84591699999874,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83132416,
+            "directPeakRssBytes": 83132416
+          },
+          {
+            "wallMs": 87.48979099999997,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83132416,
+            "directPeakRssBytes": 83132416
+          },
+          {
+            "wallMs": 104.91554199999882,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83296256,
+            "directPeakRssBytes": 83296256
+          },
+          {
+            "wallMs": 86.92720799999915,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 82853888,
+            "directPeakRssBytes": 82853888
+          },
+          {
+            "wallMs": 88.91833299999962,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83312640,
+            "directPeakRssBytes": 83312640
+          },
+          {
+            "wallMs": 85.6432079999995,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83034112,
+            "directPeakRssBytes": 83034112
+          },
+          {
+            "wallMs": 87.8887080000004,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82935808,
+            "directPeakRssBytes": 82935808
+          },
+          {
+            "wallMs": 87.09137499999997,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83247104,
+            "directPeakRssBytes": 83247104
+          },
+          {
+            "wallMs": 97.82208399999945,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82739200,
+            "directPeakRssBytes": 82739200
+          },
+          {
+            "wallMs": 87.71291700000074,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83656704,
+            "directPeakRssBytes": 83656704
+          },
+          {
+            "wallMs": 85.14908300000025,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83132416,
+            "directPeakRssBytes": 83132416
+          },
+          {
+            "wallMs": 84.33829199999855,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83410944,
+            "directPeakRssBytes": 83410944
+          },
+          {
+            "wallMs": 87.08299999999872,
+            "cpuMs": 110,
+            "userMs": 50,
+            "systemMs": 60,
+            "treePeakRssBytes": 83394560,
+            "directPeakRssBytes": 83394560
+          },
+          {
+            "wallMs": 84.24537500000224,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 83066880,
+            "directPeakRssBytes": 83066880
+          },
+          {
+            "wallMs": 85.46637499999997,
+            "cpuMs": 120,
+            "userMs": 60,
+            "systemMs": 60,
+            "treePeakRssBytes": 82722816,
+            "directPeakRssBytes": 82722816
+          }
+        ]
+      },
+      "summary": {
+        "current": {
+          "wallMs": {
+            "median": 264.3294159999996,
+            "p95": 277.34375
+          },
+          "cpuMs": {
+            "median": 500,
+            "p95": 530
+          },
+          "userMs": {
+            "median": 230,
+            "p95": 240
+          },
+          "systemMs": {
+            "median": 270,
+            "p95": 290
+          },
+          "treePeakRssBytes": {
+            "median": 121700352,
+            "p95": 122339328
+          },
+          "directPeakRssBytes": {
+            "median": 121315328,
+            "p95": 122290176
+          }
+        },
+        "candidate": {
+          "wallMs": {
+            "median": 87.59456200000022,
+            "p95": 97.82208399999945
+          },
+          "cpuMs": {
+            "median": 120,
+            "p95": 130
+          },
+          "userMs": {
+            "median": 60,
+            "p95": 60
+          },
+          "systemMs": {
+            "median": 60,
+            "p95": 70
+          },
+          "treePeakRssBytes": {
+            "median": 83132416,
+            "p95": 83410944
+          },
+          "directPeakRssBytes": {
+            "median": 83132416,
+            "p95": 83410944
+          }
+        }
+      }
+    }
+  }
+}
