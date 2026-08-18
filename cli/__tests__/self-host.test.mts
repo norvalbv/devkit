@@ -218,18 +218,15 @@ describe('buildSelfHostHook', () => {
     expect(() => execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root })).toThrow();
   });
 
-  // The `--extra` above is only as hard as the script it names, and biome exits 0 when every
-  // diagnostic is warn-severity. A bare `biome check .` therefore PRINTS its findings into the gate
-  // log — indistinguishable from a real failure to the reader — and passes the commit anyway (a
-  // v0.50.0 ship shipped with six of them). `--error-on-warnings` is what makes the exit code match
-  // what the log shows. devkit's own root config turns `noConsole` (the one deliberately-advisory
-  // rule in biome/base.jsonc) off for the whole authored surface, so nothing advisory is caught here.
-  it('backs the lint extra with a biome invocation that exits non-zero on WARNINGS too', () => {
+  it('backs the lint extra with the native Oxlint policy only', () => {
     const pkg: { scripts?: Record<string, string> } = JSON.parse(
       readFileSync(join(ROOT, 'package.json'), 'utf8'),
     );
     expect(SELF_HOST_EXTRAS).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
-    expect(pkg.scripts?.lint).toBe('biome check --formatter-enabled=false --error-on-warnings .');
+    expect(pkg.scripts?.lint).toBe('bun run lint:oxlint');
+    expect(pkg.scripts?.['lint:oxlint']).toContain('--deny-warnings');
+    expect(pkg.scripts?.['lint:biome']).toBeUndefined();
+    expect(pkg.scripts?.['lint:regex']).toBeUndefined();
   });
 
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {
