@@ -218,19 +218,15 @@ describe('buildSelfHostHook', () => {
     expect(() => execFileSync('sh', ['-c', fragment ?? 'exit 1'], { cwd: root })).toThrow();
   });
 
-  it('backs the lint extra with the native Oxlint policy and fail-closed retained Biome lanes', () => {
+  it('backs the lint extra with the native Oxlint policy only', () => {
     const pkg: { scripts?: Record<string, string> } = JSON.parse(
       readFileSync(join(ROOT, 'package.json'), 'utf8'),
     );
     expect(SELF_HOST_EXTRAS).toContainEqual({ label: 'lint', cmd: 'bun run lint' });
-    expect(pkg.scripts?.lint).toBe(
-      'bun run lint:oxlint && bun run lint:biome && bun run lint:regex',
-    );
+    expect(pkg.scripts?.lint).toBe('bun run lint:oxlint');
     expect(pkg.scripts?.['lint:oxlint']).toContain('--deny-warnings');
-    expect(pkg.scripts?.['lint:biome']).toContain('--config-path biome/non-js.jsonc');
-    expect(pkg.scripts?.['lint:biome']).toContain('--assist-enabled=false');
-    expect(pkg.scripts?.['lint:biome']).toContain('--error-on-warnings');
-    expect(pkg.scripts?.['lint:regex']).toContain('--diagnostic-level=error');
+    expect(pkg.scripts?.['lint:biome']).toBeUndefined();
+    expect(pkg.scripts?.['lint:regex']).toBeUndefined();
   });
 
   it('preserves the advisory fallow-audit gate INSIDE the block (never blocks, survives re-run)', () => {

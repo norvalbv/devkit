@@ -1,45 +1,37 @@
-# Devkit JS/TS lint migration to Oxlint — 2026-08-18
+# Devkit's lint hard cutover to Oxlint — 2026-08-18
 
 **Shortcut:** sc-1787
-**Decision:** move Devkit's own ordinary JavaScript and TypeScript linting from Biome to a
-small, explicit native Oxlint policy. Keep Biome only where Oxlint is not the owner: JSON/CSS
-diagnostics and one named regex-performance rule. This is a one-off adoption measurement, not a
-new ongoing benchmark gate.
 
-## In plain English
+Devkit now runs **Oxlint only** for its own ordinary source-code linting. Its local lint command,
+pre-commit hook, and CI do not invoke Biome. This is a deliberate hard cutover, made because CPU
+time is the limiting resource for local coding and agent loops.
 
-Before this change, `bun run lint` asked Biome to inspect almost all Devkit source code in one
-large pass. After it, Oxlint handles normal JavaScript/TypeScript code problems, and the much
-smaller Biome passes handle the few things Oxlint does not own.
+## Result in plain English
 
-On the same machine and source tree, the middle result of ten runs was:
+The same Devkit lint command was run ten times before and after the change. The middle result was:
 
-| What matters | Before | After | Change |
+| What you feel | Before | After | Improvement |
 | --- | ---: | ---: | ---: |
-| CPU time used | 2.34 seconds | 0.70 seconds | **70.2% less** |
-| Time waited for the command | 0.42 seconds | 0.26 seconds | **36.7% less** |
-| Highest combined memory use | 206 MiB | 128 MiB | 37.8% less |
+| CPU occupied by the check | 2.32 seconds | 0.16 seconds | **93.1% less CPU** |
+| Time waiting for it to finish | 0.38 seconds | 0.09 seconds | **75.8% faster** |
+| Peak memory used by the command and children | 206 MiB | 97 MiB | 53.1% lower |
 
-CPU is the decision metric: less CPU leaves more capacity for local tools and coding agents. The
-memory number is recorded as a safety check, not as the reason to migrate.
+CPU is the reason for the decision. Memory is only a safety measure here; an increase would have
+been acceptable if the CPU saving still made the agent loop materially faster.
 
-## What owns what after the change
+## What runs now
 
-| Concern | Owner | Why |
+| Responsibility | Tool | Reason |
 | --- | --- | --- |
-| Normal JS/TS correctness, suspicious-code, and performance checks | Native Oxlint | The explicit 155-rule profile is fast and has no existing Devkit findings. |
-| React hook placement | Native Oxlint `react/rules-of-hooks` | This is a direct named replacement for the former React-hook check. |
-| Regex literals repeatedly created in production code | Biome `performance/useTopLevelRegex` | Oxlint 1.78.0 has no native equivalent. Tests remain exempt, exactly as before. |
-| JSON and CSS diagnostics | Biome | Oxlint does not lint those file types. |
-| Formatting | Oxfmt | Already adopted in the earlier formatter decision. |
-| Import organisation | Oxfmt/IDE, not this lint gate | Oxfmt can sort imports, but its sort order differs from the old Biome action and enabling it would reformat 412 files. Keep the existing editor assist available and make a focused formatting decision before enforcing Oxfmt sorting. |
-| File/folder topology and import walls | ESLint + `eslint-plugin-project-structure` | These are cross-file filesystem rules, not ordinary source lint. |
-| Anti-slop debt | Oxlint's vendored JS plugin, through `anti-slop check` | It has its own baseline and staged-index semantics. |
-| Type errors | `tsc --noEmit` | Oxlint is not being used as Devkit's type checker. |
+| Ordinary JavaScript and TypeScript lint | Native Oxlint | Fast explicit policy: correctness, suspicious-code, performance, and React hook checks. |
+| Formatting | Oxfmt | Already selected for Devkit formatting; it is separate from linting. |
+| Folder/file topology and import walls | ESLint + `eslint-plugin-project-structure` | These are cross-file filesystem rules, not normal source lint. |
+| Anti-slop debt | Oxlint's vendored JS plugin | It uses its own explicit baseline lifecycle. |
+| Type errors and build compatibility | `tsc --noEmit` | Oxlint is not a type checker and does not replace Devkit's TypeScript compiler lane. |
 
-The shipped `biome/base` and `biome/react` presets are deliberately unchanged. They are consumer
-contracts, and consumer migration needs its own parity and performance work. This change is only
-about Devkit linting Devkit.
+`bun run lint` is now exactly `bun run lint:oxlint`. It uses
+`oxc/oxlint.devkit-lint.json` and `--disable-nested-config`, so it cannot accidentally inherit the
+separate anti-slop policy.
 
 ## Policy change, made explicit
 
@@ -55,29 +47,39 @@ change replaces the implicit ambient preset with an explicit Devkit policy:
   `no-underscore-dangle`, `preserve-caught-error`, and `no-map-spread`;
 - keep one file-specific `no-unused-vars` exception for the pre-existing unused helper in
   `skills/upstream-sync/scripts/sync.mjs`, rather than pretending this migration has repaired
-  unrelated code; and
-- retain the named Biome-only regex, JSON, and CSS responsibilities above.
+  unrelated code.
 
 That makes future additions and removals reviewable in `oxc/oxlint.devkit-lint.json` rather than
 being hidden inside a changing recommended preset.
 
-## Why the Biome part is now small
+## Checks consciously retired from Devkit's lint command
 
-Running a general `biome check` after Oxlint was counterproductive: even with JavaScript lint
-disabled, it still parsed the JS/TS tree for its import-organising assist and made the combined
-command slower than the old one. `biome/non-js.jsonc` prevents that duplicate JS/TS work. The
-remaining Biome command checks the 29 in-scope JSON/CSS files; `biome/regex.jsonc` checks the one
-retained regex rule on 324 production JS/TS files.
+This cutover removes every Devkit self-hosted Biome pass. Nothing was silently left running as a
+fallback.
 
-The import organiser remains enabled in the shared Biome presets for editor users. It is simply no
-longer a separate CI/static-lint pass for Devkit itself. Oxfmt's built-in import sorter is available
-for a future deliberate format migration, not silently enabled here.
+| Retired check | Why it is not reimplemented |
+| --- | --- |
+| Biome's `useTopLevelRegex` performance rule | Oxlint 1.78 has no equivalent. A one-rule custom plugin would recreate the maintenance burden this cutover is intended to remove. |
+| JSON duplicate-key and CSS-property diagnostics | Oxlint does not lint JSON or CSS. These 29 Devkit config/style files still go through Oxfmt, but their extra Biome lint diagnostics are intentionally no longer a CI gate. |
+| Static import organisation assist | The old Biome assist was not a sound part of the lint gate once formatting moved to Oxfmt. Oxfmt import sorting remains deliberately off because its ordering would make an unrelated 412-file rewrite. |
+
+This is a policy decision, not a claim that Oxlint produces the same message for every previous
+Biome rule. The explicit native policy and its seven established Devkit exceptions are recorded in
+`oxc/oxlint.devkit-lint.json`.
+
+## Important compatibility boundary
+
+The published `biome/base` and `biome/react` files remain in the npm package for existing consumer
+projects. They are **not part of Devkit's own runtime toolchain** and no Devkit self-host command
+uses them. Removing published configuration paths before Frink is ported would break installed
+projects without making Devkit itself faster. Their replacement is therefore consumer migration
+work, not an invisible second lint lane.
 
 ## Measurement protocol
 
 The control is a clean archive of `origin/main` at `8f562e02c7bef763b2aee1903040d05c67e22f70`,
-running its original `bun run lint`. The candidate is this worktree running the proposed command of
-the same name. Both therefore include their real process startup and all their retained checks.
+running its original `bun run lint`. The candidate is this worktree running the new command of the
+same name. Both include normal command startup; installed dependencies are shared and excluded.
 
 The machine was macOS arm64 with Node 24.19.0, Bun 1.3.1, and ten logical CPUs. There were three
 warm-up runs, then ten measured pairs in alternating order. CPU is user plus system time collected
@@ -85,17 +87,18 @@ by `/usr/bin/time -lp`; the memory figure samples the command and its children e
 samples and summaries are in [results.json](results.json); the reproducer is
 [benchmark.mjs](benchmark.mjs).
 
-The p95 (the slowest of these ten runs) also improved: CPU fell from 2.57 seconds to 0.73 seconds,
-and wall time from 0.52 seconds to 0.30 seconds.
+The slowest measured candidate run still used only 0.18 seconds CPU and took 0.09 seconds wall
+time, compared with 2.36 seconds CPU and 0.38 seconds wall time for the slowest old run.
 
 ## Acceptance checks
 
-- The full proposed `bun run lint` exits clean.
-- A fixture proves the native Oxlint profile rejects an unused JS/TS value.
-- A fixture proves the retained Biome profile still rejects a regex literal in production code.
+- `bun run lint` runs Oxlint only and exits clean.
+- A fixture proves the configured native policy rejects an unused TypeScript value.
+- A regression test proves the root lint script cannot regain either of the retired Biome fallback
+  commands unnoticed.
 - The native runner uses a separate config with `--disable-nested-config`, so anti-slop's baseline
   config cannot accidentally join the ordinary lint pass.
-- The prior 412-file Oxfmt import-sort rewrite is intentionally not part of this PR.
+- Formatting, topology, anti-slop, and TypeScript retain their separately documented owners.
 
 ## Sources
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,9 +8,6 @@ import { testSpawnSync as spawnSync } from './_helpers.mts';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OXLINT = join(ROOT, 'node_modules', '.bin', 'oxlint');
 const OXLINT_CONFIG = join(ROOT, 'oxc', 'oxlint.devkit-lint.json');
-const BIOME = join(ROOT, 'node_modules', '.bin', 'biome');
-const NON_JS_CONFIG = join(ROOT, 'biome', 'non-js.jsonc');
-const REGEX_CONFIG = join(ROOT, 'biome', 'regex.jsonc');
 const roots: string[] = [];
 
 function fixture(name: string, source: string) {
@@ -36,42 +33,13 @@ describe('Devkit lint ownership', () => {
     expect(result.status).toBe(1);
   });
 
-  it('keeps the existing production-only top-level-regex rule in Biome', () => {
-    const result = spawnSync(
-      BIOME,
-      [
-        'lint',
-        '--config-path',
-        REGEX_CONFIG,
-        '--diagnostic-level=error',
-        '--stdin-file-path',
-        'cli/production.mts',
-      ],
-      { encoding: 'utf8', input: 'const matcher = /value/;\nmatcher.test("x");\n' },
+  it('runs the policy without a Biome fallback command', () => {
+    const packageJson: { scripts?: Record<string, string> } = JSON.parse(
+      readFileSync(join(ROOT, 'package.json'), 'utf8'),
     );
 
-    expect(result.status).toBe(1);
-  });
-
-  it.each([
-    ['JSON duplicate keys', 'package.json', '{"name":"one","name":"two"}\n'],
-    ['CSS unknown properties', 'cli/style.css', 'a { colr: red; }\n'],
-  ])('retains Biome for %s', (_name, path, source) => {
-    const result = spawnSync(
-      BIOME,
-      [
-        'check',
-        '--config-path',
-        NON_JS_CONFIG,
-        '--formatter-enabled=false',
-        '--assist-enabled=false',
-        '--error-on-warnings',
-        '--stdin-file-path',
-        path,
-      ],
-      { encoding: 'utf8', input: source },
-    );
-
-    expect(result.status).toBe(1);
+    expect(packageJson.scripts?.lint).toBe('bun run lint:oxlint');
+    expect(packageJson.scripts?.['lint:biome']).toBeUndefined();
+    expect(packageJson.scripts?.['lint:regex']).toBeUndefined();
   });
 });

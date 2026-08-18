@@ -1,15 +1,14 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-18T15:37:35.860Z",
+  "recordedAt": "2026-08-18T16:04:43.049Z",
   "source": {
     "controlRef": "origin/main",
     "controlCommit": "8f562e02c7bef763b2aee1903040d05c67e22f70",
-    "candidateCommit": "8f562e02c7bef763b2aee1903040d05c67e22f70",
-    "candidateState": "the worktree changes documented by this experiment"
+    "candidateCommit": "4dc191cb9bfa9cbf910b9f8c5a6d47e908593799"
   },
   "host": {
-    "os": "Darwin 25.5.0 arm64",
-    "node": "24.19.0",
+    "uname": "Darwin Benji-mac 25.5.0 Darwin Kernel Version 25.5.0: Mon Apr 27 20:41:26 PDT 2026; root:xnu-12377.121.6~2/RELEASE_ARM64_T8132 arm64",
+    "node": "v22.20.0",
     "bun": "1.3.1",
     "logicalCpuCount": 10
   },
@@ -23,43 +22,228 @@
     "cpu": "/usr/bin/time -lp aggregate user + sys; primary decision metric",
     "rss": "10ms sampling; sum RSS of /usr/bin/time wrapper and all descendants"
   },
-  "columns": ["wallMs", "cpuMs", "treePeakRssBytes"],
+  "commands": {
+    "control": "bun run lint",
+    "candidate": "bun run lint"
+  },
   "samples": {
     "control": [
-      [406.646, 2320, 215187456],
-      [505.921, 2570, 215941120],
-      [418.972, 2350, 215678976],
-      [378.655, 2300, 216514560],
-      [422.761, 2210, 214925312],
-      [436.629, 2400, 215728128],
-      [412.069, 2340, 216006656],
-      [396.798, 2330, 215924736],
-      [378.388, 2310, 215695360],
-      [517.018, 2470, 212729856]
+      {
+        "wallMs": 383.094417,
+        "cpuMs": 2330,
+        "userMs": 360,
+        "systemMs": 1970,
+        "treePeakRssBytes": 216825856,
+        "directPeakRssBytes": 165445632
+      },
+      {
+        "wallMs": 354.940208,
+        "cpuMs": 2290,
+        "userMs": 330,
+        "systemMs": 1960,
+        "treePeakRssBytes": 217382912,
+        "directPeakRssBytes": 166051840
+      },
+      {
+        "wallMs": 378.64416600000004,
+        "cpuMs": 2300,
+        "userMs": 340,
+        "systemMs": 1960,
+        "treePeakRssBytes": 216547328,
+        "directPeakRssBytes": 165511168
+      },
+      {
+        "wallMs": 381.06408399999964,
+        "cpuMs": 2340,
+        "userMs": 340,
+        "systemMs": 2000,
+        "treePeakRssBytes": 216121344,
+        "directPeakRssBytes": 164757504
+      },
+      {
+        "wallMs": 375.98054200000024,
+        "cpuMs": 2330,
+        "userMs": 340,
+        "systemMs": 1990,
+        "treePeakRssBytes": 216072192,
+        "directPeakRssBytes": 164757504
+      },
+      {
+        "wallMs": 378.3156250000002,
+        "cpuMs": 2360,
+        "userMs": 350,
+        "systemMs": 2009.9999999999998,
+        "treePeakRssBytes": 216645632,
+        "directPeakRssBytes": 165380096
+      },
+      {
+        "wallMs": 373.86091599999963,
+        "cpuMs": 2300,
+        "userMs": 340,
+        "systemMs": 1960,
+        "treePeakRssBytes": 216367104,
+        "directPeakRssBytes": 165019648
+      },
+      {
+        "wallMs": 358.9548329999998,
+        "cpuMs": 2320,
+        "userMs": 330,
+        "systemMs": 1990,
+        "treePeakRssBytes": 216842240,
+        "directPeakRssBytes": 165478400
+      },
+      {
+        "wallMs": 376.9319169999999,
+        "cpuMs": 2320,
+        "userMs": 340,
+        "systemMs": 1980,
+        "treePeakRssBytes": 216285184,
+        "directPeakRssBytes": 164872192
+      },
+      {
+        "wallMs": 348.82737499999985,
+        "cpuMs": 2280,
+        "userMs": 320,
+        "systemMs": 1960,
+        "treePeakRssBytes": 216449024,
+        "directPeakRssBytes": 165101568
+      }
     ],
     "candidate": [
-      [264.393, 690, 106577920],
-      [256.342, 710, 126025728],
-      [261.845, 680, 123158528],
-      [263.855, 700, 135086080],
-      [284.782, 730, 133087232],
-      [266.489, 700, 143523840],
-      [258.507, 690, 116998144],
-      [238.646, 690, 143048704],
-      [227.035, 670, 142737408],
-      [298.408, 720, 142802944]
+      {
+        "wallMs": 91.54825000000028,
+        "cpuMs": 170,
+        "userMs": 50,
+        "systemMs": 120,
+        "treePeakRssBytes": 106233856,
+        "directPeakRssBytes": 94388224
+      },
+      {
+        "wallMs": 89.032917,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 106381312,
+        "directPeakRssBytes": 94535680
+      },
+      {
+        "wallMs": 90.5981670000001,
+        "cpuMs": 170,
+        "userMs": 50,
+        "systemMs": 120,
+        "treePeakRssBytes": 95862784,
+        "directPeakRssBytes": 95862784
+      },
+      {
+        "wallMs": 91.85845900000004,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 94912512,
+        "directPeakRssBytes": 94912512
+      },
+      {
+        "wallMs": 91.68775000000005,
+        "cpuMs": 170,
+        "userMs": 50,
+        "systemMs": 120,
+        "treePeakRssBytes": 94404608,
+        "directPeakRssBytes": 94404608
+      },
+      {
+        "wallMs": 89.10645900000054,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 104316928,
+        "directPeakRssBytes": 93618176
+      },
+      {
+        "wallMs": 89.1973339999995,
+        "cpuMs": 180,
+        "userMs": 60,
+        "systemMs": 120,
+        "treePeakRssBytes": 102367232,
+        "directPeakRssBytes": 93634560
+      },
+      {
+        "wallMs": 91.27450000000044,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 106594304,
+        "directPeakRssBytes": 94732288
+      },
+      {
+        "wallMs": 92.46587499999987,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 100679680,
+        "directPeakRssBytes": 94306304
+      },
+      {
+        "wallMs": 91.18983300000036,
+        "cpuMs": 160,
+        "userMs": 50,
+        "systemMs": 110,
+        "treePeakRssBytes": 94519296,
+        "directPeakRssBytes": 94519296
+      }
     ]
   },
   "summary": {
     "control": {
-      "wallMs": { "median": 415.520, "p95": 517.018 },
-      "cpuMs": { "median": 2335, "p95": 2570 },
-      "treePeakRssBytes": { "median": 215711744, "p95": 216514560 }
+      "wallMs": {
+        "median": 376.45622950000006,
+        "p95": 383.094417
+      },
+      "cpuMs": {
+        "median": 2320,
+        "p95": 2360
+      },
+      "userMs": {
+        "median": 340,
+        "p95": 360
+      },
+      "systemMs": {
+        "median": 1975,
+        "p95": 2009.9999999999998
+      },
+      "treePeakRssBytes": {
+        "median": 216498176,
+        "p95": 217382912
+      },
+      "directPeakRssBytes": {
+        "median": 165240832,
+        "p95": 166051840
+      }
     },
     "candidate": {
-      "wallMs": { "median": 262.850, "p95": 298.408 },
-      "cpuMs": { "median": 695, "p95": 730 },
-      "treePeakRssBytes": { "median": 134086656, "p95": 143523840 }
+      "wallMs": {
+        "median": 91.2321665000004,
+        "p95": 92.46587499999987
+      },
+      "cpuMs": {
+        "median": 160,
+        "p95": 180
+      },
+      "userMs": {
+        "median": 50,
+        "p95": 60
+      },
+      "systemMs": {
+        "median": 110,
+        "p95": 120
+      },
+      "treePeakRssBytes": {
+        "median": 101523456,
+        "p95": 106594304
+      },
+      "directPeakRssBytes": {
+        "median": 94461952,
+        "p95": 95862784
+      }
     }
   }
 }

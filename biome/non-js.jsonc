@@ -1,9 +1,0 @@
-{
-  "$schema": "../node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": ["../biome.jsonc"],
-  // Biome stays responsible for JSON/CSS diagnostics. The negative extension
-  // patterns keep its residual gate from parsing JS/TS after Oxlint takes it.
-  "files": {
-    "includes": ["!**/*.js", "!**/*.jsx", "!**/*.mjs", "!**/*.ts", "!**/*.tsx", "!**/*.mts"]
-  }
-}
