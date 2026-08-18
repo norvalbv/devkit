@@ -254,6 +254,14 @@ describe('review setup manifest', () => {
     expect(() => captureReviewSetup(ineffective.root, ineffective.manifest)).toThrow(
       /core\.hooksPath.*expected \.husky\/_.*doctor --fix/,
     );
+
+    // An ABSOLUTE value is git config, which `--fix` cannot rewrite — sending the reader there is a
+    // loop. It is also how a checkout ends up running another checkout's hooks, so name that repair.
+    const pinned = setup('pinned');
+    git(pinned.root, 'config', 'core.hooksPath', join(pinned.root, '.husky', '_'));
+    expect(() => captureReviewSetup(pinned.root, pinned.manifest)).toThrow(
+      /core\.hooksPath.*run 'devkit doctor'.*devkit sync-hook-runner/s,
+    );
   });
 
   it('freezes every target-controlled Husky runner dependency', () => {
