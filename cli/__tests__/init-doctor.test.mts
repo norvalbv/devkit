@@ -289,8 +289,8 @@ describe('init --stack react-app (structure ungated)', () => {
     });
     devkit(root, 'init', '--stack', 'react-app', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    // config-driven stack → devkit's guard-structure bin, joined to the deterministic orchestrator.
-    expect(hook).toContain('--structure "guard-structure gate"');
+    // Devkit's staged runner is joined to the deterministic orchestrator.
+    expect(hook).toContain('--structure "guard-structure staged"');
   });
 });
 
@@ -319,8 +319,8 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     );
     expect(pkg.scripts['lint:structure']).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    // guard-structure runs as the orchestrator's structure gate (trichotomy: exit 2 stays fail-open).
-    expect(hook).toContain('--structure "guard-structure gate"');
+    // guard-structure runs as the staged structure gate (trichotomy: exit 2 stays fail-open).
+    expect(hook).toContain('--structure "guard-structure staged"');
     expect(hook).not.toContain('bunx eslint src');
   });
 
@@ -356,10 +356,7 @@ describe('init — zero consumer deps (config-driven structure)', () => {
     expect(pkg.devDependencies.eslint).toBeDefined();
     expect(pkg.devDependencies['@typescript-eslint/parser']).toBeDefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain(
-      '--structure "node --preserve-symlinks node_modules/eslint/bin/eslint.js src"',
-    );
-    expect(hook).not.toContain('guard-structure');
+    expect(hook).toContain('--structure "guard-structure staged"');
   });
 });
 
@@ -475,7 +472,7 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/biome\.jsonc: OK — extends @norvalbv\/devkit\/biome\/react/);
-    expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure gate`/);
+    expect(r.stdout).toMatch(/structure-lint: OK — runs `guard-structure staged`/);
   });
 
   it('flags DRIFT when the structure-lint line is missing from the hook', () => {
@@ -491,7 +488,7 @@ describe('doctor — selection-aware', () => {
     const hookPath = join(root, '.husky/pre-commit');
     writeFileSync(
       hookPath,
-      readFileSync(hookPath, 'utf8').replace(' --structure "guard-structure gate"', ''),
+      readFileSync(hookPath, 'utf8').replace(' --structure "guard-structure staged"', ''),
     );
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(1);

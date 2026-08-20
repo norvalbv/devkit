@@ -18,3 +18,4 @@ created: 2026-07-01
 **Anchored-bet:** [BET]
 **Scope:** cli/commands/init.mjs,gate-engine/co-occurrence/clone-detector.mjs,gate-engine/structure/**,package.json
 **Source:** collab
+- 2026-08-20 — structure:true now emits the single Devkit-owned guard-structure staged runner. It reads configured roots, validates normal staged files once, probes structural renames/deletions from an existing sibling where possible, and defers mixed index/worktree input to CI rather than declaring it checked. Electron still uses its pinned local ESLint preset behind that runner; config-driven stacks continue through Devkit’s bundled ESLint.

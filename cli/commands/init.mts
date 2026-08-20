@@ -836,7 +836,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   } = plan;
   // Structure-lint: config-driven stacks (react-app, component-lib) run via devkit's own eslint (the
   // `guard-structure` bin), so they work even in standalone (no consumer eslint/plugin). Electron's
-  // preset needs consumer-side eslint/parser/plugin, so it stays package-only.
+  // preset keeps its pinned local ESLint/plugin, but the Devkit-owned staged runner invokes it.
   const isStructure =
     selection.structure &&
     STRUCTURE_STACKS.has(stack) &&

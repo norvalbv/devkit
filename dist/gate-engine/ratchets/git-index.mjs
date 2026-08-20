@@ -41,7 +41,7 @@ export function hasStagedFiles(root) {
 }
 // Split a NUL-delimited git list. `-z` is used so a path containing a newline (or one git would
 // otherwise quote and escape) survives verbatim.
-function splitNul(out) {
+export function splitNul(out) {
     return out.split('\0').filter((line) => line.length > 0);
 }
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
