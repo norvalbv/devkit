@@ -16,7 +16,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { planStagedStructureLint, runStagedStructureGate, runStructureGate } from '../run.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -196,6 +196,22 @@ describe('guard-structure staged plan', () => {
     });
   });
 
+  it('plans additions, deletions, and renames for a repository-root tree', () => {
+    const rootScope = [{ root: '.', extensions: ['ts'] }];
+    expect(
+      planStagedStructureLint(
+        rootScope,
+        ['src/Added.ts', 'src/Renamed.ts'],
+        ['src/Deleted.ts', 'src/Renamed.ts'],
+        [],
+      ),
+    ).toEqual({
+      targets: ['src/Added.ts', 'src/Renamed.ts'],
+      probeScopes: rootScope,
+      deferred: [],
+    });
+  });
+
   it('defers a partially staged source file instead of reading its worktree bytes as index bytes', () => {
     expect(
       planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/index.ts']),
@@ -260,5 +276,25 @@ describe('guard-structure staged execution', () => {
     write(root, 'src/not-ok.ts');
 
     await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('defers an untracked source from a package cwd', async () => {
+    const root = repo();
+    const pkg = join(root, 'packages', 'lib');
+    write(pkg, 'guard.config.json', JSON.stringify(config));
+    write(pkg, 'src/Ok.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'packages/lib/guard.config.json', 'packages/lib/src/Ok.ts'], {
+      cwd: root,
+    });
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
+    write(pkg, 'src/Ok.ts', 'export const changed = true;\n');
+    execFileSync('git', ['add', '--', 'packages/lib/src/Ok.ts'], { cwd: root });
+    write(pkg, 'src/Uncommitted.ts');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('src/Ok.ts'));
+    error.mockRestore();
   });
 });

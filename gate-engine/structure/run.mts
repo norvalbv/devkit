@@ -22,6 +22,7 @@ import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { resolveGuardConfig } from '../config.mts';
+import { gitPrefix, splitNul } from '../ratchets/git-index.mts';
 import { buildStructureConfigs } from './eslint-config.mts';
 
 // The one field this gate reads off each structure.trees[] entry — its on-disk root.
@@ -56,12 +57,9 @@ const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
 const POLICY_PATH_RE =
   /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/))/;
 
-function splitNul(output: string | Buffer): string[] {
-  return output.toString().split('\0').filter(Boolean);
-}
-
 function pathInRoot(file: string, root: string): boolean {
   const cleanRoot = root.replace(/\/+$/, '');
+  if (cleanRoot === '.') return true;
   return Boolean(cleanRoot) && (file === cleanRoot || file.startsWith(`${cleanRoot}/`));
 }
 
@@ -124,11 +122,11 @@ export function planStagedStructureLint(
 }
 
 function gitPaths(cwd: string, args: string[]): string[] {
-  return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }));
+  return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }).toString());
 }
 
 function untrackedPaths(cwd: string): string[] {
-  return gitPaths(cwd, ['ls-files', '--others', '--exclude-standard', '-z']);
+  return gitPaths(cwd, ['ls-files', '--full-name', '--others', '--exclude-standard', '-z']);
 }
 
 function destructivePaths(cwd: string): string[] {
@@ -136,7 +134,7 @@ function destructivePaths(cwd: string): string[] {
     execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
       cwd,
       encoding: 'buffer',
-    }),
+    }).toString(),
   );
   const paths: string[] = [];
   for (let index = 0; index < fields.length;) {
@@ -148,10 +146,6 @@ function destructivePaths(cwd: string): string[] {
     }
   }
   return paths.filter(Boolean);
-}
-
-function gitPrefix(cwd: string): string {
-  return execFileSync('git', ['rev-parse', '--show-prefix'], { cwd, encoding: 'utf8' }).trimEnd();
 }
 
 function toCwdPaths(paths: string[], prefix: string): string[] {

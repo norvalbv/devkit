@@ -21,17 +21,17 @@ import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { resolveGuardConfig } from "../config.mjs";
+import { gitPrefix, splitNul } from "../ratchets/git-index.mjs";
 import { buildStructureConfigs } from "./eslint-config.mjs";
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
 const POLICY_PATH_RE = /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/))/;
-function splitNul(output) {
-    return output.toString().split('\0').filter(Boolean);
-}
 function pathInRoot(file, root) {
     const cleanRoot = root.replace(/\/+$/, '');
+    if (cleanRoot === '.')
+        return true;
     return Boolean(cleanRoot) && (file === cleanRoot || file.startsWith(`${cleanRoot}/`));
 }
 function pathInScope(file, scope) {
@@ -84,16 +84,16 @@ export function planStagedStructureLint(scopes, changed, destructive, unstaged) 
     };
 }
 function gitPaths(cwd, args) {
-    return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }));
+    return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }).toString());
 }
 function untrackedPaths(cwd) {
-    return gitPaths(cwd, ['ls-files', '--others', '--exclude-standard', '-z']);
+    return gitPaths(cwd, ['ls-files', '--full-name', '--others', '--exclude-standard', '-z']);
 }
 function destructivePaths(cwd) {
     const fields = splitNul(execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
         cwd,
         encoding: 'buffer',
-    }));
+    }).toString());
     const paths = [];
     for (let index = 0; index < fields.length;) {
         const status = fields[index++] ?? '';
@@ -105,9 +105,6 @@ function destructivePaths(cwd) {
         }
     }
     return paths.filter(Boolean);
-}
-function gitPrefix(cwd) {
-    return execFileSync('git', ['rev-parse', '--show-prefix'], { cwd, encoding: 'utf8' }).trimEnd();
 }
 function toCwdPaths(paths, prefix) {
     if (!prefix)
