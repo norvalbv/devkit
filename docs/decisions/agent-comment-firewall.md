@@ -20,3 +20,20 @@ created: 2026-08-15
 **Scope:** gate-engine/comment-firewall/**,cli/lib/components.mts,cli/lib/husky/**,cli/lib/doctor/**,package.json,guard.config.json
 **Category:** commit-gates
 **Source:** Bun Comment Cop and self-obsoleting workaround prior art · https://github.com/oven-sh/bun/blob/cc53961f55e261d5167e440517eb8eb19a900a37/.github/workflows/comment-cop.yml
+
+## Target · 2026-08-18 — Challenge paragraph-shaped workaround explanations, not comments generally
+
+**Evidence-change:** The first self-hosted implementation required ten committed rationales for legitimate comments in its own PR, and review showed that a large change could force authors to defend scores of ordinary comments or delete useful documentation. A fresh Bun audit found the same failure mode: current Comment Cop is advisory, PR #39166 retained three useful flagged comments, and RoboBun PR #37948 narrows the trigger after maintainer complaints to a third non-structural text line.
+**Context:** Treating every changed comment as suspicious creates pressure to remove useful documentation, grows a repository allowlist, and scales model calls with comment count. The motivating defect is narrower: agents write paragraph-shaped prose to defend an implementation workaround that should instead be fixed.
+**Ruling:** Challenge only standalone JS/TS-family comment paragraphs for which the staged change adds or modifies at least three non-structural text lines. Multi-line block explanations may open after code and may end before closing punctuation or JSX closing tags, but comments followed by executable text remain inline. One- and two-line staged comment changes, inline comments, untouched lines, deletions, and pure renames pass deterministically. There are no content-keyword exemptions: long license/generated headers enter the same batched review instead of creating a gameable bypass. Explicit per-finding rationales live in shared Git-local metadata with pre-change-blob migration, per-worktree ownership, and conflict detection; managed review reads shared evidence and redirects mutations into its private data root. All pending exceptions are decided in one bounded Haiku batch with deterministic overflow failure and content-addressed receipts.
+**Consequences:**
+- Positive: The gate preserves pressure against workaround essays without taxing normal comments, committing an accumulating rationale registry, or issuing one model request per finding.
+- Negative: A workaround compressed into one or two lines can evade this detector, and legitimate long-form documentation still requires an explicit reviewed exception.
+**Vision-fit:** Keeps devkit's governance proportional to the specific agent failure it addresses while preserving low-friction comments and bounded review cost.
+**Researched:** Bun Comment Cop current workflow; Bun PRs #32089, #35534, #37948, #38127, #39166, and #39183; RoboBun discussion responses and the proposed three-text-line rule.
+**Rejected:** Rejected retaining the every-comment gate because observed self-host friction confirms its deletion and registry incentives; rejected copying Bun's current two-physical-line threshold because Bun maintainers have already found it noisy; rejected per-finding model calls because one structured batch can return independent decisions at bounded cost.
+**Anchored-bet:** Three non-structural lines are a practical deterministic proxy for explanation-shaped workaround prose without making comments suspicious by default.
+**Revisit-when:** Production examples show workaround prose routinely compressed below three lines, or accepted long-form documentation produces material false-block friction after batching.
+**Scope:** gate-engine/comment-firewall/**,cli/lib/components.mts,cli/lib/husky/**,cli/lib/doctor/**,package.json,guard.config.json
+**Category:** commit-gates
+**Source:** Bun RoboBun narrowing prior art · https://github.com/oven-sh/bun/pull/37948

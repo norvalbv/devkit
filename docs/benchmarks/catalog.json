@@ -151,7 +151,7 @@
     },
     {
       "id": "bin-guard-comments",
-      "label": "Changed-comment firewall",
+      "label": "Changed-comment paragraph firewall",
       "kind": "bin",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
@@ -385,7 +385,7 @@
     },
     {
       "id": "judge-comment-firewall",
-      "label": "Changed-comment rationale judge",
+      "label": "Changed-comment paragraph rationale judge",
       "kind": "judge",
       "lifecycle": "shipped",
       "evidence": "evidence-only",
@@ -758,7 +758,7 @@
     },
     {
       "id": "comment-firewall",
-      "label": "Changed-comment rationale review",
+      "label": "Changed-comment paragraph rationale review",
       "adapter": "reviewer",
       "subjectIds": [
         "judge-comment-firewall",

@@ -21,17 +21,21 @@ export interface CommentRationale {
   rationale: string;
   ticket?: string;
   at: string;
+  worktrees?: string[];
 }
 
 export interface RationaleStore {
   version: 1;
   entries: Record<string, CommentRationale>;
+  migratedWorktrees?: string[];
 }
 
 export interface CommentJudgeResult {
   verdict: 'PASS' | 'FAIL';
   reason: string;
 }
+
+export type CommentJudgeBatchResult = Record<string, CommentJudgeResult>;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 

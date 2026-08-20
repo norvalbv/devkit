@@ -13,14 +13,20 @@ import { resolveGuardConfig, sourceMatchers } from '../config.mts';
 import { gitPrefix } from '../ratchets/git-index.mts';
 import type { CommentFinding, DetectionResult } from './types.mts';
 
-export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v1';
-export const COMMENT_FINDING_POLICY = 'changed-comment-v1';
+export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
+export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v4';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
+const TRAILING_CARRIAGE_RETURN = /\r$/;
+const TRAILING_STRUCTURAL_PUNCTUATION = /^(?:[)\]};,.:]+|<\/(?:[A-Za-z][\w:.-]*|)>)+$/;
+const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
+const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
+const BLOCK_COMMENT_SUFFIX = /[ \t]*\*\/[ \t]*$/;
+const BLOCK_COMMENT_CONTINUATION = /^\s*\*[ \t]?/;
 
 interface PatchHunk {
   newStart: number;
@@ -34,6 +40,7 @@ export interface CommentToken {
   startLine: number;
   endLine: number;
   text: string;
+  standalone: boolean;
 }
 
 const sha12 = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -203,11 +210,19 @@ export function scanCommentTokens(source: string, extension: string): CommentTok
     .map((range) => {
       const start = range.pos;
       const end = range.end;
+      const kind = range.kind === ts.SyntaxKind.SingleLineCommentTrivia ? 'line' : 'block';
+      const startLine = lineAt(starts, start);
+      const endLine = lineAt(starts, Math.max(start, end - 1));
+      const before = source.slice(starts[startLine - 1], start).trim();
+      const after = source.slice(end, starts[endLine] ?? source.length).trim();
+      const clearAfter = after.length === 0 || TRAILING_STRUCTURAL_PUNCTUATION.test(after);
       return {
-        kind: range.kind === ts.SyntaxKind.SingleLineCommentTrivia ? 'line' : 'block',
-        startLine: lineAt(starts, start),
-        endLine: lineAt(starts, Math.max(start, end - 1)),
+        kind,
+        startLine,
+        endLine,
         text: source.slice(start, end),
+        standalone:
+          clearAfter && (before.length === 0 || (kind === 'block' && startLine < endLine)),
       };
     });
 }
@@ -245,9 +260,66 @@ function hunkIntersects(hunk: PatchHunk, token: CommentToken): boolean {
   return false;
 }
 
+function meaningfulLine(line: string): string {
+  return line
+    .replace(TRAILING_CARRIAGE_RETURN, '')
+    .replace(LINE_COMMENT_PREFIX, '')
+    .replace(BLOCK_COMMENT_PREFIX, '')
+    .replace(BLOCK_COMMENT_SUFFIX, '')
+    .replace(BLOCK_COMMENT_CONTINUATION, '')
+    .trim();
+}
+
+function requiresChallenge(token: CommentToken, hunks: PatchHunk[]): boolean {
+  const addedLines = new Set(hunks.flatMap((hunk) => [...hunk.addedLines]));
+  const changedTextLines = token.text.split('\n').filter((line, index) => {
+    const sourceLine = token.startLine + index;
+    return addedLines.has(sourceLine) && Boolean(meaningfulLine(line));
+  });
+  return changedTextLines.length >= 3;
+}
+
+export function paragraphCommentTokens(tokens: CommentToken[]): CommentToken[] {
+  const paragraphs: CommentToken[] = [];
+  let run: CommentToken[] = [];
+  const flushRun = (): void => {
+    if (run.length > 0) {
+      const first = run[0];
+      const last = run.at(-1);
+      if (first && last) {
+        const paragraph: CommentToken = {
+          kind: first.kind,
+          startLine: first.startLine,
+          endLine: last.endLine,
+          text: run.map((token) => token.text).join('\n'),
+          standalone: true,
+        };
+        paragraphs.push(paragraph);
+      }
+    }
+    run = [];
+  };
+
+  for (const token of tokens) {
+    const groupable = token.kind === 'line' || token.startLine === token.endLine;
+    if (token.standalone && groupable) {
+      const previous = run.at(-1);
+      if (previous && (token.kind !== previous.kind || token.startLine !== previous.endLine + 1)) {
+        flushRun();
+      }
+      run.push(token);
+      continue;
+    }
+    flushRun();
+    if (token.standalone) paragraphs.push(token);
+  }
+  flushRun();
+  return paragraphs;
+}
+
 function changedTokens(source: string, extension: string, hunks: PatchHunk[]): CommentToken[] {
-  return scanCommentTokens(source, extension).filter((token) =>
-    hunks.some((hunk) => hunkIntersects(hunk, token)),
+  return paragraphCommentTokens(scanCommentTokens(source, extension)).filter(
+    (token) => hunks.some((hunk) => hunkIntersects(hunk, token)) && requiresChallenge(token, hunks),
   );
 }
 

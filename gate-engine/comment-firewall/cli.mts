@@ -2,7 +2,12 @@
 import { realpathSync } from 'node:fs';
 import { detectChangedComments } from './detect.mts';
 import { runCommentFirewall } from './gate.mts';
-import { listRationales, pruneRationales, recordRationale } from './rationales.mts';
+import {
+  ensureLegacyRationalesMigrated,
+  listRationales,
+  pruneRationales,
+  recordRationale,
+} from './rationales.mts';
 
 const USAGE = `Usage:
   guard-comments gate
@@ -17,7 +22,17 @@ function flag(args: string[], name: string): string | undefined {
 
 export function runCommentCli(args: string[], cwd = process.cwd()): number {
   const [command, ...rest] = args;
-  if (command === 'gate') return runCommentFirewall(cwd);
+  if (command === 'gate') {
+    try {
+      ensureLegacyRationalesMigrated(cwd);
+      return runCommentFirewall(cwd);
+    } catch (cause) {
+      console.error(
+        `guard-comments: migration — ${cause instanceof Error ? cause.message : cause}`,
+      );
+      return 4;
+    }
+  }
   if (command === 'list') {
     const entries = listRationales(cwd);
     if (entries.length === 0) console.log('guard-comments: no recorded rationales.');
@@ -31,7 +46,7 @@ export function runCommentCli(args: string[], cwd = process.cwd()): number {
       const current = new Set(detectChangedComments(cwd).findings.map((finding) => finding.id));
       const removed = pruneRationales(cwd, current);
       console.error(
-        `guard-comments: pruned ${removed} obsolete rationale${removed === 1 ? '' : 's'}.`,
+        `guard-comments: released ${removed} obsolete rationale ownership${removed === 1 ? '' : 's'} for this worktree.`,
       );
       return 0;
     } catch (cause) {
@@ -50,8 +65,8 @@ export function runCommentCli(args: string[], cwd = process.cwd()): number {
       return 2;
     }
     try {
-      const current = detectChangedComments(cwd).findings.some((finding) => finding.id === id);
-      if (!current) {
+      const currentIds = new Set(detectChangedComments(cwd).findings.map((finding) => finding.id));
+      if (!currentIds.has(id)) {
         console.error(
           `guard-comments: [${id}] is not a current staged finding; re-run the gate and copy its ID.`,
         );
@@ -59,7 +74,7 @@ export function runCommentCli(args: string[], cwd = process.cwd()): number {
       }
       const entry = recordRationale(cwd, id, rationale, ticket);
       console.error(
-        `guard-comments: rationale staged for [${id}]${entry.ticket ? ` (${entry.ticket})` : ''}; re-run the gate for independent review.`,
+        `guard-comments: local rationale recorded for [${id}]${entry.ticket ? ` (${entry.ticket})` : ''}; re-run the gate for batched independent review.`,
       );
       return 0;
     } catch (cause) {

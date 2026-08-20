@@ -1,4 +1,4 @@
-/** Committed author rationales for changed-comment findings. A rationale is evidence, not approval. */
+/** Local author rationales for changed-comment findings. A rationale is evidence, not approval. */
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -11,11 +11,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { withStoreLock } from '../judge/verdict-store.mts';
+import { devkitDataFile, withStoreLock } from '../judge/verdict-store.mts';
 import type { CommentRationale, JsonValue, RationaleStore } from './types.mts';
 import { isJsonObject, isJsonString, parseJson } from './types.mts';
 
-export const RATIONALES_FILE = '.devkit/comment-firewall-rationales.json';
+export const RATIONALES_FILE = 'devkit/comment-firewall-rationales.json';
 const STORE_MAX_BYTES = 1024 * 1024;
 const RATIONALE_MAX_CHARS = 2_000;
 const RATIONALE_MIN_CHARS = 20;
@@ -51,6 +51,13 @@ function parseStore(raw: string, label: string): RationaleStore {
   if (value.version !== 1 || !isJsonObject(value.entries)) {
     throw new Error(`${label} must use schema { version: 1, entries: { ... } }`);
   }
+  if (
+    value.migratedWorktrees !== undefined &&
+    (!Array.isArray(value.migratedWorktrees) ||
+      value.migratedWorktrees.some((item) => !isJsonString(item) || !item.trim()))
+  ) {
+    throw new Error(`${label} contains malformed migrated-worktree state`);
+  }
   const entries: Record<string, CommentRationale> = {};
   for (const [id, entry] of Object.entries(value.entries)) {
     if (!FINDING_ID.test(id) || !isJsonObject(entry)) {
@@ -61,7 +68,11 @@ function parseStore(raw: string, label: string): RationaleStore {
       !entry.rationale.trim() ||
       !isJsonString(entry.at) ||
       !entry.at.trim() ||
-      (entry.ticket !== undefined && !isJsonString(entry.ticket))
+      (entry.ticket !== undefined && !isJsonString(entry.ticket)) ||
+      (entry.worktrees !== undefined &&
+        (!Array.isArray(entry.worktrees) ||
+          entry.worktrees.length === 0 ||
+          entry.worktrees.some((item) => !isJsonString(item) || !item.trim())))
     ) {
       throw new Error(`${label} contains malformed evidence for finding ${id}`);
     }
@@ -73,6 +84,9 @@ function parseStore(raw: string, label: string): RationaleStore {
         at: entry.at,
       };
       if (ticket) parsed.ticket = ticket;
+      if (Array.isArray(entry.worktrees)) {
+        parsed.worktrees = [...new Set(entry.worktrees.filter(isJsonString))];
+      }
       entries[id] = parsed;
     } catch (cause) {
       throw new Error(
@@ -80,53 +94,134 @@ function parseStore(raw: string, label: string): RationaleStore {
       );
     }
   }
-  return { version: 1, entries };
+  const store: RationaleStore = { version: 1, entries };
+  if (Array.isArray(value.migratedWorktrees)) {
+    store.migratedWorktrees = [...new Set(value.migratedWorktrees.filter(isJsonString))];
+  }
+  return store;
 }
 
-function repositoryRoot(cwd: string): string {
-  return execFileSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel'], {
+function gitPath(cwd: string, flag: '--git-common-dir' | '--git-dir' | '--show-toplevel'): string {
+  return execFileSync('git', ['rev-parse', '--path-format=absolute', flag], {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 }
 
-function workingPath(cwd: string): string {
-  return path.join(repositoryRoot(cwd), RATIONALES_FILE);
+function sharedPath(cwd: string): string {
+  return path.join(gitPath(cwd, '--git-common-dir'), RATIONALES_FILE);
 }
 
-/** Authorization reads staged bytes so unstaged rationale edits cannot approve the pending commit. */
-export function loadStagedRationales(cwd: string): RationaleStore {
-  try {
-    const raw = execFileSync('git', ['show', `:${RATIONALES_FILE}`], {
-      cwd,
-      encoding: 'utf8',
-      maxBuffer: STORE_MAX_BYTES,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return parseStore(raw, RATIONALES_FILE);
-  } catch (cause) {
-    /* Absence is the pre-first-rationale state; staged corruption must never become empty approval. */
-    try {
-      execFileSync('git', ['cat-file', '-e', `:${RATIONALES_FILE}`], {
-        cwd,
-        stdio: 'ignore',
-      });
-    } catch {
-      return emptyStore();
-    }
-    throw cause;
-  }
+function mutationPath(cwd: string): string {
+  const privateReview =
+    process.env.DEVKIT_RUN_MODE === 'review' &&
+    (Boolean(process.env.DEVKIT_REVIEW_ID) || process.env.DEVKIT_REVIEW_DATA_ROOT !== undefined);
+  if (privateReview) return devkitDataFile(cwd, 'comment-firewall-rationales.json');
+  return sharedPath(cwd);
 }
 
-export function loadWorkingRationales(cwd: string): RationaleStore {
-  const file = workingPath(cwd);
+function legacyWorkingPath(cwd: string): string {
+  return path.join(gitPath(cwd, '--show-toplevel'), '.devkit/comment-firewall-rationales.json');
+}
+
+function worktreeIdentity(cwd: string): string {
+  return gitPath(cwd, '--git-dir');
+}
+
+function loadFile(file: string): RationaleStore {
   if (!existsSync(file)) return emptyStore();
   const stat = statSync(file);
   if (!stat.isFile() || stat.size > STORE_MAX_BYTES) {
     throw new Error(`${RATIONALES_FILE} is not a regular file under ${STORE_MAX_BYTES} bytes`);
   }
   return parseStore(readFileSync(file, 'utf8'), RATIONALES_FILE);
+}
+
+function loadLegacy(cwd: string): RationaleStore {
+  const file = legacyWorkingPath(cwd);
+  if (existsSync(file)) return loadFile(file);
+  try {
+    const raw = execFileSync('git', ['show', 'HEAD:.devkit/comment-firewall-rationales.json'], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: STORE_MAX_BYTES,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return parseStore(raw, RATIONALES_FILE);
+  } catch {
+    return emptyStore();
+  }
+}
+
+function loadCombinedStore(cwd: string): RationaleStore {
+  const shared = loadFile(sharedPath(cwd));
+  const writable = mutationPath(cwd);
+  if (writable === sharedPath(cwd) || !existsSync(writable)) return shared;
+  const overlay = loadFile(writable);
+  return {
+    version: 1,
+    entries: { ...shared.entries, ...overlay.entries },
+    migratedWorktrees: [
+      ...new Set([...(shared.migratedWorktrees ?? []), ...(overlay.migratedWorktrees ?? [])]),
+    ],
+  };
+}
+
+interface LegacyMergeResult {
+  changed: boolean;
+  conflict: string;
+}
+
+function mergeLegacyForOwner(
+  store: RationaleStore,
+  legacy: RationaleStore,
+  owner: string,
+): LegacyMergeResult {
+  if (store.migratedWorktrees?.includes(owner)) return { changed: false, conflict: '' };
+  if (Object.keys(legacy.entries).length === 0) return { changed: false, conflict: '' };
+  for (const [id, legacyEntry] of Object.entries(legacy.entries)) {
+    const existing = store.entries[id];
+    if (
+      existing &&
+      (existing.rationale !== legacyEntry.rationale || existing.ticket !== legacyEntry.ticket)
+    ) {
+      return {
+        changed: false,
+        conflict: `legacy evidence for [${id}] conflicts with another worktree; reconcile it before continuing`,
+      };
+    }
+    store.entries[id] = {
+      ...(existing ?? legacyEntry),
+      worktrees: [...new Set([...(existing?.worktrees ?? []), owner])],
+    };
+  }
+  store.migratedWorktrees = [...new Set([...(store.migratedWorktrees ?? []), owner])];
+  return { changed: true, conflict: '' };
+}
+
+export function loadWorkingRationales(cwd: string): RationaleStore {
+  const store = loadCombinedStore(cwd);
+  const legacy = loadLegacy(cwd);
+  const merged = mergeLegacyForOwner(store, legacy, worktreeIdentity(cwd));
+  if (merged.conflict) throw new Error(merged.conflict);
+  return store;
+}
+
+export function ensureLegacyRationalesMigrated(cwd: string): void {
+  const file = mutationPath(cwd);
+  let error = '';
+  const completed = withStoreLock(file, {}, (handle) => {
+    const store = loadCombinedStore(cwd);
+    const merged = mergeLegacyForOwner(store, loadLegacy(cwd), worktreeIdentity(cwd));
+    if (merged.conflict) {
+      error = merged.conflict;
+      return;
+    }
+    if (merged.changed) persistWorking(cwd, store, handle);
+  });
+  if (error) throw new Error(error);
+  if (!completed) throw new Error('could not acquire or retain the comment-rationale lock');
 }
 
 function validRationale(rationale: string): string {
@@ -153,7 +248,7 @@ function validTicket(ticket: string | undefined): string | undefined {
 }
 
 function persistWorking(cwd: string, store: RationaleStore, handle: { owns: () => boolean }): void {
-  const file = workingPath(cwd);
+  const file = mutationPath(cwd);
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
@@ -189,15 +284,34 @@ export function recordRationale(
     at: now,
   };
   if (canonicalTicket) entry.ticket = canonicalTicket;
-  const file = workingPath(cwd);
-  const root = repositoryRoot(cwd);
+  const file = mutationPath(cwd);
+  const owner = worktreeIdentity(cwd);
+  let mutationError = '';
   const completed = withStoreLock(file, {}, (handle) => {
-    const store = loadWorkingRationales(cwd);
+    let store: RationaleStore;
+    try {
+      store = loadWorkingRationales(cwd);
+    } catch (cause) {
+      mutationError = cause instanceof Error ? cause.message : String(cause);
+      return;
+    }
     options.afterLoad?.();
+    const existing = store.entries[findingId];
+    const otherOwner = existing?.worktrees?.some((item) => item !== owner) ?? false;
+    if (
+      existing &&
+      otherOwner &&
+      (existing.rationale !== entry.rationale || existing.ticket !== entry.ticket)
+    ) {
+      mutationError =
+        'another worktree owns different evidence for this finding; prune that ownership or use the same rationale';
+      return;
+    }
+    entry.worktrees = [...new Set([...(existing?.worktrees ?? []), owner])];
     store.entries[findingId] = entry;
     persistWorking(cwd, store, handle);
-    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
   });
+  if (mutationError) throw new Error(mutationError);
   if (!completed) throw new Error('could not acquire or retain the comment-rationale lock');
   return entry;
 }
@@ -208,21 +322,48 @@ export function listRationales(cwd: string): Array<[string, CommentRationale]> {
   );
 }
 
-export function pruneRationales(cwd: string, currentIds: ReadonlySet<string>): number {
-  const file = workingPath(cwd);
-  const root = repositoryRoot(cwd);
+export interface PruneRationalesOptions {
+  afterSnapshot?: () => void;
+}
+
+export function pruneRationales(
+  cwd: string,
+  currentIds: ReadonlySet<string>,
+  options: PruneRationalesOptions = {},
+): number {
+  const file = mutationPath(cwd);
+  const owner = worktreeIdentity(cwd);
+  const snapshot = loadWorkingRationales(cwd);
+  const candidates = Object.entries(snapshot.entries)
+    .filter(([id, entry]) => {
+      if (currentIds.has(id)) return false;
+      const owners = entry.worktrees;
+      return !owners || owners.includes(owner);
+    })
+    .map(([id, entry]) => [id, JSON.stringify(entry)] as const);
+  options.afterSnapshot?.();
   let removed = 0;
+  let mutationError = '';
   const completed = withStoreLock(file, {}, (handle) => {
-    const store = loadWorkingRationales(cwd);
-    for (const id of Object.keys(store.entries)) {
-      if (currentIds.has(id)) continue;
-      delete store.entries[id];
+    let store: RationaleStore;
+    try {
+      store = loadWorkingRationales(cwd);
+    } catch (cause) {
+      mutationError = cause instanceof Error ? cause.message : String(cause);
+      return;
+    }
+    for (const [id, fingerprint] of candidates) {
+      const entry = store.entries[id];
+      if (!entry || JSON.stringify(entry) !== fingerprint) continue;
+      const remainingOwners = (entry.worktrees ?? []).filter((item) => item !== owner);
+      if (remainingOwners.length > 0) entry.worktrees = remainingOwners;
+      else delete store.entries[id];
       removed += 1;
     }
     if (removed === 0) return;
     persistWorking(cwd, store, handle);
-    execFileSync('git', ['add', '--', RATIONALES_FILE], { cwd: root, stdio: 'pipe' });
   });
+  if (mutationError) throw new Error(mutationError);
   if (!completed) throw new Error('could not acquire or retain the comment-rationale lock');
   return removed;
 }
