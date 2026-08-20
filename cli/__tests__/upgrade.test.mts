@@ -169,6 +169,24 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(false); // still off — not newly added
     expect(readFileSync(join(root, '.husky/pre-commit'), 'utf8')).not.toContain('guard-structure');
   });
+
+  it('migrates an enabled Electron structure hook to the Devkit staged runner', () => {
+    const root = tmpRepo({ ...CLIB_PKG, devDependencies: { electron: '^30' } });
+    expect(run(root, 'init', '--stack', 'electron', '--yes', '--no-cursor').status).toBe(0);
+    const hookPath = join(root, '.husky', 'pre-commit');
+    writeFileSync(
+      hookPath,
+      readFileSync(hookPath, 'utf8').replace(
+        'guard-structure staged',
+        'node --preserve-symlinks node_modules/eslint/bin/eslint.js src',
+      ),
+    );
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(readFileSync(hookPath, 'utf8')).toContain('guard-structure staged');
+    expect(config(root).components.structure).toBe(true);
+  });
 });
 
 describe('devkit upgrade — preflight', () => {

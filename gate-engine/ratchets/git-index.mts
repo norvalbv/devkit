@@ -43,7 +43,7 @@ export function hasStagedFiles(root: string): boolean {
 
 // Split a NUL-delimited git list. `-z` is used so a path containing a newline (or one git would
 // otherwise quote and escape) survives verbatim.
-function splitNul(out: string): string[] {
+export function splitNul(out: string): string[] {
   return out.split('\0').filter((line) => line.length > 0);
 }
 

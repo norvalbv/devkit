@@ -11,12 +11,13 @@
  * here pin the zero-dependency mechanism + the fail-open / nothing-to-lint contract, which are what
  * the refactor introduces.
  */
+import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { runStructureGate } from '../run.mts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { planStagedStructureLint, runStagedStructureGate, runStructureGate } from '../run.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -40,6 +41,12 @@ afterEach(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots.length = 0;
 });
+
+function initializeGit(root: string) {
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', 'devkit-test@example.com'], { cwd: root });
+  execFileSync('git', ['config', 'user.name', 'Devkit Test'], { cwd: root });
+}
 
 describe('guard-structure gate — zero consumer deps', () => {
   it("runs from DEVKIT's own eslint/plugin against a conforming tree — no consumer node_modules", () => {
@@ -148,5 +155,146 @@ describe('guard-structure gate — zero consumer deps', () => {
     write(root, 'a/thing.ts'); // all-ignored (single-ext glob)
     write(root, 'b/Ok.ts'); // conforms
     expect((await runStructureGate(root)).code).toBe(0); // 'b' reached + clean, not a masked/fail-open
+  });
+});
+
+describe('guard-structure staged plan', () => {
+  const scopes = [
+    { root: 'src', extensions: ['ts', 'tsx', 'css'] },
+    { root: 'socket-server/src', extensions: ['ts', 'tsx', 'css'] },
+    { root: 'vercel-serverless', extensions: ['ts', 'tsx', 'css'] },
+  ];
+
+  it('keeps every configured root and NUL-safe pathname as one ESLint target', () => {
+    const unusual = 'socket-server/src/with a space/line\nbreak.ts';
+    expect(
+      planStagedStructureLint(
+        scopes,
+        ['src/main.ts', unusual, 'vercel-serverless/handler.ts', 'README.md'],
+        [],
+        [],
+      ),
+    ).toEqual({
+      targets: ['src/main.ts', unusual, 'vercel-serverless/handler.ts'],
+      probeScopes: [],
+      deferred: [],
+    });
+  });
+
+  it('probes only the affected root after a deletion or rename', () => {
+    expect(
+      planStagedStructureLint(
+        scopes,
+        ['src/Feature/Renamed.ts'],
+        ['src/Feature/index.ts', 'src/Feature/Renamed.ts'],
+        [],
+      ),
+    ).toEqual({
+      targets: ['src/Feature/Renamed.ts'],
+      probeScopes: [{ root: 'src', extensions: ['ts', 'tsx', 'css'] }],
+      deferred: [],
+    });
+  });
+
+  it('plans additions, deletions, and renames for a repository-root tree', () => {
+    const rootScope = [{ root: '.', extensions: ['ts'] }];
+    expect(
+      planStagedStructureLint(
+        rootScope,
+        ['src/Added.ts', 'src/Renamed.ts'],
+        ['src/Deleted.ts', 'src/Renamed.ts'],
+        [],
+      ),
+    ).toEqual({
+      targets: ['src/Added.ts', 'src/Renamed.ts'],
+      probeScopes: rootScope,
+      deferred: [],
+    });
+  });
+
+  it('defers a partially staged source file instead of reading its worktree bytes as index bytes', () => {
+    expect(
+      planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/index.ts']),
+    ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
+  });
+
+  it('defers every staged file in a topology root with an unrelated working-tree source', () => {
+    expect(
+      planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['src/Feature/Uncommitted.ts']),
+    ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
+  });
+
+  it('defers all staged structure input when its policy has unstaged edits', () => {
+    expect(
+      planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['eslint.config.mjs']),
+    ).toEqual({
+      targets: [],
+      probeScopes: [],
+      deferred: ['structure policy', 'src/Feature/index.ts'],
+    });
+  });
+});
+
+describe('guard-structure staged execution', () => {
+  const config = {
+    scanRoots: ['src'],
+    sourceExtensions: ['ts'],
+    structure: {
+      trees: [
+        {
+          name: 'lib',
+          root: 'src',
+          sourceExtensions: ['ts'],
+          grammar: { files: ['{pascal}'] },
+        },
+      ],
+    },
+  };
+
+  it('checks a config-driven staged file from a package subdirectory, not sibling packages', async () => {
+    const root = repo();
+    const pkg = join(root, 'packages', 'lib');
+    write(pkg, 'guard.config.json', JSON.stringify(config));
+    write(pkg, 'src/Ok.ts');
+    write(root, 'packages/other/src/Wrong.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'packages/lib/guard.config.json', 'packages/lib/src/Ok.ts'], {
+      cwd: root,
+    });
+
+    await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('does not treat unstaged worktree bytes as a verdict on a staged file', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'guard.config.json', 'src/Ok.ts'], { cwd: root });
+    // The index is valid. The working tree is not. The pre-commit runner must defer this file to
+    // CI rather than reject a staged snapshot on the basis of an unstaged edit.
+    write(root, 'src/not-ok.ts');
+
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('defers an untracked source from a package cwd', async () => {
+    const root = repo();
+    const pkg = join(root, 'packages', 'lib');
+    write(pkg, 'guard.config.json', JSON.stringify(config));
+    write(pkg, 'src/Ok.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'packages/lib/guard.config.json', 'packages/lib/src/Ok.ts'], {
+      cwd: root,
+    });
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: root });
+    write(pkg, 'src/Ok.ts', 'export const changed = true;\n');
+    execFileSync('git', ['add', '--', 'packages/lib/src/Ok.ts'], { cwd: root });
+    write(pkg, 'src/Uncommitted.ts');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('src/Ok.ts'));
+    error.mockRestore();
   });
 });
