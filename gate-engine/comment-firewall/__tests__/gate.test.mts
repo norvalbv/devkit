@@ -13,7 +13,7 @@ const finding: CommentFinding = {
   id: 'a1b2c3d4e5f6',
   path: 'src/a.ts',
   extension: 'ts',
-  adapterVersion: 'typescript-scanner-v1',
+  adapterVersion: 'typescript-scanner-v2',
   kind: 'line',
   startLine: 2,
   endLine: 2,
@@ -71,7 +71,12 @@ describe('runCommentFirewall', () => {
           Object.assign(saved, entries);
           return true;
         },
-        judge: () => ({ verdict: 'PASS', reason: 'Documents an external protocol invariant.' }),
+        judge: () => ({
+          [finding.id]: {
+            verdict: 'PASS',
+            reason: 'Documents an external protocol invariant.',
+          },
+        }),
         model: () => 'haiku',
       }),
     ).toBe(0);
@@ -104,11 +109,16 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt: () => false,
-        judge: () => ({ verdict: 'PASS', reason: 'Documents an external protocol invariant.' }),
+        judge: () => ({
+          [finding.id]: {
+            verdict: 'PASS',
+            reason: 'Documents an external protocol invariant.',
+          },
+        }),
       }),
     ).toBe(4);
     expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
-      'PASS receipt could not be persisted',
+      'PASS receipts could not be persisted',
     );
   });
 
@@ -121,7 +131,12 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ verdict: 'FAIL', reason: 'The comment defends a removable workaround.' }),
+        judge: () => ({
+          [finding.id]: {
+            verdict: 'FAIL',
+            reason: 'The comment defends a removable workaround.',
+          },
+        }),
       }),
     ).toBe(1);
     expect(saveReceipt).not.toHaveBeenCalled();
@@ -139,7 +154,24 @@ describe('runCommentFirewall', () => {
     expect(runCommentFirewall('/repo', { ...base, strict: () => true })).toBe(3);
   });
 
-  it('discards PASS when staged evidence changes during the model call', () => {
+  it('classifies deterministic batch overflow as unsafe evidence, not a reviewer outage', () => {
+    quiet();
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection(),
+        loadRationales: () => store({ [finding.id]: rationale }),
+        loadReceipts: () => ({}),
+        judge: () => {
+          throw new RangeError('comment review batch exceeds 200 findings');
+        },
+      }),
+    ).toBe(4);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      'deterministic review-batch limit exceeded',
+    );
+  });
+
+  it('discards PASS when local evidence changes during the model call', () => {
     quiet();
     const saveReceipt = vi.fn(() => true);
     let calls = 0;
@@ -149,10 +181,34 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ verdict: 'PASS', reason: 'Valid.' }),
+        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
       }),
     ).toBe(1);
     expect(saveReceipt).not.toHaveBeenCalled();
+  });
+
+  it('reviews all pending rationales in one batch and persists both decisions together', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const rationales = store({ [finding.id]: rationale, [second.id]: rationale });
+    const judge = vi.fn(() => ({
+      [finding.id]: { verdict: 'PASS' as const, reason: 'First invariant.' },
+      [second.id]: { verdict: 'PASS' as const, reason: 'Second invariant.' },
+    }));
+    const saveReceipt = vi.fn(() => true);
+
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second]),
+        loadRationales: () => rationales,
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge,
+      }),
+    ).toBe(0);
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge.mock.calls[0]?.[1]).toHaveLength(2);
+    expect(Object.keys(saveReceipt.mock.calls[0]?.[1] ?? {})).toHaveLength(2);
   });
 
   it('fails visibly when a configured changed language has no lexer adapter', () => {

@@ -29,12 +29,15 @@ export const DEVKIT_CACHE_IGNORES = [
     // preference on everyone who clones the repo.
     '.devkit/adhd-off',
 ];
-export const DEVKIT_TRACKED_UNIGNORES = [
-    '!.devkit/agent-hook-registrations-manifest.json',
-    '!.devkit/comment-firewall-rationales.json',
+export const DEVKIT_TRACKED_UNIGNORES = ['!.devkit/agent-hook-registrations-manifest.json'];
+const LEGACY_GITIGNORE_LINES = ['!.devkit/comment-firewall-rationales.json'];
+const DEVKIT_GITIGNORE_LINES = [
+    ...DEVKIT_CACHE_IGNORES,
+    ...DEVKIT_TRACKED_UNIGNORES,
+    ...LEGACY_GITIGNORE_LINES,
 ];
-const DEVKIT_GITIGNORE_LINES = [...DEVKIT_CACHE_IGNORES, ...DEVKIT_TRACKED_UNIGNORES];
 const TRACKED_UNIGNORE_SET = new Set(DEVKIT_TRACKED_UNIGNORES);
+const OBSOLETE_LINE_SET = new Set(LEGACY_GITIGNORE_LINES);
 // Append cache rules and keep tracked-state negations at the effective tail (gitignore is last-match
 // wins, so presence alone is insufficient when a consumer later appends a broad `.devkit/*` rule).
 export function ensureDevkitCacheGitignore(cwd, dryRun) {
@@ -44,7 +47,7 @@ export function ensureDevkitCacheGitignore(cwd, dryRun) {
     const missingCaches = DEVKIT_CACHE_IGNORES.filter((line) => !have.has(line));
     const kept = existing
         .split('\n')
-        .filter((line) => !TRACKED_UNIGNORE_SET.has(line.trim()))
+        .filter((line) => !TRACKED_UNIGNORE_SET.has(line.trim()) && !OBSOLETE_LINE_SET.has(line.trim()))
         .join('\n');
     const additions = [...missingCaches, ...DEVKIT_TRACKED_UNIGNORES];
     const separator = kept && !kept.endsWith('\n') ? '\n' : '';

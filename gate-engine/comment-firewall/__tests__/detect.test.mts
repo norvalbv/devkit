@@ -56,6 +56,29 @@ describe('scanCommentTokens', () => {
     expect(token).toMatchObject({ startLine: 1, endLine: 3, kind: 'block' });
     expect(token?.text).toBe('/* first\n * second\n */');
   });
+
+  it('distinguishes multi-line trailing explanations from comments followed by code', () => {
+    const [trailingExplanation] = scanCommentTokens(
+      'doHack(); /* first\n * second\n * third\n */\n',
+      'ts',
+    );
+    const [followedByCode] = scanCommentTokens(
+      '/* first\n * second\n * third\n */ doHack();\n',
+      'ts',
+    );
+    const [followedByStructure] = scanCommentTokens(
+      '/* first\n * second\n * third\n */ });\n',
+      'ts',
+    );
+    expect(trailingExplanation?.standalone).toBe(true);
+    expect(followedByCode?.standalone).toBe(false);
+    expect(followedByStructure?.standalone).toBe(true);
+  });
+
+  it('treats JSX closing tags after a multi-line comment as structural', () => {
+    const [token] = scanCommentTokens('{/* first\n * second\n * third\n */}</div>;\n', 'tsx');
+    expect(token?.standalone).toBe(true);
+  });
 });
 
 describe('parsePatchHunks', () => {
@@ -75,7 +98,7 @@ describe('parsePatchHunks', () => {
 });
 
 describe('detectChangedComments', () => {
-  it('challenges added and modified staged comments as whole tokens, using the index only', () => {
+  it('challenges only staged comment paragraphs with at least three text lines', () => {
     const root = fixture();
     writeFileSync(
       path.join(root, 'src/a.ts'),
@@ -85,7 +108,26 @@ describe('detectChangedComments', () => {
 
     writeFileSync(
       path.join(root, 'src/a.ts'),
-      'const url = "https://example.test";\n// durable constraint changed\n/* first\n * second\n */\n',
+      [
+        'const url = "https://example.test";',
+        '// short note changed',
+        'const separatorA = 0;',
+        '// two-line note',
+        '// remains unchallenged',
+        'const separatorB = 0;',
+        '// first paragraph line',
+        '// second paragraph line',
+        '// third paragraph line',
+        '/**',
+        ' * first block line',
+        ' * second block line',
+        ' */',
+        '/* first challenged block line',
+        ' * second challenged block line',
+        ' * third challenged block line',
+        ' */',
+        '',
+      ].join('\n'),
     );
     git(root, ['add', 'src/a.ts']);
     writeFileSync(path.join(root, 'src/a.ts'), 'const url = "unstaged";\n');
@@ -93,10 +135,160 @@ describe('detectChangedComments', () => {
     const result = detectChangedComments(root);
     expect(result.unsupported).toEqual([]);
     expect(result.findings.map((finding) => finding.comment)).toEqual([
-      '// durable constraint changed',
-      '/* first\n * second\n */',
+      '// first paragraph line\n// second paragraph line\n// third paragraph line',
+      '/* first challenged block line\n * second challenged block line\n * third challenged block line\n */',
     ]);
-    expect(result.findings[1]).toMatchObject({ startLine: 3, endLine: 5 });
+    expect(result.findings[1]).toMatchObject({ startLine: 14, endLine: 17 });
+  });
+
+  it('reconstructs a modified existing line-comment paragraph before attribution', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), '// first\n// old second\n// third\nconst x = 1;\n');
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// new first\n// new second\n// new third\nconst x = 1;\n',
+    );
+    git(root, ['add', 'src/a.ts']);
+
+    expect(detectChangedComments(root).findings.map((item) => item.comment)).toEqual([
+      '// new first\n// new second\n// new third',
+    ]);
+  });
+
+  it('does not sweep an untouched two-line note into an adjacent one-line addition', () => {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), '// old first\n// old second\nconst x = 1;\n');
+    commitAll(root, 'base');
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '// old first\n// old second\n// new short note\nconst x = 1;\n',
+    );
+    git(root, ['add', 'src/a.ts']);
+    expect(detectChangedComments(root).findings).toEqual([]);
+  });
+
+  it('groups adjacent one-line block comments into one staged paragraph', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        '/* This workaround skips validation in the legacy path. */',
+        '/* It monkey-patches the result until the upstream fix lands. */',
+        '/* Remove this branch when the tracked dependency is upgraded. */',
+        'const x = 1;',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings.map((item) => item.comment)).toEqual([
+      [
+        '/* This workaround skips validation in the legacy path. */',
+        '/* It monkey-patches the result until the upstream fix lands. */',
+        '/* Remove this branch when the tracked dependency is upgraded. */',
+      ].join('\n'),
+    ]);
+  });
+
+  it('challenges a multi-line workaround opened after code but passes one followed by code', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        'doHack(); /* workaround detail one',
+        ' * workaround detail two',
+        ' * workaround detail three',
+        ' */',
+        '/* inline detail one',
+        ' * inline detail two',
+        ' * inline detail three',
+        ' */ doOtherWork();',
+        '/* structural detail one',
+        ' * structural detail two',
+        ' * structural detail three',
+        ' */ });',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings.map((item) => item.comment)).toEqual([
+      [
+        '/* workaround detail one',
+        ' * workaround detail two',
+        ' * workaround detail three',
+        ' */',
+      ].join('\n'),
+      [
+        '/* structural detail one',
+        ' * structural detail two',
+        ' * structural detail three',
+        ' */',
+      ].join('\n'),
+    ]);
+  });
+
+  it('does not count a CRLF block-comment closer as a third text line', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      '/**\r\n * first documentation line\r\n * second documentation line\r\n */\r\nconst x = 1;\r\n',
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings).toEqual([]);
+  });
+
+  it('ignores inline comments but does not exempt long file-header directives', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        '/*!',
+        ' * @license',
+        ' * Copyright Example Authors',
+        ' * More license text',
+        ' */',
+        'const a = 1; // inline one',
+        'const b = 2; // inline two',
+        'const c = 3; // inline three',
+        '',
+      ].join('\n'),
+    );
+    writeFileSync(
+      path.join(root, 'src/b.ts'),
+      [
+        '/** @generated',
+        ' * Generated source file',
+        ' * Do not edit this file directly',
+        ' */',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings.map((item) => item.path)).toEqual([
+      'src/a.ts',
+      'src/b.ts',
+    ]);
+  });
+
+  it('does not let bare preserve markers or non-header directives bypass review', () => {
+    const root = fixture();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        'const value = 1;',
+        '/*!',
+        ' * workaround detail one',
+        ' * workaround detail two',
+        ' * workaround detail three',
+        ' */',
+        '// @preserve',
+        '// workaround detail three',
+        '// workaround detail four',
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', '.']);
+    expect(detectChangedComments(root).findings.map((item) => item.comment)).toHaveLength(2);
   });
 
   it('grandfathers untouched comments and ignores deletions', () => {

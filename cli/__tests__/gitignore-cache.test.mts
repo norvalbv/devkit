@@ -23,7 +23,8 @@ describe('ensureDevkitCacheGitignore', () => {
   it('manages the review run directory without ignoring tracked devkit state', () => {
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/review-runs/');
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/comment-firewall-receipts.json');
-    expect(DEVKIT_TRACKED_UNIGNORES).toContain('!.devkit/comment-firewall-rationales.json');
+    expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/comment-firewall-rationales.json');
+    expect(DEVKIT_TRACKED_UNIGNORES).not.toContain('!.devkit/comment-firewall-rationales.json');
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/');
   });
 
@@ -59,6 +60,15 @@ describe('ensureDevkitCacheGitignore', () => {
     const lines = readFileSync(join(d, '.gitignore'), 'utf8').trimEnd().split('\n');
     expect(lines.slice(-DEVKIT_TRACKED_UNIGNORES.length)).toEqual(DEVKIT_TRACKED_UNIGNORES);
     expect(lines.filter((line) => line === tracked)).toHaveLength(1);
+  });
+
+  it('removes the obsolete tracked-rationale exception during upgrade', () => {
+    const d = tmp();
+    writeFileSync(join(d, '.gitignore'), '!.devkit/comment-firewall-rationales.json\n');
+    ensureDevkitCacheGitignore(d, false);
+    expect(readFileSync(join(d, '.gitignore'), 'utf8')).not.toContain(
+      '!.devkit/comment-firewall-rationales.json',
+    );
   });
 
   it('dry-run writes nothing', () => {

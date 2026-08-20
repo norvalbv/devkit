@@ -50,7 +50,7 @@ function fixture(row: Row) {
     id: row.id.padEnd(12, '0').slice(0, 12),
     path: `src/eval/${row.id}.ts`,
     extension: 'ts',
-    adapterVersion: 'typescript-scanner-v1',
+    adapterVersion: 'typescript-scanner-v2',
     kind: row.comment.startsWith('/*') ? 'block' : 'line',
     startLine: 2,
     endLine: 2,
