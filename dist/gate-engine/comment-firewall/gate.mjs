@@ -1,14 +1,14 @@
 import { devkitDataFile, loadEntries, saveEntries } from "../judge/verdict-store.mjs";
 import { detectChangedComments } from "./detect.mjs";
-import { commentJudgeModel, judgeComment, receiptKey } from "./judge.mjs";
-import { loadStagedRationales } from "./rationales.mjs";
+import { commentJudgeModel, judgeComments, receiptKey } from "./judge.mjs";
+import { loadWorkingRationales } from "./rationales.mjs";
 export const COMMENT_RECEIPTS_FILE = 'comment-firewall-receipts.json';
 const defaults = {
     detect: detectChangedComments,
-    loadRationales: loadStagedRationales,
+    loadRationales: loadWorkingRationales,
     loadReceipts: loadEntries,
     saveReceipt: saveEntries,
-    judge: judgeComment,
+    judge: judgeComments,
     model: commentJudgeModel,
     now: () => new Date().toISOString(),
     strict: () => Boolean(process.env.GUARD_AI_STRICT),
@@ -21,14 +21,14 @@ function printFinding(finding) {
     console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
 }
 function printMissing(findings) {
-    console.error(`guard-comments: ${findings.length} added/modified comment${findings.length === 1 ? '' : 's'} need a decision.`);
+    console.error(`guard-comments: ${findings.length} added/modified comment paragraph${findings.length === 1 ? '' : 's'} need a decision.`);
     for (const finding of findings)
         printFinding(finding);
     console.error('\nFix the implementation and remove the explanatory workaround, or justify a load-bearing comment:');
     console.error(`  guard-comments justify <id> "why code/types/tests cannot express this durable constraint"`);
     console.error('If this is legitimate temporary debt, create/link its cleanup ticket:');
     console.error(`  guard-comments justify <id> "why unavoidable now and what removes it" --ticket SC-123`);
-    console.error('The rationale is staged as audit evidence; a separate Haiku reviewer must still approve it.');
+    console.error('The rationale stays in Git-local state; one batched Haiku review must still approve it.');
 }
 function passReceipt(meta) {
     return meta?.verdict === 'PASS';
@@ -38,17 +38,21 @@ function evidenceFor(finding, rationales) {
     return evidence?.rationale.trim() ? evidence : undefined;
 }
 /** Recompute the evidence just before publishing PASS, closing the stage-while-judge-runs race. */
-function remainsCurrent(cwd, originalKey, findingId, deps) {
+function allRemainCurrent(cwd, pending, deps) {
     const refreshed = deps.detect(cwd);
-    const current = refreshed.findings.find((finding) => finding.id === findingId);
-    if (!current)
-        return false;
-    const rationale = evidenceFor(current, deps.loadRationales(cwd));
-    return Boolean(rationale && receiptKey(current, rationale, deps.model()) === originalKey);
+    const currentById = new Map(refreshed.findings.map((finding) => [finding.id, finding]));
+    const rationales = deps.loadRationales(cwd);
+    return pending.every((item) => {
+        const current = currentById.get(item.finding.id);
+        if (!current)
+            return false;
+        const rationale = evidenceFor(current, rationales);
+        return Boolean(rationale && receiptKey(current, rationale, deps.model()) === item.key);
+    });
 }
 /**
  * Exit contract: 0 clean/receipted, 1 unresolved/rejected, 2 ordinary judge outage (fail-open),
- * 3 strict judge outage, 4 unreadable staged evidence or unsupported configured language.
+ * 3 strict judge outage, 4 unreadable evidence, deterministic batch overflow, or unsupported language.
  */
 export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
     const deps = { ...defaults, ...injected };
@@ -59,7 +63,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         rationales = deps.loadRationales(cwd);
     }
     catch (cause) {
-        console.error(`guard-comments: staged evidence unreadable — ${cause instanceof Error ? cause.message : cause}`);
+        console.error(`guard-comments: comment evidence unreadable — ${cause instanceof Error ? cause.message : cause}`);
         return 4;
     }
     if (detection.unsupported.length > 0) {
@@ -90,44 +94,69 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         printMissing(missing);
         return 1;
     }
-    for (const item of pending) {
-        const result = deps.judge(cwd, item.finding, item.rationale);
-        if (!result) {
-            console.error(`guard-comments: [${item.finding.id}] reviewer unavailable or returned malformed evidence; no receipt was written.`);
-            return deps.strict() ? 3 : 2;
-        }
-        if (result.verdict === 'FAIL') {
-            console.error(`guard-comments: [${item.finding.id}] rationale rejected — ${result.reason}`);
-            console.error('Fix the implementation/comment, or replace the rationale with specific evidence.');
-            console.error('For unavoidable temporary debt, include a cleanup ticket with --ticket SC-123.');
+    if (pending.length === 0)
+        return 0;
+    let results;
+    try {
+        results = deps.judge(cwd, pending.map(({ finding, rationale }) => ({ finding, rationale })));
+    }
+    catch (cause) {
+        console.error(`guard-comments: deterministic review-batch limit exceeded; split the staged change — ${cause instanceof Error ? cause.message : cause}`);
+        return 4;
+    }
+    if (!results || pending.some(({ finding }) => results[finding.id] === undefined)) {
+        console.error('guard-comments: batched reviewer unavailable or returned malformed evidence; no receipt was written.');
+        return deps.strict() ? 3 : 2;
+    }
+    try {
+        if (!allRemainCurrent(cwd, pending, deps)) {
+            console.error('guard-comments: local evidence changed during review; stale batch discarded.');
             return 1;
         }
-        try {
-            if (!remainsCurrent(cwd, item.key, item.finding.id, deps)) {
-                console.error(`guard-comments: [${item.finding.id}] staged evidence changed during review; stale PASS discarded.`);
-                return 1;
-            }
-        }
-        catch (cause) {
-            console.error(`guard-comments: could not re-read staged evidence before publishing PASS — ${cause instanceof Error ? cause.message : cause}`);
-            return 4;
-        }
-        const saved = deps.saveReceipt(receiptFile, {
-            [item.key]: {
+    }
+    catch (cause) {
+        console.error(`guard-comments: could not re-read local evidence before publishing PASS — ${cause instanceof Error ? cause.message : cause}`);
+        return 4;
+    }
+    const approved = pending.filter(({ finding }) => results[finding.id]?.verdict === 'PASS');
+    if (approved.length > 0) {
+        const entries = Object.fromEntries(approved.map((item) => [
+            item.key,
+            {
                 at: deps.now(),
                 verdict: 'PASS',
                 findingId: item.finding.id,
                 path: item.finding.path,
                 model: deps.model(),
-                reason: result.reason,
+                reason: results[item.finding.id]?.reason,
             },
-        });
+        ]));
+        const saved = deps.saveReceipt(receiptFile, entries);
         if (!saved) {
-            console.error(`guard-comments: [${item.finding.id}] reviewer approved, but its PASS receipt could not be persisted; commit blocked.`);
+            console.error('guard-comments: approved PASS receipts could not be persisted; commit blocked.');
             return 4;
         }
-        receipts[item.key] = { verdict: 'PASS' };
-        console.error(`guard-comments: [${item.finding.id}] approved — ${result.reason}`);
+        Object.assign(receipts, entries);
+    }
+    let rejected = false;
+    for (const item of pending) {
+        const result = results[item.finding.id];
+        if (!result) {
+            console.error(`guard-comments: [${item.finding.id}] reviewer result disappeared before publication; commit blocked.`);
+            return 4;
+        }
+        if (result.verdict === 'FAIL') {
+            rejected = true;
+            console.error(`guard-comments: [${item.finding.id}] rationale rejected — ${result.reason}`);
+        }
+        else {
+            console.error(`guard-comments: [${item.finding.id}] approved — ${result.reason}`);
+        }
+    }
+    if (rejected) {
+        console.error('Fix the implementation/comment, or replace the rationale with specific evidence.');
+        console.error('For unavoidable temporary debt, include a cleanup ticket with --ticket SC-123.');
+        return 1;
     }
     return 0;
 }
