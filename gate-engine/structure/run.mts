@@ -5,7 +5,8 @@
 // guard.config.json `structure` block + baselines and returns a runnable eslint flat-config that
 // embeds the plugin as a LOADED OBJECT — so ESLint never resolves the plugin from the consumer.
 //
-//   guard-structure gate   # lint the declared structure roots (pre-commit); default subcommand
+//   guard-structure gate     # lint all declared structure roots (CI/manual)
+//   guard-structure staged   # lint only staged structure input (generated pre-commit hook)
 //
 // PARAMETERIZED (W-3): the trees / roots / grammar / baselines all come from resolveGuardConfig(cwd)
 // — the consumer's guard.config.json under the consumer cwd, never the package dir. Grandfathering is
@@ -15,8 +16,9 @@
 // Exit contract (the shared gate trichotomy guard-deterministic applies): 0 clean, 1 violations,
 // 2 fail-open (could-not-run).
 
-import { existsSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
 import { resolveGuardConfig } from '../config.mts';
@@ -25,6 +27,19 @@ import { buildStructureConfigs } from './eslint-config.mts';
 // The one field this gate reads off each structure.trees[] entry — its on-disk root.
 interface StructureTree {
   root?: string;
+  sourceExtensions?: string[];
+  grammar?: unknown;
+}
+
+interface StagedScope {
+  root: string;
+  extensions: string[];
+}
+
+interface StagedPlan {
+  targets: string[];
+  probeScopes: StagedScope[];
+  deferred: string[];
 }
 
 // Outcome of the folder-structure gate: 0 clean / nothing to lint, 1 violations, 2 fail-open.
@@ -37,20 +52,235 @@ interface StructureGateResult {
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
+const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
+const POLICY_PATH_RE =
+  /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/))/;
+
+function splitNul(output: string | Buffer): string[] {
+  return output.toString().split('\0').filter(Boolean);
+}
+
+function pathInRoot(file: string, root: string): boolean {
+  const cleanRoot = root.replace(/\/+$/, '');
+  return Boolean(cleanRoot) && (file === cleanRoot || file.startsWith(`${cleanRoot}/`));
+}
+
+function pathInScope(file: string, scope: StagedScope): boolean {
+  return pathInRoot(file, scope.root) && scope.extensions.includes(extname(file).slice(1));
+}
+
+function isPolicyPath(file: string): boolean {
+  return POLICY_PATH_RE.test(file);
+}
+
+function unique(paths: string[]): string[] {
+  return [...new Set(paths)];
+}
+
+export function planStagedStructureLint(
+  scopes: StagedScope[],
+  changed: string[],
+  destructive: string[],
+  unstaged: string[],
+): StagedPlan {
+  const unstablePolicy = unstaged.some(isPolicyPath);
+  const stagedPolicy = changed.some(isPolicyPath);
+  const deferred: string[] = [];
+  const probeScopes = new Map<string, StagedScope>();
+  const unstableScopes = new Set(
+    scopes
+      .filter((scope) => unstaged.some((file) => pathInScope(file, scope)))
+      .map((scope) => scope.root),
+  );
+
+  for (const scope of scopes) {
+    const hasDestructiveChange = destructive.some((file) => pathInScope(file, scope));
+    const hasRelevantInput =
+      stagedPolicy || hasDestructiveChange || changed.some((file) => pathInScope(file, scope));
+    if (!hasRelevantInput) continue;
+    if (unstablePolicy || unstableScopes.has(scope.root)) {
+      if (unstablePolicy) deferred.push('structure policy');
+      if (hasDestructiveChange) deferred.push(scope.root);
+      continue;
+    }
+    if (stagedPolicy || hasDestructiveChange) probeScopes.set(scope.root, scope);
+  }
+
+  const targets: string[] = [];
+  for (const file of changed) {
+    const scope = scopes.find((candidate) => pathInScope(file, candidate));
+    if (!scope) continue;
+    if (unstablePolicy || unstableScopes.has(scope.root)) {
+      deferred.push(file);
+      continue;
+    }
+    targets.push(file);
+  }
+  return {
+    targets: unique(targets),
+    probeScopes: [...probeScopes.values()],
+    deferred: unique(deferred),
+  };
+}
+
+function gitPaths(cwd: string, args: string[]): string[] {
+  return splitNul(execFileSync('git', args, { cwd, encoding: 'buffer' }));
+}
+
+function untrackedPaths(cwd: string): string[] {
+  return gitPaths(cwd, ['ls-files', '--others', '--exclude-standard', '-z']);
+}
+
+function destructivePaths(cwd: string): string[] {
+  const fields = splitNul(
+    execFileSync('git', ['diff', '--cached', '--name-status', '-z', '--diff-filter=DR'], {
+      cwd,
+      encoding: 'buffer',
+    }),
+  );
+  const paths: string[] = [];
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index++] ?? '';
+    if (status.startsWith('R')) {
+      paths.push(fields[index++] ?? '', fields[index++] ?? '');
+    } else if (status.startsWith('D')) {
+      paths.push(fields[index++] ?? '');
+    }
+  }
+  return paths.filter(Boolean);
+}
+
+function gitPrefix(cwd: string): string {
+  return execFileSync('git', ['rev-parse', '--show-prefix'], { cwd, encoding: 'utf8' }).trimEnd();
+}
+
+function toCwdPaths(paths: string[], prefix: string): string[] {
+  if (!prefix) return paths;
+  return paths.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length));
+}
+
+function stagedScopes(cwd: string): StagedScope[] {
+  const cfg = resolveGuardConfig(cwd);
+  const trees: StructureTree[] = cfg.structure?.trees ?? [];
+  const configScopes = trees
+    .filter((tree): tree is StructureTree & { root: string } => Boolean(tree.root))
+    .map((tree) => ({
+      root: tree.root,
+      extensions: tree.sourceExtensions?.length ? tree.sourceExtensions : cfg.sourceExtensions,
+    }));
+  return configScopes.length
+    ? configScopes
+    : cfg.scanRoots.map((root) => ({ root, extensions: ELECTRON_SOURCE_EXTENSIONS }));
+}
+
+function firstProbeFile(
+  cwd: string,
+  scope: StagedScope,
+  excluded: ReadonlySet<string>,
+): string | null {
+  const pending = [scope.root];
+  while (pending.length) {
+    const dir = pending.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(join(cwd, dir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const relative = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) pending.push(relative);
+      else if (entry.isFile() && pathInScope(relative, scope) && !excluded.has(relative)) {
+        return relative;
+      }
+    }
+  }
+  return null;
+}
+
+export async function runStagedStructureGate(cwd = process.cwd()): Promise<StructureGateResult> {
+  try {
+    const prefix = gitPrefix(cwd);
+    const changed = toCwdPaths(
+      gitPaths(cwd, ['diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR']),
+      prefix,
+    );
+    // Name-status preserves both sides of a rename, unlike name-only. Either side can remove a
+    // required sibling, so either must probe its containing structure root.
+    const destructive = toCwdPaths(destructivePaths(cwd), prefix);
+    // Untracked sources also change the tree observed by a topology parser, so they carry the
+    // same deferral rule as tracked working-tree edits.
+    const unstaged = unique(
+      toCwdPaths([...gitPaths(cwd, ['diff', '--name-only', '-z']), ...untrackedPaths(cwd)], prefix),
+    );
+    const plan = planStagedStructureLint(stagedScopes(cwd), changed, destructive, unstaged);
+    if (plan.deferred.length) {
+      console.error(
+        `⚠️  Structure lint deferred mixed staged/unstaged input to CI: ${plan.deferred.join(', ')}`,
+      );
+    }
+    // A probe also reads worktree bytes. Do not select a dirty source as the representative file
+    // for a deletion/rename check; its result would not describe the staged tree either.
+    const unstableSources = new Set(unstaged);
+    const probeTargets = plan.probeScopes
+      .map((scope) => firstProbeFile(cwd, scope, unstableSources))
+      .filter((target): target is string => target !== null);
+    const unprobedRoots = plan.probeScopes
+      .filter((scope) => !probeTargets.some((target) => pathInScope(target, scope)))
+      .map((scope) => scope.root);
+    if (unprobedRoots.length) {
+      console.error(
+        `⚠️  Structure deletion probe deferred to CI (no remaining source file): ${unprobedRoots.join(', ')}`,
+      );
+    }
+    if (!plan.targets.length && !probeTargets.length) return { code: 0, errorCount: 0 };
+
+    const cfg = resolveGuardConfig(cwd);
+    const trees: StructureTree[] = cfg.structure?.trees ?? [];
+    const configDriven = trees.some((tree) => Boolean(tree.grammar));
+    if (configDriven) return runStructureGate(cwd, unique([...plan.targets, ...probeTargets]));
+
+    const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
+    if (!existsSync(eslintBin)) {
+      return {
+        code: 1,
+        errorCount: 0,
+        text: 'guard-structure: electron structure lint needs the locally pinned eslint binary',
+      };
+    }
+    try {
+      execFileSync(
+        process.execPath,
+        ['--preserve-symlinks', eslintBin, '--', ...unique([...plan.targets, ...probeTargets])],
+        { cwd, stdio: 'inherit' },
+      );
+      return { code: 0, errorCount: 0 };
+    } catch {
+      return { code: 1, errorCount: 0, text: 'guard-structure: local eslint failed' };
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { code: 2, errorCount: 0, text: `guard-structure: ${message}` };
+  }
+}
 
 /**
  * Run the folder-structure gate over a repo's declared structure roots. `cwd` is the consumer root
  * (holds guard.config.json + eslint/baselines/). Result code: 0 = clean / nothing to lint,
  * 1 = violations, 2 = fail-open (internal error).
  */
-export async function runStructureGate(cwd = process.cwd()): Promise<StructureGateResult> {
+export async function runStructureGate(
+  cwd = process.cwd(),
+  targets?: string[],
+): Promise<StructureGateResult> {
   try {
     const cfg = resolveGuardConfig(cwd);
     // Lint only roots that EXIST on disk (an absent root has nothing to enforce yet).
     const trees: StructureTree[] = cfg.structure?.trees ?? [];
-    const roots = trees
-      .map((t) => t.root)
-      .filter((r): r is string => (r ? existsSync(join(cwd, r)) : false));
+    const roots = (
+      targets ??
+      trees.map((t) => t.root).filter((r): r is string => (r ? existsSync(join(cwd, r)) : false))
+    ).filter((target) => existsSync(join(cwd, target)));
     // Nothing declared / nothing present (generic guard.config, electron-only preset, empty tree).
     if (!roots.length) return { code: 0, errorCount: 0 };
     const baseConfig = await buildStructureConfigs(cwd);
@@ -85,11 +315,14 @@ export async function runStructureGate(cwd = process.cwd()): Promise<StructureGa
 }
 
 export async function runCli(cmd = 'gate') {
-  if (cmd !== 'gate') {
-    console.error('usage: guard-structure gate');
+  if (cmd !== 'gate' && cmd !== 'staged') {
+    console.error('usage: guard-structure <gate|staged>');
     process.exit(2);
   }
-  const { code, text } = await runStructureGate(process.cwd());
+  const { code, text } =
+    cmd === 'staged'
+      ? await runStagedStructureGate(process.cwd())
+      : await runStructureGate(process.cwd());
   if (code === 1) {
     if (text) console.error(text);
     console.error(
