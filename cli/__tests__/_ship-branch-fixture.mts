@@ -157,6 +157,26 @@ export function seedShipRepoLocalRemote({ hookBody } = {}) {
   return { ...seedShipRepo({ origin: bare, ...(hookBody ? { hookBody } : {}) }), bare };
 }
 
+/** An `origin` bare with a `studio` branch plus a checked-out `finalized` branch whose note.txt change
+ *  is ALREADY COMMITTED — the DK-1 repro state. Here, not in the --base suite, so siblings can use it. */
+export function seedBaseRepo({ hookBody } = {}) {
+  const seeded = seedShipRepoLocalRemote({ hookBody });
+  const { dir, git, bare } = seeded;
+  writeFileSync(join(dir, 'note.txt'), 'studio\n');
+  git(['add', 'note.txt'], { stdio: 'ignore' });
+  git(['commit', '-q', '-m', 'studio note'], { stdio: 'ignore' });
+  git(['push', '-q', 'origin', 'work:studio'], { stdio: 'ignore' }); // the PR base, on origin
+  git(['checkout', '-q', '-b', 'finalized'], { stdio: 'ignore' });
+  writeFileSync(join(dir, 'note.txt'), 'finalized\n');
+  git(['add', 'note.txt'], { stdio: 'ignore' });
+  git(['commit', '-q', '-m', 'finalize'], { stdio: 'ignore' }); // committed → HEAD-based ship stages nothing
+  const studioTip = execFileSync('git', ['-C', bare, 'rev-parse', 'studio'], {
+    env: { ...process.env, ...GIT_ENV },
+    encoding: 'utf8',
+  }).trim();
+  return { ...seeded, studioTip };
+}
+
 export function createPreservedCommit({ dir, env, git, branch, tempPrefix }) {
   const preservedWt = mkdtempSync(join(tmpdir(), tempPrefix));
   dirs.push(preservedWt);
