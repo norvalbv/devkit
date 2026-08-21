@@ -377,8 +377,8 @@ describe('ship-branch.sh — resume refusals that name their own cause', () => {
     expect(readFileSync(hookCount, 'utf8').trim().split('\n')).toHaveLength(1); // gates never re-ran
   });
 
-  // Six paths exercises the cap, the platform's awk (BSD vs gawk), and the reason it is not `head`: a
-  // truncating reader SIGPIPEs git and propagates 141 out of the substitution, aborting the ship.
+  // Six paths exercises the cap. Exit 1 rather than 141 is the assertion that matters: the list must be
+  // built without a truncating pipe, whose SIGPIPE would abort the ship only once a list got long.
   it('caps the drifted-path list at five and still exits 1, never a SIGPIPE abort', () => {
     const files = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => `${n}.txt`);
     const rewrite = files.map((f) => `printf 'formatted\\n' > ${f}\ngit add -f -- ${f}`).join('\n');

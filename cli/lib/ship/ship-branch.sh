@@ -259,29 +259,17 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
   read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
-  # $BASE is RE-RESOLVED every invocation (origin's tip under --base, this checkout's HEAD otherwise), so
-  # on a retry it has usually MOVED — a gated commit that took the full SHIP_COMMIT_TIMEOUT to land is
-  # precisely the case where the base advanced under it. Demanding parent == $BASE therefore made the
-  # timeout banner's "re-run to converge" promise unreachable on any busy base.
-  #
-  # The invariant that actually matters is the PR's merge-base: GitHub renders a PR as
-  # merge-base(base, head) -> head, so asserting merge-base($BASE, C) == parent(C) asserts DIRECTLY that
-  # the PR will show exactly this one commit. Note that `merge-base --is-ancestor parent(C) $BASE` is NOT
-  # equivalent and must not be substituted: it also accepts a $BASE that has already ABSORBED C (an
-  # operator who hand-merged the preserved commit and re-ran — ship would re-push a merged branch and
-  # `gh pr create` would fail with "No commits between"), and the degenerate $BASE == C (this checkout
-  # sitting on $BR — `gh pr create --base $BR --head $BR` is rejected AFTER the push, stranding the branch
-  # on origin with no PR). Strict equality refused both; this predicate keeps refusing both.
-  #
-  # `|| true` is load-bearing: a command-substitution assignment does NOT suppress errexit
-  # (docs/decisions/fail-open-needs-an-errexit-safe-call.md), so unrelated histories — where merge-base
-  # exits non-zero — would abort the script instead of refusing. An empty result compares unequal, i.e.
-  # fails closed.
+  # $BASE is re-resolved every invocation, so on a retry it has usually MOVED. Demand the PR's merge-base
+  # instead of equality: GitHub renders a PR as merge-base(base, head) -> head, so this asserts directly
+  # that the PR shows exactly this one commit. Unreachable histories yield an empty fork point, which
+  # compares unequal and refuses. Do NOT weaken to `--is-ancestor` — ship-branch-resume.test.mts pins the
+  # two cases that would then be accepted (a base that already absorbed the commit, and $BASE == the tip).
   if [ "${#RECOVERY_PARENTS[@]}" -ne 2 ]; then
     RECOVERY_REASON="its tip is not a single commit (a ship commit has exactly one parent)"
   else
     RECOVERY_PARENT=${RECOVERY_PARENTS[1]}
-    if [ "$(git merge-base "$BASE" "$RECOVERY_COMMIT" 2>/dev/null || true)" != "$RECOVERY_PARENT" ]; then
+    RECOVERY_FORK=$(git merge-base "$BASE" "$RECOVERY_COMMIT" 2>/dev/null) || RECOVERY_FORK=
+    if [ "$RECOVERY_FORK" != "$RECOVERY_PARENT" ]; then
       RECOVERY_REASON="its parent ${RECOVERY_PARENT:0:7} is not where $BASE_REF (${BASE:0:7}) diverges from it — a different --base, a base moved backwards, or this commit is already merged"
     fi
   fi
@@ -343,21 +331,20 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
     if [ "$RECOVERY_TREE" != "$BRANCH_TREE" ]; then
       RECOVERY_REASON="the current scoped files no longer match its commit"
-      # Name them. Over a ship of 18 paths "some scoped file changed" is unactionable, and the commonest
-      # cause is the gate chain's own FORMATTER: it rewrites staged files inside the ephemeral ship
-      # worktree and re-stages them (cli/lib/husky/husky-block.mts runs `biome format --write` then
-      # `git add -f`; devkit's own .husky/pre-commit is the oxfmt variant), so the COMMIT is formatted
-      # while $ROOT is not — the refusal blamed the operator for a rewrite the gates performed. Both
-      # trees are already in hand, so one diff is the diagnosis.
-      #
-      # awk, NOT `head`: the script runs `set -euo pipefail`, and a truncating reader that exits early
-      # SIGPIPEs git, propagates 141 out of the command substitution and ABORTS the ship. That failure is
-      # size-dependent — a short list finishes before the reader exits — so a `head` version passes every
-      # small fixture and only kills real ships. awk drains stdin, so no SIGPIPE is possible.
-      RECOVERY_DRIFT=$(git diff --name-only "$BRANCH_TREE" "$RECOVERY_TREE" |
-        awk 'NF { n++; if (n <= 5) list = list (n > 1 ? " " : "") $0 }
-             END { printf "(%d): %s%s", n, list, (n > 5 ? " (+" n - 5 " more)" : "") }')
-      RECOVERY_HINTS+=("differing paths $RECOVERY_DRIFT")
+      # Name them: "some scoped file changed" is unactionable on a wide ship, and the commonest cause is
+      # the gate chain's own formatter re-staging inside the worktree, not an edit the operator made.
+      RECOVERY_DRIFT_N=0
+      RECOVERY_DRIFT_LIST=
+      while IFS= read -r drifted; do
+        RECOVERY_DRIFT_N=$((RECOVERY_DRIFT_N + 1))
+        if [ "$RECOVERY_DRIFT_N" -le 5 ]; then
+          RECOVERY_DRIFT_LIST="${RECOVERY_DRIFT_LIST:+$RECOVERY_DRIFT_LIST }$drifted"
+        fi
+      done < <(git diff --name-only "$BRANCH_TREE" "$RECOVERY_TREE")
+      if [ "$RECOVERY_DRIFT_N" -gt 5 ]; then
+        RECOVERY_DRIFT_LIST="$RECOVERY_DRIFT_LIST (+$((RECOVERY_DRIFT_N - 5)) more)"
+      fi
+      RECOVERY_HINTS+=("differing paths ($RECOVERY_DRIFT_N): $RECOVERY_DRIFT_LIST")
       RECOVERY_HINTS+=("a pre-commit formatter rewrites and re-stages inside the ship worktree, so its commit can differ from your tree — see it with: git diff $BR -- <path>")
     fi
   fi
