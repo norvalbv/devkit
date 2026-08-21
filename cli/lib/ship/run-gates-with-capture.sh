@@ -167,6 +167,22 @@ run_gates_with_capture() {
   if [ "$running" -eq 0 ]; then
     wait "$tee_pid"
     tee_status=$?
+    # READ IT TWICE. With a trapped signal PENDING, bash >= 4 returns 128+signum here without
+    # collecting the job, so a tee that drained and exited 0 read as 143 — line 177 then blamed a log
+    # that persisted fine, and ship-branch.sh refused the receipt for a commit that had ALREADY
+    # LANDED with every gate green (the retry re-ran the whole chain, sc-1711). bash 3.2 collects on
+    # the first read, which is why only Linux CI ever saw it. The second read returns tee's OWN
+    # status, so this cannot fail open: a tee that really exited 1 reads 1 again. It must stay an
+    # `if` — a child that genuinely died of a signal reports 128+signum on EVERY re-read, so a loop
+    # would spin forever. It also cannot be jobs-probe-guarded like the supervisor re-wait above:
+    # after an interrupted wait the job has already left `jobs -pr; jobs -ps`, so the probe would
+    # break before the second read. Two residuals accepted: a signal delivered to the process GROUP
+    # kills tee for real (reads >128 twice, fails closed — the log truly was cut), and a second
+    # signal landing between the two reads degrades to the old behaviour.
+    if [ "$drain_stage" -eq 0 ] && [ "$tee_status" -gt 128 ]; then
+      wait "$tee_pid"
+      tee_status=$?
+    fi
   else
     capture_failed=1
   fi

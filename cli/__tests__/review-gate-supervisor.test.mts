@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SUPERVISOR = join(HERE, '../lib/ship/review/process/gate-supervisor.mts');
 const GATE_RUNNER = join(HERE, '../lib/ship/run-gates-with-capture.sh');
+const HANDOFF = join(HERE, '../lib/ship/review/process/gate-signal-handoff.sh');
 const { mkTmp, cleanup } = rootRegistry();
 const SIGNAL_RECORDER_SOURCE = [
   "import { writeFileSync } from 'node:fs';",
@@ -269,6 +270,84 @@ function outerReviewWrapper(root: string, command: string[], env: NodeJS.Process
       { env, stdio: 'ignore' },
     ),
   };
+}
+
+// bash >= 4 reports 128+signum from a `wait` that a pending trap interrupted, without collecting the
+// job; bash 3.2 collects on the first read. macOS ships 3.2 as /bin/bash, so a run there exercises
+// nothing — resolve a modern bash explicitly and skip loudly rather than pass having proved nothing.
+function findModernBash(): string | null {
+  for (const candidate of ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash']) {
+    const probe = spawnSync(candidate, ['-c', 'printf %s "${BASH_VERSINFO[0]}"'], {
+      encoding: 'utf8',
+    });
+    if (probe.status === 0 && Number(probe.stdout) >= 4) return candidate;
+  }
+  return null;
+}
+const MODERN_BASH = findModernBash();
+
+// Ship-shaped on purpose: only ship sets GATE_SIGNAL_DEFER_EXIT, and without it forward_gate_signal
+// exits inside the trap so the drain wait is never reached. Reports the runner's rc as data on stdout
+// instead of exiting with it — masking rc is what let sc-1711 ship.
+interface DeferredSignalOptions {
+  teeExit?: number;
+  signal?: string;
+  // 'parent' signals the runner's shell (the sc-1711 window); 'self' makes tee die of the signal.
+  target?: 'parent' | 'self';
+}
+
+function deferredSignalGateHarness(root: string, options: DeferredSignalOptions = {}) {
+  const { teeExit = 0, signal = 'TERM', target = 'parent' } = options;
+  const bin = join(root, 'bin');
+  const log = join(root, 'gate.log');
+  const progress = join(root, 'progress.json');
+  mkdirSync(bin);
+  // Resolved, not hardcoded: tee is not at /usr/bin on every distro, and a stub that cannot find the
+  // real binary reddens for the wrong reason. Same lookup ship-branch.test.mts uses.
+  const realTee = execFileSync('/bin/sh', ['-c', 'command -v tee'], { encoding: 'utf8' }).trim();
+  const kill = target === 'parent' ? `kill -${signal} "$PPID"` : `kill -${signal} $$`;
+  writeFileSync(join(bin, 'tee'), `#!/bin/sh\n"$REAL_TEE" "$@"\n${kill}\nexit ${teeExit}\n`);
+  chmodSync(join(bin, 'tee'), 0o755);
+  const shell = [
+    'set -euo pipefail',
+    'gate_runner=$1; handoff=$2; root=$3; log=$4; progress=$5',
+    'shift 5',
+    'source "$gate_runner"',
+    'source "$handoff"',
+    // init BEFORE arming: it resets GATE_SIGNAL_DEFER_EXIT, so the reverse order tests review.
+    'gate_signal_handoff_init',
+    'GATE_SIGNAL_DEFER_EXIT=1',
+    'export DEVKIT_RUN_MODE=ship SHIP_COMMIT_TIMEOUT=30',
+    'if run_gates_with_capture "$root" "$root" gate "$log" "$progress" -- "$@"; then rc=0; else rc=$?; fi',
+    'printf "RUNNER_RC=%s\\n" "$rc"',
+    'printf "SIGNAL_STATUS=%s\\n" "$REQUESTED_SIGNAL_STATUS"',
+    'exit 0',
+  ].join('\n');
+  const result = spawnSync(
+    MODERN_BASH ?? 'bash',
+    [
+      '-c',
+      shell,
+      'pending-trap-test',
+      GATE_RUNNER,
+      HANDOFF,
+      root,
+      log,
+      progress,
+      process.execPath,
+      '-e',
+      'console.log("pending-trap gate output")',
+    ],
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        REAL_TEE: realTee,
+      },
+    },
+  );
+  return { ...result, log };
 }
 
 describe('review gate supervisor', () => {
@@ -743,6 +822,74 @@ describe('review gate supervisor', () => {
     expect(await waitForExit(wrapped.child)).toBe(143);
     expect(existsSync(drained)).toBe(true);
   });
+
+  // teeExit 0 is the sc-1711 defect: the drain wait read 143 off a tee that exited clean, the runner
+  // blamed a log that persisted fine, and ship-branch.sh then withheld the receipt for a landed
+  // commit. teeExit 1 is the fail-closed half, and the reason the fix reads the status twice instead
+  // of discarding any >128 — discarding fails OPEN here.
+  (MODERN_BASH ? it : it.skip).each([
+    { teeExit: 0, wantRc: 0 },
+    { teeExit: 1, wantRc: 1 },
+  ])(
+    `keeps tee exit $teeExit distinguishable through a pending-trap signal${
+      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
+    }`,
+    ({ teeExit, wantRc }) => {
+      const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-'), { teeExit });
+
+      // Witness: without this a run where the signal landed outside the window looks identical.
+      expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=143');
+      expect(result.stdout, result.stderr).toContain(`RUNNER_RC=${wantRc}`);
+      if (teeExit === 0) {
+        expect(result.stderr).not.toMatch(/could not persist gate output/);
+        expect(readFileSync(result.log, 'utf8')).toContain('pending-trap gate output');
+      } else {
+        expect(result.stderr).toMatch(/could not persist gate output/);
+      }
+    },
+  );
+
+  // Every signal the handoff traps, not just TERM. Ctrl-C is SIGINT and a harness terminating a task
+  // may send any of them; ship-branch.sh's receipt case list admits 129/130/131 alongside 143, so the
+  // >128 test in the runner has to be signal-agnostic rather than TERM-shaped.
+  (MODERN_BASH ? it : it.skip).each([
+    { signal: 'HUP', status: 129 },
+    { signal: 'INT', status: 130 },
+    { signal: 'QUIT', status: 131 },
+  ])(
+    `survives a pending-trap $signal signal, not only TERM${
+      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
+    }`,
+    ({ signal, status }) => {
+      const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-sig-'), {
+        signal,
+      });
+
+      expect(result.stdout, result.stderr).toContain(`SIGNAL_STATUS=${status}`);
+      expect(result.stdout, result.stderr).toContain('RUNNER_RC=0');
+      expect(result.stderr).not.toMatch(/could not persist gate output/);
+    },
+  );
+
+  // The accepted residual, pinned so it cannot silently become a fail-OPEN. When the signal reaches
+  // tee itself (a process-GROUP kill, which is how a terminal Ctrl-C and some task harnesses deliver
+  // it) both reads report tee's own death, the runner cannot prove the log is whole, and it must fail
+  // closed — no receipt. Note SIGNAL_STATUS=0: the shell was never signalled, so this is purely the
+  // second read refusing to launder a signal-dead tee into a success.
+  (MODERN_BASH ? it : it.skip)(
+    `fails closed when the signal kills tee itself rather than the shell${
+      MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
+    }`,
+    () => {
+      const result = deferredSignalGateHarness(mkTmp('devkit-review-tee-signalled-'), {
+        target: 'self',
+      });
+
+      expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=0');
+      expect(result.stdout, result.stderr).toContain('RUNNER_RC=1');
+      expect(result.stderr).toMatch(/could not persist gate output/);
+    },
+  );
 
   it('bounds tee drain when a failed supervisor leaves a pipe writer behind', () => {
     const root = mkTmp('devkit-review-tee-bound-');
