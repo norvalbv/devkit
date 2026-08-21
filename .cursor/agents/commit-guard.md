@@ -1,7 +1,8 @@
 ---
 name: commit-guard
+mcpServers: [codebase, context7, autonomous_bugs]
 description: "Use this agent before committing code to guard against unintentional duplication using semantic search.\\n\\n<example>\\nContext: User is about to commit staged changes.\\nuser: \"I'm ready to commit these changes\"\\nassistant: \"Let me invoke the commit-guard agent to check for duplicates before you commit.\"\\n<commentary>\\ncommit-guard runs semantic duplicate detection against the search index and checks DRY rules per file.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has added new utility functions or components.\\nuser: \"Added a new helper function for date formatting\"\\nassistant: \"I'll run the commit-guard agent to verify this doesn't duplicate an existing utility.\"\\n<commentary>\\nNew utilities should be checked against the indexed codebase to prevent duplication.\\n</commentary>\\n</example>"
-tools: Read, Grep, Glob, Bash, mcp__codebase__searchCode
+tools: Read, Grep, Glob, Bash, mcp__codebase__*, mcp__context7__*, mcp__autonomous_bugs__*
 model: haiku
 color: blue
 ---

@@ -33,3 +33,4 @@ created: 2026-06-24
 **Scope:** cli/commands/init.mts,cli/commands/upgrade.mts,cli/commands/doctor.mts,cli/lib/self-host.mts,cli/lib/husky/husky-block.mts
 **Source:** collab
 **Evidence-change:** The prior ruling rejected devkit-init-in-repo as INFEASIBLE (a self-referential @norvalbv/devkit dep breaks bun install) and DEFERRED the self-repo-guard variant as more surface than the sync commands. The self-host mode removes the infeasibility (no self-dep is ever added), and new evidence - the hand hook's silent drift plus the reviewer gate never running on devkit - shows the sync-commands-only ruling left the GATE half of dogfooding unaddressed.
+- 2026-08-21 — sync-skills/sync-agents projections are now parity-tested in CI, not doctor-detected: #405 and #395 both shipped source-only and the recorded manifest-sha mitigation is advisory-only in self-host

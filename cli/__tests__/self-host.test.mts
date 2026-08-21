@@ -1,8 +1,13 @@
 /**
- * Self-host mode: the bin→source rewrite, the fixed selection, and — the drift guarantee — a PARITY
- * check that the committed `.husky/pre-commit` still equals what the current generator produces.
- * If the parity test fails, the hook drifted from the generator: regenerate it (`devkit init` in the
- * repo, or `devkit doctor --fix`) and re-commit.
+ * Self-host mode: the bin→source rewrite, the fixed selection, and — the drift guarantees — TWO
+ * PARITY checks on this repo's own committed state.
+ *
+ * 1. The committed `.husky/pre-commit` still equals what the current generator produces. If it
+ *    fails, the hook drifted from the generator: regenerate it (`devkit init` in the repo, or
+ *    `devkit doctor --fix`) and re-commit.
+ * 2. Each agentTarget's skills/agents dir still equals what the sync writers project from `skills/`
+ *    and `agents/`. If it fails, a source edit shipped without re-running the writer: run
+ *    `node cli/index.mts sync-skills` / `sync-agents` and commit.
  */
 import {
   chmodSync,
@@ -18,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
 import { buildFullHook, extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
@@ -340,4 +346,48 @@ describe('committed hook parity', () => {
     const expectedBlock = buildSelfHostBlock(HOOK_SEL, '', ROOT);
     expect(currentBlock?.trim()).toBe(expectedBlock.trim());
   });
+});
+
+// THE second drift guarantee. `skills/` and `agents/` are the sources of truth; each agentTarget's
+// dir is a pure projection of them (identical bytes for claude/cursor — only codex transforms).
+// #405 edited two skill references and #395 edited every agent's frontmatter without re-running the
+// writers, so the projections went on serving deleted ratchet scripts and a stale MCP tool profile,
+// and nothing caught it. Missing, stale, and orphaned files all fail here.
+describe('committed agent-asset projection parity', () => {
+  // The source dir is carried explicitly rather than derived from `kind`: the two coincide for
+  // skills/agents, but AgentAssetKind's third member `hooks` lives in `agents-hooks/`, so the
+  // shortcut is already false for a third of the union.
+  for (const [kind, srcDir] of [
+    ['skills', 'skills'],
+    ['agents', 'agents'],
+  ] as const) {
+    // Config read and comparison both happen INSIDE `it`. A throw in the describe body is a
+    // file-level collection error, which would take the hook-parity guarantee above down with it —
+    // a new guard must never be able to disable an existing one.
+    it(`${kind}/ === what sync-${kind} projects into every agentTarget`, () => {
+      // SAFETY: `.devkit/config.json` is devkit-owned and committed in THIS repo, and `components`
+      // is the same object the sync writers read for their selection and target list. A missing or
+      // reshaped field would already have broken the writers, and surfaces here as a throw inside
+      // this test rather than a silent pass.
+      const { components } = JSON.parse(
+        readFileSync(join(ROOT, '.devkit', 'config.json'), 'utf8'),
+      ) as { components: { agentTargets: string[]; guards: string[] } };
+
+      const drift = projectionDrift({
+        root: ROOT,
+        kind,
+        srcDir,
+        targets: components.agentTargets,
+        selection: components,
+      });
+      // The classes need different repairs: sync rewrites a stale file but can NEVER prune an
+      // orphan (it only removes what the manifest records), so one blanket "re-run sync" would
+      // send the next reader to a command that does nothing.
+      expect(
+        drift,
+        `stale/missing → run \`node cli/index.mts sync-${kind}\` and commit; ` +
+          'orphan → `git rm` it (sync never prunes unmanifested files)',
+      ).toEqual([]);
+    });
+  }
 });
