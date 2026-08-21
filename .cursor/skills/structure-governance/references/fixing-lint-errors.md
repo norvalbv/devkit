@@ -92,7 +92,7 @@ suppressing it is not an option. Extract cohesive pieces into sibling files (or 
 you'd cross the fan-out cap → row 5). After shrinking, optionally lock in the lower count:
 
 ```bash
-node scripts/size-disable-ratchet.mjs freeze
+guard-size freeze
 ```
 
 ---
@@ -102,7 +102,7 @@ node scripts/size-disable-ratchet.mjs freeze
 ```
 Folder fan-out exceeded … (>12 impl files)
 ```
-(from `node scripts/folder-fanout-ratchet.mjs gate` at commit; tests/index barrels don't count.)
+(from `guard-fanout gate` at commit; tests/index barrels don't count.)
 
 **Cause:** more than 12 implementation files in one folder, at any depth.
 **Fix:** split into cohesive kebab subfolders — group the files by concern (graphify
@@ -110,7 +110,7 @@ co-occurrence can suggest clusters), move each group into `lib/<domain>/<sub-con
 a junk-drawer subfolder to dump the overflow. Re-`freeze` after if you want the lower count pinned:
 
 ```bash
-node scripts/folder-fanout-ratchet.mjs freeze
+guard-fanout freeze
 ```
 
 ---
@@ -162,9 +162,9 @@ reconsider whether it should be shared at all).
 Run all four to approximate the full commit gate:
 
 ```bash
-bun run lint                                  # biome + eslint: placement, imports, size CAP
-node scripts/size-disable-ratchet.mjs  gate   # Wall 3 ratchet (new eslint-disable max-lines)
-node scripts/folder-fanout-ratchet.mjs gate   # Wall 4 ratchet (>12 files/folder)
+bun run lint                                  # code/style + structural lint, where configured
+guard-size gate                               # Wall 3 ratchet (new disable or a legacy giant growing)
+guard-fanout gate                             # Wall 4 ratchet (>12 files/folder)
 bunx vitest run scripts/                       # the governance test suites
 ```
 
