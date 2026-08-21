@@ -125,7 +125,7 @@ export function isInsideResolved(root, target) {
 /** Same directory, tolerant of the `/private` aliasing. Load-bearing: git reports absolute paths
  * realpath'd (`/private/var/…`) while a configured value keeps whatever form it was written in
  * (`/var/…`), so a purely lexical comparison calls a pin that restates its own fallback a shadow. */
-function sameDir(a, b) {
+export function sameDir(a, b) {
     return isInsideResolved(a, b) && isInsideResolved(b, a);
 }
 /** Every checkout of this repo, main worktree included. */
