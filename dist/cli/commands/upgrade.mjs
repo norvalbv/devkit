@@ -18,15 +18,14 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isCancel, multiselect } from '@clack/prompts';
-import { applyOverlayConstraints, GUARD_OPTIONS, newBundledGates, normalizeSelection, } from "../lib/components.mjs";
+import { applyOverlayConstraints, normalizeSelection, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
 import { selfHostSelection } from "../lib/husky/self-host.mjs";
 import { resolveExistingAgentProviders } from "../lib/install/agent-assets/agent-providers.mjs";
 import { adoptAgentAssetCollisions } from "../lib/install/agent-assets/agent-surfaces.mjs";
-import { offerLineGrowth, offerOptionalComponents } from "../lib/install/upgrade-offers.mjs";
+import { offerLineGrowth, offerNewGates, offerOptionalComponents, } from "../lib/install/upgrade-offers.mjs";
 import doctor from "./doctor.mjs";
 import { applyInit } from "./init.mjs";
 import { computeMigration } from "./migrate-config.mjs";
@@ -179,6 +178,7 @@ export default async function upgrade(args, cwd) {
         // Overlay repos get the SAME one-time offer as package repos — and, critically, the same
         // `undecided` pass-through: applyOverlay writes its own components block, so without it an
         // overlay upgrade records a decline nobody made and the offer never fires again.
+        const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
         const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
             unavailable: ['oxc', 'antiSlop'],
         });
@@ -187,6 +187,7 @@ export default async function upgrade(args, cwd) {
             selection: sel,
             overlay: true,
             undecided: undecidedOverlay,
+            disabledGuards,
             devkitRef: `v${target}`,
             // Preserve an opted-in machine-global commit gate: applyOverlay reads plan.globalCommitGate (NOT
             // the existing config) and rewrites the flag from it — omitting it would silently un-wire the shim.
@@ -282,62 +283,9 @@ export default async function upgrade(args, cwd) {
     // ── 3. gates: reconcile newly-bundled gates against the recorded selection ─
     // applyInit rebuilds the husky block from sel.guards (the RECORDED set), so a gate shipped after
     // this repo's last install is silently dropped. Reconcile against the current bundle: offer the
-    // new gates interactively (TTY), else heal the recommended ones + notice the opt-in ones (never
-    // auto-added). Mutating sel.guards here feeds applyInit below, which persists it to .devkit/config.json.
-    console.log('\n3. gates');
-    if (!sel.husky) {
-        console.log('  • husky not selected — no gates to reconcile');
-    }
-    else {
-        const { recommended, optIn } = newBundledGates(sel.guards);
-        const opt = (id) => GUARD_OPTIONS.find((g) => g.id === id);
-        // Trigger ONLY on a missing RECOMMENDED gate (the genuine "you're behind" case — e.g. a
-        // newly-promoted gate). An opt-in gate the user simply never enabled must NOT re-nag on every
-        // upgrade; it rides along in the offer/notice below whenever a recommended reconcile fires.
-        // ponytail: gate on recommended-missing (no per-repo "gates known at install" state); a purely-new
-        // opt-in gate with no recommended change won't surface until one does.
-        if (!recommended.length) {
-            console.log('  • no new recommended gates — gate selection unchanged');
-        }
-        else if (dryRun) {
-            console.log(`  [dry-run] would add recommended gate(s): ${recommended.join(', ')}`);
-            for (const id of optIn)
-                console.log(`  [dry-run] opt-in gate also available: ${id}`);
-        }
-        else if (process.stdout.isTTY && process.stdin.isTTY) {
-            const picked = await multiselect({
-                message: 'New gates available since your last install — select any to add',
-                options: [...recommended, ...optIn].map((id) => ({
-                    value: id,
-                    label: opt(id)?.label ?? id,
-                    hint: opt(id)?.hint,
-                })),
-                initialValues: recommended,
-                required: false,
-            });
-            if (isCancel(picked)) {
-                console.log('  • skipped gate selection — existing gates unchanged');
-            }
-            else if (picked.length) {
-                sel.guards = [...sel.guards, ...picked];
-                console.log(`  ✓ added gate(s): ${picked.join(', ')}`);
-            }
-            else {
-                console.log('  • no gates selected');
-            }
-        }
-        else {
-            // Non-TTY: REPORT, never auto-add. The recorded selection is authoritative — a consumer who
-            // removed a gate had a reason devkit cannot see (frink hand-places `decisions` after its free
-            // gates, so the managed copy is a second LLM call on every commit), and healing it back made
-            // .devkit/config.json say one thing while the hook did another, with no way to express the
-            // refusal. Falling behind a genuinely-new gate is now a loud notice instead of a silent edit.
-            for (const id of [...recommended, ...optIn]) {
-                const kind = recommended.includes(id) ? 'recommended' : 'opt-in';
-                console.log(`  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with 'devkit init --guards …,${id}'`);
-            }
-        }
-    }
+    // new gates interactively (TTY), otherwise report them without auto-adding. The helper returns
+    // explicit declines separately, so an answered "off" is durable while a non-TTY notice is not.
+    const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
     // ── 3b/3c. what upgrade OFFERS a repo that predates a feature (see upgrade-offers.mts) ─────
     await offerLineGrowth(cwd, sel, dryRun);
     const undecided = await offerOptionalComponents(cfg.components, sel, dryRun);
@@ -358,6 +306,7 @@ export default async function upgrade(args, cwd) {
         dryRun,
         regenStructureBaselines: false,
         undecided,
+        disabledGuards,
     });
     // ── 5. --force asset adoption (assets only — never configs) ─────────────────
     // --force is driven by the `override` OPT (args only carry --dry-run). Re-syncs the selected

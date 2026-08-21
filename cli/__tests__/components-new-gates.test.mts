@@ -39,4 +39,11 @@ describe('newBundledGates', () => {
     expect(recommended).toEqual([]);
     expect(optIn).toEqual(['review', 'sentry', 'coverage']);
   });
+
+  it('does not re-offer a gate recorded as explicitly disabled', () => {
+    const selected = RECOMMENDED_GUARD_IDS.filter((guard) => guard !== 'comments');
+    const { recommended, optIn } = newBundledGates(selected, ['comments']);
+    expect(recommended).toEqual([]);
+    expect(optIn).toEqual(['review', 'sentry', 'coverage']);
+  });
 });

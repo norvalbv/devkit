@@ -1,10 +1,3 @@
-/**
- * `devkit init` scaffolds shared configs and gates through interactive, `--yes`, or non-TTY
- * selection. Selected components install idempotently; deselected components are removed only
- * after confirmation or `--remove-deselected`, and removal never deletes user-owned files.
- * The chosen set is recorded in `.devkit/config.json.components` for selection-aware doctor runs.
- */
-
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +14,7 @@ import {
   applyOverlayConstraints,
   COMPONENTS,
   CONFIG_DRIVEN_STRUCTURE,
+  disabledGuardsFor,
   dropUndecided,
   GUARD_IDS,
   normalizeReviewProfile,
@@ -105,8 +99,6 @@ const BIOME_SCRIPTS = ['lint', 'format'];
 // (preserves the //-comment guidance keys a JSON round-trip would drop). Hoisted (perf).
 const SCANROOTS_RE = /("scanRoots"\s*:\s*)\[[^\]]*\]/;
 
-// The recorded `.devkit/config.json` `components` block: per-component booleans + the guard/target
-// arrays. Every field optional — a pre-wizard config may omit any of them.
 interface RecordedComponents {
   biome?: boolean;
   tsconfig?: boolean;
@@ -125,10 +117,9 @@ interface RecordedComponents {
   priorArtGate?: boolean;
   agentTargets?: string[];
   guards?: string[];
+  disabledGuards?: string[];
 }
 
-// The `.devkit/config.json` shape init reads back (prevConfig / recorded selection). Only the fields
-// init consults are modelled; all optional (a partial/old config is valid).
 interface DevkitConfig {
   stack?: string;
   devkitRef?: string;
@@ -149,8 +140,6 @@ interface TsConfig {
   [key: string]: unknown;
 }
 
-// The `eslint/baselines/exempt.mjs` overlay module (dynamic import) — the hand-maintained
-// import-wall exemptions.
 interface ExemptModule {
   importWallExempt?: Array<{ pattern: string }>;
 }
@@ -163,7 +152,7 @@ interface ExecError {
 }
 
 // The fully-resolved plan applyInit / applyOverlay consume (no prompting — callers pass this).
-interface InitPlan {
+interface InitPlan extends Pick<RecordedComponents, 'disabledGuards'> {
   stack: string;
   selection: Selection;
   remove?: string[];
@@ -190,8 +179,6 @@ interface InitPlan {
   undecided?: string[];
 }
 
-// A component selection extended with the resolved structure-lint command — the shape the husky
-// block builders (buildFullHook / buildGuardBlock / installStandaloneHook) consume.
 type HookSelectionInput = Selection & { structureCmd?: string };
 
 // Which components are currently wired? Read the recorded set first (authoritative), then
@@ -762,6 +749,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
     plan.undecided,
     prevConfig?.components,
   );
+  overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
   if (!dryRun) {
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
     writeFileSync(
@@ -985,6 +973,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
 
   // .devkit/config.json with the component selection.
   console.log('9. .devkit/config.json');
+  const guards = selection.husky
+    ? [...selection.guards]
+    : selection.guards.filter((guard) => guard === 'decisions');
   const components = {
     biome: selection.biome,
     tsconfig: selection.tsconfig,
@@ -1006,9 +997,8 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     agentTargets: [...agentTargets],
     // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
     // owns an agent pre-edit hook, so it remains authoritative in config even without husky.
-    guards: selection.husky
-      ? [...selection.guards]
-      : selection.guards.filter((guard) => guard === 'decisions'),
+    guards,
+    disabledGuards: disabledGuardsFor(guards, plan.disabledGuards),
   };
   // Keep an un-asked optional component ABSENT — see InitPlan.undecided.
   dropUndecided(components, undecided, prevConfig?.components);
@@ -1087,6 +1077,7 @@ export default async function run(args: string[], cwd: string) {
   let remove: string[] = [];
   let mode = detectedMode;
   let review: Partial<ReviewProfile> | undefined;
+  let disabledGuards: string[] | undefined;
 
   // --baselines-only re-derives structure/import-wall baselines only for package-mode presets.
   if (flags.baselinesOnly) {
@@ -1116,6 +1107,7 @@ export default async function run(args: string[], cwd: string) {
     mode = 'self-host';
     const recorded = readJson(join(cwd, '.devkit', 'config.json')) as DevkitConfig | null;
     selection = selfHostSelection(recorded?.components);
+    disabledGuards = recorded?.components?.disabledGuards;
   } else if (interactive) {
     const installed = detectInstalled(cwd);
     const result = await runWizard({
@@ -1129,9 +1121,13 @@ export default async function run(args: string[], cwd: string) {
     if (!result) return 0; // cancelled — nothing written
     ({ mode, stack, remove, review } = result);
     selection = result.selection as Selection;
+    disabledGuards = selection.husky
+      ? GUARD_IDS.filter((guard) => !selection.guards.includes(guard))
+      : [];
   } else {
     selection = initFlags.selectionFromFlags(flags);
     selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
+    disabledGuards = initFlags.disabledGuardsFromFlags(flags);
   }
 
   oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
@@ -1178,6 +1174,7 @@ export default async function run(args: string[], cwd: string) {
     selfHost: mode === 'self-host',
     globalCommitGate: flags.globalCommitGate,
     review,
+    disabledGuards,
   });
   if (interactive && !selfHost) outro('Done — run `devkit doctor` to verify.');
   return 0;

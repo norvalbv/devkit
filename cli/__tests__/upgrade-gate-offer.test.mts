@@ -7,10 +7,13 @@
  * A repo already current on recommended gates is NOT re-nagged about the opt-in one. DEVKIT_REPO points
  * at a bogus URL so the version step's `git ls-remote` fails fast (no network).
  */
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { defaultSelection, GUARD_IDS } from '../lib/components.mts';
+import { offerNewGates } from '../lib/install/upgrade-offers.mts';
 import { CLI, readConfig as config, tmpRepos } from './_helpers.mts';
 
 const CLIB_PKG = {
@@ -22,7 +25,10 @@ const CLIB_PKG = {
 };
 
 const { tmpRepo, cleanup } = tmpRepos('upgrade-gate-');
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const run = (root: string, ...args: string[]) =>
   spawnSync(process.execPath, [CLI, ...args], {
@@ -49,6 +55,12 @@ function preQavisFixture() {
     'size,fanout,dup,clone,decisions',
   );
   expect(r.status, r.stderr || r.stdout).toBe(0);
+  // The current init records every omitted gate as an explicit decline. Strip that new field to
+  // reproduce a real pre-field install whose missing guards have never been offered.
+  const cfgPath = join(root, '.devkit', 'config.json');
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  delete cfg.components.disabledGuards;
+  writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
   return root;
 }
 
@@ -92,6 +104,53 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(hook(root)).not.toContain('bunx guard-decisions detect');
   });
 
+  it('an init opt-out records comments disabled and upgrade does not re-offer it', () => {
+    const root = tmpRepo(CLIB_PKG);
+    const init = run(
+      root,
+      'init',
+      '--stack',
+      'component-lib',
+      '--yes',
+      '--no-cursor',
+      '--no-comments',
+    );
+    expect(init.status, init.stderr || init.stdout).toBe(0);
+    expect(guards(root)).not.toContain('comments');
+    expect(config(root).components.disabledGuards).toEqual(['comments']);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(up.stdout).not.toMatch(/comments.*recommended/i);
+    expect(guards(root)).not.toContain('comments');
+  });
+
+  it('offers a never-seen comments gate during an overlay upgrade without auto-enabling it', () => {
+    const root = tmpRepo(CLIB_PKG);
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const init = run(
+      root,
+      'init',
+      '--overlay',
+      '--stack',
+      'generic',
+      '--yes',
+      '--guards',
+      'size,fanout,dup,clone,decisions,qavis-advisory',
+    );
+    expect(init.status, init.stderr || init.stdout).toBe(0);
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    delete cfg.components.disabledGuards;
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(up.stdout).toMatch(/comments.*recommended/i);
+    expect(guards(root)).not.toContain('comments');
+    expect(config(root).components.disabledGuards).not.toContain('comments');
+  });
+
   it('does NOT re-nag about opt-in review when the repo is already current on recommended gates', () => {
     // default init now includes qavis (recommended) and excludes review.
     const root = tmpRepo(CLIB_PKG);
@@ -110,6 +169,36 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(offers).toMatch(/no new recommended gates/i);
     expect(offers).not.toMatch(/\breview\b/i); // opt-in gate not re-surfaced
     expect(guards(root)).toEqual(before); // selection unchanged
+  });
+});
+
+describe('offerNewGates — interactive answers', () => {
+  it('persists an unselected recommended comments gate as disabled', async () => {
+    const select = vi.fn(async () => []);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const sel = defaultSelection();
+    sel.guards = sel.guards.filter((guard) => guard !== 'comments');
+    const disabled = await offerNewGates(undefined, sel, false, { interactive: true, select });
+
+    expect(disabled).toContain('comments');
+    expect(sel.guards).not.toContain('comments');
+    expect(select).toHaveBeenCalledOnce();
+
+    select.mockClear();
+    await offerNewGates(disabled, sel, false, { interactive: true, select });
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it('keeps the default-on comments choice selected', async () => {
+    const select = vi.fn(async () => ['comments']);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const sel = defaultSelection();
+    sel.guards = sel.guards.filter((guard) => guard !== 'comments');
+    const disabled = await offerNewGates(undefined, sel, false, { interactive: true, select });
+
+    expect(sel.guards).toContain('comments');
+    expect(disabled).not.toContain('comments');
+    expect(new Set([...sel.guards, ...disabled])).toEqual(new Set(GUARD_IDS));
   });
 });
 
