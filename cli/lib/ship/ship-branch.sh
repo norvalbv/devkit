@@ -198,6 +198,7 @@ else ship_read_stdin_body; fi
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 RECOVERY_INDEX=
+RECOVERY_PARENT=  # the preserved commit's OWN parent: what its diff and manifest anchor on, since $BASE may have advanced since it was cut
 RECOVERY_PATHS_ALL=
 RECOVERY_PATHS_SCOPED=
 RECOVERY_RECEIPT_REF="refs/devkit/ship-receipts/$BR"
@@ -253,12 +254,36 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # from the caller's CURRENT scoped files that is byte-for-byte identical. The temporary index makes
   # that last check include tracked, untracked and ignored files without touching the caller's index.
   RECOVERY_REASON=
+  RECOVERY_HINTS=()   # optional indented lines printed between the reason and the closing advice
   RECOVERY_COMMIT=$(git rev-parse -q --verify "$BR^{commit}" 2>/dev/null || true)
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
   read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
-  if [ "${#RECOVERY_PARENTS[@]}" -ne 2 ] || [ "${RECOVERY_PARENTS[1]:-}" != "$BASE" ]; then
-    RECOVERY_REASON="its tip is not one commit on the requested base"
+  # $BASE is RE-RESOLVED every invocation (origin's tip under --base, this checkout's HEAD otherwise), so
+  # on a retry it has usually MOVED — a gated commit that took the full SHIP_COMMIT_TIMEOUT to land is
+  # precisely the case where the base advanced under it. Demanding parent == $BASE therefore made the
+  # timeout banner's "re-run to converge" promise unreachable on any busy base.
+  #
+  # The invariant that actually matters is the PR's merge-base: GitHub renders a PR as
+  # merge-base(base, head) -> head, so asserting merge-base($BASE, C) == parent(C) asserts DIRECTLY that
+  # the PR will show exactly this one commit. Note that `merge-base --is-ancestor parent(C) $BASE` is NOT
+  # equivalent and must not be substituted: it also accepts a $BASE that has already ABSORBED C (an
+  # operator who hand-merged the preserved commit and re-ran — ship would re-push a merged branch and
+  # `gh pr create` would fail with "No commits between"), and the degenerate $BASE == C (this checkout
+  # sitting on $BR — `gh pr create --base $BR --head $BR` is rejected AFTER the push, stranding the branch
+  # on origin with no PR). Strict equality refused both; this predicate keeps refusing both.
+  #
+  # `|| true` is load-bearing: a command-substitution assignment does NOT suppress errexit
+  # (docs/decisions/fail-open-needs-an-errexit-safe-call.md), so unrelated histories — where merge-base
+  # exits non-zero — would abort the script instead of refusing. An empty result compares unequal, i.e.
+  # fails closed.
+  if [ "${#RECOVERY_PARENTS[@]}" -ne 2 ]; then
+    RECOVERY_REASON="its tip is not a single commit (a ship commit has exactly one parent)"
+  else
+    RECOVERY_PARENT=${RECOVERY_PARENTS[1]}
+    if [ "$(git merge-base "$BASE" "$RECOVERY_COMMIT" 2>/dev/null || true)" != "$RECOVERY_PARENT" ]; then
+      RECOVERY_REASON="its parent ${RECOVERY_PARENT:0:7} is not where $BASE_REF (${BASE:0:7}) diverges from it — a different --base, a base moved backwards, or this commit is already merged"
+    fi
   fi
 
   # `git commit -m` applies stripspace cleanup before writing the object. Apply the same cleanup to
@@ -267,6 +292,17 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   ACTUAL_MESSAGE=$(git log -1 --format=%B "$RECOVERY_COMMIT" 2>/dev/null || true)
   if [ -z "$RECOVERY_REASON" ] && [ "$ACTUAL_MESSAGE" != "$EXPECTED_MESSAGE" ]; then
     RECOVERY_REASON="its commit message differs from this ship title/body"
+    # A here-doc does not survive a re-run through a wrapper: a CLOSED stdin and /dev/null both read as
+    # an empty body, silently and with exit 0 (read-stdin-body.sh errors only on an idle-but-OPEN pipe).
+    # The message then differs on the BODY, and the generic reason sends the operator to inspect a title
+    # that never changed. Only claim that when the body is the PROVEN sole divergence — the title must
+    # already match, or an operator who changed BOTH would be pointed at the wrong half.
+    RECOVERY_BODY=$(git log -1 --format=%b "$RECOVERY_COMMIT" 2>/dev/null || true)
+    RECOVERY_SUBJECT=$(git log -1 --format=%s "$RECOVERY_COMMIT" 2>/dev/null || true)
+    if [ -z "$BODY" ] && [ -n "$RECOVERY_BODY" ] && [ "$RECOVERY_SUBJECT" = "$TITLE" ]; then
+      RECOVERY_REASON="this run supplied no PR body, but its commit has one"
+      RECOVERY_HINTS+=("re-supply it with --body \"<text>\" — this run's stdin was empty, and an empty stdin is a valid empty body")
+    fi
   fi
 
   # Ask Git to resolve the caller's pathspecs, then compare that exact NUL-delimited set with the
@@ -274,13 +310,21 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # safe for unusual filenames, and uses --no-renames so BOTH sides of a rename must be briefed.
   RECOVERY_PATHS_ALL=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-all.XXXXXX")
   RECOVERY_PATHS_SCOPED=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-scoped.XXXXXX")
-  git diff --name-only --no-renames -z "$BASE" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
-  git diff --name-only --no-renames -z "$BASE" "$RECOVERY_COMMIT" -- "${PATHS[@]}" \
-    > "$RECOVERY_PATHS_SCOPED"
-  if [ -z "$RECOVERY_REASON" ] && [ ! -s "$RECOVERY_PATHS_ALL" ]; then
-    RECOVERY_REASON="its commit has no scoped changes"
-  elif [ -z "$RECOVERY_REASON" ] && ! cmp -s "$RECOVERY_PATHS_ALL" "$RECOVERY_PATHS_SCOPED"; then
-    RECOVERY_REASON="its commit changes paths outside the requested scope"
+  # Anchored on the commit's OWN parent, not $BASE: scope means "what this commit changed", and with an
+  # advanced base `git diff $BASE $COMMIT` also carries the INVERSE of everything merged in since, so
+  # every such path would read as out-of-scope — turning one wrong refusal into a worse one. The parent
+  # is the same commit GitHub picks as the PR's merge-base (guaranteed by the check above), so this set
+  # IS the PR's diff. Guarded as a whole because a failed parent-count check leaves RECOVERY_PARENT
+  # empty, and a bare `git diff ""` would abort under -e before the reason is ever printed.
+  if [ -z "$RECOVERY_REASON" ]; then
+    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
+    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "${PATHS[@]}" \
+      > "$RECOVERY_PATHS_SCOPED"
+    if [ ! -s "$RECOVERY_PATHS_ALL" ]; then
+      RECOVERY_REASON="its commit has no scoped changes"
+    elif ! cmp -s "$RECOVERY_PATHS_ALL" "$RECOVERY_PATHS_SCOPED"; then
+      RECOVERY_REASON="its commit changes paths outside the requested scope"
+    fi
   fi
 
   # Similarity is not provenance. Only ship itself writes this private ref after a gated commit has
@@ -299,12 +343,34 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
     if [ "$RECOVERY_TREE" != "$BRANCH_TREE" ]; then
       RECOVERY_REASON="the current scoped files no longer match its commit"
+      # Name them. Over a ship of 18 paths "some scoped file changed" is unactionable, and the commonest
+      # cause is the gate chain's own FORMATTER: it rewrites staged files inside the ephemeral ship
+      # worktree and re-stages them (cli/lib/husky/husky-block.mts runs `biome format --write` then
+      # `git add -f`; devkit's own .husky/pre-commit is the oxfmt variant), so the COMMIT is formatted
+      # while $ROOT is not — the refusal blamed the operator for a rewrite the gates performed. Both
+      # trees are already in hand, so one diff is the diagnosis.
+      #
+      # awk, NOT `head`: the script runs `set -euo pipefail`, and a truncating reader that exits early
+      # SIGPIPEs git, propagates 141 out of the command substitution and ABORTS the ship. That failure is
+      # size-dependent — a short list finishes before the reader exits — so a `head` version passes every
+      # small fixture and only kills real ships. awk drains stdin, so no SIGPIPE is possible.
+      RECOVERY_DRIFT=$(git diff --name-only "$BRANCH_TREE" "$RECOVERY_TREE" |
+        awk 'NF { n++; if (n <= 5) list = list (n > 1 ? " " : "") $0 }
+             END { printf "(%d): %s%s", n, list, (n > 5 ? " (+" n - 5 " more)" : "") }')
+      RECOVERY_HINTS+=("differing paths $RECOVERY_DRIFT")
+      RECOVERY_HINTS+=("a pre-commit formatter rewrites and re-stages inside the ship worktree, so its commit can differ from your tree — see it with: git diff $BR -- <path>")
     fi
   fi
 
   if [ -n "$RECOVERY_REASON" ]; then
     echo "branch already exists: $BR" >&2
     echo "  cannot safely resume it: $RECOVERY_REASON" >&2
+    # ${#arr[@]} (not ${arr[@]}) is the bash-3.2 + `set -u` safe emptiness test — same idiom as the
+    # LINK_EXTRA check above. Hints sit BETWEEN the reason and the advice so the recognisable three-line
+    # shape survives verbatim whenever none is set.
+    if [ "${#RECOVERY_HINTS[@]}" -gt 0 ]; then
+      for hint in "${RECOVERY_HINTS[@]}"; do echo "  $hint" >&2; done
+    fi
     echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
     exit 1
   fi
@@ -452,9 +518,16 @@ fi
 # The manifest itself still lands in $ROOT (the persistent shared tree); $WT is removed right after.
 # devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
 # installed consumer (dist). Prefer whichever exists beside this script.
+# --base-sha is the sha the SHIPPED COMMIT is diffed against (classify() reads add-vs-modify from
+# `cat-file -e <sha>:<path>` and a deletion's pre-deletion blob from `ls-tree <sha>`), so it must be that
+# commit's OWN parent. On a new ship the two are the same value — the worktree was cut at $BASE, so the
+# commit's parent IS $BASE, and RECOVERY_PARENT is empty. On a resume they diverge: $BASE was re-resolved
+# this invocation and may have advanced, which would record this ship's ADD as a modify (upstream added
+# the path meanwhile) or a stranger's newer blob as a delete's pre-deletion blob — silently, in both
+# cases. --base-ref stays the branch NAME: that is the PR target, not a sha.
 RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
 node "$RMW" \
-  --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "$BASE" --pr "$PR_NUM" -- "${PATHS[@]}" \
+  --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "${RECOVERY_PARENT:-$BASE}" --pr "$PR_NUM" -- "${PATHS[@]}" \
   || echo "ship-branch: reconcile manifest not recorded (non-fatal)" >&2
 
 # PR-create failed but the push + manifest record both landed: the branch is recoverable AND known to
