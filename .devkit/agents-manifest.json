@@ -1,53 +1,53 @@
 {
   "schemaVersion": 2,
   "kind": "agents",
-  "devkitRef": "v0.51.1",
-  "generatedAt": "2026-08-16T02:26:52.084Z",
+  "devkitRef": "v0.52.1",
+  "generatedAt": "2026-08-21T12:48:27.284Z",
   "files": {
-    "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
-    "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
-    "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
-    "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
-    "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
-    "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
-    "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
-    "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
-    "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
-    "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
-    "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
-    "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+    "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
+    "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
+    "commit-guard.md": "c66e4ffcbafb7235a814b063728c5b611fdf7dbc37146ee08b47ee03bd0edd3f",
+    "conventions-reviewer.md": "68fae5e03bc9d43268990fa736395410e41c3d311a7036c090390f51ae267db9",
+    "correctness-reviewer.md": "0d5ed8b6f4a425ba7df0d1f92b2b1a588e92650cfbfc48f537956b3c81b6a41d",
+    "feature-completeness-reviewer.md": "22cc73ff6bdb05e8523b133b0683324ff50f26d35d6b112fe0d89c7e8ef2d63b",
+    "feature-critique.md": "da7d20a6f1f1d784077be7d563bce4d1618101c3992445e83fbf9bcab124edbc",
+    "fix-upstream-reviewer.md": "d8826326d1451c858ea8c9037166418d508ab457d3a82fda2aca428151a89a0c",
+    "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
+    "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
+    "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
+    "prior-art.md": "212947b129d471fab9aadcc248a0ca16c9e6af81257f7a33090b5b4c67330aed"
   },
   "providers": {
     "claude": {
       "files": {
-        "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
-        "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
-        "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
-        "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
-        "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
-        "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
-        "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
-        "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
-        "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
-        "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
-        "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
-        "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+        "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
+        "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
+        "commit-guard.md": "c66e4ffcbafb7235a814b063728c5b611fdf7dbc37146ee08b47ee03bd0edd3f",
+        "conventions-reviewer.md": "68fae5e03bc9d43268990fa736395410e41c3d311a7036c090390f51ae267db9",
+        "correctness-reviewer.md": "0d5ed8b6f4a425ba7df0d1f92b2b1a588e92650cfbfc48f537956b3c81b6a41d",
+        "feature-completeness-reviewer.md": "22cc73ff6bdb05e8523b133b0683324ff50f26d35d6b112fe0d89c7e8ef2d63b",
+        "feature-critique.md": "da7d20a6f1f1d784077be7d563bce4d1618101c3992445e83fbf9bcab124edbc",
+        "fix-upstream-reviewer.md": "d8826326d1451c858ea8c9037166418d508ab457d3a82fda2aca428151a89a0c",
+        "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
+        "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
+        "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
+        "prior-art.md": "212947b129d471fab9aadcc248a0ca16c9e6af81257f7a33090b5b4c67330aed"
       }
     },
     "cursor": {
       "files": {
-        "api-security-reviewer.md": "ed7b27dbf49e30f597559baaf153487b2851abf2c6a9482ea9caaa6228ceb420",
-        "backend-performance-reviewer.md": "8aa858861a1afb3e740d371f7cc28d7f22552c25eb28a21fabda19186baca338",
-        "commit-guard.md": "1a996999d7bcd0e5c96d4e78d6b5e67c1e02f3a66ec4ea8d98548260ad511764",
-        "conventions-reviewer.md": "f7329e27571e9abdc6409556e4d2ae291473d001653763790ae72b9db8a8d456",
-        "correctness-reviewer.md": "abdb37e8a43ba1bf7d72269967dd25bc98df988681c5fca182150ce7610aacf0",
-        "feature-completeness-reviewer.md": "0b9a742a2692d0b0ad9b8ff9829d652f7f43c52c163d780ef1b36a3aaeba2c19",
-        "feature-critique.md": "36b77ef31ffd9e7c82147ba0db0b369d20420cea34cbec660db7f7d693dee5f4",
-        "fix-upstream-reviewer.md": "1cff6e45b474dd6900d9e0b159078fdacbb4028ac2d7feb6ba99a58a82da1326",
-        "frontend-accessibility-reviewer.md": "c0494ea5b15bd288a2d4476dd097cdebe6f267a542ea04efffd4dd8574626232",
-        "frontend-performance-reviewer.md": "66a1777cfe069196b2dc31b8f918deb0e7833d3aa96c72b615351156990731a2",
-        "frontend-security-reviewer.md": "1888e5a6365e4fe2d8881823da6cd2e5c66e6f8457e08295fcc0729247b25d79",
-        "prior-art.md": "64525643e13a9c2180cdea5029ef4335791a5673dbce7f3bbe14e3c4aa30ad40"
+        "api-security-reviewer.md": "bfa4ff0d792a03ec7845dc7c7daf586779bdc76f053551c6d05a2ee11b22a87e",
+        "backend-performance-reviewer.md": "ff60c2338a9854fa63104a1b343e1d90f0feecf1126c84c66c5b86d4537c9ba0",
+        "commit-guard.md": "c66e4ffcbafb7235a814b063728c5b611fdf7dbc37146ee08b47ee03bd0edd3f",
+        "conventions-reviewer.md": "68fae5e03bc9d43268990fa736395410e41c3d311a7036c090390f51ae267db9",
+        "correctness-reviewer.md": "0d5ed8b6f4a425ba7df0d1f92b2b1a588e92650cfbfc48f537956b3c81b6a41d",
+        "feature-completeness-reviewer.md": "22cc73ff6bdb05e8523b133b0683324ff50f26d35d6b112fe0d89c7e8ef2d63b",
+        "feature-critique.md": "da7d20a6f1f1d784077be7d563bce4d1618101c3992445e83fbf9bcab124edbc",
+        "fix-upstream-reviewer.md": "d8826326d1451c858ea8c9037166418d508ab457d3a82fda2aca428151a89a0c",
+        "frontend-accessibility-reviewer.md": "1555ca737f0e6a548cb7a066d78a586fc7c5efde078addbc3d038b900d0a9287",
+        "frontend-performance-reviewer.md": "01bf36905b2be06997e10f5c95f2cc5ae5102456965e69d46483f2161a8bdd17",
+        "frontend-security-reviewer.md": "2eebe20d291feeae89f9116bb8e5fd0c79d9f7e690e9c9133a162aca042ed8ff",
+        "prior-art.md": "212947b129d471fab9aadcc248a0ca16c9e6af81257f7a33090b5b4c67330aed"
       }
     }
   }

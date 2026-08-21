@@ -43,7 +43,9 @@ interface DevkitConfig {
 }
 
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
-function listAgents(dir: string): string[] {
+// Exported for the self-host projection-parity test, which must enumerate exactly what this writer
+// enumerates rather than re-deriving the flat-`.md` rule.
+export function listAgents(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile() && e.name.endsWith('.md'))
     .map((e) => e.name);

@@ -1,5 +1,6 @@
 ---
 name: fix-upstream-reviewer
+mcpServers: [codebase, context7, autonomous_bugs]
 model: opus
 description: Lead-engineer code reviewer that identifies fallbacks, workarounds, and patches that mask upstream problems. Use proactively when reviewing code that contains try/catch fallbacks, redundant API calls, defensive null-checks, or multi-path resolution logic. Answers two questions - can we simplify this code, and should we fix upstream (closer to the source of the problem) instead of patching downstream? Here "upstream" means the direction the data flows FROM, not any particular repo.
 ---

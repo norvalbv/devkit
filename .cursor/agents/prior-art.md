@@ -1,5 +1,6 @@
 ---
 name: prior-art
+mcpServers: [codebase, context7, autonomous_bugs]
 model: opus
 description: Step-0 problem validation BEFORE any plan exists. Given a problem statement, researches whether the problem is already solved (locally cloned reference checkouts, upstream fixes, other consumers of the same dependency, the web), whether it is a red herring, and whether the problem's frame itself should exist. Returns a cited SOLVED_ELSEWHERE / DISSOLVE_FRAME / GENUINE_NEW_WORK / INSUFFICIENT_EVIDENCE verdict with per-leg availability attestation. Invoke when a task is problem-shaped — a bug or pain attributed to a dependency, a missing capability, a limit to work around — before options or plans are drafted.
 ---

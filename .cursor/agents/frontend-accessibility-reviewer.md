@@ -1,7 +1,8 @@
 ---
 name: frontend-accessibility-reviewer
+mcpServers: [codebase, context7, autonomous_bugs]
 description: "Use this agent to review frontend code for accessibility (WCAG AA) issues. Checks semantic HTML, keyboard navigation, ARIA usage, color contrast, form labels, focus management, and motion safety. Advisory only.\\n\\n<example>\\nContext: User has added a new interactive component.\\nuser: \"Added the new dropdown menu\"\\nassistant: \"Let me invoke the frontend-accessibility-reviewer agent to check keyboard navigation, focus management, and ARIA usage.\"\\n<commentary>\\nNew interactive widgets should be reviewed for keyboard access and correct ARIA roles.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: User has changed colors or added text on a colored background.\\nuser: \"Updated the badge styles\"\\nassistant: \"I'll run the frontend-accessibility-reviewer agent to verify contrast ratios meet WCAG AA.\"\\n<commentary>\\nColor changes need a contrast check (4.5:1 normal text, 3:1 large/non-text).\\n</commentary>\\n</example>"
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, mcp__codebase__*, mcp__context7__*, mcp__autonomous_bugs__*
 model: opus
 color: blue
 ---

@@ -149,20 +149,20 @@ record stays intact). Deleting committed history would break the trust the whole
 ## Capture A — at the fork (primary)
 
 The **`brainstorming` skill is the trigger**. There, before the user picks:
-1. `decisions query "<topic>"` → top-k candidate axes (catches the same axis under another name).
-   If one fits, `show <slug>` and **surface its current Target inside the A/B you pose** — never let
+1. `guard-decisions query "<topic>"` → top-k candidate axes (catches the same axis under another name).
+   If one fits, `guard-decisions show <slug>` and **surface its current Target inside the A/B you pose** — never let
    a silent reversal happen.
 2. After the ruling settles, if it clears the bar → record the **Target** (`add --target …`) while
    the *why* is live. New axis → `--new`.
 
-## Capture B — unrecorded-decision gate (`detect.mjs`)
+## Capture B — unrecorded-decision gate (`guard-decisions detect`)
 
 `.husky/pre-commit` smells an architectural diff (dep change · cross-boundary · module replace ·
 legacy deletion) with **no decision staged**; `claude -p` clears a routine change, else **blocks**
 ("record a Target, or `GUARD_NO_LOG=1` if minor"). A Stop hook also nudges at turn-end while the
 *why* is live (snoozed once per session).
 
-## Capture C — alignment gate (`check-alignment.mjs`) — the flip-flop guard
+## Capture C — alignment gate (`guard-decisions check-alignment`) — the flip-flop guard
 
 For every Target with a `--scope`, when a staged file matches that scope, an **agentic judge**
 (`claude -p` with read-only tools: Read/Grep/Glob/`git diff --cached`) *investigates* the staged
