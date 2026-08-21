@@ -1,15 +1,17 @@
 /** Stable, typed capture of the target-controlled setup that `devkit review` will execute. */
 import { spawnSync } from 'node:child_process';
-import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { writeFileAtomic } from "../../atomic-write.mjs";
 import { detectGitRoot } from "../../detect-git-root.mjs";
+import { gitOut, sameDir } from "../../doctor/hooks-path.mjs";
 import { reviewHookDrift } from "../../husky/review-drift.mjs";
 import { captureOrigHooksPath, overlayHookScriptDir } from "../../overlay.mjs";
 import { runDirectReviewCli } from "./run-direct.mjs";
 import { reviewRuntimeFingerprint } from "./runtime-fingerprint.mjs";
 import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
 import { OVERLAY_HOOKS_PATH, overlayHooksPathRejection, } from "./setup/overlay-hooks-path.mjs";
+import { reviewSetupStat } from "./setup/setup-runtime-copy.mjs";
 import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from "./setup-manifest-format.mjs";
 import { parseReviewSetupManifest } from "./setup-manifest-parse.mjs";
 import { REVIEW_SETUP_DOCTOR as DOCTOR, REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR, parseReviewSetupProfile, } from "./setup-profile.mjs";
@@ -110,7 +112,9 @@ function safeRelativePath(root, path, label) {
     return normalized;
 }
 function validateTree(path, relativePath) {
-    const stat = lstatSync(path, { throwIfNoEntry: false });
+    // `reviewSetupStat`, not a bare lstat: `throwIfNoEntry: false` silences only ENOENT, and a path
+    // whose ANCESTOR is a file (a linked worktree's `.git` gitfile) raises ENOTDIR. Both mean absent.
+    const stat = reviewSetupStat(path);
     if (stat === undefined)
         return;
     if (stat.isSymbolicLink())
@@ -130,7 +134,7 @@ function pathState(rootKind, root, id, relativePath, required, executable) {
     const safe = safeRelativePath(root, relativePath, `${id} path`);
     const source = resolveReviewSource(root, safe);
     validateTree(source.physicalPath, safe);
-    const stat = lstatSync(source.physicalPath, { throwIfNoEntry: false });
+    const stat = reviewSetupStat(source.physicalPath);
     if (stat === undefined) {
         if (required)
             fail(`missing ${safe} — ${DOCTOR}`);
@@ -208,6 +212,58 @@ function captureSetupPaths(targetRoot, gitRoot, overlay) {
         ...OPTIONAL_PATHS.map(([id, path]) => pathState('target', targetRoot, id, path, false, false)),
     ];
 }
+/** What `overlayHookScriptDir` returns when core.hooksPath is unset — git's own hooks directory. */
+const GIT_HOOKS_DIR = '.git/hooks';
+/**
+ * Would git actually run a hook at `path`?
+ *
+ * FOLLOWS symlinks, unlike every other stat in this module. git executes a symlinked hook exactly
+ * like a regular one — and symlinked hooks are how dotfiles setups and hook managers install them,
+ * devkit's own ship worktrees included — so judging by `lstat` here would report "not a file" and
+ * wave through the very checkout this guard exists to refuse.
+ */
+function gitWouldExecute(path) {
+    try {
+        // `throwIfNoEntry` covers the missing-file and broken-symlink cases; ENOTDIR and ELOOP throw.
+        // All of them mean the same thing: nothing here that git could execute.
+        const stat = statSync(path, { throwIfNoEntry: false });
+        return stat?.isFile() === true && (stat.mode & 0o111) !== 0;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Refuse a target whose NATIVE hooks directory lives outside the checkout.
+ *
+ * `.git/hooks` names the real hooks directory only when `.git` is a directory. In a linked worktree,
+ * a submodule, or a `--separate-git-dir` checkout, `.git` is a gitfile and the hooks live in the
+ * common dir — which has no repository-relative spelling, so review cannot freeze it. The segment
+ * walk now resolves that path to ABSENT instead of aborting, so without this check a repo that
+ * really owns a native pre-commit would be reviewed green without it ever running — and review is
+ * the SAME in-chain pre-commit authority (docs/decisions/review-gate-in-chain.md).
+ *
+ * Compared by SAME DIRECTORY rather than containment: `git init --separate-git-dir=<gitRoot>/mygit`
+ * produces a gitfile whose common dir is INSIDE gitRoot, which a containment test waves through.
+ */
+function assertNativeHooksAreInTree(gitRoot) {
+    // Stripped of the ambient git environment for the reason LOCAL_GIT_ENVIRONMENT exists: an
+    // inherited GIT_DIR/GIT_COMMON_DIR steers this answer at a different repository, and `devkit
+    // review` is routinely spawned from inside git (a hook, a `rebase --exec`).
+    const common = withoutLocalGitEnvironment(() => gitOut(gitRoot, ['rev-parse', '--path-format=absolute', '--git-common-dir']));
+    // gitOut reports EVERY failure as '', and join('', 'hooks') is the cwd-relative 'hooks' — which
+    // reads as in-tree or out-of-tree depending on the caller's cwd. An unprovable answer is fatal,
+    // never a fall-through: falling through is exactly the silent skip this function prevents.
+    if (!common || !isAbsolute(common))
+        fail('could not resolve the target Git common directory; retry.');
+    const realHooks = join(common, 'hooks');
+    if (sameDir(realHooks, join(gitRoot, '.git', 'hooks')))
+        return;
+    const hook = join(realHooks, 'pre-commit');
+    if (!gitWouldExecute(hook))
+        return;
+    fail(`${gitRoot} is a linked worktree, submodule, or separate-git-dir checkout whose native pre-commit lives outside it (${hook}). devkit review cannot freeze a hook outside the target root — review a full clone of this repository instead.`);
+}
 function captureOverlayChain(gitRoot, targetRoot, config) {
     const origHooksPath = typeof config.origHooksPath === 'string'
         ? config.origHooksPath
@@ -217,6 +273,15 @@ function captureOverlayChain(gitRoot, targetRoot, config) {
     const sourcePath = dirname(path);
     if (sourcePath === '.')
         fail('root-level overlay pre-commit chains are not supported by devkit review.');
+    // Only the native-hooks case can name a directory outside the checkout. A husky or custom
+    // hooksPath is an ordinary in-tree path, and in husky mode git's own hooks dir is never executed —
+    // so a stray `.git/hooks/pre-commit` there must NOT fail the review closed.
+    //
+    // Decided on the NORMALIZED sourcePath rather than the raw recorded value: devkit records
+    // core.hooksPath verbatim, so a hand-written `.git/hooks/` produces the identical chain path while
+    // slipping past a literal match — one character silently disabling the refusal below.
+    if (sourcePath === GIT_HOOKS_DIR)
+        assertNativeHooksAreInTree(gitRoot);
     const chainState = pathState('git', gitRoot, 'overlay-chain', path, false, true);
     const present = chainState.fingerprint !== REVIEW_SETUP_ABSENT;
     const paths = [chainState];

@@ -37,6 +37,17 @@ function resolveProjection(traversal, segments, index, relativePath, allowProjec
         },
     };
 }
+/**
+ * The traversal for a path that cannot exist, with the remaining segments resolved LEXICALLY.
+ *
+ * Stopping at the segment that ended the walk would leave `physicalPath` pointing at that ancestor,
+ * and the caller fingerprints/stats whatever it names. For a linked worktree's `.git` — a real
+ * regular file — that reports the gitfile itself as the requested hook.
+ */
+function unresolved(next, segments, index) {
+    const rest = segments.slice(index + 1);
+    return { ...next, lexical: join(next.lexical, ...rest), physical: join(next.physical, ...rest) };
+}
 function traverseSegment(traversal, segments, index, relativePath, allowProjection) {
     const segment = segments[index];
     const next = {
@@ -46,14 +57,21 @@ function traverseSegment(traversal, segments, index, relativePath, allowProjecti
     };
     const stat = reviewSetupStat(next.lexical);
     if (stat === undefined)
-        return { traversal: next, exists: false };
+        return { traversal: unresolved(next, segments, index), exists: false };
     if (stat.isSymbolicLink()) {
         return {
             traversal: resolveProjection(next, segments, index, relativePath, allowProjection),
             exists: true,
         };
     }
-    requireParentDirectory(stat, index === segments.length - 1, relativePath);
+    // A non-directory ANCESTOR means the leaf cannot exist — the same verdict a single lstat gives,
+    // since `reviewSetupStat` maps ENOTDIR to absent. Walking segment-by-segment used to disagree with
+    // that convention and hard-fail instead, which is what made a linked worktree's `.git` gitfile
+    // unreviewable. A non-directory LEAF is still the caller's to judge (`pathState` rejects a
+    // non-executable hook; `validateTree` rejects an unsupported type).
+    if (index !== segments.length - 1 && !stat.isDirectory()) {
+        return { traversal: unresolved(next, segments, index), exists: false };
+    }
     return { traversal: next, exists: true };
 }
 /**
