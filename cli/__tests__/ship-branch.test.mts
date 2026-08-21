@@ -924,9 +924,9 @@ describe('ship-branch.sh — worktree integration', () => {
 
     expect(first.status, first.stderr).toBe(143);
     const preserved = git(['rev-parse', 'feat/post-reap-signal']).trim();
-    expect(git(['rev-parse', 'refs/devkit/ship-receipts/feat/post-reap-signal']).trim()).toBe(
-      preserved,
-    );
+    const receiptRef = 'refs/devkit/ship-receipts/feat/post-reap-signal';
+    expect(localBranchExists(git, receiptRef), first.stderr).toBe(true);
+    expect(git(['rev-parse', receiptRef]).trim()).toBe(preserved);
     expect(remoteBranchExists(bare, 'feat/post-reap-signal')).toBe(false);
 
     const retry = spawnSync(
