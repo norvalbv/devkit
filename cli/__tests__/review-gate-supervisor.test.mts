@@ -1,5 +1,12 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -294,14 +301,40 @@ interface DeferredSignalOptions {
   signal?: string;
   // 'parent' signals the runner's shell (the sc-1711 window); 'self' makes tee die of the signal.
   target?: 'parent' | 'self';
+  // Defaults to the real runner; a stripped copy proves the interrupted read actually happened.
+  runner?: string;
+}
+
+// Builds a copy of the runner with the sc-1711 re-read deleted, so a test can prove the interrupted
+// read really happened: the pre-fix copy must FAIL on the same run that the real one passes. This is
+// the only honest observable available. Instrumenting the runner's own `wait` (shadowing the builtin
+// to log each status) was tried and DESTROYS the phenomenon — the extra function call gives bash a
+// chance to service the pending trap, so the read returns tee's status and the window silently
+// closes. Sibling paths are symlinked because the runner resolves the supervisor and the progress
+// reader relative to BASH_SOURCE.
+function runnerWithoutReread(root: string): string {
+  const shipDir = join(root, 'prefix/cli/lib/ship');
+  mkdirSync(shipDir, { recursive: true });
+  symlinkSync(join(HERE, '../lib/ship/review'), join(shipDir, 'review'));
+  symlinkSync(join(HERE, '../../gate-engine'), join(root, 'prefix/gate-engine'));
+  const source = readFileSync(GATE_RUNNER, 'utf8');
+  const stripped = source.replace(
+    /\n *if \[ "\$drain_stage" -eq 0 \] && \[ "\$tee_status" -gt 128 \]; then\n[\s\S]*?\n *fi\n/,
+    '\n',
+  );
+  // Fail loudly rather than silently comparing a runner against itself.
+  if (stripped === source) throw new Error('could not strip the re-read — the guard shape changed');
+  const path = join(shipDir, 'run-gates-with-capture.sh');
+  writeFileSync(path, stripped);
+  return path;
 }
 
 function deferredSignalGateHarness(root: string, options: DeferredSignalOptions = {}) {
-  const { teeExit = 0, signal = 'TERM', target = 'parent' } = options;
+  const { teeExit = 0, signal = 'TERM', target = 'parent', runner = GATE_RUNNER } = options;
   const bin = join(root, 'bin');
   const log = join(root, 'gate.log');
   const progress = join(root, 'progress.json');
-  mkdirSync(bin);
+  mkdirSync(bin, { recursive: true });
   // Resolved, not hardcoded: tee is not at /usr/bin on every distro, and a stub that cannot find the
   // real binary reddens for the wrong reason. Same lookup ship-branch.test.mts uses.
   const realTee = execFileSync('/bin/sh', ['-c', 'command -v tee'], { encoding: 'utf8' }).trim();
@@ -329,7 +362,7 @@ function deferredSignalGateHarness(root: string, options: DeferredSignalOptions 
       '-c',
       shell,
       'pending-trap-test',
-      GATE_RUNNER,
+      runner,
       HANDOFF,
       root,
       log,
@@ -835,14 +868,26 @@ describe('review gate supervisor', () => {
       MODERN_BASH ? '' : ' (skipped: no bash >= 4)'
     }`,
     ({ teeExit, wantRc }) => {
-      const result = deferredSignalGateHarness(mkTmp('devkit-review-pending-trap-'), { teeExit });
+      const root = mkTmp('devkit-review-pending-trap-');
+      const result = deferredSignalGateHarness(root, { teeExit });
 
-      // Witness: without this a run where the signal landed outside the window looks identical.
       expect(result.stdout, result.stderr).toContain('SIGNAL_STATUS=143');
       expect(result.stdout, result.stderr).toContain(`RUNNER_RC=${wantRc}`);
       if (teeExit === 0) {
         expect(result.stderr).not.toMatch(/could not persist gate output/);
         expect(readFileSync(result.log, 'utf8')).toContain('pending-trap gate output');
+        // Proof the interrupted read actually occurred, rather than the signal landing harmlessly in
+        // the drain loop: the same stub against a runner WITHOUT the re-read must lose the receipt.
+        // If this passes, the assertions above ran on a green path and covered nothing.
+        const prefix = deferredSignalGateHarness(join(root, 'prefix-run'), {
+          teeExit,
+          runner: runnerWithoutReread(root),
+        });
+        expect(
+          prefix.stdout,
+          'pre-fix runner did not fail — the interrupted read never happened',
+        ).toContain('RUNNER_RC=1');
+        expect(prefix.stderr).toMatch(/could not persist gate output/);
       } else {
         expect(result.stderr).toMatch(/could not persist gate output/);
       }
