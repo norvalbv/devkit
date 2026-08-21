@@ -46,6 +46,7 @@ import {
   resolve,
   reviewerTimeoutEnv,
   scriptPath,
+  seedBaseRepo,
   seedReshipRepo,
   seedShipRepo,
   seedShipRepoLocalRemote,
@@ -108,25 +109,7 @@ describe('ship-branch.sh — PR base = the branch we branched from', () => {
 // and force-deleted its own branch. The fix is that BASE is no longer pinned to HEAD; `git diff <base>
 // -- <paths>` was already base-vs-WORKING-TREE, so staging itself needed no change.
 describe('ship-branch.sh — --base <branch>', () => {
-  /** A repo with an `origin` bare that has a `studio` branch, and a `finalized` branch (checked out)
-   *  whose note.txt change is ALREADY COMMITTED — exactly the DK-1 repro state. */
-  function seedBaseRepo({ hookBody } = {}) {
-    const seeded = seedShipRepoLocalRemote({ hookBody });
-    const { dir, git, bare } = seeded;
-    writeFileSync(join(dir, 'note.txt'), 'studio\n');
-    git(['add', 'note.txt'], { stdio: 'ignore' });
-    git(['commit', '-q', '-m', 'studio note'], { stdio: 'ignore' });
-    git(['push', '-q', 'origin', 'work:studio'], { stdio: 'ignore' }); // the PR base, on origin
-    git(['checkout', '-q', '-b', 'finalized'], { stdio: 'ignore' });
-    writeFileSync(join(dir, 'note.txt'), 'finalized\n');
-    git(['add', 'note.txt'], { stdio: 'ignore' });
-    git(['commit', '-q', '-m', 'finalize'], { stdio: 'ignore' }); // committed → HEAD-based ship stages nothing
-    const studioTip = execFileSync('git', ['-C', bare, 'rev-parse', 'studio'], {
-      env: { ...process.env, ...GIT_ENV },
-      encoding: 'utf8',
-    }).trim();
-    return { ...seeded, studioTip };
-  }
+  // seedBaseRepo lives in _ship-branch-fixture.mts — the resume suite needs it from a sibling file.
 
   // The acceptance criterion, and the proof that `x` and `origin/x` resolve to ONE base.
   for (const spelling of ['studio', 'origin/studio']) {
