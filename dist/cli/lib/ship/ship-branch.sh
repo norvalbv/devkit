@@ -389,7 +389,12 @@ else
 # vanished, publishing a devkit whose gate supervisor could not resolve its own import.
 # Every PATHS entry is caller-explicit (positional after --; directories rejected above), so
 # forcing them is precisely what was asked — same reasoning as reship.sh's `git add -f` (#199).
+  # A path the patch staged as DELETED is skipped: this pass exists to catch ignored files the diff
+  # MISSED, never to overrule one it expressed. Without the guard, deleting a tracked file whose
+  # gitignored copy is back on disk (a regenerable cache — sc-1489's receipt) silently re-adds it and
+  # the deletion can never land, however many times it is shipped.
   git -C "$ROOT" ls-files -o -i --exclude-standard -- "${PATHS[@]}" | while IFS= read -r f; do
+    git -C "$WT" diff --cached --quiet --diff-filter=D -- "$f" || continue
     mkdir -p "$WT/$(dirname "$f")"
     cp -Pp "$ROOT/$f" "$WT/$f"
     git -C "$WT" add -f -- "$f"
