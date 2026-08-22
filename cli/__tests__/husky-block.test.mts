@@ -77,11 +77,12 @@ describe('buildGuardBlock', () => {
     expect(block).not.toContain('biome format');
   });
 
-  it('emits ONE deterministic line for any selected deterministic guard, gated `|| exit 1`', () => {
+  it('emits ONE deterministic command for any selected deterministic guard through the mode policy', () => {
     const block = buildGuardBlock({ biome: true, guards: ['fanout', 'size'] });
     const lines = block.split('\n').filter((l) => l.includes('guard-deterministic'));
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/\|\| exit 1$/);
+    expect(lines[0]).toContain('__dk_gate_deterministic');
+    expect(block).toContain('# devkit:review-deterministic-finalizer');
     // no AI guards selected → no AI fragment
     expect(block).not.toContain('bunx guard-decisions');
   });
@@ -234,15 +235,15 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   });
 });
 
-// The deterministic set fails CLOSED at the orchestrator: the single `guard-deterministic` line is
-// `|| exit 1`-guarded, so its exit 1 (one or more real failures, aggregated inside the bin) blocks
-// the commit. The per-gate trichotomy/aggregation itself is proven in
+// The deterministic set fails CLOSED at the hook policy: commit/ship exits immediately, while
+// review defers the same status until its selected diagnostics have run. The per-gate aggregation is
 // gate-engine/deterministic/__tests__/run.test.mjs.
-describe('deterministic orchestrator line is fail-closed', () => {
-  it('the guard-deterministic line propagates a real failure via `|| exit 1`', () => {
+describe('deterministic orchestrator policy is fail-closed', () => {
+  it('routes the command through the policy helper and emits the final blocking check', () => {
     const block = buildGuardBlock({ guards: ['size'] });
     const line = block.split('\n').find((l) => l.includes('guard-deterministic'));
-    expect(line).toMatch(/\|\| exit 1$/);
+    expect(line).toContain('__dk_gate_deterministic');
+    expect(block).toContain('[ "${dk_review_det_failed:-0}" -ne 0 ]');
   });
 });
 
@@ -259,7 +260,7 @@ describe('hasFragment', () => {
 
 // husky runs hooks under `sh -e`. The AI fragments capture their code with `rc=0; bunx … || rc=$?`
 // so a fail-open code (2) never aborts the hook before the fragment's own check; the deterministic
-// line guards itself with `|| exit 1`. Run the assembled hook under a real `sh -e` with a stubbed
+// helper captures its code in the same tested form. Run the assembled hook under real `sh -e` with
 // `bunx` to prove neither aborts prematurely.
 describe('assembled hook is set -e-safe', () => {
   const runHookWithStubBunx = (stubExit) => {
@@ -287,7 +288,7 @@ describe('assembled hook is set -e-safe', () => {
   });
 
   it('a gate returning non-zero blocks the commit (exit 1), never aborts silently mid-hook', () => {
-    // guard-deterministic exit 1 → `|| exit 1`; and were it to reach an AI gate, that too exits 1.
+    // guard-deterministic exit 1 → the non-review policy exits; AI gates also remain blocking.
     expect(runHookWithStubBunx(1)).toBe(1);
   });
 });
@@ -404,6 +405,12 @@ describe('buildOverlayHook — gates-only guard for the global init.sh shim', ()
     expect(withFallow).toContain('node_modules/.bin/eslint -c eslint.config.devkit.mjs');
     expect(withFallow).toContain('command -v fallow');
     expect(withFallow).toContain('baseline-gate.mjs');
+    expect(withFallow.indexOf('__dk_review_baseline_gate fallow')).toBeLessThan(
+      withFallow.indexOf('# devkit:review-deterministic-finalizer'),
+    );
+    expect(withFallow.indexOf('# devkit:review-deterministic-finalizer')).toBeLessThan(
+      withFallow.indexOf('DEVKIT_VIA_HUSKY_INIT'),
+    );
   });
 });
 

@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { defaultSelection, RECOMMENDED_GUARD_IDS } from "../components.mjs";
 import { readJson } from "../fs-helpers.mjs";
 import { markEnd } from "./husky.mjs";
-import { buildFullHook, buildGuardBlock, extractGuardBlock, replaceGuardBlock, } from "./husky-block.mjs";
+import { buildFullHook, buildGuardBlock, extractGuardBlock, REVIEW_DETERMINISTIC_FINALIZER, replaceGuardBlock, } from "./husky-block.mjs";
 // devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
 // and its hard Biome lint/assist gate (`lint` disables Biome's formatter explicitly — Biome exits 0 when
 // every diagnostic is warn-severity, so without that flag the gate PRINTS its findings into the log
@@ -138,11 +138,12 @@ function definedOnly(recorded) {
         return {};
     return Object.fromEntries(Object.entries(recorded).filter(([, value]) => value !== undefined));
 }
-// Inject the fallow fragment as the last member of the devkit-guards block (just before its end
-// marker), in both the block-only and full-hook forms so they stay consistent.
 function withFallow(text, pkgRel) {
     const end = markEnd(pkgRel);
-    return text.replace(`\n${end}`, `\n\n${FALLOW_FRAGMENT}\n${end}`);
+    const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
+        ? REVIEW_DETERMINISTIC_FINALIZER
+        : end;
+    return text.replace(`\n${anchor}`, `\n\n${FALLOW_FRAGMENT}\n\n${anchor}`);
 }
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
 export function buildSelfHostBlock(sel, pkgRel, cwd) {

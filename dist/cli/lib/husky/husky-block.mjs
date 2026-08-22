@@ -13,6 +13,18 @@ import { GUARD_FRAGMENTS } from "./ai-guard-fragments.mjs";
 import { buildCommitTerminalFragment } from "./commit-terminal.mjs";
 import { markEnd, markStart } from "./husky.mjs";
 import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from "./review-fragments.mjs";
+// Commit/ship exits on failure; review remembers it. The OR-test stays safe under `sh -e`.
+const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
+__dk_gate_deterministic() {
+    dk_det_rc=0
+    __dk_no_git_env "$@" || dk_det_rc=$?
+    [ "$dk_det_rc" -eq 0 ] && return 0
+    [ "\${DEVKIT_RUN_MODE:-}" = "review" ] || exit 1
+    dk_review_det_failed=1
+}`;
+export const REVIEW_DETERMINISTIC_FINALIZER = `# devkit:review-deterministic-finalizer
+if [ "\${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
+# /devkit:review-deterministic-finalizer`;
 // The ONE deterministic line: `guard-deterministic` (gate-engine/deterministic/run.mjs) owns the
 // prefix-cache check/record, runs the selected guards (.devkit/config.json components.guards),
 // applies the rc trichotomy per gate, and aggregates every failure into one report + one exit
@@ -21,7 +33,7 @@ import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from ".
 // hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
 const deterministicFragment = (structureCmd, extras = []) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_no_git_env bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')} || exit 1
+__dk_gate_deterministic bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')}
 # /devkit:deterministic`;
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
@@ -103,6 +115,7 @@ function wantsDeterministic(selection) {
  */
 export function buildGuardBlock(selection, pkgRel = '') {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
+    const deterministic = wantsDeterministic(selection);
     const pieces = [
         buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
@@ -111,14 +124,16 @@ export function buildGuardBlock(selection, pkgRel = '') {
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).
     if (!pkgRel && selection.biome)
         pieces.push(BIOME_FRAGMENT);
-    if (wantsDeterministic(selection))
-        pieces.push(deterministicFragment(selection.structureCmd, selection.extras));
+    if (deterministic)
+        pieces.push(DK_DETERMINISTIC_GATE_HELPER, deterministicFragment(selection.structureCmd, selection.extras));
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             pieces.push(selectedFragment(id, GUARD_FRAGMENTS[id]));
     }
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, QAVIS_FRAGMENT));
+    if (deterministic)
+        pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
     const body = pieces.join('\n\n');
     const start = markStart(pkgRel);
     const end = markEnd(pkgRel);
@@ -140,12 +155,10 @@ const STANDALONE_GATES = {
     decisions: ['guard-decisions', 'detect', '--gate'],
     review: ['guard-review', '--gate'],
 };
-// The standalone/overlay deterministic lines: ONE global-bin orchestrator call, command -v-guarded
-// (a machine without devkit is never blocked). The bin owns the prefix cache, guard selection,
-// structure lint (--structure) and the aggregated report — its exit contract is 0/1 only, so a
-// failure exits the hook directly.
+// Standalone/overlay use the global orchestrator if installed and share the package-mode policy:
+// commit/ship fails fast; review remembers the failure until its finalizer.
 const standaloneDeterministicLines = (structureCmd) => `if command -v guard-deterministic >/dev/null 2>&1; then
-    __dk_no_git_env guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''} || exit 1
+    __dk_gate_deterministic guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}
 fi`;
 // AI-gate helper: FAIL-FAST (never aggregated — findings surface one at a time), with exit 3
 // (strict ship mode failing closed on a judge outage) given its own remedy so it is never
@@ -157,20 +170,23 @@ const DK_GATE_AI_HELPER = '__dk_gate_ai() { command -v "$1" >/dev/null 2>&1 || r
  */
 export function buildStandaloneBlock(selection, pkgRel = '') {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
+    const deterministic = wantsDeterministic(selection);
     const pieces = [
         '# devkit standalone gates — global CLI, fail-open (skipped if devkit is not installed).',
         buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
         DK_GATE_AI_HELPER,
     ];
-    if (wantsDeterministic(selection))
-        pieces.push(standaloneDeterministicLines(selection.structureCmd));
+    if (deterministic)
+        pieces.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines(selection.structureCmd));
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             pieces.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
     }
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         pieces.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
+    if (deterministic)
+        pieces.push(REVIEW_DETERMINISTIC_FINALIZER);
     const body = pieces.join('\n');
     const start = markStart(pkgRel);
     const end = markEnd(pkgRel);
@@ -236,21 +252,22 @@ fi`;
  */
 export function buildOverlayHook(selection, chainTarget = '.husky/pre-commit', pkgRel = '', { fallow = false } = {}) {
     const handoff = selection.guards?.some((id) => id === 'review' || id === 'sentry') ?? false;
+    const deterministic = wantsDeterministic(selection);
     const gates = [
         buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
         DK_GATE_AI_HELPER,
         DK_REVIEW_BASELINE_HELPER,
     ];
-    if (wantsDeterministic(selection))
-        gates.push(standaloneDeterministicLines());
+    if (deterministic)
+        gates.push(DK_DETERMINISTIC_GATE_HELPER, standaloneDeterministicLines());
     for (const id of AI_GUARD_IDS) {
         if (selection.guards?.includes(id))
             gates.push(`if __dk_gate_selected ${id}; then __dk_gate_ai ${STANDALONE_GATES[id].join(' ')}; fi`);
     }
     if (selection.guards?.includes(QAVIS_ADVISORY_ID))
         gates.push(selectedFragment(QAVIS_ADVISORY_ID, standaloneQavisLines));
-    const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}`;
+    const inner = `${gates.join('\n')}\n\n${OVERLAY_LINT_STEPS}${fallow ? `\n\n${FALLOW_OVERLAY_GATE}` : ''}${deterministic ? `\n\n${REVIEW_DETERMINISTIC_FINALIZER}` : ''}`;
     const scoped = pkgRel
         ? `DK_HOOK_PATH="$(cd "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)/$(basename -- "$0")"\n( cd ${JSON.stringify(pkgRel)} || exit 1\n${inner}\n) || exit 1`
         : inner;

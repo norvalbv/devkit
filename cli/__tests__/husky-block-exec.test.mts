@@ -11,15 +11,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildFullHook } from '../lib/husky/husky-block.mts';
+import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
 
 // Execute the ASSEMBLED hook under a real `sh -e` with a stub `bunx` that dispatches per tool
 // (exit codes via env knobs) and logs every invocation. The hook now delegates the whole
 // deterministic set (prefix cache → guards → structure → aggregation) to the single
 // `guard-deterministic` orchestrator, so its internal trichotomy/aggregation is proven in
 // gate-engine/deterministic/__tests__/run.test.mjs. THIS harness proves the SHELL contract the
-// hook still owns: the orchestrator gates the AI fragments (`|| exit 1`), the AI gates stay
-// fail-fast with their outage remedies, and it all survives dash + a hook path with spaces.
+// hook still owns: commit/ship fails fast, review remembers deterministic failure until selected
+// diagnostics run, AI gates stay fail-fast, and it all survives dash + a hook path with spaces.
 
 const homes = [];
 afterEach(() => {
@@ -35,7 +35,14 @@ const hasDash = existsSync('/bin/dash');
 function runHook(
   env = {},
   selection = { biome: false, guards: ALL_GUARDS },
-  { shell = 'sh', dirPrefix = 'dk-hook-exec-', shipMsg = false } = {},
+  {
+    shell = 'sh',
+    dirPrefix = 'dk-hook-exec-',
+    shipMsg = false,
+    builder = 'package',
+    pkgRel = '',
+    missingBins = [],
+  } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
   homes.push(home);
@@ -48,10 +55,9 @@ function runHook(
   }
   const bin = join(home, '.bun', 'bin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(
-    join(bin, 'bunx'),
-    `#!/bin/sh
-tool="$1"; shift
+  const gateStub = `#!/bin/sh
+tool="\${0##*/}"
+if [ "$tool" = "bunx" ]; then tool="$1"; shift; fi
 echo "$tool $*" >> "$HOME/calls.log"
 case "$tool" in
   guard-deterministic) exit \${DET_RC:-0};;
@@ -78,11 +84,41 @@ case "$tool" in
     esac;;
   *) exit 0;;
 esac
-`,
-  );
-  chmodSync(join(bin, 'bunx'), 0o755);
+`;
+  for (const name of [
+    'bunx',
+    'guard-deterministic',
+    'guard-comments',
+    'guard-decisions',
+    'guard-review',
+    'guard-qavis-advisory',
+  ]) {
+    writeFileSync(join(bin, name), gateStub);
+    chmodSync(join(bin, name), 0o755);
+  }
+  for (const name of missingBins) rmSync(join(bin, name), { force: true });
+
+  // Overlay review always runs its merge-base lint diagnostic after the selected guards. Give the
+  // generated helper a minimal packaged-runtime shape and a node stub that records the call.
+  const packageRoot = join(home, 'runtime');
+  const baselineDir = join(home, 'baseline');
+  mkdirSync(join(packageRoot, 'gate-engine', 'review'), { recursive: true });
+  mkdirSync(baselineDir);
+  writeFileSync(join(packageRoot, 'gate-engine', 'review', 'baseline-gate.mts'), '// test stub\n');
+  if (builder === 'overlay') {
+    writeFileSync(join(bin, 'node'), '#!/bin/sh\necho "baseline $*" >> "$HOME/calls.log"\n');
+    chmodSync(join(bin, 'node'), 0o755);
+  }
+
+  if (pkgRel) mkdirSync(join(home, pkgRel), { recursive: true });
   const hookPath = join(home, 'pre-commit');
-  writeFileSync(hookPath, buildFullHook(selection));
+  const hook =
+    builder === 'standalone'
+      ? buildStandaloneHook(selection, pkgRel)
+      : builder === 'overlay'
+        ? buildOverlayHook(selection, '', pkgRel)
+        : buildFullHook(selection, pkgRel);
+  writeFileSync(hookPath, hook);
   let status = 0;
   let stdout = '';
   try {
@@ -90,11 +126,14 @@ esac
       env: {
         ...process.env,
         DEVKIT_COMMIT_MSG_FILE: '',
+        DEVKIT_REVIEW_BASELINE_DIR: baselineDir,
+        DEVKIT_REVIEW_PACKAGE_ROOT: packageRoot,
         HOME: home,
         PATH: '/usr/bin:/bin',
         ...env,
       },
       encoding: 'utf8',
+      cwd: home,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (e) {
@@ -116,10 +155,94 @@ describe('assembled hook execution (stubbed bunx, sh -e)', () => {
     const r = runHook({ DET_RC: '1' });
     expect(r.status).toBe(1);
     expect(r.calls).toContain('guard-deterministic');
-    // `guard-deterministic … || exit 1` — a doomed commit never pays for a judge.
+    // Ordinary commit/ship keeps the cost-saving fail-fast policy.
     expect(r.calls).not.toContain('guard-comments');
     expect(r.calls).not.toContain('guard-decisions');
     expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('review remembers deterministic failure, runs the selected reviewer, then returns 1', () => {
+    const r = runHook({
+      DET_RC: '1',
+      DEVKIT_RUN_MODE: 'review',
+      DEVKIT_REVIEW_GUARDS: 'size,review',
+    });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('reviewer-only profile reaches the reviewer and stays green when deterministic selects none', () => {
+    const r = runHook({ DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'review' });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('initializes remembered status per block instead of trusting an inherited shell value', () => {
+    const r = runHook({
+      DEVKIT_RUN_MODE: 'review',
+      DEVKIT_REVIEW_GUARDS: 'size,review',
+      dk_review_det_failed: '1',
+    });
+    expect(r.status).toBe(0);
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('AI gates remain fail-fast in review mode after a remembered deterministic failure', () => {
+    const r = runHook({
+      DET_RC: '1',
+      COMMENTS_RC: '1',
+      DEVKIT_RUN_MODE: 'review',
+      DEVKIT_REVIEW_GUARDS: 'size,comments,review',
+    });
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-comments gate');
+    expect(r.calls).not.toContain('guard-review');
+  });
+
+  it('standalone review defers an installed deterministic failure until after the reviewer', () => {
+    const r = runHook(
+      { DET_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'size,review' },
+      undefined,
+      { builder: 'standalone' },
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('standalone review keeps missing global deterministic tooling fail-open', () => {
+    const r = runHook(
+      { DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'size,review' },
+      undefined,
+      { builder: 'standalone', missingBins: ['guard-deterministic'] },
+    );
+    expect(r.status).toBe(0);
+    expect(r.calls).not.toContain('guard-deterministic');
+    expect(r.calls).toContain('guard-review --gate');
+  });
+
+  it('overlay review runs AI and baseline diagnostics before finalizing deterministic failure', () => {
+    const r = runHook(
+      { DET_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'size,review' },
+      undefined,
+      { builder: 'overlay' },
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
+    expect(r.calls).toContain('baseline');
+    expect(r.calls.indexOf('guard-review --gate')).toBeLessThan(r.calls.indexOf('baseline'));
+  });
+
+  it('package-scoped review keeps the remembered status inside its failing subshell', () => {
+    const r = runHook(
+      { DET_RC: '1', DEVKIT_RUN_MODE: 'review', DEVKIT_REVIEW_GUARDS: 'size,review' },
+      undefined,
+      { pkgRel: 'pkg/a' },
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).toContain('guard-review --gate');
   });
 
   it('a clean deterministic run lets the AI gates run', () => {
