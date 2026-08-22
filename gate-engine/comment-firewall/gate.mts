@@ -55,7 +55,13 @@ function printFinding(finding: CommentFinding): void {
   console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 function printMissing(findings: CommentFinding[]): void {
+  const shipLog = process.env.DEVKIT_SHIP_GATE_LOG;
+  const shipEvidence = shipLog ? ` --from-ship-log ${shellQuote(shipLog)}` : '';
   console.error(
     `guard-comments: ${findings.length} added/modified comment paragraph${findings.length === 1 ? '' : 's'} need a decision.`,
   );
@@ -64,11 +70,11 @@ function printMissing(findings: CommentFinding[]): void {
     '\nFix the implementation and remove the explanatory workaround, or justify a load-bearing comment:',
   );
   console.error(
-    `  guard-comments justify <id> "why code/types/tests cannot express this durable constraint"`,
+    `  guard-comments justify <id> "why code/types/tests cannot express this durable constraint"${shipEvidence}`,
   );
   console.error('If this is legitimate temporary debt, create/link its cleanup ticket:');
   console.error(
-    `  guard-comments justify <id> "why unavoidable now and what removes it" --ticket SC-123`,
+    `  guard-comments justify <id> "why unavoidable now and what removes it" --ticket SC-123${shipEvidence}`,
   );
   console.error(
     'The rationale stays in Git-local state; one batched Haiku review must still approve it.',
