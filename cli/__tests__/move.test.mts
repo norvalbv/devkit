@@ -51,7 +51,7 @@ function fixture(tsconfigText = DEFAULT_TSCONFIG) {
     "import { vi } from 'vitest';\nvi.mock('@/features/a/util');\nexport const load = () => import('@/features/a/util');\n",
   );
   write(
-    'eslint/baselines/renderer.mjs',
+    '.devkit/baselines/structure/renderer.mjs',
     'export const rendererStructureBaseline = [\n  "features/a/util.ts",\n  "features/a/util.test.ts",\n  "keep/other.ts"\n];\n',
   );
   git(root, 'init', '-q');
@@ -96,7 +96,7 @@ describe('devkit move', () => {
     expect(cTest).not.toContain('@/features/a/util');
 
     // baseline pruned (moved entries gone, unrelated kept)
-    const baseline = read(root, 'eslint/baselines/renderer.mjs');
+    const baseline = read(root, '.devkit/baselines/structure/renderer.mjs');
     expect(baseline).not.toContain('features/a/util.ts');
     expect(baseline).not.toContain('features/a/util.test.ts');
     expect(baseline).toContain('keep/other.ts');
@@ -122,7 +122,7 @@ describe('devkit move', () => {
     write('app/foo.ts', 'export const x = 1;\n');
     write('app/use.ts', "import { x } from '@/foo';\nexport const z = x;\n");
     write(
-      'eslint/baselines/app.mjs',
+      '.devkit/baselines/structure/app.mjs',
       'export const appStructureBaseline = [\n  "foo.ts",\n  "keep/other.ts"\n];\n',
     );
     git(root, 'init', '-q');
@@ -134,7 +134,7 @@ describe('devkit move', () => {
     });
 
     expect(existsSync(join(root, 'app/sub/foo.ts'))).toBe(true);
-    const baseline = read(root, 'eslint/baselines/app.mjs');
+    const baseline = read(root, '.devkit/baselines/structure/app.mjs');
     expect(baseline).not.toContain('"foo.ts"'); // moved entry pruned
     expect(baseline).toContain('keep/other.ts'); // unrelated entry kept
   });

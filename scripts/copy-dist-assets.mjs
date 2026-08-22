@@ -31,7 +31,12 @@ const ROOT_DIRS = [
   'agents-hooks',
 ];
 const ROOT_FILES = ['package.json', 'README.md'];
-for (const d of ROOT_DIRS) cpSync(join(root, d), join(dist, d), { recursive: true });
+for (const d of ROOT_DIRS) {
+  // These are mirrors, not overlays. Clear the destination first so renamed or removed templates
+  // cannot survive in the published package after disappearing from the source tree.
+  rmSync(join(dist, d), { recursive: true, force: true });
+  cpSync(join(root, d), join(dist, d), { recursive: true });
+}
 for (const f of ROOT_FILES) if (existsSync(join(root, f))) cpSync(join(root, f), join(dist, f));
 for (const f of ['LICENSE', 'UPSTREAM.md'])
   cpSync(join(root, 'anti-slop', f), join(dist, 'anti-slop', f));

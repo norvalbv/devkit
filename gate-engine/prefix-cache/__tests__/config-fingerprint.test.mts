@@ -20,9 +20,13 @@ const repo = (config?: object) => {
   if (config) writeFileSync(join(d, 'guard.config.json'), JSON.stringify(config));
   return d;
 };
-const writeBaseline = (d: string, name: string, body: string) => {
-  mkdirSync(join(d, 'eslint', 'baselines'), { recursive: true });
-  writeFileSync(join(d, 'eslint', 'baselines', name), body);
+const writeRatchetBaseline = (d: string, name: string, body: string) => {
+  mkdirSync(join(d, '.devkit', 'baselines'), { recursive: true });
+  writeFileSync(join(d, '.devkit', 'baselines', name), body);
+};
+const writeStructureBaseline = (d: string, name: string, body: string) => {
+  mkdirSync(join(d, '.devkit', 'baselines', 'structure'), { recursive: true });
+  writeFileSync(join(d, '.devkit', 'baselines', 'structure', name), body);
 };
 
 let savedJscpd: string | undefined;
@@ -54,14 +58,21 @@ describe('gateConfigFingerprint — invalidating inputs', () => {
 
   it('a ratchet .json AND a structure .mjs baseline each change the fingerprint', () => {
     const d = repo({ scanRoots: ['src'] });
-    writeBaseline(d, 'fanout.json', '{"src/x":13}');
+    writeRatchetBaseline(d, 'fanout.json', '{"src/x":13}');
     const afterJson = gateConfigFingerprint(d);
-    writeFileSync(join(d, 'eslint', 'baselines', 'fanout.json'), '{"src/x":99}');
+    writeFileSync(join(d, '.devkit', 'baselines', 'fanout.json'), '{"src/x":99}');
     expect(gateConfigFingerprint(d)).not.toBe(afterJson);
     // The .mjs grandfather/exempt lists the structure gate reads — distinct from the .json ratchets.
     const beforeMjs = gateConfigFingerprint(d);
-    writeBaseline(d, 'app.mjs', 'export default ["src/legacy.ts"];');
+    writeStructureBaseline(d, 'app.mjs', 'export default ["src/legacy.ts"];');
     expect(gateConfigFingerprint(d)).not.toBe(beforeMjs);
+    const beforeExempt = gateConfigFingerprint(d);
+    mkdirSync(join(d, '.devkit', 'structure'), { recursive: true });
+    writeFileSync(
+      join(d, '.devkit', 'structure', 'exempt.mjs'),
+      'export const structureExempt = {};',
+    );
+    expect(gateConfigFingerprint(d)).not.toBe(beforeExempt);
   });
 
   it('the index changes on both size and mtime (the stat proxy)', () => {
@@ -121,7 +132,7 @@ describe('gateConfigFingerprint — stability (or the cache is useless)', () => 
     // inode → a fresh worktree per retry never matches the recorded prefix → the cache silently dies).
     delete process.env.JSCPD_BIN; // both resolve to devkit's own bundled jscpd → identical
     const root = repo({ scanRoots: ['src'], indexPath: '.search-code/index.db' });
-    writeBaseline(root, 'fanout.json', '{"src/x":13}');
+    writeRatchetBaseline(root, 'fanout.json', '{"src/x":13}');
     mkdirSync(join(root, '.search-code'), { recursive: true });
     writeFileSync(join(root, '.search-code', 'index.db'), 'idx-bytes');
     const real = gateConfigFingerprint(root);
@@ -129,8 +140,9 @@ describe('gateConfigFingerprint — stability (or the cache is useless)', () => 
     const linkWorktree = () => {
       const wt = tempDir();
       symlinkSync(join(root, 'guard.config.json'), join(wt, 'guard.config.json'));
+      mkdirSync(join(wt, '.devkit'), { recursive: true });
+      symlinkSync(join(root, '.devkit', 'baselines'), join(wt, '.devkit', 'baselines'));
       mkdirSync(join(wt, 'eslint'), { recursive: true });
-      symlinkSync(join(root, 'eslint', 'baselines'), join(wt, 'eslint', 'baselines')); // dir symlink
       mkdirSync(join(wt, '.search-code'), { recursive: true });
       symlinkSync(join(root, '.search-code', 'index.db'), join(wt, '.search-code', 'index.db'));
       return wt;

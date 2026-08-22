@@ -160,7 +160,7 @@ export const DEFAULTS = Object.freeze({
   // Max lines per source file before the size ratchet flags it (raw line count, all lines). 0 = OFF
   // (opt-in). When set, size is enforced by the ratchet directly — no eslint max-lines rule needed,
   // so the structure-only eslint shim governs ANY stack. Existing over-cap files are grandfathered
-  // shrink-only in eslint/baselines/size-lines.json. (Per-FUNCTION caps need a parser → not here yet.)
+  // shrink-only in .devkit/baselines/size-lines.json. (Per-FUNCTION caps need a parser → not here yet.)
   maxLines: 0,
   // Separate loose test-file ceiling. 0 = OFF; init/upgrade enables it alongside maxLines.
   maxTestLines: 0,

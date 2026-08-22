@@ -15,15 +15,16 @@
 //
 // PARAMETERIZED (W-3): scanRoots / fanoutCap / fanoutExempt come from
 // resolveGuardConfig(cwd) — the CONSUMER's guard.config.json + GUARD_* env, never
-// hardcoded. The baseline (eslint/baselines/fanout.json) is per-repo STATE: it is
+// hardcoded. The baseline (.devkit/baselines/fanout.json) is per-repo STATE: it is
 // read/written under the CONSUMER cwd, never the package dir.
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { hasStagedFiles, indexFiles, stageBaseline, treeFilesAtRef } from "./git-index.mjs";
+import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from "./baseline-paths.mjs";
+import { hasStagedFiles, indexFiles, treeFilesAtRef } from "./git-index.mjs";
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
-const BASELINE = 'eslint/baselines/fanout.json';
+const BASELINE = FANOUT_BASELINE;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '__tests__', '_shared']);
 // The ONE fan-out tally. Every producer of candidate paths — the filesystem walk below, and the two
 // git tree readers the gate uses — funnels through here, so "what counts as an impl file" is decided
@@ -106,21 +107,21 @@ function runCli(cmd) {
     const root = process.cwd();
     const cfg = resolveGuardConfig(root);
     const cap = cfg.fanoutCap;
-    const baselineFile = join(root, BASELINE);
     const offenders = overCap(countFanout(root), cap);
     if (cmd === 'freeze') {
+        const baseline = readRatchetBaseline(root, BASELINE, LEGACY_FANOUT_BASELINE);
         if (Object.keys(offenders).length > 0) {
             // Read the OUTGOING baseline before clobbering it, so the refresh can name what it is newly
             // grandfathering. Deliberately NOT shrink-only, matching an explicit guard-size refresh:
             // recording legitimate drift is the operation a stale baseline actually needs. Loud, not
             // forbidden — a blind `freeze` must not quietly absorb a folder that just went over-cap.
-            const prior = existsSync(baselineFile)
-                ? (JSON.parse(readFileSync(baselineFile, 'utf8')).dirs ?? {})
+            // SAFETY: freeze reads the Devkit-owned fan-out baseline shape it writes below.
+            const prior = baseline
+                ? (JSON.parse(baseline.contents).dirs ?? {})
                 : {};
             const out = { cap, dirs: offenders };
-            mkdirSync(dirname(baselineFile), { recursive: true });
-            writeFileSync(baselineFile, `${JSON.stringify(out, null, 2)}\n`);
-            console.log(`✓ ${BASELINE}: cap ${cap}, ${Object.keys(offenders).length} over-cap folder(s) grandfathered`);
+            writeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, `${JSON.stringify(out, null, 2)}\n`);
+            console.log(`✓ ${FANOUT_BASELINE}: cap ${cap}, ${Object.keys(offenders).length} over-cap folder(s) grandfathered`);
             const rose = Object.entries(offenders).filter(([dir, n]) => n > (prior[dir] ?? cap));
             if (rose.length > 0) {
                 console.log(`  ⚠ ${rose.length} folder(s) grew since the last freeze:`);
@@ -131,15 +132,21 @@ function runCli(cmd) {
         else {
             // No folder over cap → no debt to grandfather. Don't write an empty baseline; delete a stale one.
             // The cap is enforced from guard.config.json, so an absent baseline still gates new fan-out.
-            rmSync(baselineFile, { force: true });
-            console.log(`✓ ${BASELINE}: no folder over cap ${cap} — no baseline written`);
+            removeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE);
+            console.log(`✓ ${FANOUT_BASELINE}: no folder over cap ${cap} — no baseline written`);
         }
         process.exit(0);
     }
     // Reason: the two ratchets (folder-fanout / size-disable) are parallel-by-design independent guard bins (+ tests); each self-contained with the same freeze/gate CLI shell
     // fallow-ignore-next-line code-duplication
     if (cmd === 'gate') {
-        const hasBaseline = existsSync(baselineFile);
+        // Finish every filesystem/index observation before snapshotting the baseline used to judge it.
+        const indexCounts = countFanoutFrom(root, indexFiles(root));
+        const inCommit = indexCounts !== null && hasStagedFiles(root);
+        const headCounts = inCommit ? (countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {}) : {};
+        const over = inCommit ? overCap(indexCounts, cap) : offenders;
+        const baseline = readRatchetBaseline(root, BASELINE, LEGACY_FANOUT_BASELINE);
+        const hasBaseline = baseline !== null;
         // Missing baseline = no grandfathered over-cap folders. Enforce the config cap whenever the repo
         // is governed (guard.config.json present — devkit's own repo, CI, any adopted consumer); only an
         // UNgoverned + un-frozen repo fails open, so an unadopted repo is never wedged. Never key this on
@@ -147,21 +154,18 @@ function runCli(cmd) {
         if (!hasBaseline && !existsSync(join(root, CONFIG_FILENAME))) {
             process.exit(2); // ungoverned + un-frozen → fail open
         }
-        const frozen = hasBaseline
-            ? JSON.parse(readFileSync(baselineFile, 'utf8'))
+        // SAFETY: gate reads the Devkit-owned fan-out baseline shape produced by freeze/migration.
+        const frozen = baseline
+            ? JSON.parse(baseline.contents)
             : { cap, dirs: {} };
         const allowed = (dir) => Math.max(frozen.cap, frozen.dirs[dir] ?? 0);
         // A ratchet must fail the CHANGE that broke it, not whoever commits next. During a commit judge
         // tracked state and require growth: the pending index against HEAD. Reading the index rather
         // than the filesystem drops untracked noise; reading it directly rather than through stagedSet
         // keeps aggregate directory counts honest during merges.
-        const indexCounts = countFanoutFrom(root, indexFiles(root));
-        const inCommit = indexCounts !== null && hasStagedFiles(root);
         // With a clean index (CI or a manual audit) there is no change to attribute, so the whole tree is
         // the subject and drift still blocks. An unborn HEAD has no prior state, which correctly makes
         // every over-cap folder part of the initial commit.
-        const headCounts = inCommit ? (countFanoutFrom(root, treeFilesAtRef(root, 'HEAD')) ?? {}) : {};
-        const over = inCommit ? overCap(indexCounts, cap) : offenders;
         const grew = Object.entries(over).filter(([dir, n]) => n > allowed(dir) && (!inCommit || n > (headCounts[dir] ?? 0)));
         if (grew.length > 0) {
             console.error(`🚫 Folder fan-out exceeded (cap ${frozen.cap} impl files/folder, any depth):`);
@@ -185,9 +189,8 @@ function runCli(cmd) {
             Object.keys(frozen.dirs).length > 0 &&
             Object.keys(over).length === 0 &&
             hasStagedFiles(root)) {
-            rmSync(baselineFile, { force: true });
-            stageBaseline(root, BASELINE);
-            console.log(`✓ fan-out debt cleared — ${BASELINE} removed & staged.`);
+            removeRatchetBaseline(root, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, { stage: true });
+            console.log(`✓ fan-out debt cleared — ${FANOUT_BASELINE} removed & staged.`);
             process.exit(0);
         }
         const shrank = Object.entries(frozen.dirs).filter(([dir, n]) => (over[dir] ?? 0) < n);

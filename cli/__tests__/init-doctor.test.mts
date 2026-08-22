@@ -265,7 +265,7 @@ describe('init --stack react-app (structure ungated)', () => {
     expect(r.status).toBe(0);
     for (const f of [
       'eslint.config.mjs',
-      'eslint/baselines/exempt.mjs',
+      '.devkit/structure/exempt.mjs',
       'guard.config.json',
       'biome.jsonc',
       'tsconfig.json',
@@ -458,6 +458,31 @@ describe('doctor — selection-aware', () => {
     const r = devkit(root, 'doctor');
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/All checks OK/);
+  });
+
+  it('reports grandfathered debt from canonical Devkit baseline paths', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
+    writeFileSync(join(root, '.devkit', 'baselines', 'size.json'), '{"files":{}}\n');
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"files":{}}\n');
+
+    const result = devkit(root, 'doctor');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(
+      'baselines: OK — grandfathered debt: fanout + size + line-growth',
+    );
+
+    rmSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(join(root, 'eslint', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
+    writeFileSync(join(root, 'eslint', 'baselines', 'size.json'), '{"files":{}}\n');
+    writeFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), '{"files":{}}\n');
+    expect(devkit(root, 'doctor').stdout).toContain(
+      'baselines: OK — grandfathered debt: fanout + size + line-growth',
+    );
   });
 
   it('component-lib biome extends react is OK, not drift (stack-aware expected extends, 2a)', () => {

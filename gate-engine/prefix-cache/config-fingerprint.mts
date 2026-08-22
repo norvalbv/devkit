@@ -83,10 +83,13 @@ export function gateConfigFingerprint(cwd: string): string {
   const cfg = resolveGuardConfig(cwd);
   const { cwd: _omitCwd, ...behavioral } = cfg;
 
-  // (2) Baseline directory + allowlist contents. The whole eslint/baselines/ dir (not three named
-  // files): the structure gate runs inside guard-deterministic and reads the .mjs grandfather/exempt
-  // lists distinct from the ratchet .json baselines, and the dir is gitignored in overlay consumers.
-  const baselines = fingerprintDir(join(cwd, 'eslint', 'baselines'));
+  // (2) Baseline and structure-policy directories + allowlist contents. Legacy ESLint storage stays
+  // in the key until every consumer has migrated, so either generation invalidates an old PASS.
+  const baselines = [
+    fingerprintDir(join(cwd, '.devkit', 'baselines')),
+    fingerprintDir(join(cwd, '.devkit', 'structure')),
+    fingerprintDir(join(cwd, 'eslint', 'baselines')),
+  ].join('\0');
   const allowlistAbs = resolveFromCwd(cfg, 'allowlistPath');
   const allowlist =
     allowlistAbs && existsSync(allowlistAbs) ? sha256(readFileSync(allowlistAbs)) : 'absent';

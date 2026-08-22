@@ -16,7 +16,8 @@
     "gate-engine/**/eval/*.mts", // dev eval harnesses
     "gate-engine/**/bench.mts", // dev benchmarks
     "eslint.config.mjs", // loaded by eslint; compiles the structure rule from guard.config.json
-    "eslint/baselines/*.mjs" // generated grandfather lists — loaded by eslint.config.mjs via a computed dynamic import() fallow can't trace
+    ".devkit/baselines/**/*.mjs", // generated grandfather lists — loaded through computed dynamic imports
+    ".devkit/structure/*.mjs" // hand-authored structure exceptions loaded through computed dynamic imports
   ],
   // An export referenced within its own file is an internal helper, not dead — a policy, not a
   // file ignore.

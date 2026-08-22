@@ -35,12 +35,12 @@ function seedBaseline(root: string): void {
   write(root, 'src/legacy.ts', big(60));
   write(
     root,
-    'eslint/baselines/size-lines.json',
+    '.devkit/baselines/size-lines.json',
     JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
   );
   execFileSync(
     'git',
-    ['add', 'guard.config.json', 'src/legacy.ts', 'eslint/baselines/size-lines.json'],
+    ['add', 'guard.config.json', 'src/legacy.ts', '.devkit/baselines/size-lines.json'],
     { cwd: root },
   );
   execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
@@ -61,7 +61,7 @@ describe('guard-size base-aware preflight', () => {
     write(root, 'src/legacy.ts', big(70));
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
     );
 
@@ -70,6 +70,35 @@ describe('guard-size base-aware preflight', () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toContain('max 60; headroom -10; working-tree max 80 differs by 20');
     expect(result.stderr).toContain('working-tree baseline would allow 80');
+  });
+
+  it('reads a legacy baseline from a pre-migration base ref', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'guard.config.json',
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
+    );
+    write(root, 'src/legacy.ts', big(60));
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    );
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'legacy base'], { cwd: root });
+    rmSync(join(root, 'eslint/baselines/size-lines.json'));
+    write(root, 'src/legacy.ts', big(70));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+
+    const result = run(root, 'preflight', '--base', 'HEAD', '--', 'src/legacy.ts');
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('max 60; headroom -10; working-tree max 80 differs by 20');
   });
 
   it('defaults to staged source files and prints remaining headroom', () => {
@@ -112,7 +141,7 @@ describe('guard-size base-aware preflight', () => {
     write(root, 'src/new.ts', big(70));
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60, 'src/new.ts': 70 } }),
     );
 
@@ -123,7 +152,7 @@ describe('guard-size base-aware preflight', () => {
       'HEAD',
       '--',
       'src/new.ts',
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
     );
 
     expect(result.status, result.stderr).toBe(0);

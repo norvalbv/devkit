@@ -224,10 +224,13 @@ describe('guard-structure staged plan', () => {
     ).toEqual({ targets: [], probeScopes: [], deferred: ['src/Feature/index.ts'] });
   });
 
-  it('defers all staged structure input when its policy has unstaged edits', () => {
-    expect(
-      planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], ['eslint.config.mjs']),
-    ).toEqual({
+  it.each([
+    'eslint.config.mjs',
+    '.devkit/structure/exempt.mjs',
+    '.devkit/baselines/imports.mjs',
+    '.devkit/baselines/structure/renderer.mjs',
+  ])('defers all staged structure input when policy %s has unstaged edits', (policy) => {
+    expect(planStagedStructureLint(scopes, ['src/Feature/index.ts'], [], [policy])).toEqual({
       targets: [],
       probeScopes: [],
       deferred: ['structure policy', 'src/Feature/index.ts'],

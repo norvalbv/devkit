@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readImportWallExempt } from '../commands/init.mts';
+import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mts';
 import { tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, devkit, cleanup } = tmpRepos('baselines-only-');
@@ -41,10 +41,10 @@ describe('devkit init --baselines-only (guards)', () => {
   });
 });
 
-describe('readImportWallExempt', () => {
+describe('loadImportWallExempt', () => {
   const writeExempt = (root, body) => {
-    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
-    writeFileSync(join(root, 'eslint', 'baselines', 'exempt.mjs'), body);
+    mkdirSync(join(root, '.devkit', 'structure'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'structure', 'exempt.mjs'), body);
   };
 
   it('reads importWallExempt patterns into a Set', async () => {
@@ -53,12 +53,12 @@ describe('readImportWallExempt', () => {
       root,
       'export const importWallExempt = [{ name: "x", pattern: "src/renderer/lib/trpc.ts" }];\n',
     );
-    const set = await readImportWallExempt(root);
+    const set = await loadImportWallExempt(root);
     expect(set).toBeInstanceOf(Set);
     expect(set.has('src/renderer/lib/trpc.ts')).toBe(true);
   });
 
   it('returns empty Set when exempt.mjs is absent', async () => {
-    expect((await readImportWallExempt(tmpRepo())).size).toBe(0);
+    expect((await loadImportWallExempt(tmpRepo())).size).toBe(0);
   });
 });

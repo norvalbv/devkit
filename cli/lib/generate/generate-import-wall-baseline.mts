@@ -31,8 +31,12 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from '../../../gate-engine/config.mts';
+import {
+  IMPORT_WALL_BASELINE,
+  LEGACY_IMPORT_WALL_BASELINE,
+} from '../../../gate-engine/ratchets/baseline-paths.mts';
 
-const OUT = 'eslint/baselines/imports.mjs';
+const OUT = IMPORT_WALL_BASELINE;
 const RULE = 'project-structure/independent-modules';
 
 const IMPORT_PATH_RE = /Import path\s*=\s*"([^"]+)"/;
@@ -231,7 +235,7 @@ export const ${exportName} = `;
 }
 
 /**
- * Generate <cwd>/eslint/baselines/imports.mjs. Returns the entries; no-ops the
+ * Generate <cwd>/.devkit/baselines/imports.mjs. Returns the entries; no-ops the
  * write under dryRun. Throws on any loud-failure guard (never silently widens).
  *
  * @param cwd consumer repo root
@@ -254,6 +258,7 @@ export function generateImportWallBaseline(
   const { entries, classCounts } = computeImportWallBaseline(cwd, opts);
   const exportName = opts.walls?.exportName ?? DEFAULT_WALLS.exportName;
   const out = join(cwd, OUT);
+  const legacy = join(cwd, LEGACY_IMPORT_WALL_BASELINE);
   if (!opts.dryRun) {
     if (entries.length > 0) {
       mkdirSync(dirname(out), { recursive: true });
@@ -263,6 +268,7 @@ export function generateImportWallBaseline(
       // (the eslint loader returns [] on absence, so enforcement is unchanged).
       rmSync(out, { force: true });
     }
+    rmSync(legacy, { force: true });
   }
   log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${OUT}: ${entries.length} grandfathered file(s)`);
   for (const [w, n] of Object.entries(classCounts).sort()) log(`     ${w}: ${n} file(s)`);

@@ -25,7 +25,7 @@
      sub-engines incl. `structure`, `ignoredDirs: [eval]`).
    - `walls: []` (no import walls → the import-wall generator early-returns).
 
-4. **Generated baselines** `eslint/baselines/{cli,gate-engine}.mjs` — both `[]` (devkit already
+4. **Generated baselines** `.devkit/baselines/structure/{cli,gate-engine}.mjs` — both `[]` (devkit already
    conforms). Kept empty per the keep-empty-files rule (standing proof of zero exceptions).
 
 5. **The eslint shim** `eslint.config.mjs` — a thin generated loader: reads `structure.trees`, loads
@@ -47,7 +47,7 @@
   ("Folder 'misc' is invalid", exit 1); removing it PASSES (exit 0). The live gate works.
 - `npx tsc` + `bun run lint` (biome) clean; `fallow` health/dupes/dead-code/audit all 0.
 - `bun run test:run`: 443 green (6 new compile/no-drift cases).
-- `.fallowrc`: `eslint.config.mjs` + `eslint/baselines/*.mjs` declared as reachability roots (the
+- `.fallowrc`: `eslint.config.mjs` + `.devkit/baselines/**/*.mjs` declared as reachability roots (the
   baselines load via a computed dynamic `import()` fallow can't trace).
 
 ## Deferred to frink-migration (ponytail-marked)

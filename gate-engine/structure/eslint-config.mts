@@ -22,7 +22,7 @@ import { makeBaselineLoaders } from './load-baseline.mts';
 /**
  * Build the eslint flat-config array governing a repo's declared structure trees (one
  * folder-structure rule per grammar tree). `root` is the repo root (holds guard.config.json +
- * eslint/baselines/).
+ * .devkit baseline/policy state).
  */
 export async function buildStructureConfigs(root: string): Promise<Linter.Config[]> {
   const cfg = resolveGuardConfig(root);

@@ -249,7 +249,7 @@ describe('devkit upgrade — line-growth block back-fill', () => {
     expect(gc(root).maxLines).toBe(500); // cap written
     expect(gc(root).maxTestLines).toBe(2000);
     const lines = JSON.parse(
-      readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
     );
     expect(lines.files['src/giant.ts']).toBe(600); // giant grandfathered, not hard-erroring
     expect(config(root).components.lineGrowth).toBe(true); // recorded on
@@ -301,7 +301,7 @@ describe('devkit upgrade — line-growth block back-fill', () => {
     expect(gc(root).maxLines).toBe(500);
     expect(gc(root).maxTestLines).toBe(2000);
     const lines = JSON.parse(
-      readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
     );
     expect(lines.files['src/executor.test.ts']).toBe(2200);
     expect(up.stdout).toMatch(/line-growth block enabled/i);

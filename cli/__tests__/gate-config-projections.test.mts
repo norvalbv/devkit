@@ -103,17 +103,17 @@ describe('gate config projections', () => {
     const materialized = join(review.root, 'materialized-config.json');
     writeFileSync(materialized, '{"scanRoots":["src"]}\n');
     symlinkSync(materialized, join(review.root, 'guard.config.json'));
-    mkdirSync(join(review.root, 'eslint', 'baselines'), { recursive: true });
-    writeFileSync(join(review.root, 'eslint', 'baselines', 'size.json'), '{"max":500}\n');
+    mkdirSync(join(review.root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(review.root, '.devkit', 'baselines', 'size.json'), '{"max":500}\n');
     const result = project(review.root, review.worktree);
     expect(result.status, result.stderr).toBe(0);
     const projected = join(review.worktree, 'guard.config.json');
     expect(lstatSync(projected).isSymbolicLink()).toBe(false);
-    expect(lstatSync(join(review.worktree, 'eslint', 'baselines')).isSymbolicLink()).toBe(false);
+    expect(lstatSync(join(review.worktree, '.devkit', 'baselines')).isSymbolicLink()).toBe(false);
     writeFileSync(projected, '{"scanRoots":["runtime"]}\n');
-    writeFileSync(join(review.worktree, 'eslint', 'baselines', 'size.json'), '{"max":1}\n');
+    writeFileSync(join(review.worktree, '.devkit', 'baselines', 'size.json'), '{"max":1}\n');
     expect(readFileSync(materialized, 'utf8')).toContain('src');
-    expect(readFileSync(join(review.root, 'eslint', 'baselines', 'size.json'), 'utf8')).toContain(
+    expect(readFileSync(join(review.root, '.devkit', 'baselines', 'size.json'), 'utf8')).toContain(
       '500',
     );
     expect(project(review.root, review.worktree, 'typo').status).toBe(2);

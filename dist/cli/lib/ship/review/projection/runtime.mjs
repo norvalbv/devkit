@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { runDirectReviewCli } from "../run-direct.mjs";
 import { reviewRuntimeFingerprint } from "../runtime-fingerprint.mjs";
 import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, safeReviewDestination, } from "../runtime-paths.mjs";
+import { fail } from "../shared/common.mjs";
 import { resolveReviewSource } from "../source-projection.mjs";
 const VERSION = 1;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -12,12 +13,15 @@ const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'];
 // Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
 // these roots are allowed to drift between the captured source and the private copy (verify checks
 // only that they stay symlink-free); every other projected root is immutable and must match exactly.
-const MUTABLE_ROOTS = ['.fallow', 'fallow-baselines', '.decisions', 'eslint/baselines'];
+const MUTABLE_ROOTS = [
+    '.fallow',
+    'fallow-baselines',
+    '.decisions',
+    '.devkit/baselines',
+    'eslint/baselines',
+];
 const PRESENT_STATE_TYPES = ['file', 'directory', 'link-file', 'link-directory'];
 const LINK_STATE_FIELDS = ['linkTarget', 'linkPath', 'physicalPath'];
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
 function manifestHash(value) {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }

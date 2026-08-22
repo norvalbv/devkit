@@ -55,7 +55,7 @@ interface StructureGateResult {
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
 const ELECTRON_SOURCE_EXTENSIONS = ['ts', 'tsx', 'css'];
 const POLICY_PATH_RE =
-  /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/))/;
+  /^(?:eslint\.config\.mjs|guard\.config\.json|eslint\/(?:domains\.mjs|baselines\/)|\.devkit\/(?:structure\/exempt\.mjs|baselines\/(?:imports\.mjs|structure\/)))/;
 
 function pathInRoot(file: string, root: string): boolean {
   const cleanRoot = root.replace(/\/+$/, '');
@@ -260,7 +260,7 @@ export async function runStagedStructureGate(cwd = process.cwd()): Promise<Struc
 
 /**
  * Run the folder-structure gate over a repo's declared structure roots. `cwd` is the consumer root
- * (holds guard.config.json + eslint/baselines/). Result code: 0 = clean / nothing to lint,
+ * (holds guard.config.json + .devkit baseline/policy state). Result code: 0 = clean / nothing to lint,
  * 1 = violations, 2 = fail-open (internal error).
  */
 export async function runStructureGate(

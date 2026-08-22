@@ -30,7 +30,7 @@ walker-vs-rule drift to maintain.
      `lintGlobs`) into `structure.walls`.
 
 2. **Regenerate baselines via the new engine** (devkit's `init`/generators reading the new config),
-   and confirm the emitted `eslint/baselines/<tree>.mjs` match the current committed ones (diff should
+   and confirm the emitted `.devkit/baselines/structure/<tree>.mjs` match the current committed ones (diff should
    be empty — the preset is exact). If a diff appears, the preset/grammar isn't faithful yet → file it
    back to devkit Piece 1, don't hand-patch frink.
 
@@ -51,7 +51,7 @@ walker-vs-rule drift to maintain.
 
 5. **Keep** (do NOT delete — these are frink-internal, not devkit-portable):
    - `docs/decisions/renderer-structure-governance.md` (the append-only why).
-   - `eslint/baselines/exempt.mjs` (frink's real exemptions — the tRPC `AppRouter` import).
+   - `.devkit/structure/exempt.mjs` (frink's real exemptions — the tRPC `AppRouter` import).
    - `.claude/skills/structure-governance/` (frink's agent-facing placement table).
    - the ratchet `.json`s (`size.json`, `fanout.json`) + the size/fan-out gates if frink's are newer
      than devkit's `gate-engine/ratchets/*` — reconcile, don't blindly drop.

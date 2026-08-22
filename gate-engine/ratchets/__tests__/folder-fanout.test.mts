@@ -30,6 +30,10 @@ const fill = (root, dir, n, prefix = 'file') => {
 
 const writeConfig = (root, cfg) =>
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
+const write = (root, rel, content) => {
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(join(root, rel), content);
+};
 const gitInit = (root) => {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
@@ -132,9 +136,31 @@ describe('CLI freeze/gate contract', () => {
     const root = makeRoot();
     fill(root, 'src/pile', 20);
     expect(run(root, 'freeze').status).toBe(0);
-    const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8'));
+    const frozen = JSON.parse(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8'));
     expect(frozen.dirs['src/pile']).toBe(20);
     expect(run(root, 'gate').status).toBe(0);
+  });
+
+  it('reads a legacy fan-out baseline and canonicalizes it on the next freeze', () => {
+    const root = makeRoot();
+    writeConfig(root, {});
+    fill(root, 'src/pile', 20);
+    write(
+      root,
+      'eslint/baselines/fanout.json',
+      JSON.stringify({ cap: FANOUT_CAP, dirs: { 'src/pile': 20 } }),
+    );
+
+    expect(run(root, 'gate').status).toBe(0);
+    fill(root, 'src/pile', 21);
+    const result = run(root, 'gate');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/pile: 21 files (allowed 20)');
+
+    expect(run(root, 'freeze').status).toBe(0);
+    const canonical = JSON.parse(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8'));
+    expect(canonical.dirs['src/pile']).toBe(21);
+    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'))).toThrow();
   });
 
   it('writes the baseline under the CONSUMER cwd, not the package dir (W-3)', () => {
@@ -142,7 +168,7 @@ describe('CLI freeze/gate contract', () => {
     fill(root, 'src/pile', 20);
     expect(run(root, 'freeze').status).toBe(0);
     // Baseline must materialize inside the temp consumer repo, addressed from its cwd.
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).not.toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8')).not.toThrow();
   });
 
   it('gate blocks a NEW folder exceeding the cap', () => {
@@ -175,7 +201,7 @@ describe('CLI freeze/gate contract', () => {
     const root = makeRoot();
     fill(root, 'src/ok', 3);
     expect(run(root, 'freeze').status).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8')).toThrow();
   });
 
   it('freeze deletes a stale empty baseline once the last over-cap pile heals', () => {
@@ -185,7 +211,7 @@ describe('CLI freeze/gate contract', () => {
     rmSync(join(root, 'src/pile'), { recursive: true });
     fill(root, 'src/pile', 5); // under cap now
     expect(run(root, 'freeze').status).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8')).toThrow();
   });
 
   it('gate ENFORCES from config (not fail-open) when governed but no baseline exists', () => {
@@ -203,7 +229,7 @@ describe('CLI freeze/gate contract', () => {
     writeConfig(root, {});
     fill(root, 'src/pile', 20);
     run(root, 'freeze'); // fanout.json = { dirs: { 'src/pile': 20 } }
-    gitAdd(root, 'guard.config.json', 'src/pile', 'eslint/baselines/fanout.json');
+    gitAdd(root, 'guard.config.json', 'src/pile', '.devkit/baselines/fanout.json');
     execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
     rmSync(join(root, 'src/pile'), { recursive: true });
     fill(root, 'src/pile', 5); // healed under cap
@@ -211,12 +237,12 @@ describe('CLI freeze/gate contract', () => {
     const r = run(root, 'gate');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('removed & staged');
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8')).toThrow();
     const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=D'], {
       cwd: root,
       encoding: 'utf8',
     });
-    expect(staged).toContain('eslint/baselines/fanout.json');
+    expect(staged).toContain('.devkit/baselines/fanout.json');
   });
 
   it('gate blocks a grandfathered folder growing past its frozen count (shrink-only)', () => {

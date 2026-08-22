@@ -169,24 +169,24 @@ describe('ship-branch.sh — --base <branch>', () => {
   it('fails before creating a worktree when the base has a tighter size ceiling than the checkout', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
     mkdirSync(join(dir, 'src'), { recursive: true });
-    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
     writeFileSync(
       join(dir, 'guard.config.json'),
       JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
     );
     writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
     writeFileSync(
-      join(dir, 'eslint/baselines/size-lines.json'),
+      join(dir, '.devkit/baselines/size-lines.json'),
       JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
     );
-    git(['add', 'guard.config.json', 'src/hot.ts', 'eslint/baselines/size-lines.json']);
+    git(['add', 'guard.config.json', 'src/hot.ts', '.devkit/baselines/size-lines.json']);
     git(['commit', '-q', '-m', 'size baseline']);
     git(['push', '-q', 'origin', 'work:studio']);
     git(['checkout', '-q', '-b', 'finalized']);
 
     writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
     writeFileSync(
-      join(dir, 'eslint/baselines/size-lines.json'),
+      join(dir, '.devkit/baselines/size-lines.json'),
       JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
     );
     const r = spawnSync(
@@ -1229,22 +1229,22 @@ describe('reship.sh (ship --pr) — overlay-mode gate chain', () => {
   it('runs the base-aware size preflight before creating a reship worktree', () => {
     const { dir, env, git } = seedReshipRepo();
     mkdirSync(join(dir, 'src'), { recursive: true });
-    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
     writeFileSync(
       join(dir, 'guard.config.json'),
       JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 }),
     );
     writeFileSync(join(dir, 'src/hot.ts'), Array(60).fill('const x = 1;').join('\n'));
     writeFileSync(
-      join(dir, 'eslint/baselines/size-lines.json'),
+      join(dir, '.devkit/baselines/size-lines.json'),
       JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 60 } }),
     );
-    git(['add', 'guard.config.json', 'src/hot.ts', 'eslint/baselines/size-lines.json']);
+    git(['add', 'guard.config.json', 'src/hot.ts', '.devkit/baselines/size-lines.json']);
     git(['commit', '-q', '-m', 'size baseline']);
     git(['push', '-q', 'origin', 'work:pr-open']);
     writeFileSync(join(dir, 'src/hot.ts'), Array(70).fill('const x = 1;').join('\n'));
     writeFileSync(
-      join(dir, 'eslint/baselines/size-lines.json'),
+      join(dir, '.devkit/baselines/size-lines.json'),
       JSON.stringify({ maxLines: 50, files: { 'src/hot.ts': 80 } }),
     );
 
@@ -1471,19 +1471,19 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     );
   });
 
-  // The ratchet freezes live in eslint/baselines. OVERLAY hides the dir via .git/info/exclude while
+  // The ratchet freezes live in .devkit/baselines. OVERLAY hides .devkit via .git/info/exclude while
   // init still freezes into it → untracked → absent from the checkout. It must be linked back, or the
   // fanout gate enforces an EMPTY freeze (it can't fail open: guard.config.json IS linked) and every
   // grandfathered folder reads as new growth.
   const freezeHook =
-    '[ -e eslint/baselines/fanout.json ] && echo FREEZE_SEEN || echo FREEZE_MISSING\nexit 0';
+    '[ -e .devkit/baselines/fanout.json ] && echo FREEZE_SEEN || echo FREEZE_MISSING\nexit 0';
 
   it('links an untracked ratchet freeze in (fanout gate sees the grandfathering, not an empty one)', () => {
     const { dir, env, git } = seedShipRepo({ hookBody: freezeHook });
-    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
+    mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
     // untracked exactly as an overlay repo leaves it (excluded via .git/info/exclude, never committed)
     writeFileSync(
-      join(dir, 'eslint/baselines/fanout.json'),
+      join(dir, '.devkit/baselines/fanout.json'),
       '{"cap":12,"dirs":{"src/icons":65}}\n',
     );
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
@@ -1500,12 +1500,15 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     expect(log).not.toMatch(/FREEZE_MISSING/);
   });
 
-  it('is a silent no-op for TRACKED baselines (devkit/frink package mode ride the checkout)', () => {
-    const { dir, env, git } = seedShipRepo({ hookBody: freezeHook });
-    mkdirSync(join(dir, 'eslint/baselines'), { recursive: true });
-    writeFileSync(join(dir, 'eslint/baselines/fanout.json'), '{"cap":12,"dirs":{}}\n');
-    git(['add', 'eslint/baselines/fanout.json'], { stdio: 'ignore' });
+  it('projects an untracked baseline beside a tracked sibling', () => {
+    const mixedHook =
+      '[ -e .devkit/baselines/fanout.json ] && [ -e .devkit/baselines/size-lines.json ] && echo BOTH_SEEN || echo BASELINE_MISSING\nexit 0';
+    const { dir, env, git } = seedShipRepo({ hookBody: mixedHook });
+    mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
+    writeFileSync(join(dir, '.devkit/baselines/fanout.json'), '{"cap":12,"dirs":{}}\n');
+    git(['add', '.devkit/baselines/fanout.json'], { stdio: 'ignore' });
     git(['commit', '-q', '--no-verify', '-m', 'track freeze'], { stdio: 'ignore' });
+    writeFileSync(join(dir, '.devkit/baselines/size-lines.json'), '{"files":{}}\n');
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/freeze-tracked', 't', 'note.txt'], {
       cwd: dir,
@@ -1515,10 +1518,9 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toMatch(/absent from the committed tree/); // nothing to link → no notice
     expect(
       readFileSync(join(dir, '.devkit/last-ship-gates-feat-freeze-tracked.log'), 'utf8'),
-    ).toMatch(/FREEZE_SEEN/);
+    ).toMatch(/BOTH_SEEN/);
   });
 
   // The qavis pass-receipt is the untracked, gitignored cache `qavis qa` writes on a pass. The ship-time
@@ -1562,6 +1564,8 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     const src = readFileSync(linkGateConfigsScript, 'utf8');
     const block = /GATE_PROJECTION_FIXED_CANDIDATES=\(\n([\s\S]*?)\n\)/.exec(src);
     expect(block, 'candidate registry not found — did the helper get restructured?').toBeTruthy();
+    expect(src).toContain('/.devkit/baselines/structure/*.mjs');
+    expect(src).toContain('/eslint/baselines/*.mjs');
     expect(
       (block as RegExpExecArray)[1]
         .split('\n')
@@ -1576,7 +1580,11 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       '.fallow',
       'fallow-baselines',
       '.decisions',
-      'eslint/baselines',
+      '.devkit/baselines/fanout.json',
+      '.devkit/baselines/size-lines.json',
+      '.devkit/baselines/size.json',
+      '.devkit/baselines/imports.mjs',
+      '.devkit/structure/exempt.mjs',
       'eslint.config.devkit.mjs',
       'biome.devkit.jsonc',
       '.qavis/receipt.json',

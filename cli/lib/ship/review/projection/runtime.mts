@@ -22,6 +22,7 @@ import {
   reviewPathWithin,
   safeReviewDestination,
 } from '../runtime-paths.mts';
+import { fail } from '../shared/common.mts';
 import { resolveReviewSource } from '../source-projection.mts';
 
 const VERSION = 1 as const;
@@ -30,7 +31,13 @@ const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'] as const;
 // Ratchet/cache gates legitimately update their own ignored baseline/cache state during a run, so
 // these roots are allowed to drift between the captured source and the private copy (verify checks
 // only that they stay symlink-free); every other projected root is immutable and must match exactly.
-const MUTABLE_ROOTS = ['.fallow', 'fallow-baselines', '.decisions', 'eslint/baselines'] as const;
+const MUTABLE_ROOTS = [
+  '.fallow',
+  'fallow-baselines',
+  '.decisions',
+  '.devkit/baselines',
+  'eslint/baselines',
+] as const;
 const PRESENT_STATE_TYPES = ['file', 'directory', 'link-file', 'link-directory'] as const;
 const LINK_STATE_FIELDS = ['linkTarget', 'linkPath', 'physicalPath'] as const;
 
@@ -67,10 +74,6 @@ export interface ProjectionRuntimeManifest {
 export interface ProjectionRuntimeHooks {
   beforePrivateCopy?: (path: string) => void;
   beforeSourceVerification?: () => void;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
 }
 
 function manifestHash(value: unknown): string {
