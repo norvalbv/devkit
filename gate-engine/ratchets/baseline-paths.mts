@@ -32,6 +32,17 @@ function sameBaselineDebt(left: Buffer, right: Buffer): boolean {
   }
 }
 
+function canCopyAfterLinkFailure(error: NodeJS.ErrnoException): boolean {
+  return error.code === 'EXDEV' || error.code === 'EPERM';
+}
+
+type BaselineLink = (existingPath: string, newPath: string) => void;
+type BaselineCreate = (path: string, contents: Buffer) => void;
+
+function createBaselineExclusively(path: string, contents: Buffer): void {
+  writeFileSync(path, contents, { flag: 'wx' });
+}
+
 export interface RatchetBaselineMigration {
   from: string;
   to: string;
@@ -72,7 +83,7 @@ export function writeRatchetBaseline(
   canonical: string,
   legacy: string,
   contents: string,
-  { stage = false }: { stage?: boolean } = {},
+  { stage = false, link = linkSync }: { stage?: boolean; link?: BaselineLink } = {},
 ): void {
   const overlay = (() => {
     if (process.env.DEVKIT_OVERLAY === '1') return true;
@@ -105,11 +116,16 @@ export function writeRatchetBaseline(
     // names are identical for their entire overlap and the newer write cannot be stranded.
     writeFileSync(legacyFile, contents);
     try {
-      linkSync(legacyFile, canonicalFile);
+      link(legacyFile, canonicalFile);
     } catch (error) {
       const concurrentCanonical = readExisting(canonicalFile);
-      if (concurrentCanonical === null) throw error;
-      writeFileSync(canonicalFile, contents);
+      if (concurrentCanonical === null) {
+        // SAFETY: link() follows Node's filesystem contract and reports failures as ErrnoException.
+        const linkFailure = error as NodeJS.ErrnoException;
+        if (!canCopyAfterLinkFailure(linkFailure)) throw error;
+        // Copying the shared legacy path can capture a peer's bytes. Persist this writer's payload.
+        writeFileSync(canonicalFile, contents);
+      } else writeFileSync(canonicalFile, contents);
     }
   } else {
     writeFileSync(canonicalFile, contents);
@@ -152,7 +168,11 @@ function readExisting(path: string): Buffer | null {
  */
 export function migrateRatchetBaselines(
   root: string,
-  { dryRun = false }: { dryRun?: boolean } = {},
+  {
+    dryRun = false,
+    link = linkSync,
+    create = createBaselineExclusively,
+  }: { dryRun?: boolean; link?: BaselineLink; create?: BaselineCreate } = {},
 ): RatchetBaselineMigration[] {
   const present = LEGACY_RATCHET_BASELINES.flatMap(({ from, to }) => {
     const bytes = readExisting(join(root, from));
@@ -221,7 +241,7 @@ export function migrateRatchetBaselines(
     } else {
       mkdirSync(dirname(canonical), { recursive: true });
       try {
-        linkSync(legacy, canonical);
+        link(legacy, canonical);
       } catch (error) {
         const concurrentCanonical = readExisting(canonical);
         const concurrentLegacy = readExisting(legacy);
@@ -229,7 +249,30 @@ export function migrateRatchetBaselines(
           stageBaseline(root, action.from);
           continue;
         }
+        // SAFETY: link() follows Node's filesystem contract and reports failures as ErrnoException.
+        const linkFailure = error as NodeJS.ErrnoException;
         if (
+          concurrentCanonical === null &&
+          concurrentLegacy !== null &&
+          canCopyAfterLinkFailure(linkFailure)
+        ) {
+          try {
+            // Exclusive creation prevents a migration from overwriting a writer that won the race.
+            create(canonical, concurrentLegacy);
+          } catch (createError) {
+            const completedCanonical = readExisting(canonical);
+            const completedLegacy = readExisting(legacy);
+            // SAFETY: create() follows Node's filesystem contract and reports failures as ErrnoException.
+            const createFailure = createError as NodeJS.ErrnoException;
+            if (
+              createFailure.code !== 'EEXIST' ||
+              completedCanonical === null ||
+              (completedLegacy !== null && !sameBaselineDebt(completedLegacy, completedCanonical))
+            ) {
+              throw createError;
+            }
+          }
+        } else if (
           concurrentCanonical === null ||
           (concurrentLegacy !== null && !sameBaselineDebt(concurrentLegacy, concurrentCanonical))
         ) {

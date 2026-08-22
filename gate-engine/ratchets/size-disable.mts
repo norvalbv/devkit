@@ -56,7 +56,7 @@ interface DisableBaseline {
 interface LinesBaseline {
   maxLines?: number;
   maxTestLines?: number;
-  files: Record<string, number>;
+  files?: Record<string, number>;
 }
 
 const BASELINE = SIZE_BASELINE;
@@ -251,7 +251,7 @@ function runLinesGate(
   const linesBaseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
   // SAFETY: this is Devkit-owned line-baseline JSON produced by freeze or migration.
   const grandfathered: Record<string, number> = linesBaseline
-    ? (JSON.parse(linesBaseline.contents) as LinesBaseline).files
+    ? ((JSON.parse(linesBaseline.contents) as LinesBaseline).files ?? {})
     : {};
   const staged = stagedSet(root);
   const inCommit = staged !== null && hasStagedFiles(root);

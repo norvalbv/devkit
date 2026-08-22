@@ -21,7 +21,7 @@ interface OversizedFile {
 }
 
 interface LinesBaseline {
-  files: Record<string, number>;
+  files?: Record<string, number>;
 }
 
 export function freezeLinesBaseline(
@@ -33,7 +33,7 @@ export function freezeLinesBaseline(
   const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
   // SAFETY: freeze reads the Devkit-owned line baseline shape it writes below.
   const previous: Record<string, number> = baseline
-    ? (JSON.parse(baseline.contents) as LinesBaseline).files
+    ? ((JSON.parse(baseline.contents) as LinesBaseline).files ?? {})
     : {};
   const match = sourceMatchers(config.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? config.maxTestLines : config.maxLines);

@@ -23,6 +23,26 @@ import {
 
 let roots: string[] = [];
 
+function denyHardLink(code: 'EXDEV' | 'EPERM'): () => never {
+  return () => {
+    throw Object.assign(new Error('forced link failure'), { code });
+  };
+}
+
+function completeMigrationBeforeCreate(contents: string): (path: string) => never {
+  return (path) => {
+    writeFileSync(path, contents);
+    throw Object.assign(new Error('peer already created baseline'), { code: 'EEXIST' });
+  };
+}
+
+function replaceLegacyThenDeny(contents: string): (source: string) => never {
+  return (source) => {
+    writeFileSync(source, contents);
+    throw Object.assign(new Error('forced link failure'), { code: 'EXDEV' });
+  };
+}
+
 function makeRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'ratchet-baselines-'));
   roots.push(root);
@@ -150,6 +170,56 @@ describe('ratchet baseline paths', () => {
 
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
     expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it('copies a gate write when a cross-device hard link is unavailable', () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+      { link: denyHardLink('EXDEV') },
+    );
+
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it("persists the writer's payload when a peer changes legacy state before fallback", () => {
+    const root = makeRoot();
+    const tightened = '{"files":{"src/legacy.ts":70}}\n';
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, tightened, {
+      link: replaceLegacyThenDeny('{"files":{"src/legacy.ts":60}}\n'),
+    });
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(tightened);
+  });
+
+  it('copies legacy debt during migration when hard links are not permitted', () => {
+    const root = makeRoot();
+    const bytes = '{"files":{"src/legacy.ts":80}}\n';
+    const concurrentBytes = '{"files":{"src/legacy.ts":70}}\n';
+    write(root, LEGACY_LINES_BASELINE, bytes);
+    expect(migrateRatchetBaselines(root, { link: replaceLegacyThenDeny(concurrentBytes) })).toEqual(
+      [{ from: LEGACY_LINES_BASELINE, kind: 'moved', to: LINES_BASELINE }],
+    );
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(concurrentBytes);
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it('accepts a matching migration completed by a peer before exclusive creation', () => {
+    const root = makeRoot();
+    const bytes = '{"files":{"src/legacy.ts":80}}\n';
+    write(root, LEGACY_LINES_BASELINE, bytes);
+    expect(
+      migrateRatchetBaselines(root, {
+        link: denyHardLink('EXDEV'),
+        create: completeMigrationBeforeCreate(bytes),
+      }),
+    ).toHaveLength(1);
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
   });
 
   it('allows the ship worktree canonical baseline symlink', () => {

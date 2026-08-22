@@ -130,6 +130,24 @@ function hasOverlayStrays(gitRoot: string): boolean {
   return false;
 }
 
+function cleanUntrackedDevkitState(gitRoot: string, dryRun: boolean): void {
+  const tracked = trackedPathPredicate(gitRoot);
+  const visit = (rel: string): void => {
+    const absolute = join(gitRoot, rel);
+    if (!existsSync(absolute)) return;
+    if (!tracked(rel)) {
+      rm(absolute, `${rel}/`, dryRun);
+      return;
+    }
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const child = `${rel}/${entry.name}`;
+      if (entry.isDirectory() && tracked(child)) visit(child);
+      else if (!tracked(child)) rm(join(gitRoot, child), child, dryRun);
+    }
+  };
+  visit('.devkit');
+}
+
 // Best-effort overlay teardown for a repo with NO config (orphaned / partial clean). Every step is
 // tracked-safe + no-ops when its artifact is absent, so it's safe to run unconditionally once strays
 // are detected. The synced files are removed by bundled-name fallback (the manifests may be gone);
@@ -152,7 +170,7 @@ function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void
   rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
   rmUntracked('eslint/baselines', 'eslint/baselines/');
   rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
-  if (!isTracked(gitRoot, '.devkit')) rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
+  cleanUntrackedDevkitState(gitRoot, dryRun);
   pruneGitExclude(gitRoot, dryRun);
 }
 

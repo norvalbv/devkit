@@ -929,6 +929,29 @@ describe('overlay (local-only) install', () => {
     ).toBe('');
   });
 
+  it('orphan clean preserves tracked .devkit state and removes untracked siblings', async () => {
+    const root = workRepo();
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), '{"files":{}}\n');
+    execFileSync('git', ['add', '-f', '.devkit/baselines/size-lines.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'track baseline'], { cwd: root });
+    mkdirSync(join(root, '.devkit', 'hooks'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), '#!/bin/sh\n');
+    writeFileSync(join(root, '.devkit', 'review-cache.json'), '{}\n');
+    writeFileSync(join(root, '.devkit', 'baselines', 'size.json'), '{"files":{}}\n');
+
+    const cleanRun = (await import('../commands/clean.mts')).default;
+    await cleanRun(['--yes'], root);
+
+    expect(existsSync(join(root, '.devkit', 'baselines', 'size-lines.json'))).toBe(true);
+    expect(existsSync(join(root, '.devkit', 'baselines', 'size.json'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'hooks'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'review-cache.json'))).toBe(false);
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' })).toBe(
+      '',
+    );
+  });
+
   it('applyOverlayConstraints: forces non-viable off + husky on, keeps the viable opt-in/opt-out', () => {
     const sel = applyOverlayConstraints({
       ...defaultSelection(),

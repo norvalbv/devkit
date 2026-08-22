@@ -641,6 +641,22 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(baseline.files['src/legacy.ts']).toBe(60); // stayed 60, NOT raised to 80
   });
 
+  it('treats a line baseline without files as empty during gate and freeze', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(80));
+    write(root, '.devkit/baselines/size-lines.json', '{"maxLines":50}\n');
+
+    const gate = run(root, 'gate');
+    expect(gate.status).toBe(1);
+    expect(gate.stderr).toContain('exceed their line limit');
+    expect(gate.stderr).not.toContain('TypeError');
+    expect(freezeLines(root)).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).files,
+    ).toEqual({ 'src/legacy.ts': 80 });
+  });
+
   it('explicit guard-size freeze refreshes legitimate drift and names every raised ceiling', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });

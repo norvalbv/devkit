@@ -31,7 +31,9 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   .fallow
   fallow-baselines
   .decisions
-  .devkit/baselines
+  .devkit/baselines/fanout.json
+  .devkit/baselines/size-lines.json
+  .devkit/baselines/size.json
   eslint/baselines
   eslint.config.devkit.mjs
   biome.devkit.jsonc
@@ -130,16 +132,14 @@ link_untracked_gate_configs() {
   # devkit's own fixed gate artifacts (guard.config.json is CONFIG_FILENAME — never configurable).
   # Overlay lint configs are local/gitignored by design; projecting them keeps ship/review parity
   # with a normal overlay commit, while callers stage their snapshot before this helper runs.
-  # .devkit/baselines: the ratchet freezes (fanout/size/size-lines). OVERLAY hides .devkit via
+  # .devkit/baselines/*.json: the ratchet freezes (fanout/size/size-lines). OVERLAY hides .devkit via
   # .git/info/exclude (overlay.mts) yet init freezes into it, so it is untracked → absent here. Without
   # it the fanout gate does NOT fail open (that needs guard.config.json absent too, and we just linked
   # it) — it enforces against an EMPTY freeze and every grandfathered folder reads as new growth.
   # ship-gates-converge-not-restart (2026-07-07) already records this link as a dependency: the
-  # prefix-cache fingerprint folds in the whole baseline directory and needs real state here.
+  # prefix-cache fingerprint folds in the baseline files and needs real state here. Each file is a
+  # candidate so a tracked freeze cannot hide an untracked sibling from the gate worktree.
   # eslint/baselines remains a separate candidate for structure/import policy modules.
-  # ponytail: dir-granular, matching overlay's exclude. A PARTIALLY tracked baselines dir (some frozen
-  # files committed, others excluded) is skipped whole by the -e guard below — same ceiling as
-  # fallow-baselines/.decisions; per-file merge is the upgrade path if it ever bites.
   # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
   # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable
   # guard.config.json → resolveGuardConfig throws) is non-fatal: warn, keep the hardcoded set, and let

@@ -1500,12 +1500,15 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     expect(log).not.toMatch(/FREEZE_MISSING/);
   });
 
-  it('is a silent no-op for TRACKED baselines (devkit/frink package mode ride the checkout)', () => {
-    const { dir, env, git } = seedShipRepo({ hookBody: freezeHook });
+  it('projects an untracked baseline beside a tracked sibling', () => {
+    const mixedHook =
+      '[ -e .devkit/baselines/fanout.json ] && [ -e .devkit/baselines/size-lines.json ] && echo BOTH_SEEN || echo BASELINE_MISSING\nexit 0';
+    const { dir, env, git } = seedShipRepo({ hookBody: mixedHook });
     mkdirSync(join(dir, '.devkit/baselines'), { recursive: true });
     writeFileSync(join(dir, '.devkit/baselines/fanout.json'), '{"cap":12,"dirs":{}}\n');
     git(['add', '.devkit/baselines/fanout.json'], { stdio: 'ignore' });
     git(['commit', '-q', '--no-verify', '-m', 'track freeze'], { stdio: 'ignore' });
+    writeFileSync(join(dir, '.devkit/baselines/size-lines.json'), '{"files":{}}\n');
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/freeze-tracked', 't', 'note.txt'], {
       cwd: dir,
@@ -1515,10 +1518,9 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     });
     dropWorktree(git, r.stderr);
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).not.toMatch(/absent from the committed tree/); // nothing to link → no notice
     expect(
       readFileSync(join(dir, '.devkit/last-ship-gates-feat-freeze-tracked.log'), 'utf8'),
-    ).toMatch(/FREEZE_SEEN/);
+    ).toMatch(/BOTH_SEEN/);
   });
 
   // The qavis pass-receipt is the untracked, gitignored cache `qavis qa` writes on a pass. The ship-time
@@ -1576,7 +1578,9 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       '.fallow',
       'fallow-baselines',
       '.decisions',
-      '.devkit/baselines',
+      '.devkit/baselines/fanout.json',
+      '.devkit/baselines/size-lines.json',
+      '.devkit/baselines/size.json',
       'eslint/baselines',
       'eslint.config.devkit.mjs',
       'biome.devkit.jsonc',
