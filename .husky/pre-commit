@@ -116,9 +116,18 @@ if [ -n "$STAGED_FMT" ]; then
 fi
 # /devkit:biome-format
 
+dk_review_det_failed=0
+__dk_gate_deterministic() {
+    dk_det_rc=0
+    __dk_no_git_env "$@" || dk_det_rc=$?
+    [ "$dk_det_rc" -eq 0 ] && return 0
+    [ "${DEVKIT_RUN_MODE:-}" = "review" ] || exit 1
+    dk_review_det_failed=1
+}
+
 # devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_no_git_env node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "anti-slop=node cli/index.mts anti-slop check --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged" || exit 1
+__dk_gate_deterministic node gate-engine/deterministic/run.mts --hook "${DK_HOOK_PATH:-$0}" --structure "bun run lint:structure" --extra "lint=bun run lint" --extra "anti-slop=node cli/index.mts anti-slop check --staged" --extra "benchmarks=bun run benchmarks:check -- --mode staged"
 # /devkit:deterministic
 
 if __dk_gate_selected comments; then
@@ -243,6 +252,7 @@ __dk_no_git_env node gate-engine/qavis-advisory/cli.mts --gate || qarc=$?
 # /devkit:guard-qavis-advisory
 fi
 
+
 # devkit:fallow-advisory
 # fallow audit — dead-code / duplication / complexity on the changed set; advisory, never blocks.
 if [ "${DEVKIT_RUN_MODE:-}" = "review" ]; then
@@ -256,6 +266,10 @@ else
     command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
 fi
 # /devkit:fallow-advisory
+
+# devkit:review-deterministic-finalizer
+if [ "${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
+# /devkit:review-deterministic-finalizer
 # <<< devkit-guards <<<
 
 exit 0

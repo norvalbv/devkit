@@ -28,6 +28,7 @@ import {
   buildFullHook,
   buildGuardBlock,
   extractGuardBlock,
+  REVIEW_DETERMINISTIC_FINALIZER,
   replaceGuardBlock,
 } from './husky-block.mts';
 
@@ -164,11 +165,12 @@ function definedOnly(recorded: Partial<Selection> | undefined): Partial<Selectio
   ) as Partial<Selection>;
 }
 
-// Inject the fallow fragment as the last member of the devkit-guards block (just before its end
-// marker), in both the block-only and full-hook forms so they stay consistent.
 function withFallow(text: string, pkgRel: string): string {
   const end = markEnd(pkgRel);
-  return text.replace(`\n${end}`, `\n\n${FALLOW_FRAGMENT}\n${end}`);
+  const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
+    ? REVIEW_DETERMINISTIC_FINALIZER
+    : end;
+  return text.replace(`\n${anchor}`, `\n\n${FALLOW_FRAGMENT}\n\n${anchor}`);
 }
 
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
