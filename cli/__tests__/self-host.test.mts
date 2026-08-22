@@ -245,6 +245,9 @@ describe('buildSelfHostHook', () => {
     expect(hook.indexOf('fallow audit')).toBeGreaterThan(hook.indexOf('>>> devkit-guards'));
     expect(hook.indexOf('fallow audit')).toBeLessThan(hook.indexOf('<<< devkit-guards'));
     expect(hook).toContain('__dk_review_baseline_gate fallow || true');
+    expect(hook.indexOf('fallow audit')).toBeLessThan(
+      hook.indexOf('# devkit:review-deterministic-finalizer'),
+    );
     expect(hook.trimEnd().endsWith('exit 0')).toBe(true);
   });
 
