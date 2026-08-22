@@ -38,14 +38,9 @@ async function importAcrossMigration(root, canonical, legacy) {
 }
 /** Load permanent import-wall exception patterns across the storage migration. */
 export async function loadImportWallExempt(root) {
-    try {
-        const mod = await importAcrossMigration(root, STRUCTURE_EXEMPT, LEGACY_STRUCTURE_EXEMPT);
-        const entries = mod?.importWallExempt ?? [];
-        return new Set(entries.map(({ pattern }) => pattern));
-    }
-    catch {
-        return new Set();
-    }
+    const mod = await importAcrossMigration(root, STRUCTURE_EXEMPT, LEGACY_STRUCTURE_EXEMPT);
+    const entries = mod?.importWallExempt ?? [];
+    return new Set(entries.map(({ pattern }) => pattern));
 }
 /**
  * @param {string} root repo root (where .devkit baseline state lives)

@@ -71,11 +71,13 @@ function hasStableBaselineConflict(canonicalFile, legacyFile) {
     }
     return true;
 }
-function concurrentBaselineCreateSettled(canonicalFile, legacyFile) {
+function concurrentBaselineCreateSettled(canonicalFile, legacyFile, expected) {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         const canonical = readExisting(canonicalFile);
         const legacy = readExisting(legacyFile);
         if (canonical !== null) {
+            if (sameBaselineDebt(canonical, expected))
+                return true;
             if (legacy !== null && sameBaselineDebt(canonical, legacy))
                 return true;
             if (legacy === null) {
@@ -265,7 +267,7 @@ export function migrateRatchetBaselines(root, { dryRun = false, link = linkSync,
                         // SAFETY: create() follows Node's filesystem contract and reports failures as ErrnoException.
                         const createFailure = createError;
                         if (createFailure.code !== 'EEXIST' ||
-                            !concurrentBaselineCreateSettled(canonical, legacy)) {
+                            !concurrentBaselineCreateSettled(canonical, legacy, concurrentLegacy)) {
                             throw createError;
                         }
                     }

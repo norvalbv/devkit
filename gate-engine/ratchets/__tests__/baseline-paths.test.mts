@@ -39,6 +39,17 @@ function completeMigrationBeforeCreate(contents: string): (path: string) => neve
   };
 }
 
+function completeModuleMigrationBeforeCreate(
+  legacyFile: string,
+  contents: string,
+): (path: string) => never {
+  return (path) => {
+    writeFileSync(path, contents);
+    rmSync(legacyFile);
+    throw Object.assign(new Error('peer already moved module baseline'), { code: 'EEXIST' });
+  };
+}
+
 function completePartialMigrationAfterDelay(contents: string): (path: string) => never {
   return (path) => {
     writeFileSync(path, '{"files":');
@@ -285,6 +296,23 @@ describe('ratchet baseline paths', () => {
       }),
     ).toHaveLength(1);
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
+  });
+
+  it('accepts a matching MJS migration after a peer removes the legacy name', () => {
+    const root = makeRoot();
+    const bytes = 'export const rendererImportWallBaseline = ["legacy.ts"]\n';
+    write(root, 'eslint/baselines/imports.mjs', bytes);
+
+    expect(
+      migrateRatchetBaselines(root, {
+        link: denyHardLink('EXDEV'),
+        create: completeModuleMigrationBeforeCreate(
+          join(root, 'eslint/baselines/imports.mjs'),
+          bytes,
+        ),
+      }),
+    ).toHaveLength(1);
+    expect(readFileSync(join(root, IMPORT_WALL_BASELINE), 'utf8')).toBe(bytes);
   });
 
   it('waits for a peer to finish writing an exclusively created baseline', () => {

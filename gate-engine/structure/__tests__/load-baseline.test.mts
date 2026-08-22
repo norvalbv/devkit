@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeBaselineLoaders } from '../load-baseline.mts';
+import { loadImportWallExempt, makeBaselineLoaders } from '../load-baseline.mts';
 
 const roots: string[] = [];
 
@@ -60,5 +60,18 @@ describe('makeBaselineLoaders', () => {
     const loaders = makeBaselineLoaders(root);
     expect(await loaders.loadBaseline('ui')).toEqual(['legacy.ts']);
     expect(await loaders.loadExempt('ui')).toEqual(['legacy-exempt.ts']);
+  });
+});
+
+describe('loadImportWallExempt', () => {
+  it('returns an empty set when no exemption module exists', async () => {
+    await expect(loadImportWallExempt(makeRoot())).resolves.toEqual(new Set());
+  });
+
+  it('rejects an invalid exemption module instead of weakening policy', async () => {
+    const root = makeRoot();
+    write(root, '.devkit/structure/exempt.mjs', 'export const importWallExempt = [\n');
+
+    await expect(loadImportWallExempt(root)).rejects.toThrow();
   });
 });

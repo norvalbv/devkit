@@ -111,11 +111,16 @@ function hasStableBaselineConflict(canonicalFile: string, legacyFile: string): b
   return true;
 }
 
-function concurrentBaselineCreateSettled(canonicalFile: string, legacyFile: string): boolean {
+function concurrentBaselineCreateSettled(
+  canonicalFile: string,
+  legacyFile: string,
+  expected: Buffer,
+): boolean {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const canonical = readExisting(canonicalFile);
     const legacy = readExisting(legacyFile);
     if (canonical !== null) {
+      if (sameBaselineDebt(canonical, expected)) return true;
       if (legacy !== null && sameBaselineDebt(canonical, legacy)) return true;
       if (legacy === null) {
         try {
@@ -332,7 +337,7 @@ export function migrateRatchetBaselines(
             const createFailure = createError as NodeJS.ErrnoException;
             if (
               createFailure.code !== 'EEXIST' ||
-              !concurrentBaselineCreateSettled(canonical, legacy)
+              !concurrentBaselineCreateSettled(canonical, legacy, concurrentLegacy)
             ) {
               throw createError;
             }

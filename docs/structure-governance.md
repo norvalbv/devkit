@@ -103,7 +103,7 @@ add an entry to `.devkit/structure/exempt.mjs` with a one-line reason. That hand
 
 **The goal is to eliminate every debt baseline,** reclassifying genuine permanent exceptions into
 `exempt.mjs` as you find them. Generated files self-delete at zero; absence means the wall has no
-grandfathered exceptions and is enforced directly from `guard.config.json`.
+grandfathered exceptions and the structure wall is enforced directly from `guard.config.json`.
 
 ## 6. Regenerating (only after a deliberate audit — never to silence a new offender)
 
