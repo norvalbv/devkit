@@ -1,13 +1,13 @@
 import {
   copyFileSync,
-  existsSync,
+  readFileSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
@@ -46,7 +46,6 @@ const PROBES = {
 };
 
 let root = '';
-let sourceRootCreated = false;
 let wallErrors: Map<string, number>;
 let builtinErrors: Map<string, number>;
 
@@ -57,9 +56,7 @@ function write(relativePath: string, content = 'export {};\n') {
 }
 
 function writeSource(relativePath: string, content = 'export {};\n') {
-  const path = join(DEVKIT_ROOT, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
+  write(relativePath, content);
 }
 
 function writeTestConfig() {
@@ -68,10 +65,16 @@ function writeTestConfig() {
     'guard.config.json',
     JSON.stringify({ scanRoots: ['src'], backends: { socketServer: false, vercel: false } }),
   );
-  copyFileSync(
-    join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'),
-    join(root, 'eslint.config.mjs'),
+  const configPath = join(root, 'eslint.config.mjs');
+  copyFileSync(join(DEVKIT_ROOT, 'templates/electron/eslint.config.mjs'), configPath);
+  const config = readFileSync(configPath, 'utf8');
+  const fixtureBase = relative(DEVKIT_ROOT, root).replaceAll('\\', '/');
+  const isolatedConfig = config.replace(
+    "pathAliases: { baseUrl: '.',",
+    `pathAliases: { baseUrl: '${fixtureBase}',`,
   );
+  if (isolatedConfig === config) throw new Error('Electron template path-alias anchor changed');
+  writeFileSync(configPath, isolatedConfig);
   mkdirSync(join(root, 'eslint'), { recursive: true });
   copyFileSync(
     join(DEVKIT_ROOT, 'templates/electron/eslint/domains.mjs'),
@@ -119,7 +122,7 @@ function collectRuleErrors() {
       ...Object.keys(PROBES),
     ],
     {
-      cwd: DEVKIT_ROOT,
+      cwd: root,
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
     },
@@ -129,7 +132,7 @@ function collectRuleErrors() {
   }
   const byFile = new Map(
     JSON.parse(result.stdout).map((file) => [
-      file.filePath.replace(`${DEVKIT_ROOT}/`, ''),
+      relative(root, file.filePath).replaceAll('\\', '/'),
       file.messages ?? [],
     ]),
   );
@@ -144,10 +147,6 @@ function collectRuleErrors() {
 }
 
 beforeAll(() => {
-  if (existsSync(join(DEVKIT_ROOT, 'src'))) {
-    throw new Error("Electron import-wall test requires Devkit's intentionally absent src/ root");
-  }
-  sourceRootCreated = true;
   root = realpathSync(mkdtempSync(join(DEVKIT_ROOT, '.electron-import-walls-')));
   writeTestConfig();
   writeTargetSources();
@@ -155,7 +154,6 @@ beforeAll(() => {
 }, 120_000);
 
 afterAll(() => {
-  if (sourceRootCreated) rmSync(join(DEVKIT_ROOT, 'src'), { recursive: true, force: true });
   if (root) rmSync(root, { recursive: true, force: true });
 });
 
