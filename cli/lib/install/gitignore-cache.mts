@@ -2,9 +2,8 @@
  * .gitignore wiring for devkit's generated `.devkit/` state: ignore regenerated gate caches while
  * keeping durable manifests trackable even when a consumer carries a broad `.devkit/*` rule.
  *
- * SPECIFIC filenames only — `.devkit/` ALSO holds TRACKED artifacts (agents-manifest.json,
- * skills-manifest.json) and, in standalone mode, vendored configs (.devkit/biome, .devkit/tsconfig).
- * A blanket `.devkit/` ignore would wrongly untrack those, so each line below is a single file/glob.
+ * `.devkit/` also holds tracked artifacts and local generated state. The tail rules briefly reopen
+ * the parent, immediately re-ignore its children, then expose only explicitly durable paths.
  *
  * init (package/standalone) ensures these lines; clean prunes them. Overlay never uses this — there
  * the whole `.devkit/` is hidden via `.git/info/exclude`, so the caches are already invisible.
@@ -25,22 +24,47 @@ export const DEVKIT_CACHE_IGNORES = [
   '.devkit/review-runs/',
   '.devkit/last-ship-gates-*.log',
   '.devkit/reconcile-manifest.json',
+  '.devkit/telemetry/',
+  '.devkit/setup.json',
+  '.devkit/*.lock',
   // Not a cache — a LOCAL preference (adhd-session-start.mjs reads it as the durable off switch).
   // Ignored for the same reason the caches are: committing it would impose one reader's output
   // preference on everyone who clones the repo.
   '.devkit/adhd-off',
 ];
 
-export const DEVKIT_TRACKED_UNIGNORES = ['!.devkit/agent-hook-registrations-manifest.json'];
+export const DEVKIT_TRACKED_UNIGNORES = [
+  // Re-open the directory itself first: Git cannot re-include children of an excluded parent.
+  '!.devkit/',
+  '!.devkit/config.json',
+  '!.devkit/skills-manifest.json',
+  '!.devkit/agents-manifest.json',
+  '!.devkit/agent-hooks-manifest.json',
+  '!.devkit/agent-hook-registrations-manifest.json',
+  '!.devkit/baselines/',
+  '!.devkit/baselines/*.json',
+  '!.devkit/biome/',
+  '!.devkit/biome/**',
+  '!.devkit/tsconfig/',
+  '!.devkit/tsconfig/**',
+  '!.devkit/anti-slop/',
+  '!.devkit/anti-slop/**',
+  '!.devkit/oxc/',
+  '!.devkit/oxc/**',
+  '!.devkit/vendored-skills/',
+  '!.devkit/vendored-skills/**',
+];
+const DEVKIT_LOCAL_STATE_IGNORE = '.devkit/*';
 const LEGACY_GITIGNORE_LINES = ['!.devkit/comment-firewall-rationales.json'];
 
 const DEVKIT_GITIGNORE_LINES = [
   ...DEVKIT_CACHE_IGNORES,
+  DEVKIT_LOCAL_STATE_IGNORE,
   ...DEVKIT_TRACKED_UNIGNORES,
   ...LEGACY_GITIGNORE_LINES,
 ];
-const TRACKED_UNIGNORE_SET = new Set(DEVKIT_TRACKED_UNIGNORES);
 const OBSOLETE_LINE_SET = new Set(LEGACY_GITIGNORE_LINES);
+const MANAGED_TAIL_SET = new Set([...DEVKIT_TRACKED_UNIGNORES, DEVKIT_LOCAL_STATE_IGNORE]);
 
 // Append cache rules and keep tracked-state negations at the effective tail (gitignore is last-match
 // wins, so presence alone is insufficient when a consumer later appends a broad `.devkit/*` rule).
@@ -51,9 +75,9 @@ export function ensureDevkitCacheGitignore(cwd: string, dryRun: boolean): void {
   const missingCaches = DEVKIT_CACHE_IGNORES.filter((line) => !have.has(line));
   const kept = existing
     .split('\n')
-    .filter((line) => !TRACKED_UNIGNORE_SET.has(line.trim()) && !OBSOLETE_LINE_SET.has(line.trim()))
+    .filter((line) => !MANAGED_TAIL_SET.has(line.trim()) && !OBSOLETE_LINE_SET.has(line.trim()))
     .join('\n');
-  const additions = [...missingCaches, ...DEVKIT_TRACKED_UNIGNORES];
+  const additions = [...missingCaches, DEVKIT_LOCAL_STATE_IGNORE, ...DEVKIT_TRACKED_UNIGNORES];
   const separator = kept && !kept.endsWith('\n') ? '\n' : '';
   const next = `${kept}${separator}${additions.join('\n')}\n`;
   if (next === existing) return;

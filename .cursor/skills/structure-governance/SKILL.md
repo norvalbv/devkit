@@ -74,7 +74,7 @@ HARD STOPS (lint errors, not guidelines):
     New domain = one-line append there (named for the concern it owns; never misc/helpers/common).
  3c. FAN-OUT: max 12 impl files per folder, ANY depth (tests/index barrels don't count).
     Folder full → split into cohesive kebab subfolders (group by concern; graphify/co-occurrence
-    can suggest clusters). Existing piles are grandfathered shrink-only (eslint/baselines/fanout.json).
+    can suggest clusters). Existing piles are grandfathered shrink-only (.devkit/baselines/fanout.json).
  4. PROCESS: renderer never imports src/main — not even types (cross-process types live in
     src/shared/types; existing offenders are grandfathered shrink-only in eslint/baselines/imports.mjs;
     sole permanent exempt: lib/trpc.ts AppRouter). No Node builtins in renderer (bare `path` OK —

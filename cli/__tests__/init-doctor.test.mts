@@ -460,6 +460,27 @@ describe('doctor — selection-aware', () => {
     expect(r.stdout).toMatch(/All checks OK/);
   });
 
+  it('reports grandfathered debt from canonical Devkit baseline paths', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    writeFileSync(join(root, '.devkit', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
+    writeFileSync(join(root, '.devkit', 'baselines', 'size.json'), '{"files":{}}\n');
+
+    const result = devkit(root, 'doctor');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('baselines: OK — grandfathered debt: fanout + size');
+
+    rmSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(join(root, 'eslint', 'baselines', 'fanout.json'), '{"cap":12,"dirs":{}}\n');
+    writeFileSync(join(root, 'eslint', 'baselines', 'size.json'), '{"files":{}}\n');
+    expect(devkit(root, 'doctor').stdout).toContain(
+      'baselines: OK — grandfathered debt: fanout + size',
+    );
+  });
+
   it('component-lib biome extends react is OK, not drift (stack-aware expected extends, 2a)', () => {
     const root = tmpRepo({
       name: 'fx',

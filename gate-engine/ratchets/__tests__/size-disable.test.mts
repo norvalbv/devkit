@@ -123,7 +123,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     const root = makeRoot();
     write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
     expect(run(root, 'freeze').status).toBe(0);
-    const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
+    const frozen = JSON.parse(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8'));
     expect(frozen).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
     expect(run(root, 'gate').status).toBe(0);
   });
@@ -137,7 +137,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
       env: { ...process.env, GUARD_RATCHET_BASE: 'missing-base' },
     });
     expect(r.status, r.stderr).toBe(0);
-    const frozen = JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
+    const frozen = JSON.parse(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8'));
     expect(frozen).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
   });
 
@@ -145,7 +145,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     const root = makeRoot();
     write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
     expect(run(root, 'freeze').status).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).not.toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).not.toThrow();
   });
 
   it('gate exits 1 when a NEW file-level disable appears', () => {
@@ -172,7 +172,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     const root = makeRoot();
     write(root, 'src/a.ts', 'export {};\n');
     expect(run(root, 'freeze').status).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).toThrow();
   });
 
   it('freeze deletes a stale empty baseline once the last disable heals', () => {
@@ -181,7 +181,7 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     run(root, 'freeze'); // size.json = {1,0}
     write(root, 'src/a.ts', 'export {};\n'); // healed
     expect(run(root, 'freeze').status).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).toThrow();
   });
 
   it('gate ENFORCES from config (not fail-open) when governed but no baseline exists', () => {
@@ -199,20 +199,20 @@ describe('CLI freeze/gate contract (what a pre-commit hook relies on)', () => {
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', '/* eslint-disable max-lines */\nexport {};\n');
     run(root, 'freeze'); // size.json = {1,0}
-    gitAdd(root, 'src/a.ts', 'eslint/baselines/size.json'); // baseline is committed → tracked
+    gitAdd(root, 'src/a.ts', '.devkit/baselines/size.json'); // baseline is committed → tracked
     execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
     write(root, 'src/a.ts', 'export {};\n'); // healed
     gitAdd(root, 'src/a.ts');
     const r = run(root, 'gate');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('removed & staged');
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).toThrow();
     // the deletion rides this commit
     const staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=D'], {
       cwd: root,
       encoding: 'utf8',
     });
-    expect(staged).toContain('eslint/baselines/size.json');
+    expect(staged).toContain('.devkit/baselines/size.json');
   });
 
   it('gate exits 0 (with a re-freeze reminder) when counts shrink', () => {
@@ -291,7 +291,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/legacy.ts', big(80));
     expect(run(root, 'freeze').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(80);
     expect(run(root, 'gate').status).toBe(0); // grandfathered → allowed
@@ -300,6 +300,64 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('exceed their line limit');
     expect(r.stderr).toContain('src/fresh.ts: 70 lines (max 50)');
+  });
+
+  it('reads pre-migration line and disable baselines from the legacy directory', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(79)}`);
+    write(
+      root,
+      'eslint/baselines/size.json',
+      JSON.stringify({ files: { 'src/legacy.ts': { file: 1, fn: 0 } } }),
+    );
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+
+    expect(run(root, 'gate').status).toBe(0);
+    write(root, 'src/legacy.ts', `/* eslint-disable max-lines */\n${big(89)}`);
+    const result = run(root, 'gate');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: 90 lines (max 80)');
+  });
+
+  it('reads legacy baselines and canonicalizes them on the next freeze', () => {
+    const root = makeRoot();
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(
+      root,
+      'src/legacy.ts',
+      `/* eslint-disable max-lines */\n/* eslint-disable max-lines */\n${big(88)}`,
+    );
+    write(
+      root,
+      'eslint/baselines/size.json',
+      JSON.stringify({ files: { 'src/legacy.ts': { file: 1, fn: 0 } } }),
+    );
+    write(
+      root,
+      'eslint/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+
+    const result = run(root, 'freeze');
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).files[
+        'src/legacy.ts'
+      ].file,
+    ).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).files[
+        'src/legacy.ts'
+      ],
+    ).toBe(90);
+    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'))).toThrow();
+    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'))).toThrow();
   });
 
   it('a grandfathered file that GROWS past its recorded ceiling fails (the ratchet)', () => {
@@ -324,7 +382,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/executor.test.ts', big(120));
     expect(run(root, 'freeze').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/executor.test.ts']).toBe(120);
     write(root, 'src/executor.test.ts', big(130));
@@ -343,7 +401,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     gitAdd(root, 'src/legacy.ts'); // it is part of this commit
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(60); // ceiling ratcheted down 80 → 60
   });
@@ -363,7 +421,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     gitAdd(root, 'src/executor.test.ts');
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/executor.test.ts']).toBe(110);
   });
@@ -379,7 +437,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     gitAdd(root, 'src/legacy.ts');
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files).not.toHaveProperty('src/legacy.ts');
     expect(baseline.files['src/other.ts']).toBe(90); // untouched
@@ -396,7 +454,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     const r = run(root, 'gate');
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('removed & staged');
-    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).toThrow();
   });
 
   it('lowers the ceiling for the STAGED file only; a parallel unstaged shrink stays untouched', () => {
@@ -411,7 +469,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     gitAdd(root, 'src/x.ts'); // ...but only x is in THIS commit
     expect(run(root, 'gate').status).toBe(0);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/x.ts']).toBe(60); // lowered
     expect(baseline.files['src/y.ts']).toBe(90); // untouched — another agent's uncommitted work
@@ -492,7 +550,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     const r = run(root, 'gate');
     expect(r.status).toBe(1); // whole-tree enforcement still catches a committed-state violation
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(80); // unchanged — no mutation without a commit
   });
@@ -505,7 +563,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/clean.ts', big(10));
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/inherited.ts': 60 } }),
     );
     gitAdd(root, '-A');
@@ -532,7 +590,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/changed.ts', big(80));
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/changed.ts': 80 } }),
     );
     gitAdd(root, '-A');
@@ -573,12 +631,12 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/legacy.ts', big(80)); // 80 lines on disk
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
     );
     expect(freezeLines(root)).toBe(1);
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(60); // stayed 60, NOT raised to 80
   });
@@ -589,7 +647,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/legacy.ts', big(80));
     write(
       root,
-      'eslint/baselines/size-lines.json',
+      '.devkit/baselines/size-lines.json',
       JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
     );
 
@@ -599,7 +657,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(result.stdout).toContain('1 file(s) grew since the last freeze');
     expect(result.stdout).toContain('src/legacy.ts: 60 → 80');
     const baseline = JSON.parse(
-      readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
     );
     expect(baseline.files['src/legacy.ts']).toBe(80);
   });
@@ -610,18 +668,18 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     write(root, 'src/legacy.ts', big(80));
     // A pre-existing disable-count baseline (as if adopted long ago). enabling the line cap on an
     // adopted repo must NOT re-snapshot this — that would launder any --no-verify disable growth.
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 5, fnDisables: 3 }));
-    const sizeBefore = readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8');
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 5, fnDisables: 3 }));
+    const sizeBefore = readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8');
 
     expect(freezeLines(root)).toBe(1);
-    const lines = JSON.parse(readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8'));
+    const lines = JSON.parse(readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'));
     expect(lines).toEqual({
       maxLines: 50,
       maxTestLines: 0,
       files: { 'src/legacy.ts': 80 },
     });
     // The disable-count baseline is byte-identical — freezeLines writes ONLY the line baseline.
-    expect(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).toBe(sizeBefore);
+    expect(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8')).toBe(sizeBefore);
   });
 
   it('freezeLines is a no-op (returns 0, writes nothing) when the cap is off', () => {
@@ -629,7 +687,7 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'] }); // no maxLines
     write(root, 'src/huge.ts', big(900));
     expect(freezeLines(root)).toBe(0);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8')).toThrow();
   });
 });
 
@@ -637,7 +695,7 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
   const run = (root, cmd) =>
     spawnSync(process.execPath, [SCRIPT, cmd], { cwd: root, encoding: 'utf8' });
   const readBaseline = (root) =>
-    JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8'));
+    JSON.parse(readFileSync(join(root, '.devkit/baselines/size.json'), 'utf8'));
   // n file-level `eslint-disable max-lines` directives in one file.
   const dis = (n) => `${Array(n).fill('/* eslint-disable max-lines */').join('\n')}\nexport {};\n`;
 
@@ -729,8 +787,8 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     gitInit(root);
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', 'export {};\n'); // no disables anywhere
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 0, fnDisables: 0 }));
-    gitAdd(root, 'src/a.ts', 'eslint/baselines/size.json');
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 0, fnDisables: 0 }));
+    gitAdd(root, 'src/a.ts', '.devkit/baselines/size.json');
     execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
     write(root, 'src/a.ts', 'export const x = 1;\n'); // an ordinary staged change
     gitAdd(root, 'src/a.ts');
@@ -742,14 +800,14 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
       cwd: root,
       encoding: 'utf8',
     });
-    expect(staged).toContain('eslint/baselines/size.json');
+    expect(staged).toContain('.devkit/baselines/size.json');
   });
 
   it('a legacy baseline with REAL disables blocks with a migrate hint (never silently un-grandfathers)', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', dis(1)); // a real, grandfathered-in-old-format disable
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
     const r = run(root, 'gate');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('pre-per-file baseline');
@@ -762,8 +820,8 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', dis(1)); // a real disable — stays UNSTAGED
     write(root, 'src/b.ts', 'export {};\n');
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
-    gitAdd(root, 'src/a.ts', 'src/b.ts', 'eslint/baselines/size.json');
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    gitAdd(root, 'src/a.ts', 'src/b.ts', '.devkit/baselines/size.json');
     execFileSync('git', ['commit', '-qm', 'seed'], { cwd: root });
     write(root, 'src/b.ts', 'export const x = 1;\n'); // ordinary change to an UNRELATED file
     gitAdd(root, 'src/b.ts'); // only b is staged; a.ts (with the disable) is not
@@ -779,7 +837,7 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/inherited.ts', dis(1));
     write(root, 'src/clean.ts', 'export {};\n');
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
     gitAdd(root, '-A');
     execFileSync('git', ['commit', '-qm', 'legacy baseline'], { cwd: root });
     const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -801,7 +859,7 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     const root = makeRoot();
     writeConfig(root, { scanRoots: ['src'] });
     write(root, 'src/a.ts', dis(1));
-    write(root, 'eslint/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
+    write(root, '.devkit/baselines/size.json', JSON.stringify({ fileDisables: 1, fnDisables: 0 }));
     expect(run(root, 'freeze').status).toBe(0);
     expect(readBaseline(root)).toEqual({ files: { 'src/a.ts': { file: 1, fn: 0 } } });
     expect(run(root, 'gate').status).toBe(0); // now recognised, passes
@@ -814,7 +872,7 @@ describe('per-file disable ratchet (auto-lower, migration, net-zero)', () => {
     // Pre-seed a lower ceiling as if a --no-verify growth is being re-frozen.
     write(
       root,
-      'eslint/baselines/size.json',
+      '.devkit/baselines/size.json',
       JSON.stringify({ files: { 'src/a.ts': { file: 1, fn: 0 } } }),
     );
     expect(run(root, 'freeze').status).toBe(0);

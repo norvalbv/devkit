@@ -105,6 +105,28 @@ afterEach(() => {
 });
 
 describe('overlay (local-only) install', () => {
+  it('grandfathers existing debt into local canonical baselines on first install', async () => {
+    const root = workRepo();
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'legacy.ts'),
+      '// eslint-disable max-lines\nexport const legacy = true;\n',
+    );
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+
+    const baseline = JSON.parse(
+      readFileSync(join(root, '.devkit', 'baselines', 'size.json'), 'utf8'),
+    );
+    expect(baseline.files).toHaveProperty('src/legacy.ts');
+    expect(existsSync(join(root, 'eslint', 'baselines', 'size.json'))).toBe(false);
+  });
+
   it('invisible + non-invasive: extends the repo, chains to the team hook, git status clean', async () => {
     const root = workRepo();
     const pkgBefore = readFileSync(join(root, 'package.json'), 'utf8');
@@ -420,7 +442,7 @@ describe('overlay (local-only) install', () => {
     await applyInit(root, opts);
     // A clean repo has zero disables → NO empty size.json is written (an empty baseline is not kept
     // as a sentinel any more). The durable "already adopted" marker is .devkit/config.json.
-    const sizeBaseline = join(root, 'eslint', 'baselines', 'size.json');
+    const sizeBaseline = join(root, '.devkit', 'baselines', 'size.json');
     expect(existsSync(sizeBaseline)).toBe(false);
     expect(existsSync(join(root, '.devkit', 'config.json'))).toBe(true);
 
@@ -447,7 +469,7 @@ describe('overlay (local-only) install', () => {
       devkitRef: 'v0.9.0',
     };
     await applyInit(root, opts); // no maxLines yet
-    const linesBaseline = join(root, 'eslint', 'baselines', 'size-lines.json');
+    const linesBaseline = join(root, '.devkit', 'baselines', 'size-lines.json');
     expect(existsSync(linesBaseline)).toBe(false);
 
     // turn on the raw-line cap AND add a legacy giant that would need grandfathering
@@ -1133,7 +1155,7 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
   it('idempotent: re-sync never re-freezes debt (adopted → baseline stays absent), exit 0', async () => {
     const root = workRepo();
     await mkOverlay(root);
-    const sizeBaseline = join(root, 'eslint', 'baselines', 'size.json');
+    const sizeBaseline = join(root, '.devkit', 'baselines', 'size.json');
     expect(existsSync(sizeBaseline)).toBe(false);
 
     // add NEW size debt that a re-freeze WOULD grandfather

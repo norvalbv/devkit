@@ -9,6 +9,7 @@ import {
   LINE_CAP,
   setMaxLines,
 } from '../../gate-engine/ratchets/size-disable.mts';
+import { reportRatchetBaselineMigration } from '../../gate-engine/ratchets/baseline-paths.mts';
 import {
   AGENT_TARGETS,
   applyOverlayConstraints,
@@ -363,13 +364,12 @@ function installHusky(sel: HookSelectionInput, hookRoot: string, pkgRel: string,
 // channel and silently move the ratchet up; see docs/decisions/overlay-self-heal.md). Explicit
 // re-cuts go through `guard-* freeze`, never an implicit re-apply. The marker is durable and survives
 // deleting empty baseline files, so it — not a debt file's existence — is the "already frozen" bit.
-// Ordering holds: runFreezes/runStructureBaselines run BEFORE the config write on first init, so the
-// very first adoption still freezes.
+// Ordering holds: freezes run before the config write, so the first adoption still freezes.
 function repoAdopted(cwd: string) {
   return existsSync(join(cwd, '.devkit', 'config.json'));
 }
 
-function runFreezes(cwd: string, dryRun: boolean) {
+function runFreezes(cwd: string, dryRun: boolean, { overlay = false }: { overlay?: boolean } = {}) {
   if (dryRun) {
     console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
     return;
@@ -378,19 +378,21 @@ function runFreezes(cwd: string, dryRun: boolean) {
     console.log('  • repo already adopted — keeping baselines (run `guard-* freeze` to re-cut)');
     return;
   }
-  // devkit's own ratchet bins are .mts in this repo (dev/tests, Node strips types) but compiled .mjs
-  // in an installed consumer (dist). Derive the extension from THIS module so the path resolves in both.
+  // Ratchet bins are .mts here but compiled .mjs in consumers; derive the extension from this module.
   const ext = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
   const bins = [
     ['guard-fanout', join(packageDir(), 'gate-engine', 'ratchets', `folder-fanout${ext}`)],
     ['guard-size', join(packageDir(), 'gate-engine', 'ratchets', `size-disable${ext}`)],
   ];
+  const env = overlay ? { ...process.env, DEVKIT_OVERLAY: '1' } : process.env;
   for (const [name, bin] of bins) {
     try {
-      execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
+      execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe', env });
       console.log(`  ✓ ${name} freeze (baseline grandfathered)`);
     } catch (e: unknown) {
-      console.log(`  ! ${name} freeze failed: ${firstLine(e)}`);
+      // SAFETY: execFileSync throws Error-shaped values whose optional stderr is declared by ExecError.
+      const detail = (e as ExecError).stderr?.toString().trim() || firstLine(e);
+      console.log(`  ! ${name} freeze failed: ${detail}`);
     }
   }
 }
@@ -715,7 +717,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
     console.log('  freeze baselines (grandfather current tree)');
-    runFreezes(cwd, dryRun);
+    runFreezes(cwd, dryRun, { overlay: true });
   }
   // Optional machine-global shim closes the plain-commit gap; `devkit clean --global` removes it.
   const globalCommitGate = Boolean(plan.globalCommitGate);
@@ -840,10 +842,12 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   // skills target the git root, with gates scoped `cd <pkgRel>`. Single-package repo → gitRoot
   // === cwd, pkgRel '' → everything as before.
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
-
   // Overlay (local-only): a self-contained path — invisible to git, non-invasive. Returns early.
   if (overlay) return applyOverlay(cwd, plan, pkgRel, devkitRef);
-
+  // Baselines are durable tracked state. Re-open their canonical directory before migration so a
+  // consumer's broad `.devkit/` ignore cannot turn the move into a staged deletion-only commit.
+  ensureDevkitCacheGitignore(cwd, dryRun);
+  reportRatchetBaselineMigration(cwd, dryRun);
   console.log(
     `devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`,
   );
@@ -1032,10 +1036,6 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
     console.log('  ✓ wrote .devkit/config.json');
   }
-
-  // Keep the gate engine's regenerated .devkit/ caches out of git (package/standalone; overlay
-  // already hides all of .devkit/ via .git/info/exclude). Specific files only — manifests stay tracked.
-  ensureDevkitCacheGitignore(cwd, dryRun);
 
   printReferencedSteps();
   console.log(
