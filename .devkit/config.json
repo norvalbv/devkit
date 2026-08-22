@@ -1,6 +1,6 @@
 {
   "stack": "node-service",
-  "devkitRef": "v0.51.1",
+  "devkitRef": "v0.52.1",
   "initVersion": 2,
   "pkgRel": "",
   "standalone": false,
@@ -34,7 +34,8 @@
       "decisions",
       "qavis-advisory",
       "review"
-    ]
+    ],
+    "disabledGuards": []
   },
   "review": {
     "enabled": true,
