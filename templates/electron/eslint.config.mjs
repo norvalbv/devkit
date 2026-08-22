@@ -46,6 +46,9 @@ import {
 // fallow-ignore-next-line code-duplication
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+// Reason: atomic baseline relocation can briefly expose either path; the bounded retry preserves
+// one loader contract without duplicating fallback logic across every baseline consumer.
+// fallow-ignore-next-line complexity
 async function importAcrossMigration(canonical, legacy) {
   for (const file of [canonical, legacy, canonical]) {
     if (!existsSync(file)) continue;
