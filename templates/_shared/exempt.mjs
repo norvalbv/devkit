@@ -1,7 +1,7 @@
-// Hand-maintained PERMANENT structure-rule exemptions — the only hand-edited baseline.
+// Hand-maintained PERMANENT structure-rule exemptions — policy, not generated debt.
 //
 // Each entry is an INTENTIONAL architectural exception, NOT a legacy grandfather awaiting cleanup.
-// Use the generated eslint/baselines/<tree>.mjs for those (auto-generated, shrink-only target).
+// Use the generated .devkit/baselines/structure/<tree>.mjs for those (auto-generated, shrink-only target).
 //
 // To exempt a file:
 //   1. Add its tree-relative path here (relative to that tree's `root`), to the matching array.
@@ -19,7 +19,7 @@ export const structureExempt = {
 
 // Permanent IMPORT-WALL exemptions — independent-modules Module entries, spread FIRST in the
 // generated eslint.config shim (first match wins). Each carries its own reason; these never shrink
-// (unlike the generated eslint/baselines/imports.mjs). Empty when a repo declares no import walls.
+// (unlike the generated .devkit/baselines/imports.mjs). Empty when a repo declares no import walls.
 export const importWallExempt = [
   // {
   //   // Example: a single sanctioned cross-boundary import that inference forces.

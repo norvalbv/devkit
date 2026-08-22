@@ -1,23 +1,20 @@
 #!/usr/bin/env node
-// Size-debt ratchet: the inline `eslint-disable max-lines` / `max-lines-per-function`
-// directives are the ONLY way a file escapes the project's line/function caps. A NEW
-// oversized file would need such a disable — so we freeze the current disable counts
-// and refuse to let them GROW. Existing giants are grandfathered; the count can only
-// shrink (split a file, delete its disable).
+// Ratchet inline max-lines disables and raw-line debt: existing giants are grandfathered, but their
+// ceilings can only shrink (split a file or delete its disable).
 //
 //   bunx guard-size freeze   # re-count + write the consumer's baseline
 //   bunx guard-size gate     # fail if counts grew (pre-commit)
 //
-// W-3: config and baselines always resolve against the consumer cwd, never the package dir.
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { hasStagedFiles, pullRequestScope, stageBaseline, stagedSet } from "./git-index.mjs";
+import { LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from "./baseline-paths.mjs";
+import { hasStagedFiles, pullRequestScope, stagedSet } from "./git-index.mjs";
 import { freezeLinesBaseline } from "./size-lines-freeze.mjs";
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
 import { runPreflightCli } from "./size-preflight.mjs";
-const BASELINE = 'eslint/baselines/size.json';
+const BASELINE = SIZE_BASELINE;
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.
 const DIRECTIVE_START = /^\s*(?:\/\/|\/\*)\s*eslint-disable/;
@@ -181,10 +178,12 @@ export function previewGrandfather(cwd) {
 // no commit to carry a baseline change. Exits 1 on a file over its ceiling.
 // Reason: sequential grow-check then per-file auto-lower, each a trivial guard at low nesting; splitting scatters one gate decision
 // fallow-ignore-next-line complexity
-function runLinesGate(root, cfg, linesBaselineFile, ciScope) {
+function runLinesGate(root, cfg, ciScope) {
     const over = countOversized(root);
-    const grandfathered = existsSync(linesBaselineFile)
-        ? JSON.parse(readFileSync(linesBaselineFile, 'utf8')).files
+    const linesBaseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+    // SAFETY: this is Devkit-owned line-baseline JSON produced by freeze or migration.
+    const grandfathered = linesBaseline
+        ? (JSON.parse(linesBaseline.contents).files ?? {})
         : {};
     const staged = stagedSet(root);
     const inCommit = staged !== null && hasStagedFiles(root);
@@ -225,24 +224,20 @@ function runLinesGate(root, cfg, linesBaselineFile, ciScope) {
         if (Object.keys(next).length === 0) {
             // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
             // not kept as a sentinel) and stage the removal so it rides this commit.
-            rmSync(linesBaselineFile, { force: true });
-            stageBaseline(root, LINES_BASELINE);
+            removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, { stage: true });
             console.log(`✓ line debt cleared — ${LINES_BASELINE} removed & staged.`);
         }
         else {
-            writeFileSync(linesBaselineFile, `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`);
-            stageBaseline(root, LINES_BASELINE);
+            writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({ maxLines: cfg.maxLines, maxTestLines: cfg.maxTestLines, files: next }, null, 2)}\n`, { stage: true });
             console.log(`✓ line debt tightened — ${LINES_BASELINE} lowered & staged.`);
         }
     }
 }
-// Read the disable baseline. A pre-per-file `{ fileDisables, fnDisables }` shape (no `files` key) is
-// reported empty + `legacy: true` so the gate blocks with a migrate hint (real disables) or
-// self-cleans it (a stale {0,0}); a re-freeze rewrites it to the per-file shape.
-function readDisableBaseline(baselineFile) {
-    if (!existsSync(baselineFile))
+function readDisableBaseline(contents) {
+    if (contents === null)
         return { grandfathered: {}, legacy: false };
-    const raw = JSON.parse(readFileSync(baselineFile, 'utf8'));
+    // SAFETY: this is Devkit-owned disable-baseline JSON; the legacy shape is handled below.
+    const raw = JSON.parse(contents);
     if (raw?.files)
         return { grandfathered: raw.files, legacy: false };
     return { grandfathered: {}, legacy: true };
@@ -254,8 +249,8 @@ function readDisableBaseline(baselineFile) {
 // gate blocks (its counts aren't recognised); a stale {0,0} self-deletes in the commit.
 // Reason: sequential grow-check then per-file auto-lower, each a trivial guard at low nesting; one gate decision, mirrors runLinesGate
 // fallow-ignore-next-line complexity
-function runDisableGate(root, baselineFile, current, ciScope) {
-    const { grandfathered, legacy } = readDisableBaseline(baselineFile);
+function runDisableGate(root, baselineContents, current, ciScope) {
+    const { grandfathered, legacy } = readDisableBaseline(baselineContents);
     const cur = current.perFile;
     const staged = stagedSet(root);
     const inCommit = staged !== null && hasStagedFiles(root);
@@ -313,14 +308,12 @@ function runDisableGate(root, baselineFile, current, ciScope) {
     if (!changed)
         return;
     if (Object.keys(next).length === 0) {
-        rmSync(baselineFile, { force: true });
-        stageBaseline(root, BASELINE);
-        console.log(`✓ size debt cleared — ${BASELINE} removed & staged.`);
+        removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, { stage: true });
+        console.log(`✓ size debt cleared — ${SIZE_BASELINE} removed & staged.`);
     }
     else {
-        writeFileSync(baselineFile, `${JSON.stringify({ files: next }, null, 2)}\n`);
-        stageBaseline(root, BASELINE);
-        console.log(`✓ size debt tightened — ${BASELINE} lowered & staged.`);
+        writeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, `${JSON.stringify({ files: next }, null, 2)}\n`, { stage: true });
+        console.log(`✓ size debt tightened — ${SIZE_BASELINE} lowered & staged.`);
     }
 }
 // Reason: flat freeze/gate/usage CLI dispatch: branch count is one mutually-exclusive command state plus gate's sequential grew-file/grew-fn/shrank guards, each a trivial exit-or-print at near-zero nesting; splitting scatters the command handler
@@ -328,28 +321,27 @@ function runDisableGate(root, baselineFile, current, ciScope) {
 function runCli(cmd) {
     const root = process.cwd();
     const cfg = resolveGuardConfig(root);
-    const baselineFile = join(root, BASELINE);
-    const linesBaselineFile = join(root, LINES_BASELINE);
     const current = countDisables(root);
+    // Read after the tree walk rather than holding a potentially stale snapshot across the full scan.
+    const baseline = readRatchetBaseline(root, BASELINE, LEGACY_SIZE_BASELINE);
     if (cmd === 'freeze') {
         // Per-file map. Shrink-only: min against the prior per-file count so a --no-verify growth can't be
         // laundered back in. A pre-per-file (or missing) baseline has no per-file prior → this first freeze
         // re-grandfathers current counts (the migration point).
-        const { grandfathered: prev } = readDisableBaseline(baselineFile);
+        const { grandfathered: prev } = readDisableBaseline(baseline?.contents ?? null);
         const files = {};
         for (const [f, c] of Object.entries(current.perFile)) {
             const p = prev[f];
             files[f] = p ? { file: Math.min(p.file, c.file), fn: Math.min(p.fn, c.fn) } : c;
         }
         if (Object.keys(files).length > 0) {
-            mkdirSync(dirname(baselineFile), { recursive: true });
-            writeFileSync(baselineFile, `${JSON.stringify({ files }, null, 2)}\n`);
-            console.log(`✓ ${BASELINE}: frozen max-lines disables for ${Object.keys(files).length} file(s) (from ${current.scannedFiles} source files)`);
+            writeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE, `${JSON.stringify({ files }, null, 2)}\n`);
+            console.log(`✓ ${SIZE_BASELINE}: frozen max-lines disables for ${Object.keys(files).length} file(s) (from ${current.scannedFiles} source files)`);
         }
         else {
             // No disables anywhere → no debt to grandfather. Don't write an empty baseline; delete a stale one.
-            rmSync(baselineFile, { force: true });
-            console.log(`✓ ${BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`);
+            removeRatchetBaseline(root, SIZE_BASELINE, LEGACY_SIZE_BASELINE);
+            console.log(`✓ ${SIZE_BASELINE}: no max-lines disables (${current.scannedFiles} source files) — no baseline written`);
         }
         if (cfg.maxLines || cfg.maxTestLines) {
             const over = freezeLines(root, 'refresh');
@@ -363,7 +355,7 @@ function runCli(cmd) {
     // fallow-ignore-next-line code-duplication
     if (cmd === 'gate') {
         const ciScope = pullRequestScope(root);
-        const hasBaseline = existsSync(baselineFile);
+        const hasBaseline = baseline !== null;
         // A missing baseline means "no grandfathered debt". Enforce from config (empty baseline = 0/0)
         // whenever the repo is governed (guard.config.json present — true in devkit's own repo, CI, and
         // any adopted consumer). Only an UNgoverned repo with no baseline fails open, so a repo that
@@ -373,9 +365,9 @@ function runCli(cmd) {
             process.exit(2); // ungoverned + un-frozen → fail open
         }
         // Disable ratchet: per-file, per-commit shrink-only (auto-lowers as disables are removed).
-        runDisableGate(root, baselineFile, current, ciScope);
+        runDisableGate(root, baseline?.contents ?? null, current, ciScope);
         if (cfg.maxLines || cfg.maxTestLines)
-            runLinesGate(root, cfg, linesBaselineFile, ciScope);
+            runLinesGate(root, cfg, ciScope);
         process.exit(0);
     }
     console.error('usage: guard-size <freeze|gate|preflight --base <ref> [-- path...]>');

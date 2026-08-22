@@ -13,7 +13,7 @@
  *      path, in the project's `@/` ALIAS style (the codebase convention).
  *   3. Re-anchor the MOVED file's own relative imports to alias form (they break on move).
  *   4. Surgically drop the moved files' OLD entries from the structure baseline
- *      (eslint/baselines/*.mjs) — NO whole-tree regen (never absorbs parallel work).
+ *      (.devkit/baselines/structure/*.mjs) — NO whole-tree regen (never absorbs parallel work).
  *
  * Why not ts-morph's SourceFile.move(): it leaves `@/` alias importers stale (dangling)
  * and emits wrong relative paths. We use ts-morph only for AST-accurate editing and
@@ -23,6 +23,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { Node, Project, type SourceFile, SyntaxKind, ts } from 'ts-morph';
+import {
+  LEGACY_STRUCTURE_BASELINE_DIR,
+  STRUCTURE_BASELINE_DIR,
+} from '../../gate-engine/ratchets/baseline-paths.mts';
 import { resolveBaselineRoots } from '../lib/generate/generate-structure-baseline.mts';
 
 /**
@@ -152,14 +156,17 @@ function gitMv(cwd: string, from: string, to: string): void {
 
 /** Drop moved files' OLD paths from the structure baselines (surgical — no regen). */
 function pruneBaselines(cwd: string, oldRelPaths: string[], dryRun: boolean): number {
-  const baselineDir = join(cwd, 'eslint', 'baselines');
-  if (!existsSync(baselineDir)) return 0;
+  const canonicalDir = join(cwd, STRUCTURE_BASELINE_DIR);
+  const legacyDir = join(cwd, LEGACY_STRUCTURE_BASELINE_DIR);
+  if (!existsSync(canonicalDir) && !existsSync(legacyDir)) return 0;
   // structureRoot prefixes → baseline file, resolved from guard.config.json so the prune
   // follows whatever roots the baseline writer used (config trees or the electron default).
   const ROOTS = resolveBaselineRoots(cwd);
   let removed = 0;
   for (const [prefix, file] of ROOTS) {
-    const abs = join(baselineDir, file);
+    const canonical = join(canonicalDir, file);
+    const legacy = join(legacyDir, file);
+    const abs = existsSync(canonical) ? canonical : legacy;
     if (!existsSync(abs)) continue;
     const keys = oldRelPaths.filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length));
     if (!keys.length) continue;
@@ -187,7 +194,7 @@ Usage:
 
 Rewrites import / export-from / dynamic import() / vi.mock|jest.mock|require in the repo's @/ alias
 style, moves colocated *.test siblings, re-anchors the moved file's own relative imports, and
-surgically prunes the moved entries from eslint/baselines (no whole-tree regen).
+surgically prunes the moved entries from .devkit/baselines/structure (no whole-tree regen).
   --dry-run        Preview only.
   --no-baseline    Skip the baseline prune.
   --alias=@/=DIR   Override tsconfig alias auto-detect.`,

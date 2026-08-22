@@ -19,7 +19,7 @@
  * dir. Each tree's walk is existsSync-guarded so a repo missing (say) a
  * socket-server still generates the trees it does have.
  *
- * Output: one `eslint/baselines/<tree>.mjs` per existing tree (overwritten).
+ * Output: one `.devkit/baselines/structure/<tree>.mjs` per existing tree.
  */
 var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path, preserveJsx) {
     if (typeof path === "string" && /^\.\.?\//.test(path)) {
@@ -29,11 +29,13 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig, resolveTreeExtensions } from "../../../gate-engine/config.mjs";
+import { STRUCTURE_BASELINE_DIR } from "../../../gate-engine/ratchets/baseline-paths.mjs";
 import { walkTree } from "../../../gate-engine/structure/walk.mjs";
+import { persistStructureBaseline } from "./structure-baseline-storage.mjs";
 // ─── Regexes (verbatim from frink's generate-eslint-baseline.mjs) ───────────────
 const PASCAL = /^[A-Z][A-Za-z0-9]*$/;
 const HOOK_KEBAB = /^use-[a-z][a-z0-9-]*\.tsx?$/;
@@ -658,7 +660,7 @@ export function renderBaselineFile(tree, sorted) {
 // entries — the goal is to shrink this list to zero.
 //
 // For INTENTIONAL permanent exemptions (architectural choice, not legacy):
-// use eslint/baselines/exempt.mjs instead. That file is hand-maintained and
+// use .devkit/structure/exempt.mjs instead. That file is hand-maintained and
 // requires a reason per entry.
 //
 // Regenerate (only after a deliberate audit, NOT to silence new offenders):
@@ -687,7 +689,7 @@ export async function loadDomains(cwd) {
 }
 const TREES = ['renderer', 'main', 'shared', 'preload', 'socket', 'vercel'];
 // Baseline for ONE config-declared tree: grammar trees use the generic walker; preset trees pass
-// through to the frink-tree walker. Writes eslint/baselines/<name>.mjs unless dryRun. `ctx` carries
+// through to the frink-tree walker. Writes the Devkit-owned structure baseline unless dryRun. `ctx` carries
 // the per-run cwd/cfg/opts/log so the signature has no optional-then-required ambiguity.
 function generateConfigTree(t, ctx) {
     const { cwd, cfg, opts, log } = ctx;
@@ -704,22 +706,13 @@ function generateConfigTree(t, ctx) {
             domains: t.domains ?? {},
         });
     if (!opts.dryRun) {
-        const outFile = join(cwd, 'eslint', 'baselines', `${t.name}.mjs`);
-        if (sorted.length > 0) {
-            mkdirSync(dirname(outFile), { recursive: true });
-            writeFileSync(outFile, renderBaselineFile(t.name, sorted));
-        }
-        else {
-            // No violators → no debt to grandfather. Don't write an empty baseline; delete a stale one
-            // (the eslint loader returns [] on absence, so enforcement is unchanged).
-            rmSync(outFile, { force: true });
-        }
+        persistStructureBaseline(cwd, t.name, sorted.length ? renderBaselineFile(t.name, sorted) : null);
     }
-    log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}eslint/baselines/${t.name}.mjs: ${sorted.length} grandfathered file(s)`);
+    log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${STRUCTURE_BASELINE_DIR}/${t.name}.mjs: ${sorted.length} grandfathered file(s)`);
     return { tree: t.name, count: sorted.length, written: !opts.dryRun };
 }
 /**
- * Generate every existing tree's baseline into <cwd>/eslint/baselines/. Returns a per-tree summary
+ * Generate every existing tree's baseline into <cwd>/.devkit/baselines/structure/. Returns a per-tree summary
  * [{tree, count, written}] (written=false when tree absent). Config-driven when guard.config.json
  * declares structure.trees; else the legacy frink-6-tree path.
  *
@@ -748,17 +741,10 @@ export async function generateStructureBaselines(cwd = process.cwd(), opts = {})
             continue;
         }
         const sorted = generateTreeBaseline(tree, cwd, { roots, domains });
-        const out = join(cwd, 'eslint', 'baselines', `${tree}.mjs`);
         if (!opts.dryRun) {
-            if (sorted.length > 0) {
-                mkdirSync(dirname(out), { recursive: true });
-                writeFileSync(out, renderBaselineFile(tree, sorted));
-            }
-            else {
-                rmSync(out, { force: true }); // no violators → no empty baseline (loader returns [] on absence)
-            }
+            persistStructureBaseline(cwd, tree, sorted.length ? renderBaselineFile(tree, sorted) : null);
         }
-        log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}eslint/baselines/${tree}.mjs: ${sorted.length} grandfathered file(s)`);
+        log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${STRUCTURE_BASELINE_DIR}/${tree}.mjs: ${sorted.length} grandfathered file(s)`);
         summary.push({ tree, count: sorted.length, written: !opts.dryRun });
     }
     return summary;

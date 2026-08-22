@@ -7,7 +7,7 @@
   "extends": ["@norvalbv/devkit/biome/react"],
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!dist", "!build", "!out", "!coverage", "!eslint/baselines"]
+    "includes": ["**", "!dist", "!build", "!out", "!coverage", "!.devkit/baselines", "!.devkit/structure"]
   },
   "overrides": [
     {

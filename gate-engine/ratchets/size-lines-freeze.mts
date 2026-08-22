@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { sourceMatchers } from '../config.mts';
+import {
+  LEGACY_LINES_BASELINE,
+  readRatchetBaseline,
+  removeRatchetBaseline,
+  writeRatchetBaseline,
+} from './baseline-paths.mts';
 import { LINES_BASELINE } from './size-policy.mts';
 
 export type LinesFreezeMode = 'shrink-only' | 'refresh';
@@ -17,7 +21,7 @@ interface OversizedFile {
 }
 
 interface LinesBaseline {
-  files: Record<string, number>;
+  files?: Record<string, number>;
 }
 
 export function freezeLinesBaseline(
@@ -26,9 +30,10 @@ export function freezeLinesBaseline(
   oversized: OversizedFile[],
   mode: LinesFreezeMode,
 ): number {
-  const baselineFile = join(root, LINES_BASELINE);
-  const previous: Record<string, number> = existsSync(baselineFile)
-    ? (JSON.parse(readFileSync(baselineFile, 'utf8')) as LinesBaseline).files
+  const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+  // SAFETY: freeze reads the Devkit-owned line baseline shape it writes below.
+  const previous: Record<string, number> = baseline
+    ? ((JSON.parse(baseline.contents) as LinesBaseline).files ?? {})
     : {};
   const match = sourceMatchers(config.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
@@ -43,13 +48,14 @@ export function freezeLinesBaseline(
     ]),
   );
   if (Object.keys(files).length > 0) {
-    mkdirSync(dirname(baselineFile), { recursive: true });
-    writeFileSync(
-      baselineFile,
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
       `${JSON.stringify({ maxLines: config.maxLines, maxTestLines: config.maxTestLines, files }, null, 2)}\n`,
     );
   } else {
-    rmSync(baselineFile, { force: true });
+    removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
   }
   if (raised.length > 0) {
     console.log(`  ⚠ ${raised.length} file(s) grew since the last freeze:`);

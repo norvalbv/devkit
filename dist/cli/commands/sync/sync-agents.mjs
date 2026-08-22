@@ -19,7 +19,9 @@ import { agentAssetDir } from "../../lib/install/agent-assets/agent-assets.mjs";
 import { resolveExistingAgentProviders } from "../../lib/install/agent-assets/agent-providers.mjs";
 import { findConflicts } from "../../lib/sync-manifest.mjs";
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
-function listAgents(dir) {
+// Exported for the self-host projection-parity test, which must enumerate exactly what this writer
+// enumerates rather than re-deriving the flat-`.md` rule.
+export function listAgents(dir) {
     return readdirSync(dir, { withFileTypes: true })
         .filter((e) => e.isFile() && e.name.endsWith('.md'))
         .map((e) => e.name);

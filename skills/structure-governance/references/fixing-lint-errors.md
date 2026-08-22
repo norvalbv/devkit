@@ -122,7 +122,7 @@ guard-fanout freeze
 Renderer import wall: no src/main (cross-process types -> src/shared/types),
 no other-feature deep paths (use the @/features/<x> barrel),
 no frozen legacy dirs (@/utils,@/types,@/constants,@/contexts -> lib/).
-Grandfathered files: eslint/baselines/imports.mjs …
+Grandfathered files: .devkit/baselines/imports.mjs …
 ```
 
 **Cause + fix (the message names which one):**
@@ -181,6 +181,6 @@ so a fresh checkout never wedges.
 - **Baseline lifecycle (debt vs exempt, the drive-to-zero goal):**
   [`structure-governance.md` §6](../../../../docs/developer-docs/structure-governance.md#6-the-baselines--debt-vs-exempt-and-the-end-goal)
 - **The ONE permanent escape hatch** — a genuine, permanent architectural exception (not "I'm in a
-  hurry"): add a reasoned entry to [`eslint/baselines/exempt.mjs`](../../../../eslint/baselines/exempt.mjs).
+  hurry"): add a reasoned entry to [`.devkit/structure/exempt.mjs`](../../../../.devkit/structure/exempt.mjs).
   It is the *only* hand-edited baseline; every entry is reviewed. **Never** hand-edit a generated
   baseline — the next regen wipes it.

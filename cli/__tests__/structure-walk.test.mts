@@ -180,7 +180,7 @@ describe('generateStructureBaselines — config-driven path', () => {
     expect(byTree.ui.written).toBe(true);
     expect(byTree.ui.count).toBe(1);
     expect(byTree.absent.written).toBe(false);
-    const file = readFileSync(join(root, 'eslint/baselines/ui.mjs'), 'utf8');
+    const file = readFileSync(join(root, '.devkit/baselines/structure/ui.mjs'), 'utf8');
     expect(file).toContain('export const uiStructureBaseline = [');
     expect(file).toContain('bad-name.tsx');
   });

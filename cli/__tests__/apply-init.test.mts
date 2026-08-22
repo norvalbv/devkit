@@ -664,7 +664,7 @@ describe('structure is stack-generic (react-app un-gated)', () => {
     expect(readFileSync(join(root, 'eslint.config.mjs'), 'utf8')).toMatch(/THE UNIVERSAL SHIM/);
     const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
     expect(guard.structure.trees.map((t) => t.name)).toEqual(['components', 'pages']);
-    expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/structure/exempt.mjs'))).toBe(true);
     expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
     expect(config(root).components.structure).toBe(true);
   });
@@ -699,7 +699,7 @@ describe('structure is stack-generic (react-app un-gated)', () => {
     const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
     expect(guard.structure.trees.map((t) => t.name)).toEqual(['lib']);
     expect(guard.structure.trees[0].grammar.files).toContain('{pascal}');
-    expect(existsSync(join(root, 'eslint/baselines/exempt.mjs'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/structure/exempt.mjs'))).toBe(true);
     // Flat rule has NO lib/<domain> vocabulary → no domains.mjs.
     expect(existsSync(join(root, 'eslint/domains.mjs'))).toBe(false);
     expect(config(root).components.structure).toBe(true);
@@ -772,7 +772,46 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
     // 600 lines (no trailing newline) → over the 500-line cap.
     writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
   };
-  const linesBaseline = (root: string) => join(root, 'eslint', 'baselines', 'size-lines.json');
+  const linesBaseline = (root: string) => join(root, '.devkit', 'baselines', 'size-lines.json');
+
+  it('moves an adopted repo legacy ratchet before applying the current selection', async () => {
+    const root = tmpRepo();
+    const legacy = join(root, 'eslint', 'baselines', 'size-lines.json');
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(legacy, '{"files":{"src/legacy.ts":731}}\n');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        ...defaultSelection(),
+        guards: [],
+        husky: false,
+        lineGrowth: false,
+        structure: false,
+      },
+    });
+
+    expect(readFileSync(linesBaseline(root), 'utf8')).toBe('{"files":{"src/legacy.ts":731}}\n');
+    expect(existsSync(legacy)).toBe(false);
+  });
+
+  it('leaves tracked legacy ratchets untouched in overlay mode', async () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const legacy = join(root, 'eslint', 'baselines', 'size-lines.json');
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(legacy, '{"files":{"src/legacy.ts":731}}\n');
+    execFileSync('git', ['add', 'eslint/baselines/size-lines.json'], { cwd: root });
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...defaultSelection(), guards: ['size'] },
+      overlay: true,
+    });
+
+    expect(readFileSync(legacy, 'utf8')).toBe('{"files":{"src/legacy.ts":731}}\n');
+    expect(existsSync(linesBaseline(root))).toBe(false);
+  });
 
   it('default init writes maxLines and grandfathers a current giant into size-lines.json', async () => {
     const root = tmpRepo();

@@ -13,7 +13,7 @@
  *      path, in the project's `@/` ALIAS style (the codebase convention).
  *   3. Re-anchor the MOVED file's own relative imports to alias form (they break on move).
  *   4. Surgically drop the moved files' OLD entries from the structure baseline
- *      (eslint/baselines/*.mjs) — NO whole-tree regen (never absorbs parallel work).
+ *      (.devkit/baselines/structure/*.mjs) — NO whole-tree regen (never absorbs parallel work).
  *
  * Why not ts-morph's SourceFile.move(): it leaves `@/` alias importers stale (dangling)
  * and emits wrong relative paths. We use ts-morph only for AST-accurate editing and
@@ -22,42 +22,62 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
-import { Node, Project, SyntaxKind } from 'ts-morph';
+import { Node, Project, SyntaxKind, ts } from 'ts-morph';
+import { LEGACY_STRUCTURE_BASELINE_DIR, STRUCTURE_BASELINE_DIR, } from "../../gate-engine/ratchets/baseline-paths.mjs";
 import { resolveBaselineRoots } from "../lib/generate/generate-structure-baseline.mjs";
 const TEST_SUFFIXES = ['.test.ts', '.test.tsx', '.spec.ts', '.spec.tsx'];
 const MOCK_CALLEES = new Set(['vi.mock', 'vi.doMock', 'jest.mock', 'require', 'import']);
+const NO_ALIAS_HINT = 'no "@/*"-style path alias found in tsconfig — pass --alias @/=src/renderer';
+// 18003 always fires because readDirectory is stubbed below, and 5023 fires on valid configs using
+// an option this TypeScript predates. Every other diagnostic left `paths` genuinely unresolved.
+const BENIGN_CONFIG_CODES = new Set([18003, 5023]);
 const EXT_RE = /\.(ts|tsx|js|jsx)$/;
-const LINE_COMMENT_RE = /\/\/.*$/gm;
-const TRAILING_COMMA_RE = /,(\s*[}\]])/g;
 const STAR_END_RE = /\*$/;
 const SLASH_END_RE = /\/$/;
 const INDEX_SUFFIX_RE = /\/index$/;
 const RE_META_RE = /[.*+?^${}()|[\]\\]/g;
 const stripExt = (p) => p.replace(EXT_RE, '');
 const toPosix = (p) => p.replaceAll('\\', '/');
-/** Read the consumer's `@/*` alias → { prefix:'@/', root:'<abs src dir>' } from tsconfig (+1 extends hop). */
+/** Reads the `@/*` alias the way tsc does: whole `extends` chain, real tsconfig JSONC. */
 function readAlias(cwd, override) {
+    const tsPath = join(cwd, 'tsconfig.json');
+    // Checked even under --alias: the rewrite pass below builds a ts-morph Project from this file
+    // AFTER git mv, so an absent one would abort mid-run and strand a half-moved tree.
+    if (!existsSync(tsPath))
+        throw new Error(`could not read ${relative(cwd, tsPath)}: file not found`);
     if (override) {
         const [prefix, dir] = override.split('=');
+        if (!dir)
+            throw new Error(`--alias needs PREFIX=DIR, got --alias=${override}`);
         return { prefix: prefix.replace(STAR_END_RE, ''), root: resolve(cwd, dir) };
     }
-    const readJson = (f) => JSON.parse(readFileSync(f, 'utf8').replace(LINE_COMMENT_RE, '').replace(TRAILING_COMMA_RE, '$1'));
-    let tsPath = join(cwd, 'tsconfig.json');
-    const cfg = readJson(tsPath);
-    let opts = cfg.compilerOptions ?? {};
-    if (!opts.paths && cfg.extends) {
-        const ext = resolve(dirname(tsPath), cfg.extends);
-        const base = readJson(ext);
-        opts = { ...(base.compilerOptions ?? {}), ...opts };
-        tsPath = ext;
+    const read = ts.readConfigFile(tsPath, (p) => ts.sys.readFile(p));
+    if (read.error)
+        throw new Error(`could not read ${relative(cwd, tsPath)}: ${ts.flattenDiagnosticMessageText(read.error.messageText, ' ')}`);
+    // readDirectory is stubbed: only compilerOptions is wanted, and the include glob would walk the repo.
+    const host = {
+        useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
+        readDirectory: () => [],
+        fileExists: (p) => ts.sys.fileExists(p),
+        readFile: (p) => ts.sys.readFile(p),
+    };
+    const parsed = ts.parseJsonConfigFileContent(read.config, host, cwd, undefined, tsPath);
+    const opts = parsed.options;
+    const entry = Object.entries(opts.paths ?? {}).find(([k, v]) => k.endsWith('/*') && v[0]);
+    if (!entry) {
+        // Only consulted once nothing resolved: these same diagnostics fire harmlessly when the root
+        // config's own paths win, so they are the diagnosis only when there is nothing else to report.
+        const fault = parsed.errors.find((d) => !BENIGN_CONFIG_CODES.has(d.code));
+        if (fault) {
+            const where = fault.file ? relative(cwd, fault.file.fileName) : relative(cwd, tsPath);
+            throw new Error(`could not read ${where}: ${ts.flattenDiagnosticMessageText(fault.messageText, ' ')}`);
+        }
+        return null;
     }
-    const baseUrl = opts.baseUrl ?? '.';
-    const entry = Object.entries(opts.paths ?? {}).find(([k]) => k.endsWith('/*'));
-    if (!entry)
-        throw new Error('no "@/*"-style path alias found in tsconfig — pass --alias @/=src/renderer');
-    const prefix = entry[0].replace(STAR_END_RE, ''); // '@/* ' -> '@/'
+    const prefix = entry[0].replace(STAR_END_RE, ''); // '@/*' -> '@/'
     const target = entry[1][0].replace(STAR_END_RE, '').replace(SLASH_END_RE, ''); // './src/renderer/*' -> './src/renderer'
-    return { prefix, root: resolve(cwd, baseUrl, target) };
+    // tsc resolves `paths` against baseUrl when declared, else against the declaring config's dir.
+    return { prefix, root: resolve(opts.baseUrl ?? opts.pathsBasePath ?? cwd, target) };
 }
 /** A specifier → absolute extensionless module path, or null if external/bare. */
 function resolveSpec(spec, resolveDir, alias) {
@@ -97,15 +117,18 @@ function gitMv(cwd, from, to) {
 }
 /** Drop moved files' OLD paths from the structure baselines (surgical — no regen). */
 function pruneBaselines(cwd, oldRelPaths, dryRun) {
-    const baselineDir = join(cwd, 'eslint', 'baselines');
-    if (!existsSync(baselineDir))
+    const canonicalDir = join(cwd, STRUCTURE_BASELINE_DIR);
+    const legacyDir = join(cwd, LEGACY_STRUCTURE_BASELINE_DIR);
+    if (!existsSync(canonicalDir) && !existsSync(legacyDir))
         return 0;
     // structureRoot prefixes → baseline file, resolved from guard.config.json so the prune
     // follows whatever roots the baseline writer used (config trees or the electron default).
     const ROOTS = resolveBaselineRoots(cwd);
     let removed = 0;
     for (const [prefix, file] of ROOTS) {
-        const abs = join(baselineDir, file);
+        const canonical = join(canonicalDir, file);
+        const legacy = join(legacyDir, file);
+        const abs = existsSync(canonical) ? canonical : legacy;
         if (!existsSync(abs))
             continue;
         const keys = oldRelPaths.filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length));
@@ -135,7 +158,7 @@ Usage:
 
 Rewrites import / export-from / dynamic import() / vi.mock|jest.mock|require in the repo's @/ alias
 style, moves colocated *.test siblings, re-anchors the moved file's own relative imports, and
-surgically prunes the moved entries from eslint/baselines (no whole-tree regen).
+surgically prunes the moved entries from .devkit/baselines/structure (no whole-tree regen).
   --dry-run        Preview only.
   --no-baseline    Skip the baseline prune.
   --alias=@/=DIR   Override tsconfig alias auto-detect.`,
@@ -153,7 +176,6 @@ export default async function move(args, cwd) {
     }
     const destDir = resolve(cwd, positionals[positionals.length - 1]);
     const srcRels = positionals.slice(0, -1);
-    const alias = readAlias(cwd, aliasArg);
     // Expand sources + colocated tests into concrete moves.
     const moves = [];
     const seen = new Set();
@@ -176,12 +198,25 @@ export default async function move(args, cwd) {
     moves.forEach((m) => {
         m.newMod = stripExt(m.newAbs);
     });
-    for (const m of moves)
-        console.log(`${dryRun ? '[dry] ' : ''}mv ${relative(cwd, m.oldAbs)} → ${relative(cwd, m.newAbs)}`);
+    const preview = () => {
+        for (const m of moves)
+            console.log(`${dryRun ? '[dry] ' : ''}mv ${relative(cwd, m.oldAbs)} → ${relative(cwd, m.newAbs)}`);
+    };
     if (dryRun) {
+        const shown = readAlias(cwd, aliasArg);
+        preview();
         console.log('[dry] would rewrite importers + prune baselines (run without --dry-run to apply)');
-        return 0;
+        if (shown)
+            return 0;
+        console.error(NO_ALIAS_HINT);
+        return 1;
     }
+    const alias = readAlias(cwd, aliasArg);
+    if (!alias) {
+        console.error(NO_ALIAS_HINT);
+        return 1;
+    }
+    preview();
     mkdirSync(destDir, { recursive: true });
     for (const m of moves)
         gitMv(cwd, m.oldAbs, m.newAbs);

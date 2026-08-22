@@ -2,7 +2,91 @@
 // Shared git-index helpers for the ratchet gates (folder-fanout / size-disable). Both gates
 // auto-lower a baseline during a commit and need the same two primitives, so they live here as
 // ONE code path rather than duplicated per ratchet.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { lstatSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+const INDEX_LOCK_RETRY = new Int32Array(new SharedArrayBuffer(4));
+function stagePathStrict(root, rel, { missingIsSuccess = false } = {}) {
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+        const result = spawnSync('git', ['add', '--', rel], {
+            cwd: root,
+            encoding: 'utf8',
+        });
+        if (result.status === 0)
+            return;
+        if (missingIsSuccess && !indexTracksBaseline(root, rel))
+            return;
+        const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+        if (output.includes('index.lock') && attempt < 49) {
+            Atomics.wait(INDEX_LOCK_RETRY, 0, 0, 20);
+            continue;
+        }
+        throw new Error(`Git could not stage ratchet baseline ${rel}: ${output.trim()}`);
+    }
+}
+function isGitWorktree(root) {
+    try {
+        return (execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+            cwd: root,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim() === 'true');
+    }
+    catch {
+        return false;
+    }
+}
+export function indexTracksBaseline(root, rel) {
+    if (!isGitWorktree(root))
+        return false;
+    const result = spawnSync('git', ['ls-files', '--error-unmatch', '--', rel], {
+        cwd: root,
+        stdio: 'ignore',
+    });
+    return result.status === 0;
+}
+/** Stop before migration writes when Git would refuse to track the canonical debt file. */
+export function assertBaselineTrackable(root, rel) {
+    if (!isGitWorktree(root))
+        return;
+    try {
+        // Ship intentionally symlinks this mutable directory outside its commit worktree.
+        if (lstatSync(join(root, dirname(rel))).isSymbolicLink())
+            return;
+    }
+    catch {
+        // An absent destination directory is the ordinary pre-migration state; Git can still judge it.
+    }
+    const result = spawnSync('git', ['check-ignore', '-q', '--no-index', '--', rel], {
+        cwd: root,
+        stdio: 'ignore',
+    });
+    if (result.status === 1)
+        return;
+    if (result.status === 0) {
+        throw new Error(`Devkit ratchet baseline migration stopped: ${rel} is ignored by Git. Run devkit init/upgrade to restore the .devkit baseline exceptions, then rerun.`);
+    }
+    throw new Error(`Devkit ratchet baseline migration stopped: Git could not verify that ${rel} is trackable.`);
+}
+/**
+ * Strict staging for a storage migration: add and verify the replacement before staging removal of
+ * the legacy path. A staging failure can therefore leave two index entries, never debt deletion.
+ */
+export function stageBaselineMigration(root, from, to) {
+    if (!isGitWorktree(root))
+        return;
+    const legacyWasTracked = indexTracksBaseline(root, from);
+    stagePathStrict(root, to);
+    if (!indexTracksBaseline(root, to)) {
+        throw new Error(`Git did not stage migrated ratchet baseline ${to}.`);
+    }
+    if (!legacyWasTracked)
+        return;
+    stagePathStrict(root, from, { missingIsSuccess: true });
+    if (indexTracksBaseline(root, from)) {
+        throw new Error(`Git did not stage removal of legacy ratchet baseline ${from}.`);
+    }
+}
 // Best-effort `git add` for a baseline the gate rewrote OR deleted, so the change rides the same
 // commit. `git add -- <rel>` stages a modification AND a deletion (git records the removal), so the
 // one call covers auto-lower and heal-delete alike. Never throws: a shrink must not block the gate,
@@ -15,7 +99,7 @@ export function stageBaseline(root, rel) {
     catch {
         // not a git repo / git absent — the change is still on disk; picked up on the next commit.
         // ponytail: also swallows the ship worktree's `fatal: pathspec ... is beyond a symbolic link`
-        // (exit 128) when eslint/baselines is symlinked in for an OVERLAY repo. Load-bearing: the write
+        // (exit 128) when .devkit/baselines is symlinked in for an OVERLAY repo. Load-bearing: the write
         // itself lands on the real root file (the source of truth there, since overlay never commits
         // baselines) and staying unstaged is what keeps overlay git-invisible. So the recorded
         // "self-deletes & stages" contract (overlay-self-heal Ruling 2) degrades to "self-deletes" only

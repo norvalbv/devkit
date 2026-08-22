@@ -61,8 +61,10 @@ function filesUnderNoSymlinks(dir, base = dir) {
     }
     return out;
 }
-// Recursively list every file under `dir`, returned as paths relative to `dir`.
-function walk(dir, base = dir) {
+// Recursively list every file under `dir`, returned as paths relative to `dir`. Exported for the
+// self-host projection-parity test, which must enumerate exactly what this writer enumerates — a
+// near-copy there would silently diverge from the writer it claims to mirror.
+export function walk(dir, base = dir) {
     const out = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
