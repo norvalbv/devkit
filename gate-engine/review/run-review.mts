@@ -37,6 +37,7 @@ import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
+import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
@@ -251,10 +252,21 @@ export async function runReviewGate(
 
   emitMergedLensResults(splitParts, firstModel); // one merged review_result per split reviewer
   const fails = results.filter((r) => r.status === 'fail');
+  const findingsPrinted = new Set<string>();
   for (const f of fails) {
     console.error(
       `guard-review: ${f.name} FAILED${f.escalated ? ' (opus-confirmed)' : ''} — ${f.reason || 'see findings below'}`,
     );
+    // A split reviewer fails as several lens-part results under one name: render its block ONCE,
+    // merged across the failing parts, so a multi-lens failure never fragments or double-counts.
+    if (!findingsPrinted.has(f.name)) {
+      findingsPrinted.add(f.name);
+      const findings = renderFindingsBlockForParts(
+        f.name,
+        fails.filter((r) => r.name === f.name),
+      );
+      if (findings) console.error(findings);
+    }
     if (f.transcript) console.error(f.transcript.trim());
   }
   const errors = results.filter((r) => r.status === 'error');
