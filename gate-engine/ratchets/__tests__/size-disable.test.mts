@@ -609,6 +609,454 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
     expect(pr.stderr).toContain('src/changed.ts: 90 lines (max 80)');
   });
 
+  it('blocks a baseline-only ceiling lowering in local, pull-request, and audit modes', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    const local = run(root, 'gate');
+    expect(local.status, local.stderr).toBe(1);
+    expect(local.stderr).toContain('src/legacy.ts: ceiling lowered 100 → 80');
+
+    execFileSync('git', ['commit', '-qm', 'lower ceiling only'], { cwd: root });
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(pr.status, pr.stderr).toBe(1);
+    expect(pr.stderr).toContain('src/legacy.ts: ceiling lowered 100 → 80');
+    expect(run(root, 'gate').status).toBe(1);
+  });
+
+  it('compares a pull-request ceiling lowering with the merge base, not the moving base tip', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'merge base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'pull request lowers ceiling'], { cwd: root });
+    const prHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+
+    execFileSync('git', ['switch', '-qc', 'base-tip', base], { cwd: root });
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'base branch independently lowers ceiling'], {
+      cwd: root,
+    });
+    const baseTip = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['checkout', '-q', '--detach', prHead], { cwd: root });
+
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: baseTip },
+    });
+    expect(pr.status, pr.stderr).toBe(1);
+    expect(pr.stderr).toContain('src/legacy.ts: ceiling lowered 100 → 80');
+  });
+
+  it('reports unavailable or malformed authority snapshots as infrastructure failures', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(70));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    write(root, '.devkit/baselines/size-lines.json', '{');
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    const malformedFreeze = run(root, 'freeze');
+    expect(malformedFreeze.status, malformedFreeze.stderr).toBe(2);
+    expect(malformedFreeze.stderr).toContain('guard-size freeze unavailable');
+    expect(malformedFreeze.stderr).not.toContain('at freezeLinesBaseline');
+    const malformed = run(root, 'gate');
+    expect(malformed.status, malformed.stderr).toBe(2);
+    expect(malformed.stderr).toContain('guard-size: invalid line baseline JSON');
+    expect(malformed.stderr).not.toContain('at lineCeilingChanges');
+
+    const conflictRoot = makeRoot();
+    gitInit(conflictRoot);
+    writeConfig(conflictRoot, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(conflictRoot, 'src/legacy.ts', big(70));
+    write(conflictRoot, 'src/conflict.ts', 'base\n');
+    write(
+      conflictRoot,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(conflictRoot, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: conflictRoot });
+    const conflictBase = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: conflictRoot,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['switch', '-qc', 'other'], { cwd: conflictRoot });
+    write(conflictRoot, 'src/conflict.ts', 'other\n');
+    gitAdd(conflictRoot, 'src/conflict.ts');
+    execFileSync('git', ['commit', '-qm', 'other source'], { cwd: conflictRoot });
+    execFileSync('git', ['checkout', '-q', '--detach', conflictBase], { cwd: conflictRoot });
+    write(conflictRoot, 'src/conflict.ts', 'current\n');
+    gitAdd(conflictRoot, 'src/conflict.ts');
+    execFileSync('git', ['commit', '-qm', 'current source'], { cwd: conflictRoot });
+    expect(spawnSync('git', ['merge', 'other'], { cwd: conflictRoot }).status).toBe(1);
+    const conflicted = run(conflictRoot, 'gate');
+    expect(conflicted.status, conflicted.stderr).toBe(2);
+    expect(conflicted.stderr).toContain('guard-size: Git index snapshot is unavailable');
+    expect(conflicted.stderr).not.toContain('at lineCeilingChanges');
+  });
+
+  it('allows a valid staged baseline to recover an invalid committed baseline', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(70));
+    write(root, '.devkit/baselines/size-lines.json', '{');
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'invalid committed baseline'], { cwd: root });
+
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    const repaired = run(root, 'gate');
+    expect(repaired.status, repaired.stderr).toBe(0);
+    expect(repaired.stderr).not.toContain('invalid line baseline JSON in HEAD');
+  });
+
+  it('blocks removing the only ceiling for an untouched oversized file', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+
+    rmSync(join(root, '.devkit/baselines/size-lines.json'));
+    gitAdd(root, '-A');
+    const local = run(root, 'gate');
+    expect(local.status, local.stderr).toBe(1);
+    expect(local.stderr).toContain('src/legacy.ts: ceiling lowered 100 → 50');
+    execFileSync('git', ['commit', '-qm', 'remove ceiling'], { cwd: root });
+
+    const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_RATCHET_BASE: base },
+    });
+    expect(pr.status, pr.stderr).toBe(1);
+  });
+
+  it.each([
+    { label: 'raise', lines: 90, previous: 100, current: 110 },
+    { label: 'safe lowering', lines: 70, previous: 100, current: 80 },
+  ])(
+    'allows a baseline-only $label that leaves the governed file legal',
+    ({ lines, previous, current }) => {
+      const root = makeRoot();
+      gitInit(root);
+      writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+      write(root, 'src/legacy.ts', big(lines));
+      write(
+        root,
+        '.devkit/baselines/size-lines.json',
+        JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': previous } }),
+      );
+      gitAdd(root, '-A');
+      execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+      const base = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: root,
+        encoding: 'utf8',
+      }).trim();
+      write(
+        root,
+        '.devkit/baselines/size-lines.json',
+        JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': current } }),
+      );
+      gitAdd(root, '.devkit/baselines/size-lines.json');
+      expect(run(root, 'gate').status).toBe(0);
+      execFileSync('git', ['commit', '-qm', 'adjust safe ceiling'], { cwd: root });
+
+      const pr = spawnSync(process.execPath, [SCRIPT, 'gate'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, GUARD_RATCHET_BASE: base },
+      });
+      expect(pr.status, pr.stderr).toBe(0);
+    },
+  );
+
+  it('validates a recorded test ceiling even when the category cap is disabled', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {
+      scanRoots: ['src'],
+      sourceExtensions: ['ts'],
+      maxLines: 50,
+      maxTestLines: 0,
+    });
+    write(root, 'src/legacy.test.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, maxTestLines: 0, files: { 'src/legacy.test.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, maxTestLines: 0, files: { 'src/legacy.test.ts': 80 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+
+    const result = run(root, 'gate');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('src/legacy.test.ts: ceiling lowered 100 → 80');
+  });
+
+  it('ignores a non-baselined staged file when its category cap is disabled', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, {
+      scanRoots: ['src'],
+      sourceExtensions: ['ts'],
+      maxLines: 50,
+      maxTestLines: 0,
+    });
+    write(root, 'src/app.ts', big(10));
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+    write(root, 'src/app.test.ts', big(20));
+    gitAdd(root, 'src/app.test.ts');
+
+    const result = run(root, 'gate');
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain('src/app.test.ts');
+  });
+
+  it('reads an untouched governed file from the index when its staged ceiling is lowered', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    write(root, 'src/legacy.ts', big(70)); // unstaged worktree shrink must not hide index debt
+    const result = run(root, 'gate');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: 90 lines (max 80)');
+  });
+
+  it('does not let an unstaged worktree growth falsely block a safe staged lowering', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(70));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(root, '.devkit/baselines/size-lines.json');
+    write(root, 'src/legacy.ts', big(90));
+    const result = run(root, 'gate');
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('auto-tightens from the index snapshot and remains valid when the gate retries', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    write(root, 'src/legacy.ts', big(90).replace('x', 'y'));
+    gitAdd(root, 'src/legacy.ts');
+    write(root, 'src/legacy.ts', big(70));
+    const first = run(root, 'gate');
+    expect(first.status, first.stderr).toBe(0);
+    const tightened = JSON.parse(
+      readFileSync(join(root, '.devkit/baselines/size-lines.json'), 'utf8'),
+    );
+    expect(tightened.files['src/legacy.ts']).toBe(90);
+    const retry = run(root, 'gate');
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).not.toContain('ceiling lowered');
+  });
+
+  it('cannot mask staged source growth with an unstaged worktree baseline edit', () => {
+    const root = makeRoot();
+    gitInit(root);
+    writeConfig(root, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(root, 'src/legacy.ts', big(90));
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(root, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: root });
+
+    write(root, 'src/legacy.ts', big(150));
+    gitAdd(root, 'src/legacy.ts');
+    write(
+      root,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 500 } }),
+    );
+    const result = run(root, 'gate');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: 150 lines (max 100)');
+  });
+
+  it('ignores an inherited merge ceiling but blocks a lower merge-authored resolution', () => {
+    const inherited = makeRoot();
+    gitInit(inherited);
+    writeConfig(inherited, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(inherited, 'src/legacy.ts', big(90));
+    write(inherited, 'src/feature.ts', big(10));
+    write(
+      inherited,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(inherited, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: inherited });
+    execFileSync('git', ['switch', '-qc', 'feature'], { cwd: inherited });
+    write(inherited, 'src/feature.ts', big(11));
+    gitAdd(inherited, 'src/feature.ts');
+    execFileSync('git', ['commit', '-qm', 'feature'], { cwd: inherited });
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: inherited });
+    write(
+      inherited,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(inherited, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'upstream lowering'], { cwd: inherited });
+    execFileSync('git', ['switch', '-q', 'feature'], { cwd: inherited });
+    execFileSync('git', ['merge', '--no-commit', '--no-ff', 'main'], { cwd: inherited });
+    expect(run(inherited, 'gate').status).toBe(0);
+
+    const resolved = makeRoot();
+    gitInit(resolved);
+    writeConfig(resolved, { scanRoots: ['src'], sourceExtensions: ['ts'], maxLines: 50 });
+    write(resolved, 'src/legacy.ts', big(70));
+    write(
+      resolved,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 100 } }),
+    );
+    gitAdd(resolved, '-A');
+    execFileSync('git', ['commit', '-qm', 'base'], { cwd: resolved });
+    execFileSync('git', ['switch', '-qc', 'feature'], { cwd: resolved });
+    write(
+      resolved,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 90 } }),
+    );
+    gitAdd(resolved, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'feature ceiling'], { cwd: resolved });
+    execFileSync('git', ['switch', '-q', 'main'], { cwd: resolved });
+    write(
+      resolved,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 80 } }),
+    );
+    gitAdd(resolved, '.devkit/baselines/size-lines.json');
+    execFileSync('git', ['commit', '-qm', 'main ceiling'], { cwd: resolved });
+    execFileSync('git', ['switch', '-q', 'feature'], { cwd: resolved });
+    spawnSync('git', ['merge', '--no-commit', '--no-ff', 'main'], { cwd: resolved });
+    write(
+      resolved,
+      '.devkit/baselines/size-lines.json',
+      JSON.stringify({ maxLines: 50, files: { 'src/legacy.ts': 60 } }),
+    );
+    gitAdd(resolved, '.devkit/baselines/size-lines.json');
+    const result = run(resolved, 'gate');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('src/legacy.ts: ceiling lowered 80 → 60');
+  });
+
   it('pull-request CI fails unavailable when its supplied base cannot be resolved', () => {
     const root = makeRoot();
     gitInit(root);

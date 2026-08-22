@@ -1,12 +1,10 @@
 import { sourceMatchers } from "../config.mjs";
 import { LEGACY_LINES_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from "./baseline-paths.mjs";
 import { LINES_BASELINE } from "./size-policy.mjs";
+import { lineBaselineFilesOrExit } from "./size-line-authority.mjs";
 export function freezeLinesBaseline(root, config, oversized, mode) {
     const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
-    // SAFETY: freeze reads the Devkit-owned line baseline shape it writes below.
-    const previous = baseline
-        ? (JSON.parse(baseline.contents).files ?? {})
-        : {};
+    const previous = lineBaselineFilesOrExit(baseline?.contents ?? null, baseline?.relativePath ?? LINES_BASELINE, 'guard-size freeze unavailable');
     const match = sourceMatchers(config.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
     const raised = mode === 'refresh'
