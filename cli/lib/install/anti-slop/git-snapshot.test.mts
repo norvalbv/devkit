@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ANTI_SLOP_UPSTREAM } from './constants.mts';
-import { withStagedAntiSlopSnapshot } from './git-snapshot.mts';
+import {
+  gitBaselineEnvelope,
+  withBaseAntiSlopSnapshot,
+  withStagedAntiSlopSnapshot,
+} from './git-snapshot.mts';
 
 const roots: string[] = [];
 const EMPTY_BASELINE = `${JSON.stringify(
@@ -125,5 +129,25 @@ describe('anti-slop staged Git snapshot', () => {
       expect(snapshot.renames.get('src/file.ts')).toBe('src/renamed.ts');
       expect(snapshot.paths).toEqual(['src/renamed.ts']);
     });
+  });
+
+  it('materializes selected files from the exact base tree and omits candidate-only paths', () => {
+    const root = repository();
+    const base = git(root, ['rev-parse', 'HEAD']);
+    writeFileSync(join(root, 'src', 'file.ts'), 'export const value = "candidate";\n');
+    writeFileSync(join(root, 'src', 'candidate.ts'), 'export const candidate = true;\n');
+    git(root, ['add', '-A']);
+    const envelope = gitBaselineEnvelope(root, base);
+    expect(envelope.introducedPaths).toEqual(new Set(['src/candidate.ts']));
+
+    withBaseAntiSlopSnapshot(
+      root,
+      envelope.baseTree,
+      ['src/file.ts', 'src/candidate.ts'],
+      (snapshot) => {
+        expect(snapshot.paths).toEqual(['src/file.ts']);
+        expect(readFileSync(join(snapshot.cwd, 'src', 'file.ts'), 'utf8')).toContain('"base"');
+      },
+    );
   });
 });

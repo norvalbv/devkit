@@ -8,6 +8,7 @@ import {
   baselineFromGroups,
   baselineIncreases,
   compareBaseline,
+  migrateBaselineRenames,
   pruneBaseline,
   readBaseline,
   writeBaseline,
@@ -20,6 +21,7 @@ import type { FindingGroup } from '../../lib/install/anti-slop/diagnostics.mts';
 import {
   type GitBaselineEnvelope,
   gitBaselineEnvelope,
+  withBaseAntiSlopSnapshot,
   withStagedAntiSlopSnapshot,
 } from '../../lib/install/anti-slop/git-snapshot.mts';
 import {
@@ -136,6 +138,46 @@ function checkBaselineEnvelope(
   return 1;
 }
 
+function inheritedBaseAllowance(
+  cwd: string,
+  selected: AntiSlopBaseline,
+  candidateGroups: readonly FindingGroup[],
+  envelope: GitBaselineEnvelope | null,
+): AntiSlopBaseline {
+  if (!envelope?.base || !envelope.baseTree) return selected;
+  const candidateNew = compareBaseline(selected, candidateGroups).newGroups;
+  if (candidateNew.length === 0) return selected;
+
+  const reverseRenames = new Map(
+    [...envelope.renames].map(([basePath, candidatePath]) => [candidatePath, basePath]),
+  );
+  const basePaths = [
+    ...new Set(
+      candidateNew.flatMap((group) =>
+        envelope.introducedPaths.has(group.file)
+          ? []
+          : [reverseRenames.get(group.file) ?? group.file],
+      ),
+    ),
+  ];
+  return withBaseAntiSlopSnapshot(cwd, envelope.baseTree, basePaths, (snapshot) => {
+    if (snapshot.paths.length === 0) return selected;
+    const inherited = migrateBaselineRenames(
+      baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)),
+      envelope.renames,
+    );
+    const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
+    for (const entry of inherited.entries) {
+      const committed = entries.get(entry.fingerprint);
+      if (!committed || entry.count > committed.count) entries.set(entry.fingerprint, entry);
+    }
+    return {
+      ...selected,
+      entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+    };
+  });
+}
+
 function check(cwd: string, args: string[], envelope: GitBaselineEnvelope | null = null): number {
   const baseline = baselineOrExplain(cwd);
   if (!baseline) return 2;
@@ -146,7 +188,9 @@ function check(cwd: string, args: string[], envelope: GitBaselineEnvelope | null
     ...baseline,
     entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
   };
-  const comparison = compareBaseline(selected, collectAntiSlopGroups(cwd, args));
+  const candidateGroups = collectAntiSlopGroups(cwd, args);
+  const allowance = inheritedBaseAllowance(cwd, selected, candidateGroups, envelope);
+  const comparison = compareBaseline(allowance, candidateGroups);
   printNew(comparison.newGroups);
   const errors = comparison.newGroups.filter((group) => group.severity === 'error');
   const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
