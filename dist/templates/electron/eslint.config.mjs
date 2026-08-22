@@ -18,7 +18,7 @@
 // and the renderer⊅main trust wall are the electron-stack contract; the lib/
 // domain registries (eslint/domains.mjs) start EMPTY and grow one append at a time.
 //
-// BASELINES ARE OPTIONAL AT LOAD TIME: a fresh repo has no eslint/baselines/*.mjs
+// BASELINES ARE OPTIONAL AT LOAD TIME: a fresh repo has no .devkit/baselines/*.mjs
 // yet, and an emptied domain registry would otherwise hard-fail every existing
 // lib folder. So the grandfather lists are loaded with `loadBaseline` (returns []
 // when the file is absent) and `devkit init` runs the baseline generators to
@@ -46,22 +46,39 @@ import {
 // fallow-ignore-next-line code-duplication
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+async function importAcrossMigration(canonical, legacy) {
+  for (const file of [canonical, legacy, canonical]) {
+    if (!existsSync(file)) continue;
+    try {
+      return await import(pathToFileURL(file).href);
+    } catch (error) {
+      if (existsSync(file)) throw error;
+    }
+  }
+  return null;
+}
+
 // Load a named export from a baseline .mjs, or [] if the file doesn't exist yet.
 // `devkit init` generates these AFTER emitting this config — until then (and on a
 // fresh repo) the config must load clean with empty grandfather lists.
 async function loadBaseline(file, exportName) {
-  const abs = join(HERE, 'eslint', 'baselines', file);
-  if (!existsSync(abs)) return [];
-  const mod = await import(pathToFileURL(abs).href);
+  const canonical =
+    file === 'imports.mjs'
+      ? join(HERE, '.devkit', 'baselines', file)
+      : join(HERE, '.devkit', 'baselines', 'structure', file);
+  const legacy = join(HERE, 'eslint', 'baselines', file);
+  const mod = await importAcrossMigration(canonical, legacy);
+  if (!mod) return [];
   return mod[exportName] ?? [];
 }
 
 // Optional hand-maintained permanent exemptions (reason-required). Absent on a
 // fresh repo → empty arrays.
 async function loadExempt(exportName) {
-  const abs = join(HERE, 'eslint', 'baselines', 'exempt.mjs');
-  if (!existsSync(abs)) return [];
-  const mod = await import(pathToFileURL(abs).href);
+  const canonical = join(HERE, '.devkit', 'structure', 'exempt.mjs');
+  const legacy = join(HERE, 'eslint', 'baselines', 'exempt.mjs');
+  const mod = await importAcrossMigration(canonical, legacy);
+  if (!mod) return [];
   return mod[exportName] ?? [];
 }
 
@@ -548,7 +565,7 @@ const backendConfigs = [
 //
 // Scan mode (DEVKIT_IMPORTS_BASELINE_SCAN=1): drops the generated grandfather
 // entries + flips debugMode so error text carries the import path — used by the
-// import-wall baseline generator to (re)generate eslint/baselines/imports.mjs.
+// import-wall baseline generator to (re)generate .devkit/baselines/imports.mjs.
 const IMPORT_WALL_SCAN = process.env.DEVKIT_IMPORTS_BASELINE_SCAN === '1';
 
 // Reason: electron and react-app are SEPARATE shipped eslint templates, each a standalone file copied into a consumer repo (no devkit import to share a base) - intentional per-stack duplication
@@ -588,7 +605,7 @@ const importWalls = createIndependentModules({
       name: 'renderer',
       pattern: 'src/renderer/**',
       errorMessage:
-        'Renderer import wall: no src/main (cross-process types -> src/shared/types), no other-feature deep paths (use the @/features/<x> barrel), no frozen legacy dirs (@/utils,@/types,@/constants,@/contexts -> lib/). Grandfathered files: eslint/baselines/imports.mjs (shrink-only).',
+        'Renderer import wall: no src/main (cross-process types -> src/shared/types), no other-feature deep paths (use the @/features/<x> barrel), no frozen legacy dirs (@/utils,@/types,@/constants,@/contexts -> lib/). Grandfathered files: .devkit/baselines/imports.mjs (shrink-only).',
       allowImportsFrom: ['{renderer_base}'],
     },
     {

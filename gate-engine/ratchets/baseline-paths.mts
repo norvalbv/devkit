@@ -1,4 +1,12 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -14,6 +22,12 @@ export const SIZE_BASELINE = '.devkit/baselines/size.json';
 export const LEGACY_FANOUT_BASELINE = 'eslint/baselines/fanout.json';
 export const LEGACY_LINES_BASELINE = 'eslint/baselines/size-lines.json';
 export const LEGACY_SIZE_BASELINE = 'eslint/baselines/size.json';
+export const IMPORT_WALL_BASELINE = '.devkit/baselines/imports.mjs';
+export const STRUCTURE_BASELINE_DIR = '.devkit/baselines/structure';
+export const STRUCTURE_EXEMPT = '.devkit/structure/exempt.mjs';
+export const LEGACY_IMPORT_WALL_BASELINE = 'eslint/baselines/imports.mjs';
+export const LEGACY_STRUCTURE_BASELINE_DIR = 'eslint/baselines';
+export const LEGACY_STRUCTURE_EXEMPT = 'eslint/baselines/exempt.mjs';
 
 const LEGACY_RATCHET_BASELINES = [
   { from: LEGACY_FANOUT_BASELINE, to: FANOUT_BASELINE },
@@ -21,14 +35,47 @@ const LEGACY_RATCHET_BASELINES = [
   { from: LEGACY_SIZE_BASELINE, to: SIZE_BASELINE },
 ] as const;
 
+function legacyDevkitBaselines(root: string) {
+  const legacyDir = join(root, LEGACY_STRUCTURE_BASELINE_DIR);
+  const canonicalDir = join(root, STRUCTURE_BASELINE_DIR);
+  const modules = new Set(
+    [legacyDir, canonicalDir].flatMap((dir) =>
+      existsSync(dir)
+        ? readdirSync(dir).filter(
+            (name) => name.endsWith('.mjs') && name !== 'imports.mjs' && name !== 'exempt.mjs',
+          )
+        : [],
+    ),
+  );
+  return [
+    ...LEGACY_RATCHET_BASELINES,
+    { from: LEGACY_IMPORT_WALL_BASELINE, to: IMPORT_WALL_BASELINE },
+    { from: LEGACY_STRUCTURE_EXEMPT, to: STRUCTURE_EXEMPT },
+    ...[...modules].sort().map((name) => ({
+      from: `${LEGACY_STRUCTURE_BASELINE_DIR}/${name}`,
+      to: `${STRUCTURE_BASELINE_DIR}/${name}`,
+    })),
+  ];
+}
+
 const BASELINE_SETTLE = new Int32Array(new SharedArrayBuffer(4));
+const MODULE_TOKEN_RE =
+  /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\/\/[^\n]*|\/\*[\s\S]*?\*\/|\s+|./g;
+
+function comparableModuleTokens(contents: Buffer): string {
+  return (contents.toString('utf8').match(MODULE_TOKEN_RE) ?? [])
+    .filter((token) => !/^\s|^\/\//.test(token) && !token.startsWith('/*'))
+    .join('');
+}
 
 function sameBaselineDebt(left: Buffer, right: Buffer): boolean {
   if (left.equals(right)) return true;
   try {
     return isDeepStrictEqual(JSON.parse(left.toString('utf8')), JSON.parse(right.toString('utf8')));
   } catch {
-    return false;
+    // MJS baselines are declarative exports. Ignore comments and formatting while retaining every
+    // executable token, so a generated-header change cannot masquerade as different debt.
+    return comparableModuleTokens(left) === comparableModuleTokens(right);
   }
 }
 
@@ -194,13 +241,14 @@ export function migrateRatchetBaselines(
     create = createBaselineExclusively,
   }: { dryRun?: boolean; link?: BaselineLink; create?: BaselineCreate } = {},
 ): RatchetBaselineMigration[] {
-  const present = LEGACY_RATCHET_BASELINES.flatMap(({ from, to }) => {
+  const legacyBaselines = legacyDevkitBaselines(root);
+  const present = legacyBaselines.flatMap(({ from, to }) => {
     const bytes = readExisting(join(root, from));
     return bytes ? [{ bytes, from, to }] : [];
   });
   // Recover cleanly if a prior run moved the file but Git staging was interrupted: the old index
   // entry still protects the debt, and this pass finishes the tracked rename.
-  const pendingIndexMoves = LEGACY_RATCHET_BASELINES.flatMap(({ from, to }) =>
+  const pendingIndexMoves = legacyBaselines.flatMap(({ from, to }) =>
     !existsSync(join(root, from)) && existsSync(join(root, to)) && indexTracksBaseline(root, from)
       ? [{ from, to }]
       : [],
@@ -307,7 +355,7 @@ export function migrateRatchetBaselines(
 export function reportRatchetBaselineMigration(root: string, dryRun: boolean): void {
   const migrations = migrateRatchetBaselines(root, { dryRun });
   if (migrations.length === 0) return;
-  console.log('0. ratchet baseline storage');
+  console.log('0. devkit baseline storage');
   for (const migration of migrations) {
     const action = migration.kind === 'moved' ? 'move' : 'remove duplicate';
     console.log(`  ${dryRun ? '[dry-run] ' : '✓ '}${action} ${migration.from} → ${migration.to}`);

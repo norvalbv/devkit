@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import {
   enableLineGrowth,
@@ -9,7 +8,14 @@ import {
   LINE_CAP,
   setMaxLines,
 } from '../../gate-engine/ratchets/size-disable.mts';
-import { reportRatchetBaselineMigration } from '../../gate-engine/ratchets/baseline-paths.mts';
+import {
+  IMPORT_WALL_BASELINE,
+  LEGACY_IMPORT_WALL_BASELINE,
+  STRUCTURE_BASELINE_DIR,
+  STRUCTURE_EXEMPT,
+  reportRatchetBaselineMigration,
+} from '../../gate-engine/ratchets/baseline-paths.mts';
+import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mts';
 import {
   AGENT_TARGETS,
   applyOverlayConstraints,
@@ -75,20 +81,20 @@ const STRUCTURE_TEMPLATE_FILES: Record<string, [string, string][]> = {
   electron: [
     ['eslint.config.mjs', 'eslint.config.mjs'],
     ['eslint/domains.mjs', 'eslint/domains.mjs'],
-    ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+    ['.devkit/structure/exempt.mjs', STRUCTURE_EXEMPT],
   ],
   // react-app — CONFIG-DRIVEN (data): components + pages trees declared in guard.config.json, compiled
   // by the shared shim. No per-stack eslint.config / domains. (electron is the one remaining preset.)
   'react-app': [
     ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
-    ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+    ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
   ],
   // Flat component lib — CONFIG-DRIVEN (the universal path): the topology is a `structure` block in
   // guard.config.json, and eslint.config.mjs is the shared shim that compiles it via devkit's
   // compileToEslint. No per-stack eslint.config / domains. `_shared/` srcs resolve from templates/.
   'component-lib': [
     ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
-    ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+    ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
   ],
 };
 
@@ -139,10 +145,6 @@ interface DevkitConfig {
 interface TsConfig {
   extends?: string | string[];
   [key: string]: unknown;
-}
-
-interface ExemptModule {
-  importWallExempt?: Array<{ pattern: string }>;
 }
 
 // The shape of a caught exec/Error the log helpers read (execFileSync throws carry stderr + status).
@@ -397,18 +399,6 @@ function runFreezes(cwd: string, dryRun: boolean, { overlay = false }: { overlay
   }
 }
 
-/** The consumer's permanent import-wall exemptions (eslint/baselines/exempt.mjs `importWallExempt`), or empty. */
-export async function readImportWallExempt(cwd: string): Promise<Set<string>> {
-  const file = join(cwd, 'eslint', 'baselines', 'exempt.mjs');
-  if (!existsSync(file)) return new Set();
-  try {
-    const { importWallExempt = [] } = (await import(pathToFileURL(file).href)) as ExemptModule;
-    return new Set(importWallExempt.map((m) => m.pattern));
-  } catch {
-    return new Set();
-  }
-}
-
 async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean, regen = true) {
   if (dryRun) {
     console.log('  [dry-run] skip structure + import-wall baseline generators');
@@ -417,7 +407,7 @@ async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean
   // Structure/import baselines are cut ONCE at first init. An adopted repo (.devkit/config.json
   // present) never re-snapshots — `devkit upgrade` passes regen=false so it skips here rather than
   // re-grandfathering violations added since init (silent debt laundering). Keyed off the durable
-  // marker, not `eslint/baselines/*.mjs` existence, so deleting an empty baseline doesn't re-arm regen.
+  // marker, not baseline-file existence, so deleting an empty baseline doesn't re-arm regeneration.
   if (!regen && repoAdopted(cwd)) {
     console.log(
       '  • repo already adopted — keeping structure + import-wall baselines (run `devkit init` to re-snapshot)',
@@ -436,12 +426,12 @@ async function runStructureBaselines(cwd: string, stack: string, dryRun: boolean
     console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
   }
   try {
-    // Honour the consumer's hand-maintained import-wall exemptions (eslint/baselines/exempt.mjs):
+    // Honour the consumer's hand-maintained import-wall exemptions:
     // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
     // during the scan — else it would be re-grandfathered every regen.
     generateImportWallBaseline(cwd, {
       ...opts,
-      exemptPatterns: await readImportWallExempt(cwd),
+      exemptPatterns: await loadImportWallExempt(cwd),
     });
   } catch (e: unknown) {
     console.log(`  ! import-wall baseline generator skipped: ${firstLine(e)}`);
@@ -658,10 +648,12 @@ function removeStructure(cwd: string, prevConfig: DevkitConfig | null, dryRun: b
       if (!dryRun) rmSync(p);
     }
   }
-  const baselines = join(cwd, 'eslint', 'baselines', 'imports.mjs');
-  if (existsSync(baselines)) {
-    console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} eslint/baselines/imports.mjs`);
-    if (!dryRun) rmSync(baselines);
+  const owned = [IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR];
+  for (const relativePath of owned) {
+    const target = join(cwd, relativePath);
+    if (!existsSync(target)) continue;
+    console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} ${relativePath}`);
+    if (!dryRun) rmSync(target, { recursive: true, force: true });
   }
   const pkgRemoved = removeFromPkg(
     cwd,

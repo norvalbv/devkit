@@ -30,7 +30,8 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGuardConfig } from "../../../gate-engine/config.mjs";
-const OUT = 'eslint/baselines/imports.mjs';
+import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, } from "../../../gate-engine/ratchets/baseline-paths.mjs";
+const OUT = IMPORT_WALL_BASELINE;
 const RULE = 'project-structure/independent-modules';
 const IMPORT_PATH_RE = /Import path\s*=\s*"([^"]+)"/;
 // Default wall pattern classes — the electron-stack shape (mirrors frink). A
@@ -168,7 +169,7 @@ export const ${exportName} = `;
     return `${header}${JSON.stringify(entries, null, 2)};\n`;
 }
 /**
- * Generate <cwd>/eslint/baselines/imports.mjs. Returns the entries; no-ops the
+ * Generate <cwd>/.devkit/baselines/imports.mjs. Returns the entries; no-ops the
  * write under dryRun. Throws on any loud-failure guard (never silently widens).
  *
  * @param cwd consumer repo root
@@ -188,6 +189,7 @@ export function generateImportWallBaseline(cwd = process.cwd(), opts = {}) {
     const { entries, classCounts } = computeImportWallBaseline(cwd, opts);
     const exportName = opts.walls?.exportName ?? DEFAULT_WALLS.exportName;
     const out = join(cwd, OUT);
+    const legacy = join(cwd, LEGACY_IMPORT_WALL_BASELINE);
     if (!opts.dryRun) {
         if (entries.length > 0) {
             mkdirSync(dirname(out), { recursive: true });
@@ -198,6 +200,7 @@ export function generateImportWallBaseline(cwd = process.cwd(), opts = {}) {
             // (the eslint loader returns [] on absence, so enforcement is unchanged).
             rmSync(out, { force: true });
         }
+        rmSync(legacy, { force: true });
     }
     log(`  ${opts.dryRun ? '[dry-run] ' : '✓ '}${OUT}: ${entries.length} grandfathered file(s)`);
     for (const [w, n] of Object.entries(classCounts).sort())

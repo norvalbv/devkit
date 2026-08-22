@@ -13,11 +13,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   FANOUT_BASELINE,
+  IMPORT_WALL_BASELINE,
   LEGACY_LINES_BASELINE,
   LINES_BASELINE,
   migrateRatchetBaselines,
   readRatchetBaseline,
   SIZE_BASELINE,
+  STRUCTURE_BASELINE_DIR,
+  STRUCTURE_EXEMPT,
   writeRatchetBaseline,
 } from '../baseline-paths.mts';
 
@@ -113,6 +116,52 @@ describe('ratchet baseline paths', () => {
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
     expect(existsSync(join(root, 'eslint/baselines/size-lines.json'))).toBe(false);
     expect(migrateRatchetBaselines(root)).toEqual([]);
+  });
+
+  it('moves ESLint-hosted structure debt and permanent exemptions under Devkit ownership', () => {
+    const root = makeRoot();
+    const tree = 'export const rendererStructureBaseline = ["legacy.ts"]\n';
+    const imports = 'export const rendererImportWallBaseline = []\n';
+    const exempt = 'export const structureExempt = { renderer: ["vendored.ts"] }\n';
+    write(root, 'eslint/baselines/renderer.mjs', tree);
+    write(root, 'eslint/baselines/imports.mjs', imports);
+    write(root, 'eslint/baselines/exempt.mjs', exempt);
+
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: 'eslint/baselines/imports.mjs', kind: 'moved', to: IMPORT_WALL_BASELINE },
+      { from: 'eslint/baselines/exempt.mjs', kind: 'moved', to: STRUCTURE_EXEMPT },
+      {
+        from: 'eslint/baselines/renderer.mjs',
+        kind: 'moved',
+        to: `${STRUCTURE_BASELINE_DIR}/renderer.mjs`,
+      },
+    ]);
+    expect(readFileSync(join(root, IMPORT_WALL_BASELINE), 'utf8')).toBe(imports);
+    expect(readFileSync(join(root, STRUCTURE_EXEMPT), 'utf8')).toBe(exempt);
+    expect(readFileSync(join(root, STRUCTURE_BASELINE_DIR, 'renderer.mjs'), 'utf8')).toBe(tree);
+  });
+
+  it('removes a token-equivalent MJS duplicate with different comments and formatting', () => {
+    const root = makeRoot();
+    write(
+      root,
+      'eslint/baselines/renderer.mjs',
+      '// old generated header\nexport const rendererStructureBaseline=["legacy.ts"];\n',
+    );
+    write(
+      root,
+      `${STRUCTURE_BASELINE_DIR}/renderer.mjs`,
+      '// new generated header\nexport const rendererStructureBaseline = [\n  "legacy.ts"\n];\n',
+    );
+
+    expect(migrateRatchetBaselines(root)).toEqual([
+      {
+        from: 'eslint/baselines/renderer.mjs',
+        kind: 'removed-duplicate',
+        to: `${STRUCTURE_BASELINE_DIR}/renderer.mjs`,
+      },
+    ]);
+    expect(existsSync(join(root, 'eslint/baselines/renderer.mjs'))).toBe(false);
   });
 
   it('stages both sides of a tracked baseline move', () => {

@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { sourceMatchers } from "../config.mjs";
+import { LEGACY_LINES_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from "./baseline-paths.mjs";
 import { LINES_BASELINE } from "./size-policy.mjs";
 export function freezeLinesBaseline(root, config, oversized, mode) {
-    const baselineFile = join(root, LINES_BASELINE);
-    const previous = existsSync(baselineFile)
-        ? JSON.parse(readFileSync(baselineFile, 'utf8')).files
+    const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+    // SAFETY: freeze reads the Devkit-owned line baseline shape it writes below.
+    const previous = baseline
+        ? (JSON.parse(baseline.contents).files ?? {})
         : {};
     const match = sourceMatchers(config.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
@@ -17,11 +17,10 @@ export function freezeLinesBaseline(root, config, oversized, mode) {
         mode === 'refresh' ? file.lines : Math.min(previous[file.file] ?? file.lines, file.lines),
     ]));
     if (Object.keys(files).length > 0) {
-        mkdirSync(dirname(baselineFile), { recursive: true });
-        writeFileSync(baselineFile, `${JSON.stringify({ maxLines: config.maxLines, maxTestLines: config.maxTestLines, files }, null, 2)}\n`);
+        writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, `${JSON.stringify({ maxLines: config.maxLines, maxTestLines: config.maxTestLines, files }, null, 2)}\n`);
     }
     else {
-        rmSync(baselineFile, { force: true });
+        removeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
     }
     if (raised.length > 0) {
         console.log(`  ⚠ ${raised.length} file(s) grew since the last freeze:`);

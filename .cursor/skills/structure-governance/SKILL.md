@@ -76,7 +76,7 @@ HARD STOPS (lint errors, not guidelines):
     Folder full → split into cohesive kebab subfolders (group by concern; graphify/co-occurrence
     can suggest clusters). Existing piles are grandfathered shrink-only (.devkit/baselines/fanout.json).
  4. PROCESS: renderer never imports src/main — not even types (cross-process types live in
-    src/shared/types; existing offenders are grandfathered shrink-only in eslint/baselines/imports.mjs;
+    src/shared/types; existing offenders are grandfathered shrink-only in .devkit/baselines/imports.mjs;
     sole permanent exempt: lib/trpc.ts AppRouter). No Node builtins in renderer (bare `path` OK —
     vite-aliased to path-browserify). Other features only via their index.ts barrel, never deep paths.
  5. Component folders: PascalCase + index.tsx required; co-locate constants.ts/types.ts/tests.
@@ -105,7 +105,7 @@ Full prose lives in [`references/walls.md`](references/walls.md) and the matchin
 2. Still stuck → [structure-governance.md `## 3`](../../../docs/developer-docs/structure-governance.md) ("I hit a wall — what do I do?").
 3. Need the step-by-step → [`references/fixing-lint-errors.md`](references/fixing-lint-errors.md).
 4. Genuine **permanent** architectural exception (not "I'm in a hurry") → one reasoned entry in
-   [`eslint/baselines/exempt.mjs`](../../../eslint/baselines/exempt.mjs). Never hand-edit a generated baseline.
+   [`.devkit/structure/exempt.mjs`](../../../.devkit/structure/exempt.mjs). Never hand-edit a generated baseline.
 
 ## Adding a domain / feature
 

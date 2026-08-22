@@ -265,7 +265,7 @@ describe('init --stack react-app (structure ungated)', () => {
     expect(r.status).toBe(0);
     for (const f of [
       'eslint.config.mjs',
-      'eslint/baselines/exempt.mjs',
+      '.devkit/structure/exempt.mjs',
       'guard.config.json',
       'biome.jsonc',
       'tsconfig.json',

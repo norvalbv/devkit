@@ -34,7 +34,8 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   .devkit/baselines/fanout.json
   .devkit/baselines/size-lines.json
   .devkit/baselines/size.json
-  eslint/baselines
+  .devkit/baselines/imports.mjs
+  .devkit/structure/exempt.mjs
   eslint.config.devkit.mjs
   biome.devkit.jsonc
   .qavis/receipt.json
@@ -139,7 +140,7 @@ link_untracked_gate_configs() {
   # ship-gates-converge-not-restart (2026-07-07) already records this link as a dependency: the
   # prefix-cache fingerprint folds in the baseline files and needs real state here. Each file is a
   # candidate so a tracked freeze cannot hide an untracked sibling from the gate worktree.
-  # eslint/baselines remains a separate candidate for structure/import policy modules.
+  # Legacy eslint/baselines files are added individually below until every consumer has migrated.
   # Config-driven paths (indexPath / allowlistPath) from the resolver. .mts in source, built .mjs in an
   # installed consumer (the reconcile-manifest-write.mts dual-ext idiom). A resolver failure (unparseable
   # guard.config.json → resolveGuardConfig throws) is non-fatal: warn, keep the hardcoded set, and let
@@ -174,6 +175,23 @@ link_untracked_gate_configs() {
       echo "⚠️  ship: could not resolve config gate paths (guard.config.json unreadable?) — linking known defaults only" >&2
     fi
   fi
+  # Structure debt is one module per configured tree. Enumerate files rather than projecting the
+  # directory atomically so a tracked tree cannot hide an untracked sibling in overlay consumers.
+  for candidate_source_root in "$root" "${main_root:-$root}"; do
+    for baseline in "$candidate_source_root"/.devkit/baselines/structure/*.mjs; do
+      [ -e "$baseline" ] || continue
+      rel=${baseline#"$candidate_source_root"/}
+      candidates+=("$rel")
+    done
+  done
+  # Legacy overlay baselines remain readable until init/upgrade migrates them. Project each local
+  # file independently; never pull an atomic directory (or a stale primary-checkout fallback) over
+  # canonical .devkit state in the shipping checkout.
+  for baseline in "$root"/eslint/baselines/*.json "$root"/eslint/baselines/*.mjs; do
+    [ -e "$baseline" ] || continue
+    rel=${baseline#"$root"/}
+    candidates+=("$rel")
+  done
   if is_review_projection_purpose "$purpose"; then
     IFS= read -r -d '' index_rel < <(node "$emitter" "$root" indexPath --null 2>/dev/null) || index_rel=
     [ -n "$projection_manifest" ] || {

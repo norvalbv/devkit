@@ -25,8 +25,8 @@ const writeRatchetBaseline = (d: string, name: string, body: string) => {
   writeFileSync(join(d, '.devkit', 'baselines', name), body);
 };
 const writeStructureBaseline = (d: string, name: string, body: string) => {
-  mkdirSync(join(d, 'eslint', 'baselines'), { recursive: true });
-  writeFileSync(join(d, 'eslint', 'baselines', name), body);
+  mkdirSync(join(d, '.devkit', 'baselines', 'structure'), { recursive: true });
+  writeFileSync(join(d, '.devkit', 'baselines', 'structure', name), body);
 };
 
 let savedJscpd: string | undefined;
@@ -66,6 +66,13 @@ describe('gateConfigFingerprint — invalidating inputs', () => {
     const beforeMjs = gateConfigFingerprint(d);
     writeStructureBaseline(d, 'app.mjs', 'export default ["src/legacy.ts"];');
     expect(gateConfigFingerprint(d)).not.toBe(beforeMjs);
+    const beforeExempt = gateConfigFingerprint(d);
+    mkdirSync(join(d, '.devkit', 'structure'), { recursive: true });
+    writeFileSync(
+      join(d, '.devkit', 'structure', 'exempt.mjs'),
+      'export const structureExempt = {};',
+    );
+    expect(gateConfigFingerprint(d)).not.toBe(beforeExempt);
   });
 
   it('the index changes on both size and mtime (the stat proxy)', () => {

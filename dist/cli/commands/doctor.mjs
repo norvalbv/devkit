@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { QAVIS_RECIPE, qavisOnPath } from "../../gate-engine/qavis-advisory/check.mjs";
+import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, LINES_BASELINE, readRatchetBaseline, SIZE_BASELINE, } from "../../gate-engine/ratchets/baseline-paths.mjs";
 import { RECOMMENDED_GUARD_IDS, structureCmdFor } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { checkAgentAssets, checkRegistrations } from "../lib/doctor/asset-checks.mjs";
@@ -54,8 +55,11 @@ function checkSearchToolBins() {
     return check('search-steering bins', 'OK', 'guard + counter present');
 }
 function checkBaselines(cwd) {
-    const has = (p) => existsSync(join(cwd, 'eslint', 'baselines', p));
-    const present = ['fanout', 'size'].filter((n) => has(`${n}.json`));
+    const present = [
+        ['fanout', readRatchetBaseline(cwd, FANOUT_BASELINE, LEGACY_FANOUT_BASELINE)],
+        ['size', readRatchetBaseline(cwd, SIZE_BASELINE, LEGACY_SIZE_BASELINE)],
+        ['line-growth', readRatchetBaseline(cwd, LINES_BASELINE, LEGACY_LINES_BASELINE)],
+    ].flatMap(([name, baseline]) => (baseline ? [name] : []));
     // A ratchet baseline holds ONLY grandfathered debt and is cut once at init. An absent one means
     // "no debt — cap enforced from guard.config.json", which is healthy, not drift. So this is purely
     // informational: never MISSING, never a --fix target.

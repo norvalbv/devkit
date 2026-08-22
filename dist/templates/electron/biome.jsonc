@@ -9,7 +9,7 @@
   "extends": ["@norvalbv/devkit/biome/base"],
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!out", "!dist", "!release", "!resources", "!eslint/baselines"]
+    "includes": ["**", "!out", "!dist", "!release", "!resources", "!.devkit/baselines", "!.devkit/structure"]
   },
   "overrides": [
     {

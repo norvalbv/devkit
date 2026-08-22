@@ -1564,6 +1564,8 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
     const src = readFileSync(linkGateConfigsScript, 'utf8');
     const block = /GATE_PROJECTION_FIXED_CANDIDATES=\(\n([\s\S]*?)\n\)/.exec(src);
     expect(block, 'candidate registry not found — did the helper get restructured?').toBeTruthy();
+    expect(src).toContain('/.devkit/baselines/structure/*.mjs');
+    expect(src).toContain('/eslint/baselines/*.mjs');
     expect(
       (block as RegExpExecArray)[1]
         .split('\n')
@@ -1581,7 +1583,8 @@ describe('ship-branch.sh — untracked/gitignored gate configs are linked into t
       '.devkit/baselines/fanout.json',
       '.devkit/baselines/size-lines.json',
       '.devkit/baselines/size.json',
-      'eslint/baselines',
+      '.devkit/baselines/imports.mjs',
+      '.devkit/structure/exempt.mjs',
       'eslint.config.devkit.mjs',
       'biome.devkit.jsonc',
       '.qavis/receipt.json',

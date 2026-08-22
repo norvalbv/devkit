@@ -20,7 +20,7 @@ Two ideas:
 1. **Walls** — rules that say where files live, how they're named, and what they may import.
 2. **Grandfather-and-shrink** — when a wall is switched on, the repo already has violations. Rather
    than rewrite everything at once, every existing violator is recorded in a generated *baseline*
-   ([`eslint/baselines/`](../eslint/baselines/)) and exempted. **New** violations are blocked; old
+   ([`.devkit/baselines/`](../.devkit/baselines/)) and exempted. **New** violations are blocked; old
    ones shrink away as files are touched. The baselines are a to-do list that empties itself.
 
 ## 2. Declare once — devkit generates the rest
@@ -89,7 +89,7 @@ e.g. devkit's `gate-engine/`, whose top-level folders are its sub-engines.)
 | import across a wall rejected | a `structure.walls` boundary | route through the allowed surface (a barrel, a bridge) |
 
 **If you believe a block is genuinely a permanent exception** (architectural, not "I'm in a hurry"):
-add an entry to `eslint/baselines/exempt.mjs` with a one-line reason. That hand-edited file is the
+add an entry to `.devkit/structure/exempt.mjs` with a one-line reason. That hand-edited file is the
 *only* escape hatch; never hand-edit a generated baseline (it's wiped on the next regen).
 
 ## 5. Debt vs exempt, and the end goal
@@ -98,12 +98,12 @@ add an entry to `eslint/baselines/exempt.mjs` with a one-line reason. That hand-
   *should* conform but doesn't *yet*. **Shrink-only** and **self-cleaning** — fix the file and its
   entry drops out on the next regen. You can't game it by hand-deleting an entry (regen re-adds
   anything still violating; the `.json` ratchets gate the count monotonically down).
-- **Exempt** ([`eslint/baselines/exempt.mjs`](../eslint/baselines/exempt.mjs)): a deliberate permanent
+- **Exempt** ([`.devkit/structure/exempt.mjs`](../.devkit/structure/exempt.mjs)): a deliberate permanent
   exception with a written reason. **Never shrinks.**
 
-**The goal is to drive every debt baseline to `[]` / `0`,** reclassifying genuine permanent exceptions
-into `exempt.mjs` as you find them. **Keep the empty files** — an empty baseline is the standing proof
-that its wall has zero grandfathered exceptions.
+**The goal is to eliminate every debt baseline,** reclassifying genuine permanent exceptions into
+`exempt.mjs` as you find them. Generated files self-delete at zero; absence means the wall has no
+grandfathered exceptions and is enforced directly from `guard.config.json`.
 
 ## 6. Regenerating (only after a deliberate audit — never to silence a new offender)
 

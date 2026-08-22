@@ -20,7 +20,7 @@ So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap f
 ## Wall 1 — Placement
 
 - **Triggers when:** a file lands in the wrong folder or carries the wrong name/casing for its tree (e.g. a loose `.ts` at a feature root, a component not named `index.tsx`, a kebab where Pascal is required).
-- **Live truth:** the per-tree shapes in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`createFolderStructure` blocks); grandfathered offenders per tree in [`eslint/baselines/`](../../../../eslint/baselines/) (`renderer.mjs`, `main.mjs`, `shared.mjs`, `preload.mjs`, `socket.mjs`, `vercel.mjs`).
+- **Live truth:** the per-tree shapes in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`createFolderStructure` blocks); grandfathered offenders per tree in [`.devkit/baselines/structure/`](../../../../.devkit/baselines/structure/) (`renderer.mjs`, `main.mjs`, `shared.mjs`, `preload.mjs`, `socket.mjs`, `vercel.mjs`).
 - **Detail:** structure-governance.md [`Wall 1 — placement`](../../../../docs/developer-docs/structure-governance.md#wall-1--placement).
 
 ## Wall 2 — Domain vocabulary
@@ -44,15 +44,15 @@ So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap f
 ## Wall 5 — Frozen legacy dirs
 
 - **Triggers when:** a new file is added to a frozen renderer dir (`src/renderer/utils/`, `types/`, `constants/`, `contexts/`) — or (via Wall 6) a new import of what's already in them. Existing files are grandfathered; the dirs are shrinking toward removal. Migrate to `lib/<domain>/`.
-- **Live truth:** the seal (match-nothing regex) in [`eslint.config.mjs`](../../../../eslint.config.mjs); grandfathered files in [`eslint/baselines/renderer.mjs`](../../../../eslint/baselines/renderer.mjs); the consumption-ban half in [`eslint/baselines/imports.mjs`](../../../../eslint/baselines/imports.mjs).
+- **Live truth:** the seal (match-nothing regex) in [`eslint.config.mjs`](../../../../eslint.config.mjs); grandfathered files in [`.devkit/baselines/structure/renderer.mjs`](../../../../.devkit/baselines/structure/renderer.mjs); the consumption-ban half in [`.devkit/baselines/imports.mjs`](../../../../.devkit/baselines/imports.mjs).
 - **Detail:** structure-governance.md [`Wall 5 — frozen legacy dirs`](../../../../docs/developer-docs/structure-governance.md#wall-5--frozen-legacy-dirs).
 
 ## Wall 6 — Import walls
 
 - **Triggers when:** a forbidden cross-boundary import is added — renderer→`src/main` (banned even as `import type`), deep cross-feature import (must go through the feature's `index.ts` barrel), consuming a frozen dir, a Node-builtin in the renderer (bare `path` excepted), or `src/shared` importing upward into main/renderer.
-- **Live truth:** `independent-modules` + `no-restricted-imports` config in [`eslint.config.mjs`](../../../../eslint.config.mjs); the grandfathered offenders (mostly renderer→main *type* imports) in [`eslint/baselines/imports.mjs`](../../../../eslint/baselines/imports.mjs); the sole permanent exception (tRPC `AppRouter`) in [`eslint/baselines/exempt.mjs`](../../../../eslint/baselines/exempt.mjs).
+- **Live truth:** `independent-modules` + `no-restricted-imports` config in [`eslint.config.mjs`](../../../../eslint.config.mjs); the grandfathered offenders (mostly renderer→main *type* imports) in [`.devkit/baselines/imports.mjs`](../../../../.devkit/baselines/imports.mjs); the sole permanent exception (tRPC `AppRouter`) in [`.devkit/structure/exempt.mjs`](../../../../.devkit/structure/exempt.mjs).
 - **Detail:** structure-governance.md [`Wall 6 — import walls`](../../../../docs/developer-docs/structure-governance.md#wall-6--import-walls).
 
 ---
 
-**The escape hatch:** a genuine, permanent architectural exception goes in [`eslint/baselines/exempt.mjs`](../../../../eslint/baselines/exempt.mjs) (the only hand-edited baseline) with a one-line reason. Never hand-edit a *generated* baseline — it's wiped on the next regen. The end goal is every generated debt baseline at `[]`/`0`; see structure-governance.md [`## 6`](../../../../docs/developer-docs/structure-governance.md#6-the-baselines--debt-vs-exempt-and-the-end-goal).
+**The escape hatch:** a genuine, permanent architectural exception goes in [`.devkit/structure/exempt.mjs`](../../../../.devkit/structure/exempt.mjs) with a one-line reason. Never hand-edit a *generated* baseline — it's wiped on the next regen. The end goal is every generated debt baseline at `[]`/`0`; see structure-governance.md [`## 6`](../../../../docs/developer-docs/structure-governance.md#6-the-baselines--debt-vs-exempt-and-the-end-goal).

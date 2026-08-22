@@ -1,17 +1,10 @@
-var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path, preserveJsx) {
-    if (typeof path === "string" && /^\.\.?\//.test(path)) {
-        return path.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function (m, tsx, d, ext, cm) {
-            return tsx ? preserveJsx ? ".jsx" : ".js" : d && (!ext || !cm) ? m : (d + ext + "." + cm.toLowerCase() + "js");
-        });
-    }
-    return path;
-};
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, setMaxLines, } from "../../gate-engine/ratchets/size-disable.mjs";
+import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, reportRatchetBaselineMigration, } from "../../gate-engine/ratchets/baseline-paths.mjs";
+import { loadImportWallExempt } from "../../gate-engine/structure/load-baseline.mjs";
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
@@ -48,20 +41,20 @@ const STRUCTURE_TEMPLATE_FILES = {
     electron: [
         ['eslint.config.mjs', 'eslint.config.mjs'],
         ['eslint/domains.mjs', 'eslint/domains.mjs'],
-        ['eslint/baselines/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+        ['.devkit/structure/exempt.mjs', STRUCTURE_EXEMPT],
     ],
     // react-app — CONFIG-DRIVEN (data): components + pages trees declared in guard.config.json, compiled
     // by the shared shim. No per-stack eslint.config / domains. (electron is the one remaining preset.)
     'react-app': [
         ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
-        ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+        ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
     ],
     // Flat component lib — CONFIG-DRIVEN (the universal path): the topology is a `structure` block in
     // guard.config.json, and eslint.config.mjs is the shared shim that compiles it via devkit's
     // compileToEslint. No per-stack eslint.config / domains. `_shared/` srcs resolve from templates/.
     'component-lib': [
         ['_shared/eslint.config.mjs', 'eslint.config.mjs'],
-        ['_shared/exempt.mjs', 'eslint/baselines/exempt.mjs'],
+        ['_shared/exempt.mjs', STRUCTURE_EXEMPT],
     ],
 };
 // devDeps/scripts owned by each component — used by both install (add) and remove (delete).
@@ -255,12 +248,11 @@ function installHusky(sel, hookRoot, pkgRel, dryRun) {
 // channel and silently move the ratchet up; see docs/decisions/overlay-self-heal.md). Explicit
 // re-cuts go through `guard-* freeze`, never an implicit re-apply. The marker is durable and survives
 // deleting empty baseline files, so it — not a debt file's existence — is the "already frozen" bit.
-// Ordering holds: runFreezes/runStructureBaselines run BEFORE the config write on first init, so the
-// very first adoption still freezes.
+// Ordering holds: freezes run before the config write, so the first adoption still freezes.
 function repoAdopted(cwd) {
     return existsSync(join(cwd, '.devkit', 'config.json'));
 }
-function runFreezes(cwd, dryRun) {
+function runFreezes(cwd, dryRun, { overlay = false } = {}) {
     if (dryRun) {
         console.log('  [dry-run] skip guard-fanout freeze + guard-size freeze');
         return;
@@ -269,34 +261,23 @@ function runFreezes(cwd, dryRun) {
         console.log('  • repo already adopted — keeping baselines (run `guard-* freeze` to re-cut)');
         return;
     }
-    // devkit's own ratchet bins are .mts in this repo (dev/tests, Node strips types) but compiled .mjs
-    // in an installed consumer (dist). Derive the extension from THIS module so the path resolves in both.
+    // Ratchet bins are .mts here but compiled .mjs in consumers; derive the extension from this module.
     const ext = import.meta.url.endsWith('.mts') ? '.mts' : '.mjs';
     const bins = [
         ['guard-fanout', join(packageDir(), 'gate-engine', 'ratchets', `folder-fanout${ext}`)],
         ['guard-size', join(packageDir(), 'gate-engine', 'ratchets', `size-disable${ext}`)],
     ];
+    const env = overlay ? { ...process.env, DEVKIT_OVERLAY: '1' } : process.env;
     for (const [name, bin] of bins) {
         try {
-            execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe' });
+            execFileSync(process.execPath, [bin, 'freeze'], { cwd, stdio: 'pipe', env });
             console.log(`  ✓ ${name} freeze (baseline grandfathered)`);
         }
         catch (e) {
-            console.log(`  ! ${name} freeze failed: ${firstLine(e)}`);
+            // SAFETY: execFileSync throws Error-shaped values whose optional stderr is declared by ExecError.
+            const detail = e.stderr?.toString().trim() || firstLine(e);
+            console.log(`  ! ${name} freeze failed: ${detail}`);
         }
-    }
-}
-/** The consumer's permanent import-wall exemptions (eslint/baselines/exempt.mjs `importWallExempt`), or empty. */
-export async function readImportWallExempt(cwd) {
-    const file = join(cwd, 'eslint', 'baselines', 'exempt.mjs');
-    if (!existsSync(file))
-        return new Set();
-    try {
-        const { importWallExempt = [] } = (await import(__rewriteRelativeImportExtension(pathToFileURL(file).href)));
-        return new Set(importWallExempt.map((m) => m.pattern));
-    }
-    catch {
-        return new Set();
     }
 }
 async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
@@ -307,7 +288,7 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
     // Structure/import baselines are cut ONCE at first init. An adopted repo (.devkit/config.json
     // present) never re-snapshots — `devkit upgrade` passes regen=false so it skips here rather than
     // re-grandfathering violations added since init (silent debt laundering). Keyed off the durable
-    // marker, not `eslint/baselines/*.mjs` existence, so deleting an empty baseline doesn't re-arm regen.
+    // marker, not baseline-file existence, so deleting an empty baseline doesn't re-arm regeneration.
     if (!regen && repoAdopted(cwd)) {
         console.log('  • repo already adopted — keeping structure + import-wall baselines (run `devkit init` to re-snapshot)');
         return;
@@ -325,12 +306,12 @@ async function runStructureBaselines(cwd, stack, dryRun, regen = true) {
         console.log(`  ! structure baseline generator failed: ${firstLine(e)}`);
     }
     try {
-        // Honour the consumer's hand-maintained import-wall exemptions (eslint/baselines/exempt.mjs):
+        // Honour the consumer's hand-maintained import-wall exemptions:
         // an exempt file is a permanent architectural allowance, not a violator, so it must be skipped
         // during the scan — else it would be re-grandfathered every regen.
         generateImportWallBaseline(cwd, {
             ...opts,
-            exemptPatterns: await readImportWallExempt(cwd),
+            exemptPatterns: await loadImportWallExempt(cwd),
         });
     }
     catch (e) {
@@ -537,11 +518,14 @@ function removeStructure(cwd, prevConfig, dryRun) {
                 rmSync(p);
         }
     }
-    const baselines = join(cwd, 'eslint', 'baselines', 'imports.mjs');
-    if (existsSync(baselines)) {
-        console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} eslint/baselines/imports.mjs`);
+    const owned = [IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR];
+    for (const relativePath of owned) {
+        const target = join(cwd, relativePath);
+        if (!existsSync(target))
+            continue;
+        console.log(`  ${dryRun ? '[dry-run] delete' : '✓ deleted'} ${relativePath}`);
         if (!dryRun)
-            rmSync(baselines);
+            rmSync(target, { recursive: true, force: true });
     }
     const pkgRemoved = removeFromPkg(cwd, ['eslint', 'eslint-plugin-project-structure', '@typescript-eslint/parser'], ['lint:structure'], dryRun);
     if (pkgRemoved.length) {
@@ -588,7 +572,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
     if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
         console.log('  freeze baselines (grandfather current tree)');
-        runFreezes(cwd, dryRun);
+        runFreezes(cwd, dryRun, { overlay: true });
     }
     // Optional machine-global shim closes the plain-commit gap; `devkit clean --global` removes it.
     const globalCommitGate = Boolean(plan.globalCommitGate);
@@ -682,6 +666,10 @@ export async function applyInit(cwd, plan) {
     // Overlay (local-only): a self-contained path — invisible to git, non-invasive. Returns early.
     if (overlay)
         return applyOverlay(cwd, plan, pkgRel, devkitRef);
+    // Baselines are durable tracked state. Re-open their canonical directory before migration so a
+    // consumer's broad `.devkit/` ignore cannot turn the move into a staged deletion-only commit.
+    ensureDevkitCacheGitignore(cwd, dryRun);
+    reportRatchetBaselineMigration(cwd, dryRun);
     console.log(`devkit init${dryRun ? ' (dry-run — no files written)' : ''} — stack=${stack}, devkit=${devkitRef}`);
     if (standalone) {
         console.log('  standalone: no package.json dep — global devkit CLI, fail-open hook');
@@ -859,9 +847,6 @@ export async function applyInit(cwd, plan) {
         writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
         console.log('  ✓ wrote .devkit/config.json');
     }
-    // Keep the gate engine's regenerated .devkit/ caches out of git (package/standalone; overlay
-    // already hides all of .devkit/ via .git/info/exclude). Specific files only — manifests stay tracked.
-    ensureDevkitCacheGitignore(cwd, dryRun);
     printReferencedSteps();
     console.log(`\n${dryRun ? 'Dry-run complete (nothing written).' : 'devkit init complete.'} Run \`devkit doctor\` to verify.`);
 }
