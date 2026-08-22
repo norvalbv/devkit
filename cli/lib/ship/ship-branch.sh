@@ -37,11 +37,13 @@ LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
+QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --base) BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
@@ -497,6 +499,11 @@ if [ -z "$PR_CREATE_FAILED" ]; then
       "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
       "$(devkit_json_escape "$PR_URL")" "${PR_NUM:-null}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
+  fi
+  if [ "$QAVIS_PUBLISH" -eq 1 ] && [ -n "$PR_NUM" ]; then
+    . "$SCRIPT_DIR/publish-qavis.sh"
+    publish_qavis_receipt \
+      "$ROOT" "$PR_NUM" "${RECOVERY_PARENT:-$BASE}" "${RECOVERY_COMMIT:-$SHIP_COMMIT}"
   fi
 fi
 

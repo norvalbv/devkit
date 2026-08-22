@@ -36,11 +36,13 @@ ship_assert_positional_args "$BR" "$TITLE" \
 LINK_EXTRA=()
 PATHS=()
 BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
+QAVIS_PUBLISH=1    # suppresses only the post-push description write, never the staged gate
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --pr) shift ;;                                                   # mode flag (already routed here) — ignore
     --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
@@ -186,7 +188,8 @@ fi
 # sc-1508: same content-keyed skip seam as ship-branch.sh — hand the pre-push hook this commit's sha so
 # it skips its typecheck + test:run for this one commit (CI re-runs both on the PR); any other ref fails
 # closed to the full suite.
-DEVKIT_SHIP_PREPUSH_SKIP_SHA="$(git -C "$WT" rev-parse HEAD)" git -C "$WT" push origin "HEAD:$BR" || {
+SHIP_COMMIT=$(git -C "$WT" rev-parse HEAD)
+DEVKIT_SHIP_PREPUSH_SKIP_SHA="$SHIP_COMMIT" git -C "$WT" push origin "HEAD:$BR" || {
   echo "push to origin/$BR rejected (not a fast-forward — the branch advanced). Re-run after fetching." >&2
   exit 1
 }
@@ -202,4 +205,14 @@ node "$RMW" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --merge -- "${PATHS[@]}" \
   || echo "reship: reconcile manifest not updated (non-fatal)" >&2
 
-gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null || echo "re-pushed to origin/$BR"
+PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
+if [ -n "$PR_URL" ]; then
+  PR_NUM=${PR_URL##*/}
+  if [[ "$PR_NUM" =~ ^[0-9]+$ ]] && [ "$QAVIS_PUBLISH" -eq 1 ]; then
+    . "$SCRIPT_DIR/publish-qavis.sh"
+    publish_qavis_receipt "$ROOT" "$PR_NUM" "$BASE" "$SHIP_COMMIT"
+  fi
+  echo "$PR_URL"
+else
+  echo "re-pushed to origin/$BR"
+fi

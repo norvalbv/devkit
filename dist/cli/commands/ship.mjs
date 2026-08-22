@@ -32,6 +32,8 @@ Usage:
                       body from stdin (a pipe or here-doc) or to leave the body empty.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
+  --no-qavis-publish  Do not publish a passed staged Qavis result into the PR description for this
+                      ship. The Qavis gate still runs; this suppresses only the post-push PR write.
   --pr                Re-push: add the changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force) instead of opening a new PR.
   --                  Force everything after it to be a file path (ships a dash-leading filename).
