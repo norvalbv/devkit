@@ -32,6 +32,7 @@ vi.mock('../commands/init.mts', () => ({ applyInit: vi.fn(async () => {}) }));
 vi.mock('../commands/doctor.mts', () => ({ default: vi.fn(async () => 0) }));
 
 import update, { fetchLatestTag } from '../commands/update.mts';
+import { applyInit } from '../commands/init.mts';
 import upgrade from '../commands/upgrade.mts';
 
 const REF = 'git+https://github.com/norvalbv/devkit.git';
@@ -68,7 +69,10 @@ const silence = () => {
   spies.push(s);
 };
 
-beforeEach(() => vi.mocked(update).mockClear());
+beforeEach(() => {
+  vi.mocked(update).mockClear();
+  vi.mocked(applyInit).mockClear();
+});
 afterEach(() => {
   for (const s of spies.splice(0)) s.mockRestore();
   for (const d of made.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -99,5 +103,21 @@ describe('upgrade version step — converge in one pass vs re-run (Option B)', (
     expect(vi.mocked(update)).toHaveBeenCalledTimes(1);
     // returned before reconciling ⇒ the pin is still the stale #v0.0.1.
     expect(readFileSync(join(dir, 'package.json'), 'utf8')).toContain('#v0.0.1');
+  });
+
+  it('preserves recorded disabled guards when reconciling a self-host repo', async () => {
+    const dir = makeRepo(V);
+    const configPath = join(dir, '.devkit', 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.selfHost = true;
+    config.components.disabledGuards = ['comments', 'review'];
+    writeFileSync(configPath, JSON.stringify(config));
+    silence();
+
+    expect(await upgrade([], dir)).toBe(0);
+    expect(vi.mocked(applyInit)).toHaveBeenCalledWith(
+      dir,
+      expect.objectContaining({ disabledGuards: ['comments', 'review'] }),
+    );
   });
 });

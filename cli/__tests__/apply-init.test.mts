@@ -19,8 +19,9 @@ const fallowSpies = vi.hoisted(() => ({
 vi.mock('../lib/install/install-fallow.mts', () => fallowSpies);
 
 import { applyInit, detectInstalled, parseFlags, selectionFromFlags } from '../commands/init.mts';
-import { defaultSelection, normalizeSelection } from '../lib/components.mts';
+import { defaultSelection, GUARD_IDS, normalizeSelection } from '../lib/components.mts';
 import { selfHostSelection } from '../lib/husky/self-host.mts';
+import { disabledGuardsFromFlags } from '../lib/install/flags/init-flags.mts';
 import { readConfig as config, tmpRepos } from './_helpers.mts';
 
 const { tmpRepo, cleanup } = tmpRepos('apply-');
@@ -88,6 +89,30 @@ describe('selection helpers', () => {
     expect(sel.biome).toBe(false);
     expect(sel.tsconfig).toBe(true);
     expect(sel.guards).toEqual(['fanout']);
+  });
+
+  it('guards have independent opt-outs without conflating the review profile', () => {
+    const sel = selectionFromFlags(parseFlags(['--yes', '--no-comments', '--no-size']));
+    expect(sel.guards).not.toContain('comments');
+    expect(sel.guards).not.toContain('size');
+    expect(sel.guards).toContain('fanout');
+
+    const review = selectionFromFlags(
+      parseFlags(['--yes', '--guards', 'size,review', '--no-review']),
+    );
+    expect(review.guards).toContain('review');
+    expect(
+      selectionFromFlags(parseFlags(['--yes', '--guards', 'size,review', '--no-review-gate']))
+        .guards,
+    ).not.toContain('review');
+  });
+
+  it('records only explicit flag declines, leaving unoffered opt-in gates unknown', () => {
+    expect(disabledGuardsFromFlags(parseFlags(['--yes']))).toEqual([]);
+    expect(disabledGuardsFromFlags(parseFlags(['--yes', '--no-comments']))).toEqual(['comments']);
+    expect(disabledGuardsFromFlags(parseFlags(['--yes', '--guards', 'size,review']))).toEqual(
+      GUARD_IDS.filter((guard) => guard !== 'size' && guard !== 'review'),
+    );
   });
 
   it('agentTargets: all providers by default, narrowed by --no-<provider>', () => {
@@ -257,6 +282,22 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     });
   });
 
+  it('records unselected guards as explicit durable opt-outs', async () => {
+    const root = tmpRepo();
+    const selection = { ...defaultSelection(), guards: ['size'] };
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection,
+      disabledGuards: GUARD_IDS.filter((guard) => guard !== 'size'),
+    });
+
+    expect(config(root).components.guards).toEqual(['size']);
+    expect(config(root).components.disabledGuards).toContain('comments');
+    expect(config(root).components.disabledGuards).toContain('fanout');
+    expect(config(root).components.disabledGuards).not.toContain('size');
+  });
+
   it('preserves legacy-enabled review behavior when reapplying an overlay', async () => {
     const root = tmpRepo();
     execFileSync('git', ['init', '-q'], { cwd: root });
@@ -281,6 +322,23 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
       guards: ['size'],
       decisionsDir: 'docs/decisions',
     });
+  });
+
+  it('records overlay guard opt-outs with the same three-state contract', async () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const selection = { ...defaultSelection(), guards: ['size'] };
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection,
+      overlay: true,
+      disabledGuards: GUARD_IDS.filter((guard) => guard !== 'size'),
+    });
+
+    expect(config(root).components.guards).toEqual(['size']);
+    expect(config(root).components.disabledGuards).toContain('comments');
+    expect(config(root).components.disabledGuards).not.toContain('size');
   });
 
   it('removes a deselected-but-present component when listed in `remove`', async () => {

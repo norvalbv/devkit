@@ -37,3 +37,4 @@ created: 2026-08-15
 **Scope:** gate-engine/comment-firewall/**,cli/lib/components.mts,cli/lib/husky/**,cli/lib/doctor/**,package.json,guard.config.json
 **Category:** commit-gates
 **Source:** Bun RoboBun narrowing prior art · https://github.com/oven-sh/bun/pull/37948
+- 2026-08-21 — Guard selection now records explicit declines in `components.disabledGuards`: selected / disabled / absent distinguishes enabled, deliberately off, and never offered. This makes the recommended-on comment firewall removable through the init picker, exact `--guards` allowlist, or `--no-comments`, prevents upgrade from re-offering a decline, and lets both package and overlay upgrades offer a genuinely new gate once without silently enabling it.

@@ -34,6 +34,17 @@ export interface InitFlags extends ReviewFlagValues {
   globalCommitGate?: boolean;
 }
 
+const guardDisableFlag = (guard: string) => (guard === 'review' ? 'review-gate' : guard);
+
+export function disabledGuardsFromFlags(flags: Pick<InitFlags, 'guards' | 'no'>): string[] {
+  if (flags.no.has('guards')) return [...GUARD_IDS];
+  return GUARD_IDS.filter(
+    (guard) =>
+      (flags.guards !== null && !flags.guards.includes(guard)) ||
+      flags.no.has(guardDisableFlag(guard)),
+  );
+}
+
 export function parseFlags(args: string[]): InitFlags {
   const flags: InitFlags = {
     yes: false,
@@ -98,6 +109,8 @@ export function selectionFromFlags(flags: InitFlags): Selection {
   }
   if (flags.no.has('guards')) sel.guards = [];
   else if (flags.guards) sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
+  const disabledGuards = disabledGuardsFromFlags(flags);
+  sel.guards = sel.guards.filter((guard) => !disabledGuards.includes(guard));
   // Line-growth block is recommended-on; --no-line-growth opts out under --yes / non-TTY.
   if (flags.no.has('line-growth')) sel.lineGrowth = false;
   // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).

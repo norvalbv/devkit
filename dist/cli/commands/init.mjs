@@ -1,9 +1,3 @@
-/**
- * `devkit init` scaffolds shared configs and gates through interactive, `--yes`, or non-TTY
- * selection. Selected components install idempotently; deselected components are removed only
- * after confirmation or `--remove-deselected`, and removal never deletes user-owned files.
- * The chosen set is recorded in `.devkit/config.json.components` for selection-aware doctor runs.
- */
 var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExtension) || function (path, preserveJsx) {
     if (typeof path === "string" && /^\.\.?\//.test(path)) {
         return path.replace(/\.(tsx)$|((?:\.d)?)((?:\.[^./]+?)?)\.([cm]?)ts$/i, function (m, tsx, d, ext, cm) {
@@ -18,7 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, setMaxLines, } from "../../gate-engine/ratchets/size-disable.mjs";
-import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, } from "../lib/components.mjs";
+import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson, writeIfAbsent } from "../lib/fs-helpers.mjs";
@@ -622,6 +616,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         priorArtGate: Boolean(selection.priorArtGate),
         agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     }, plan.undecided, prevConfig?.components);
+    overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit'), { recursive: true });
         writeFileSync(join(cwd, '.devkit', 'config.json'), `${JSON.stringify({
@@ -804,6 +799,9 @@ export async function applyInit(cwd, plan) {
     applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun);
     // .devkit/config.json with the component selection.
     console.log('9. .devkit/config.json');
+    const guards = selection.husky
+        ? [...selection.guards]
+        : selection.guards.filter((guard) => guard === 'decisions');
     const components = {
         biome: selection.biome,
         tsconfig: selection.tsconfig,
@@ -825,9 +823,8 @@ export async function applyInit(cwd, plan) {
         agentTargets: [...agentTargets],
         // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
         // owns an agent pre-edit hook, so it remains authoritative in config even without husky.
-        guards: selection.husky
-            ? [...selection.guards]
-            : selection.guards.filter((guard) => guard === 'decisions'),
+        guards,
+        disabledGuards: disabledGuardsFor(guards, plan.disabledGuards),
     };
     // Keep an un-asked optional component ABSENT — see InitPlan.undecided.
     dropUndecided(components, undecided, prevConfig?.components);
@@ -896,6 +893,7 @@ export default async function run(args, cwd) {
     let remove = [];
     let mode = detectedMode;
     let review;
+    let disabledGuards;
     // --baselines-only re-derives structure/import-wall baselines only for package-mode presets.
     if (flags.baselinesOnly) {
         if (mode !== 'package') {
@@ -919,6 +917,7 @@ export default async function run(args, cwd) {
         mode = 'self-host';
         const recorded = readJson(join(cwd, '.devkit', 'config.json'));
         selection = selfHostSelection(recorded?.components);
+        disabledGuards = recorded?.components?.disabledGuards;
     }
     else if (interactive) {
         const installed = detectInstalled(cwd);
@@ -934,10 +933,14 @@ export default async function run(args, cwd) {
             return 0; // cancelled — nothing written
         ({ mode, stack, remove, review } = result);
         selection = result.selection;
+        disabledGuards = selection.husky
+            ? GUARD_IDS.filter((guard) => !selection.guards.includes(guard))
+            : [];
     }
     else {
         selection = initFlags.selectionFromFlags(flags);
         selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
+        disabledGuards = initFlags.disabledGuardsFromFlags(flags);
     }
     oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
     antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
@@ -982,6 +985,7 @@ export default async function run(args, cwd) {
         selfHost: mode === 'self-host',
         globalCommitGate: flags.globalCommitGate,
         review,
+        disabledGuards,
     });
     if (interactive && !selfHost)
         outro('Done — run `devkit doctor` to verify.');
