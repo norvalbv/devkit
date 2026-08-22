@@ -58,8 +58,8 @@ export async function offerNewGates(
   const { recommended, optIn } = newBundledGates(sel.guards, disabled);
   const offered = [...recommended, ...optIn];
   const opt = (id: string) => GUARD_OPTIONS.find((guard) => guard.id === id);
-  if (!recommended.length) {
-    console.log('  • no new recommended gates — gate selection unchanged');
+  if (!offered.length) {
+    console.log('  • no new gates — gate selection unchanged');
     return disabled;
   }
   if (dryRun) {

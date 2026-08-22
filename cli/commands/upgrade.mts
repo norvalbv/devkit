@@ -129,6 +129,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
       stack,
       selection: { ...selfHostSelection(cfg.components), agentTargets },
       selfHost: true,
+      disabledGuards: cfg.components?.disabledGuards,
       force,
       dryRun,
       regenStructureBaselines: false,

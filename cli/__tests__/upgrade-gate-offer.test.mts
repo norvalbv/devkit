@@ -151,13 +151,18 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(config(root).components.disabledGuards).not.toContain('comments');
   });
 
-  it('does NOT re-nag about opt-in review when the repo is already current on recommended gates', () => {
-    // default init now includes qavis (recommended) and excludes review.
+  it('does NOT re-nag about opt-in gates that were already recorded as declined', () => {
+    // Default init includes every recommended gate and excludes opt-in gates. Record those omissions
+    // as explicit declines to distinguish them from never-seen gates that upgrade should offer.
     const root = tmpRepo(CLIB_PKG);
     expect(run(root, 'init', '--stack', 'component-lib', '--yes', '--no-cursor').status).toBe(0);
     expect(guards(root)).toContain('qavis-advisory');
 
     const before = guards(root);
+    const cfgPath = join(root, '.devkit', 'config.json');
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    cfg.components.disabledGuards = GUARD_IDS.filter((guard) => !before.includes(guard));
+    writeFileSync(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`);
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     // Scoped to upgrade's OWN offer sections (3a/3b/3c) — everything before it hands off to doctor.
@@ -166,13 +171,25 @@ describe('devkit upgrade — gate reconcile', () => {
     // assertion fail on unrelated doctor output rather than on the gate being re-offered.
     const offers = up.stdout.split('devkit doctor')[0];
     // Proves the slice is the offer region and not empty — an empty one would pass vacuously.
-    expect(offers).toMatch(/no new recommended gates/i);
-    expect(offers).not.toMatch(/\breview\b/i); // opt-in gate not re-surfaced
+    expect(offers).toMatch(/no new gates/i);
+    expect(offers).not.toMatch(/\breview\b/i); // recorded opt-in decline not re-surfaced
     expect(guards(root)).toEqual(before); // selection unchanged
   });
 });
 
 describe('offerNewGates — interactive answers', () => {
+  it('offers an unrecorded opt-in gate when every recommended gate is already selected', async () => {
+    const select = vi.fn(async () => []);
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const sel = defaultSelection();
+    expect(sel.guards).not.toContain('review');
+
+    const disabled = await offerNewGates(undefined, sel, false, { interactive: true, select });
+
+    expect(select).toHaveBeenCalledOnce();
+    expect(disabled).toContain('review');
+  });
+
   it('persists an unselected recommended comments gate as disabled', async () => {
     const select = vi.fn(async () => []);
     vi.spyOn(console, 'log').mockImplementation(() => {});

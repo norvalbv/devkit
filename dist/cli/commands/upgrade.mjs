@@ -18,7 +18,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyOverlayConstraints, normalizeSelection, } from "../lib/components.mjs";
+import { applyOverlayConstraints, normalizeSelection } from "../lib/components.mjs";
 import { detectGitRoot } from "../lib/detect-git-root.mjs";
 import { detectStack } from "../lib/detect-stack.mjs";
 import { packageDir, readJson } from "../lib/fs-helpers.mjs";
@@ -97,6 +97,7 @@ export default async function upgrade(args, cwd) {
             stack,
             selection: { ...selfHostSelection(cfg.components), agentTargets },
             selfHost: true,
+            disabledGuards: cfg.components?.disabledGuards,
             force,
             dryRun,
             regenStructureBaselines: false,
