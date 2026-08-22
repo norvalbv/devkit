@@ -64,6 +64,26 @@ function hasStableBaselineConflict(canonicalFile: string, legacyFile: string): b
   return true;
 }
 
+function concurrentBaselineCreateSettled(canonicalFile: string, legacyFile: string): boolean {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const canonical = readExisting(canonicalFile);
+    const legacy = readExisting(legacyFile);
+    if (canonical !== null) {
+      if (legacy !== null && sameBaselineDebt(canonical, legacy)) return true;
+      if (legacy === null) {
+        try {
+          JSON.parse(canonical.toString('utf8'));
+          return true;
+        } catch {
+          // The exclusive creator has published the name but is still writing its bytes.
+        }
+      }
+    }
+    if (attempt < 19) Atomics.wait(BASELINE_SETTLE, 0, 0, 5);
+  }
+  return false;
+}
+
 /** Read debt across a concurrent legacy→canonical move without observing a false missing state. */
 export function readRatchetBaseline(
   root: string,
@@ -260,14 +280,11 @@ export function migrateRatchetBaselines(
             // Exclusive creation prevents a migration from overwriting a writer that won the race.
             create(canonical, concurrentLegacy);
           } catch (createError) {
-            const completedCanonical = readExisting(canonical);
-            const completedLegacy = readExisting(legacy);
             // SAFETY: create() follows Node's filesystem contract and reports failures as ErrnoException.
             const createFailure = createError as NodeJS.ErrnoException;
             if (
               createFailure.code !== 'EEXIST' ||
-              completedCanonical === null ||
-              (completedLegacy !== null && !sameBaselineDebt(completedLegacy, completedCanonical))
+              !concurrentBaselineCreateSettled(canonical, legacy)
             ) {
               throw createError;
             }

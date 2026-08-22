@@ -36,6 +36,22 @@ function completeMigrationBeforeCreate(contents: string): (path: string) => neve
   };
 }
 
+function completePartialMigrationAfterDelay(contents: string): (path: string) => never {
+  return (path) => {
+    writeFileSync(path, '{"files":');
+    spawn(
+      process.execPath,
+      [
+        '-e',
+        `setTimeout(() => require('node:fs').writeFileSync(process.argv[1], ${JSON.stringify(contents)}), 10)`,
+        path,
+      ],
+      { stdio: 'ignore' },
+    );
+    throw Object.assign(new Error('peer is still creating baseline'), { code: 'EEXIST' });
+  };
+}
+
 function replaceLegacyThenDeny(contents: string): (source: string) => never {
   return (source) => {
     writeFileSync(source, contents);
@@ -217,6 +233,19 @@ describe('ratchet baseline paths', () => {
       migrateRatchetBaselines(root, {
         link: denyHardLink('EXDEV'),
         create: completeMigrationBeforeCreate(bytes),
+      }),
+    ).toHaveLength(1);
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
+  });
+
+  it('waits for a peer to finish writing an exclusively created baseline', () => {
+    const root = makeRoot();
+    const bytes = '{"files":{"src/legacy.ts":80}}\n';
+    write(root, LEGACY_LINES_BASELINE, bytes);
+    expect(
+      migrateRatchetBaselines(root, {
+        link: denyHardLink('EPERM'),
+        create: completePartialMigrationAfterDelay(bytes),
       }),
     ).toHaveLength(1);
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
