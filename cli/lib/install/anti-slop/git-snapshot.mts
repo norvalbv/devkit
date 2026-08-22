@@ -1,7 +1,7 @@
 /** Exact Git-index materialization and base-commit baseline evidence for anti-slop gates. */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type AntiSlopBaseline, parseBaseline } from './baseline.mts';
@@ -32,6 +32,9 @@ interface GitChange {
 
 export interface GitBaselineEnvelope {
   base: AntiSlopBaseline | null;
+  /** Present for full-tree CI comparisons; staged snapshots already run outside a Git checkout. */
+  baseTree?: string;
+  introducedPaths: Set<string>;
   renames: Map<string, string>;
 }
 
@@ -133,21 +136,36 @@ function envelope(
   const baseTree = treeForRef(repo.root, baseRef);
   const changes = parseChanges(repo.root, baseTree, candidateTree);
   const renames = new Map<string, string>();
+  const introducedPaths = new Set<string>();
   for (const change of changes) {
+    if (change.status.startsWith('A') || change.status.startsWith('C')) {
+      const path = packagePath(change.path, repo.prefix);
+      if (path !== null) introducedPaths.add(path);
+    }
     if (!change.status.startsWith('R') || change.oldPath === undefined) continue;
     const oldPath = packagePath(change.oldPath, repo.prefix);
     const nextPath = packagePath(change.path, repo.prefix);
     if (oldPath !== null && nextPath !== null) renames.set(oldPath, nextPath);
   }
-  return { layout: repo, baseTree, changes, base: baselineAtTree(repo, baseTree), renames };
+  return {
+    layout: repo,
+    baseTree,
+    changes,
+    base: baselineAtTree(repo, baseTree),
+    introducedPaths,
+    renames,
+  };
 }
 
 /** Read the base baseline and exact rename map used by a full-tree CI check. */
-export function gitBaselineEnvelope(cwd: string, baseRef: string): GitBaselineEnvelope {
+export function gitBaselineEnvelope(
+  cwd: string,
+  baseRef: string,
+): GitBaselineEnvelope & { baseTree: string } {
   const repo = layout(cwd);
   const candidateTree = git(repo.root, ['write-tree']);
-  const { base, renames } = envelope(cwd, baseRef, candidateTree);
-  return { base, renames };
+  const { base, baseTree, introducedPaths, renames } = envelope(cwd, baseRef, candidateTree);
+  return { base, baseTree, introducedPaths, renames };
 }
 
 function requiresFullScan(path: string): boolean {
@@ -169,6 +187,25 @@ function extractTree(root: string, tree: string, destination: string): void {
     throw new Error(
       `anti-slop: could not materialize staged Git tree: ${extracted.stderr?.toString().trim() || `tar exit ${extracted.status}`}`,
     );
+  }
+}
+
+/** Run an action against selected files from the exact base tree used by a CI comparison. */
+export function withBaseAntiSlopSnapshot<T>(
+  cwd: string,
+  baseTree: string,
+  paths: readonly string[],
+  action: (snapshot: { cwd: string; paths: string[] }) => T,
+): T {
+  const repo = layout(cwd);
+  const temp = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-base-'));
+  try {
+    extractTree(repo.root, baseTree, temp);
+    const snapshotCwd = join(temp, repo.prefix);
+    const existingPaths = paths.filter((path) => existsSync(join(snapshotCwd, path)));
+    return action({ cwd: snapshotCwd, paths: existingPaths });
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
   }
 }
 
@@ -203,6 +240,7 @@ export function withStagedAntiSlopSnapshot<T>(
       fullScan,
       skipped,
       base: evidence.base,
+      introducedPaths: evidence.introducedPaths,
       renames: evidence.renames,
     });
   }
@@ -217,6 +255,7 @@ export function withStagedAntiSlopSnapshot<T>(
       fullScan,
       skipped,
       base: evidence.base,
+      introducedPaths: evidence.introducedPaths,
       renames: evidence.renames,
     });
   } finally {

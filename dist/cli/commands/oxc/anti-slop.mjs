@@ -2,9 +2,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock } from "../../lib/atomic-write.mjs";
-import { baselineFromGroups, baselineIncreases, compareBaseline, pruneBaseline, readBaseline, writeBaseline, } from "../../lib/install/anti-slop/baseline.mjs";
+import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from "../../lib/install/anti-slop/baseline.mjs";
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from "../../lib/install/anti-slop/constants.mjs";
-import { gitBaselineEnvelope, withStagedAntiSlopSnapshot, } from "../../lib/install/anti-slop/git-snapshot.mjs";
+import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStagedAntiSlopSnapshot, } from "../../lib/install/anti-slop/git-snapshot.mjs";
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from "../../lib/install/anti-slop/runner.mjs";
 export const meta = {
     name: 'anti-slop',
@@ -93,6 +93,34 @@ function checkBaselineEnvelope(candidate, envelope) {
     console.error('anti-slop: FAIL — the committed baseline may only shrink; fix the finding instead of adopting it');
     return 1;
 }
+function inheritedBaseAllowance(cwd, selected, candidateGroups, envelope) {
+    if (!envelope?.base || !envelope.baseTree)
+        return selected;
+    const candidateNew = compareBaseline(selected, candidateGroups).newGroups;
+    if (candidateNew.length === 0)
+        return selected;
+    const reverseRenames = new Map([...envelope.renames].map(([basePath, candidatePath]) => [candidatePath, basePath]));
+    const basePaths = [
+        ...new Set(candidateNew.flatMap((group) => envelope.introducedPaths.has(group.file)
+            ? []
+            : [reverseRenames.get(group.file) ?? group.file])),
+    ];
+    return withBaseAntiSlopSnapshot(cwd, envelope.baseTree, basePaths, (snapshot) => {
+        if (snapshot.paths.length === 0)
+            return selected;
+        const inherited = migrateBaselineRenames(baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)), envelope.renames);
+        const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
+        for (const entry of inherited.entries) {
+            const committed = entries.get(entry.fingerprint);
+            if (!committed || entry.count > committed.count)
+                entries.set(entry.fingerprint, entry);
+        }
+        return {
+            ...selected,
+            entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+        };
+    });
+}
 function check(cwd, args, envelope = null) {
     const baseline = baselineOrExplain(cwd);
     if (!baseline)
@@ -105,7 +133,9 @@ function check(cwd, args, envelope = null) {
         ...baseline,
         entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
     };
-    const comparison = compareBaseline(selected, collectAntiSlopGroups(cwd, args));
+    const candidateGroups = collectAntiSlopGroups(cwd, args);
+    const allowance = inheritedBaseAllowance(cwd, selected, candidateGroups, envelope);
+    const comparison = compareBaseline(allowance, candidateGroups);
     printNew(comparison.newGroups);
     const errors = comparison.newGroups.filter((group) => group.severity === 'error');
     const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
