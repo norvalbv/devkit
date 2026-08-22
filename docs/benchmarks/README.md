@@ -33,6 +33,15 @@ Metric observations retain their stable ID, direction, unit, raw numerator/denom
 
 Each suite adapter owns its acceptance semantics. LLM suites can require K=3 and zero outages; deterministic, external, and no-ship studies use different contracts. The renderer never invents a universal significance rule.
 
+## Findings and research records
+
+Hand-written records that sit beside the ledger; each number in them names its population, `n`, and query.
+
+- [`decisions-findings.md`](decisions-findings.md) — decision-log benchmarks: findings, corrections, open work (sc-1236).
+- [`reviewer-yield-vs-diff-size.md`](reviewer-yield-vs-diff-size.md) — the review gate returns ~1 issue per run above ~1k LOC and the corpus never measures that regime (2026-08-22).
+- [`corpus-growth.md`](corpus-growth.md) — how corpus rows are mined from telemetry and adapted.
+- [`experiments/`](experiments/) — one folder per investigation with its inputs, arms, and reports (latest: [`2026-08-22-ship-attempts-research`](experiments/2026-08-22-ship-attempts-research/README.md)).
+
 ## Contributor workflow
 
 ```bash
