@@ -37,6 +37,29 @@ GATE_PROJECTION_FIXED_CANDIDATES=(
   .qavis/receipt.json
 )
 
+# Candidates that are a content-addressed CACHE, not source. A copy in the base commit is stale by
+# construction — the sha it attests cannot cover the set being shipped — so it must lose to the live
+# one, or the gate reading it can never be cleared by running the tool (sc-1489).
+GATE_PROJECTION_CACHE_CANDIDATES=(
+  .qavis/receipt.json
+)
+
+# gate_projection_is_stale_cache <worktree> <repo-relative-path>
+# A cache candidate the BASE COMMIT put in $WT and that is still there: not a symlink (we placed that),
+# not a path change-application already removed (a ship that untracks it), and not one absent from HEAD
+# (change-application put those there from the invoking checkout — already the live bytes).
+gate_projection_is_stale_cache() {
+  local wt=$1 rel=$2 cache
+  for cache in "${GATE_PROJECTION_CACHE_CANDIDATES[@]}"; do
+    [ "$rel" = "$cache" ] || continue
+    [ -L "$wt/$rel" ] && return 1
+    [ -f "$wt/$rel" ] || return 1
+    git -C "$wt" cat-file -e "HEAD:$rel" 2>/dev/null && return 0
+    return 1
+  done
+  return 1
+}
+
 gate_config_path_emitter() {
   local self_dir emitter
   self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -93,9 +116,9 @@ gate_projection_source_is_ignored() {
 # link_untracked_gate_configs <worktree> <root> [purpose]
 link_untracked_gate_configs() {
   local wt=$1 root=$2 purpose=${3:-ship} emitter resolved rel line index_rel='' candidate_manifest=''
-  local main_root='' candidate_root=$root source=''
+  local main_root='' candidate_root=$root source='' stale_hit=''
   local projection_manifest=${DEVKIT_REVIEW_PROJECTION_MANIFEST:-} projection_tool=''
-  local linked=() linked_sources=() candidates=()
+  local linked=() linked_sources=() candidates=() stale=()
   case "$purpose" in
     ship | review | review-baseline) ;;
     *)
@@ -180,13 +203,37 @@ link_untracked_gate_configs() {
       # Present in the repo but absent from the committed worktree = the gate would fail open. The
       # -L guard also skips a pre-existing symlink so `ln` never aborts on it. Empty local projection
       # dirs are unusable, so a populated main-worktree copy wins; files keep root-first precedence.
+      # Recorded BEFORE the source lookup so the diagnostic still prints when the operator's checkout
+      # has no live copy to link. A stale cache never enters `linked`: it is present in the committed
+      # tree, so that notice's wording and count would both be wrong for it.
+      stale_hit=
+      if gate_projection_is_stale_cache "$wt" "$rel"; then
+        rm -f "$wt/$rel"   # worktree only; the shipped commit is asserted unchanged by this file's test
+        stale+=("$rel")
+        stale_hit=1
+      fi
       source=$(gate_link_source "$root" "$main_root" "$rel" prefer-populated) || continue
-      [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+      if [ -z "$stale_hit" ]; then
+        [ ! -e "$wt/$rel" ] && [ ! -L "$wt/$rel" ] || continue
+        linked+=("$rel")
+        linked_sources+=("$source")
+      fi
       mkdir -p "$wt/$(dirname "$rel")"
       ln -s "$source" "$wt/$rel"
-      linked+=("$rel")
-      linked_sources+=("$source")
     done
+  fi
+
+  if [ "${#stale[@]}" -gt 0 ]; then
+    {
+      echo "⚠️  ship: ${#stale[@]} gate cache(s) are COMMITTED, so the base checkout carried a stale copy"
+      echo "   into the gate worktree — the live one was used instead. These are content-addressed: a"
+      echo "   committed copy can never match the set being shipped. Untrack them and LAND it on the"
+      echo "   base, or every ship repeats this. Use \`git rm\`, NOT \`--cached\` — a file left on disk"
+      echo "   stages no deletion. Ship BOTH paths, ideally on their own so no QA gate is in the way:"
+      for rel in "${stale[@]}"; do
+        echo "   - git rm $rel && printf '%s\\n' '$rel' >> .gitignore"
+      done
+    } >&2
   fi
 
   # Guard the empty array BEFORE expanding it (stock-macOS bash 3.2 aborts on "${arr[@]}" when empty
