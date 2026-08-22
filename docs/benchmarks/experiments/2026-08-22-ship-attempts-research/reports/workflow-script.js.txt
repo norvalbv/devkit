@@ -1,0 +1,110 @@
+export const meta = {
+  name: 'chunked-review-research',
+  description: 'Research + design for cutting ship attempts/cost: incremental re-review and chunked (N-LOC) parallel reviewers',
+  phases: [
+    { title: 'Explore', detail: 'codebase: ship/review flow, cache, bench infra (haiku)' },
+    { title: 'Evidence', detail: 'telemetry SQL + arXiv + industry + prior-art (sonnet)' },
+    { title: 'Critique', detail: 'completeness critic over the evidence' },
+    { title: 'Design', detail: '3 independent plans from different angles' },
+    { title: 'Judge', detail: 'score plans, synthesize one recommendation' },
+  ],
+}
+
+const A = args || {}
+const REPO = A.repo
+const DB = A.db
+const COMMON = `
+HARD RULES: You are in READ-ONLY plan mode. Do NOT edit, create, move or delete any file in the repo. Do NOT commit, stash, checkout, or run anything that mutates git or the filesystem. Read-only shell (cat/sed -n/grep/find/ls, sqlite3 -readonly, gh api GET, curl GET) is fine. Return your findings as your final text — raw, dense, with file:line citations and exact numbers. No fluff.
+Repo: ${REPO}
+`
+
+phase('Explore')
+const explore = await parallel([
+  () => agent(`${COMMON}
+TASK: Map how a devkit "ship" attempt reviews code today, precisely enough that a designer could insert (a) incremental re-review (only the delta since the last attempt) and (b) chunked parallel review (split the diff into ~N-LOC chunks, one reviewer per chunk).
+Cover, with file:line cites:
+1. The ship attempt lifecycle: cli/lib/ship/ship-branch.sh, reship.sh, review-target.sh, prepare-gate-worktree.sh, commit-with-gate-capture.sh; what a 'reship' is; what happens after a FAIL (does the agent fix and re-run the whole gate?).
+2. The review engine: gate-engine/review/** (run-review.mts, runCascade, setup-manifest.mts, setup-runtime.mts, cache/session.mts, judge-verdict cache). What EXACTLY is the cache key (diff hash? per reviewer? per file?). When the agent fixes one file and re-ships, which reviewers re-run and on WHAT input — the whole staged diff or just changes? Is there any 'previously approved' notion?
+3. How a reviewer gets its input: the prompt/brief, how the diff is passed (whole diff? per-file? truncation/byte caps? 8 MiB cap?), file routing by domain (backend/frontend/code/all), the escalation cascade (haiku/sonnet -> opus), the completeness judge, concurrency caps (cap 6?), budget/timeouts.
+4. Telemetry events emitted per review (review_scope fields diff_bytes/file_count/files_json, review_result, judge_exec, cache_hit) — enough to know what is measurable.
+5. Any EXISTING sharding/splitting/pagination of large diffs, and any 'scope' mechanism (e.g. reviewers given a subset of files). 
+6. Every docs/decisions/*.md whose ruling touches: review scope, verdict cache, attempts/convergence (ship-gates-converge-not-restart), reviewer precision, judge model choice, cost. For each: slug, one-line ruling, and whether it CONSTRAINS or FORBIDS incremental or chunked review. Quote the constraining sentence.
+Output sections: LIFECYCLE, ENGINE+CACHE, INPUT+PROMPT, TELEMETRY, EXISTING-SPLITTING, DECISIONS-CONSTRAINTS, OPEN-QUESTIONS.`, { label: 'explore:ship-review-flow', model: 'haiku', effort: 'high' }),
+
+  () => agent(`${COMMON}
+TASK: Map the benchmark infrastructure well enough to design an experiment that tests: "does chunking a large diff into ~N-LOC pieces (one reviewer per chunk) find MORE/SAME/FEWER true bugs, at what cost and precision, vs one reviewer on the whole diff; and does a cheaper model (haiku) per chunk match sonnet on the whole?"
+Read: gate-engine/review/eval/reviewers/{README.md,bench.mts,corpus.mts,finalize.mts,stats.mts,mine-telemetry.mts,mine-telemetry-lib.mts,propose/*.mts}, docs/benchmarks/{README.md,benchmark-methodology.md,corpus-growth.md,pre-registration-lens-split.md}, docs/benchmarks/experiments/**, gate-engine/eval/cli.mts, gate-engine/review/evidence/diff-archive.mts.
+Answer with cites:
+1. Corpus row schema (all fields), how a row's fixture is materialized (repo.base/staged?), size limits on fixtures (<=25 lines?), can a row carry a LARGE multi-file diff (e.g. 2-10k LOC)? If not, what would have to change?
+2. How bench.mts drives the reviewer (runCascade), what knobs exist (model, cascade, --only, --fresh, concurrency), how metrics are computed (firstFailRecall, firstCleanPass, pooled k/n, expectItems/reasonPattern), per-row checkpoint/salvage (rowHash/behaviorHash), how A/B arms are declared (lens-split arm example) and pre-registered.
+3. The telemetry diff archive: what is stored (<telemetry>/diffs/<sha>.diff.gz, 404 files now), and what labels exist for a real ship diff (review_result FAIL + reason, next attempt's fix diff, item tallies). Could real archived ship diffs be used as 'whole-PR' bench inputs with their FAIL findings as gold? What's missing for that?
+4. How a change is published (publish --change-type coverage|quality), acceptance floors, the noise floor rule (~4pp), what counts as a pre-registered decision.
+5. Existing experiment records (docs/benchmarks/experiments/**, pre-registration-lens-split.md) — format to copy.
+Output sections: ROW-SCHEMA, BENCH-DRIVER, DIFF-ARCHIVE-AS-BENCH, PUBLISH+FLOORS, EXPERIMENT-FORMAT, GAPS-FOR-CHUNK-EXPERIMENT.`, { label: 'explore:bench-infra', model: 'haiku', effort: 'high' }),
+])
+
+phase('Evidence')
+const [flow, bench] = explore
+const evidence = await parallel([
+  () => agent(`${COMMON}
+TASK: Quantify, from the collector DB at ${DB} (sqlite3 -readonly ONLY) and ~/.devkit/telemetry/gate-events.jsonl, the cost of ship iteration and WHY attempts repeat. Headline facts already verified by the lead: 23 branches with >=20 attempts (max 55); top judge cost per branch $465.98 (branch-02, 23 ships, 186 judge runs); cost_usd is only populated on 5770/16147 judge rows (since ~2026-08-07), total $5549.
+Schemas to use: commit_ships(ship_id,repo,branch,mode,ts_start,ts_end,exit_code,blocked_gate,fail_gate,fail_detail,duration_s,pr_number,source,devkit_version), commit_judges(ship_id,ts,judge,raw_judge,escalated,model,outcome,status,secs,input_tokens,output_tokens,cache_creation,cache_read,cost_usd), commit_reviews(ship_id,ts,reviewer,status,escalated,model,reason,secs), commit_review_scope(ship_id,reviewer,diff_sha256,diff_bytes,file_count,files_json,cached,item_count,item_tally_json), commit_gate_results(ship_id,gate,status,detail), commit_cache_events, commit_review_skips, commit_review_lenses, commit_gate_timings. Run .schema on any you need.
+Produce, each with the exact SQL used and the number:
+1. Attempts per branch distribution (already: 1:415, 2-4:401, 5-9:185, 10-19:60, 20+:23). Add: for branches with >=10 attempts, what fraction of attempts were blocked by 'review' vs deterministic gates vs decisions vs timeout (blocked_gate/fail_gate)? Same for all branches.
+2. Per-attempt wall time: median/p90 duration_s overall, and for review-blocked attempts. Per-branch total minutes for the 20+ cohort.
+3. THE KEY QUESTION — churn: for consecutive attempts on the same branch where attempt k was review-FAIL: (a) how often is attempt k+1 also review-FAIL; (b) is the FAILING reviewer the same or different; (c) using commit_review_scope.files_json + diff_sha256, how often does attempt k+1's diff differ only slightly (files changed between attempts) yet a NEW reviewer/finding appears; (d) using commit_reviews.reason text, how often is the k+1 finding about the SAME issue vs a different one (heuristic: reason similarity/same file path mentioned). Be honest about what's derivable.
+4. Diff size vs outcome: bucket commit_review_scope.diff_bytes (and file_count) and compute review FAIL rate, mean item_count, judge cost per ship, judge secs. Does bigger diff => more findings, or flat? Give the table.
+5. Cost anatomy for the 20+ cohort: cost share by judge (correctness vs domain reviewers vs completeness vs decision-alignment vs commit-guard), by model, escalated share; cache_hit rate per judge (commit_cache_events or gate-events cache_hit vs judge_exec).
+6. Repeat-run waste: for ship k+1, how many judge runs were on a diff_sha256 identical to attempt k (should be cache hits) vs re-run; and how many reviewers re-ran on a diff where THEIR files_json was unchanged vs attempt k.
+7. Token sizes: input_tokens/cache_read distribution per judge_exec; how big are the diffs reviewers see (diff_bytes p50/p90/max; LOC estimate = bytes/40).
+Output: NUMBERS first (table per question), then 5-line INTERPRETATION, then CAVEATS (what the data cannot show). Cite 'verify-telemetry-aggregates-yourself' pitfalls: LIKE matches, cached PASSes leave no commit_reviews row, per-machine sink mixes repos.`, { label: 'evidence:telemetry-sql', model: 'sonnet', effort: 'high' }),
+
+  () => agent(`${COMMON}
+TASK: Literature research (you MUST actually call the arxiv-mcp-server tools — search_papers / semantic_search / read_paper / get_abstract — and WebSearch/WebFetch; do not answer from memory). Question: when an LLM reviews a code diff, how do recall and precision change with diff size / context length, and does splitting the diff into chunks reviewed by independent agents (possibly smaller models) improve recall at acceptable precision and cost? Also: incremental review (review only the changes since the last review) — evidence on missed cross-hunk bugs.
+Find and read (at least abstract + method + results) 8-15 relevant papers. Candidates to look for: 'Lost in the Middle', long-context degradation on code tasks (RULER, LongCodeArena, NoLiMa), LLM code review automation evals (e.g. 'AI-assisted code review at Google/Meta/Ericsson', CodeReviewer, 'Automating Code Review Activities', CR-Bench, c-CRAB, SWE-CARE), multi-agent / ensemble review (self-consistency, 'More Agents Is All You Need', debate), agentic bug finding with smaller models, chunking for retrieval vs review, and any industrial report on 'review noise' / false-positive tolerance.
+For each paper: arXiv id, title, year, ONE sentence of the finding that bears on our question, and the effect size/number if any. Then a synthesis: (1) does size hurt recall — how much, at what sizes (tokens/LOC)? (2) does chunking help — evidence for/against; what chunk granularity (hunk/file/function/N-LOC) and what breaks (cross-file bugs, state across hunks)? (3) small-model-per-chunk vs big-model-whole: evidence; (4) incremental re-review: evidence of regressions missed; (5) what would a rigorous test look like (metrics, min n, the noise-floor logic). End with a CONFIDENCE line per claim (high/med/low) and a list of papers you could NOT access.`, { label: 'evidence:arxiv', model: 'sonnet', effort: 'high' }),
+
+  () => agent(`${COMMON}
+TASK: Industry practice research (you MUST use WebSearch/WebFetch and 'gh api' / 'gh repo view' / reading public source; do not answer from memory). Question: how do production AI code-review products handle (a) LARGE PRs — chunking, per-file/per-hunk fan-out, token caps, what chunk size, which model per chunk — and (b) RE-REVIEW after the author pushes fixes — incremental review of only new commits vs full re-review, how they avoid 'new finding on unchanged code' churn.
+Cover at minimum: CodeRabbit (incremental reviews docs, 'review only new commits', path filters, chunking), Qodo PR-Agent (OPEN SOURCE: read pr_agent's pr_reviewer / pr_code_suggestions: how it compresses/splits large diffs, 'extended patch', 'large_patch_policy', 'max_model_tokens', parallel calls per chunk — cite file paths in github.com/qodo-ai/pr-agent), Greptile, Graphite (Diamond) reviewer, Cursor Bugbot, GitHub Copilot code review, Ellipsis, Sourcery, Google's ML code review / Meta's 'MetaMate' if public, Anthropic's own Claude Code review ('/code-review ultra' multi-agent). Also open-source: Danger, reviewdog (not LLM — skip unless relevant), 'ai-code-reviewer' GitHub Actions that split by file.
+For each: source URL, what they do for large PRs (chunk unit + size if stated), what they do on re-push (incremental? how do they suppress repeats? do they re-review whole PR?), model tiering if stated, and any published numbers (false-positive rate, cost). Then: a one-paragraph 'standard practice' summary — is per-file/per-chunk fan-out standard? is incremental re-review standard? what do they do about cross-file bugs in chunked mode (e.g. a second whole-PR 'summary' pass, repo-context retrieval)? End with what is NOT known publicly.`, { label: 'evidence:industry', model: 'sonnet', effort: 'high' }),
+
+  () => agent(`${COMMON}
+PROBLEM STATEMENT for prior-art validation (follow your prior-art methodology — local reference checkouts if any, upstream, other consumers, the web; cite everything):
+"devkit's ship gate runs several LLM reviewers over the WHOLE staged diff on every attempt. After a FAIL the agent fixes one thing and re-ships; the diff hash changes so reviewers re-run on the entire diff and, being stochastic, often surface a NEW finding in code they previously passed. Result: 23 branches needed >=20 attempts (max 55), top branch cost $466 in judge calls, ~15 min per attempt. Proposed fix: (1) on attempt k+1 show reviewers only the code amended since attempt k ('incremental review'); (2) to keep recall, on the FIRST attempt split the diff into ~N-LOC chunks (e.g. 300 LOC => ~33 parallel reviewers for a 10k-LOC PR), each reviewer gets an isolated slice, possibly on a cheaper model (haiku instead of sonnet)."
+Return the standard verdict (SOLVED_ELSEWHERE / DISSOLVE_FRAME / GENUINE_NEW_WORK / INSUFFICIENT_EVIDENCE) with per-leg attestation. Specifically examine: is the FRAME right — is the churn really caused by whole-diff re-review + stochasticity, or by (a) the agent introducing new bugs while fixing, (b) reviewers' precision (false positives), (c) deterministic gates, (d) the completeness judge? Is 'review only the delta' already solved by existing tooling (CodeRabbit incremental, PR-Agent, git range-diff based approaches) or by devkit's own verdict cache (per-file caching?) — check the repo (gate-engine/review/**, docs/decisions/**) before concluding. Is chunked fan-out already how any maintained tool works? Also flag the obvious risk: incremental review cannot see a fix that breaks an unchanged file's contract.`, { label: 'evidence:prior-art', agentType: 'prior-art', model: 'sonnet', effort: 'high' }),
+])
+const [telemetry, arxiv, industry, priorArt] = evidence.map(x => x || '(agent returned null)')
+
+phase('Critique')
+const critique = await agent(`${COMMON}
+You are a completeness critic. Below are five research reports produced for a plan to reduce devkit ship attempts/cost via incremental re-review + chunked parallel reviewers. Your job: what is MISSING, UNVERIFIED, or CONTRADICTORY across them? Specifically: (1) claims without a number or cite; (2) places where the telemetry report and the flow report disagree on what the cache does; (3) the strongest argument AGAINST the proposal that none of them made; (4) any decision in docs/decisions that would be violated; (5) the 2-3 most important unknowns a plan must resolve by experiment rather than assumption. You may read the repo (read-only) and run sqlite3 -readonly ${DB} to check a specific claim. Return: GAPS (numbered, each with 'how to close it'), CONTRADICTIONS, STRONGEST-COUNTERARGUMENT, MUST-EXPERIMENT.
+
+=== FLOW ===\n${flow}\n\n=== BENCH ===\n${bench}\n\n=== TELEMETRY ===\n${telemetry}\n\n=== ARXIV ===\n${arxiv}\n\n=== INDUSTRY ===\n${industry}\n\n=== PRIOR-ART ===\n${priorArt}`, { label: 'critique:completeness', effort: 'high' })
+
+phase('Design')
+const CONTEXT = `=== FLOW ===\n${flow}\n\n=== BENCH ===\n${bench}\n\n=== TELEMETRY ===\n${telemetry}\n\n=== ARXIV ===\n${arxiv}\n\n=== INDUSTRY ===\n${industry}\n\n=== PRIOR-ART ===\n${priorArt}\n\n=== CRITIQUE ===\n${critique}`
+const ANGLES = [
+  { key: 'incremental-first', brief: 'Angle: the cheapest durable win. Design incremental re-review (attempt k+1 reviews only the delta since the last verdict, with per-file/per-hunk verdict memory) with explicit guards for cross-file regressions (e.g. a cheap whole-diff consistency pass, or re-review any file whose imports/callers changed). Chunking is optional/deferred. Minimize new code; reuse the existing verdict cache and review_scope telemetry.' },
+  { key: 'chunk-fanout', brief: 'Angle: maximize first-attempt recall. Design chunked parallel review (split the staged diff into ~N-LOC chunks by file/hunk boundaries, one reviewer per chunk, model tier experiment haiku vs sonnet, plus a whole-diff cross-cut pass for cross-file bugs), so that attempt 1 finds nearly everything and attempts 2..n become small. Address concurrency caps, cost bounds, dedup of findings across chunks, and how chunk verdicts are cached so a fix only re-reviews the touched chunk.' },
+  { key: 'measure-first', brief: 'Angle: do not build what is not proven. Design the smallest EXPERIMENT (using bench.mts, the telemetry diff archive of real ship diffs with their FAIL findings as labels, and the corpus) that would decide chunk size, model tier, and whether incremental review loses recall — with pre-registration, noise floor, min n, cost estimate of the experiment itself — and only the thin production scaffolding needed to run it (e.g. feature flags). State the decision rule that would green-light each production piece.' },
+]
+const plans = await parallel(ANGLES.map(a => () => agent(`${COMMON}
+You are a software architect. ${a.brief}
+Constraints: devkit is the repo; the ship gate + review engine paths are in the FLOW report; the bench infra in the BENCH report; follow the repo's 'third-party over hand-rolled' preference where a maintained package fits; every architectural choice must name the docs/decisions slug it extends or conflicts with; PR scope must stay small and coherent (CLAUDE.md); every production change must be measurable via existing telemetry events or a named new event.
+Produce a concrete implementation plan: (1) goal + success metric (attempts/branch, judge $ per shipped commit, minutes per attempt) with the baseline numbers from the TELEMETRY report; (2) design with the exact files/functions to touch (cite file:line from the reports) and the algorithm (chunking rule, cache key, delta computation, cross-file guard, dedup); (3) experiment/bench plan with decision rule; (4) rollout + flags + kill switch; (5) risks with the mitigation; (6) ordered PR list (each < ~400 LOC) with a one-line scope; (7) what you explicitly did NOT do and why. Be specific, no hand-waving.
+${CONTEXT}`, { label: `design:${a.key}`, effort: 'high' })))
+
+phase('Judge')
+const JUDGE_SCHEMA = { type: 'object', properties: { scores: { type: 'array', items: { type: 'object', properties: { plan: { type: 'string' }, evidence_fit: { type: 'number' }, risk: { type: 'number' }, cost_to_build: { type: 'number' }, expected_impact: { type: 'number' }, total: { type: 'number' }, best_ideas: { type: 'array', items: { type: 'string' } }, fatal_flaws: { type: 'array', items: { type: 'string' } } }, required: ['plan', 'total', 'best_ideas', 'fatal_flaws'] } }, winner: { type: 'string' }, rationale: { type: 'string' } }, required: ['scores', 'winner', 'rationale'] }
+const LENSES = ['evidence fidelity: does each plan respect what the telemetry/arXiv/industry reports actually show, and where does it assume?', 'engineering risk + blast radius in the ship gate: what can silently reduce recall or break the verdict cache, and is the kill switch real?', 'cost/benefit for a cost-sensitive solo user on subscription plans: attempts saved x minutes, $ per shipped commit, experiment cost itself']
+const judged = await parallel(LENSES.map((lens, i) => () => agent(`${COMMON}
+Judge the three plans below through ONE lens: ${lens}. Score each 1-10 on evidence_fit, risk (10=lowest risk), cost_to_build (10=cheapest), expected_impact; total = sum. List best_ideas worth grafting and fatal_flaws. Pick a winner.
+${plans.map((p, j) => `=== PLAN ${ANGLES[j].key} ===\n${p}`).join('\n\n')}
+${CONTEXT}`, { label: `judge:lens${i + 1}`, schema: JUDGE_SCHEMA, effort: 'high' })))
+
+const synthesis = await agent(`${COMMON}
+Synthesize ONE recommended plan from the three candidate plans and the three judge verdicts. Start from the winner (by summed totals across judges) and graft the best_ideas from the others; remove anything flagged fatal. Keep the structure: Context, Baseline numbers, Recommendation (what to build first / second / what to only measure), Design (files, algorithm, cache key, guards), Experiment + decision rule (pre-registered, noise floor, n, cost of experiment), Rollout/flags, Risks, PR list (<400 LOC each), Explicitly-not-doing, Open questions for the owner (max 4, each with a recommended default). Cite file:line and the decisions slugs. Be concrete and scannable; this becomes the plan the owner approves.
+=== JUDGES ===\n${JSON.stringify(judged, null, 1)}\n\n${plans.map((p, j) => `=== PLAN ${ANGLES[j].key} ===\n${p}`).join('\n\n')}\n\n${CONTEXT}`, { label: 'synthesize', effort: 'high' })
+
+return { flow, bench, telemetry, arxiv, industry, priorArt, critique, plans, judged, synthesis }

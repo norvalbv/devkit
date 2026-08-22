@@ -1,0 +1,224 @@
+[
+ {
+  "lens": "cost-sensitive solo user",
+  "scores": [
+   {
+    "plan": "incremental-first",
+    "evidence_fit": 7,
+    "risk": 7,
+    "cost_to_build": 6,
+    "expected_impact": 5,
+    "total": 25,
+    "best_ideas": [
+     "Shadow mode (PR2) measures skip-miss on LIVE traffic at $0 marginal \u2014 the full run happens anyway; this replaces measure-first's $0.8k E2 for a subscription user whose bench quota is the same quota as shipping",
+     "E0 offline replay over candidates-telemetry.jsonl + 416 archived diffs + 2,957 scope pairs with a pre-registered 30%-addressable go/no-go BEFORE any code \u2014 $0",
+     "Mint memory only on PASS; whole-diff key kept so byte-identical reship fast path is untouched; kill = env off or existing `guard-review clear-cache`, no new store (review-cache.json, ~11 entries/branch under MAX_ENTRIES=100)",
+     "writer-reader-contracts always full + es-module-lexer (already in deps, cli/lib/ship/dist-integrity.mts:104-116) transitive import closure + unlexable-file \u2192 full fallback + 0.8 judged-bytes floor: cheap cross-file guards without new deps",
+     "Honest guardrail framing: attempts/branch is explicitly NOT a target (720/772 blocked ships = 1 reviewer; 680/731 correctness FAILs = 1 finding), so the plan does not oversell"
+    ],
+    "fatal_flaws": [
+     "Does not reduce attempts at all by its own admission \u2014 for a solo user minutes-per-branch are dominated by attempt count (devkit k>=2 review-blocked mean 353s x 33 attempts cost-era), so the lens's first term (attempts saved x minutes) is ~0",
+     "Fixed-cost-dominated judge economics cap the win: per-lens run ~= $0.55 fixed + $0.03/KB; at the 27KB p50 diff, halving judged bytes saves ~$0.40 of ~$1.36 (~30%) \u2014 the -30% target is the ceiling, realistic -15%; on devkit that is ~$40-75 imputed per 6 weeks against correctness k>=2 spend of $244/6wk (289 runs, cached 4/76)",
+     "0.8 floor + typical 1-2 file fixes on ~4-file diffs means a large share of k+1 attempts still go full; addressable share is unproven until E0 (go/no-go 30%)",
+     "Judges keep Bash/Read and will re-fetch 'unchanged' files to trace, so token/latency savings are smaller than byte savings suggest; must be verified via judge_exec cache_read, not review_scope bytes",
+     "Records a conflict with reviewers.mts:428-432 and judge-verdict-cache-scope Rejected (b); if skip-miss lands 5-10% the plan widens the guard and re-measures \u2014 a second multi-week cycle"
+    ]
+   },
+   {
+    "plan": "chunk-fanout",
+    "evidence_fit": 4,
+    "risk": 4,
+    "cost_to_build": 3,
+    "expected_impact": 4,
+    "total": 15,
+    "best_ideas": [
+     "Bounded deduped multi-finding FAIL report (PR4, ~200 LOC, evidence/findings.mts + run-review.mts:510-516) is useful standalone with today's 4 lens parts and is the ONLY idea across all three plans that attacks serial single-finding disclosure, the actual attempt driver \u2014 graft as its own story",
+     "C=1 \u21d2 no `|chunk:` suffix \u21d2 byte-identical cache keys: flag-off is a true no-op, no cache clear needed",
+     "Sticky replan keyed on files_sha256 so a 1-line edit cannot move a bin boundary and void sibling PASSes",
+     "Sibling-file prompt line ('trace into them freely, report only if YOUR hunk introduces it') and per-lens x chunk waiver fingerprint narrowing",
+     "Step-0 finding-location audit with an explicit stop rule (if changed-line findings dominate, lever is precision not slicing)"
+    ],
+    "fatal_flaws": [
+     "Optimises first-attempt recall, which for a cost-sensitive solo user RAISES blocks and attempts: restores the 13.9% of correctness reviews truncated at 60KB and adds per-slice attention; own cost model says attempt-1 +17-35% on >36KB diffs \u2014 'paid back by fewer attempts' is asserted, not evidenced, and contradicts ship-gates-converge Rejected (a)",
+     "Fixed-cost multiplication: 3C+1 tasks x ~$0.55 fixed \u2192 C=3 is ~$5.5 fixed vs ~$2.2 today before any bytes; $/shipped commit goes up, not down, unless attempts fall materially",
+     "Devkit has 0/91 correctness reviews >60KB and 15/91 (16%) >36KB in the cost era, so the trigger rarely fires where it is dogfooded (330/864 = 38% across all repos); benefit lands on frink under a regime that was never measured there",
+     "Experiment is the expensive kind: author a 36-row 30-60KB scale corpus with \u226510 cross-file gold + \u226512 decoys, then 4 arms x K=3 on sonnet (~$1-2k unpriced by the plan) \u2014 competes with ship quota on a subscription",
+     "~1,250 LOC across 6 PRs, MAX_ENTRIES 100\u2192400, checklist.mjs state-path change (synced copies), sc-1476 concurrency compliance risk with up to 13 correctness tasks in flight"
+    ]
+   },
+   {
+    "plan": "measure-first",
+    "evidence_fit": 8,
+    "risk": 8,
+    "cost_to_build": 2,
+    "expected_impact": 4,
+    "total": 22,
+    "best_ideas": [
+     "E0 finding-location audit over 322 archived fail\u2192fail pairs ($0, ~1 day) classifying k+1 findings as identity-unchanged / changed / OMITTED-truncated \u2014 the single best go/no-go instrument; graft verbatim as PR0 of any winner",
+     "PR1 telemetry: evidence_bytes_shown / omitted_files / truncated_files on review_scope from buildCappedDiffEvidence (~120 LOC) \u2014 cheap, permanent, makes the 60KB-cap blindness attributable",
+     "Bench seam insight: chunked and incremental arms are expressible by passing a files-subset ReviewerSelection into runReviewerCascade/runCascade (bench.mts:251-253) \u2014 zero production code needed to run an experiment",
+     "P1 per-file cache grain design (key = diffCacheIdentity(fileSegment) + `|file:<path>`, writer-reader exempt, FAIL never cached) is the same end-state as incremental-first but smaller; its decision framing (extends converge ruling (1), does not hit cache-scope Rejected (b)) is the cleanest",
+     "Precision proxy = arm findings matching neither gold nor any later production finding on the branch; W must re-find \u226560% of production gold or harness is invalid (sanity gate before spend)"
+    ],
+    "fatal_flaws": [
+     "Experiment budget $1.5-2.0k stage 1 + $0.8k E2 (+$2.5k stage 2) \u2248 $2.3-2.8k vs devkit's ENTIRE cost-era judge spend of $460/6wk and lifetime all-repo $5,585 \u2014 the experiment costs ~6x what it could save on devkit in 6 weeks; on a subscription this is weeks of the same quota used for shipping (judges are `claude -p`, gate-engine/judge/factory.mts:104)",
+     "$760 of that (W + W') is spent purely establishing a noise floor; ~1,300 LOC of eval-only scaffolding (skeleton fixtures, scale-row minter, arms) before a single production dollar or minute moves",
+     "Skeleton-fixture materialisation (per-hunk context windows) may distort judges; if W fails the \u226560% sanity bar the harness is invalid and the spend is sunk with no decision",
+     "Calendar: E0 \u2192 E1 \u2192 E2 \u2192 P1 opt-in \u2192 2-week dogfood \u2192 default; the shipped end-state is incremental-first's P1 arriving weeks later and conditionally",
+     "Headline metric ($/shipped commit from 31 costed devkit successes) is thin; devkit cost-era shows 142/195 attempts and $405/$460 of spend sit on k>=2 \u2014 the retry axis is where the money is, which E0 would confirm for ~$0 without E1"
+    ]
+   }
+  ],
+  "winner": "incremental-first",
+  "rationale": "Lens: cost-sensitive solo user on subscription plans, i.e. judge $ are imputed (`claude -p`, gate-engine/judge/factory.mts:104) and the real currencies are quota consumption + wall-clock minutes; bench spend draws from the same quota as shipping, so experiment cost weighs heavily. Re-derived devkit cost-era facts (usage.db, \u22652026-08-07): 195 attempts / $460; 142 attempts (73%) and $405 (88%) are k>=2; correctness on k>=2 = 289 runs / $244 = 53% of all spend with only 4/76 cached; 57 shipped commits; mean k>=2 review-blocked attempt 353s (n=33); correctness diff sizes <5K 18 / 5-20K 39 / 20-36K 19 / 36-60K 15 / >60K 0 of 91. So the money is on retries of mid-size diffs, not on >60KB first attempts. incremental-first (25) is the only plan whose design targets exactly that slice, whose deciding experiment is free (E0 offline replay + shadow mode on live traffic), and which is fully reversible (env flag, existing store, whole-diff key intact); its honest weakness is that it saves $/minutes per attempt (~15-30% of correctness k>=2, fixed-cost-bounded) and zero attempts. measure-first (22) has the best evidence discipline and the same end-state (P1 per-file grain), but its $2.3-2.8k E1/E2 budget is ~6x devkit's 6-week judge spend and weeks of subscription quota \u2014 indefensible for this user when E0 ($0) plus incremental-first's shadow telemetry answer the same go/no-go. chunk-fanout (15) optimises first-attempt recall, which raises blocks, multiplies fixed per-task cost (3C+1 x ~$0.55), rarely triggers on devkit (16% >36KB, 0% >60KB), and needs a hand-authored scale corpus plus a $1-2k 4-arm bench; its one graftable win is the bounded multi-finding FAIL report, which attacks serial disclosure (the real attempt driver) and should be its own ~200 LOC story. Recommendation: run incremental-first with measure-first's E0 audit as the hard PR0 gate (classify \u226550 pairs into unchanged/changed/omitted; proceed only if unchanged-file share \u226530%), add measure-first's PR1 evidence_bytes/omitted telemetry, and spin the deduped multi-finding report out separately; do not fund E1 or any chunk bench until those land and shadow data exists."
+ },
+ {
+  "lens": "engineering risk + blast radius",
+  "scores": [
+   {
+    "plan": "incremental-first",
+    "evidence_fit": 6,
+    "risk": 4,
+    "cost_to_build": 6,
+    "expected_impact": 5,
+    "total": 21,
+    "best_ideas": [
+     "E0 offline replay ($0) over 322/2,957 archived fail\u2192fix pairs with a pre-registered 30%-addressable-bytes go/no-go before any engine code",
+     "Shadow mode that re-runs FULL review and reports shadow-skip-miss (k+1 findings in files the delta would have skipped / all findings, \u22645% over \u226540 findings) \u2014 the only plan that measures recall loss in production before it can cause it",
+     "Import-closure cross-file guard via es-module-lexer (already in dependencies, package.json:88) + unlexable-file \u2192 full-review fallback + writer-reader-contracts always whole-diff + 0.8 size floor",
+     "Mint memory only on PASS (never FAIL/inconclusive), keeping the 'presence = PASS' semantics of review-cache.json (cache.mts:1-4)",
+     "deltaBlock PromptExtra that names unchanged files and keeps full --stat + Bash fetch, so the judge's investigative reach is not cut, only its stdin evidence"
+    ],
+    "fatal_flaws": [
+     "Kill switch is NOT fully real: a delta-judged PASS lands via settle.mts:77 savePasses({[t.key]}) under the WHOLE-diff key (reviewers.mts:441 cacheKey has no delta-mode salt), so after GUARD_REVIEW_DELTA=off a byte-identical reship replays a verdict earned over a partial judgement; the only revocation is `guard-review clear-cache`, which wipes every branch's PASSes in the main-checkout-anchored store (verdict-store.mts:91-104)",
+     "PR1 'off = mint only' is not a no-op on the gate: review-cache.json is one store per repo shared by ALL worktrees (devkitDataFile uses git-common-dir) with MAX_ENTRIES=100 (verdict-store.mts:38) and ~10 keys/attempt today; adding ~9 memory entries per PASSing attempt roughly halves retained attempts \u2192 real PASSes evicted (retainNewest, store-retention.mts:27-39) while the flag is off, silently raising cost and contaminating the E2 baseline",
+     "Import guard resolution is unspecified: es-module-lexer yields specifiers, not files \u2014 tsconfig paths, index/extension resolution, barrel re-exports, require(), template dynamic imports (dist-integrity.mts:118-120 notes `n` undefined) all produce silently missing edges \u2192 a coupled neighbour is reused, not re-judged; plus non-import coupling (event names, env keys, DI tokens, shared JSON) only caught by the writer-reader lens",
+     "Transitive reuse compounds: once a file PASSes it is never re-judged while its identity is unchanged, across arbitrarily many attempts and neighbour rewrites (state-transitions/concurrency-races lenses are cross-file by nature, only writer-reader is exempt); judge-verdict-cache-scope Rejected (b) calls this shape UNSOUND and the plan only records a note",
+     "Does not touch the dominant loop driver (serial single-finding disclosure: 720/772 blocked ships = 1 reviewer, 680/731 correctness FAILs = 1 finding) \u2014 attempts/branch can only be a guardrail, so the win is bounded to $/min on k\u22652 in a repo (devkit) whose max is 19 attempts"
+    ]
+   },
+   {
+    "plan": "chunk-fanout",
+    "evidence_fit": 6,
+    "risk": 5,
+    "cost_to_build": 3,
+    "expected_impact": 6,
+    "total": 20,
+    "best_ideas": [
+     "Mode-salted cache keys (`|chunk:<sha12(files)>`) with C=1 \u21d2 no suffix \u21d2 today's key byte-for-byte \u2014 the only plan whose `off` cannot be served a verdict earned under `on` and needs no clear-cache; graft this discipline onto any delta/per-file scheme",
+     "Step-0 finding-location audit as a hard GO/NO-GO (stop if (a) changed-lines dominates \u2192 lever is precision, not slicing)",
+     "Sticky chunk plan per files_sha256 so a 1-line edit cannot move bin boundaries and void sibling PASSes",
+     "Whole-diff writer-reader cross-cut pass + sibling-file list in prompt + judges keep Read/Grep/git (responsibility partition, not reach partition)",
+     "Bounded deduped multi-finding FAIL report (useful even with today's 4 lens parts) \u2014 the one idea that attacks serial disclosure, the measured loop driver",
+     "Scale-track corpus with cross-file gold as a recall guardrail, pre-registered with the 0.75/0.85 floors"
+    ],
+    "fatal_flaws": [
+     "Largest blast radius in the ship gate: checklist.mjs is a synced asset in 4 copies (.claude/.cursor/.agents/dist) \u2014 any byte change flips identitySalt and voids every consumer's PASSes; plus planner, keys, state-file paths, report, and MAX_ENTRIES (a single const at verdict-store.mts:38 shared by all 4 stores \u2014 400 must be per-store or it changes retention for decisions/prefix/sentry too)",
+     "Predicted silent recall loss on cross-chunk state-transitions/concurrency-races findings (SWE-PRBench Type2/Type3 collapse; correctness brief: 'trace BEYOND the hunk'); only writer-reader is whole-diff, and the cross-file gold guardrail is 'B \u2265 A \u2212 1 row' on ~10 gold rows \u2014 too weak to detect a 10-20% loss",
+     "Restores the 13.9% truncated reviews and multiplies per-attempt findings (3C+1 judges) \u2192 MORE blocks and +17\u201335% attempt-1 cost on >36KB diffs; conflicts with ship-gates-converge Rejected (a) and the only splitting precedent (lens split) was UNRESOLVED at its own bar",
+     "More in-flight judges under cap 6 hit the recorded sc-1476 compliance degradation (checklist-void under concurrent load); the plan measures it but fans out anyway",
+     "Cost: ~1,250 LOC + authored 36-row scale corpus + 4-arm K=3 bench + 4-week dogfood before any evidence the lever matters; devkit (0 branches \u226520) is not where the win lands",
+     "Dedup keyed on a lossy file:line regex and a \u226412-line report can hide findings 13..N from the agent (FAIL verdict kept, disclosure truncated) \u2014 a new, unmeasured convergence risk"
+    ]
+   },
+   {
+    "plan": "measure-first",
+    "evidence_fit": 9,
+    "risk": 8,
+    "cost_to_build": 5,
+    "expected_impact": 5,
+    "total": 27,
+    "best_ideas": [
+     "Zero production windowing code to decide: chunk and incremental arms are expressible by passing a files-subset ReviewerSelection through the existing runReviewerCascade/runCascade seam (run-review.mts:199-205 builds evidence from sel.files) \u2014 the gate's recall cannot be reduced by an experiment that never touches it",
+     "E0 on 322 archived fail\u2192fail pairs classifies every k+1 finding as (a) unchanged-file / (b) changed / (c) OMITTED-by-cap, with numeric stop rules (P1 only if a\u226530%, P2 only if c\u226515%) and an explicit 'lever is disclosure count' exit",
+     "PR1 telemetry (evidence_bytes_shown, omitted_files, truncated_files on review_scope) \u2014 additive, tiny blast radius, and it makes the 60KB-cap blindness measurable forever",
+     "Harness validity floor (W must re-find \u226560% of production gold or nothing is published) and W vs W\u2032 noise floor before any treatment is read",
+     "P1 per-file cache grain keys `|file:<path>` (mode-distinct from the whole-diff key) so `reviewer` grain never reads a per-file PASS \u2014 a real kill switch without clear-cache",
+     "Honest devkit-only baselines ($14.85/shipped commit, 3.42 attempts cost-era) replacing the cross-repo 23/55/$466 frame"
+    ],
+    "fatal_flaws": [
+     "Nothing improves the gate until $2.8\u20135.3k of judge spend and ~1,170 LOC of eval scaffolding land; if E0 says 'disclosure count is the lever', all three plans' windowing machinery is moot and the spend bought a no-ship (correct, but zero impact)",
+     "Skeleton fixtures (hunk windows, not real files) change what the judge can Read/Grep vs production \u2014 arms are equal but absolute recall may not transfer; the 60% sanity floor is the only guard",
+     "P1 as specified has NO cross-file guard beyond the writer-reader/domain:'all' exemption \u2014 weaker than incremental-first's import closure; it must graft that guard (and the mode-salted key discipline) before any default flip",
+     "E2 incremental arm is n=40 k+1 sides \u2014 underpowered to detect a \u226410pp recall loss; 'non-inferior' at that n is mostly noise-floor",
+     "Adds a devDependency (parse-diff) possibility and a gitignored private corpus \u2014 bench banks are not evidence and only 78 devkit rows are committable"
+    ]
+   }
+  ],
+  "winner": "measure-first",
+  "rationale": "Lens = engineering risk + blast radius in the ship gate: what silently reduces recall, what breaks the verdict cache, is the kill switch real.\n\nVerified facts that drive the scores (read-only, this checkout):\n- cacheKey = sha256(identitySalt\\0versionSalt\\0diffText) with NO mode salt (gate-engine/review/reviewers.mts:441-455); planReviewWork keys `${salt}|split:<group>` (lens/split.mts:341) \u2014 the split precedent already proves mode-in-key is the kill-switch idiom.\n- PASS write path: settle.mts:77 savePasses({[t.key]: {at, model, duration_ms, lens fields}}); FAIL/inconclusive never cached; archiveFailedDiff on fail (settle.mts:79).\n- Store: one `.devkit/review-cache.json` per repo anchored at git-common-dir \u2192 shared by ALL worktrees/branches (verdict-store.mts:91-104); MAX_ENTRIES=100 is a module const shared by all four stores (verdict-store.mts:38, applied in saveEntries:176 via retainNewest, store-retention.mts:27-39, which emits cache_evicted). Retention doc says ~10 keys/attempt and zero evicted-then-needed TODAY \u2014 both incremental (\u2248+9 memory entries/attempt) and chunk (\u224813+ keys + plan entries/attempt) change that; chunk at least raises the cap (but must make it per-store).\n- Session fence: 4 stores hardcoded in cli/lib/ship/review/cache/session.mts:21-26 and `[ \"${CACHE_FIELDS[1]}\" = 4 ]` in review-target.sh:730-734 \u2014 any new store (incremental PR5) must touch both; both plans that stay inside review-cache.json avoid this.\n- diffCacheIdentity (judge/diff-focus.mts:131-175) drops context/line numbers/index shas per file, so per-file identity is a sound, already-shipped primitive for all three plans.\n- Correctness domain 'all' files are source-only, test-free (reviewers.mts:234-239) \u2192 incremental's \"unlexable \u2192 full\" fallback rarely fires for correctness (good for savings, but means the es-module-lexer guard IS the recall guard there); es-module-lexer is in `dependencies` (package.json:88) though dist-integrity.mts:102-103 documents it as dev-only intent.\n- Judge stdin = buildCappedDiffEvidence(gitCached(cwd,[],files), stat) with 60000/8000/40 caps (diff-evidence.mts:85-87, run-review.mts:205) \u2014 the seam measure-first and chunk both exploit; run-review.mts:387 computes one diff per reviewer over s.files.\n\nKill-switch verdicts:\n- incremental-first: NOT fully real. Under `on`, a delta-judged task still saves the whole-diff key (settle.mts:77 uses t.key; plan keeps whole-diff key \"still saved\"), so `off` replays partial-judgement PASSes on a byte-identical reship; revocation requires clear-cache (repo-wide, all branches). Also PR1 \"off\" mints memory into the shared 100-cap store \u2014 a silent eviction cost while nominally dark.\n- chunk-fanout: REAL. `|chunk:` suffix + C=1 no-suffix makes on/off verdicts non-interchangeable and today's keys byte-identical; no clear-cache needed. The cost is the blast radius: checklist.mjs asset change (4 synced copies \u2192 identitySalt flip for every consumer), state-file path change, MAX_ENTRIES raise on a shared const, 3C+1 judges vs sc-1476 compliance, +17-35% attempt-1 cost, and predicted cross-chunk loss on state/concurrency lenses (SWE-PRBench Type2/3) behind a too-weak 'B \u2265 A\u22121 row' guardrail.\n- measure-first: REAL by construction \u2014 no gate code until E0/E1/E2 gate it; P1's `|file:<path>` keys are mode-distinct; PR1 is additive telemetry.\n\nSilent recall reducers ranked: chunk (cross-chunk state/concurrency, dedup/\u226412-line report truncating disclosure) > incremental (unresolved module graph \u2192 missed edges, transitive reuse compounding, non-import coupling, prompt nudging judge away from 'unchanged' files; mitigated by shadow-skip-miss) > measure-first (none in the gate; P1 later lacks an import guard and must graft incremental's).\n\nWinner: measure-first (27) \u2014 highest evidence fit (E0 $0 audit decides whether ANY windowing matters, directly testing the CRITIQUE counterargument that the loop is serial disclosure + 14% false-block), lowest gate risk (nothing ships ungated, kill switches real), moderate cost (real $ but no engine surgery). Graft: chunk's mode-salted key discipline and sticky-plan idea, incremental's import-closure guard + shadow-skip-miss metric for P1, chunk's bounded multi-finding report as the disclosure-count experiment if E0 says that is the lever. incremental-first (21) edges chunk (20) on cost and shadow-measurement but loses heavily on kill switch and store pressure; chunk-fanout is the most expensive and widest-blast plan built ahead of evidence, redeemed only by its key discipline and step-0 gate."
+ },
+ {
+  "lens": "evidence fidelity",
+  "scores": [
+   {
+    "plan": "incremental-first",
+    "evidence_fit": 8,
+    "risk": 7,
+    "cost_to_build": 6,
+    "expected_impact": 5,
+    "total": 26,
+    "best_ideas": [
+     "Mint per-file memory on PASS only - 'silence != pass' is exactly right given verified serial disclosure (commit_review_lenses: 825/834 failing lenses carry 1 issue), so a FAIL run's silence on other files is not evidence",
+     "Shadow mode (GUARD_REVIEW_DELTA=shadow) measures skip-miss on LIVE ships in real repos at ~$0 marginal - strictly better evidence than skeleton fixtures for the incremental-recall question; pre-registers a 5% skip-miss gate over >=40 findings",
+     "Attempts/branch demoted to a guardrail, not a target - the only plan whose success metric matches what windowing can actually move",
+     "writer-reader-contracts lens always full (brief architecture_context: cross-root pairs are ONE finding) + es-module-lexer import-closure pull (verified package.json dependencies l.88) + unlexable->full fallback",
+     "E0 offline addressable-bytes go/no-go (>=30%) before any flag flips; fleet bench byte-identical on/off"
+    ],
+    "fatal_flaws": [
+     "Not fatal but unresolved: judge-verdict-cache-scope Rejected (b) ('a fix routinely edits files outside that reviewer's domain ... quietly dropping real changes out of the judgement') is argued away as 'domain subtraction' rather than dissolved; applies to any non-import coupling (env/JSON/shell<->TS); only measurement mitigates it",
+     "E1 power: needs >=40 k>=2 findings on devkit-only in 3 weeks; devkit cost-era ~195 attempts/6wk, 21.9% review-blocked - borderline, may stall in shadow",
+     "Impact ceiling is cost-only on k>=2: the failing lens still re-reviews everything and, being serial-disclosure-bound, surfaces the next finding; devkit total judge spend is $460/6wk so the absolute win is small where it is dogfooded",
+     "dist-integrity.mts:102-103 says es-module-lexer is 'dev-only ... only for devkit self-hosting' despite package.json listing it under dependencies - the consumer-runtime guard needs that resolution verified before PR2"
+    ]
+   },
+   {
+    "plan": "chunk-fanout",
+    "evidence_fit": 5,
+    "risk": 4,
+    "cost_to_build": 3,
+    "expected_impact": 6,
+    "total": 18,
+    "best_ideas": [
+     "C=1 => no '|chunk:' suffix so flag off/on is byte-identical for sub-36KB diffs (correctness p50 = 20,987 bytes, verified) - clean kill switch",
+     "Sticky chunk plan keyed on files_sha256 so a 1-line edit cannot move bin boundaries and void sibling PASSes",
+     "Bounded deduped FAIL report (<=12 one-liners, PR-Agent fingerprint shape) instead of concatenated transcripts - useful even today with 4 lens parts",
+     "MAX_ENTRIES 100->400 retention raise; per-lens x chunk waiver fingerprint narrowing",
+     "Explicit cost model ($0.55 fixed + $0.03/KB) with MAX_CHUNKS=4 and >36KB threshold"
+    ],
+    "fatal_flaws": [
+     "Targets attempt reduction (repeat 46.7%->35%, new-reviewer 19.9%->12%) with no mechanism tying chunk count to fewer attempts; the evidence says the loop is serial disclosure (98.9% single-issue lenses) and the only way chunking helps is multi-finding disclosure, which collides head-on with ship-gates-converge Rejected (a) maintainer ruling and is unmeasured (CRITIQUE must-experiment 3)",
+     "Latency claim (review-blocked p50 -> <=360s, 'makespan ~ slowest slice') ignores waves: 13 correctness + ~4 domain tasks under cap 6 = 3 waves vs 2 today; could be slower, not faster",
+     "Internally inconsistent: cites Rejected (b) to rule per-file incremental UNSOUND, then ships per-chunk identity memory at k+1 ('only chunks whose identity changed miss') - the same cross-slice blindness class",
+     "PR1-4 (~950 LOC) land before the step-0 audit script (PR5) can deliver its GO/NO-GO - builds before the evidence that decides",
+     "Scale bench: 36 rows, >=5 net flips - underpowered (SWE-PRBench needed n=300 to separate 0.03); lens-split A/B on a bigger corpus already ended UNRESOLVED at +4 flips vs ~5 floor; un-truncating the 13.9% capped reviews (219/1,580 verified) raises blocks by design"
+    ]
+   },
+   {
+    "plan": "measure-first",
+    "evidence_fit": 9,
+    "risk": 8,
+    "cost_to_build": 5,
+    "expected_impact": 5,
+    "total": 27,
+    "best_ideas": [
+     "The seam insight is correct and verified: run-review.mts:387 gitCached(cwd,[],s.files) and bench.mts:251-253 runReviewerCascade(sel,...) mean chunk and incremental arms are expressible with zero production code",
+     "Devkit-only re-derivation is accurate (verified: $14.85/shipped = $460.20/31 cost-era, max 19 attempts, 375 archived correctness-FAIL diffs vs plan's 373)",
+     "E0 stop rule: if unchanged-file share <30% and serial-disclosure >=40% then STOP and reopen disclosure count - the only plan whose decision tree can end in 'do not build windowing'",
+     "Compound success metric ($/shipped -30% AND attempts not up AND minutes not up); cache waste re-cut to ~$30-50 (agrees with CRITIQUE #3, not TELEMETRY's $147)",
+     "P3 haiku-per-chunk requires non-inferiority AND a superseding decision note - respects correctness-reviewer-precision and the 4,880/4,880 sonnet fact",
+     "PR1 instruments evidence_bytes_shown/omitted_files/truncated_files on review_scope - closes CRITIQUE gap 4 cheaply"
+    ],
+    "fatal_flaws": [
+     "Skeleton fixtures (context + '-' lines as base, context + '+' as staged) strip the surrounding code; judges keep Read/Grep/Glob and the brief says 'trace BEYOND the hunk' - the >=60% W-re-find sanity bar is the right guard but ~$2-2.8k rides on an unvalidated harness; a K=1 probe should gate all of it",
+     "P1 scope is self-contradictory: section 2b keys 'salt|split:<group>|file:<path>' (correctness lenses included) but risk 6 says writer-reader + domain:'all' are exempt - if correctness (domain all) is exempt, P1 skips 64.9% of spend",
+     "E1 n=60 MDE ~15pp (n=120 ~10pp) means the chunk-size answer most likely lands UNRESOLVED at $2k, exactly like the lens-split A/B; E2 n=40 non-inferiority margin is unstated",
+     "'322 fail->fail pairs both sides archived' overcounts - my join gives 353 pairs / 274 both archived; harmless for E0 but the number should be re-derived",
+     "No live shadow arm: E2's incremental-recall question is answered on skeleton fixtures when incremental-first's shadow mode would answer it on real ships for free"
+    ]
+   }
+  ],
+  "winner": "measure-first",
+  "rationale": "Through the evidence-fidelity lens the decisive facts are: (1) the loop is serial disclosure (825/834 failing lenses = 1 issue, verified), so attempt counts are not a windowing lever; (2) devkit-only severity is small ($14.85/shipped, max 19 attempts, verified) and the cited 23/55/$466 frame is cross-repo; (3) no arXiv paper measures whole-vs-chunked or incremental LLM review, SWE-PRBench says cross-file Type3~0 regardless, and industry only confirms PR-Agent's file-packed chunking and incremental modes exist, not that they hold recall; (4) judge-verdict-cache-scope Rejected (b) and ship-gates-converge Rejected (a) are live maintainer rulings. measure-first respects all four: it re-derives devkit numbers correctly, makes 'stop, the lever is disclosure count' a pre-registered outcome, ships nothing before E0 ($0), and pins P3 behind a superseding decision. Its weaknesses are experimental validity (skeleton fixtures) and power (n=60), both stated honestly. incremental-first is a close second and is the better BUILD plan: PASS-only minting and the attempts-as-guardrail framing respect serial disclosure, and its shadow mode is better recall evidence than any skeleton bench - graft it into measure-first as the E2 replacement. chunk-fanout assumes away the serial-disclosure finding (targets repeat-rate reduction with no mechanism), contradicts itself on per-slice memory, builds ~950 LOC before its own audit, and its latency claim ignores wave count; it is the least evidence-faithful of the three."
+ }
+]
