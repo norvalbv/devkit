@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "kind": "prior_art",
+  "phase": "problem",
+  "status": "reviewed",
+  "problem": {
+    "statement": "devkit's ship gate runs several LLM reviewers over the WHOLE staged diff on every attempt. After a FAIL the agent fixes one thing and re-ships; the diff hash changes so reviewers re-run on the entire diff and, being stochastic, often surface a NEW finding in code they previously passed. Result: 23 branches needed >=20 attempts (max 55), top branch cost $466 in judge calls, ~15 min per attempt. Proposed fix: (1) incremental review of only code amended since the last attempt; (2) on the first attempt, chunk the diff into ~300-LOC slices reviewed in parallel, possibly on a cheaper model.",
+    "restatedFrame": "Ship-gate retries are expensive because each retry re-sends a reviewer's entire domain diff and re-pays a stochastic LLM judgment on bytes that already passed, so the fix is architected as a windowing problem: show less code per attempt (delta-only on retries, LOC-chunked fan-out on the first pass).",
+    "assumedConstraints": [
+      "Reviewer granularity (one verdict per reviewer over its whole domain diff) is fixed; the only lever considered is how much of that diff is shown per attempt.",
+      "The churn is attributed mainly to reviewer stochasticity re-flagging previously-passed, unchanged code, rather than to reviewer imprecision on genuinely new fix code or to non-LLM (deterministic) gate blocks.",
+      "The cited numbers (23 branches, max 55 attempts, $466 top branch, ~15 min/attempt) are treated as accurate inputs rather than something to re-derive from telemetry before scoping a fix.",
+      "Shrinking the first-attempt reviewer's context to ~300-LOC chunks on a cheaper model is assumed roughly recall-neutral; the cross-chunk blind spot is named as a risk but not measured."
+    ]
+  },
+  "verdict": "DISSOLVE_FRAME",
+  "confidence": "medium",
+  "legs": [
+    {
+      "leg": "local",
+      "status": "unavailable",
+      "detail": "declaredCheckouts=0, resolvedCheckouts=0 — guard.config.json has no research.referenceCheckouts key, so no reference checkout was opened. Searched instead: docs/decisions/*.md, gate-engine/review/**, gate-engine/judge/diff-focus.mts, and ~/.devkit/telemetry/gate-events.jsonl (67,950 events, devkit's own dogfood sink)."
+    },
+    {
+      "leg": "github",
+      "status": "reached",
+      "detail": "gh authenticated (norvalbv). `gh search code \"auto_incremental_review\"` returned real, current adoption across 20+ unrelated production repos, confirming the feature is a maintained, widely-used capability, not a hypothetical."
+    },
+    {
+      "leg": "web",
+      "status": "reached",
+      "detail": "WebFetch on docs.coderabbit.ai confirmed auto_incremental_review's exact mechanism; WebSearch surfaced PR-Agent's diff-compression/chunking for large PRs and Cursor BugBot's 8-way parallel-pass majority-vote precision technique, plus an academic Multi-Review (2025) ensemble paper."
+    },
+    {
+      "leg": "deep-research",
+      "status": "unavailable",
+      "detail": "No start_research/check_research_status MCP tool present in this session's tool set."
+    }
+  ],
+  "frameChallenge": {
+    "framing": "DISSOLVES",
+    "upstreamChoice": "The 2026-07-02 review-gate-in-chain ruling to cache a reviewer PASS as one SHA256 over its WHOLE per-reviewer diff (never per-file/per-hunk) — refined since (diffCacheIdentity's sentry-only normalization, sc-1437's identity salts) but never repartitioned to a finer grain — even though judge-verdict-cache-scope (2026-08-07) already proved that re-keying at a NARROWER altitude (branch+message for completeness) eliminates the identical repeat-cost problem, and gate-verdict-attribution already computes per-file diff_sha256 for telemetry that a finer cache partition would need.",
+    "boundaryMustExist": "no"
+  },
+  "questions": [
+    {
+      "id": "Q1",
+      "status": "ANSWERED",
+      "finding": "No declared reference checkout, but peer LLM-diff-reviewer tools are real and reachable: CodeRabbit's auto_incremental_review re-reviews only commits since the last review (confirmed via docs + 20+ production adopters found on GitHub); PR-Agent/Qodo (open source, cloneable) compresses/chunks large diffs. These are genuine peer consumers of the same problem class."
+    },
+    {
+      "id": "Q2",
+      "status": "ANSWERED",
+      "finding": "No — `claude -p` is a stateless one-shot completion call with no session/diff memory; the underlying dependency exposes no native 'diff since last invocation' mode. Any windowing has to live in devkit's own retry logic, so this isn't a case of picking the harder of two dependency-native paths."
+    },
+    {
+      "id": "Q3",
+      "status": "ANSWERED",
+      "finding": "Must every retry re-send the reviewer's WHOLE domain diff? No. Devkit's own architecture already treats cache granularity as adjustable ('cached at the altitude of the question', judge-verdict-cache-scope) — the whole-diff-per-reviewer boundary is a chosen cache partition, not an inherent property of LLM review."
+    },
+    {
+      "id": "Q4",
+      "status": "ANSWERED",
+      "finding": "Confirmed absent by direct code read: run-review.mts computes `diffs = selected.map((s) => gitCached(cwd, [], s.files))` — one full diff per reviewer's entire file set — and no file in gate-engine/review/**, reviewers.mts, ship-branch.sh, or reship.sh carries an attempt-index or since-last-attempt delta computation. Lens-split (the closest analog) divides by CONCERN over the SAME full diff, not by code region."
+    },
+    {
+      "id": "Q5",
+      "status": "ANSWERED",
+      "finding": "CodeRabbit (incremental review), PR-Agent (diff compression/chunking for large PRs), Cursor BugBot (8-way parallel pass + majority vote for precision), and an academic Multi-Review ensemble paper (2025) all solve adjacent slices of this same class of problem in production or peer-reviewed work."
+    },
+    {
+      "id": "Q6",
+      "status": "ANSWERED",
+      "finding": "Real but partially unverified cost: this machine's telemetry sink (67,950 events) shows 19 branches with >=20 ship_attempt rows and a max of 49 on one branch — same order of magnitude as the cited 23/55 but not an exact match (consistent with the known per-machine-sink caveat). New failure surface: showing a reviewer only a new hunk (not the full file) is a STRICTLY WEAKER guarantee than devkit's current cache, which only skips a reviewer when its ENTIRE domain diff is byte-identical — incremental windowing would introduce a new class of contract-blindness the current architecture does not yet tolerate. Repeat-patch alarm: >=2 prior rounds already patched this exact 'retries repay reviewers for unchanged work' axis (prefix-cache, message-scope cache, sc-1437 identity salts, diffCacheIdentity normalization, correctness-lens-split's two-round A/B) — the frame, not the next patch, is the recurring signal."
+    },
+    {
+      "id": "Q7",
+      "status": "ANSWERED",
+      "finding": "Yes — the whole-per-reviewer-diff cache-key granularity chosen in review-gate-in-chain (2026-07-02) is the upstream decision. Revisiting it toward per-file (or per-hunk) partitioning — reusing lens-split's existing merge/aggregate machinery and the per-file diff_sha256 gate-verdict-attribution already emits — captures most of proposal (1)'s cost win without inventing new windowing machinery or its contract-blindness risk."
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "local",
+      "source": "gate-engine/review/reviewers.mts:441 (cacheKey)",
+      "repoRoot": null,
+      "claim": "A reviewer PASS is cached as one hash over the reviewer's WHOLE domain diff; only a byte-identical diff skips review — by explicit design.",
+      "quote": "Cache key for a PASS verdict: reviewer identity + devkit version + the exact bytes of its staged domain diff... That skip is BY DESIGN"
+    },
+    {
+      "kind": "local",
+      "source": "gate-engine/review/run-review.mts:387",
+      "repoRoot": null,
+      "claim": "Each reviewer's diff is computed once over ALL its domain files, not per-file or per-hunk — confirms no incremental/since-last-attempt windowing exists anywhere in the ship/review path.",
+      "quote": "diffs = selected.map((s) => gitCached(cwd, [], s.files));"
+    },
+    {
+      "kind": "local",
+      "source": "docs/decisions/correctness-reviewer-precision.md",
+      "repoRoot": null,
+      "claim": "Devkit's own correctness reviewer already false-blocks ~14% of clean diffs, model-invariantly, with the fix (K-sample self-consistency) ruled but explicitly unbuilt/paused — a second, independent driver of repeated FAILs that incremental review does not touch.",
+      "quote": "the single-pass correctness reviewer false-blocks ~14% of clean diffs... precision cannot be bought by a bigger model (model-invariant: haiku 0.86 = sonnet 0.86)."
+    },
+    {
+      "kind": "local",
+      "source": "docs/decisions/judge-verdict-cache-scope.md",
+      "repoRoot": null,
+      "claim": "Devkit already solved an identical repeat-cost problem for the completeness judge by re-keying its cache at a narrower altitude (branch+message) instead of exact bytes — proving cache-granularity repartitioning is a proven, already-shipped in-repo lever.",
+      "quote": "A confident PASS is cached at the altitude of the question the judge answers, not uniformly on the evidence bytes."
+    },
+    {
+      "kind": "local",
+      "source": "docs/decisions/gate-verdict-attribution.md",
+      "repoRoot": null,
+      "claim": "Per-file diff hashes are already computed and emitted for telemetry attribution — the primitive a per-file cache partition would need already exists, just not wired into the verdict-cache key.",
+      "quote": "Every SELECTED reviewer emits review_scope BEFORE the judge runs — files, diff_sha256, file count and hash, and cached"
+    },
+    {
+      "kind": "local",
+      "source": "~/.devkit/telemetry/gate-events.jsonl (67,950 events, this machine's sink)",
+      "repoRoot": null,
+      "claim": "Corroborates the general severity but not the exact cited numbers: 19 branches (not 23) show >=20 ship_attempt rows, max 49 (not 55) on one branch.",
+      "quote": "branch-04: 49 ship_attempt rows; 19 branches total with >=20 attempts on this sink"
+    },
+    {
+      "kind": "github",
+      "source": "gh search code \"auto_incremental_review\" (tinymce/tinymce, lldap/lldap, akash-network/node, webex/webex-js-sdk, and 15+ more)",
+      "repoRoot": null,
+      "claim": "CodeRabbit's incremental-review-since-last-push feature is real, widely adopted, and maintained across many unrelated production repos.",
+      "quote": "tinymce/tinymce:.coderabbit.yaml: auto_incremental_review: true (and 19+ other production repos)"
+    },
+    {
+      "kind": "web",
+      "source": "https://docs.coderabbit.ai/configuration/auto-review",
+      "repoRoot": null,
+      "claim": "CodeRabbit re-reviews only the commits added since the last review, not the whole diff — the exact mechanism proposal (1) describes, already shipped and maintained.",
+      "quote": "CodeRabbit re-reviews a PR after each new push, focusing on the commits added since the last review."
+    },
+    {
+      "kind": "web",
+      "source": "https://thamizhelango.medium.com/how-qodo-pr-agent-smartly-compresses-and-reviews-large-code-changes-72db8898f622",
+      "repoRoot": null,
+      "claim": "PR-Agent (open-source, cloneable) already implements diff compression/chunking for large changes — relevant prior art for proposal (2), and unlike CodeRabbit it is declarable as a real reference checkout for future investigation.",
+      "quote": "How Qodo PR-Agent Smartly Compresses and Reviews Large Code Changes"
+    },
+    {
+      "kind": "web",
+      "source": "https://zylos.ai/research/2026-03-01-multi-model-ai-code-review-convergence/",
+      "repoRoot": null,
+      "claim": "Parallel multi-pass + majority-vote ensembles are the established technique for the PRECISION problem — the same lever devkit's own correctness-reviewer-precision decision names (K-sample self-consistency) but has not yet built.",
+      "quote": "Cursor's BugBot uses 8 parallel review passes over the same diff... Results are majority-voted"
+    }
+  ],
+  "suggestedNextStep": {
+    "kind": "reframe",
+    "detail": "Split into three separable stories instead of one windowing project. (1) Repartition the existing per-reviewer review-cache to per-file granularity, reusing lens-split's merge/aggregate machinery and the per-file diff_sha256 gate-verdict-attribution already computes — this captures proposal (1)'s cost win (an unrelated file's change no longer forces full re-review) without incremental-windowing's new contract-blindness risk, since each touched file's FULL diff is still shown, just untouched files are skipped. (2) Scope first-attempt LOC-chunking for very large diffs (proposal 2) as its own investigation — real prior art exists (PR-Agent's chunking, Cursor BugBot's parallel-pass ensembles) but it solves first-attempt latency on huge PRs, a different problem from retry churn, and needs its own risk analysis for cross-chunk blindness. (3) Before committing engineering budget, verify the cited numbers against the full gate-events.jsonl telemetry (this sink alone shows 19 branches / max 49, not 23/55) and measure what fraction of repeat FAILs land on files/hunks that did NOT change between attempts (the churn this proposal targets) versus genuinely new findings on the fix itself or on deterministic (non-LLM) gates — correctness-reviewer-precision's already-documented ~14% model-invariant false-block rate may be the larger, unaddressed driver."
+  },
+  "routing": null,
+  "summary": "The stated mechanism (whole-diff re-review forces stochastic re-flagging on retries) is real and code-confirmed — reviewers.mts/run-review.mts cache and re-diff at the granularity of one reviewer's ENTIRE domain, never per-file or per-hunk, so any unrelated fix invalidates the whole verdict. But devkit already has a proven, cheaper, safer answer to this exact shape of problem: judge-verdict-cache-scope re-keyed the completeness judge's cache to a narrower altitude (branch+message) instead of exact bytes, and gate-verdict-attribution already computes per-file diff hashes for telemetry. Repartitioning the domain-reviewer cache to per-file granularity would capture most of proposal (1)'s savings while avoiding a new correctness risk that true incremental windowing introduces (showing only a new hunk, not the surrounding file, is a strictly weaker guarantee than today's full-diff-identity cache). Proposal (2)'s LOC-chunking targets a different problem (first-attempt latency on huge PRs, not retry churn) and has real external prior art (PR-Agent, Cursor BugBot) but needs its own scoping. Separately, devkit's own correctness-reviewer-precision decision already documents a ~14% model-invariant false-block rate with its fix (K-sample self-consistency) ruled but unbuilt — likely a larger, independent driver of the attempt counts than diff-window size. The cited numbers are directionally corroborated by local telemetry (19 branches/max 49 vs cited 23/55) but not exactly verified. Recommend reframing into the cache-repartition story (cheap, low-risk, reuses existing machinery), a separate chunking story for huge first attempts, and re-deriving the actual telemetry before scoping either."
+}
