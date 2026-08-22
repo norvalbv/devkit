@@ -33,6 +33,10 @@ export const RECOMMENDED_GUARD_IDS = [
  */
 export const GUARD_IDS = [...RECOMMENDED_GUARD_IDS, 'review', 'sentry', 'coverage'];
 
+export function disabledGuardsFor(selected: string[], disabled: string[] = []): string[] {
+  return GUARD_IDS.filter((guard) => disabled.includes(guard) && !selected.includes(guard));
+}
+
 /** Guards that can execute in a pre-commit review (excludes commit-msg-only Sentry capture). */
 export const REVIEWABLE_GUARD_IDS = GUARD_IDS.filter((guard) => guard !== 'sentry');
 
@@ -305,18 +309,11 @@ export function normalizeSelection(partial: Partial<Selection> = {}): Selection 
   return normalized;
 }
 
-/**
- * Bundled gates absent from a RECORDED selection, split by recommend-status. `normalizeSelection`
- * replays the recorded `guards` array verbatim, so a gate shipped after a repo's last install is
- * never in it; `upgrade` and `doctor` call this to reconcile the recorded set against the current
- * bundle (`GUARD_IDS`). Both lists are REPORTED, never applied: `upgrade` pre-checks `recommended`
- * in the wizard and prints both otherwise. Neither is auto-added — the recorded selection is
- * authoritative, because a consumer who removes a gate has a reason devkit cannot see (frink runs
- * `decisions` hand-placed after its free gates, so the managed copy is a duplicate LLM call), and
- * silently healing it back means the config says one thing while the hook does another.
- */
-export function newBundledGates(recorded: string[]): { recommended: string[]; optIn: string[] } {
-  const missing = GUARD_IDS.filter((g) => !recorded.includes(g));
+export function newBundledGates(
+  recorded: string[],
+  disabled: string[] = [],
+): { recommended: string[]; optIn: string[] } {
+  const missing = GUARD_IDS.filter((g) => !recorded.includes(g) && !disabled.includes(g));
   return {
     recommended: missing.filter((g) => RECOMMENDED_GUARD_IDS.includes(g)),
     optIn: missing.filter((g) => !RECOMMENDED_GUARD_IDS.includes(g)),

@@ -23,9 +23,91 @@ import {
   previewGrandfather,
 } from '../../../gate-engine/ratchets/size-disable.mts';
 import type { ComponentToggleId, OptionalComponent } from '../components.mts';
-import { type Selection, unofferedComponents } from '../components.mts';
+import {
+  GUARD_IDS,
+  GUARD_OPTIONS,
+  newBundledGates,
+  type Selection,
+  unofferedComponents,
+} from '../components.mts';
 
 const interactive = () => Boolean(process.stdout.isTTY && process.stdin.isTTY);
+
+type GateSelection = string[] | symbol;
+
+interface GateOfferOptions {
+  interactive?: boolean;
+  select?: () => Promise<GateSelection>;
+}
+
+export async function offerNewGates(
+  recordedDisabled: string[] | undefined,
+  sel: Selection,
+  dryRun: boolean,
+  options: GateOfferOptions = {},
+): Promise<string[]> {
+  const disabled = GUARD_IDS.filter(
+    (guard) => recordedDisabled?.includes(guard) && !sel.guards.includes(guard),
+  );
+  console.log('\n3. gates');
+  if (!sel.husky) {
+    console.log('  • husky not selected — no gates to reconcile');
+    return disabled;
+  }
+
+  const { recommended, optIn } = newBundledGates(sel.guards, disabled);
+  const offered = [...recommended, ...optIn];
+  const opt = (id: string) => GUARD_OPTIONS.find((guard) => guard.id === id);
+  if (!offered.length) {
+    console.log('  • no new gates — gate selection unchanged');
+    return disabled;
+  }
+  if (dryRun) {
+    console.log(`  [dry-run] would offer recommended gate(s): ${recommended.join(', ')}`);
+    for (const id of optIn) console.log(`  [dry-run] opt-in gate also available: ${id}`);
+    return disabled;
+  }
+  if (!(options.interactive ?? interactive())) {
+    for (const id of offered) {
+      const kind = recommended.includes(id) ? 'recommended' : 'opt-in';
+      console.log(
+        `  • devkit bundles ${id} (${kind}) — not in this repo's guards; enable with 'devkit init --guards …,${id}'`,
+      );
+    }
+    return disabled;
+  }
+
+  const picked = await (options.select
+    ? options.select()
+    : multiselect<string>({
+        message: 'New gates available since your last install — select any to add',
+        options: offered.map((id) => ({
+          value: id,
+          label: opt(id)?.label ?? id,
+          hint: opt(id)?.hint,
+        })),
+        initialValues: recommended,
+        required: false,
+      }));
+  if (isCancel(picked)) {
+    console.log('  • skipped gate selection — will offer again on the next upgrade');
+    return disabled;
+  }
+
+  const chosen = new Set(Array.isArray(picked) ? picked : []);
+  sel.guards = GUARD_IDS.filter((guard) => sel.guards.includes(guard) || chosen.has(guard));
+  const answeredDisabled = new Set(disabled);
+  for (const id of offered) {
+    if (chosen.has(id)) answeredDisabled.delete(id);
+    else answeredDisabled.add(id);
+  }
+  console.log(
+    chosen.size
+      ? `  ✓ added gate(s): ${[...chosen].join(', ')}`
+      : '  • no gates selected (recorded — this will not be offered again)',
+  );
+  return GUARD_IDS.filter((guard) => answeredDisabled.has(guard));
+}
 
 // Print the outcome of a line-growth enable — honest when an unreadable guard.config.json meant the
 // cap was NOT written (enableLineGrowth skips rather than crashing on a corrupt file).

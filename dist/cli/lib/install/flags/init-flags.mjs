@@ -8,6 +8,13 @@ import { join } from 'node:path';
 import { AGENT_TARGETS, defaultSelection, GUARD_IDS } from "../../components.mjs";
 import { readJson } from "../../fs-helpers.mjs";
 import { parseReviewFlags } from "./review-profile.mjs";
+const guardDisableFlag = (guard) => (guard === 'review' ? 'review-gate' : guard);
+export function disabledGuardsFromFlags(flags) {
+    if (flags.no.has('guards'))
+        return [...GUARD_IDS];
+    return GUARD_IDS.filter((guard) => (flags.guards !== null && !flags.guards.includes(guard)) ||
+        flags.no.has(guardDisableFlag(guard)));
+}
 export function parseFlags(args) {
     const flags = {
         yes: false,
@@ -93,6 +100,8 @@ export function selectionFromFlags(flags) {
         sel.guards = [];
     else if (flags.guards)
         sel.guards = flags.guards.filter((g) => GUARD_IDS.includes(g));
+    const disabledGuards = disabledGuardsFromFlags(flags);
+    sel.guards = sel.guards.filter((guard) => !disabledGuards.includes(guard));
     // Line-growth block is recommended-on; --no-line-growth opts out under --yes / non-TTY.
     if (flags.no.has('line-growth'))
         sel.lineGrowth = false;
