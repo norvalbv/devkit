@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,6 +63,51 @@ describe('ensureDevkitCacheGitignore', () => {
     expect(lines.filter((line) => line === tracked)).toHaveLength(1);
   });
 
+  it('makes canonical baselines trackable beneath a blanket .devkit ignore', () => {
+    const d = tmp();
+    execFileSync('git', ['init', '-q'], { cwd: d });
+    writeFileSync(join(d, '.gitignore'), '.devkit/\n');
+
+    ensureDevkitCacheGitignore(d, false);
+
+    expect(() =>
+      execFileSync(
+        'git',
+        ['check-ignore', '-q', '--no-index', '.devkit/baselines/size-lines.json'],
+        { cwd: d },
+      ),
+    ).toThrow();
+    expect(() =>
+      execFileSync('git', ['check-ignore', '-q', '--no-index', '.devkit/telemetry/events.jsonl'], {
+        cwd: d,
+      }),
+    ).not.toThrow();
+    for (const tracked of [
+      '.devkit/config.json',
+      '.devkit/skills-manifest.json',
+      '.devkit/agents-manifest.json',
+      '.devkit/agent-hooks-manifest.json',
+      '.devkit/biome/base.jsonc',
+      '.devkit/tsconfig/base.json',
+      '.devkit/anti-slop/manifest.json',
+      '.devkit/oxc/manifest.json',
+      '.devkit/vendored-skills/i-have-adhd/SKILL.md',
+    ]) {
+      expect(() =>
+        execFileSync('git', ['check-ignore', '-q', '--no-index', tracked], { cwd: d }),
+      ).toThrow();
+    }
+    for (const local of [
+      '.devkit/correctness-overrides.json',
+      '.devkit/comment-firewall-rationales.json',
+      '.devkit/hooks/pre-commit',
+    ]) {
+      expect(() =>
+        execFileSync('git', ['check-ignore', '-q', '--no-index', local], { cwd: d }),
+      ).not.toThrow();
+    }
+  });
+
   it('removes the obsolete tracked-rationale exception during upgrade', () => {
     const d = tmp();
     writeFileSync(join(d, '.gitignore'), '!.devkit/comment-firewall-rationales.json\n');
@@ -77,13 +123,14 @@ describe('ensureDevkitCacheGitignore', () => {
     expect(existsSync(join(d, '.gitignore'))).toBe(false);
   });
 
-  it('never blanket-ignores .devkit/ (tracked manifests + vendored configs stay tracked)', () => {
+  it('ignores local children while explicitly preserving durable tracked state', () => {
     const d = tmp();
     ensureDevkitCacheGitignore(d, false);
     const gi = readFileSync(join(d, '.gitignore'), 'utf8');
     expect(gi).not.toMatch(/^\.devkit\/?$/m);
-    expect(gi).not.toContain('.devkit/agents-manifest.json');
-    expect(gi).not.toContain('.devkit/skills-manifest.json');
+    expect(gi).toContain('.devkit/*');
+    expect(gi).toContain('!.devkit/agents-manifest.json');
+    expect(gi).toContain('!.devkit/skills-manifest.json');
     expect(gi).toContain('!.devkit/agent-hook-registrations-manifest.json');
   });
 });

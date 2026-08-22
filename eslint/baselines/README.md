@@ -11,15 +11,17 @@ on the next regen, and the wall closes a little further.
 
 ## What's in here
 
-One generated baseline per declared `structure.trees[]` entry, plus the shared ratchet/exempt files:
+One generated baseline per declared `structure.trees[]` entry, plus the shared import exemption:
 
 | File | Kind | Rule it feeds | Goal |
 |------|------|---------------|------|
 | `<tree>.mjs` (e.g. `cli.mjs`, `gate-engine.mjs`) | debt (generated) | that tree's folder-structure | shrink to `[]` |
 | `imports.mjs` | debt (generated) | import walls (`independent-modules`) — only when `structure.walls` is non-empty | shrink to `[]` |
-| `size.json` | debt (generated) | `max-lines` / `max-lines-per-function` ratchet | shrink toward 0 |
-| `fanout.json` | debt (generated) | folder fan-out ratchet (≤ `fanoutCap` impl files/folder) | shrink toward 0 |
 | `exempt.mjs` | **permanent** (hand-edited) | structure + import walls | **never shrinks** |
+
+Devkit's engine-neutral size and fan-out ratchets live separately under `.devkit/baselines/`.
+Keeping those JSON ceilings out of the ESLint directory makes their ownership independent of the
+lint engine; `eslint/baselines/` remains exclusively structure/import policy consumed by ESLint.
 
 **Debt vs exempt** is the key distinction:
 
@@ -54,7 +56,7 @@ way to remove an entry is to *fix the file*.
 Drive each debt file's contents to `[]` / `0`, reclassifying genuine exceptions into `exempt.mjs` as
 you go. When a debt file reaches empty it is **deleted, not kept** — an absent baseline means "zero
 grandfathered exceptions, wall enforced straight from `guard.config.json`". The gates self-clean:
-`guard-fanout` / `guard-size` delete a baseline the moment its last entry heals in a commit, and the
+`guard-fanout` / `guard-size` delete their `.devkit/baselines/*.json` file the moment its last entry heals in a commit, and the
 structure/import generators write nothing when a tree has no violators. So the standing proof of a
 clean wall is the **absence** of its baseline, and a governed repo (one with `guard.config.json`)
 still enforces every cap with no baseline present.

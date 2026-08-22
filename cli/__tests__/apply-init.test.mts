@@ -772,7 +772,46 @@ describe('applyInit — per-file line-growth block (recommended-on)', () => {
     // 600 lines (no trailing newline) → over the 500-line cap.
     writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
   };
-  const linesBaseline = (root: string) => join(root, 'eslint', 'baselines', 'size-lines.json');
+  const linesBaseline = (root: string) => join(root, '.devkit', 'baselines', 'size-lines.json');
+
+  it('moves an adopted repo legacy ratchet before applying the current selection', async () => {
+    const root = tmpRepo();
+    const legacy = join(root, 'eslint', 'baselines', 'size-lines.json');
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(legacy, '{"files":{"src/legacy.ts":731}}\n');
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        ...defaultSelection(),
+        guards: [],
+        husky: false,
+        lineGrowth: false,
+        structure: false,
+      },
+    });
+
+    expect(readFileSync(linesBaseline(root), 'utf8')).toBe('{"files":{"src/legacy.ts":731}}\n');
+    expect(existsSync(legacy)).toBe(false);
+  });
+
+  it('leaves tracked legacy ratchets untouched in overlay mode', async () => {
+    const root = tmpRepo();
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    const legacy = join(root, 'eslint', 'baselines', 'size-lines.json');
+    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
+    writeFileSync(legacy, '{"files":{"src/legacy.ts":731}}\n');
+    execFileSync('git', ['add', 'eslint/baselines/size-lines.json'], { cwd: root });
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...defaultSelection(), guards: ['size'] },
+      overlay: true,
+    });
+
+    expect(readFileSync(legacy, 'utf8')).toBe('{"files":{"src/legacy.ts":731}}\n');
+    expect(existsSync(linesBaseline(root))).toBe(false);
+  });
 
   it('default init writes maxLines and grandfathers a current giant into size-lines.json', async () => {
     const root = tmpRepo();

@@ -32,13 +32,13 @@ So `bun run lint` catches a misplaced file, a forbidden import, or an over-cap f
 ## Wall 3 — File size (cap + ratchet)
 
 - **Triggers when:** a file exceeds 500 lines, a `.ts` function exceeds 200, or a `.tsx` function exceeds 300 (the **cap**, in eslint); or a *new* `// eslint-disable max-lines` directive appears (the **ratchet**, husky-only — the count may only shrink).
-- **Live truth:** cap rules in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`max-lines`); frozen per-file disable allowance in [`eslint/baselines/size.json`](../../../../eslint/baselines/size.json) and raw-line ceilings in [`eslint/baselines/size-lines.json`](../../../../eslint/baselines/size-lines.json), gated by Devkit `guard-size`.
+- **Live truth:** cap rules in [`eslint.config.mjs`](../../../../eslint.config.mjs) (`max-lines`); frozen per-file disable allowance in [`.devkit/baselines/size.json`](../../../../.devkit/baselines/size.json) and raw-line ceilings in [`.devkit/baselines/size-lines.json`](../../../../.devkit/baselines/size-lines.json), gated by Devkit `guard-size`.
 - **Detail:** structure-governance.md [`Wall 3 — file size`](../../../../docs/developer-docs/structure-governance.md#wall-3--file-size).
 
 ## Wall 4 — Folder fan-out (ratchet)
 
 - **Triggers when:** any folder, at any depth, holds more than 12 non-test implementation files (`index` barrels and tests don't count). Recursive per-folder, not a repo-wide total — split into cohesive kebab subfolders.
-- **Live truth:** frozen over-cap folders in [`eslint/baselines/fanout.json`](../../../../eslint/baselines/fanout.json), gated by Devkit `guard-fanout` (husky-only). Configure intentional flat-by-design exceptions in [`guard.config.json`](../../../../guard.config.json)'s `fanoutExempt` list.
+- **Live truth:** frozen over-cap folders in [`.devkit/baselines/fanout.json`](../../../../.devkit/baselines/fanout.json), gated by Devkit `guard-fanout` (husky-only). Configure intentional flat-by-design exceptions in [`guard.config.json`](../../../../guard.config.json)'s `fanoutExempt` list.
 - **Detail:** structure-governance.md [`Wall 4 — folder fan-out`](../../../../docs/developer-docs/structure-governance.md#wall-4--folder-fan-out).
 
 ## Wall 5 — Frozen legacy dirs
