@@ -26,10 +26,7 @@ async function fixture(): Promise<Fixture> {
   return value;
 }
 
-const INITIAL = readFileSync(
-  new URL('./fixtures/anti-slop/all-rules.ts', import.meta.url),
-  'utf8',
-);
+const INITIAL = readFileSync(new URL('./fixtures/anti-slop/all-rules.ts', import.meta.url), 'utf8');
 const INIT_ARGS = [
   'init',
   '--stack',
@@ -137,10 +134,7 @@ describe('e2e: packed anti-slop capability', () => {
     expect(fx.run('devkit', ['anti-slop', 'create', 'legacy.ts']).status).toBe(0);
     expect(fx.git('add', '-A').status).toBe(0);
     expect(
-      fx.git(
-        'ls-files',
-        '.devkit/anti-slop/plugin/oxlint-plugins-api/index.js',
-      ).stdout.trim(),
+      fx.git('ls-files', '.devkit/anti-slop/plugin/oxlint-plugins-api/index.js').stdout.trim(),
     ).toBe('.devkit/anti-slop/plugin/oxlint-plugins-api/index.js');
     expect(fx.git('ls-files', '.devkit/anti-slop/plugin/node_modules/**').stdout.trim()).toBe('');
     expect(fx.git('commit', '-qm', 'fixture').status).toBe(0);
@@ -194,7 +188,10 @@ describe('e2e: packed anti-slop capability', () => {
 
     expect(fx.git('reset', '-q', 'HEAD', '--', 'staged.ts').status).toBe(0);
     rmSync(staged, { force: true });
-    writeFileSync(join(fx.repoDir, 'adopted.ts'), 'function adopted(value: object) { return value; }\n');
+    writeFileSync(
+      join(fx.repoDir, 'adopted.ts'),
+      'function adopted(value: object) { return value; }\n',
+    );
     expect(fx.run('devkit', ['anti-slop', 'create', '--force']).status).toBe(0);
     expect(fx.git('add', 'adopted.ts', '.anti-slop-baseline.json').status).toBe(0);
     const laundered = fx.run('devkit', ['anti-slop', 'check', '--staged']);
@@ -229,6 +226,70 @@ describe('e2e: packed anti-slop capability', () => {
     expect(renamed.git('add', 'unrelated.ts').status).toBe(0);
     expect(renamed.run('devkit', ['anti-slop', 'check', '--staged']).status).toBe(0);
     expect(renamed.run('devkit', ['anti-slop', 'check', '--base', 'HEAD']).status).toBe(0);
+  });
+
+  it('attributes inherited findings to an already-red CI base without allowing growth', async () => {
+    const fx = await fixture();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    expect(fx.git('add', '-A').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'bootstrap').status).toBe(0);
+
+    const inherited = 'function inherited(value: object) { return value; }\n';
+    writeFileSync(join(fx.repoDir, 'inherited.ts'), inherited);
+    expect(fx.git('add', 'inherited.ts').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'red base').status).toBe(0);
+    const redBase = fx.git('rev-parse', 'HEAD').stdout.trim();
+
+    writeFileSync(join(fx.repoDir, 'unrelated.ts'), 'export const unrelated = true;\n');
+    expect(fx.git('add', 'unrelated.ts').status).toBe(0);
+    const inheritedCheck = fx.run('devkit', ['anti-slop', 'check', '--base', redBase]);
+    expect(inheritedCheck.status, out(inheritedCheck)).toBe(0);
+
+    writeFileSync(join(fx.repoDir, 'inherited.ts'), `${inherited}${inherited}`);
+    expect(fx.git('add', 'inherited.ts').status).toBe(0);
+    const growthCheck = fx.run('devkit', ['anti-slop', 'check', '--base', redBase]);
+    expect(growthCheck.status, out(growthCheck)).toBe(1);
+    expect(out(growthCheck)).toContain('anti-slop/no-object-parameters');
+  });
+
+  it('checks candidate findings normally when the CI base predates anti-slop', async () => {
+    const fx = await fixture();
+    const preInstallBase = fx.git('rev-parse', 'HEAD').stdout.trim();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    writeFileSync(
+      join(fx.repoDir, 'candidate.ts'),
+      'function candidate(value: object) { return value; }\n',
+    );
+    expect(fx.git('add', '-A').status).toBe(0);
+
+    const check = fx.run('devkit', ['anti-slop', 'check', '--base', preInstallBase]);
+    expect(check.status, out(check)).toBe(1);
+    expect(out(check)).toContain('anti-slop/no-object-parameters');
+    expect(out(check)).not.toContain('anti-slop is not installed');
+  });
+
+  it('does not inherit debt for an introduced copy of a red-base source path', async () => {
+    const fx = await fixture();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    const finding = 'function repeated(value: object) { return value; }\n';
+    writeFileSync(join(fx.repoDir, 'source.ts'), finding);
+    expect(fx.git('add', '-A').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'red base').status).toBe(0);
+    const redBase = fx.git('rev-parse', 'HEAD').stdout.trim();
+
+    expect(fx.git('mv', 'source.ts', 'renamed.ts').status).toBe(0);
+    writeFileSync(join(fx.repoDir, 'source.ts'), `${finding}export const replacement = true;\n`);
+    expect(fx.git('add', 'source.ts').status).toBe(0);
+    const check = fx.run('devkit', ['anti-slop', 'check', '--base', redBase]);
+
+    expect(check.status, out(check)).toBe(1);
+    expect(out(check)).toContain('anti-slop/no-object-parameters renamed.ts');
   });
 
   it('vendors all rules and enforces an explicit deterministic shrink-only adoption flow', async () => {
@@ -290,19 +351,13 @@ describe('e2e: packed anti-slop capability', () => {
 
     const create = fx.run('devkit', ['anti-slop', 'create', 'legacy.ts', 'held.ts']);
     expect(create.status, out(create)).toBe(0);
-    const originalBaseline = readFileSync(
-      join(fx.repoDir, '.anti-slop-baseline.json'),
-      'utf8',
-    );
+    const originalBaseline = readFileSync(join(fx.repoDir, '.anti-slop-baseline.json'), 'utf8');
     const initial = baseline(fx.repoDir);
     expect(new Set(initial.entries.map((entry: { ruleId: string }) => entry.ruleId)).size).toBe(15);
-    const heldEntries = initial.entries.filter((entry: { file: string }) => entry.file === 'held.ts');
-    const scopedForce = fx.run('devkit', [
-      'anti-slop',
-      'create',
-      '--force',
-      'legacy.ts',
-    ]);
+    const heldEntries = initial.entries.filter(
+      (entry: { file: string }) => entry.file === 'held.ts',
+    );
+    const scopedForce = fx.run('devkit', ['anti-slop', 'create', '--force', 'legacy.ts']);
     expect(scopedForce.status, out(scopedForce)).toBe(0);
     expect(
       baseline(fx.repoDir).entries.filter((entry: { file: string }) => entry.file === 'held.ts'),
@@ -336,13 +391,7 @@ describe('e2e: packed anti-slop capability', () => {
     );
 
     writeFileSync(join(fx.repoDir, 'new.ts'), 'function newer(value: object) { return value; }\n');
-    const introduced = fx.run('devkit', [
-      'anti-slop',
-      'check',
-      'legacy.ts',
-      'held.ts',
-      'new.ts',
-    ]);
+    const introduced = fx.run('devkit', ['anti-slop', 'check', 'legacy.ts', 'held.ts', 'new.ts']);
     expect(introduced.status, out(introduced)).toBe(1);
     expect(out(introduced)).toContain('anti-slop/no-object-parameters');
     expect(readFileSync(join(fx.repoDir, '.anti-slop-baseline.json'), 'utf8')).toBe(
@@ -353,9 +402,9 @@ describe('e2e: packed anti-slop capability', () => {
       join(fx.repoDir, 'new.ts'),
       'interface RecordValue { id: string }\nfunction newer(value: RecordValue) { return value; }\n',
     );
-    expect(
-      fx.run('devkit', ['anti-slop', 'check', 'legacy.ts', 'held.ts', 'new.ts']).status,
-    ).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'check', 'legacy.ts', 'held.ts', 'new.ts']).status).toBe(
+      0,
+    );
 
     writeFileSync(
       join(fx.repoDir, '.oxlintrc.json'),
