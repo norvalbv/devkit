@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { detectChangedComments } from './detect.mts';
 import { runCommentFirewall } from './gate.mts';
 import {
@@ -11,13 +13,95 @@ import {
 
 const USAGE = `Usage:
   guard-comments gate
-  guard-comments justify <finding-id> "<specific rationale>" [--ticket SC-123|URL]
+  guard-comments justify <finding-id> "<specific rationale>" [--ticket SC-123|URL] [--from-ship-log <absolute-path>]
   guard-comments list
   guard-comments prune`;
 
-function flag(args: string[], name: string): string | undefined {
-  const at = args.indexOf(name);
-  return at === -1 ? undefined : args[at + 1];
+export const SHIP_LOG_MAX_BYTES = 16 * 1024 * 1024;
+const SHIP_LOG_NAME = /^last-ship-gates-.+\.log$/;
+
+interface JustifyArgs {
+  id: string;
+  rationale: string;
+  ticket?: string;
+  shipLog?: string;
+}
+
+function parseJustifyArgs(args: string[]): JustifyArgs | null {
+  const [id, ...tail] = args;
+  if (!id) return null;
+  const rationale: string[] = [];
+  let ticket: string | undefined;
+  let shipLog: string | undefined;
+  for (let index = 0; index < tail.length; index += 1) {
+    const token = tail[index];
+    if (token === '--ticket' || token === '--from-ship-log') {
+      const value = tail[index + 1];
+      if (!value || value.startsWith('--')) return null;
+      if (token === '--ticket') {
+        if (ticket !== undefined) return null;
+        ticket = value;
+      } else {
+        if (shipLog !== undefined) return null;
+        shipLog = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (token?.startsWith('-')) return null;
+    if (token) rationale.push(token);
+  }
+  const text = rationale.join(' ').trim();
+  return text ? { id, rationale: text, ticket, shipLog } : null;
+}
+
+function gitTopLevel(cwd: string): string {
+  return execFileSync('git', ['rev-parse', '--path-format=absolute', '--show-toplevel'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
+function shipLogContainsFinding(cwd: string, file: string, id: string): boolean {
+  if (!path.isAbsolute(file)) throw new Error('ship gate log path must be absolute');
+  const root = gitTopLevel(cwd);
+  const devkitDir = path.join(root, '.devkit');
+  if (!SHIP_LOG_NAME.test(path.basename(file))) {
+    throw new Error('ship gate log must be a last-ship-gates-*.log file');
+  }
+  const canonicalRoot = realpathSync(root);
+  const canonicalDevkit = realpathSync(devkitDir);
+  if (canonicalDevkit !== path.join(canonicalRoot, '.devkit')) {
+    throw new Error('ship gate log directory must not redirect outside this repository');
+  }
+  if (realpathSync(path.dirname(file)) !== canonicalDevkit) {
+    throw new Error("ship gate log must be directly under this repository's .devkit directory");
+  }
+
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error('ship gate log is not a regular file');
+    if (stat.size > SHIP_LOG_MAX_BYTES) throw new Error('ship gate log exceeds the size limit');
+    const buffer = Buffer.allocUnsafe(SHIP_LOG_MAX_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = readSync(descriptor, buffer, length, buffer.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+    if (length > SHIP_LOG_MAX_BYTES) throw new Error('ship gate log exceeds the size limit');
+    const prefix = `  • [${id}] `;
+    return buffer
+      .subarray(0, length)
+      .toString('utf8')
+      .split(/\r?\n/)
+      .some((line) => line.startsWith(prefix));
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 export function runCommentCli(args: string[], cwd = process.cwd()): number {
@@ -55,18 +139,22 @@ export function runCommentCli(args: string[], cwd = process.cwd()): number {
     }
   }
   if (command === 'justify') {
-    const [id, ...tail] = rest;
-    const ticketAt = tail.indexOf('--ticket');
-    const rationaleParts = ticketAt === -1 ? tail : tail.slice(0, ticketAt);
-    const rationale = rationaleParts.join(' ').trim();
-    const ticket = flag(tail, '--ticket');
-    if (!id || !rationale || (ticketAt !== -1 && !ticket)) {
+    const parsed = parseJustifyArgs(rest);
+    if (!parsed) {
       console.error(USAGE);
       return 2;
     }
     try {
+      const { id, rationale, ticket, shipLog } = parsed;
       const currentIds = new Set(detectChangedComments(cwd).findings.map((finding) => finding.id));
-      if (!currentIds.has(id)) {
+      const reportedByShip = shipLog ? shipLogContainsFinding(cwd, shipLog, id) : false;
+      if (!currentIds.has(id) && !reportedByShip) {
+        if (shipLog) {
+          console.error(
+            `guard-comments: [${id}] is not an unresolved finding in the supplied ship gate log.`,
+          );
+          return 2;
+        }
         console.error(
           `guard-comments: [${id}] is not a current staged finding; re-run the gate and copy its ID.`,
         );

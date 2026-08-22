@@ -87,6 +87,12 @@ the exact finding ID printed by the gate:
     guard-comments justify <finding-id> "why this constraint must remain"
     guard-comments justify <finding-id> "why temporary debt is unavoidable and what removes it" --ticket SC-123
 
+When `devkit ship` finds a comment only after applying your scoped changes to the requested current
+base, its failed-worktree cleanup removes the staged context that produced that ID. Use the exact
+`--from-ship-log` command printed by that ship attempt. It validates the unresolved finding against
+the retained caller-root gate log before recording the same pending evidence in shared Git-local
+state; it does not approve the rationale, and the next ship still runs the independent reviewer.
+
 The command records pending evidence under the repository's local Git metadata, so it is shared by
 linked worktrees but never committed. If two worktrees encounter the same finding ID, they may share
 identical evidence; conflicting rationale text is rejected instead of silently overwriting either

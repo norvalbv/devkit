@@ -34,7 +34,10 @@ const store = (entries: RationaleStore['entries'] = {}): RationaleStore => ({
   entries,
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 function quiet(): void {
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -55,6 +58,25 @@ describe('runCommentFirewall', () => {
     expect(judge).not.toHaveBeenCalled();
     expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
       'create/link its cleanup ticket',
+    );
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).not.toContain('--from-ship-log');
+  });
+
+  it('prints the retained ship log as one shell-safe recovery argument', () => {
+    quiet();
+    vi.stubEnv('DEVKIT_SHIP_GATE_LOG', "/tmp/repo's $gate;log/.devkit/last-ship-gates-feat.log");
+
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection(),
+        loadRationales: () => store(),
+        loadReceipts: () => ({}),
+      }),
+    ).toBe(1);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output.match(/--from-ship-log/g)).toHaveLength(2);
+    expect(output).toContain(
+      `--from-ship-log '/tmp/repo'"'"'s $gate;log/.devkit/last-ship-gates-feat.log'`,
     );
   });
 
