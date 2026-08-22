@@ -90,8 +90,8 @@ describe('line-growth block enabler', () => {
     writeSrc(root, 'giant.test.ts', big(2200));
     writeSrc(root, 'small.ts', big(10));
     // A pre-existing disable-count baseline (adopted long ago) that must survive byte-for-byte.
-    mkdirSync(join(root, 'eslint', 'baselines'), { recursive: true });
-    const sizeJson = join(root, 'eslint', 'baselines', 'size.json');
+    mkdirSync(join(root, '.devkit', 'baselines'), { recursive: true });
+    const sizeJson = join(root, '.devkit', 'baselines', 'size.json');
     writeFileSync(sizeJson, JSON.stringify({ fileDisables: 2, fnDisables: 0 }));
     const sizeBefore = readFileSync(sizeJson, 'utf8');
 
@@ -106,7 +106,7 @@ describe('line-growth block enabler', () => {
       TEST_LINE_CAP,
     );
     const lines = JSON.parse(
-      readFileSync(join(root, 'eslint', 'baselines', 'size-lines.json'), 'utf8'),
+      readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
     );
     expect(lines).toEqual({
       maxLines: LINE_CAP,
@@ -139,6 +139,6 @@ describe('line-growth block enabler', () => {
     writeSrc(root, 'giant.ts', big(600));
     // Must NOT throw — freezeLines would otherwise re-resolve the corrupt file and crash.
     expect(enableLineGrowth(root)).toEqual({ enabled: false, grandfathered: 0 });
-    expect(existsSync(join(root, 'eslint', 'baselines', 'size-lines.json'))).toBe(false);
+    expect(existsSync(join(root, '.devkit', 'baselines', 'size-lines.json'))).toBe(false);
   });
 });

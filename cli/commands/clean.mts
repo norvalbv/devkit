@@ -152,7 +152,7 @@ function cleanOverlayStrays(cwd: string, gitRoot: string, dryRun: boolean): void
   rmUntracked('eslint.config.devkit.mjs', 'eslint.config.devkit.mjs');
   rmUntracked('eslint/baselines', 'eslint/baselines/');
   rm(join(cwd, 'fallow-baselines'), 'fallow-baselines/', dryRun);
-  rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
+  if (!isTracked(gitRoot, '.devkit')) rm(join(gitRoot, '.devkit'), '.devkit/', dryRun);
   pruneGitExclude(gitRoot, dryRun);
 }
 
