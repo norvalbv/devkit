@@ -19,6 +19,9 @@ non-ignored untracked files. Devkit never fetches, calls GitHub, commits, pushes
 changes back. The target checkout stays unchanged, although Git's shared worktree metadata is
 touched temporarily while the isolated review worktrees exist.
 
+Overlay setup is local to each checkout and is not copied by Git. Before reviewing a fresh clone of
+an overlay consumer, run \`devkit init --overlay --review\` inside that target checkout.
+
 WARNING: target-controlled hooks and package scripts execute. Review trusted targets only.
 
 Output streams for the whole run, not just the gates: setup and teardown emit a
