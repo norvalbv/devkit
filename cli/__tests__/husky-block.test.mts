@@ -29,6 +29,35 @@ import {
 } from '../lib/husky/husky-block.mts';
 
 const ALL = { biome: true, guards: [...GUARD_IDS] };
+const PRE_COMMIT_GATE_BINS = [
+  'guard-deterministic',
+  'guard-comments',
+  'guard-decisions',
+  'guard-review',
+];
+const COMMIT_MSG_GATE_BINS = ['guard-review', 'guard-sentry'];
+
+function installGateStubs(
+  dir: string,
+  gates: string[],
+  codes: Record<string, number> = {},
+  defaultExit = 0,
+): void {
+  for (const gate of gates) {
+    writeFileSync(join(dir, gate), `#!/bin/sh\nexit ${codes[gate] ?? defaultExit}\n`);
+    chmodSync(join(dir, gate), 0o755);
+  }
+}
+
+function installCommitMsgGateStubs(
+  globalBin: string,
+  packageBin: string,
+  stubExit: number,
+  missingLocal: boolean,
+): void {
+  installGateStubs(globalBin, COMMIT_MSG_GATE_BINS);
+  if (!missingLocal) installGateStubs(packageBin, COMMIT_MSG_GATE_BINS, {}, stubExit);
+}
 
 // A reviewer-gate hook in frink's shape: shebang + a PATH-setup for-loop + a gate that EARLY-EXITS
 // `exit 0` (indented, reviews-pass) before a top-level `exit 1`. The bug: a block appended at EOF (or
@@ -57,14 +86,16 @@ describe('buildGuardBlock', () => {
     expect(block).toContain('# >>> devkit-guards >>>');
     expect(block).toContain('# <<< devkit-guards <<<');
     expect(block).toContain('# devkit:biome-format');
+    expect(block).toContain('__dk_package_bin_dir="$(bun pm bin)"');
     // Deterministic guards (size/fanout/dup/clone) run through the ONE orchestrator, not per-guard.
-    expect(block).toContain('bunx guard-deterministic --hook');
-    expect(block).not.toContain('bunx guard-size');
-    expect(block).not.toContain('bunx guard-fanout');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
+    expect(block).not.toContain('$__dk_package_bin_dir/guard-size');
+    expect(block).not.toContain('$__dk_package_bin_dir/guard-fanout');
     // AI guards keep their own fail-fast fragments.
-    expect(block).toContain('bunx guard-comments gate');
-    expect(block).toContain('bunx guard-decisions');
-    expect(block).toContain('bunx guard-review');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-comments" gate');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-decisions"');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-review"');
+    expect(block).not.toContain('bunx ');
     expect(block).toContain('__dk_gate_selected comments');
     expect(block).toContain('__dk_gate_selected decisions');
     expect(block).toContain('__dk_gate_selected review');
@@ -84,13 +115,13 @@ describe('buildGuardBlock', () => {
     expect(lines[0]).toContain('__dk_gate_deterministic');
     expect(block).toContain('# devkit:review-deterministic-finalizer');
     // no AI guards selected → no AI fragment
-    expect(block).not.toContain('bunx guard-decisions');
+    expect(block).not.toContain('$__dk_package_bin_dir/guard-decisions');
   });
 
   it('emits NO deterministic line when only AI guards are selected', () => {
     const block = buildGuardBlock({ biome: false, guards: ['decisions'] });
     expect(block).not.toContain('guard-deterministic');
-    expect(block).toContain('bunx guard-decisions');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-decisions"');
   });
 
   it('joins the structure command to the deterministic line via --structure when set', () => {
@@ -104,7 +135,7 @@ describe('buildGuardBlock', () => {
 
   it('emits the deterministic line for structure even with NO deterministic guard selected', () => {
     const block = buildGuardBlock({ guards: ['decisions'], structureCmd: 'guard-structure gate' });
-    expect(block).toContain('bunx guard-deterministic --hook');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-deterministic" --hook');
     expect(block).toContain('--structure "guard-structure gate"');
   });
 
@@ -114,6 +145,7 @@ describe('buildGuardBlock', () => {
     const iHookPath = block.indexOf('DK_HOOK_PATH=');
     expect(iHookPath).toBeGreaterThan(-1);
     expect(iHookPath).toBeLessThan(block.indexOf('( cd "pkg/a"'));
+    expect(block.indexOf('( cd "pkg/a"')).toBeLessThan(block.indexOf('__dk_package_bin_dir='));
     expect(block).toContain(`--hook "\${DK_HOOK_PATH:-$0}"`);
   });
 });
@@ -132,9 +164,9 @@ describe('removeFragment', () => {
     const hook = buildFullHook(ALL);
     const { content, removed } = removeFragment(hook, 'guard-decisions');
     expect(removed).toBe(true);
-    expect(content).not.toContain('bunx guard-decisions');
-    expect(content).toContain('bunx guard-review');
-    expect(content).toContain('bunx guard-deterministic');
+    expect(content).not.toContain('$__dk_package_bin_dir/guard-decisions');
+    expect(content).toContain('$__dk_package_bin_dir/guard-review');
+    expect(content).toContain('$__dk_package_bin_dir/guard-deterministic');
     expect(content).toContain('# <<< devkit-guards <<<');
   });
 
@@ -142,8 +174,8 @@ describe('removeFragment', () => {
     const hook = buildFullHook(ALL);
     const { content, removed } = removeFragment(hook, 'deterministic');
     expect(removed).toBe(true);
-    expect(content).not.toContain('bunx guard-deterministic');
-    expect(content).toContain('bunx guard-decisions');
+    expect(content).not.toContain('$__dk_package_bin_dir/guard-deterministic');
+    expect(content).toContain('$__dk_package_bin_dir/guard-decisions');
   });
 
   it('removes the biome-format step only', () => {
@@ -151,7 +183,7 @@ describe('removeFragment', () => {
     const { content, removed } = removeFragment(hook, 'biome-format');
     expect(removed).toBe(true);
     expect(content).not.toContain('biome format');
-    expect(content).toContain('bunx guard-deterministic');
+    expect(content).toContain('$__dk_package_bin_dir/guard-deterministic');
   });
 
   it('is a no-op (removed:false) when the fragment is absent', () => {
@@ -220,7 +252,7 @@ describe('replaceGuardBlock — relocate after the preamble (reachability)', () 
   it('swaps content on re-run (markers present) without duplicating', () => {
     const once = replaceGuardBlock(FRINK_HOOK, buildGuardBlock(ALL));
     const next = replaceGuardBlock(once, buildGuardBlock({ biome: true, guards: ['decisions'] }));
-    expect(next).toContain('bunx guard-decisions');
+    expect(next).toContain('$__dk_package_bin_dir/guard-decisions');
     expect(next).not.toContain('guard-deterministic'); // only an AI guard now → no det line
     expect((next.match(/# >>> devkit-guards/g) || []).length).toBe(1);
   });
@@ -261,15 +293,17 @@ describe('hasFragment', () => {
 // husky runs hooks under `sh -e`. The AI fragments capture their code with `rc=0; bunx … || rc=$?`
 // so a fail-open code (2) never aborts the hook before the fragment's own check; the deterministic
 // helper captures its code in the same tested form. Run the assembled hook under real `sh -e` with
-// `bunx` to prove neither aborts prematurely.
+// local package bins to prove neither aborts prematurely.
 describe('assembled hook is set -e-safe', () => {
-  const runHookWithStubBunx = (stubExit) => {
+  const runHookWithLocalStubs = (stubExit) => {
     const home = mkdtempSync(join(tmpdir(), 'dk-husky-'));
     const bin = join(home, '.bun', 'bin');
+    const packageBin = join(home, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    const bunx = join(bin, 'bunx');
-    writeFileSync(bunx, `#!/bin/sh\nexit ${stubExit}\n`);
-    chmodSync(bunx, 0o755);
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$HOME/node_modules/.bin"\n');
+    chmodSync(join(bin, 'bun'), 0o755);
+    installGateStubs(packageBin, PRE_COMMIT_GATE_BINS, {}, stubExit);
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
     try {
@@ -284,12 +318,12 @@ describe('assembled hook is set -e-safe', () => {
   };
 
   it('every gate clean (exit 0) → the hook runs to completion (exit 0)', () => {
-    expect(runHookWithStubBunx(0)).toBe(0);
+    expect(runHookWithLocalStubs(0)).toBe(0);
   });
 
   it('a gate returning non-zero blocks the commit (exit 1), never aborts silently mid-hook', () => {
     // guard-deterministic exit 1 → the non-review policy exits; AI gates also remain blocking.
-    expect(runHookWithStubBunx(1)).toBe(1);
+    expect(runHookWithLocalStubs(1)).toBe(1);
   });
 });
 
@@ -305,16 +339,16 @@ describe('assembled hook is set -e-safe', () => {
  * not "prints a particular new line", and it holds on every already-installed consumer hook.
  */
 describe('exit 4 renders as an object-database fault, never as a verdict', () => {
-  /** Stub bunx per-gate: `bunx <bin> ...` → the code this map gives that bin (default 0). */
+  /** Stub each package-local gate with the code this map gives it (default 0). */
   const runHook = (codes: Record<string, number>) => {
     const home = mkdtempSync(join(tmpdir(), 'dk-odb-'));
     const bin = join(home, '.bun', 'bin');
+    const packageBin = join(home, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    const cases = Object.entries(codes)
-      .map(([b, c]) => `  ${b}) exit ${c} ;;`)
-      .join('\n');
-    writeFileSync(join(bin, 'bunx'), `#!/bin/sh\ncase "$1" in\n${cases}\n  *) exit 0 ;;\nesac\n`);
-    chmodSync(join(bin, 'bunx'), 0o755);
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$HOME/node_modules/.bin"\n');
+    chmodSync(join(bin, 'bun'), 0o755);
+    installGateStubs(packageBin, PRE_COMMIT_GATE_BINS, codes);
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: false, guards: [...GUARD_IDS] }));
     try {
@@ -504,7 +538,10 @@ describe('buildCommitMsgBlock', () => {
     const block = buildCommitMsgBlock({ guards: ['review'] });
     expect(block).toContain('# >>> devkit-guards >>>'); // same marker pair as pre-commit
     expect(block).toContain('# devkit:guard-completeness');
-    expect(block).toContain('bunx guard-review completeness --gate "$1" || crc=$?');
+    expect(block).toContain('pinned guard-review is missing — run bun install');
+    expect(block).toContain(
+      '"$__dk_package_bin_dir/guard-review" completeness --gate "$1" || crc=$?',
+    );
     expect(block).toContain('GUARD_NO_COMPLETENESS=1');
     expect(block).not.toContain('guard-sentry');
   });
@@ -512,7 +549,8 @@ describe('buildCommitMsgBlock', () => {
   it('sentry-only → the sentry fragment with its bypass guidance, no completeness', () => {
     const block = buildCommitMsgBlock({ guards: ['sentry'] });
     expect(block).toContain('# devkit:guard-sentry');
-    expect(block).toContain('bunx guard-sentry --gate "$1" || src=$?');
+    expect(block).toContain('pinned guard-sentry is missing — run bun install');
+    expect(block).toContain('"$__dk_package_bin_dir/guard-sentry" --gate "$1" || src=$?');
     expect(block).toContain('GUARD_NO_SENTRY_JUDGE=1');
     expect(block).not.toContain('guard-completeness');
   });
@@ -601,17 +639,20 @@ describe('buildCommitMsgHook + installCommitMsgHook (the managed .husky/commit-m
 
 // The commit-msg fragments capture each judge's exit (`|| var=$?`) so under husky's `sh -e` an
 // exit-2 fail-open continues to the explicit `exit 0`, while a confirmed exit-1 blocks with the
-// guidance. Run the ASSEMBLED hook under a real `sh -e` with a stubbed bunx to prove the contract.
+// guidance. Run the ASSEMBLED hook under a real `sh -e` with local package stubs to prove the contract.
 describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 1 → 1)', () => {
-  const runCommitMsgHook = (stubExit) => {
+  const runCommitMsgHook = (stubExit, { missingLocal = false } = {}) => {
     const home = mkdtempSync(join(tmpdir(), 'dk-commit-msg-exec-'));
     execFileSync('git', ['init', '-q'], { cwd: home });
     const commitState = join(home, '.git', 'devkit-commit-attempt');
     writeFileSync(commitState, `commit-run-test\n${'0'.repeat(40)}\n`);
     const bin = join(home, '.bun', 'bin');
+    const packageBin = join(home, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, 'bunx'), `#!/bin/sh\nexit ${stubExit}\n`);
-    chmodSync(join(bin, 'bunx'), 0o755);
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$HOME/node_modules/.bin"\n');
+    chmodSync(join(bin, 'bun'), 0o755);
+    installCommitMsgGateStubs(bin, packageBin, stubExit, missingLocal);
     const hookPath = join(home, 'commit-msg');
     writeFileSync(hookPath, buildCommitMsgHook({ guards: ['review', 'sentry'] }));
     try {
@@ -635,6 +676,11 @@ describe('assembled commit-msg hook is sh -e-safe (fail-open 2 → 0, confirmed 
     const r = runCommitMsgHook(0);
     expect(r.status).toBe(0);
     expect(r.stateExists).toBe(false);
+  });
+
+  it('a missing pinned judge blocks instead of executing a global decoy', () => {
+    const r = runCommitMsgHook(0, { missingLocal: true });
+    expect(r.status).toBe(1);
   });
 
   it('fail-open (exit 2) never propagates — the explicit exit 0 wins', () => {

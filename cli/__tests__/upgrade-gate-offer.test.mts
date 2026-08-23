@@ -101,7 +101,7 @@ describe('devkit upgrade — gate reconcile', () => {
     expect(run(root, 'upgrade').status).toBe(0);
 
     expect(guards(root)).not.toContain('decisions');
-    expect(hook(root)).not.toContain('bunx guard-decisions detect');
+    expect(hook(root)).not.toContain('$__dk_package_bin_dir/guard-decisions');
   });
 
   it('an init opt-out records comments disabled and upgrade does not re-offer it', () => {

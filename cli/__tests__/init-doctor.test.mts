@@ -247,7 +247,7 @@ describe('init --yes (all recommended)', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes');
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
-    expect(hook).toContain('bunx guard-deterministic'); // deterministic guards still run
+    expect(hook).toContain('$__dk_package_bin_dir/guard-deterministic'); // deterministic guards still run
     expect(hook).not.toContain('--structure'); // structure off for a generic stack
     expect(hook).not.toContain('guard-structure');
   });
@@ -379,8 +379,8 @@ describe('init — per-component flag selection', () => {
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     // The selected deterministic guards run through the ONE orchestrator (which re-reads the subset
     // from .devkit/config.json at commit time), so the WHICH lives in config, not per-hook-line.
-    expect(hook).toContain('bunx guard-deterministic');
-    expect(hook).not.toContain('bunx guard-decisions'); // decisions deselected
+    expect(hook).toContain('$__dk_package_bin_dir/guard-deterministic');
+    expect(hook).not.toContain('$__dk_package_bin_dir/guard-decisions'); // decisions deselected
     expect(config(root).components.guards).toEqual(['fanout', 'size']);
     // No clone guard → jscpd devDep omitted.
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -413,7 +413,7 @@ describe('init — removal (deselected + present)', () => {
     expect(pkg.scripts.format).toBeUndefined();
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     expect(hook).not.toContain('biome format');
-    expect(hook).toContain('bunx guard-deterministic'); // guards intact
+    expect(hook).toContain('$__dk_package_bin_dir/guard-deterministic'); // guards intact
     expect(config(root).components.biome).toBe(false);
   });
 
@@ -440,8 +440,8 @@ describe('init — removal (deselected + present)', () => {
     );
     const hook = readFileSync(join(root, '.husky/pre-commit'), 'utf8');
     // The orchestrator stays a single line; the narrowed subset lives in .devkit/config.json.
-    expect(hook).toContain('bunx guard-deterministic');
-    expect(hook).not.toContain('bunx guard-decisions'); // decisions dropped
+    expect(hook).toContain('$__dk_package_bin_dir/guard-deterministic');
+    expect(hook).not.toContain('$__dk_package_bin_dir/guard-decisions'); // decisions dropped
     expect(config(root).components.guards).toEqual(['fanout']);
   });
 });
@@ -541,7 +541,7 @@ describe('doctor — selection-aware', () => {
     devkit(root, 'doctor', '--fix');
     const after = devkit(root, 'doctor');
     expect(after.status).toBe(0);
-    expect(readFileSync(hookPath, 'utf8')).toContain('bunx guard-deterministic');
+    expect(readFileSync(hookPath, 'utf8')).toContain('$__dk_package_bin_dir/guard-deterministic');
   });
 
   it('does NOT flag biome missing when biome was deselected', () => {
