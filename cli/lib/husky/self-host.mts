@@ -3,12 +3,12 @@
  *
  * The problem: a plain `devkit init` treats the repo as a CONSUMER of the published package —
  * it adds `@norvalbv/devkit` as a self-dependency (a package can't depend on itself) and emits a
- * hook that runs `bunx guard-*` → the compiled `dist/*.mjs` in node_modules (the last-published
+ * hook that runs the package-local `guard-*` bins → compiled `dist/*.mjs` in node_modules (the last-published
  * build, not the working tree). Both are wrong for the package itself.
  *
  * Self-host is a third install mode (beside `standalone`/`overlay`), auto-selected when the repo's
  * own package.json name is `@norvalbv/devkit`. It adds NO self-dep and generates a SOURCE-mode
- * hook by taking the ordinary generated hook and rewriting each `bunx guard-<x>` to
+ * hook by taking the ordinary generated hook and rewriting each package-local `guard-<x>` to
  * `node gate-engine/<x>.mts`. Only four bins ever appear in the hook (`guard-deterministic`,
  * `guard-decisions`, `guard-review`, `guard-qavis-advisory`) — dup/clone/size/fanout/structure run
  * INSIDE the source-launched `guard-deterministic`, which resolves its own sub-gates by `SELF_EXT`
@@ -28,6 +28,7 @@ import {
   buildFullHook,
   buildGuardBlock,
   extractGuardBlock,
+  PACKAGE_BIN_DIR_FRAGMENT,
   REVIEW_DETERMINISTIC_FINALIZER,
   replaceGuardBlock,
 } from './husky-block.mts';
@@ -77,11 +78,11 @@ type SelfHostHookInput = Selection & {
   extras?: Array<{ label: string; cmd: string }>;
 };
 
-// Matches the `bunx guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
+// Matches the package-local `guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
 // covered by `[a-z-]+`. The formatter has its own exact rewrite below so consumer output is not
 // affected by the self-host-only Oxfmt adoption.
-const BUNX_GUARD_RE = /\bbunx (guard-[a-z-]+)\b/g;
-const BUNX_BIOME_FORMAT_RE = /\bbunx biome format --write\b/g;
+const PACKAGE_GUARD_RE = /"\$__dk_package_bin_dir\/(guard-[a-z-]+)"/g;
+const PACKAGE_BIOME_FORMAT_RE = /"\$__dk_package_bin_dir\/biome" format --write\b/g;
 const BIOME_FORMAT_COMMENT_RE = /Format staged files with biome/g;
 const BIOME_FORMAT_EXTENSIONS = '\\.(tsx?|jsx?|css|json|jsonc|mjs)$';
 const BIOME_FORMAT_FILTER = `grep -E '${BIOME_FORMAT_EXTENSIONS}'`;
@@ -121,8 +122,9 @@ export function sourceBinFor(cwd: string, binName: string): string {
 export function toSelfHost(hookText: string, cwd: string): string {
   return (
     hookText
-      .replace(BUNX_GUARD_RE, (_m, bin: string) => `node ${sourceBinFor(cwd, bin)}`)
-      .replace(BUNX_BIOME_FORMAT_RE, 'node_modules/.bin/oxfmt --threads 1 --write')
+      .replace(`${PACKAGE_BIN_DIR_FRAGMENT}\n\n`, '')
+      .replace(PACKAGE_GUARD_RE, (_m, bin: string) => `node ${sourceBinFor(cwd, bin)}`)
+      .replace(PACKAGE_BIOME_FORMAT_RE, 'node_modules/.bin/oxfmt --threads 1 --write')
       .replace(BIOME_FORMAT_COMMENT_RE, 'Format staged files with Oxfmt')
       // Formatting is a hard self-host responsibility now that Biome lint runs with formatting off.
       // Generic consumer hooks retain their existing best-effort Biome behavior.

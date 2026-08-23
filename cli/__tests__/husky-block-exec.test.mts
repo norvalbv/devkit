@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildFullHook, buildOverlayHook, buildStandaloneHook } from '../lib/husky/husky-block.mts';
 
-// Execute the ASSEMBLED hook under a real `sh -e` with a stub `bunx` that dispatches per tool
+// Execute the ASSEMBLED hook under a real `sh -e` with local/global stubs that dispatch per tool
 // (exit codes via env knobs) and logs every invocation. The hook now delegates the whole
 // deterministic set (prefix cache → guards → structure → aggregation) to the single
 // `guard-deterministic` orchestrator, so its internal trichotomy/aggregation is proven in
@@ -42,6 +42,7 @@ function runHook(
     builder = 'package',
     pkgRel = '',
     missingBins = [],
+    missingLocalBins = [],
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), dirPrefix));
@@ -54,7 +55,11 @@ function runHook(
     env = { DEVKIT_COMMIT_MSG_FILE: msgf, ...env };
   }
   const bin = join(home, '.bun', 'bin');
+  const packageBin = join(home, 'node_modules', '.bin');
   mkdirSync(bin, { recursive: true });
+  mkdirSync(packageBin, { recursive: true });
+  writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$HOME/node_modules/.bin"\n');
+  chmodSync(join(bin, 'bun'), 0o755);
   const gateStub = `#!/bin/sh
 tool="\${0##*/}"
 if [ "$tool" = "bunx" ]; then tool="$1"; shift; fi
@@ -80,7 +85,7 @@ case "$tool" in
             wait $!
         fi
         exit \${COMP_RC:-0};;
-      *) exit \${REVIEW_RC:-0};;
+      *) [ -n "\${COMP_SLOW_TERM:-}" ] && sleep 0.1; exit \${REVIEW_RC:-0};;
     esac;;
   *) exit 0;;
 esac
@@ -95,8 +100,13 @@ esac
   ]) {
     writeFileSync(join(bin, name), gateStub);
     chmodSync(join(bin, name), 0o755);
+    if (name !== 'bunx') {
+      writeFileSync(join(packageBin, name), gateStub);
+      chmodSync(join(packageBin, name), 0o755);
+    }
   }
   for (const name of missingBins) rmSync(join(bin, name), { force: true });
+  for (const name of missingLocalBins) rmSync(join(packageBin, name), { force: true });
 
   // Overlay review always runs its merge-base lint diagnostic after the selected guards. Give the
   // generated helper a minimal packaged-runtime shape and a node stub that records the call.
@@ -150,7 +160,19 @@ esac
   return { status, stdout, calls, home };
 }
 
-describe('assembled hook execution (stubbed bunx, sh -e)', () => {
+describe('assembled hook execution (stubbed bins, sh -e)', () => {
+  it('package mode blocks when the pinned local bin is missing instead of using a global decoy', () => {
+    const r = runHook(
+      {},
+      { biome: false, guards: ['size'] },
+      {
+        missingLocalBins: ['guard-deterministic'],
+      },
+    );
+    expect(r.status).toBe(1);
+    expect(r.calls).not.toContain('guard-deterministic');
+  });
+
   it('a deterministic failure blocks the hook (exit 1) and the AI gates never run', () => {
     const r = runHook({ DET_RC: '1' });
     expect(r.status).toBe(1);
@@ -423,9 +445,13 @@ describe('biome-format re-stage step (real git)', () => {
     const home = mkdtempSync(join(tmpdir(), 'dk-hook-git-home-'));
     homes.push(home);
     const bin = join(home, '.bun', 'bin');
+    const packageBin = join(repo, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, 'bunx'), '#!/bin/sh\nexit 0\n');
-    chmodSync(join(bin, 'bunx'), 0o755);
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD/node_modules/.bin"\n');
+    chmodSync(join(bin, 'bun'), 0o755);
+    writeFileSync(join(packageBin, 'biome'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(packageBin, 'biome'), 0o755);
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook({ biome: true, guards: [] }));
     try {
@@ -507,13 +533,23 @@ describe('commit-terminal telemetry (real temp git repo)', () => {
     execFileSync('git', ['add', 'a.txt'], { cwd: repo });
     const tree = execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim();
     const bin = join(home, '.bun', 'bin');
+    const packageBin = join(repo, 'node_modules', '.bin');
     mkdirSync(bin, { recursive: true });
-    writeFileSync(
-      join(bin, 'bunx'),
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional shell ${VAR:-default} expansion in the stubbed bunx script
-      '#!/bin/sh\ntool="$1"; shift\ncase "$tool" in\n  guard-deterministic) [ "${MUTATE_TREE:-0}" = 1 ] && { printf \'later\\n\' > telemetry-restaged.txt; git add telemetry-restaged.txt; }; printf \'%s\' "$DEVKIT_COMMIT_ID" > "$HOME/gate-id"; exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n',
-    );
-    chmodSync(join(bin, 'bunx'), 0o755);
+    mkdirSync(packageBin, { recursive: true });
+    writeFileSync(join(bin, 'bun'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD/node_modules/.bin"\n');
+    chmodSync(join(bin, 'bun'), 0o755);
+    const localGateStub =
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional shell ${VAR:-default} expansion in the stub
+      '#!/bin/sh\ntool="${0##*/}"\ncase "$tool" in\n  guard-deterministic) [ "${MUTATE_TREE:-0}" = 1 ] && { printf \'later\\n\' > telemetry-restaged.txt; git add telemetry-restaged.txt; }; printf \'%s\' "$DEVKIT_COMMIT_ID" > "$HOME/gate-id"; exit ${DET_RC:-0};;\n  *) exit 0;;\nesac\n';
+    for (const gate of [
+      'guard-deterministic',
+      'guard-comments',
+      'guard-decisions',
+      'guard-review',
+    ]) {
+      writeFileSync(join(packageBin, gate), localGateStub);
+      chmodSync(join(packageBin, gate), 0o755);
+    }
     const hookPath = join(home, 'pre-commit');
     writeFileSync(hookPath, buildFullHook(selection));
     const sink = join(home, 'events.jsonl');

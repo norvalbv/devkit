@@ -44,7 +44,7 @@ describe('e2e: devkit init', () => {
 
     // The assembled hook invokes the deterministic gate; config records the stack.
     expect(readFileSync(join(fx.repoDir, '.husky/pre-commit'), 'utf8')).toContain(
-      'bunx guard-deterministic',
+      '$__dk_package_bin_dir/guard-deterministic',
     );
     expect(JSON.parse(readFileSync(join(fx.repoDir, '.devkit/config.json'), 'utf8')).stack).toBe(
       'generic',
@@ -62,9 +62,8 @@ describe('e2e: devkit init', () => {
     try {
       const fx = await fixture();
       expect(fx.run('devkit', ['init', '--stack', 'generic', '--yes']).status).toBe(0);
-      const pin = JSON.parse(readFileSync(join(fx.repoDir, 'package.json'), 'utf8')).devDependencies?.[
-        '@norvalbv/devkit'
-      ];
+      const pin = JSON.parse(readFileSync(join(fx.repoDir, 'package.json'), 'utf8'))
+        .devDependencies?.['@norvalbv/devkit'];
       expect(pin).toMatch(/#v\d/);
       expect(pin).not.toContain('ssh');
     } finally {

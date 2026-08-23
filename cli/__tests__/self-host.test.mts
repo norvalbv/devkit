@@ -24,7 +24,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectionDrift } from '../lib/install/agent-assets/projection-parity.mts';
-import { buildFullHook, extractGuardBlock, replaceGuardBlock } from '../lib/husky/husky-block.mts';
+import {
+  buildFullHook,
+  extractGuardBlock,
+  PACKAGE_BIN_DIR_FRAGMENT,
+  replaceGuardBlock,
+} from '../lib/husky/husky-block.mts';
 import { DK_NO_GIT_ENV_HELPER } from '../lib/husky/review-fragments.mts';
 import {
   buildSelfHostBlock,
@@ -61,19 +66,20 @@ describe('self-host bin rewrite', () => {
   });
 
   it('toSelfHost rewrites source gates and the self-host formatter without changing consumers', () => {
-    const input =
-      'bunx guard-review --gate\nbunx biome format --write\nbunx guard-deterministic --hook x';
+    const input = `${PACKAGE_BIN_DIR_FRAGMENT}\n\n"$__dk_package_bin_dir/guard-review" --gate
+"$__dk_package_bin_dir/biome" format --write
+"$__dk_package_bin_dir/guard-deterministic" --hook x`;
     const out = toSelfHost(input, ROOT);
     expect(out).toContain('node gate-engine/review/cli.mts --gate');
     expect(out).toContain('node gate-engine/deterministic/run.mts --hook x');
     expect(out).toContain('node_modules/.bin/oxfmt --threads 1 --write');
-    expect(out).not.toContain('bunx biome format --write');
-    expect(out).not.toContain('bunx guard-');
+    expect(out).not.toContain('bun pm bin');
+    expect(out).not.toContain('$__dk_package_bin_dir');
   });
 
   it('leaves the generic consumer hook on Biome until that repository proves parity', () => {
     const hook = buildFullHook({ biome: true, guards: [] });
-    expect(hook).toContain('bunx biome format --write');
+    expect(hook).toContain('"$__dk_package_bin_dir/biome" format --write');
     expect(hook).not.toContain('node_modules/.bin/oxfmt');
   });
 });
@@ -142,7 +148,7 @@ describe('selfHostSelection', () => {
 });
 
 describe('buildSelfHostHook', () => {
-  it('emits source gates + hard deterministic extras + the structure cmd; no bunx guard, no self-dep', () => {
+  it('emits source gates + hard deterministic extras + the structure cmd; no package bins or self-dep', () => {
     const hook = buildSelfHostHook(HOOK_SEL, '', ROOT);
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
@@ -157,8 +163,8 @@ describe('buildSelfHostHook', () => {
     expect(hook).toContain('node_modules/.bin/oxfmt --threads 1 --write || exit 1');
     expect(hook).not.toContain('oxfmt --threads 1 --write 2>/dev/null || true');
     expect(hook).not.toContain("grep -E '\\.(tsx?|jsx?|css|json|jsonc|mjs|mts)$'");
-    expect(hook).not.toContain('bunx biome format --write');
-    expect(hook).not.toMatch(/bunx guard-/);
+    expect(hook).not.toContain('$__dk_package_bin_dir/biome');
+    expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
     expect(hook).not.toContain('@norvalbv/devkit');
   });
 

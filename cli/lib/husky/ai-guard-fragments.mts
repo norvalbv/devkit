@@ -4,7 +4,7 @@ export const GUARD_FRAGMENTS = {
   comments: `# devkit:guard-comments
 echo "🧯 Changed-comment firewall..."
 ccrc=0
-__dk_no_git_env bunx guard-comments gate || ccrc=$?
+__dk_no_git_env "$__dk_package_bin_dir/guard-comments" gate || ccrc=$?
 if [ "$ccrc" -eq 1 ]; then
     exit 1
 elif [ "$ccrc" -eq 4 ]; then
@@ -23,7 +23,7 @@ fi
   decisions: `# devkit:guard-decisions
 echo "🧭 Decision-log gate..."
 ddrc=0
-__dk_no_git_env bunx guard-decisions detect --gate || ddrc=$?
+__dk_no_git_env "$__dk_package_bin_dir/guard-decisions" detect --gate || ddrc=$?
 if [ "$ddrc" -eq 1 ]; then
     echo "   Record the decision target, or bypass a non-decision: GUARD_NO_LOG=1 git commit ..."
     exit 1
@@ -54,10 +54,10 @@ echo "🔍 Reviewer gate (headless domain judges)..."
 comp_pid=""
 if [ "\${DEVKIT_RUN_MODE:-}" != "review" ] && [ -n "\${DEVKIT_COMMIT_MSG_FILE:-}" ] && [ -f "\${DEVKIT_COMMIT_MSG_FILE:-}" ]; then
     echo "🧩 Completeness judge started in parallel (ship message known)..."
-    ${DK_NO_GIT_ENV_INLINE} bunx guard-review completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
+    ${DK_NO_GIT_ENV_INLINE} "$__dk_package_bin_dir/guard-review" completeness --gate "$DEVKIT_COMMIT_MSG_FILE" & comp_pid=$!
 fi
 rrc=0
-__dk_no_git_env bunx guard-review --gate || rrc=$?
+__dk_no_git_env "$__dk_package_bin_dir/guard-review" --gate || rrc=$?
 crc=0
 if [ -n "$comp_pid" ]; then
     if [ "$rrc" -eq 0 ] || [ "$rrc" -eq 2 ]; then

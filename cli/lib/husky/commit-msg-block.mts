@@ -19,6 +19,7 @@ import type { CheckResult } from '../doctor/check-result.mts';
 import { markEnd, markStart } from './husky.mts';
 import {
   extractGuardBlock,
+  PACKAGE_BIN_DIR_FRAGMENT,
   PATH_SETUP,
   removeGuardBlock,
   replaceGuardBlock,
@@ -51,11 +52,16 @@ __dk_clear_commit_state() {
 }
 trap '__dk_clear_commit_state' EXIT`;
 
-// One judge invocation line. Package mode runs the bundled bin via bunx; standalone runs the
+// One judge invocation line. Package mode runs the repo-pinned local bin; standalone runs the
 // GLOBAL bin, command -v-guarded so a machine without devkit is never blocked (the standalone
 // pre-commit precedent). Both capture the exit into `rcVar` (see TESTED_STATUS_COMMENT).
 function invoke(standalone: boolean, cmd: string, rcVar: string): string {
-  if (!standalone) return `bunx ${cmd} --gate "$1" || ${rcVar}=$?`;
+  if (!standalone) {
+    const [bin, ...args] = cmd.split(' ');
+    const localBin = `"$__dk_package_bin_dir/${bin}"`;
+    return `[ -x ${localBin} ] || { echo "devkit: pinned ${bin} is missing — run bun install." >&2; exit 1; }
+${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate "$1" || ${rcVar}=$?`;
+  }
   const bin = cmd.split(' ')[0];
   return `if command -v ${bin} >/dev/null 2>&1; then ${cmd} --gate "$1" || ${rcVar}=$?; fi`;
 }
@@ -130,7 +136,7 @@ export function commitMsgGuards(guards: string[] = []): string[] {
  * no commit-msg guard is selected (callers then remove any existing block instead).
  *
  * `pkgRel` (monorepo): package-scoped markers, and the judges run from the package dir (its staged
- * diff + guard.config.json). `standalone` swaps bunx for command -v-guarded global bins.
+ * diff + guard.config.json). `standalone` swaps local paths for command -v-guarded global bins.
  */
 export function buildCommitMsgBlock(
   selection: CommitMsgSelection,
@@ -139,7 +145,11 @@ export function buildCommitMsgBlock(
 ): string | null {
   const selected = commitMsgGuards(selection.guards);
   if (!selected.length) return null;
-  const pieces = [COMMIT_ATTEMPT_HANDOFF, TESTED_STATUS_COMMENT];
+  const pieces = [
+    ...(standalone ? [] : [PACKAGE_BIN_DIR_FRAGMENT]),
+    COMMIT_ATTEMPT_HANDOFF,
+    TESTED_STATUS_COMMENT,
+  ];
   if (selected.includes('review')) pieces.push(completenessFragment(standalone));
   if (selected.includes('sentry')) pieces.push(sentryFragment(standalone));
   const body = pieces.join('\n\n');
