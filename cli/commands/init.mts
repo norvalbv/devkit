@@ -116,7 +116,6 @@ interface RecordedComponents {
   husky?: boolean;
   structure?: boolean;
   fallow?: boolean;
-  oxc?: boolean;
   antiSlop?: boolean;
   searchCode?: boolean;
   lineGrowth?: boolean;
@@ -203,7 +202,6 @@ export function detectInstalled(cwd: string) {
   if (existsSync(join(cwd, 'biome.jsonc'))) installed.add('biome');
   if (existsSync(join(cwd, 'tsconfig.json'))) installed.add('tsconfig');
   if (existsSync(join(cwd, 'eslint.config.mjs'))) installed.add('structure');
-  if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json'))) installed.add('oxc');
   if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json'))) installed.add('antiSlop');
   const { gitRoot } = detectGitRoot(cwd);
   if (existsSync(join(gitRoot, '.devkit', 'skills-manifest.json'))) installed.add('skills');
@@ -688,7 +686,6 @@ function applyRemovals(
   // Agent-hook scripts + registrations are exact-reconciled by installAgentSurfaces before this
   // Avoid deleting a decisions-owned hook that survives a general agentHooks deselection.
   if (remove.includes('structure')) removeStructure(cwd, prevConfig, dryRun);
-  if (remove.includes('oxc')) oxcLifecycle.removeOxcCapability(cwd, dryRun);
   if (remove.includes('antiSlop')) antiSlopLifecycle.removeAntiSlopCapability(cwd, dryRun);
   if (remove.includes('husky')) removeHusky(gitRoot, pkgRel, dryRun);
 }
@@ -734,7 +731,6 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       agentHooks: Boolean(selection.agentHooks),
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
       fallow: fallowWired,
-      oxc: false,
       antiSlop: false,
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
@@ -950,9 +946,10 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     console.log('8b. search-code (opt-in semantic search)');
     installSearchCode(cwd, dryRun);
   }
-  if (selection.oxc && !selection.antiSlop)
-    oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
+  // Oxc repository state is core in every tracked install mode. Anti-slop remains the optional
+  // policy layer and selects the extended managed base; overlay returned before this apply path.
   if (selection.antiSlop) antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
+  else oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
 
   // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
   // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
@@ -979,7 +976,6 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     husky: selection.husky,
     structure: isStructure,
     fallow: Boolean(selection.fallow),
-    oxc: Boolean(selection.oxc),
     antiSlop: Boolean(selection.antiSlop),
     searchCode: Boolean(selection.searchCode),
     lineGrowth: Boolean(selection.lineGrowth),
@@ -1119,7 +1115,6 @@ export default async function run(args: string[], cwd: string) {
     disabledGuards = initFlags.disabledGuardsFromFlags(flags);
   }
 
-  oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
   antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
   if (mode === 'overlay') selection = applyOverlayConstraints(selection);
   if (!selfHost && !interactive) {

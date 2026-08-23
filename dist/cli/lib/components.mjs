@@ -147,7 +147,6 @@ export const RECORDED_COMPONENT_IDS = [
     'structure',
     'adhd',
     'priorArtGate',
-    'oxc',
     'antiSlop',
 ];
 /**
@@ -169,8 +168,6 @@ export function defaultSelection() {
         husky: true,
         structure: true,
         fallow: false,
-        // Toolchain migration is incremental: capability arrives only when explicitly selected.
-        oxc: false,
         // Policy-heavy rules and their debt baseline must never arrive without an explicit choice.
         antiSlop: false,
         searchCode: false,
@@ -203,7 +200,6 @@ export function applyOverlayConstraints(sel) {
         structure: false,
         searchSteering: false,
         searchCode: false,
-        oxc: false,
         antiSlop: false,
         husky: true,
     };
@@ -211,19 +207,18 @@ export function applyOverlayConstraints(sel) {
 /** Normalise a (possibly partial) selection to a full one — missing keys take recommended defaults. */
 export function normalizeSelection(partial = {}) {
     const base = defaultSelection();
-    const normalized = {
+    // SAFETY: runtime config JSON may contain the retired `oxc` key even though Selection no longer
+    // exposes it; the widened local copy exists only so that key can be deleted before normalising.
+    const supported = { ...partial };
+    delete supported.oxc;
+    return {
         ...base,
-        ...partial,
+        ...supported,
         agentTargets: Array.isArray(partial.agentTargets)
             ? normalizeAgentProviders(partial.agentTargets)
             : base.agentTargets,
         guards: partial.guards ? partial.guards.filter((g) => GUARD_IDS.includes(g)) : base.guards,
     };
-    // The plugin is executed by the pinned Oxc capability; an impossible anti-slop-without-Oxc
-    // recording self-heals to the only runnable selection.
-    if (normalized.antiSlop)
-        normalized.oxc = true;
-    return normalized;
 }
 export function newBundledGates(recorded, disabled = []) {
     const missing = GUARD_IDS.filter((g) => !recorded.includes(g) && !disabled.includes(g));
@@ -295,18 +290,10 @@ export const OPTIONAL_COMPONENTS = [
         since: '0.51.0',
     },
     {
-        id: 'oxc',
-        kind: 'tool',
-        label: 'Oxc',
-        hint: 'pinned Oxlint/Oxfmt runtime + repository config (optional, off by default)',
-        flag: '--oxc',
-        since: '0.52.0',
-    },
-    {
         id: 'antiSlop',
         kind: 'tool',
         label: 'anti-slop',
-        hint: '15 vendored Oxlint rules + explicit shrink-only baseline (includes Oxc)',
+        hint: '15 vendored rules over core Oxlint + explicit shrink-only baseline',
         flag: '--anti-slop',
         since: '0.52.0',
     },

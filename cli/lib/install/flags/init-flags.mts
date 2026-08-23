@@ -17,7 +17,8 @@ export interface InitFlags extends ReviewFlagValues {
   stack: string | null;
   removeDeselected: boolean;
   fallow: boolean;
-  oxc: boolean;
+  /** One-release compatibility signal for the retired no-op `--oxc` flag. */
+  legacyOxc: boolean;
   antiSlop: boolean;
   searchSteering: boolean;
   agentHooks: boolean;
@@ -53,7 +54,7 @@ export function parseFlags(args: string[]): InitFlags {
     stack: null,
     removeDeselected: false,
     fallow: false,
-    oxc: false,
+    legacyOxc: false,
     antiSlop: false,
     searchSteering: false,
     agentHooks: false,
@@ -75,7 +76,7 @@ export function parseFlags(args: string[]): InitFlags {
     else if (a === '--force') flags.force = true;
     else if (a === '--remove-deselected') flags.removeDeselected = true;
     else if (a === '--fallow') flags.fallow = true;
-    else if (a === '--oxc') flags.oxc = true;
+    else if (a === '--oxc') flags.legacyOxc = true;
     else if (a === '--anti-slop') flags.antiSlop = true;
     else if (a === '--search-steering') flags.searchSteering = true;
     else if (a === '--agent-hooks') flags.agentHooks = true;
@@ -115,11 +116,9 @@ export function selectionFromFlags(flags: InitFlags): Selection {
   if (flags.no.has('line-growth')) sel.lineGrowth = false;
   // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
   sel.fallow = flags.fallow && !flags.no.has('fallow');
-  sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop') && !flags.no.has('oxc');
-  sel.oxc = (flags.oxc || sel.antiSlop) && !flags.no.has('oxc');
-  if (flags.antiSlop && flags.no.has('oxc')) {
-    console.warn('  ! anti-slop skipped: --no-oxc disables its required runtime');
-  }
+  sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop');
+  if (flags.legacyOxc) console.warn('  • --oxc is no longer needed: Oxc is core Devkit tooling');
+  if (flags.no.has('oxc')) console.warn('  ! --no-oxc is retired and ignored: Oxc is core');
   sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
   sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
   sel.searchCode = flags.searchCode && !flags.no.has('search-code');
@@ -151,16 +150,11 @@ export function recoverInterruptedCapabilitySelection(
   } | null;
   if (recorded?.components) return selection;
 
-  if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')) && !flags.no.has('oxc')) {
-    selection.oxc = true;
-  }
   if (
     existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')) &&
-    !flags.no.has('anti-slop') &&
-    !flags.no.has('oxc')
+    !flags.no.has('anti-slop')
   ) {
     selection.antiSlop = true;
-    selection.oxc = true;
   }
   return selection;
 }

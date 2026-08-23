@@ -162,9 +162,8 @@ export function selfHostSelection(recorded?: Partial<Selection>): Selection {
     // claimed was on. Undefined entries are dropped so an absent key falls through to the default
     // rather than overwriting it with undefined.
     ...definedOnly(recorded),
-    // Devkit is the soak environment for the exact-pinned Oxc + vendored anti-slop stack. These
-    // stay on even when an older recorded config predates them or explicitly recorded them off.
-    oxc: true,
+    // Devkit is the soak environment for the vendored anti-slop policy over core Oxc. Anti-slop
+    // stays on even when an older recorded config predates it or explicitly recorded it off.
     antiSlop: true,
     // Guards stay FIXED even so: that is the deliberate part (see upgrade.mts) — a future
     // RECOMMENDED_GUARD_IDS addition must not open an interactive multiselect in the dogfood repo.
@@ -175,7 +174,7 @@ export function selfHostSelection(recorded?: Partial<Selection>): Selection {
 function definedOnly(recorded: Partial<Selection> | undefined): Partial<Selection> {
   if (!recorded) return {};
   return Object.fromEntries(
-    Object.entries(recorded).filter(([, value]) => value !== undefined),
+    Object.entries(recorded).filter(([key, value]) => key !== 'oxc' && value !== undefined),
   ) as Partial<Selection>;
 }
 

@@ -183,7 +183,6 @@ function selectionFlags(sel: Partial<Selection>): string[] {
     ['searchCode', '--search-code'],
     ['adhd', '--adhd'],
     ['priorArtGate', '--prior-art-gate'],
-    ['oxc', '--oxc'],
     ['antiSlop', '--anti-slop'],
   ] as const)
     if (sel[id]) flags.push(flag);
@@ -225,9 +224,9 @@ function applyFix(
     'oxlint config',
     'oxfmt config',
   ]);
-  const needsOxcSync =
-    Boolean(sel.oxc) &&
-    results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
+  const needsOxcSync = results.some(
+    (r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK',
+  );
   const needsAntiSlopSync =
     Boolean(sel.antiSlop) &&
     results.some((r) => r.name.startsWith('anti-slop') && r.fixable && r.status !== 'OK');
@@ -375,7 +374,7 @@ async function collectResults(
     results.push(checkAgentAssets(cwd, 'hooks', surfaces, { expected: hooks.scripts }));
   if (sel.adhd) results.push(checkAdhdSkill(cwd));
   if (sel.searchSteering) results.push(checkSearchToolBins());
-  if (sel.oxc) results.push(...checkOxcCapability(cwd));
+  results.push(...checkOxcCapability(cwd));
   if (sel.antiSlop) results.push(...checkAntiSlopCapability(cwd));
   if (surfaces.length) results.push(checkRegistrations(cwd, hooks.components, surfaces));
   if (sel.guards?.includes('fanout') || sel.guards?.includes('size'))

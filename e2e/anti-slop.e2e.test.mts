@@ -101,9 +101,10 @@ describe('e2e: packed anti-slop capability', () => {
 
     expect(retry.status, out(retry)).toBe(0);
     const recovered = JSON.parse(readFileSync(join(fx.repoDir, '.devkit/config.json'), 'utf8')) as {
-      components: { antiSlop: boolean; oxc: boolean };
+      components: { antiSlop: boolean };
     };
-    expect(recovered.components).toMatchObject({ antiSlop: true, oxc: true });
+    expect(recovered.components.antiSlop).toBe(true);
+    expect(recovered.components).not.toHaveProperty('oxc');
     expect(fx.run('devkit', ['doctor']).status).toBe(0);
   });
 
@@ -112,7 +113,6 @@ describe('e2e: packed anti-slop capability', () => {
     expect(fx.run('devkit', INIT_ARGS).status).toBe(0);
     const deselect = fx.run('devkit', [
       ...INIT_ARGS.filter((argument) => argument !== '--anti-slop'),
-      '--oxc',
       '--no-anti-slop',
       '--remove-deselected',
     ]);

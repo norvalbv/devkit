@@ -5,7 +5,7 @@ production ruleset at commit **446268e5d15baa968eaec669ff65358d36ae6259**. It is
 capability on top of Devkit's exact Oxlint 1.78.0 and @oxlint/plugins 1.78.0 pins:
 
 ~~~bash
-devkit init --anti-slop   # implies --oxc; package and standalone modes
+devkit init --anti-slop   # core Oxc is already installed; package and standalone modes
 ~~~
 
 Install and upgrade never fetch anti-slop or add a plugin dependency to the consumer. Devkit copies
