@@ -118,7 +118,6 @@ function selectionFlags(sel) {
         ['searchCode', '--search-code'],
         ['adhd', '--adhd'],
         ['priorArtGate', '--prior-art-gate'],
-        ['oxc', '--oxc'],
         ['antiSlop', '--anti-slop'],
     ])
         if (sel[id])
@@ -155,8 +154,7 @@ function applyFix(cwd, results, sel, stack, standalone) {
         'oxlint config',
         'oxfmt config',
     ]);
-    const needsOxcSync = Boolean(sel.oxc) &&
-        results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
+    const needsOxcSync = results.some((r) => OXC_CHECKS.has(r.name) && r.fixable && r.status !== 'OK');
     const needsAntiSlopSync = Boolean(sel.antiSlop) &&
         results.some((r) => r.name.startsWith('anti-slop') && r.fixable && r.status !== 'OK');
     const needsInit = results.some((r) => r.fixable &&
@@ -290,8 +288,7 @@ async function collectResults(cwd, cfg, configResult) {
         results.push(checkAdhdSkill(cwd));
     if (sel.searchSteering)
         results.push(checkSearchToolBins());
-    if (sel.oxc)
-        results.push(...checkOxcCapability(cwd));
+    results.push(...checkOxcCapability(cwd));
     if (sel.antiSlop)
         results.push(...checkAntiSlopCapability(cwd));
     if (surfaces.length)

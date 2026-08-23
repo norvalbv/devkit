@@ -88,8 +88,6 @@ export function detectInstalled(cwd) {
         installed.add('tsconfig');
     if (existsSync(join(cwd, 'eslint.config.mjs')))
         installed.add('structure');
-    if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
-        installed.add('oxc');
     if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
         installed.add('antiSlop');
     const { gitRoot } = detectGitRoot(cwd);
@@ -554,8 +552,6 @@ function applyRemovals(cwd, remove, prevConfig, gitRoot, pkgRel, dryRun) {
     // Avoid deleting a decisions-owned hook that survives a general agentHooks deselection.
     if (remove.includes('structure'))
         removeStructure(cwd, prevConfig, dryRun);
-    if (remove.includes('oxc'))
-        oxcLifecycle.removeOxcCapability(cwd, dryRun);
     if (remove.includes('antiSlop'))
         antiSlopLifecycle.removeAntiSlopCapability(cwd, dryRun);
     if (remove.includes('husky'))
@@ -594,7 +590,6 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         agentHooks: Boolean(selection.agentHooks),
         searchSteering: false, // never wired in overlay (no resolvable bin without the package)
         fallow: fallowWired,
-        oxc: false,
         antiSlop: false,
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
@@ -769,10 +764,12 @@ export async function applyInit(cwd, plan) {
         console.log('8b. search-code (opt-in semantic search)');
         installSearchCode(cwd, dryRun);
     }
-    if (selection.oxc && !selection.antiSlop)
-        oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
+    // Oxc repository state is core in every tracked install mode. Anti-slop remains the optional
+    // policy layer and selects the extended managed base; overlay returned before this apply path.
     if (selection.antiSlop)
         antiSlopLifecycle.syncAntiSlopCapability(cwd, { dryRun });
+    else
+        oxcLifecycle.syncOxcCapability(cwd, { dryRun, antiSlop: false });
     // The vendored i-have-adhd skill, into devkit's own tree rather than the agent skills dirs — so it
     // no longer depends on the `skills` component. Called unconditionally: a false selection reclaims a
     // previously-installed copy, and syncSurfaces above has already reclaimed the `.claude/skills/`
@@ -797,7 +794,6 @@ export async function applyInit(cwd, plan) {
         husky: selection.husky,
         structure: isStructure,
         fallow: Boolean(selection.fallow),
-        oxc: Boolean(selection.oxc),
         antiSlop: Boolean(selection.antiSlop),
         searchCode: Boolean(selection.searchCode),
         lineGrowth: Boolean(selection.lineGrowth),
@@ -924,7 +920,6 @@ export default async function run(args, cwd) {
         selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
         disabledGuards = initFlags.disabledGuardsFromFlags(flags);
     }
-    oxcLifecycle.warnIfOxcUnavailable(mode, flags.oxc);
     antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
     if (mode === 'overlay')
         selection = applyOverlayConstraints(selection);

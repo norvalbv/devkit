@@ -84,8 +84,8 @@ devkit anti-slop check
 devkit anti-slop check --staged
 ```
 
-`--anti-slop` implies the opt-in Oxc capability. Rules load beside the repository's other
-Oxlint rules; their severities and scoped overrides stay in the ordinary Oxlint config. Baseline
+Oxc is core Devkit tooling; `--anti-slop` adds the optional policy rules over that managed base.
+Their severities and scoped overrides stay in the ordinary Oxlint config. Baseline
 creation is always explicit, normal checks are read-only, and pruning can only remove fixed debt.
 The staged form reads the exact Git index, and CI can pass `--base <ref>` to prevent a candidate
 baseline from growing relative to its base commit.

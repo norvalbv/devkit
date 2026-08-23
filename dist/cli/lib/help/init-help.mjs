@@ -10,7 +10,7 @@ Usage:
   --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
                          own same-named skill/agent/hook collisions (default: preserve them).
   --no-<component>       Skip a component: --no-biome --no-tsconfig --no-skills --no-husky
-                         --no-structure --no-guards --no-fallow --no-adhd --no-oxc --no-anti-slop.
+                         --no-structure --no-guards --no-fallow --no-adhd --no-anti-slop.
   --no-<guard>           Turn off one guard without restating the full guard list; for example
                          --no-comments. Use --no-review-gate for the review guard.
   --guards <a,b,…>       Only these guards (subset of size,fanout,dup,clone,comments,decisions,
@@ -23,10 +23,8 @@ Usage:
   --baselines-only       Re-derive ONLY the structure + import-wall baselines (rare; after a
                          structure-RULE change). Package-mode structure stacks only.
   --fallow               Also install the optional fallow code-health layer (off by default).
-  --oxc                  Activate Devkit's pinned Oxlint/Oxfmt runtime and repository configs
-                         (off by default; package/standalone only). Use \`devkit oxc lint|fmt\`.
   --anti-slop            Install 15 vendored anti-slop rules and its explicit shrink-only baseline
-                         workflow (implies --oxc; package/standalone only; baseline creation is manual).
+                         workflow over core Oxc (package/standalone only; baseline creation is manual).
   --search-code          Opt this repo in to the semantic search index (off by default).
   --adhd                 Sync the i-have-adhd SKILL — an ADHD-friendly output style — and
                          keep it ALWAYS ON via a SessionStart hook (off by default;

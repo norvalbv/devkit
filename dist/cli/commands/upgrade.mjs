@@ -181,8 +181,11 @@ export default async function upgrade(args, cwd) {
         // overlay upgrade records a decline nobody made and the offer never fires again.
         const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
         const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
-            unavailable: ['oxc', 'antiSlop'],
+            unavailable: ['antiSlop'],
         });
+        if (Object.hasOwn(cfg.components ?? {}, 'oxc')) {
+            console.log('  • retired components.oxc key will be removed; overlay remains runtime-only and writes no tracked Oxc config');
+        }
         await applyInit(cwd, {
             stack,
             selection: sel,
@@ -290,6 +293,9 @@ export default async function upgrade(args, cwd) {
     // ── 3b/3c. what upgrade OFFERS a repo that predates a feature (see upgrade-offers.mts) ─────
     await offerLineGrowth(cwd, sel, dryRun);
     const undecided = await offerOptionalComponents(cfg.components, sel, dryRun);
+    if (Object.hasOwn(cfg.components ?? {}, 'oxc')) {
+        console.log('  • hard cutover: reconcile core Oxc repository state and remove the retired components.oxc key');
+    }
     // ── 4. broad refresh (idempotent; never clobbers consumer configs) ─────────
     // applyInit(force:false): configs via writeIfAbsent (existing preserved), package.json devDeps,
     // husky guard block refreshed only if changed, ratchet baselines frozen only if missing,

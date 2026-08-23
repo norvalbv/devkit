@@ -1,4 +1,4 @@
-/** Collision-safe install, drift, and uninstall lifecycle for the opt-in Oxc repository config. */
+/** Collision-safe install, drift, and uninstall lifecycle for core Oxc repository state. */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,12 +18,6 @@ const OXFMT_STARTER = '{}\n';
 const MANIFEST_REL = '.devkit/oxc/manifest.json';
 const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
-/** Explain why an explicitly requested capability cannot activate in a non-repository mode. */
-export function warnIfOxcUnavailable(mode, requested) {
-    if (!requested || mode !== 'overlay')
-        return;
-    console.warn(`devkit init --${mode}: --oxc is unavailable because Oxc activation writes tracked repository config; skipping it.`);
-}
 const digest = (content) => createHash('sha256').update(content).digest('hex');
 const fileDigest = (path) => digest(readFileSync(path));
 function baseContent(antiSlop) {

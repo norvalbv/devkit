@@ -93,16 +93,10 @@ const ADHD_OPTION = {
   hint: 'ADHD-friendly output style, invoked with /i-have-adhd (off by default; needs Agent skills)',
 };
 
-const OXC_OPTION = {
-  id: 'oxc',
-  label: 'Oxc toolchain',
-  hint: 'pinned Oxlint/Oxfmt runtime + repository config (off by default)',
-};
-
 const ANTI_SLOP_OPTION = {
   id: 'antiSlop',
   label: 'anti-slop rules',
-  hint: '15 vendored Oxlint rules + explicit shrink-only baseline (includes Oxc)',
+  hint: '15 vendored rules over core Oxlint + explicit shrink-only baseline',
 };
 
 // prior-art gate: same opt-in shape as adhd, and kept out of COMPONENTS for the same reason — it
@@ -241,7 +235,7 @@ export async function runWizard({
       ],
       initialValues: [
         ...choices.filter((c) => c.recommended).map((c) => c.id),
-        ...installedOptional.filter((id) => id !== 'oxc' && id !== 'antiSlop'),
+        ...installedOptional.filter((id) => id !== 'antiSlop'),
       ],
       required: false,
     });
@@ -264,7 +258,6 @@ export async function runWizard({
         componentOption(SEARCHCODE_OPTION),
         componentOption(ADHD_OPTION),
         componentOption(PRIOR_ART_GATE_OPTION),
-        componentOption(OXC_OPTION),
         componentOption(ANTI_SLOP_OPTION),
       ],
       initialValues: [
@@ -281,7 +274,6 @@ export async function runWizard({
     selection.adhd = chosen.has('adhd');
     selection.priorArtGate = chosen.has('priorArtGate');
     selection.antiSlop = chosen.has('antiSlop');
-    selection.oxc = chosen.has('oxc') || selection.antiSlop;
     if (!structAvail) selection.structure = false;
   }
 
@@ -446,7 +438,6 @@ function summarize(
   lines.push(`${selection.searchCode ? '✓' : '·'} ${SEARCHCODE_OPTION.label}`);
   lines.push(`${selection.adhd ? '✓' : '·'} ${ADHD_OPTION.label}`);
   lines.push(`${selection.priorArtGate ? '✓' : '·'} ${PRIOR_ART_GATE_OPTION.label}`);
-  lines.push(`${selection.oxc ? '✓' : '·'} ${OXC_OPTION.label}`);
   lines.push(`${selection.antiSlop ? '✓' : '·'} ${ANTI_SLOP_OPTION.label}`);
   lines.push(`${selection.lineGrowth ? '✓' : '·'} line-growth block`);
   if (AGENT_SURFACE_COMPONENTS.some((id) => selection[id])) {

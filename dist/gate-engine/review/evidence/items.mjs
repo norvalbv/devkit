@@ -10,11 +10,18 @@
  * full vector spills to a sidecar and the event carries a ref; the counts and the status tally ride
  * inline either way, so a reader can always tell a spilled vector from a short one.
  */
-import { saveTranscript } from "../../judge/transcript-store.mjs";
+import { saveTranscriptUnique } from "../../judge/transcript-store.mjs";
 // Non-passing items sort FIRST so any truncation can never keep the passes and drop the findings.
 const ITEM_CAP = 40;
 const ISSUE_CHARS = 200;
-const ISSUES_PER_ITEM = 3;
+// Mirrored by skills/_devkit/checklist-store.mjs (consumer asset, cannot import this module):
+// both read GUARD_REVIEW_MAX_ISSUES_PER_LENS with the same default and clamp.
+export function issuesPerLensCap() {
+    const n = Number.parseInt(process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS ??
+        process.env.FRINK_REVIEW_MAX_ISSUES_PER_LENS ??
+        '', 10);
+    return Number.isFinite(n) && n >= 1 && n <= 10 ? n : 3;
+}
 const LENS_CHARS = 200; // a commit-guard lens is a repo path; deep trees make these long
 // A waiver rationale is free text a human wrote — unbounded in the overrides file, but an element
 // cap alone is not a byte bound (see module docstring), so the copy riding the event is capped here.
@@ -65,7 +72,8 @@ export function mergeItemVectors(res, parts) {
         res.items = capped;
         return;
     }
-    res.itemsRef = saveTranscript(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
+    res.itemsRef =
+        saveTranscriptUnique(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
 }
 /** The lens-part fields a cached PASS must round-trip (sc-1475): a part whose vector SPILLED
  * caches `items: undefined` (dropped by JSON.stringify), so without the aggregates the rebuilt
@@ -105,7 +113,7 @@ export function attachItems(res, state, disposition) {
         const lens = String(it.name ?? it.path ?? '(finding)').slice(0, LENS_CHARS);
         // checkItem clears issues on a pass, so this only ever carries text for a non-pass.
         const issues = (it.issues ?? [])
-            .slice(0, ISSUES_PER_ITEM)
+            .slice(0, issuesPerLensCap())
             .map((issue) => String(issue).slice(0, ISSUE_CHARS));
         const lensDisposition = disposition.get(lens);
         const rationale = rationaleByLens.get(lens);
@@ -127,8 +135,9 @@ export function attachItems(res, state, disposition) {
         return;
     }
     // Over budget: the FULL capped vector goes to a sidecar so nothing is lost, and the event carries
-    // only the ref. saveTranscript is a no-op off-run, in which case the tally + counts still stand.
-    res.itemsRef = saveTranscript(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
+    // only the ref. saveTranscriptUnique is a no-op off-run, in which case the tally + counts still stand.
+    res.itemsRef =
+        saveTranscriptUnique(`items-${res.name}`, JSON.stringify(capped, null, 2)) ?? undefined;
 }
 /**
  * The item fields of a `review_result` event. Lives beside `attachItems` so the wire shape and the

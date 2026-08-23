@@ -141,26 +141,24 @@ describe('selection helpers', () => {
     expect(selectionFromFlags(parseFlags(['--yes', '--fallow', '--no-fallow'])).fallow).toBe(false);
   });
 
-  it('Oxc is OPT-IN: off by default, on with --oxc, off again with --no-oxc', () => {
-    expect(selectionFromFlags(parseFlags(['--yes'])).oxc).toBe(false);
-    expect(selectionFromFlags(parseFlags(['--yes', '--oxc'])).oxc).toBe(true);
-    expect(selectionFromFlags(parseFlags(['--yes', '--oxc', '--no-oxc'])).oxc).toBe(false);
+  it('Oxc is core and retired flags never recreate a selection key', () => {
+    expect(selectionFromFlags(parseFlags(['--yes']))).not.toHaveProperty('oxc');
+    expect(selectionFromFlags(parseFlags(['--yes', '--oxc']))).not.toHaveProperty('oxc');
+    expect(selectionFromFlags(parseFlags(['--yes', '--no-oxc']))).not.toHaveProperty('oxc');
   });
 
-  it('anti-slop is OPT-IN, implies Oxc, and yields to an explicit --no-oxc', () => {
+  it('anti-slop is independently opt-in over core Oxc', () => {
     expect(selectionFromFlags(parseFlags(['--yes'])).antiSlop).toBe(false);
-    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop']))).toMatchObject({
-      antiSlop: true,
-      oxc: true,
-    });
-    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop', '--no-oxc']))).toMatchObject({
-      antiSlop: false,
-      oxc: false,
-    });
-    expect(normalizeSelection({ antiSlop: true, oxc: false })).toMatchObject({
-      antiSlop: true,
-      oxc: true,
-    });
+    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop'])).antiSlop).toBe(true);
+    expect(selectionFromFlags(parseFlags(['--yes', '--anti-slop', '--no-oxc'])).antiSlop).toBe(
+      true,
+    );
+    // SAFETY: this deliberately models persisted pre-cutover JSON carrying the retired `oxc` key.
+    const migrated = normalizeSelection({ antiSlop: true, oxc: false } as Parameters<
+      typeof normalizeSelection
+    >[0] & { oxc: boolean });
+    expect(migrated.antiSlop).toBe(true);
+    expect(migrated).not.toHaveProperty('oxc');
   });
 
   it('lineGrowth is recommended-ON: default true, off with --no-line-growth', () => {
@@ -212,8 +210,12 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
     expect(existsSync(join(root, '.claude/skills'))).toBe(false);
     expect(existsSync(join(root, '.husky/pre-commit'))).toBe(true);
+    expect(existsSync(join(root, '.devkit/oxc/manifest.json'))).toBe(true);
+    expect(existsSync(join(root, '.oxlintrc.json'))).toBe(true);
+    expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(true);
     const cfg = config(root);
     expect(cfg.components).toMatchObject({ biome: false, skills: false, guards: ['size'] });
+    expect(cfg.components).not.toHaveProperty('oxc');
     expect(cfg.review).toEqual({
       enabled: false,
       guards: ['size'],
@@ -1000,8 +1002,9 @@ describe('self-host mode (devkit dogfooding itself)', () => {
 
     expect(config(root)).toMatchObject({
       selfHost: true,
-      components: { oxc: true, antiSlop: true },
+      components: { antiSlop: true },
     });
+    expect(config(root).components).not.toHaveProperty('oxc');
     expect(existsSync(join(root, '.devkit', 'oxc', 'manifest.json'))).toBe(true);
     expect(existsSync(join(root, '.devkit', 'anti-slop', 'manifest.json'))).toBe(true);
   });

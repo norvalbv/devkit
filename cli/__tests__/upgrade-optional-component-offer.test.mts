@@ -79,12 +79,11 @@ describe('devkit upgrade — optional component offer', () => {
 
     expect(up.stdout).toContain('3c. newly bundled optional skills / hooks / tools');
     expect(up.stdout).toMatch(/devkit bundles the i-have-adhd skill/i);
-    expect(up.stdout).toMatch(/devkit bundles the Oxc tool/i);
     expect(up.stdout).toContain('--adhd');
-    expect(up.stdout).toContain('--oxc');
     // Reported, not applied.
     expect(existsSync(join(root, '.claude', 'skills', 'i-have-adhd'))).toBe(false);
-    expect(existsSync(join(root, '.devkit', 'oxc'))).toBe(false);
+    // Core Oxc is reconciled independently of optional-component offers.
+    expect(existsSync(join(root, '.devkit', 'oxc'))).toBe(true);
   });
 
   it('names WHAT is on offer, never devkit\'s internal word "component"', () => {
@@ -119,13 +118,12 @@ describe('devkit upgrade — optional component offer', () => {
     // A plain --yes init records adhd:false — an explicit init IS a decision.
     expect(run(root, 'init', '--stack', 'generic', '--yes', '--no-cursor').status).toBe(0);
     expect(config(root).components.adhd).toBe(false);
-    expect(config(root).components.oxc).toBe(false);
+    expect(config(root).components.oxc).toBeUndefined();
 
     const up = run(root, 'upgrade');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toContain('none — selection unchanged');
     expect(up.stdout).not.toMatch(/devkit bundles the i-have-adhd skill/i);
-    expect(up.stdout).not.toMatch(/devkit bundles the Oxc tool/i);
   });
 
   it('preserves an accepted component across upgrade', () => {
@@ -165,7 +163,7 @@ describe('devkit upgrade — optional component offer', () => {
     const up = run(root, 'upgrade', '--dry-run');
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(up.stdout).toMatch(/\[dry-run\] would offer the i-have-adhd skill/);
-    expect(up.stdout).toMatch(/\[dry-run\] would offer the Oxc tool/);
+    expect(up.stdout).toContain('[dry-run] sync .devkit/oxc/oxlint.base.json');
     expect(config(root).components.adhd).toBeUndefined();
     expect(config(root).components.oxc).toBeUndefined();
   });
