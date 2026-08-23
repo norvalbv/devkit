@@ -391,7 +391,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
       guards: [] as const,
     };
 
-    await applyInit(root, { stack: 'generic', selection });
+    await applyInit(root, { stack: 'react-app', selection });
 
     for (const path of [
       '.claude/skills/commit-gates/SKILL.md',
@@ -405,7 +405,7 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     );
 
     await applyInit(root, {
-      stack: 'generic',
+      stack: 'react-app',
       selection: { ...selection, husky: false },
     });
 
@@ -416,6 +416,27 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     ]) {
       expect(existsSync(join(root, path))).toBe(false);
     }
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).not.toContain(
+      'commit-gates/SKILL.md',
+    );
+  });
+
+  it('does not project commit-gate guidance for unsupported requested structure', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        husky: true,
+        structure: true,
+        agentTargets: ['claude'],
+        guards: [],
+      },
+    });
+
+    expect(existsSync(join(root, '.claude/skills/commit-gates/SKILL.md'))).toBe(false);
     expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).not.toContain(
       'commit-gates/SKILL.md',
     );
