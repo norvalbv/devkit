@@ -32,8 +32,10 @@ interface GitChange {
 
 export interface GitBaselineEnvelope {
   base: AntiSlopBaseline | null;
-  /** Present for full-tree CI comparisons; staged snapshots already run outside a Git checkout. */
+  /** Git tree used to distinguish inherited findings from candidate growth. */
   baseTree?: string;
+  /** Original checkout used when the candidate runs from a materialized staged snapshot. */
+  baseCheckoutCwd?: string;
   introducedPaths: Set<string>;
   renames: Map<string, string>;
 }
@@ -240,6 +242,8 @@ export function withStagedAntiSlopSnapshot<T>(
       fullScan,
       skipped,
       base: evidence.base,
+      baseTree: evidence.baseTree,
+      baseCheckoutCwd: cwd,
       introducedPaths: evidence.introducedPaths,
       renames: evidence.renames,
     });
@@ -255,6 +259,8 @@ export function withStagedAntiSlopSnapshot<T>(
       fullScan,
       skipped,
       base: evidence.base,
+      baseTree: evidence.baseTree,
+      baseCheckoutCwd: cwd,
       introducedPaths: evidence.introducedPaths,
       renames: evidence.renames,
     });
