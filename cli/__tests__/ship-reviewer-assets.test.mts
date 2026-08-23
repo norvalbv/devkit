@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -13,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { projectShipAssetKind } from '../lib/ship/review/asset-runtime.mts';
 import { testSpawnSync as spawnSync } from './_helpers.mts';
 import {
   dirs,
@@ -32,7 +35,7 @@ const packagedCompletenessAgent = fileURLToPath(
   new URL('../../agents/feature-completeness-reviewer.md', import.meta.url),
 );
 
-function runReviewerRefresh(worktree, root, packageRoot = '') {
+function runReviewerRefresh(worktree, root, packageRoot = '', env = process.env) {
   return spawnSync(
     '/bin/bash',
     [
@@ -51,7 +54,7 @@ function runReviewerRefresh(worktree, root, packageRoot = '') {
       worktree,
       root,
     ],
-    { encoding: 'utf8', env: process.env },
+    { encoding: 'utf8', env },
   );
 }
 
@@ -177,6 +180,87 @@ describe('ship reviewer asset refresh', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/\.claude\/skills must be a real directory/);
     expect(readFileSync(join(external, 'consumer.txt'), 'utf8')).toBe('untouched\n');
+  });
+
+  it('rejects a child root swapped to an external symlink after validation', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-race-'));
+    dirs.push(parent);
+    const worktree = join(parent, 'worktree');
+    const root = join(parent, 'root');
+    const external = join(parent, 'external');
+    const savedSkills = join(parent, 'saved-skills');
+    const skillRoot = join(worktree, '.claude/skills');
+    const stubBin = join(parent, 'bin');
+    mkdirSync(join(skillRoot, 'consumer-only'), { recursive: true });
+    mkdirSync(join(external, 'api-security'), { recursive: true });
+    mkdirSync(root);
+    mkdirSync(stubBin);
+    writeFileSync(join(skillRoot, 'consumer-only/SKILL.md'), '# consumer\n');
+    writeFileSync(join(external, 'api-security/sentinel.txt'), 'external untouched\n');
+    writeFileSync(
+      join(stubBin, 'node'),
+      [
+        '#!/usr/bin/env bash',
+        'if [ "$2" = manifest-owned ] && [ "$4" = skills ] && [ ! -e "$DEVKIT_RACE_SAVED" ]; then',
+        '  mv -- "$DEVKIT_RACE_ROOT" "$DEVKIT_RACE_SAVED"',
+        '  ln -s -- "$DEVKIT_RACE_EXTERNAL" "$DEVKIT_RACE_ROOT"',
+        'fi',
+        'exec "$DEVKIT_RACE_REAL_NODE" "$@"',
+        '',
+      ].join('\n'),
+    );
+    chmodSync(join(stubBin, 'node'), 0o755);
+
+    const result = runReviewerRefresh(worktree, root, sourcePackageRoot, {
+      ...process.env,
+      DEVKIT_RACE_EXTERNAL: external,
+      DEVKIT_RACE_REAL_NODE: process.execPath,
+      DEVKIT_RACE_ROOT: skillRoot,
+      DEVKIT_RACE_SAVED: savedSkills,
+      PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+    });
+
+    expect(existsSync(join(external, 'api-security/sentinel.txt'))).toBe(true);
+    expect(readFileSync(join(external, 'api-security/sentinel.txt'), 'utf8')).toBe(
+      'external untouched\n',
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/ship reviewer skills root must be a real directory/);
+    expect(readFileSync(join(savedSkills, 'consumer-only/SKILL.md'), 'utf8')).toBe('# consumer\n');
+  });
+
+  it('restores quarantined assets when a replacement rename fails', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-rollback-'));
+    dirs.push(parent);
+    const worktree = join(parent, 'worktree');
+    const runtime = join(parent, 'runtime');
+    const owned = join(parent, 'owned');
+    const agents = join(worktree, '.claude/agents');
+    mkdirSync(agents, { recursive: true });
+    mkdirSync(runtime);
+    writeFileSync(join(agents, 'a.md'), 'consumer a\n');
+    writeFileSync(join(agents, 'b.md'), 'consumer b\n');
+    writeFileSync(join(runtime, 'a.md'), 'packaged a\n');
+    writeFileSync(join(runtime, 'b.md'), 'packaged b\n');
+    writeFileSync(owned, '');
+    const originalCwd = process.cwd();
+    let renames = 0;
+
+    try {
+      expect(() =>
+        projectShipAssetKind(worktree, runtime, owned, 'agents', (source, destination) => {
+          renames += 1;
+          if (renames === 3) throw new Error('injected install failure');
+          renameSync(source, destination);
+        }),
+      ).toThrow(/injected install failure/);
+    } finally {
+      process.chdir(originalCwd);
+    }
+
+    expect(readFileSync(join(agents, 'a.md'), 'utf8')).toBe('consumer a\n');
+    expect(readFileSync(join(agents, 'b.md'), 'utf8')).toBe('consumer b\n');
+    expect(readdirSync(agents).filter((name) => name.startsWith('.devkit-'))).toEqual([]);
   });
 
   it('rejects a non-directory child root before making a partial projection', () => {

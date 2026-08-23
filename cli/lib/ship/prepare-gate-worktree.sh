@@ -69,7 +69,7 @@ refresh_ship_reviewer_assets() {
   # so a stale consumer copy can never impersonate a broken running package. Its destination grammar
   # is intentionally shell-tool-safe; use a fixed /tmp parent rather than inheriting a TMPDIR that
   # may contain spaces (the ship worktree itself remains free to live there).
-  local asset_tool script_dir runtime_parent runtime entries owned source name projection_failed
+  local asset_tool script_dir runtime_parent runtime owned name
   script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || return 1
   asset_tool="$script_dir/review/asset-runtime.mts"
   [ -f "$asset_tool" ] || asset_tool="$script_dir/review/asset-runtime.mjs"
@@ -98,12 +98,7 @@ refresh_ship_reviewer_assets() {
 
   for sub in agents skills; do
     mkdir -p "$physical_wt/.claude/$sub"
-    entries="$runtime_parent/$sub.entries"
     owned="$runtime_parent/$sub.owned"
-    if ! find "$runtime/$sub" -mindepth 1 -maxdepth 1 -print0 > "$entries"; then
-      rm -rf -- "$runtime_parent"
-      return 1
-    fi
     if ! node "$asset_tool" manifest-owned "$physical_root" "$sub" > "$owned"; then
       rm -rf -- "$runtime_parent"
       return 1
@@ -120,20 +115,8 @@ refresh_ship_reviewer_assets() {
   done
 
   for sub in agents skills; do
-    entries="$runtime_parent/$sub.entries"
     owned="$runtime_parent/$sub.owned"
-    projection_failed=0
-    while IFS= read -r -d '' name; do
-      rm -rf -- "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
-    done < "$owned"
-    if [ "$projection_failed" -eq 0 ]; then
-      while IFS= read -r -d '' source; do
-        name=${source##*/}
-        rm -rf -- "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
-        cp -R "$source" "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
-      done < "$entries"
-    fi
-    if [ "$projection_failed" -ne 0 ]; then
+    if ! node "$asset_tool" project-ship-kind "$physical_wt" "$runtime/$sub" "$owned" "$sub"; then
       rm -rf -- "$runtime_parent"
       return 1
     fi
