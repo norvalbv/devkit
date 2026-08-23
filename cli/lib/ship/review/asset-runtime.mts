@@ -335,7 +335,6 @@ function enterPinnedDirectory(path: string, label: string): number {
 }
 
 type ShipAssetRename = (source: string, destination: string) => void;
-
 export function projectShipAssetKind(
   worktree: string,
   runtimeRootPath: string,
@@ -353,67 +352,70 @@ export function projectShipAssetKind(
   const descriptors: number[] = [];
   const quarantined: Array<{ name: string; path: string }> = [];
   const installed: string[] = [];
+  const originalCwd = process.cwd();
   let staging: string | undefined;
   let cleanStaging = true;
   try {
-    descriptors.push(enterPinnedDirectory(worktree, 'ship reviewer worktree'));
-    descriptors.push(enterPinnedDirectory('.claude', 'ship reviewer .claude root'));
-    descriptors.push(enterPinnedDirectory(kind, `ship reviewer ${kind} root`));
-
-    staging = mkdtempSync('.devkit-review-assets-');
-    const quarantine = join(staging, '.quarantine');
-    mkdirSync(quarantine);
-    for (const name of packaged) {
-      cpSync(join(runtime, name), join(staging, name), {
-        recursive: true,
-        errorOnExist: true,
-        force: false,
-      });
-    }
-    for (const [index, name] of replacements.entries()) {
-      if (lstatSync(name, { throwIfNoEntry: false }) !== undefined) {
-        const path = join(quarantine, String(index));
-        rename(name, path);
-        quarantined.push({ name, path });
+    try {
+      descriptors.push(enterPinnedDirectory(worktree, 'ship reviewer worktree'));
+      descriptors.push(enterPinnedDirectory('.claude', 'ship reviewer .claude root'));
+      descriptors.push(enterPinnedDirectory(kind, `ship reviewer ${kind} root`));
+      staging = realpathSync(mkdtempSync('.devkit-review-assets-'));
+      const quarantine = join(staging, '.quarantine');
+      mkdirSync(quarantine);
+      for (const name of packaged) {
+        cpSync(join(runtime, name), join(staging, name), {
+          recursive: true,
+          errorOnExist: true,
+          force: false,
+        });
       }
-    }
-    for (const name of packaged) {
-      rename(join(staging, name), name);
-      installed.push(name);
-    }
-  } catch (cause) {
-    const rollbackFailures: unknown[] = [];
-    for (const name of installed.reverse()) {
-      try {
-        rmSync(name, { recursive: true, force: true });
-      } catch (rollbackCause) {
-        rollbackFailures.push(rollbackCause);
-      }
-    }
-    for (const entry of quarantined.reverse()) {
-      try {
-        if (lstatSync(entry.name, { throwIfNoEntry: false }) !== undefined) {
-          throw new Error(`cannot restore occupied reviewer asset: ${entry.name}`);
+      for (const [index, name] of replacements.entries()) {
+        if (lstatSync(name, { throwIfNoEntry: false }) !== undefined) {
+          const path = join(quarantine, String(index));
+          rename(name, path);
+          quarantined.push({ name, path });
         }
-        rename(entry.path, entry.name);
-      } catch (rollbackCause) {
-        rollbackFailures.push(rollbackCause);
       }
+      for (const name of packaged) {
+        rename(join(staging, name), name);
+        installed.push(name);
+      }
+    } catch (cause) {
+      const rollbackFailures: unknown[] = [];
+      for (const name of installed.reverse()) {
+        try {
+          rmSync(name, { recursive: true, force: true });
+        } catch (rollbackCause) {
+          rollbackFailures.push(rollbackCause);
+        }
+      }
+      for (const entry of quarantined.reverse()) {
+        try {
+          if (lstatSync(entry.name, { throwIfNoEntry: false }) !== undefined) {
+            throw new Error(`cannot restore occupied reviewer asset: ${entry.name}`);
+          }
+          rename(entry.path, entry.name);
+        } catch (rollbackCause) {
+          rollbackFailures.push(rollbackCause);
+        }
+      }
+      if (rollbackFailures.length > 0) {
+        cleanStaging = false;
+        throw new AggregateError(
+          [cause, ...rollbackFailures],
+          `ship reviewer ${kind} projection failed; recovery assets retained in ${staging}`,
+        );
+      }
+      throw cause;
+    } finally {
+      if (staging && cleanStaging) rmSync(staging, { recursive: true, force: true });
+      for (const descriptor of descriptors.reverse()) closeSync(descriptor);
     }
-    if (rollbackFailures.length > 0) {
-      cleanStaging = false;
-      throw new AggregateError(
-        [cause, ...rollbackFailures],
-        `ship reviewer ${kind} projection failed; recovery assets retained in ${staging}`,
-      );
-    }
-    throw cause;
   } finally {
-    if (staging && cleanStaging) rmSync(staging, { recursive: true, force: true });
-    for (const descriptor of descriptors.reverse()) closeSync(descriptor);
+    process.chdir(originalCwd);
   }
 }
-
 /** Recheck both the packaged source and its immutable private copy after target hooks run. */
 export function verifyReviewAssetRuntime(
   packageRoot: string,
@@ -493,5 +495,4 @@ function runCli(args: string[]): void {
     'usage: asset-runtime materialize[-ship] <package-root> <destination-root> | manifest-owned <root> <agents|skills> | project-ship-kind <worktree> <runtime-root> <owned-names> <agents|skills> | verify <package-root> <runtime-root> <fingerprint>',
   );
 }
-
 runDirectReviewCli(import.meta.url, runCli);

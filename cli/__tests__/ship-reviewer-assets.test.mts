@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { projectShipAssetKind } from '../lib/ship/review/asset-runtime.mts';
@@ -254,6 +254,7 @@ describe('ship reviewer asset refresh', () => {
           renameSync(source, destination);
         }),
       ).toThrow(/injected install failure/);
+      expect(process.cwd()).toBe(originalCwd);
     } finally {
       process.chdir(originalCwd);
     }
@@ -261,6 +262,46 @@ describe('ship reviewer asset refresh', () => {
     expect(readFileSync(join(agents, 'a.md'), 'utf8')).toBe('consumer a\n');
     expect(readFileSync(join(agents, 'b.md'), 'utf8')).toBe('consumer b\n');
     expect(readdirSync(agents).filter((name) => name.startsWith('.devkit-'))).toEqual([]);
+  });
+
+  it('restores cwd and reports an absolute recovery path when rollback fails', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'ship-review-assets-recovery-'));
+    dirs.push(parent);
+    const worktree = join(parent, 'worktree');
+    const runtime = join(parent, 'runtime');
+    const owned = join(parent, 'owned');
+    const agents = join(worktree, '.claude/agents');
+    mkdirSync(agents, { recursive: true });
+    mkdirSync(runtime);
+    writeFileSync(join(agents, 'a.md'), 'consumer a\n');
+    writeFileSync(join(agents, 'b.md'), 'consumer b\n');
+    writeFileSync(join(runtime, 'a.md'), 'packaged a\n');
+    writeFileSync(join(runtime, 'b.md'), 'packaged b\n');
+    writeFileSync(owned, '');
+    const originalCwd = process.cwd();
+    let renames = 0;
+    let failure: unknown;
+
+    try {
+      projectShipAssetKind(worktree, runtime, owned, 'agents', (source, destination) => {
+        renames += 1;
+        if (renames === 3 || renames === 4) throw new Error('injected rename failure');
+        renameSync(source, destination);
+      });
+    } catch (cause) {
+      failure = cause;
+    } finally {
+      const finalCwd = process.cwd();
+      process.chdir(originalCwd);
+      expect(finalCwd).toBe(originalCwd);
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) throw new Error('expected rollback AggregateError');
+    const recoveryPath = failure.message.split('recovery assets retained in ')[1] ?? '';
+    expect(isAbsolute(recoveryPath)).toBe(true);
+    expect(recoveryPath).toContain('/.claude/agents/.devkit-review-assets-');
+    expect(existsSync(recoveryPath)).toBe(true);
   });
 
   it('rejects a non-directory child root before making a partial projection', () => {
