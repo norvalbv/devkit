@@ -175,10 +175,13 @@ describe('overlay (local-only) install', () => {
       './.devkit/biome/react.jsonc',
     ]);
 
-    // config records overlay
-    expect(JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).overlay).toBe(
-      true,
-    );
+    // config records overlay, but its local-only contract writes no tracked Oxc repository state.
+    const overlayConfig = JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8'));
+    expect(overlayConfig.overlay).toBe(true);
+    expect(overlayConfig.components).not.toHaveProperty('oxc');
+    expect(existsSync(join(root, '.devkit', 'oxc'))).toBe(false);
+    expect(existsSync(join(root, '.oxlintrc.json'))).toBe(false);
+    expect(existsSync(join(root, '.oxfmtrc.json'))).toBe(false);
   });
 
   it('monorepo subdir: hook + .git/info/exclude live at the git ROOT, not the package', async () => {
@@ -959,7 +962,6 @@ describe('overlay (local-only) install', () => {
       structure: true,
       searchSteering: true,
       searchCode: true,
-      oxc: true,
       husky: false,
       skills: true,
       agents: false, // user opted OUT — must be preserved
@@ -971,7 +973,7 @@ describe('overlay (local-only) install', () => {
     expect(sel.structure).toBe(false);
     expect(sel.searchSteering).toBe(false);
     expect(sel.searchCode).toBe(false);
-    expect(sel.oxc).toBe(false);
+    expect(sel).not.toHaveProperty('oxc');
     expect(sel.husky).toBe(true);
     // viable choices pass through untouched (overlay offers the same opt-in choices as package)
     expect(sel.skills).toBe(true);

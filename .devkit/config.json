@@ -15,7 +15,6 @@
     "husky": true,
     "structure": false,
     "fallow": false,
-    "oxc": true,
     "antiSlop": true,
     "searchCode": false,
     "lineGrowth": true,

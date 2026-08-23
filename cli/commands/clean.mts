@@ -38,7 +38,6 @@ interface DevkitComponents {
   agentHooks?: boolean;
   searchSteering?: boolean;
   fallow?: boolean;
-  oxc?: boolean;
   antiSlop?: boolean;
   searchCode?: boolean;
   guards?: string[];
@@ -364,10 +363,8 @@ function cleanPackage(cwd: string, cfg: DevkitConfig, dryRun: boolean): void {
     removeSearchCode(cwd, dryRun);
     pruneGitignoreLine(gitRoot, '.search-code/', dryRun);
   }
-  // The manifest is its own provenance record. Use it as a recovery signal when init created the
-  // capability but a later config write failed (or an older config lost the component key).
-  if (cfg.components?.oxc || existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')))
-    removeOxcCapability(cwd, dryRun);
+  // Core Oxc is not a component flag; its manifest is the uninstall provenance record.
+  if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json'))) removeOxcCapability(cwd, dryRun);
   if (cfg.components?.antiSlop || existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')))
     removeAntiSlopCapability(cwd, dryRun);
   // Regenerated gate caches: init adds these .gitignore lines on every package/standalone install

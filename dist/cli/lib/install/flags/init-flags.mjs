@@ -23,7 +23,7 @@ export function parseFlags(args) {
         stack: null,
         removeDeselected: false,
         fallow: false,
-        oxc: false,
+        legacyOxc: false,
         antiSlop: false,
         searchSteering: false,
         agentHooks: false,
@@ -51,7 +51,7 @@ export function parseFlags(args) {
         else if (a === '--fallow')
             flags.fallow = true;
         else if (a === '--oxc')
-            flags.oxc = true;
+            flags.legacyOxc = true;
         else if (a === '--anti-slop')
             flags.antiSlop = true;
         else if (a === '--search-steering')
@@ -107,11 +107,11 @@ export function selectionFromFlags(flags) {
         sel.lineGrowth = false;
     // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
     sel.fallow = flags.fallow && !flags.no.has('fallow');
-    sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop') && !flags.no.has('oxc');
-    sel.oxc = (flags.oxc || sel.antiSlop) && !flags.no.has('oxc');
-    if (flags.antiSlop && flags.no.has('oxc')) {
-        console.warn('  ! anti-slop skipped: --no-oxc disables its required runtime');
-    }
+    sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop');
+    if (flags.legacyOxc)
+        console.warn('  • --oxc is no longer needed: Oxc is core Devkit tooling');
+    if (flags.no.has('oxc'))
+        console.warn('  ! --no-oxc is retired and ignored: Oxc is core');
     sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
     sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
     sel.searchCode = flags.searchCode && !flags.no.has('search-code');
@@ -134,14 +134,9 @@ export function recoverInterruptedCapabilitySelection(cwd, flags, selection) {
     const recorded = readJson(join(cwd, '.devkit', 'config.json'));
     if (recorded?.components)
         return selection;
-    if (existsSync(join(cwd, '.devkit', 'oxc', 'manifest.json')) && !flags.no.has('oxc')) {
-        selection.oxc = true;
-    }
     if (existsSync(join(cwd, '.devkit', 'anti-slop', 'manifest.json')) &&
-        !flags.no.has('anti-slop') &&
-        !flags.no.has('oxc')) {
+        !flags.no.has('anti-slop')) {
         selection.antiSlop = true;
-        selection.oxc = true;
     }
     return selection;
 }

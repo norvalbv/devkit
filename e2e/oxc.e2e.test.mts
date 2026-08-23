@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { type Fixture, makeFixture, out } from './lib/harness.mts';
@@ -20,7 +20,6 @@ const INIT_ARGS = [
   'generic',
   '--yes',
   '--standalone',
-  '--oxc',
   '--no-biome',
   '--no-tsconfig',
   '--no-skills',
@@ -42,6 +41,9 @@ describe('e2e: packed Oxc capability', () => {
     expect(existsSync(join(fx.repoDir, '.devkit/oxc/oxlint.base.json'))).toBe(true);
     expect(existsSync(join(fx.repoDir, '.oxlintrc.json'))).toBe(true);
     expect(existsSync(join(fx.repoDir, '.oxfmtrc.json'))).toBe(true);
+    expect(
+      JSON.parse(readFileSync(join(fx.repoDir, '.devkit/config.json'), 'utf8')).components,
+    ).not.toHaveProperty('oxc');
 
     const lintVersion = fx.run('devkit', ['oxc', 'lint', '--version']);
     const fmtVersion = fx.run('devkit', ['oxc', 'fmt', '--version']);
@@ -124,17 +126,68 @@ export default { meta: { name: 'local' }, rules: { 'max-classes': rule } };
     const doctor = fx.run('devkit', ['doctor']);
     expect(doctor.status, out(doctor)).toBe(0);
 
-    // The Oxc manifest is independent provenance: clean can recover even if the component record
-    // was lost after installation, while still preserving customized root config.
-    const configPath = join(fx.repoDir, '.devkit/config.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf8'));
-    delete config.components.oxc;
-    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-
+    // The Oxc manifest is independent provenance: no component key is needed for clean, while the
+    // customized root config remains consumer-owned.
     const clean = fx.run('devkit', ['clean', '--yes']);
     expect(clean.status, out(clean)).toBe(0);
     expect(existsSync(join(fx.repoDir, '.devkit/oxc'))).toBe(false);
     expect(existsSync(join(fx.repoDir, '.oxfmtrc.json'))).toBe(false);
     expect(existsSync(join(fx.repoDir, '.oxlintrc.json'))).toBe(true);
+  });
+
+  it.each([true, false])(
+    'migrates a legacy components.oxc=%s config to keyless core state',
+    async (legacyValue) => {
+      const fx = await fixture();
+      expect(fx.run('devkit', INIT_ARGS).status).toBe(0);
+      const configPath = join(fx.repoDir, '.devkit/config.json');
+      const config = JSON.parse(readFileSync(configPath, 'utf8'));
+      config.components.oxc = legacyValue;
+      writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      if (!legacyValue) {
+        rmSync(join(fx.repoDir, '.devkit/oxc'), { recursive: true, force: true });
+        rmSync(join(fx.repoDir, '.oxlintrc.json'), { force: true });
+        rmSync(join(fx.repoDir, '.oxfmtrc.json'), { force: true });
+      }
+
+      const upgrade = fx.run('devkit', ['upgrade']);
+      expect(upgrade.status, out(upgrade)).toBe(0);
+      expect(out(upgrade)).toContain('hard cutover: reconcile core Oxc repository state');
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).components).not.toHaveProperty('oxc');
+      expect(existsSync(join(fx.repoDir, '.devkit/oxc/manifest.json'))).toBe(true);
+      expect(existsSync(join(fx.repoDir, '.oxlintrc.json'))).toBe(true);
+      expect(existsSync(join(fx.repoDir, '.oxfmtrc.json'))).toBe(true);
+    },
+  );
+
+  it('keeps the legacy key retryable when core synchronization fails before config persistence', async () => {
+    const fx = await fixture();
+    expect(fx.run('devkit', INIT_ARGS).status).toBe(0);
+    const configPath = join(fx.repoDir, '.devkit/config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.components.oxc = false;
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    rmSync(join(fx.repoDir, '.devkit/oxc'), { recursive: true, force: true });
+    writeFileSync(join(fx.repoDir, 'oxlint.config.ts'), 'export default {};\n');
+
+    const upgrade = fx.run('devkit', ['upgrade']);
+    expect(upgrade.status, out(upgrade)).not.toBe(0);
+    expect(out(upgrade)).toContain('multiple Oxc configs');
+    expect(JSON.parse(readFileSync(configPath, 'utf8')).components.oxc).toBe(false);
+    expect(existsSync(join(fx.repoDir, '.devkit/oxc/manifest.json'))).toBe(false);
+  });
+
+  it('doctor repairs missing core state without a component key', async () => {
+    const fx = await fixture();
+    expect(fx.run('devkit', INIT_ARGS).status).toBe(0);
+    rmSync(join(fx.repoDir, '.devkit/oxc'), { recursive: true, force: true });
+
+    const before = fx.run('devkit', ['doctor']);
+    expect(before.status, out(before)).toBe(1);
+    expect(out(before)).toContain('Oxc manifest: MISSING');
+    const fix = fx.run('devkit', ['doctor', '--fix']);
+    expect(fix.status, out(fix)).toBe(1);
+    expect(existsSync(join(fx.repoDir, '.devkit/oxc/manifest.json'))).toBe(true);
+    expect(fx.run('devkit', ['doctor']).status).toBe(0);
   });
 });
