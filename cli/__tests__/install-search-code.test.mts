@@ -40,17 +40,35 @@ describe('search-code opt-in component', () => {
     const root = tmpRepo();
     expect(devkit(root, 'init', '--stack', 'generic', '--yes').status).toBe(0);
 
-    for (const surface of ['.claude', '.cursor']) {
-      const skill = readFileSync(join(root, surface, 'skills/commit-guard/SKILL.md'), 'utf8');
-      const agent = readFileSync(join(root, surface, 'agents/commit-guard.md'), 'utf8');
+    const surfaces = [
+      {
+        skill: ['.claude', 'skills/commit-guard/SKILL.md'],
+        agent: ['.claude', 'agents/commit-guard.md'],
+      },
+      {
+        skill: ['.agents', 'skills/commit-guard/SKILL.md'],
+        agent: ['.codex', 'agents/commit-guard.toml'],
+      },
+      {
+        skill: ['.cursor', 'skills/commit-guard/SKILL.md'],
+        agent: ['.cursor', 'agents/commit-guard.md'],
+      },
+    ] as const;
+
+    for (const surface of surfaces) {
+      const skill = readFileSync(join(root, ...surface.skill), 'utf8');
+      const agent = readFileSync(join(root, ...surface.agent), 'utf8');
 
       expect(skill).toContain('`search-code search "<text>"`');
       expect(skill).not.toContain('tools/search-code/bin/semantic-search.mjs');
-      expect(skill).toContain(
-        'Semantic matching is intentionally not run as an advisory pre-push net',
-      );
-      expect(skill).not.toContain('+ the advisory `.husky/pre-push` net');
-      expect(agent).toContain('`search-code search "<natural-language query>" --json`');
+      expect
+        .soft(skill, `${surface.skill[0]} semantic boundary`)
+        .toContain('Semantic matching is intentionally not run as an advisory pre-push net');
+      expect
+        .soft(skill, `${surface.skill[0]} stale semantic pre-push guidance`)
+        .not.toContain('+ the advisory `.husky/pre-push` net');
+      expect(agent).toContain('search-code search');
+      expect(agent).toContain('--json');
       expect(agent).not.toContain('tools/search-code/bin/semantic-search.mjs');
     }
   });
