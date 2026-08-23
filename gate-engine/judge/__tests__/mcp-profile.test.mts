@@ -23,11 +23,29 @@ const repo = path.join(root, 'repo');
 const registry = path.join(root, 'registry.json');
 mkdirSync(repo);
 
+interface RegistryFixtureOverrides {
+  projects?: {
+    [root: string]: {
+      mcpServers: {
+        [name: string]: {
+          type: string;
+          command: string;
+          args: string[];
+        };
+      };
+    };
+  };
+}
+
+interface ParsedRegistry {
+  mcpServers: object;
+}
+
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function writeRegistry(extra: Record<string, unknown> = {}): void {
+function writeRegistry(extra: RegistryFixtureOverrides = {}): void {
   writeFileSync(
     registry,
     JSON.stringify({
@@ -66,10 +84,8 @@ describe('judge MCP profiles', () => {
       projectRoots: [repo],
       temporaryRoot: root,
     });
-    const configPath = prepared.args[1] as string;
-    const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
-      mcpServers: Record<string, unknown>;
-    };
+    const configPath = prepared.args[1];
+    const config: ParsedRegistry = JSON.parse(readFileSync(configPath, 'utf8'));
     expect(Object.keys(config.mcpServers).sort()).toEqual([
       'autonomous_bugs',
       'codebase',
@@ -92,9 +108,7 @@ describe('judge MCP profiles', () => {
       projectRoots: [repo],
       temporaryRoot: root,
     });
-    const config = JSON.parse(readFileSync(prepared.args[1] as string, 'utf8')) as {
-      mcpServers: Record<string, unknown>;
-    };
+    const config: ParsedRegistry = JSON.parse(readFileSync(prepared.args[1], 'utf8'));
     expect(withNamedAgentMcpTools('Read', 'mcp__alternate__query')).toContain(
       'mcp__alternate__query',
     );

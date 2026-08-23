@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.53.1",
+  "version": "0.54.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -77,6 +77,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
+    "@typescript-eslint/parser": "^8.0.0",
     "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",
