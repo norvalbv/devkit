@@ -400,13 +400,13 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
       },
     ]);
   });
-  it('preserves wrapped quoted content that starts with protocol labels', () => {
+  it('preserves wrapped quoted content that starts with non-closer protocol labels', () => {
     const transcript =
       'VIOLATION:\n' +
       'OFFENDING: labels in quoted rule text\n' +
       '— db/CLAUDE.md:3-4\n' +
       'OFFENDING:\n' +
-      'VERDICT: FAIL\n' +
+      'VIOLATION: quoted source label\n' +
       '— src/db/client.ts:42–44\n' +
       'VERDICT: FAIL — cited wrapped labels';
     expect(parseConventionFindings(transcript)).toEqual([
@@ -489,6 +489,30 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
   ])('does not pair an orphan violation across %s', (_boundary, boundary) => {
     const transcript = `VIOLATION: Never use raw SQL. — CLAUDE.md:3\n${boundary}OFFENDING: const x = 1 — src/unrelated.ts:80`;
     expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('treats a verdict closer before a delayed citation as a hard evidence boundary', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL.\n' +
+      'VERDICT: FAIL — abandoned point\n' +
+      '— CLAUDE.md:3\n' +
+      'OFFENDING: const x = 1 — src/unrelated.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('preserves quoted verdict text without treating it as a protocol closer', () => {
+    const transcript =
+      'VIOLATION: Test fixtures must not hardcode verdict strings. — CLAUDE.md:5\n' +
+      'OFFENDING: The fixture writes\n' +
+      '"VERDICT: FAIL"\n' +
+      '— src/fixture.test.ts:42\n' +
+      'VERDICT: FAIL — cited fixture';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 5,
+        offendingPath: 'src/fixture.test.ts',
+        offendingLine: 42,
+      },
+    ]);
   });
   it('preserves a blank-line-separated evidence pair', () => {
     const transcript =

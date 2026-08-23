@@ -94,7 +94,7 @@ describe('conventions evidence completeness', () => {
         'OFFENDING: labels in quoted rule text\n' +
         '— CLAUDE.md:1-2\n' +
         'OFFENDING:\n' +
-        'VERDICT: FAIL\n' +
+        'VIOLATION: quoted source label\n' +
         '— src/config.json:1–2\n' +
         'VERDICT: FAIL — cited violation',
     );

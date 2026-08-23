@@ -74,12 +74,8 @@ export function parseConventionEvidencePairs(raw) {
             continue;
         }
         if (CONVENTION_CLOSER_RE.test(line)) {
-            if (mode !== 'idle' && !blockHasTrailer() && hasCitationTrailerAhead(index))
-                buffer.push(line.trim());
-            else {
-                finalize();
-                pendingViolation = null;
-            }
+            finalize();
+            pendingViolation = null;
             continue;
         }
         const violation = line.match(CONVENTION_VIOLATION_START_RE);
