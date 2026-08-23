@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { envFlag, type GuardConfig } from '../../config.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { saveTranscript } from '../../judge/transcript-store.mts';
+import { measureDiffEvidenceCap } from '../diff-evidence.mts';
 import {
   declaredRoots,
   hasChecklist,
@@ -179,6 +180,7 @@ export function emitReviewScope(
     prompt_identity: promptIdentity,
     diff_sha256: sha256(diffText),
     diff_bytes: Buffer.byteLength(diffText, 'utf8'),
+    ...measureDiffEvidenceCap(diffText),
     file_count: files.length,
     files_sha256: sha256(files.join('\n')),
     ...(spilled ? { scope_ref: spilled } : { files }),
