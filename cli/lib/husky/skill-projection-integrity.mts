@@ -19,10 +19,7 @@ export interface SkillProjectionIntegrityReport {
 }
 
 function manifestTargets(root: string): string[] {
-  const manifest = readAgentAssetManifest(
-    join(root, '.devkit', 'skills-manifest.json'),
-    'skills',
-  );
+  const manifest = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
   if (!manifest) return [];
   return manifest.version === 1
     ? [...manifest.manifest.targets]
