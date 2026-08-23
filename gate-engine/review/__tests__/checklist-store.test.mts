@@ -153,6 +153,33 @@ describe('createChecklistStore — checkItem', () => {
   });
 
   // The one non-obvious rule in the original: a later pass wipes the failure trail, so a recovered
+  it('appends one issue per --fail call, capped at 3 by default', () => {
+    const h = harness();
+    h.store.save({ items: items() });
+    h.store.checkItem('alpha', false, 'first src/a.ts:1');
+    h.store.checkItem('alpha', false, 'second src/b.ts:2');
+    h.store.checkItem('alpha', false, 'third src/c.ts:3');
+    h.store.checkItem('alpha', false, 'fourth src/d.ts:4');
+    const item = h.store.load().items.find((i: { name: string }) => i.name === 'alpha');
+    expect(item.issues).toEqual(['first src/a.ts:1', 'second src/b.ts:2', 'third src/c.ts:3']);
+    expect(h.out()).toContain('issue cap reached (3)');
+  });
+
+  it('GUARD_REVIEW_MAX_ISSUES_PER_LENS raises the cap (clamped to 1..10)', () => {
+    const saved = process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS;
+    process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS = '5';
+    try {
+      const h = harness();
+      h.store.save({ items: items() });
+      for (let i = 0; i < 6; i++) h.store.checkItem('alpha', false, `issue-${i}`);
+      const item = h.store.load().items.find((i: { name: string }) => i.name === 'alpha');
+      expect(item.issues).toHaveLength(5);
+    } finally {
+      if (saved === undefined) delete process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS;
+      else process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS = saved;
+    }
+  });
+
   // item cannot keep failing `finalize` on stale issues from an earlier attempt.
   it('a recovery pass CLEARS the stale issue trail', () => {
     const h = harness();
