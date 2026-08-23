@@ -135,6 +135,25 @@ describe('projectedLogicals', () => {
     ]);
   });
 
+  it('projects commit-gate remediation only for a managed Husky guard chain', () => {
+    const root = tempRoot();
+    write(root, 'skills/alpha/SKILL.md', '# alpha\n');
+    write(root, 'skills/commit-gates/SKILL.md', '# commit gates\n');
+    const input = { root, kind: 'skills', srcDir: 'skills', targets: ['claude'] } as const;
+
+    expect(projectedLogicals(input)).toEqual(['alpha/SKILL.md']);
+    expect(projectedLogicals({ ...input, selection: { husky: true } })).toEqual(['alpha/SKILL.md']);
+    expect(projectedLogicals({ ...input, selection: { guards: ['comments'] } })).toEqual([
+      'alpha/SKILL.md',
+    ]);
+    expect(
+      projectedLogicals({ ...input, selection: { husky: true, structure: true } }).sort(),
+    ).toEqual(['alpha/SKILL.md', 'commit-gates/SKILL.md']);
+    expect(
+      projectedLogicals({ ...input, selection: { husky: true, guards: ['comments'] } }).sort(),
+    ).toEqual(['alpha/SKILL.md', 'commit-gates/SKILL.md']);
+  });
+
   it('never projects the vendored i-have-adhd skill onto an agent surface', () => {
     const root = tempRoot();
     write(root, 'skills/alpha/SKILL.md', '# alpha\n');

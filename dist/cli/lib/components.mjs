@@ -237,6 +237,8 @@ export function newBundledGates(recorded, disabled = []) {
  * unnamed here ships unconditionally; a skill appears in this filter only when it is tied to a
  * component the consumer can decline:
  *   - `decisions` — companion to the `decisions` guard; useless without the gate that runs it.
+ *   - `commit-gates` — remediation for Devkit's managed hook chain; irrelevant without Husky and
+ *     either a selected guard or the structure gate.
  *   - `i-have-adhd` — NEVER synced here. It is vendored third-party content devkit owns and pins,
  *     so it ships to `.devkit/vendored-skills/` (install/adhd-skill.mts) instead of the consumer's
  *     `.claude/skills/`, which is where their OWN hand-authored skills live. The constant `false`
@@ -252,8 +254,10 @@ export function newBundledGates(recorded, disabled = []) {
  * Deselecting a skill is also what makes syncSkills' manifest reclamation delete its directory, so
  * this filter is the removal path too — there is no separate uninstall step.
  */
-export function skillNamesForSelection(allNames, { guards = [] } = {}) {
+export function skillNamesForSelection(allNames, { husky = false, structure = false, guards = [] } = {}) {
     return allNames.filter((name) => {
+        if (name === 'commit-gates')
+            return husky && (structure || guards.length > 0);
         if (name === 'decisions')
             return guards.includes('decisions');
         if (name === 'i-have-adhd')
