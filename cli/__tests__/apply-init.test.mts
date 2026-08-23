@@ -854,7 +854,7 @@ describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () =>
       devkitRef: 'v0.3.0',
     });
     const hook = readFileSync(hookAt(root), 'utf8');
-    expect(hook).toContain('guard-review completeness --gate "$1"');
+    expect(hook).toContain('"$__dk_package_bin_dir/guard-review" completeness --gate "$1"');
     expect(hook).not.toContain('guard-sentry');
   });
 
@@ -865,7 +865,9 @@ describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () =>
       selection: { ...base, guards: ['size', 'sentry'] },
       devkitRef: 'v0.3.0',
     });
-    expect(readFileSync(hookAt(root), 'utf8')).toContain('bunx guard-sentry --gate "$1"');
+    expect(readFileSync(hookAt(root), 'utf8')).toContain(
+      '"$__dk_package_bin_dir/guard-sentry" --gate "$1"',
+    );
   });
 
   it('default (recommended) guards → NO commit-msg hook is created', async () => {
@@ -931,7 +933,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
-    expect(hook).not.toMatch(/bunx guard-/);
+    expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
 
     expect(config(root)).toMatchObject({
       selfHost: true,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { strayGateCalls } from '../lib/doctor/stray-gate-calls.mts';
+import { buildFullHook } from '../lib/husky/husky-block.mts';
 
 // A repo that hand-rolled its gates before devkit absorbed them keeps the old lines below the
 // managed block, so every commit runs each gate twice — two model bills for the LLM judges, while
@@ -19,6 +20,14 @@ describe('strayGateCalls', () => {
     // Signature is bin + SUBCOMMAND; `--gate` is a flag, so it stops at the bin.
     expect(found[0].bin).toBe('guard-review');
     expect(found[0].line).toBe(6); // shebang, open marker, 2 block lines, close marker, then this
+  });
+
+  it('recognizes package-local gate paths in a generated block', () => {
+    const generated = buildFullHook({ guards: ['review'] }).replace(
+      '\nexit 0\n',
+      '\nguard-review --gate\n\nexit 0\n',
+    );
+    expect(strayGateCalls(generated).map((call) => call.bin)).toEqual(['guard-review']);
   });
 
   it('reports a duplicate changed-comment firewall call outside its managed fragment', () => {

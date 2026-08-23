@@ -31,7 +31,9 @@ describe('e2e: commit gate', () => {
     fx.git('commit', '-q', '-m', 'base');
     const before = headCount(fx);
 
-    expect(fx.run('devkit', ['init', '--stack', 'generic', '--guards', 'size,fanout', '--yes']).status).toBe(0);
+    expect(
+      fx.run('devkit', ['init', '--stack', 'generic', '--guards', 'size,fanout', '--yes']).status,
+    ).toBe(0);
     fx.git('config', 'core.hooksPath', '.husky');
 
     write(fx, 'src/util.ts', 'export const util = 1;\n');
@@ -56,9 +58,13 @@ describe('e2e: commit gate', () => {
     fx.git('commit', '-q', '-m', 'base');
     const before = headCount(fx);
 
-    expect(fx.run('devkit', ['init', '--stack', 'generic', '--guards', 'size,fanout', '--yes']).status).toBe(0);
+    expect(
+      fx.run('devkit', ['init', '--stack', 'generic', '--guards', 'size,fanout', '--yes']).status,
+    ).toBe(0);
     // Confirm the deterministic gate is wired into the hook before relying on it to trip.
-    expect(readFileSync(join(fx.repoDir, '.husky/pre-commit'), 'utf8')).toContain('bunx guard-deterministic');
+    expect(readFileSync(join(fx.repoDir, '.husky/pre-commit'), 'utf8')).toContain(
+      '$__dk_package_bin_dir/guard-deterministic',
+    );
     fx.git('config', 'core.hooksPath', '.husky');
 
     // Introduce a fan-out violation AFTER init (generic cap is 12, no exemption) so the baseline
