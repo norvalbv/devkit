@@ -13,8 +13,8 @@ import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { sourceMatchers } from "../config.mjs";
 import { devkitVersion } from "../devkit-version.mjs";
 import { withNamedAgentMcpTools } from "../judge/mcp/profile.mjs";
-import { VERDICT_LINE_RE } from "./evidence/conventions.mjs";
 import { checklistContractFor } from "./lens/split.mjs";
+export { parseReviewVerdict } from "./contracts/response.mjs";
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
 export function hasChecklist(reviewer) {
@@ -92,20 +92,11 @@ export const REVIEWERS = Object.freeze([
         // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
         model: 'sonnet',
     }),
-    // Checks a diff against the CONSUMER repo's own written CLAUDE.md rules — never devkit's own.
-    // SKILL-LESS (no skill/stateFile/cmds — see Reviewer.skill docstring): its AC forbids Bash
-    // entirely (Read/Grep/Glob only), so it cannot run the checklist.mjs workflow every other entry
-    // depends on. Its anti-hallucination substitute is the AC's own contract: flag a violation ONLY
-    // when it can quote both the exact rule and the exact offending line, else stay silent — no
-    // artifact to verify, so a PASS is trusted directly (cascadeVerdict/runCascade branch on
-    // `!reviewer.skill`). `domain: 'conventions'` reuses the 'all' root union (rootsFor) but is
-    // exempt from selectReviewers' isSource/isTest filters — a CLAUDE.md rule can govern any staged
-    // file type (docs, config, tests), not just source. Single-pass haiku per the ticket mandate: no
-    // cascade, FAIL blocks directly, and joins the override valve (overrides.mts) like correctness.
     Object.freeze({
         name: 'conventions-reviewer',
         domain: 'conventions',
         model: 'haiku',
+        responseContract: 'conventions-v1',
     }),
 ]);
 // Synced-skill layout is devkit's own convention (sync-skills targets .claude/skills), so the
@@ -289,20 +280,6 @@ export function escalatePrompt(wrappedPrompt, firstPass) {
         '─────\n' +
         'Independently verify its evidence with your own investigation — confirm or overturn. ' +
         'Your verdict is final; a FAIL blocks the commit.');
-}
-/**
- * Bounded verdict: the LAST `VERDICT:` line wins. No VERDICT line → {verdict: null} (no block,
- * no cache — see VERDICT_LINE_RE note). The FAIL reason is the line's tail, markdown-stripped.
- */
-export function parseReviewVerdict(raw) {
-    const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
-    if (lines.length === 0)
-        return { verdict: null, reason: '' };
-    const last = lines[lines.length - 1];
-    return {
-        verdict: last[1].toUpperCase(),
-        reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
-    };
 }
 /**
  * Cache key for a PASS verdict: reviewer identity + devkit version + the exact bytes of its staged

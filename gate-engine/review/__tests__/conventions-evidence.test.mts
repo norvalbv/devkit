@@ -114,7 +114,9 @@ describe('conventions evidence completeness', () => {
     expect(exec).toHaveBeenCalledOnce();
     expect(exec.mock.calls[0][0].input).toContain('OMITTED');
     expect(exec.mock.calls[0][0].input).toContain('TRUNCATED');
-    expect(err.mock.calls.flat().join('\n')).toContain('unsubstantiated conventions FAIL');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'response contract rejected an unsubstantiated FAIL',
+    );
     expect(err.mock.calls.flat().join('\n')).not.toContain('conventions-reviewer FAILED');
   });
 
@@ -129,7 +131,9 @@ describe('conventions evidence completeness', () => {
     expect(err.mock.calls.flat().join('\n')).toContain('INCONCLUSIVE');
     expect(err.mock.calls.flat().join('\n')).toContain('retrying once');
     expect(err.mock.calls.flat().join('\n')).toContain('strict ship mode fails closed');
-    expect(err.mock.calls.flat().join('\n')).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'judge response did not satisfy its declared contract',
+    );
     expect(err.mock.calls.flat().join('\n')).toContain('69 OMITTED and 3 TRUNCATED');
     expect(err.mock.calls.flat().join('\n')).not.toContain('auth/quota');
     expect(err.mock.calls.flat().join('\n')).not.toContain('conventions-reviewer FAILED');
@@ -174,7 +178,7 @@ describe('conventions evidence completeness', () => {
     );
   });
 
-  it('strict mode classifies a verdict-less evidence retry as an evidence gap', async () => {
+  it('strict mode classifies a verdict-less evidence retry as a response-contract gap', async () => {
     process.env.GUARD_AI_STRICT = '1';
     const repo = cappedRepo();
     const exec = vi
@@ -187,7 +191,9 @@ describe('conventions evidence completeness', () => {
     expect(exec).toHaveBeenCalledTimes(2);
     expect(exec.mock.calls[1][0].args[1]).toContain('EVIDENCE-CONTRACT RETRY');
     expect(exec.mock.calls[1][0].args[1]).toContain('complete cited VIOLATION/OFFENDING pair');
-    expect(err.mock.calls.flat().join('\n')).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'judge response did not satisfy its declared contract',
+    );
     expect(err.mock.calls.flat().join('\n')).not.toContain('auth/quota');
   });
 

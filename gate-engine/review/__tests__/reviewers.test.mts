@@ -295,6 +295,9 @@ describe('conventions-reviewer (domain conventions, skill-less)', () => {
   it('is pinned single-pass to haiku, same mechanism as correctness', () => {
     expect(conv.model).toBe('haiku');
   });
+  it('declares the response contract that grants blocking authority', () => {
+    expect(conv.responseContract).toBe('conventions-v1');
+  });
   it("shares 'all''s root union — never ['.'], never restricted to a single declared-root kind", () => {
     expect([...rootsFor(conv, cfg)].sort()).toEqual(
       [

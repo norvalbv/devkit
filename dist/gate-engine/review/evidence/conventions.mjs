@@ -1,3 +1,4 @@
+import { VERDICT_LINE_RE } from "../contracts/response.mjs";
 const CONVENTION_VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
 const CONVENTION_OFFENDING_START_RE = /^[\s>*#-]*\**OFFENDING\**\s*:\s*(.*)$/i;
 const CONVENTION_CLOSER_RE = /^[\s>*#-]*\**(VERDICT|NO_VIOLATIONS)\b/i;
@@ -22,11 +23,6 @@ function hasConventionCitationTrailer(block) {
     return Boolean(location &&
         (parseConventionLocation(location) !== null || LINELESS_RULE_LOCATION_RE.test(location)));
 }
-// Tolerates markdown dressing around the verdict line; the LAST match wins (the body may discuss
-// pass/fail while reasoning). Deliberately NO bare-word fallback — unlike ALIGN/CONTRADICT,
-// "pass"/"fail" saturate ordinary review prose, so a missing VERDICT line must read as "no
-// verdict" (null → no block, no cache), never be guessed from body words.
-export const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
 /**
  * Scan free-form reviewer output into ordered VIOLATION/OFFENDING pairs. Blocks may wrap across
  * lines, including quoted content that resembles a protocol label before its citation trailer.
