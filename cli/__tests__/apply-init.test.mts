@@ -379,6 +379,48 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(config(root).components.agentTargets).toEqual(['claude']);
   });
 
+  it('projects commit-gate guidance only while a managed Husky guard chain is active', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: true,
+      husky: true,
+      structure: true,
+      agentTargets: ['claude', 'codex', 'cursor'] as const,
+      guards: [] as const,
+    };
+
+    await applyInit(root, { stack: 'generic', selection });
+
+    for (const path of [
+      '.claude/skills/commit-gates/SKILL.md',
+      '.agents/skills/commit-gates/SKILL.md',
+      '.cursor/skills/commit-gates/SKILL.md',
+    ]) {
+      expect(existsSync(join(root, path))).toBe(true);
+    }
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).toContain(
+      'commit-gates/SKILL.md',
+    );
+
+    await applyInit(root, {
+      stack: 'generic',
+      selection: { ...selection, husky: false },
+    });
+
+    for (const path of [
+      '.claude/skills/commit-gates/SKILL.md',
+      '.agents/skills/commit-gates/SKILL.md',
+      '.cursor/skills/commit-gates/SKILL.md',
+    ]) {
+      expect(existsSync(join(root, path))).toBe(false);
+    }
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).not.toContain(
+      'commit-gates/SKILL.md',
+    );
+  });
+
   it('decisions installs its skill and edit hook without general agentHooks', async () => {
     const root = tmpRepo();
     await applyInit(root, {
