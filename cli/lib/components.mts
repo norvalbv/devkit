@@ -322,6 +322,8 @@ export function newBundledGates(
 
 /** The selection inputs that decide WHICH bundled skills a repo gets — see {@link skillNamesForSelection}. */
 export interface SkillSelection {
+  husky?: boolean;
+  structure?: boolean;
   guards?: string[];
 }
 
@@ -330,6 +332,8 @@ export interface SkillSelection {
  * unnamed here ships unconditionally; a skill appears in this filter only when it is tied to a
  * component the consumer can decline:
  *   - `decisions` — companion to the `decisions` guard; useless without the gate that runs it.
+ *   - `commit-gates` — remediation for Devkit's managed hook chain; irrelevant without Husky and
+ *     either a selected guard or the structure gate.
  *   - `i-have-adhd` — NEVER synced here. It is vendored third-party content devkit owns and pins,
  *     so it ships to `.devkit/vendored-skills/` (install/adhd-skill.mts) instead of the consumer's
  *     `.claude/skills/`, which is where their OWN hand-authored skills live. The constant `false`
@@ -347,9 +351,10 @@ export interface SkillSelection {
  */
 export function skillNamesForSelection(
   allNames: string[],
-  { guards = [] }: SkillSelection = {},
+  { husky = false, structure = false, guards = [] }: SkillSelection = {},
 ): string[] {
   return allNames.filter((name) => {
+    if (name === 'commit-gates') return husky && (structure || guards.length > 0);
     if (name === 'decisions') return guards.includes('decisions');
     if (name === 'i-have-adhd') return false;
     return true;
