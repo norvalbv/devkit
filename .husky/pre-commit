@@ -267,6 +267,17 @@ else
 fi
 # /devkit:fallow-advisory
 
+
+# devkit:self-host-skill-projection-advisory
+# Warn when canonical Devkit skills drift from a recorded provider surface or packaged dist.
+if [ "${DEVKIT_RUN_MODE:-}" != "review" ]; then
+    __dk_skill_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$__dk_skill_root" ]; then
+        node "$__dk_skill_root/cli/lib/husky/skill-projection-integrity.mts" --root "$__dk_skill_root" || true
+    fi
+fi
+# /devkit:self-host-skill-projection-advisory
+
 # devkit:review-deterministic-finalizer
 if [ "${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
 # /devkit:review-deterministic-finalizer

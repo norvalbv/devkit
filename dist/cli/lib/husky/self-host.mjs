@@ -60,6 +60,17 @@ else
     command -v fallow >/dev/null 2>&1 && __dk_no_git_env fallow audit $FALLOW_BASE_ARGS || true
 fi
 # /devkit:fallow-advisory`;
+// Devkit owns this source-only check and its self-host hook. Consumer hooks never receive the
+// fragment, and review-mode replays skip it because they do not represent a pending commit.
+const SKILL_PROJECTION_FRAGMENT = `# devkit:self-host-skill-projection-advisory
+# Warn when canonical Devkit skills drift from a recorded provider surface or packaged dist.
+if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
+    __dk_skill_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$__dk_skill_root" ]; then
+        node "$__dk_skill_root/cli/lib/husky/skill-projection-integrity.mts" --root "$__dk_skill_root" || true
+    fi
+fi
+# /devkit:self-host-skill-projection-advisory`;
 // Matches the `bunx guard-<x>` bins the generator emits. `guard-qavis-advisory` (double hyphen) is
 // covered by `[a-z-]+`. The formatter has its own exact rewrite below so consumer output is not
 // affected by the self-host-only Oxfmt adoption.
@@ -138,20 +149,26 @@ function definedOnly(recorded) {
         return {};
     return Object.fromEntries(Object.entries(recorded).filter(([, value]) => value !== undefined));
 }
-function withFallow(text, pkgRel) {
+function withSelfHostFragment(text, pkgRel, fragment) {
     const end = markEnd(pkgRel);
     const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
         ? REVIEW_DETERMINISTIC_FINALIZER
         : end;
-    return text.replace(`\n${anchor}`, `\n\n${FALLOW_FRAGMENT}\n\n${anchor}`);
+    return text.replace(`\n${anchor}`, `\n\n${fragment}\n\n${anchor}`);
+}
+function withFallow(text, pkgRel) {
+    return withSelfHostFragment(text, pkgRel, FALLOW_FRAGMENT);
+}
+function withSelfHostAdvisories(text, pkgRel) {
+    return withSelfHostFragment(withFallow(text, pkgRel), pkgRel, SKILL_PROJECTION_FRAGMENT);
 }
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
 export function buildSelfHostBlock(sel, pkgRel, cwd) {
-    return withFallow(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
+    return withSelfHostAdvisories(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
 }
-/** A full fresh self-host hook (preamble + rewritten block incl. the advisory fallow fragment + exit 0). */
+/** A full fresh self-host hook (preamble + rewritten block incl. self-host advisories + exit 0). */
 export function buildSelfHostHook(sel, pkgRel, cwd) {
-    return withFallow(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
+    return withSelfHostAdvisories(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
 }
 /**
  * Write/refresh the self-host `.husky/pre-commit`. Fresh (or a MARKER-LESS hand-authored hook — the
