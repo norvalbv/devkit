@@ -311,6 +311,22 @@ async function terminatePublicCliAtMarker(
 }
 
 describe('devkit review source CLI', () => {
+  it('routes an uninitialized target to review-enabled init before any gate runs', () => {
+    const target = fixture("printf 'UNINITIALIZED_HOOK_MUST_NOT_RUN\\n'");
+    addCommittedChange(target);
+    rmSync(join(target.root, '.devkit/config.json'));
+
+    const before = logs(target.root);
+    const result = runReview(target, ['--target', target.root]);
+    const output = combinedOutput(result);
+
+    expect(result.status, output).toBe(1);
+    expect(output).toMatch(/not initialized.*devkit init --overlay --review/s);
+    expect(output).not.toContain('doctor --fix');
+    expect(output).not.toContain('UNINITIALIZED_HOOK_MUST_NOT_RUN');
+    expect(newLogSince(target.root, before)).toContain('result=failed exit=1 phase=setup-capture');
+  });
+
   // sc-1442: a review run has no commit message — the driver synthesizes the reviewed range's
   // subjects (oldest first) into DEVKIT_COMMIT_MSG_FILE, and a caller-injected stale path must be
   // scrubbed, never forwarded to the gates.

@@ -31,6 +31,7 @@ import {
 import { parseReviewSetupManifest } from './setup-manifest-parse.mts';
 import {
   REVIEW_SETUP_DOCTOR as DOCTOR,
+  REVIEW_SETUP_INIT as INIT,
   REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR,
   parseReviewSetupProfile,
   type RawReviewConfig,
@@ -389,6 +390,11 @@ function captureState(targetRoot: string, gitRoot: string): ReviewSetupState {
     parsed = parseReviewSetupProfile(readFileSync(configPath));
   } catch (cause) {
     if (cause instanceof Error && cause.message.startsWith('devkit review:')) throw cause;
+    if (cause instanceof Error && 'code' in cause && cause.code === 'ENOENT') {
+      return fail(
+        `target is not initialized for devkit review: could not read .devkit/config.json (${errorMessage(cause)}) — ${INIT}`,
+      );
+    }
     return fail(`could not read .devkit/config.json (${errorMessage(cause)}) — ${DOCTOR}`);
   }
   // The chain is captured BEFORE the hooksPath so the acceptance predicate can reuse its verdict:

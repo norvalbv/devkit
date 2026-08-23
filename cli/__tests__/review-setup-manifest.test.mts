@@ -130,6 +130,27 @@ describe('review setup manifest', () => {
     expect(verifyReviewSetup(root, manifest)).toEqual(captured);
   });
 
+  it('distinguishes an uninitialized checkout from an installed setup that needs repair', () => {
+    const uninitialized = setup('uninitialized');
+    rmSync(join(uninitialized.root, '.devkit/config.json'));
+
+    expect(() => captureReviewSetup(uninitialized.root, uninitialized.manifest)).toThrow(
+      /not initialized.*devkit init --overlay --review/s,
+    );
+    try {
+      captureReviewSetup(uninitialized.root, uninitialized.manifest);
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(Error);
+      if (cause instanceof Error) expect(cause.message).not.toContain('doctor --fix');
+    }
+
+    const malformed = setup('malformed-installed');
+    writeFileSync(join(malformed.root, '.devkit/config.json'), '{\n');
+    expect(() => captureReviewSetup(malformed.root, malformed.manifest)).toThrow(
+      /could not parse \.devkit\/config\.json.*doctor --fix/s,
+    );
+  });
+
   it('freezes package-local config and Git-root hooks separately in a monorepo install', () => {
     const parent = mkTmp('devkit-review-setup-monorepo-');
     const gitRoot = join(parent, 'repo');

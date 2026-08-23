@@ -5,6 +5,7 @@ import { reviewGuardIssues } from "../../install/flags/review-profile.mjs";
 import { normalizeSafeReviewRelativePath } from "./runtime-paths.mjs";
 import { fail, objectValue } from "./shared/common.mjs";
 export const REVIEW_SETUP_DOCTOR = "run 'devkit doctor --fix'.";
+export const REVIEW_SETUP_INIT = "in the target checkout, run 'devkit init --overlay --review' for local-only overlay mode, or 'devkit init --review' for a normal install.";
 /**
  * Overlay's hooksPath remedy. Leads with the DURABLE fix: `doctor --fix` re-points core.hooksPath,
  * but husky's `prepare` reclaims it again on the very next install, so pointing there first would
