@@ -95,6 +95,19 @@ you'd cross the fan-out cap → row 5). After shrinking, optionally lock in the 
 guard-size freeze
 ```
 
+The raw-line ratchet can also report:
+
+```text
+src/legacy.ts: ceiling lowered 100 → 80 via .devkit/baselines/size-lines.json
+guard-size: ... unavailable ...
+```
+
+A lowered-ceiling failure means the baseline changed without a matching staged source shrink. Restore
+the prior ceiling or stage enough of the source shrink to fit the new ceiling, then retry the commit.
+An `unavailable` message exits 2 because Git could not produce a coherent snapshot or the baseline is
+malformed; resolve index conflicts or repair the named JSON file before retrying. Do not run freeze to
+paper over an invalid snapshot.
+
 ---
 
 ### 5. `Folder fan-out exceeded`

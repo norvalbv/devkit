@@ -189,6 +189,44 @@ export function gitPrefix(root: string): string {
   }
 }
 
+/** Freeze the pending index into one immutable tree object without changing the index or worktree. */
+export function indexTreeRef(root: string): string | null {
+  try {
+    return execFileSync('git', ['write-tree'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Read a CWD-relative UTF-8 blob from a Git tree. Missing paths or refs return null. */
+export function treeTextAtRef(root: string, ref: string, relativePath: string): string | null {
+  try {
+    return execFileSync('git', ['show', `${ref}:${gitPrefix(root)}${relativePath}`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function mergeBaseRef(root: string, ref: string): string | null {
+  try {
+    return execFileSync('git', ['merge-base', ref, 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 // The CWD-relative paths changed between an exact base commit and HEAD. This is the clean-index
 // analogue of stagedSet for pull-request CI: GitHub supplies the base SHA, so inherited base debt
 // is not attributed to the PR. NUL delimiters preserve every valid path byte except NUL itself.

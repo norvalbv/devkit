@@ -3,39 +3,24 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from "../config.mjs";
 import { LEGACY_LINES_BASELINE, readRatchetBaseline } from "./baseline-paths.mjs";
-import { gitPrefix, stagedSet } from "./git-index.mjs";
+import { stagedSet, treeTextAtRef } from "./git-index.mjs";
+import { decodeLineBaseline } from "./size-line-authority.mjs";
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
-function readLinesBaseline(contents) {
-    if (contents === null)
-        return { files: {} };
-    // SAFETY: baseline JSON is Devkit-owned; missing/legacy fields are normalized below.
-    const parsed = JSON.parse(contents);
-    return { files: parsed.files ?? {} };
-}
-function gitShowBaseline(root, ref, path) {
-    try {
-        return execFileSync('git', ['show', `${ref}:${path}`], {
-            cwd: root,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        });
-    }
-    catch {
-        return null;
-    }
+function readLinesBaseline(contents, label) {
+    const decoded = decodeLineBaseline(contents, label);
+    if (decoded.error)
+        throw new Error(decoded.error);
+    return decoded;
 }
 function readLinesBaselineAtRef(root, ref) {
     execFileSync('git', ['rev-parse', '--verify', `${ref}^{commit}`], {
         cwd: root,
         stdio: ['ignore', 'pipe', 'ignore'],
     });
-    const prefix = gitPrefix(root);
-    const text = gitShowBaseline(root, ref, `${prefix}${LINES_BASELINE}`) ??
-        gitShowBaseline(root, ref, `${prefix}${LEGACY_LINES_BASELINE}`);
+    const text = treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
     if (text === null)
         return null;
-    const parsed = JSON.parse(text);
-    return { files: parsed.files ?? {} };
+    return readLinesBaseline(text, ref);
 }
 function sourcePaths(root, cfg, selected) {
     const match = sourceMatchers(cfg.sourceExtensions);
@@ -53,7 +38,8 @@ export function preflightLines(root, ref, requested = []) {
         cfg = resolveGuardConfig(root);
         if (!cfg.maxLines && !cfg.maxTestLines)
             return 0;
-        local = readLinesBaseline(readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.contents ?? null);
+        const localBaseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
+        local = readLinesBaseline(localBaseline?.contents ?? null, localBaseline?.relativePath ?? LINES_BASELINE);
     }
     catch (error) {
         console.error(`guard-size preflight unavailable: ${String(error)}`);

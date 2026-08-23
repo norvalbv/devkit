@@ -24,8 +24,14 @@ import {
   SIZE_BASELINE,
   writeRatchetBaseline,
 } from './baseline-paths.mts';
-import { hasStagedFiles, pullRequestScope, stagedSet } from './git-index.mts';
+import { hasStagedFiles, indexTreeRef, pullRequestScope, stagedSet } from './git-index.mts';
 import { freezeLinesBaseline, type LinesFreezeMode } from './size-lines-freeze.mts';
+import {
+  lineBaselineForGate,
+  lineCountsAtRef,
+  lineViolationReport,
+  tightenLineBaseline,
+} from './size-line-authority.mts';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mts';
 import { runPreflightCli } from './size-preflight.mts';
 
@@ -50,13 +56,6 @@ interface DisableCount {
 // regenerable state, so no dual-format gate is carried.
 interface DisableBaseline {
   files: Record<string, DisableCount>;
-}
-
-// The persisted raw-line baseline (.devkit/baselines/size-lines.json): grandfathered files → line count.
-interface LinesBaseline {
-  maxLines?: number;
-  maxTestLines?: number;
-  files?: Record<string, number>;
 }
 
 const BASELINE = SIZE_BASELINE;
@@ -248,46 +247,46 @@ function runLinesGate(
   ciScope: Set<string> | null,
 ): void {
   const over = countOversized(root);
-  const linesBaseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
-  // SAFETY: this is Devkit-owned line-baseline JSON produced by freeze or migration.
-  const grandfathered: Record<string, number> = linesBaseline
-    ? ((JSON.parse(linesBaseline.contents) as LinesBaseline).files ?? {})
-    : {};
   const staged = stagedSet(root);
   const inCommit = staged !== null && hasStagedFiles(root);
   const match = sourceMatchers(cfg.sourceExtensions);
   const cap = (f: string) => (match.isTest(f) ? cfg.maxTestLines : cfg.maxLines);
   // A PR supplies an exact base scope; local commits use the index; audits use the whole tree.
   const selected = ciScope ?? (inCommit ? staged : null);
-  const scoped = selected ? over.filter((o) => selected.has(o.file)) : over;
+  const candidate = ciScope ? 'HEAD' : inCommit ? indexTreeRef(root) : null;
+  const grandfathered = lineBaselineForGate(root, candidate);
+  const scoped =
+    candidate && selected
+      ? lineCountsAtRef(root, candidate, selected, cfg)
+      : selected
+        ? over.filter((o) => selected.has(o.file))
+        : over;
   // A file fails when it exceeds its own recorded ceiling (grandfathered) or the cap (new file).
-  const grew = scoped.filter((o) => o.lines > Math.max(cap(o.file), grandfathered[o.file] ?? 0));
-  if (grew.length) {
-    console.error(`🚫 ${grew.length} file(s) exceed their line limit — split them:`);
-    for (const o of grew) {
-      console.error(
-        `   ${o.file}: ${o.lines} lines (max ${Math.max(cap(o.file), grandfathered[o.file] ?? 0)})`,
-      );
-    }
+  const { error, lines: report } = lineViolationReport(root, cfg, scoped, cap, grandfathered, {
+    candidate,
+    inCommit,
+    prBase: ciScope ? process.env.GUARD_RATCHET_BASE : undefined,
+  });
+  if (error) {
+    console.error(error);
+    process.exit(2);
+  }
+  if (report.length) {
+    for (const line of report) console.error(line);
     process.exit(1);
   }
   if (ciScope || !inCommit || !staged) return; // CI never tightens/stages
 
   // Tighten only the committing files' ceilings; every other recorded count is preserved as-is,
   // so a concurrent agent's uncommitted shrink is never locked in.
-  const next = { ...grandfathered };
-  let tightened = false;
-  for (const f of staged) {
-    if (!(f in grandfathered)) continue;
-    const cur = over.find((o) => o.file === f)?.lines; // undefined = healed under the cap
-    if (cur === undefined) {
-      delete next[f];
-      tightened = true;
-    } else if (cur < grandfathered[f]) {
-      next[f] = cur;
-      tightened = true;
-    }
-  }
+  if (!candidate) return;
+  const { files: next, tightened } = tightenLineBaseline(
+    root,
+    candidate,
+    staged,
+    grandfathered,
+    cap,
+  );
   if (tightened) {
     if (Object.keys(next).length === 0) {
       // Last grandfathered giant healed → the baseline is now empty. Delete it (an empty file is
