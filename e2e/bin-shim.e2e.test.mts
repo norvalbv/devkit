@@ -30,11 +30,6 @@ interface Case {
   expect?: string;
 }
 
-// A fallow audit payload whose introduced dead_code finding references no attributable path, so the
-// filter's fail-closed branch fires: exit 1 with the blocker on stdout. A dead shim exits 0, silent.
-const FALLOW_PAYLOAD =
-  '{"dead_code":{"unused_files":[{"introduced":true,"reason":"no attributable ref"}]}}';
-
 const PKG = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
 
 const CASES: Case[] = [
@@ -48,7 +43,6 @@ const CASES: Case[] = [
   // No usage path — this runs the real deterministic chain and narrates it.
   { bin: 'guard-deterministic', args: [], expect: 'matcher' },
   { bin: 'guard-dup', args: [], expect: 'co-occurrence matcher' },
-  { bin: 'guard-fallow-staged', args: [], input: FALLOW_PAYLOAD, expect: 'fail-closed' },
   { bin: 'guard-fanout', args: [], expect: 'usage: guard-fanout' },
   { bin: 'guard-prefix', args: [], expect: 'Usage: guard-prefix' },
   { bin: 'guard-qavis-advisory', args: [], expect: 'Usage: guard-qavis-advisory' },
@@ -66,8 +60,19 @@ afterAll(() => {
 });
 
 describe('e2e: every published bin dispatches through its bin shim', () => {
+  it('has exactly one case per bin', () => {
+    const caseBins = CASES.map((c) => c.bin);
+    expect(new Set(caseBins).size).toBe(caseBins.length);
+  });
+
+  it('has no cases for unpublished bins', () => {
+    const publishedBins = new Set(Object.keys(PKG.bin));
+    expect(CASES.map((c) => c.bin).filter((bin) => !publishedBins.has(bin))).toEqual([]);
+  });
+
   it('covers every bin in package.json (a new bin must be added here)', () => {
-    expect(CASES.map((c) => c.bin).sort()).toEqual(Object.keys(PKG.bin).sort());
+    const caseBins = new Set(CASES.map((c) => c.bin));
+    expect(Object.keys(PKG.bin).filter((bin) => !caseBins.has(bin))).toEqual([]);
   });
 
   it.each(CASES)('$bin $args', async ({ bin, args, input, expect: marker }) => {
