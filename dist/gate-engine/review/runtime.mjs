@@ -290,7 +290,8 @@ export async function enforceChecklistContract(selection, initial, cwd, assetRoo
     if (initial.status !== 'pass' || !selection.reviewer.stateFile)
         return initial;
     let result = initial;
-    let hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
+    const initialState = readChecklistState(cwd, selection.reviewer);
+    let hole = verifyChecklist(initialState, 'PASS');
     if (hole && assetRoot) {
         console.error(`guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`);
         cleanupChecklistState(cwd, selection.reviewer);
@@ -308,6 +309,9 @@ export async function enforceChecklistContract(selection, initial, cwd, assetRoo
     else if (hole) {
         result.status = 'inconclusive';
         result.reason = hole;
+        const items = initialState?.items ?? initialState?.files;
+        result.inconclusiveCause =
+            !Array.isArray(items) || items.length === 0 ? 'sync' : 'response-contract';
     }
     return result;
 }

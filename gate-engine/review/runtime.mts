@@ -4,6 +4,7 @@ import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { GuardConfig } from '../config.mts';
 import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mts';
+import type { ReviewInconclusiveCause } from './contracts/response.mts';
 import type { RecordedWaiver } from './overrides.mts';
 import {
   checklistAssetPath,
@@ -143,6 +144,9 @@ export interface ReviewOutcome {
   status: 'pass' | 'fail' | 'inconclusive' | 'error';
   reason: string;
   escalated: boolean;
+  /** Machine-owned category set where the inconclusive outcome originates. Consumers must never
+   * reverse-engineer this from the human-readable reason. */
+  inconclusiveCause?: ReviewInconclusiveCause;
   transcript?: string;
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
    * both all-waived PASS and mixed waived+blocking FAIL outcomes. */
@@ -464,7 +468,8 @@ export async function enforceChecklistContract(
   // contract, enforced by the brief, not an artifact this gate can independently check.
   if (initial.status !== 'pass' || !selection.reviewer.stateFile) return initial;
   let result = initial;
-  let hole = verifyChecklist(readChecklistState(cwd, selection.reviewer), 'PASS');
+  const initialState = readChecklistState(cwd, selection.reviewer);
+  let hole = verifyChecklist(initialState, 'PASS');
   if (hole && assetRoot) {
     console.error(
       `guard-review: ${selection.reviewer.name} — checklist contract not satisfied; retrying once (${hole})`,
@@ -483,6 +488,9 @@ export async function enforceChecklistContract(
   } else if (hole) {
     result.status = 'inconclusive';
     result.reason = hole;
+    const items = initialState?.items ?? initialState?.files;
+    result.inconclusiveCause =
+      !Array.isArray(items) || items.length === 0 ? 'sync' : 'response-contract';
   }
   return result;
 }

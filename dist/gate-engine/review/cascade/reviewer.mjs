@@ -2,11 +2,13 @@ import { JUDGE_ISOLATION } from "../../judge/judge-isolation.mjs";
 import { namedAgentMcpProfile } from "../../judge/mcp/profile.mjs";
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from "../../judge/run-judge.mjs";
 import { renderGoverningClaudeMd } from "../claude-md.mjs";
+import { parseReviewVerdict } from "../contracts/response.mjs";
 import { buildCappedDiffEvidence } from "../diff-evidence.mjs";
+import { responseContractFor } from "../contracts/registry.mjs";
 import { attachItems } from "../evidence/items.mjs";
 import { gitCached } from "../evidence/staged-git.mjs";
 import { applyOverrideValve } from "../overrides.mjs";
-import { allowedToolsFor, escalatePrompt, hasChecklist, parseReviewVerdict, wrapConventionsPrompt, wrapPrompt, } from "../reviewers.mjs";
+import { allowedToolsFor, escalatePrompt, hasChecklist, wrapConventionsPrompt, wrapPrompt, } from "../reviewers.mjs";
 import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from "../runtime.mjs";
 import { consumerChecklistAssetRoot } from "./consumer-assets.mjs";
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
@@ -47,12 +49,14 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             name: reviewer.name,
             status: 'inconclusive',
             reason: `agent brief ${reviewer.name}.md missing under ${cfg.review.agentsDir} — run devkit sync-agents && devkit sync-skills`,
+            inconclusiveCause: 'sync',
             escalated: false,
         };
     const stat = gitCached(cwd, ['--stat'], files);
     const prompt = hasChecklist(reviewer)
         ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras, checklistRoot)
         : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
+    const responseContract = responseContractFor(reviewer.responseContract);
     const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
     const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
     const mcpProfile = namedAgentMcpProfile();
@@ -81,7 +85,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         },
     };
     let first = await exec(firstOpts);
+    let initialRetryUsed = false;
     if (first === null && retryFirst && firstOutage !== 'timeout') {
+        initialRetryUsed = true;
         console.error(`guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`);
         cleanupChecklistState(cwd, reviewer);
         initializeCommitGuardChecklist(cwd, reviewer, checklistRoot, judgeEnv);
@@ -92,10 +98,11 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             name: reviewer.name,
             status: 'inconclusive',
             reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
+            inconclusiveCause: firstOutage === 'timeout' ? 'timeout' : 'outage',
             escalated: false,
             model: passModel,
         };
-    const firstVerdict = parseReviewVerdict(first);
+    let firstVerdict = parseReviewVerdict(first);
     if (firstVerdict.verdict === 'PASS')
         return {
             name: reviewer.name,
@@ -110,11 +117,78 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             name: reviewer.name,
             status: 'inconclusive',
             reason: 'no VERDICT line',
+            inconclusiveCause: 'response-contract',
             escalated: false,
             model: passModel,
             transcript: first,
         };
-    if (reviewer.model)
+    if (reviewer.model) {
+        if (responseContract && !responseContract.validatesFail(first)) {
+            let contractRetryUsed = false;
+            if (retryFirst && !initialRetryUsed) {
+                contractRetryUsed = true;
+                console.error(`guard-review: ${reviewer.name}: FAIL did not satisfy its response contract, retrying once…`);
+                let contractRetryOutage;
+                const retried = await exec({
+                    ...firstOpts,
+                    args: args(`${prompt}\n\n${responseContract.retryInstruction}`, passModel),
+                    onOutage: (kind) => {
+                        contractRetryOutage = kind;
+                    },
+                });
+                if (retried === null)
+                    return {
+                        name: reviewer.name,
+                        status: 'inconclusive',
+                        reason: contractRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
+                        inconclusiveCause: contractRetryOutage === 'timeout' ? 'timeout' : 'outage',
+                        escalated: false,
+                        model: passModel,
+                        transcript: first,
+                    };
+                if (retried !== null) {
+                    first = retried;
+                    firstVerdict = parseReviewVerdict(first);
+                    if (firstVerdict.verdict === 'PASS')
+                        return {
+                            name: reviewer.name,
+                            status: 'pass',
+                            reason: firstVerdict.reason,
+                            escalated: false,
+                            model: passModel,
+                            transcript: first,
+                        };
+                    if (firstVerdict.verdict === null)
+                        return {
+                            name: reviewer.name,
+                            status: 'inconclusive',
+                            reason: 'response-contract retry produced no VERDICT line',
+                            inconclusiveCause: 'response-contract',
+                            escalated: false,
+                            model: passModel,
+                            transcript: first,
+                        };
+                }
+            }
+            if (firstVerdict.verdict === 'FAIL' && responseContract.validatesFail(first))
+                return {
+                    name: reviewer.name,
+                    status: 'fail',
+                    reason: firstVerdict.reason,
+                    escalated: false,
+                    model: passModel,
+                    transcript: first,
+                };
+            return {
+                name: reviewer.name,
+                status: 'inconclusive',
+                reason: responseContract.missingEvidenceReason(initialRetryUsed || contractRetryUsed),
+                inconclusiveCause: 'response-contract',
+                escalated: false,
+                model: passModel,
+                transcript: first,
+            };
+        }
         return {
             name: reviewer.name,
             status: 'fail',
@@ -123,6 +197,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             model: passModel,
             transcript: first,
         };
+    }
     let secondOutage;
     const second = await exec({
         label: `review:${reviewer.name}:escalate`,
@@ -142,11 +217,24 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             name: reviewer.name,
             status: 'inconclusive',
             reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
+            inconclusiveCause: secondOutage === 'timeout' ? 'timeout' : 'outage',
             escalated: true,
             model: passModel,
             transcript: first,
         };
     const finalVerdict = parseReviewVerdict(second);
+    if (finalVerdict.verdict === 'FAIL' &&
+        responseContract &&
+        !responseContract.validatesFail(second))
+        return {
+            name: reviewer.name,
+            status: 'inconclusive',
+            reason: responseContract.missingEvidenceReason(true),
+            inconclusiveCause: 'response-contract',
+            escalated: true,
+            model: passModel,
+            transcript: second,
+        };
     if (finalVerdict.verdict === 'FAIL')
         return {
             name: reviewer.name,
@@ -169,6 +257,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         name: reviewer.name,
         status: 'inconclusive',
         reason: 'no VERDICT line',
+        inconclusiveCause: 'response-contract',
         escalated: true,
         model: passModel,
         transcript: second,

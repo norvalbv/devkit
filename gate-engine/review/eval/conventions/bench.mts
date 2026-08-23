@@ -93,6 +93,9 @@ import {
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
 import { parseReviewVerdict, REVIEWERS, selectReviewers } from '../../reviewers.mts';
 import { runCascade } from '../../run-review.mts';
+import { parseConventionFindings } from '../../evidence/conventions.mts';
+import { CONVENTIONS_GATE_HASH_INPUTS, CONVENTIONS_MATCHER_HASH_INPUTS } from './hash-inputs.mts';
+import { blockingAuthorityByGoldSlot, variantConsistency } from './metrics.mts';
 import {
   type CaseScore,
   type DecoySlot,
@@ -102,6 +105,8 @@ import {
   runMatcher,
   scoreCase,
 } from './matcher.mts';
+
+export { variantConsistency } from './metrics.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // gate-engine/review/eval/conventions → repo root is four levels up (same depth as
@@ -250,15 +255,11 @@ function materializeConventionsFixture(
 }
 
 /** gateHash: everything whose edit invalidates comparability — the cascade source, the pure gate
- * logic, the two NEW skill-less-reviewer modules this reviewer depends on, and the brief itself
- * (the brief IS gate code, the completeness-eval rule). */
+ * logic, the skill-less reviewer's evidence modules, and the brief itself (the brief IS gate code,
+ * the completeness-eval rule). */
 function gateHash(): string {
-  // sc-1442: evidence/ supplies judge-visible prompt AND diff bytes — edits break comparability.
-  const ev = ['targets-block', 'commit-message', 'staged-git'].map((f) => `evidence/${f}.mts`);
-  const files = ['reviewers.mts', 'run-review.mts', 'claude-md.mts', 'diff-evidence.mts', ...ev];
   return sha12(
-    files
-      .map((f) => readFileSync(path.join(repoRoot, 'gate-engine/review', f), 'utf8'))
+    CONVENTIONS_GATE_HASH_INPUTS.map((f) => readFileSync(path.join(repoRoot, f), 'utf8'))
       .concat(readFileSync(AGENT_MD, 'utf8'))
       .join('\n \n'),
   );
@@ -271,10 +272,9 @@ function gateHash(): string {
  * consumer's matcher-audit after touching matcher-core.mts (documented in README.md). */
 function matcherHash(): string {
   return sha12(
-    [
-      readFileSync(path.join(repoRoot, 'gate-engine/judge/matcher-core.mts'), 'utf8'),
-      readFileSync(path.join(here, 'matcher.mts'), 'utf8'),
-    ].join('\n \n'),
+    CONVENTIONS_MATCHER_HASH_INPUTS.map((f) => readFileSync(path.join(repoRoot, f), 'utf8')).join(
+      '\n \n',
+    ),
   );
 }
 
@@ -306,6 +306,7 @@ export interface CaseResult {
   verdict: string | null;
   /** The cascade's own status — informational (scoring is slot-based, not this). */
   status: 'pass' | 'fail' | 'inconclusive' | null;
+  blockingAuthority: Record<string, boolean>;
 }
 
 /**
@@ -349,7 +350,14 @@ export async function runCase(
         `conventions-eval: gate free-skipped ${row.id} — fixture bug, not a pass`,
       );
     if (capture.raw === null)
-      return { id: row.id, outage: true, score: null, verdict: null, status: null };
+      return {
+        id: row.id,
+        outage: true,
+        score: null,
+        verdict: null,
+        status: null,
+        blockingAuthority: {},
+      };
 
     const findings = parseFindings(capture.raw);
     const outcomes = await runMatcher(row.gold, row.decoys, findings, {
@@ -359,6 +367,11 @@ export async function runCase(
       exec: matcherExec,
     });
     const score = scoreCase(row.gold, row.decoys, findings, outcomes);
+    const blockingAuthority = blockingAuthorityByGoldSlot(
+      outcomes,
+      findings,
+      parseConventionFindings(capture.raw),
+    );
     const verdict = parseReviewVerdict(capture.raw).verdict;
     if (saveTranscript) {
       try {
@@ -384,7 +397,7 @@ export async function runCase(
         // Transcripts are audit material, not scoring input — never fail a paid run on them.
       }
     }
-    return { id: row.id, outage: false, score, verdict, status: cas.status };
+    return { id: row.id, outage: false, score, verdict, status: cas.status, blockingAuthority };
   } finally {
     activeCleanup = null;
     fx.cleanup();
@@ -411,8 +424,10 @@ export interface BenchSummary {
     byKind: Record<string, { total: number; flagged: number }>;
   };
   findings: { total: number; matched: number; spurious: number };
+  blockingGold: { total: number; hit: number };
   verdicts: { total: number; correct: number };
   gapRecall: number;
+  blockingAuthorityRecall: number;
   falseFlagRate: number;
   rows: Record<string, { ok: boolean; stable: boolean }>;
   slots: Record<
@@ -446,8 +461,10 @@ export function summarize(
     gold: { total: 0, hit: 0 },
     decoys: { total: 0, flagged: 0, byKind: {} },
     findings: { total: 0, matched: 0, spurious: 0 },
+    blockingGold: { total: 0, hit: 0 },
     verdicts: { total: 0, correct: 0 },
     gapRecall: 0,
+    blockingAuthorityRecall: 0,
     falseFlagRate: 0,
     rows: {},
     slots: {},
@@ -480,6 +497,8 @@ export function summarize(
       if (slot.kind === 'gold') {
         s.gold.total += 1;
         if (slot.ok) s.gold.hit += 1;
+        s.blockingGold.total += 1;
+        if (res.blockingAuthority[slot.slotId]) s.blockingGold.hit += 1;
       } else {
         s.decoys.total += 1;
         const decoy = row.decoys.find((d) => d.id === slot.slotId);
@@ -505,6 +524,7 @@ export function summarize(
   }
   s.outages = s.caseOutages + s.slotOutages;
   s.gapRecall = pct(s.gold.hit, s.gold.total);
+  s.blockingAuthorityRecall = pct(s.blockingGold.hit, s.blockingGold.total);
   s.falseFlagRate = pct(s.decoys.flagged, s.decoys.total);
   return s;
 }
@@ -518,37 +538,6 @@ export function summarize(
  * "broken" even when the actual outcome is perfectly consistent — ordinal position within the
  * row's own gold/decoy arrays is the stable axis a variant pair actually shares.
  */
-export function variantConsistency(rows: ConventionsCase[], summary: BenchSummary) {
-  const groups: Record<string, Set<string>> = {};
-  for (const r of rows) {
-    if (!r.variantOf || r.variantKind === 'directional') continue;
-    groups[r.variantOf] ??= new Set([r.variantOf]);
-    groups[r.variantOf].add(r.id);
-  }
-  const ids = Object.keys(groups);
-  if (!ids.length) return null;
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const pattern = (caseId: string) => {
-    const row = byId.get(caseId);
-    if (!row) return '';
-    const got = (slotId: string) => summary.slots[`${caseId}::${slotId}`]?.got ?? '';
-    return [
-      ...row.gold.map((s, i) => `gold[${i}]=${got(s.id)}`),
-      ...row.decoys.map((s, i) => `decoy[${i}]=${got(s.id)}`),
-    ]
-      .sort()
-      .join(',');
-  };
-  let consistent = 0;
-  const broken: string[] = [];
-  for (const g of ids) {
-    const patterns = new Set([...groups[g]].map(pattern).filter((p) => p !== ''));
-    if (patterns.size <= 1) consistent += 1;
-    else broken.push(g);
-  }
-  return { consistent, total: ids.length, broken };
-}
-
 // ─── Baseline comparison — floors + case-level flip gate ──────────────────────────
 
 /**
@@ -585,6 +574,12 @@ export function compareConventions(summary: BenchSummary, base: BenchSummary | u
     regressed = true;
     lines.push(
       `  FLOOR BREACH — gap recall ${summary.gapRecall.toFixed(2)} < ${FLOOR_GAP_RECALL} (catastrophic; fails regardless of flip statistics)`,
+    );
+  }
+  if (summary.blockingAuthorityRecall < FLOOR_GAP_RECALL) {
+    regressed = true;
+    lines.push(
+      `  FLOOR BREACH — blocking-authority recall ${summary.blockingAuthorityRecall.toFixed(2)} < ${FLOOR_GAP_RECALL} (production parser dropped real findings)`,
     );
   }
   if (summary.falseFlagRate > CEILING_FALSE_FLAG) {
@@ -923,6 +918,9 @@ async function main(argv: string[]) {
     `  headline: gap recall ${fmtCi(s.gold.hit, s.gold.total)}  (floor ${FLOOR_GAP_RECALL})`,
   );
   console.log(
+    `  headline: blocking-authority recall ${fmtCi(s.blockingGold.hit, s.blockingGold.total)}  (floor ${FLOOR_GAP_RECALL})`,
+  );
+  console.log(
     `  headline: false-flag rate ${fmtCi(s.decoys.flagged, s.decoys.total)}  (ceiling ${CEILING_FALSE_FLAG})`,
   );
   for (const [kindName, k] of Object.entries(s.decoys.byKind))
@@ -955,6 +953,7 @@ async function main(argv: string[]) {
     corpusHash: s.corpusHash,
     cases: s.cases,
     gapRecall: Number(s.gapRecall.toFixed(3)),
+    blockingAuthorityRecall: Number(s.blockingAuthorityRecall.toFixed(3)),
     falseFlagRate: Number(s.falseFlagRate.toFixed(3)),
     outages: s.outages,
     regressed,

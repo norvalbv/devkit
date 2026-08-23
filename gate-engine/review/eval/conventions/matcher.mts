@@ -40,6 +40,10 @@ import {
   voteSlot,
 } from '../../../judge/matcher-core.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
+import {
+  parseConventionEvidencePairs,
+  splitConventionCitation,
+} from '../../evidence/conventions.mts';
 
 export type { MatcherOptions, SlotOutcome };
 export { kappa, MATCH_TIMEOUT_MS, mapPool, parseSlotReply, voteSlot };
@@ -78,14 +82,6 @@ export interface DecoySlot {
 
 // ─── Deterministic transcript parsing ─────────────────────────────────────────────
 
-// Per the brief's contract (agents/conventions-reviewer.md): a VIOLATION line is ALWAYS
-// immediately followed by its OFFENDING line — one pair per violation. Both lines share the same
-// `<quoted text> — <path>:<line>` shape; the greedy `(.+)` backs off only as far as needed to let
-// the trailing em-dash/path:line anchor match at the line's end. Tolerant of markdown dressing
-// (`**VIOLATION**:`, `- OFFENDING:`) like review/eval/matcher.mts's FINDING_LINE_RE. Non-global
-// (matched per-line via .match()) so pairing stays a simple sequential scan — no lastIndex
-// bookkeeping.
-//
 // BLOCK-based, not single-line-regex: a live haiku baseline run (2026-07-09) surfaced real
 // transcripts a strict `^…: (.+)[—–]\s*(\S+):(\d+)\s*$` regex silently drops, corrupting recall —
 // (1) a line RANGE ("CLAUDE.md:6-7", "db/CLAUDE.md:3–4") instead of a single line number, (2) the
@@ -95,10 +91,6 @@ export interface DecoySlot {
 // "OFFENDING:" marker. Every one of these is a real, well-formed violation the reviewer correctly
 // found — the parser must not be stricter than the brief's actual contract tolerates. Fixture
 // transcripts reproducing each case are exercised in the unit tests (grep "regression" there).
-const VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
-const OFFENDING_START_RE = /^[\s>*#-]*\**OFFENDING\**\s*:\s*(.*)$/i;
-const CLOSER_RE = /^[\s>*#-]*\**(VERDICT|NO_VIOLATIONS)\b/i;
-const CODE_FENCE_RE = /^\s*```/;
 const LOC_UNSPECIFIED = '(location unspecified)';
 
 /** Strip wrapping markdown emphasis/quote marks a model sometimes adds around a quoted string. */
@@ -110,23 +102,12 @@ function cleanQuote(s: string): string {
     .trim();
 }
 
-/**
- * Split an accumulated VIOLATION/OFFENDING block into {quote, loc} on the LAST em-dash. EM-DASH
- * ONLY as the primary split point (never en-dash, never a plain hyphen): a plain hyphen is far too
- * common inside a real path (`icon-manifest.ts`) or a numeric range ("6-7") to double as a
- * delimiter, and a numeric range can ALSO use an en-dash ("3–4") — if en-dash were accepted
- * unconditionally, `lastIndexOf` would find the RANGE's en-dash (further right) instead of the
- * true separator, splitting the location string in half. En-dash is tried only as a fallback when
- * NO em-dash is present at all (a model substituting one dash style for the other). No separator
- * found at all → the whole block is the quote; loc is explicitly UNSPECIFIED, never silently ''.
- */
-function splitQuoteAndLoc(block: string): { quote: string; loc: string } {
+/** Split with the production parser's spaced-dash grammar; internal path/range hyphens stay inert. */
+function splitQuoteAndLoc(block: string) {
   const text = block.trim();
-  const em = text.lastIndexOf('—');
-  const idx = em !== -1 ? em : text.lastIndexOf('–');
-  if (idx === -1) return { quote: cleanQuote(text), loc: LOC_UNSPECIFIED };
-  const loc = text.slice(idx + 1).trim();
-  return { quote: cleanQuote(text.slice(0, idx)), loc: loc || LOC_UNSPECIFIED };
+  const citation = splitConventionCitation(text);
+  if (!citation) return { quote: cleanQuote(text), loc: LOC_UNSPECIFIED };
+  return { quote: cleanQuote(citation.quote), loc: citation.location };
 }
 
 /**
@@ -140,47 +121,16 @@ function splitQuoteAndLoc(block: string): { quote: string; loc: string } {
  * brief's contract neither should occur, but a parser must never trust the model to be well-formed.
  */
 export function parseFindings(raw: string): Finding[] {
-  const findings: Finding[] = [];
-  let mode: 'idle' | 'violation' | 'offending' = 'idle';
-  let buffer: string[] = [];
-  let pendingRule: { ruleQuote: string; ruleLoc: string } | null = null;
-
-  const finalize = () => {
-    if (mode === 'violation' && buffer.length) {
-      const { quote, loc } = splitQuoteAndLoc(buffer.join(' '));
-      pendingRule = { ruleQuote: quote, ruleLoc: loc };
-    } else if (mode === 'offending' && buffer.length) {
-      const { quote, loc } = splitQuoteAndLoc(buffer.join(' '));
-      if (pendingRule) findings.push({ ...pendingRule, offendingLine: quote, offendingLoc: loc });
-      pendingRule = null;
-    }
-    mode = 'idle';
-    buffer = [];
-  };
-
-  for (const line of String(raw).split('\n')) {
-    if (!line.trim() || CODE_FENCE_RE.test(line) || CLOSER_RE.test(line)) {
-      finalize();
-      continue;
-    }
-    const v = line.match(VIOLATION_START_RE);
-    if (v) {
-      finalize(); // a fresh VIOLATION always closes whatever block was in flight first
-      mode = 'violation';
-      buffer = [v[1]];
-      continue;
-    }
-    const o = line.match(OFFENDING_START_RE);
-    if (o) {
-      finalize();
-      mode = 'offending';
-      buffer = [o[1]];
-      continue;
-    }
-    if (mode !== 'idle') buffer.push(line.trim()); // a continuation line of a multi-line quote
-  }
-  finalize(); // EOF closes whatever was still open
-  return findings;
+  return parseConventionEvidencePairs(raw).map(({ violation, offending }) => {
+    const rule = splitQuoteAndLoc(violation);
+    const offendingSource = splitQuoteAndLoc(offending);
+    return {
+      ruleQuote: rule.quote,
+      ruleLoc: rule.loc,
+      offendingLine: offendingSource.quote,
+      offendingLoc: offendingSource.loc,
+    };
+  });
 }
 
 // ─── Per-slot forced-choice prompts ───────────────────────────────────────────────

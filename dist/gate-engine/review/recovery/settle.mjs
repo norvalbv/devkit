@@ -115,6 +115,7 @@ export async function runDeferredRecoveries(parked, results, ctx, runOne, gateSt
                 name: p.task.sel.reviewer.name,
                 status: 'inconclusive',
                 reason: `recovery deferred, budget exhausted — re-run to converge (${p.reason})`,
+                inconclusiveCause: 'timeout',
                 escalated: false,
             };
             // NOT marked retried: no deferred judge ran. The flag measures attempts that happened, so
