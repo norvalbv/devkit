@@ -309,7 +309,7 @@ function runScan() {
   if (ONLY_NEW) {
     // Hide anything already covered by a LIVE allowlist pair; expired entries
     // (decay lapsed) are treated as uncovered and re-surface. Read-only — never
-    // mutates the allowlist (cf. prune), so it's safe in a pre-push/commit hook.
+    // mutates the allowlist (cf. prune), so it's safe in the blocking pre-commit hook.
     const known = new Set(
       loadAllowlist()
         .pairs.filter((p: AllowlistPair) => !isExpired(p))

@@ -36,6 +36,7 @@ describe('devkit help surface', () => {
     expect(r.stdout).toContain('--target <path>');
     expect(r.stdout).toContain('--base <ref>');
     expect(r.stdout).toMatch(/trusted targets only/i);
+    expect(r.stdout).toContain('devkit init --overlay --review');
   });
 
   it('`help <unknown>` errors and falls back to the top-level help (EC8)', () => {

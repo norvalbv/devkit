@@ -379,6 +379,69 @@ describe('applyInit (direct chosen map — the wizard seam)', () => {
     expect(config(root).components.agentTargets).toEqual(['claude']);
   });
 
+  it('projects commit-gate guidance only while a managed Husky guard chain is active', async () => {
+    const root = tmpRepo();
+    const selection = {
+      biome: false,
+      tsconfig: false,
+      skills: true,
+      husky: true,
+      structure: true,
+      agentTargets: ['claude', 'codex', 'cursor'] as const,
+      guards: [] as const,
+    };
+
+    await applyInit(root, { stack: 'react-app', selection });
+
+    for (const path of [
+      '.claude/skills/commit-gates/SKILL.md',
+      '.agents/skills/commit-gates/SKILL.md',
+      '.cursor/skills/commit-gates/SKILL.md',
+    ]) {
+      expect(existsSync(join(root, path))).toBe(true);
+    }
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).toContain(
+      'commit-gates/SKILL.md',
+    );
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...selection, husky: false },
+    });
+
+    for (const path of [
+      '.claude/skills/commit-gates/SKILL.md',
+      '.agents/skills/commit-gates/SKILL.md',
+      '.cursor/skills/commit-gates/SKILL.md',
+    ]) {
+      expect(existsSync(join(root, path))).toBe(false);
+    }
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).not.toContain(
+      'commit-gates/SKILL.md',
+    );
+  });
+
+  it('does not project commit-gate guidance for unsupported requested structure', async () => {
+    const root = tmpRepo();
+    await applyInit(root, {
+      stack: 'generic',
+      selection: {
+        biome: false,
+        tsconfig: false,
+        skills: true,
+        husky: true,
+        structure: true,
+        agentTargets: ['claude'],
+        guards: [],
+      },
+    });
+
+    expect(existsSync(join(root, '.claude/skills/commit-gates/SKILL.md'))).toBe(false);
+    expect(readFileSync(join(root, '.devkit/skills-manifest.json'), 'utf8')).not.toContain(
+      'commit-gates/SKILL.md',
+    );
+  });
+
   it('decisions installs its skill and edit hook without general agentHooks', async () => {
     const root = tmpRepo();
     await applyInit(root, {
@@ -854,7 +917,7 @@ describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () =>
       devkitRef: 'v0.3.0',
     });
     const hook = readFileSync(hookAt(root), 'utf8');
-    expect(hook).toContain('guard-review completeness --gate "$1"');
+    expect(hook).toContain('"$__dk_package_bin_dir/guard-review" completeness --gate "$1"');
     expect(hook).not.toContain('guard-sentry');
   });
 
@@ -865,7 +928,9 @@ describe('applyInit — managed .husky/commit-msg (review/sentry judges)', () =>
       selection: { ...base, guards: ['size', 'sentry'] },
       devkitRef: 'v0.3.0',
     });
-    expect(readFileSync(hookAt(root), 'utf8')).toContain('bunx guard-sentry --gate "$1"');
+    expect(readFileSync(hookAt(root), 'utf8')).toContain(
+      '"$__dk_package_bin_dir/guard-sentry" --gate "$1"',
+    );
   });
 
   it('default (recommended) guards → NO commit-msg hook is created', async () => {
@@ -931,7 +996,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
     expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
-    expect(hook).not.toMatch(/bunx guard-/);
+    expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
 
     expect(config(root)).toMatchObject({
       selfHost: true,

@@ -755,15 +755,12 @@ export async function applyInit(cwd, plan) {
         // deterministic orchestrator line — package and standalone alike. No separate enable step / hook
         // placeholder to flip.
     }
-    // Skills / agents / agent-hooks → the selected agent surface(s), with a prune of any now-dropped
-    // surface a prior run installed. First resolve the non-devkit-collision policy (preserve the
-    // consumer's own same-named assets unless they opt in — interactive picker / --force). Returns the
-    // resolved agentTargets (recorded in the config below).
-    const override = await resolveAssetConflicts(gitRoot, selection, {
+    const assets = { ...selection, structure: isStructure };
+    const override = await resolveAssetConflicts(gitRoot, assets, {
         interactive,
         force,
     });
-    const agentTargets = syncSurfaces(gitRoot, selection, dryRun, override, prevConfig?.components);
+    const agentTargets = syncSurfaces(gitRoot, assets, dryRun, override, prevConfig?.components);
     if (selection.fallow) {
         console.log('8. fallow (optional code-health layer)');
         await applyFallow(cwd, dryRun, interactive);

@@ -14,7 +14,11 @@ import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { type GuardConfig, sourceMatchers } from '../config.mts';
 import { devkitVersion } from '../devkit-version.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
+import type { ReviewerResponseContractName } from './contracts/registry.mts';
 import { checklistContractFor } from './lens/split.mts';
+
+export { parseReviewVerdict } from './contracts/response.mts';
+export type { ReviewVerdict } from './contracts/response.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
  * `sourceExtensions` and `searchTool` fields). Derived from the shared loader so it never drifts. */
@@ -23,13 +27,12 @@ import { checklistContractFor } from './lens/split.mts';
 export interface Reviewer {
   name: string;
   domain: string;
-  /** Absent for a SKILL-LESS reviewer (e.g. conventions-reviewer): no checklist.mjs binding, no
-   * Bash grant beyond the read-only base, no verifyChecklist call — its PASS is trusted directly,
-   * the same trust level completeness.mts already uses for its own straight verdict. Present for
-   * every checklist-driven reviewer, whose skill/stateFile/cmds always travel together. */
   skill?: string;
   stateFile?: string;
   cmds?: { gen: string; check: string; fin?: string };
+  /** Required for a checklist-free reviewer whose FAIL can block. The descriptor owns validation,
+   * retry guidance, and cache identity; orchestration never branches on reviewer names. */
+  responseContract?: ReviewerResponseContractName;
   /** Set ONLY by `deriveLensReviewer` (lens-split.mts) — the lens group this judge covers. Its
    * presence tells `wrapPrompt` the brief's own command lines carry no `--lens` and so cannot be
    * deferred to. Never set on a REVIEWERS table entry. */
@@ -61,12 +64,6 @@ export function hasChecklist(reviewer: Reviewer): reviewer is ChecklistReviewer 
 export interface ReviewerSelection {
   reviewer: Reviewer;
   files: string[];
-}
-
-/** A parsed VERDICT line: the token (null when no VERDICT line) + its markdown-stripped reason. */
-export interface ReviewVerdict {
-  verdict: string | null;
-  reason: string;
 }
 
 /**
@@ -141,20 +138,11 @@ export const REVIEWERS = Object.freeze([
     // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
     model: 'sonnet',
   }),
-  // Checks a diff against the CONSUMER repo's own written CLAUDE.md rules — never devkit's own.
-  // SKILL-LESS (no skill/stateFile/cmds — see Reviewer.skill docstring): its AC forbids Bash
-  // entirely (Read/Grep/Glob only), so it cannot run the checklist.mjs workflow every other entry
-  // depends on. Its anti-hallucination substitute is the AC's own contract: flag a violation ONLY
-  // when it can quote both the exact rule and the exact offending line, else stay silent — no
-  // artifact to verify, so a PASS is trusted directly (cascadeVerdict/runCascade branch on
-  // `!reviewer.skill`). `domain: 'conventions'` reuses the 'all' root union (rootsFor) but is
-  // exempt from selectReviewers' isSource/isTest filters — a CLAUDE.md rule can govern any staged
-  // file type (docs, config, tests), not just source. Single-pass haiku per the ticket mandate: no
-  // cascade, FAIL blocks directly, and joins the override valve (overrides.mts) like correctness.
   Object.freeze({
     name: 'conventions-reviewer',
     domain: 'conventions',
     model: 'haiku',
+    responseContract: 'conventions-v1',
   }),
 ]);
 
@@ -176,12 +164,6 @@ export function checklistScriptAt(reviewer: ChecklistReviewer, assetRoot = '.cla
 // Read-only investigation surface (mirrors check-alignment's JUDGE_TOOLS + log/status for context).
 // No naked Bash: a gate judge must never be able to write, stage, or commit.
 const BASE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
-
-// Tolerates markdown dressing around the verdict line; the LAST match wins (the body may discuss
-// pass/fail while reasoning). Deliberately NO bare-word fallback — unlike ALIGN/CONTRADICT,
-// "pass"/"fail" saturate ordinary review prose, so a missing VERDICT line must read as "no
-// verdict" (null → no block, no cache), never be guessed from body words.
-const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
 
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
@@ -339,12 +321,6 @@ export function wrapPrompt(
   );
 }
 
-// One violation block per the conventions-reviewer brief's contract — the OFFENDING path:line is
-// the STABLE key the override valve fingerprints on (see parseConventionFindings docstring): it
-// is deterministic for a fixed diff, unlike the free-text VERDICT reason, which a haiku judge may
-// paraphrase differently run to run on byte-identical input.
-const OFFENDING_LINE_RE = /^[\s>*#-]*\**OFFENDING\**\s*:.*[—–-]\s*(\S+):(\d+)\s*$/gim;
-
 /**
  * Checklist-free counterpart to `wrapPrompt` for a reviewer without Bash: pre-capped evidence rides
  * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
@@ -384,22 +360,6 @@ export function wrapConventionsPrompt(
   );
 }
 
-/**
- * Parse the `OFFENDING: … — <path>:<line>` blocks from a conventions-reviewer transcript — used
- * ONLY to build the override valve's lens keys (never the free-text VERDICT reason: haiku's
- * one-line paraphrase of the SAME violation varies run-to-run on byte-identical input, which would
- * silently un-match a dev's already-committed waiver and re-block them; the offending path:line is
- * deterministic for a fixed diff, exactly like the checklist item names other reviewers key on).
- */
-export function parseConventionFindings(
-  raw: string,
-): { offendingPath: string; offendingLine: number }[] {
-  return [...String(raw).matchAll(OFFENDING_LINE_RE)].map((m) => ({
-    offendingPath: m[1],
-    offendingLine: Number(m[2]),
-  }));
-}
-
 /** Escalation prompt: opus independently re-verifies a first-pass FAIL (check-alignment shape). */
 export function escalatePrompt(wrappedPrompt: string, firstPass: string): string {
   return (
@@ -411,20 +371,6 @@ export function escalatePrompt(wrappedPrompt: string, firstPass: string): string
     'Independently verify its evidence with your own investigation — confirm or overturn. ' +
     'Your verdict is final; a FAIL blocks the commit.'
   );
-}
-
-/**
- * Bounded verdict: the LAST `VERDICT:` line wins. No VERDICT line → {verdict: null} (no block,
- * no cache — see VERDICT_LINE_RE note). The FAIL reason is the line's tail, markdown-stripped.
- */
-export function parseReviewVerdict(raw: string): ReviewVerdict {
-  const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];
-  if (lines.length === 0) return { verdict: null, reason: '' };
-  const last = lines[lines.length - 1];
-  return {
-    verdict: last[1].toUpperCase(),
-    reason: (last[2] ?? '').replace(/\*+/g, '').trim(),
-  };
 }
 
 /**
