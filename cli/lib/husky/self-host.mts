@@ -71,6 +71,18 @@ else
 fi
 # /devkit:fallow-advisory`;
 
+// Devkit owns this source-only check and its self-host hook. Consumer hooks never receive the
+// fragment, and review-mode replays skip it because they do not represent a pending commit.
+const SKILL_PROJECTION_FRAGMENT = `# devkit:self-host-skill-projection-advisory
+# Warn when canonical Devkit skills drift from a recorded provider surface or packaged dist.
+if [ "\${DEVKIT_RUN_MODE:-}" != "review" ]; then
+    __dk_skill_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$__dk_skill_root" ]; then
+        node "$__dk_skill_root/cli/lib/husky/skill-projection-integrity.mts" --root "$__dk_skill_root" || true
+    fi
+fi
+# /devkit:self-host-skill-projection-advisory`;
+
 // The hook-builder's view of the self-host selection (Selection + the two hook-only fields the
 // generator reads). structureCmd/extras are constant for self-host — seeded here, never persisted.
 type SelfHostHookInput = Selection & {
@@ -167,22 +179,30 @@ function definedOnly(recorded: Partial<Selection> | undefined): Partial<Selectio
   ) as Partial<Selection>;
 }
 
-function withFallow(text: string, pkgRel: string): string {
+function withSelfHostFragment(text: string, pkgRel: string, fragment: string): string {
   const end = markEnd(pkgRel);
   const anchor = text.includes(REVIEW_DETERMINISTIC_FINALIZER)
     ? REVIEW_DETERMINISTIC_FINALIZER
     : end;
-  return text.replace(`\n${anchor}`, `\n\n${FALLOW_FRAGMENT}\n\n${anchor}`);
+  return text.replace(`\n${anchor}`, `\n\n${fragment}\n\n${anchor}`);
+}
+
+function withFallow(text: string, pkgRel: string): string {
+  return withSelfHostFragment(text, pkgRel, FALLOW_FRAGMENT);
+}
+
+function withSelfHostAdvisories(text: string, pkgRel: string): string {
+  return withSelfHostFragment(withFallow(text, pkgRel), pkgRel, SKILL_PROJECTION_FRAGMENT);
 }
 
 /** The self-host guard BLOCK (markers inclusive) — the shared source of truth for install, doctor, and the parity test. */
 export function buildSelfHostBlock(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  return withFallow(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
+  return withSelfHostAdvisories(toSelfHost(buildGuardBlock(sel, pkgRel), cwd), pkgRel);
 }
 
-/** A full fresh self-host hook (preamble + rewritten block incl. the advisory fallow fragment + exit 0). */
+/** A full fresh self-host hook (preamble + rewritten block incl. self-host advisories + exit 0). */
 export function buildSelfHostHook(sel: SelfHostHookInput, pkgRel: string, cwd: string): string {
-  return withFallow(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
+  return withSelfHostAdvisories(toSelfHost(buildFullHook(sel, pkgRel), cwd), pkgRel);
 }
 
 /**
