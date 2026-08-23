@@ -192,6 +192,12 @@ async function cascadeVerdict(
         let evidenceRetryOutage: 'timeout' | 'transient' | 'empty' | undefined;
         const retried = await exec({
           ...firstOpts,
+          args: args(
+            `${prompt}\n\nEVIDENCE-CONTRACT RETRY: the prior FAIL had no complete cited ` +
+              'VIOLATION/OFFENDING pair. Either emit at least one complete pair using the exact ' +
+              'required format, or return VERDICT: PASS. Do not repeat an evidence-free FAIL.',
+            passModel,
+          ),
           onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
             evidenceRetryOutage = kind;
           },

@@ -294,9 +294,13 @@ change that motivated it, and the headline numbers — so the reviewer's measure
 greppable in one place. Validate any row by re-running `node bench.mts --fail` at that commit: the
 numbers must reproduce within the printed MDE.
 
-| date · change                                               | gap recall (floor .70)    | false-flag rate (ceiling .25) | out-of-scope flags | recorded-decision flags | verdict                  |
-| ----------------------------------------------------------- | ------------------------- | ----------------------------- | ------------------ | ----------------------- | ------------------------ |
-| 2026-07-09 · first baseline (haiku single-pass, no cascade) | 1.00 (18/18) [0.82, 1.00] | 0.07 (1/14) [0.01, 0.31]      | 0/4                | 1/1                     | PASS — both floors clear |
+| date · change                                               | gap recall (floor .70)    | blocking authority (floor .70) | false-flag rate (ceiling .25) | out-of-scope flags | recorded-decision flags | verdict                  |
+| ----------------------------------------------------------- | ------------------------- | ------------------------------- | ----------------------------- | ------------------ | ----------------------- | ------------------------ |
+| 2026-07-09 · first baseline (haiku single-pass, no cascade) | 1.00 (18/18) [0.82, 1.00] | n/a — metric not recorded       | 0.07 (1/14) [0.01, 0.31]      | 0/4                | 1/1                     | PASS — both floors clear |
+
+Blocking-authority recall was introduced by SC-1836 after this baseline was committed. The
+baseline artifact contains no production-authority field or raw transcripts, so the historical
+value cannot be reconstructed without inventing data; the next regenerated baseline must record it.
 
 **The one recorded-decision flag, explained (not hidden):** `layering-recorded-exception-pass`
 FAILs even though `docs/decisions/ui-data-import-for-offline-cache.md` records exactly this import

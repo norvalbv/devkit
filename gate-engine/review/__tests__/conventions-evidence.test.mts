@@ -174,6 +174,23 @@ describe('conventions evidence completeness', () => {
     );
   });
 
+  it('strict mode classifies a verdict-less evidence retry as an evidence gap', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
+      .mockResolvedValueOnce('I could not finish reviewing the diff.');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][0].args[1]).toContain('EVIDENCE-CONTRACT RETRY');
+    expect(exec.mock.calls[1][0].args[1]).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(err.mock.calls.flat().join('\n')).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('auth/quota');
+  });
+
   it('strict mode caps outage recovery plus evidence validation at two judge calls', async () => {
     process.env.GUARD_AI_STRICT = '1';
     const repo = cappedRepo();

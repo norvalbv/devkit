@@ -169,6 +169,22 @@ describe('parseFindings — regression fixtures from a live haiku baseline run',
     expect(found[0].offendingLoc).toBe('services/orders/handlers/create-order.ts:5');
   });
 
+  it('plain-hyphen citation separators retain tolerant quote and location fields', () => {
+    const found = parseFindings(
+      'VIOLATION: rule A - CLAUDE.md:5\n' +
+        'OFFENDING: code A - src/foo-bar.ts:10\n' +
+        'VERDICT: FAIL — cited pair',
+    );
+    expect(found).toEqual([
+      {
+        ruleQuote: 'rule A',
+        ruleLoc: 'CLAUDE.md:5',
+        offendingLine: 'code A',
+        offendingLoc: 'src/foo-bar.ts:10',
+      },
+    ]);
+  });
+
   it('NO_VIOLATIONS transcript parses to zero findings', () => {
     expect(parseFindings('NO_VIOLATIONS\nVERDICT: PASS')).toEqual([]);
   });

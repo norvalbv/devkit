@@ -40,7 +40,10 @@ import {
   voteSlot,
 } from '../../../judge/matcher-core.mts';
 import { execJudgeAsync } from '../../../judge/run-judge.mts';
-import { parseConventionEvidencePairs } from '../../evidence/conventions.mts';
+import {
+  parseConventionEvidencePairs,
+  splitConventionCitation,
+} from '../../evidence/conventions.mts';
 
 export type { MatcherOptions, SlotOutcome };
 export { kappa, MATCH_TIMEOUT_MS, mapPool, parseSlotReply, voteSlot };
@@ -99,23 +102,12 @@ function cleanQuote(s: string): string {
     .trim();
 }
 
-/**
- * Split an accumulated VIOLATION/OFFENDING block into {quote, loc} on the LAST em-dash. EM-DASH
- * ONLY as the primary split point (never en-dash, never a plain hyphen): a plain hyphen is far too
- * common inside a real path (`icon-manifest.ts`) or a numeric range ("6-7") to double as a
- * delimiter, and a numeric range can ALSO use an en-dash ("3–4") — if en-dash were accepted
- * unconditionally, `lastIndexOf` would find the RANGE's en-dash (further right) instead of the
- * true separator, splitting the location string in half. En-dash is tried only as a fallback when
- * NO em-dash is present at all (a model substituting one dash style for the other). No separator
- * found at all → the whole block is the quote; loc is explicitly UNSPECIFIED, never silently ''.
- */
-function splitQuoteAndLoc(block: string): { quote: string; loc: string } {
+/** Split with the production parser's spaced-dash grammar; internal path/range hyphens stay inert. */
+function splitQuoteAndLoc(block: string) {
   const text = block.trim();
-  const em = text.lastIndexOf('—');
-  const idx = em !== -1 ? em : text.lastIndexOf('–');
-  if (idx === -1) return { quote: cleanQuote(text), loc: LOC_UNSPECIFIED };
-  const loc = text.slice(idx + 1).trim();
-  return { quote: cleanQuote(text.slice(0, idx)), loc: loc || LOC_UNSPECIFIED };
+  const citation = splitConventionCitation(text);
+  if (!citation) return { quote: cleanQuote(text), loc: LOC_UNSPECIFIED };
+  return { quote: cleanQuote(citation.quote), loc: citation.location };
 }
 
 /**

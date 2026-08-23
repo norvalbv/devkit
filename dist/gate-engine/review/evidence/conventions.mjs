@@ -5,11 +5,17 @@ const CODE_FENCE_RE = /^\s*```/;
 const CITATION_SEPARATOR_RE = /(?:^|\s)[—–-]\s/g;
 const TERMINAL_LINE_RE = /:(\d+)(?:[-–]\d+)?\s*$/;
 const LINELESS_RULE_LOCATION_RE = /(?:^|\/)CLAUDE\.md(?:\s+\([^)]*\))?$/i;
-function citationLocation(block) {
+export function splitConventionCitation(block) {
     const separator = [...block.matchAll(CITATION_SEPARATOR_RE)].at(-1);
     if (separator?.index === undefined)
         return null;
-    return block.slice(separator.index + separator[0].length).trim() || null;
+    const location = block.slice(separator.index + separator[0].length).trim();
+    if (!location)
+        return null;
+    return { quote: block.slice(0, separator.index).trim(), location };
+}
+function citationLocation(block) {
+    return splitConventionCitation(block)?.location ?? null;
 }
 function hasConventionCitationTrailer(block) {
     const location = citationLocation(block);
@@ -58,15 +64,22 @@ export function parseConventionEvidencePairs(raw) {
         return false;
     };
     for (const [index, line] of lines.entries()) {
-        if (!line.trim() || CODE_FENCE_RE.test(line)) {
+        if (!line.trim()) {
             finalize();
+            continue;
+        }
+        if (CODE_FENCE_RE.test(line)) {
+            finalize();
+            pendingViolation = null;
             continue;
         }
         if (CONVENTION_CLOSER_RE.test(line)) {
             if (mode !== 'idle' && !blockHasTrailer() && hasCitationTrailerAhead(index))
                 buffer.push(line.trim());
-            else
+            else {
                 finalize();
+                pendingViolation = null;
+            }
             continue;
         }
         const violation = line.match(CONVENTION_VIOLATION_START_RE);
@@ -76,6 +89,7 @@ export function parseConventionEvidencePairs(raw) {
                 continue;
             }
             finalize();
+            pendingViolation = null;
             mode = 'violation';
             buffer = violation[1] ? [violation[1]] : [];
             continue;
@@ -94,14 +108,18 @@ export function parseConventionEvidencePairs(raw) {
             buffer = offending[1] ? [offending[1]] : [];
             continue;
         }
-        if (mode !== 'idle') {
-            if (blockHasTrailer() &&
-                !hasConventionCitationTrailer(line) &&
-                !hasCitationTrailerAhead(index))
-                finalize();
-            else
-                buffer.push(line.trim());
+        if (mode === 'idle') {
+            pendingViolation = null;
+            continue;
         }
+        if (blockHasTrailer() &&
+            !hasConventionCitationTrailer(line) &&
+            !hasCitationTrailerAhead(index)) {
+            finalize();
+            pendingViolation = null;
+        }
+        else
+            buffer.push(line.trim());
     }
     finalize();
     return pairs;

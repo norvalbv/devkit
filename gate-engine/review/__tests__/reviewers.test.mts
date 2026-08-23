@@ -482,6 +482,24 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
     expect(parseConventionFindings('VIOLATION: rule a — CLAUDE.md:1\nVERDICT: FAIL')).toEqual([]);
     expect(parseConventionFindings('OFFENDING: x — src/a.ts:1\nVERDICT: FAIL')).toEqual([]);
   });
+  it.each([
+    ['unrelated prose', 'Reviewer abandoned this point.\n'],
+    ['a code fence', '```\n'],
+    ['a verdict closer', 'VERDICT: FAIL — abandoned point\n'],
+  ])('does not pair an orphan violation across %s', (_boundary, boundary) => {
+    const transcript = `VIOLATION: Never use raw SQL. — CLAUDE.md:3\n${boundary}OFFENDING: const x = 1 — src/unrelated.ts:80`;
+    expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('preserves a blank-line-separated evidence pair', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n\nOFFENDING: db.raw(query) — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      {
+        violation: 'Never use raw SQL. — CLAUDE.md:3',
+        offending: 'db.raw(query) — src/db.ts:80',
+      },
+    ]);
+  });
   it('rejects a missing rule citation even when the wrapped OFFENDING citation is complete', () => {
     const transcript =
       'VIOLATION: rule text\n' +
