@@ -1,15 +1,20 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { defaultSelection } from '../lib/components.mts';
+import { buildFullHook } from '../lib/husky/husky-block.mts';
+import { buildSelfHostHook } from '../lib/husky/self-host.mts';
 import {
   inspectSkillProjectionIntegrity,
   printSkillProjectionWarning,
-} from '../lib/ship/skill-projection-integrity.mts';
+} from '../lib/husky/skill-projection-integrity.mts';
 import { rootRegistry } from './_helpers.mts';
 
 const shipScript = fileURLToPath(new URL('../lib/ship/ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const { mkTmp, cleanup } = rootRegistry();
 
 afterEach(() => {
@@ -125,6 +130,16 @@ describe('inspectSkillProjectionIntegrity', () => {
     ]);
   });
 
+  it('warns explicitly when the canonical skills directory is missing', () => {
+    const root = devkitRepo();
+
+    expect(inspectSkillProjectionIntegrity(root)).toEqual({
+      active: true,
+      checkedProjections: ['claude', 'cursor', 'dist'],
+      findings: ['unchecked skills/ — canonical skills directory missing'],
+    });
+  });
+
   it('does not activate in consumer repositories', () => {
     const root = devkitRepo({ name: 'consumer' });
     seedSkill(root, 'review', { 'SKILL.md': '# Review\n' });
@@ -148,7 +163,7 @@ describe('inspectSkillProjectionIntegrity', () => {
   });
 });
 
-describe('ship skill projection warning', () => {
+describe('self-host Husky skill projection warning', () => {
   it('is advisory and distinguishes automatic repairs from orphan cleanup', () => {
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const status = printSkillProjectionWarning({
@@ -164,11 +179,42 @@ describe('ship skill projection warning', () => {
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining('remove orphan files explicitly'));
   });
 
-  it('runs fail-open for both new ships and reships', () => {
+  it('is generated only into the internal self-host hook and remains fail-open', () => {
+    const selfHost = buildSelfHostHook(defaultSelection(), '', repoRoot);
+    const consumer = buildFullHook(defaultSelection(), '');
+
+    expect(selfHost).toContain('# devkit:self-host-skill-projection-advisory');
+    expect(selfHost).toContain('cli/lib/husky/skill-projection-integrity.mts');
+    expect(selfHost).toContain('--root "$__dk_skill_root" || true');
+    expect(consumer).not.toContain('self-host-skill-projection-advisory');
+
     for (const script of [shipScript, reshipScript]) {
       const source = readFileSync(script, 'utf8');
-      expect(source).toContain('skill-projection-integrity');
-      expect(source).toContain('node "$SKILL_PROJECTION_INTEGRITY" --root "$ROOT" || true');
+      expect(source).not.toContain('skill-projection-integrity');
     }
+  });
+
+  it('executes advisory-only for commits and skips review-mode replays', () => {
+    const hook = buildSelfHostHook(defaultSelection(), '', repoRoot);
+    const fragment = hook.match(
+      /# devkit:self-host-skill-projection-advisory[\s\S]*?# \/devkit:self-host-skill-projection-advisory/,
+    )?.[0];
+    expect(fragment).toBeDefined();
+
+    const bin = mkTmp('skill-projection-hook-bin-');
+    write(bin, 'node', '#!/bin/sh\necho "NODE:$*"\nexit 17\n');
+    chmodSync(join(bin, 'node'), 0o755);
+    const run = (runMode?: string) => {
+      const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+      if (runMode) env.DEVKIT_RUN_MODE = runMode;
+      return execFileSync('sh', ['-e', '-c', fragment ?? 'exit 99'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env,
+      });
+    };
+
+    expect(run()).toContain('cli/lib/husky/skill-projection-integrity.mts');
+    expect(run('review')).toBe('');
   });
 });

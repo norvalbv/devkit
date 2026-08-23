@@ -150,9 +150,6 @@ fi
 # unbriefed dist artifacts. Installed consumer copies run the same helper, which no-ops unless the
 # caller package is @norvalbv/devkit. Prefer source beside this script, then packaged .mjs.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SKILL_PROJECTION_INTEGRITY="$SCRIPT_DIR/skill-projection-integrity.mts"
-[ -f "$SKILL_PROJECTION_INTEGRITY" ] || SKILL_PROJECTION_INTEGRITY="$SCRIPT_DIR/skill-projection-integrity.mjs"
-node "$SKILL_PROJECTION_INTEGRITY" --root "$ROOT" || true
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
