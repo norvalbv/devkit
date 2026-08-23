@@ -763,6 +763,66 @@
       "lines": 12,
       "rangeA": "97-108",
       "rangeB": "57-68"
+    },
+    {
+      "fragmentHash": "14cb79dd4c04bc40",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally keep their typed summary aggregation local; SC-1836 changes only conventions blocking-authority metrics.",
+      "date": "2026-08-23",
+      "lines": 34,
+      "rangeA": "370-403",
+      "rangeB": "467-500"
+    },
+    {
+      "fragmentHash": "4504e40d778d2ad9",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally keep their baseline comparison flow local; cross-bench extraction is outside SC-1836.",
+      "date": "2026-08-23",
+      "lines": 31,
+      "rangeA": "470-500",
+      "rangeB": "549-579"
+    },
+    {
+      "fragmentHash": "e1aab20665036cd2",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally share the house-standard result reporting shape while retaining reviewer-specific metrics.",
+      "date": "2026-08-23",
+      "lines": 14,
+      "rangeA": "835-848",
+      "rangeB": "943-956"
+    },
+    {
+      "fragmentHash": "ce7257c3b01a8bf2",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally use the same gate-spy capture contract; SC-1836 does not change that architecture.",
+      "date": "2026-08-23",
+      "lines": 8,
+      "rangeA": "291-298",
+      "rangeB": "374-382"
+    },
+    {
+      "fragmentHash": "a8a0ad5ff1782d84",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally share outage and metric finalization semantics while keeping their result types independent.",
+      "date": "2026-08-23",
+      "lines": 7,
+      "rangeA": "402-408",
+      "rangeB": "501-507"
+    },
+    {
+      "fragmentHash": "3a2e12fc151ec668",
+      "fileA": "gate-engine/review/eval/bench.mts",
+      "fileB": "gate-engine/review/eval/conventions/bench.mts",
+      "description": "Sibling benchmarks intentionally share stable row aggregation semantics; extracting it would broaden SC-1836.",
+      "date": "2026-08-23",
+      "lines": 6,
+      "rangeA": "427-432",
+      "rangeB": "522-527"
     }
   ]
 }

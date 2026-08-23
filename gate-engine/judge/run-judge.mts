@@ -111,11 +111,13 @@ export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
  *   the warning line). The levers that actually work are re-running, getting out from under the
  *   600s agent-tool cap, and shrinking the commit.
  * - `sync` — a missing brief/checklist artifact: an un-synced consumer, not an outage.
+ * - `evidence` — a completed conventions response without the required evidence pair: the judge is
+ *   healthy, but its response must satisfy the quote-and-cite protocol before it can block.
  * - `outage` — a genuine dark judge (ENOENT / 401 / non-zero exit): auth/quota is the right place.
  *
  * Each caller appends its own cached-verdict clause — what a retry re-uses differs per gate.
  */
-export function strictRemedy(cause: 'timeout' | 'sync' | 'outage'): string {
+export function strictRemedy(cause: 'timeout' | 'sync' | 'evidence' | 'outage'): string {
   if (cause === 'timeout')
     return (
       'the judge hit its time cap — this is NOT an auth/quota problem. Re-run `devkit ship`; run ' +
@@ -126,6 +128,11 @@ export function strictRemedy(cause: 'timeout' | 'sync' | 'outage'): string {
     return (
       'run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are ' +
       'present, then re-run devkit ship'
+    );
+  if (cause === 'evidence')
+    return (
+      'the conventions judge returned FAIL without a complete cited VIOLATION/OFFENDING pair; ' +
+      'inspect the transcript above, fix a real violation if present, then re-run devkit ship'
     );
   return 'check `claude` CLI auth/quota, then re-run devkit ship';
 }

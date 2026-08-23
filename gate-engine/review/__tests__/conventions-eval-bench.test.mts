@@ -24,12 +24,29 @@ import {
   variantConsistency,
 } from '../eval/conventions/bench.mts';
 import {
+  CONVENTIONS_GATE_HASH_INPUTS,
+  CONVENTIONS_MATCHER_HASH_INPUTS,
+} from '../eval/conventions/hash-inputs.mts';
+import {
   buildDecoyPrompt,
   buildGoldPrompt,
   parseFindings,
   scoreCase,
 } from '../eval/conventions/matcher.mts';
 import { selectReviewers } from '../reviewers.mts';
+
+it('hashes the shared conventions parser as both gate and matcher code', () => {
+  const parser = 'gate-engine/review/evidence/conventions.mts';
+  expect(CONVENTIONS_GATE_HASH_INPUTS).toContain(parser);
+  expect(CONVENTIONS_GATE_HASH_INPUTS).toContain('gate-engine/review/cascade/reviewer.mts');
+  expect(CONVENTIONS_MATCHER_HASH_INPUTS).toContain(parser);
+  const manifest = 'gate-engine/review/eval/conventions/hash-inputs.mts';
+  expect(CONVENTIONS_GATE_HASH_INPUTS).toContain(manifest);
+  expect(CONVENTIONS_MATCHER_HASH_INPUTS).toContain(manifest);
+  expect(CONVENTIONS_MATCHER_HASH_INPUTS).toContain(
+    'gate-engine/review/eval/conventions/metrics.mts',
+  );
+});
 
 function makeRow(overrides: Partial<ConventionsCase> = {}): ConventionsCase {
   return {
@@ -108,6 +125,23 @@ describe('parseFindings — regression fixtures from a live haiku baseline run',
     expect(found[0].offendingLine).toContain('CREATE TABLE order_events');
     expect(found[0].offendingLine).toContain('order_id UUID NOT NULL');
     expect(found[0].offendingLoc).toBe('db/migrations/0007_order_events.sql:1–5');
+  });
+
+  it('retains an uncited rule with a wrapped offending citation for tolerant scoring', () => {
+    const found = parseFindings(
+      'VIOLATION: some rule with no citation\n' +
+        'OFFENDING: bad code\n' +
+        '— src/x.ts:12\n' +
+        'VERDICT: FAIL',
+    );
+    expect(found).toEqual([
+      {
+        ruleQuote: 'some rule with no citation',
+        ruleLoc: '(location unspecified)',
+        offendingLine: 'bad code',
+        offendingLoc: 'src/x.ts:12',
+      },
+    ]);
   });
 
   it('a parenthetical annotation before the path ("CLAUDE.md (repo root):2-3") — the em-dash-only split still isolates the true separator', () => {
@@ -310,6 +344,7 @@ describe('summarize', () => {
         outage: false,
         verdict: 'FAIL',
         status: 'fail',
+        blockingAuthority: { g1: true },
         score: {
           slots: [
             { slotId: 'g1', kind: 'gold', ok: true, got: 'hit', stable: true, outage: false },
@@ -322,6 +357,8 @@ describe('summarize', () => {
       },
     ]);
     expect(summary.gold).toEqual({ total: 1, hit: 1 });
+    expect(summary.blockingGold).toEqual({ total: 1, hit: 1 });
+    expect(summary.blockingAuthorityRecall).toBe(1);
     expect(summary.decoys.total).toBe(1);
     expect(summary.decoys.flagged).toBe(0);
     expect(summary.gapRecall).toBe(1);
@@ -329,7 +366,14 @@ describe('summarize', () => {
   });
   it('a case outage is counted but contributes no slot metrics', () => {
     const summary = summarize(rows, [
-      { id: 'r1', outage: true, verdict: null, status: null, score: null },
+      {
+        id: 'r1',
+        outage: true,
+        verdict: null,
+        status: null,
+        score: null,
+        blockingAuthority: {},
+      },
     ]);
     expect(summary.caseOutages).toBe(1);
     expect(summary.gold.total).toBe(0);
@@ -357,6 +401,7 @@ describe('variantConsistency — pattern by kind+ordinal, not literal slot id (r
           outage: false,
           verdict: 'FAIL',
           status: 'fail',
+          blockingAuthority: { 'base-slot-name': baseGot === 'hit' },
           score: {
             slots: [
               {
@@ -378,6 +423,7 @@ describe('variantConsistency — pattern by kind+ordinal, not literal slot id (r
           outage: false,
           verdict: 'FAIL',
           status: 'fail',
+          blockingAuthority: { 'totally-different-slot-name': variantGot === 'hit' },
           score: {
             slots: [
               {
@@ -417,8 +463,10 @@ describe('compareConventions', () => {
     gold: { total: 10, hit: 8 },
     decoys: { total: 10, flagged: 1, byKind: {} },
     findings: { total: 8, matched: 8, spurious: 0 },
+    blockingGold: { total: 10, hit: 8 },
     verdicts: { total: 10, correct: 9 },
     gapRecall: 0.8,
+    blockingAuthorityRecall: 0.8,
     falseFlagRate: 0.1,
     rows: {},
     slots: {},
@@ -428,6 +476,10 @@ describe('compareConventions', () => {
   });
   it('a gap-recall floor breach regresses regardless of flip statistics', () => {
     const bad = { ...base, gapRecall: FLOOR_GAP_RECALL - 0.01 };
+    expect(compareConventions(bad, base).regressed).toBe(true);
+  });
+  it('a production-parser recall breach regresses even when tolerant gap recall passes', () => {
+    const bad = { ...base, blockingAuthorityRecall: FLOOR_GAP_RECALL - 0.01 };
     expect(compareConventions(bad, base).regressed).toBe(true);
   });
   it('a false-flag ceiling breach regresses regardless of flip statistics', () => {
@@ -483,6 +535,21 @@ describe('runCase', () => {
     expect(res.score?.slots).toEqual([
       { slotId: 'g1', kind: 'gold', ok: true, got: 'hit', stable: true, outage: false },
     ]);
+    expect(res.blockingAuthority).toEqual({ g1: true });
+  });
+
+  it('reports a tolerant gold hit without an OFFENDING line as missing blocking authority', async () => {
+    const res = await runCase(makeRow(), {
+      reviewerExec: async () =>
+        'VIOLATION: Never call console.log directly. Use the structured logger. — app/CLAUDE.md:1\n' +
+        "OFFENDING: console.log('leaked'); — app/handler.ts\n" +
+        'VERDICT: FAIL — direct console.log call\n',
+      matcherExec: async () => 'SLOT: F1',
+      matchRuns: 1,
+      saveTranscript: false,
+    });
+    expect(res.score?.slots[0]).toMatchObject({ got: 'hit', ok: true });
+    expect(res.blockingAuthority).toEqual({ g1: false });
   });
 
   it('a judge outage (null) is reported as an outage, never scored as a miss', async () => {

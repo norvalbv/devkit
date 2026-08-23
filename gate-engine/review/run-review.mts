@@ -71,6 +71,7 @@ export { runCascade };
 const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
 // A cap kill, likewise, is the gate's OWN contention kill — not auth/quota.
 const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
+const EVIDENCE_INCONCLUSIVE_RE = /^(unsubstantiated conventions FAIL|conventions evidence retry)/;
 
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
@@ -270,19 +271,21 @@ export async function runReviewGate(
     // actively wrong there and contradicts the reason; in a `devkit ship` worktree the briefs/skills
     // must also be LINKED in (ship-branch.sh does this), an un-synced main checkout being the other
     // cause. A cap kill is a TIMEOUT, also not auth/quota. Only a genuine dark judge keeps it.
-    const remedy = strictRemedy(
-      SYNC_INCONCLUSIVE_RE.test(r.reason)
-        ? 'sync'
-        : TIMEOUT_INCONCLUSIVE_RE.test(r.reason)
-          ? 'timeout'
-          : 'outage',
-    );
+    const cause = SYNC_INCONCLUSIVE_RE.test(r.reason)
+      ? 'sync'
+      : TIMEOUT_INCONCLUSIVE_RE.test(r.reason)
+        ? 'timeout'
+        : EVIDENCE_INCONCLUSIVE_RE.test(r.reason)
+          ? 'evidence'
+          : 'outage';
+    const remedy = strictRemedy(cause);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
             `   Remedy: ${remedy} (completed verdicts are cached).`
         : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
     );
+    if (cause === 'evidence' && r.transcript) console.error(r.transcript.trim());
   }
   if (inconclusive.length > 0) return finish(strict ? 3 : 2);
   return finish(0);

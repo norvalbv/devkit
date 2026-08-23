@@ -63,12 +63,19 @@ describe('strictRemedy', () => {
     expect(strictRemedy('sync')).not.toContain('auth/quota');
   });
 
+  it('an evidence gap names the conventions protocol, not auth or quota', () => {
+    const r = strictRemedy('evidence');
+    expect(r).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(r).toContain('inspect the transcript above');
+    expect(r).not.toContain('auth/quota');
+  });
+
   it('a genuine outage KEEPS the auth/quota remedy — that cause really is auth/quota', () => {
     expect(strictRemedy('outage')).toBe('check `claude` CLI auth/quota, then re-run devkit ship');
   });
 
   it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {
-    const all = (['timeout', 'sync', 'outage'] as const).map(strictRemedy);
-    expect(new Set(all).size).toBe(3);
+    const all = (['timeout', 'sync', 'evidence', 'outage'] as const).map(strictRemedy);
+    expect(new Set(all).size).toBe(4);
   });
 });

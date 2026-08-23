@@ -4,6 +4,7 @@ import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mts';
 import { renderGoverningClaudeMd } from '../claude-md.mts';
 import { buildCappedDiffEvidence } from '../diff-evidence.mts';
+import { parseConventionFindings } from '../evidence/conventions.mts';
 import { attachItems } from '../evidence/items.mts';
 import { gitCached } from '../evidence/staged-git.mts';
 import { applyOverrideValve } from '../overrides.mts';
@@ -143,7 +144,9 @@ async function cascadeVerdict(
     },
   };
   let first = await exec(firstOpts);
+  let initialRetryUsed = false;
   if (first === null && retryFirst && firstOutage !== 'timeout') {
+    initialRetryUsed = true;
     console.error(
       `guard-review: ${reviewer.name}: judge run failed (${firstOutage ?? 'transient'}), retrying once…`,
     );
@@ -159,7 +162,7 @@ async function cascadeVerdict(
       escalated: false,
       model: passModel,
     };
-  const firstVerdict = parseReviewVerdict(first);
+  let firstVerdict = parseReviewVerdict(first);
   if (firstVerdict.verdict === 'PASS')
     return {
       name: reviewer.name,
@@ -178,7 +181,71 @@ async function cascadeVerdict(
       model: passModel,
       transcript: first,
     };
-  if (reviewer.model)
+  if (reviewer.model) {
+    if (reviewer.name === 'conventions-reviewer' && parseConventionFindings(first).length === 0) {
+      let evidenceRetryUsed = false;
+      if (retryFirst && !initialRetryUsed) {
+        evidenceRetryUsed = true;
+        console.error(
+          `guard-review: ${reviewer.name}: FAIL lacked a complete evidence pair, retrying once…`,
+        );
+        let evidenceRetryOutage: 'timeout' | 'transient' | 'empty' | undefined;
+        const retried = await exec({
+          ...firstOpts,
+          onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
+            evidenceRetryOutage = kind;
+          },
+        });
+        if (retried === null)
+          return {
+            name: reviewer.name,
+            status: 'inconclusive',
+            reason: evidenceRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
+            escalated: false,
+            model: passModel,
+            transcript: first,
+          };
+        if (retried !== null) {
+          first = retried;
+          firstVerdict = parseReviewVerdict(first);
+          if (firstVerdict.verdict === 'PASS')
+            return {
+              name: reviewer.name,
+              status: 'pass',
+              reason: firstVerdict.reason,
+              escalated: false,
+              model: passModel,
+              transcript: first,
+            };
+          if (firstVerdict.verdict === null)
+            return {
+              name: reviewer.name,
+              status: 'inconclusive',
+              reason: 'conventions evidence retry produced no VERDICT line',
+              escalated: false,
+              model: passModel,
+              transcript: first,
+            };
+        }
+      }
+      if (firstVerdict.verdict === 'FAIL' && parseConventionFindings(first).length > 0)
+        return {
+          name: reviewer.name,
+          status: 'fail',
+          reason: firstVerdict.reason,
+          escalated: false,
+          model: passModel,
+          transcript: first,
+        };
+      return {
+        name: reviewer.name,
+        status: 'inconclusive',
+        reason: `unsubstantiated conventions FAIL${initialRetryUsed || evidenceRetryUsed ? ' after retry' : ''} — no complete VIOLATION/OFFENDING pair`,
+        escalated: false,
+        model: passModel,
+        transcript: first,
+      };
+    }
     return {
       name: reviewer.name,
       status: 'fail',
@@ -187,6 +254,7 @@ async function cascadeVerdict(
       model: passModel,
       transcript: first,
     };
+  }
   let secondOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,

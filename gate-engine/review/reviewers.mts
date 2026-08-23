@@ -14,6 +14,7 @@ import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { type GuardConfig, sourceMatchers } from '../config.mts';
 import { devkitVersion } from '../devkit-version.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
+import { VERDICT_LINE_RE } from './evidence/conventions.mts';
 import { checklistContractFor } from './lens/split.mts';
 
 /** The resolved governance-gate config shape (the review cluster reads its `review.*`, `scanRoots`,
@@ -177,12 +178,6 @@ export function checklistScriptAt(reviewer: ChecklistReviewer, assetRoot = '.cla
 // No naked Bash: a gate judge must never be able to write, stage, or commit.
 const BASE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git status:*)';
 
-// Tolerates markdown dressing around the verdict line; the LAST match wins (the body may discuss
-// pass/fail while reasoning). Deliberately NO bare-word fallback — unlike ALIGN/CONTRADICT,
-// "pass"/"fail" saturate ordinary review prose, so a missing VERDICT line must read as "no
-// verdict" (null → no block, no cache), never be guessed from body words.
-const VERDICT_LINE_RE = /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
-
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const TRAILING_SLASH_RE = /\/$/;
@@ -339,12 +334,6 @@ export function wrapPrompt(
   );
 }
 
-// One violation block per the conventions-reviewer brief's contract — the OFFENDING path:line is
-// the STABLE key the override valve fingerprints on (see parseConventionFindings docstring): it
-// is deterministic for a fixed diff, unlike the free-text VERDICT reason, which a haiku judge may
-// paraphrase differently run to run on byte-identical input.
-const OFFENDING_LINE_RE = /^[\s>*#-]*\**OFFENDING\**\s*:.*[—–-]\s*(\S+):(\d+)\s*$/gim;
-
 /**
  * Checklist-free counterpart to `wrapPrompt` for a reviewer without Bash: pre-capped evidence rides
  * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
@@ -382,22 +371,6 @@ export function wrapConventionsPrompt(
     'VERDICT: PASS | FAIL — <one-line reason>\n' +
     'FAIL only for a clear, quotable violation that must block THIS commit.'
   );
-}
-
-/**
- * Parse the `OFFENDING: … — <path>:<line>` blocks from a conventions-reviewer transcript — used
- * ONLY to build the override valve's lens keys (never the free-text VERDICT reason: haiku's
- * one-line paraphrase of the SAME violation varies run-to-run on byte-identical input, which would
- * silently un-match a dev's already-committed waiver and re-block them; the offending path:line is
- * deterministic for a fixed diff, exactly like the checklist item names other reviewers key on).
- */
-export function parseConventionFindings(
-  raw: string,
-): { offendingPath: string; offendingLine: number }[] {
-  return [...String(raw).matchAll(OFFENDING_LINE_RE)].map((m) => ({
-    offendingPath: m[1],
-    offendingLine: Number(m[2]),
-  }));
 }
 
 /** Escalation prompt: opus independently re-verifies a first-pass FAIL (check-alignment shape). */
