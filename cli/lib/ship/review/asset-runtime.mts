@@ -14,6 +14,7 @@ import {
   PACKAGED_REVIEW_RUNTIME_ENTRYPOINT,
   PACKAGED_REVIEW_RUNTIME_MODULE_STEMS,
 } from '../../../../gate-engine/review/runtime.mts';
+import { readAgentAssetManifest } from '../../install/agent-asset-manifest/reader.mts';
 import { runDirectReviewCli } from './run-direct.mts';
 import {
   readPinnedReviewFile,
@@ -26,10 +27,12 @@ import {
   isSafeReviewRelativePath,
   reviewPathWithin,
 } from './runtime-paths.mts';
+import { fail } from './shared/common.mts';
 
 const SAFE_RUNTIME_PATH = /^[A-Za-z0-9_./-]+$/;
 const RUNTIME_MODULE_EXTENSIONS = ['.mjs', '.mts'] as const;
 type RuntimeModuleExtension = (typeof RUNTIME_MODULE_EXTENSIONS)[number];
+type ShipAssetKind = 'agents' | 'skills';
 
 interface CapturedAsset {
   content: Buffer;
@@ -45,10 +48,6 @@ export interface ReviewAssetRuntime {
 
 export interface ReviewAssetRuntimeHooks {
   beforeSourceVerification?: () => void;
-}
-
-function fail(message: string): never {
-  throw new Error(`devkit review: ${message}`);
 }
 
 function validateAssetPath(path: string): void {
@@ -166,14 +165,28 @@ function runtimeFiles(root: string): string[] {
   return files;
 }
 
-/** Copy the exact registered reviewer assets and return the private tree's integrity fingerprint. */
-export function materializeReviewAssetRuntime(
+function packageShipAssetPaths(sourceRoot: string): readonly string[] {
+  for (const assetPath of packageRuntimePaths(sourceRoot)) {
+    captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset');
+  }
+  const paths = ['agents', 'skills']
+    .flatMap((directory) =>
+      runtimeFiles(join(sourceRoot, directory)).map((path) => `${directory}/${path}`),
+    )
+    .sort();
+  validateAssetPaths(paths);
+  return paths;
+}
+
+function materializeAssetRuntime(
   packageRoot: string,
   destinationRoot: string,
-  hooks: ReviewAssetRuntimeHooks = {},
+  assetPathsForPackage: (sourceRoot: string) => readonly string[],
+  expectedSet: string,
+  hooks: ReviewAssetRuntimeHooks,
 ): ReviewAssetRuntime {
   const sourceRoot = canonicalReviewDirectory(packageRoot, 'reviewer package root');
-  const assetPaths = packageRuntimePaths(sourceRoot);
+  const assetPaths = assetPathsForPackage(sourceRoot);
   const before = new Map<string, CapturedAsset>();
   for (const assetPath of assetPaths) {
     before.set(
@@ -189,7 +202,7 @@ export function materializeReviewAssetRuntime(
       writeCapturedAsset(runtime, assetPath, before.get(assetPath) as CapturedAsset);
     }
     hooks.beforeSourceVerification?.();
-    if (JSON.stringify(packageRuntimePaths(sourceRoot)) !== JSON.stringify(assetPaths)) {
+    if (JSON.stringify(assetPathsForPackage(sourceRoot)) !== JSON.stringify(assetPaths)) {
       fail('packaged reviewer assets changed during private runtime capture; retry');
     }
     for (const assetPath of assetPaths) {
@@ -200,7 +213,7 @@ export function materializeReviewAssetRuntime(
         fail('packaged reviewer assets changed during private runtime capture; retry');
     }
     if (JSON.stringify(runtimeFiles(runtime)) !== JSON.stringify(assetPaths))
-      fail('private reviewer asset runtime does not match the registered asset set');
+      fail(`private reviewer asset runtime does not match the ${expectedSet}`);
     return {
       root: runtime,
       fingerprint: reviewRuntimeFingerprint(runtime),
@@ -210,6 +223,60 @@ export function materializeReviewAssetRuntime(
     if (runtime) rmSync(runtime, { recursive: true, force: true });
     throw cause;
   }
+}
+
+/** Copy the exact registered reviewer assets and return the private tree's integrity fingerprint. */
+export function materializeReviewAssetRuntime(
+  packageRoot: string,
+  destinationRoot: string,
+  hooks: ReviewAssetRuntimeHooks = {},
+): ReviewAssetRuntime {
+  return materializeAssetRuntime(
+    packageRoot,
+    destinationRoot,
+    packageRuntimePaths,
+    'registered asset set',
+    hooks,
+  );
+}
+
+/** Copy every packaged agent and skill for a ship/reship worktree projection. */
+export function materializeShipAssetRuntime(
+  packageRoot: string,
+  destinationRoot: string,
+): ReviewAssetRuntime {
+  return materializeAssetRuntime(
+    packageRoot,
+    destinationRoot,
+    packageShipAssetPaths,
+    'packaged agent/skill set',
+    {},
+  );
+}
+
+function claudeManifestOwnedNames(root: string, kind: ShipAssetKind): string[] {
+  const sourceRoot = canonicalReviewDirectory(root, 'ship source root');
+  let decoded: ReturnType<typeof readAgentAssetManifest>;
+  try {
+    decoded = readAgentAssetManifest(join(sourceRoot, '.devkit', `${kind}-manifest.json`), kind);
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return fail(`could not read ${kind} ownership manifest: ${message}`);
+  }
+  if (!decoded) return [];
+  const files =
+    decoded.version === 1
+      ? decoded.manifest.targets.includes('claude')
+        ? decoded.manifest.files
+        : {}
+      : (decoded.manifest.providers.claude?.files ?? {});
+  return [
+    ...new Set(
+      Object.keys(files)
+        .map((path) => path.split('/')[0])
+        .filter(Boolean),
+    ),
+  ].sort();
 }
 
 /** Recheck both the packaged source and its immutable private copy after target hooks run. */
@@ -245,6 +312,25 @@ function runCli(args: string[]): void {
     process.stdout.write(result.fingerprint);
     return;
   }
+  if (args[0] === 'materialize-ship' && args.length === 3) {
+    const packageRoot = args[1];
+    const destinationRoot = args[2];
+    if (packageRoot === undefined || destinationRoot === undefined) {
+      fail('materialize-ship requires package and destination roots');
+    }
+    const result = materializeShipAssetRuntime(packageRoot, destinationRoot);
+    process.stdout.write(result.fingerprint);
+    return;
+  }
+  if (args[0] === 'manifest-owned' && args.length === 3) {
+    const root = args[1];
+    const kind = args[2];
+    if (root === undefined || (kind !== 'agents' && kind !== 'skills')) {
+      fail('manifest-owned requires a root and agents or skills');
+    }
+    for (const name of claudeManifestOwnedNames(root, kind)) process.stdout.write(`${name}\0`);
+    return;
+  }
   if (args[0] === 'verify' && args.length === 4) {
     verifyReviewAssetRuntime(args[1] as string, args[2] as string, args[3] as string);
     return;
@@ -256,7 +342,7 @@ function runCli(args: string[]): void {
     return;
   }
   fail(
-    'usage: asset-runtime materialize <package-root> <destination-root> | verify <package-root> <runtime-root> <fingerprint>',
+    'usage: asset-runtime materialize[-ship] <package-root> <destination-root> | manifest-owned <root> <agents|skills> | verify <package-root> <runtime-root> <fingerprint>',
   );
 }
 

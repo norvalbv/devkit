@@ -63,10 +63,82 @@ refresh_ship_reviewer_assets() {
     return 1
   fi
   mkdir -p "$physical_wt/.claude"
+
+  # Capture the exact registered reviewer contract before touching the consumer projection. The
+  # runtime helper rejects missing, escaping, non-regular, or concurrently changing package assets,
+  # so a stale consumer copy can never impersonate a broken running package. Its destination grammar
+  # is intentionally shell-tool-safe; use a fixed /tmp parent rather than inheriting a TMPDIR that
+  # may contain spaces (the ship worktree itself remains free to live there).
+  local asset_tool script_dir runtime_parent runtime entries owned source name projection_failed
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || return 1
+  asset_tool="$script_dir/review/asset-runtime.mts"
+  [ -f "$asset_tool" ] || asset_tool="$script_dir/review/asset-runtime.mjs"
+  [ -f "$asset_tool" ] || {
+    echo "devkit ship: reviewer asset runtime helper is unavailable" >&2
+    return 1
+  }
+  runtime_parent=$(mktemp -d /tmp/devkit-ship-review-assets.XXXXXX) || return 1
+  runtime="$runtime_parent/runtime"
+  if ! node "$asset_tool" materialize-ship "$package_root" "$runtime" >/dev/null; then
+    rm -rf -- "$runtime_parent"
+    return 1
+  fi
+
+  # Both roots must be real before the first replacement. Following a consumer symlink here could
+  # mutate a directory outside the throwaway worktree; accepting a file would produce a partial,
+  # misleading projection. Validate the pair first so either failure is all-before-overlay.
   for sub in agents skills; do
-    rm -rf -- "$physical_wt/.claude/$sub"
-    cp -R "$package_root/$sub" "$physical_wt/.claude/$sub"
+    if [ -L "$physical_wt/.claude/$sub" ] ||
+      { [ -e "$physical_wt/.claude/$sub" ] && [ ! -d "$physical_wt/.claude/$sub" ]; }; then
+      echo "devkit ship: $physical_wt/.claude/$sub must be a real directory" >&2
+      rm -rf -- "$runtime_parent"
+      return 1
+    fi
   done
+
+  for sub in agents skills; do
+    mkdir -p "$physical_wt/.claude/$sub"
+    entries="$runtime_parent/$sub.entries"
+    owned="$runtime_parent/$sub.owned"
+    if ! find "$runtime/$sub" -mindepth 1 -maxdepth 1 -print0 > "$entries"; then
+      rm -rf -- "$runtime_parent"
+      return 1
+    fi
+    if ! node "$asset_tool" manifest-owned "$physical_root" "$sub" > "$owned"; then
+      rm -rf -- "$runtime_parent"
+      return 1
+    fi
+    while IFS= read -r -d '' name; do
+      case $name in
+        '' | . | .. | */*)
+          echo "devkit ship: unsafe manifest-owned $sub name: $name" >&2
+          rm -rf -- "$runtime_parent"
+          return 1
+          ;;
+      esac
+    done < "$owned"
+  done
+
+  for sub in agents skills; do
+    entries="$runtime_parent/$sub.entries"
+    owned="$runtime_parent/$sub.owned"
+    projection_failed=0
+    while IFS= read -r -d '' name; do
+      rm -rf -- "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
+    done < "$owned"
+    if [ "$projection_failed" -eq 0 ]; then
+      while IFS= read -r -d '' source; do
+        name=${source##*/}
+        rm -rf -- "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
+        cp -R "$source" "$physical_wt/.claude/$sub/$name" || { projection_failed=1; break; }
+      done < "$entries"
+    fi
+    if [ "$projection_failed" -ne 0 ]; then
+      rm -rf -- "$runtime_parent"
+      return 1
+    fi
+  done
+  rm -rf -- "$runtime_parent"
   echo "  ↳ $purpose: refreshed reviewer agents + skills from running devkit package" >&2
 }
 
