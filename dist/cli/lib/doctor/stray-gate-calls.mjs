@@ -43,6 +43,7 @@ const PROBE_RE = /(^|[\s;|&(])(command\s+-v|which|type|hash)\s+$/;
 // Whole-word boundaries around a bin occurrence, so `guard-dup-allowlist` is not a `guard-dup` call.
 const BOUNDARY_BEFORE_RE = /[\s;|&(]$/;
 const BOUNDARY_AFTER_RE = /^\s/;
+const PACKAGE_BIN_PREFIX = '"$__dk_package_bin_dir/';
 // A package.json bin path (`./dist/gate-engine/review/cli.mjs`) → its self-host source form.
 const DIST_PREFIX_RE = /^\.?\/?dist\//;
 const MJS_EXT_RE = /\.mjs$/;
@@ -53,7 +54,7 @@ const MJS_EXT_RE = /\.mjs$/;
  * and flagging it would tell the consumer to delete their only invocation.
  */
 /**
- * `[needle, bin]` pairs to scan for. In a SELF-HOSTED hook devkit rewrites `bunx guard-review` to
+ * `[needle, bin]` pairs to scan for. In a SELF-HOSTED hook devkit rewrites the local `guard-review` to
  * `node gate-engine/review/cli.mts` (see husky/self-host.mts), so the bin name never appears in the
  * block — scanning for names alone leaves blockSignatures empty and the whole check silently does
  * nothing in exactly the repo that dogfoods it. The alias comes from the consumer's own bin map.
@@ -75,7 +76,7 @@ function gateNeedles(cwd) {
     }
     return needles;
 }
-function gateSignatures(code, needles) {
+function gateSignatures(code, needles, allowPackagePath = false) {
     const found = [];
     for (const [needle, bin] of needles) {
         // EVERY occurrence, not just the first: `command -v guard-dup && guard-dup scan` puts a probe
@@ -84,10 +85,11 @@ function gateSignatures(code, needles) {
         for (let at = code.indexOf(needle); at !== -1; at = code.indexOf(needle, at + needle.length)) {
             const before = code.slice(0, at);
             const after = code.slice(at + needle.length);
+            const packagePath = allowPackagePath && before.endsWith(PACKAGE_BIN_PREFIX) && after.startsWith('" ');
             // Whole-word only — `guard-dup-allowlist` must not read as a `guard-dup` call.
-            if (before && !BOUNDARY_BEFORE_RE.test(before))
+            if (!packagePath && before && !BOUNDARY_BEFORE_RE.test(before))
                 continue;
-            if (after && !BOUNDARY_AFTER_RE.test(after))
+            if (!packagePath && after && !BOUNDARY_AFTER_RE.test(after))
                 continue;
             // `command -v X` / `which X` ask whether the bin EXISTS; they never run the gate.
             if (PROBE_RE.test(before))
@@ -95,7 +97,7 @@ function gateSignatures(code, needles) {
             // Quoted or after an inline `#` — a message ABOUT the gate, not a call to it. Catches the
             // non-leading forms PRINTS_RE cannot: `[ -n "$V" ] && echo "next: guard-review --gate"`,
             // and `some_cmd  # guard-review runs in the block above`.
-            if (isQuotedOrCommented(before))
+            if (!packagePath && isQuotedOrCommented(before))
                 continue;
             found.push({ bin, at, end: at + needle.length });
         }
@@ -136,7 +138,7 @@ export function strayGateCalls(hookText, pkgRel = '', cwd) {
         .split('\n')
         .map((l) => l.trim())
         .filter((l) => l && !l.startsWith('#') && !PRINTS_RE.test(l))
-        .flatMap((l) => gateSignatures(l, needles)));
+        .flatMap((l) => gateSignatures(l, needles, true)));
     // `guard-deterministic` is an ORCHESTRATOR: the block never names size/fanout/dup/clone/coverage,
     // it runs them. Without expanding it, a stray `guard-dup` below the block could never match a
     // block signature and would go unreported — even though the orchestrator already runs that check.

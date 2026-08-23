@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { envFlag } from "../../config.mjs";
 import { emitGateEvent } from "../../judge/gate-events.mjs";
 import { saveTranscript } from "../../judge/transcript-store.mjs";
+import { measureDiffEvidenceCap } from "../diff-evidence.mjs";
 import { declaredRoots, hasChecklist, REVIEWERS, underRoot, } from "../reviewers.mjs";
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 export function emitReviewSkipped(reviewer, reason) {
@@ -123,6 +124,7 @@ contextFields = null) {
         prompt_identity: promptIdentity,
         diff_sha256: sha256(diffText),
         diff_bytes: Buffer.byteLength(diffText, 'utf8'),
+        ...measureDiffEvidenceCap(diffText),
         file_count: files.length,
         files_sha256: sha256(files.join('\n')),
         ...(spilled ? { scope_ref: spilled } : { files }),

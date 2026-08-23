@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import { isJsonObject, isJsonString, parseJson, } from "../../comment-firewall/types.mjs";
 import { withoutGitEnv } from "../judge-isolation.mjs";
 const BASELINE_SERVER_NAMES = ['codebase', 'context7', 'autonomous_bugs'];
 // Claude Code matches server-wide MCP permissions with the explicit `__*` suffix.
@@ -12,7 +13,6 @@ const EMPTY_MCP_CONFIG = '{"mcpServers":{}}';
 const REGISTRY_ENV = 'DEVKIT_JUDGE_MCP_CONFIG';
 const registryCache = new Map();
 const warned = new Set();
-const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 function warnOnce(key, message) {
     if (warned.has(key))
         return;
@@ -30,7 +30,8 @@ function trustedRegistryPath(requested, cwd, explicit) {
         const entry = lstatSync(requested);
         if (!entry.isFile() || entry.isSymbolicLink())
             return null;
-        if (typeof process.getuid === 'function' && entry.uid !== process.getuid())
+        const processUid = process.getuid?.();
+        if (processUid !== undefined && entry.uid !== processUid)
             return null;
         if ((entry.mode & 0o022) !== 0)
             return null;
@@ -51,8 +52,8 @@ function readRegistry(file) {
         const cached = registryCache.get(file);
         if (cached?.stamp === stamp)
             return cached.value;
-        const parsed = JSON.parse(readFileSync(file, 'utf8'));
-        const value = isRecord(parsed) ? parsed : null;
+        const parsed = parseJson(readFileSync(file, 'utf8'));
+        const value = isJsonObject(parsed) ? parsed : null;
         registryCache.set(file, { stamp, value });
         return value;
     }
@@ -61,17 +62,17 @@ function readRegistry(file) {
     }
 }
 function validServer(value) {
-    if (!isRecord(value) || value.disabled === true)
+    if (!isJsonObject(value) || value.disabled === true)
         return null;
     const command = value.command;
     const url = value.url;
-    if (typeof command !== 'string' && typeof url !== 'string')
+    if (!isJsonString(command) && !isJsonString(url))
         return null;
     const { disabled: _disabled, ...server } = value;
     return server;
 }
 function serverTable(value) {
-    if (!isRecord(value))
+    if (!isJsonObject(value))
         return {};
     const result = {};
     for (const [name, server] of Object.entries(value)) {
@@ -114,8 +115,8 @@ function projectCandidates(cwd, env, supplied) {
 function selectedServers(registry, serverNames, roots) {
     const selected = {};
     const rootServers = serverTable(registry.mcpServers);
-    const projects = isRecord(registry.projects) ? registry.projects : {};
-    const projectRows = roots.map((root) => projects[root]).filter(isRecord);
+    const projects = isJsonObject(registry.projects) ? registry.projects : {};
+    const projectRows = roots.map((root) => projects[root]).filter(isJsonObject);
     for (const name of serverNames) {
         let server = rootServers[name] ?? null;
         for (const project of projectRows) {
@@ -206,10 +207,11 @@ export function prepareJudgeMcpProfile(profile, options) {
             mode: 0o600,
             flag: 'wx',
         });
+        const privateDirectory = directory;
         return {
             args: ['--mcp-config', file, '--strict-mcp-config'],
             serverNames: present,
-            cleanup: () => rmSync(directory, { recursive: true, force: true }),
+            cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
         };
     }
     catch {

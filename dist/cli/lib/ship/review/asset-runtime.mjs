@@ -1,15 +1,14 @@
 /** Coherent, private materialization of the packaged reviewer assets used by review mode. */
-import { chmodSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync, } from 'node:fs';
+import { chmodSync, closeSync, constants, cpSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { PACKAGED_REVIEW_ASSET_PATHS, PACKAGED_REVIEW_RUNTIME_ENTRYPOINT, PACKAGED_REVIEW_RUNTIME_MODULE_STEMS, } from "../../../../gate-engine/review/runtime.mjs";
+import { readAgentAssetManifest } from "../../install/agent-asset-manifest/reader.mjs";
 import { runDirectReviewCli } from "./run-direct.mjs";
 import { readPinnedReviewFile, reviewRuntimeFileFingerprint, reviewRuntimeFingerprint, } from "./runtime-fingerprint.mjs";
 import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
+import { fail } from "./shared/common.mjs";
 const SAFE_RUNTIME_PATH = /^[A-Za-z0-9_./-]+$/;
 const RUNTIME_MODULE_EXTENSIONS = ['.mjs', '.mts'];
-function fail(message) {
-    throw new Error(`devkit review: ${message}`);
-}
 function validateAssetPath(path) {
     if (!isSafeReviewRelativePath(path)) {
         fail(`unsafe packaged reviewer asset path: ${JSON.stringify(path)}`);
@@ -117,10 +116,19 @@ function runtimeFiles(root) {
     visit(root);
     return files;
 }
-/** Copy the exact registered reviewer assets and return the private tree's integrity fingerprint. */
-export function materializeReviewAssetRuntime(packageRoot, destinationRoot, hooks = {}) {
+function packageShipAssetPaths(sourceRoot) {
+    for (const assetPath of packageRuntimePaths(sourceRoot)) {
+        captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset');
+    }
+    const paths = ['agents', 'skills']
+        .flatMap((directory) => runtimeFiles(join(sourceRoot, directory)).map((path) => `${directory}/${path}`))
+        .sort();
+    validateAssetPaths(paths);
+    return paths;
+}
+function materializeAssetRuntime(packageRoot, destinationRoot, assetPathsForPackage, expectedSet, hooks) {
     const sourceRoot = canonicalReviewDirectory(packageRoot, 'reviewer package root');
-    const assetPaths = packageRuntimePaths(sourceRoot);
+    const assetPaths = assetPathsForPackage(sourceRoot);
     const before = new Map();
     for (const assetPath of assetPaths) {
         before.set(assetPath, captureFile(sourceAsset(sourceRoot, assetPath), 'packaged reviewer asset'));
@@ -132,7 +140,7 @@ export function materializeReviewAssetRuntime(packageRoot, destinationRoot, hook
             writeCapturedAsset(runtime, assetPath, before.get(assetPath));
         }
         hooks.beforeSourceVerification?.();
-        if (JSON.stringify(packageRuntimePaths(sourceRoot)) !== JSON.stringify(assetPaths)) {
+        if (JSON.stringify(assetPathsForPackage(sourceRoot)) !== JSON.stringify(assetPaths)) {
             fail('packaged reviewer assets changed during private runtime capture; retry');
         }
         for (const assetPath of assetPaths) {
@@ -143,7 +151,7 @@ export function materializeReviewAssetRuntime(packageRoot, destinationRoot, hook
                 fail('packaged reviewer assets changed during private runtime capture; retry');
         }
         if (JSON.stringify(runtimeFiles(runtime)) !== JSON.stringify(assetPaths))
-            fail('private reviewer asset runtime does not match the registered asset set');
+            fail(`private reviewer asset runtime does not match the ${expectedSet}`);
         return {
             root: runtime,
             fingerprint: reviewRuntimeFingerprint(runtime),
@@ -154,6 +162,160 @@ export function materializeReviewAssetRuntime(packageRoot, destinationRoot, hook
         if (runtime)
             rmSync(runtime, { recursive: true, force: true });
         throw cause;
+    }
+}
+/** Copy the exact registered reviewer assets and return the private tree's integrity fingerprint. */
+export function materializeReviewAssetRuntime(packageRoot, destinationRoot, hooks = {}) {
+    return materializeAssetRuntime(packageRoot, destinationRoot, packageRuntimePaths, 'registered asset set', hooks);
+}
+/** Copy every packaged agent and skill for a ship/reship worktree projection. */
+export function materializeShipAssetRuntime(packageRoot, destinationRoot) {
+    return materializeAssetRuntime(packageRoot, destinationRoot, packageShipAssetPaths, 'packaged agent/skill set', {});
+}
+function claudeManifestOwnedNames(root, kind) {
+    const sourceRoot = canonicalReviewDirectory(root, 'ship source root');
+    let decoded;
+    try {
+        decoded = readAgentAssetManifest(join(sourceRoot, '.devkit', `${kind}-manifest.json`), kind);
+    }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return fail(`could not read ${kind} ownership manifest: ${message}`);
+    }
+    if (!decoded)
+        return [];
+    const files = decoded.version === 1
+        ? decoded.manifest.targets.includes('claude')
+            ? decoded.manifest.files
+            : {}
+        : (decoded.manifest.providers.claude?.files ?? {});
+    return [
+        ...new Set(Object.keys(files)
+            .map((path) => path.split('/')[0])
+            .filter(Boolean)),
+    ].sort();
+}
+function shipAssetName(name, kind, source) {
+    if (!isSafeReviewRelativePath(name) || name.includes('/')) {
+        return fail(`unsafe ${source} ${kind} name: ${JSON.stringify(name)}`);
+    }
+    return name;
+}
+function manifestOwnedNames(path, kind) {
+    const content = readFileSync(path);
+    if (content.length === 0)
+        return [];
+    if (content[content.length - 1] !== 0) {
+        return fail(`${kind} ownership list is not NUL terminated`);
+    }
+    return content
+        .subarray(0, -1)
+        .toString('utf8')
+        .split('\0')
+        .map((name) => shipAssetName(name, kind, 'manifest-owned'));
+}
+function enterPinnedDirectory(path, label) {
+    let descriptor;
+    try {
+        descriptor = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    }
+    catch {
+        return fail(`${label} must be a real directory and must not change during projection`);
+    }
+    try {
+        const opened = fstatSync(descriptor, { bigint: true });
+        process.chdir(path);
+        const entered = statSync('.', { bigint: true });
+        if (!opened.isDirectory() ||
+            !entered.isDirectory() ||
+            opened.dev !== entered.dev ||
+            opened.ino !== entered.ino) {
+            fail(`${label} changed during projection`);
+        }
+        return descriptor;
+    }
+    catch (cause) {
+        closeSync(descriptor);
+        throw cause;
+    }
+}
+export function projectShipAssetKind(worktree, runtimeRootPath, ownedNamesPath, kind, rename = renameSync) {
+    const runtime = canonicalReviewDirectory(runtimeRootPath, `ship reviewer ${kind} runtime`);
+    runtimeFiles(runtime);
+    const packaged = readdirSync(runtime)
+        .sort()
+        .map((name) => shipAssetName(name, kind, 'packaged'));
+    const owned = manifestOwnedNames(ownedNamesPath, kind);
+    const replacements = [...new Set([...owned, ...packaged])].sort();
+    const descriptors = [];
+    const quarantined = [];
+    const installed = [];
+    const originalCwd = process.cwd();
+    let staging;
+    let cleanStaging = true;
+    try {
+        try {
+            descriptors.push(enterPinnedDirectory(worktree, 'ship reviewer worktree'));
+            descriptors.push(enterPinnedDirectory('.claude', 'ship reviewer .claude root'));
+            descriptors.push(enterPinnedDirectory(kind, `ship reviewer ${kind} root`));
+            staging = realpathSync(mkdtempSync('.devkit-review-assets-'));
+            const quarantine = join(staging, '.quarantine');
+            mkdirSync(quarantine);
+            for (const name of packaged) {
+                cpSync(join(runtime, name), join(staging, name), {
+                    recursive: true,
+                    errorOnExist: true,
+                    force: false,
+                });
+            }
+            for (const [index, name] of replacements.entries()) {
+                if (lstatSync(name, { throwIfNoEntry: false }) !== undefined) {
+                    const path = join(quarantine, String(index));
+                    rename(name, path);
+                    quarantined.push({ name, path });
+                }
+            }
+            for (const name of packaged) {
+                rename(join(staging, name), name);
+                installed.push(name);
+            }
+        }
+        catch (cause) {
+            const rollbackFailures = [];
+            for (const name of installed.reverse()) {
+                try {
+                    rmSync(name, { recursive: true, force: true });
+                }
+                catch (rollbackCause) {
+                    rollbackFailures.push(rollbackCause);
+                }
+            }
+            for (const entry of quarantined.reverse()) {
+                try {
+                    if (lstatSync(entry.name, { throwIfNoEntry: false }) !== undefined) {
+                        throw new Error(`cannot restore occupied reviewer asset: ${entry.name}`);
+                    }
+                    rename(entry.path, entry.name);
+                }
+                catch (rollbackCause) {
+                    rollbackFailures.push(rollbackCause);
+                }
+            }
+            if (rollbackFailures.length > 0) {
+                cleanStaging = false;
+                throw new AggregateError([cause, ...rollbackFailures], `ship reviewer ${kind} projection failed; recovery assets retained in ${staging}`);
+            }
+            throw cause;
+        }
+        finally {
+            if (staging && cleanStaging)
+                rmSync(staging, { recursive: true, force: true });
+            for (const descriptor of descriptors.reverse())
+                closeSync(descriptor);
+        }
+    }
+    finally {
+        process.chdir(originalCwd);
     }
 }
 /** Recheck both the packaged source and its immutable private copy after target hooks run. */
@@ -184,6 +346,37 @@ function runCli(args) {
         process.stdout.write(result.fingerprint);
         return;
     }
+    if (args[0] === 'materialize-ship' && args.length === 3) {
+        const packageRoot = args[1];
+        const destinationRoot = args[2];
+        if (packageRoot === undefined || destinationRoot === undefined) {
+            fail('materialize-ship requires package and destination roots');
+        }
+        const result = materializeShipAssetRuntime(packageRoot, destinationRoot);
+        process.stdout.write(result.fingerprint);
+        return;
+    }
+    if (args[0] === 'manifest-owned' && args.length === 3) {
+        const root = args[1];
+        const kind = args[2];
+        if (root === undefined || (kind !== 'agents' && kind !== 'skills')) {
+            fail('manifest-owned requires a root and agents or skills');
+        }
+        for (const name of claudeManifestOwnedNames(root, kind))
+            process.stdout.write(`${name}\0`);
+        return;
+    }
+    if (args[0] === 'project-ship-kind' && args.length === 5) {
+        const [worktree, runtimeRootPath, ownedNamesPath, kind] = args.slice(1);
+        if (worktree === undefined ||
+            runtimeRootPath === undefined ||
+            ownedNamesPath === undefined ||
+            (kind !== 'agents' && kind !== 'skills')) {
+            fail('project-ship-kind requires worktree, runtime, ownership list, and agents or skills');
+        }
+        projectShipAssetKind(worktree, runtimeRootPath, ownedNamesPath, kind);
+        return;
+    }
     if (args[0] === 'verify' && args.length === 4) {
         verifyReviewAssetRuntime(args[1], args[2], args[3]);
         return;
@@ -194,6 +387,6 @@ function runCli(args) {
         process.stdout.write(result.fingerprint);
         return;
     }
-    fail('usage: asset-runtime materialize <package-root> <destination-root> | verify <package-root> <runtime-root> <fingerprint>');
+    fail('usage: asset-runtime materialize[-ship] <package-root> <destination-root> | manifest-owned <root> <agents|skills> | project-ship-kind <worktree> <runtime-root> <owned-names> <agents|skills> | verify <package-root> <runtime-root> <fingerprint>');
 }
 runDirectReviewCli(import.meta.url, runCli);

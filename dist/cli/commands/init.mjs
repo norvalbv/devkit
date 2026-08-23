@@ -827,7 +827,7 @@ export async function applyInit(cwd, plan) {
         pkgRel,
         standalone,
         // Self-host marker: upgrade/doctor read this to skip the pin/dep checks and regenerate the
-        // source-mode hook instead of the `bunx guard-*` one.
+        // source-mode hook instead of the package-local `guard-*` one.
         selfHost,
         components,
         review: normalizeReviewProfile(plan.review ?? prevConfig?.review, components.guards, {

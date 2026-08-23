@@ -12,6 +12,13 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  isJsonObject,
+  isJsonString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from '../../comment-firewall/types.mts';
 import { withoutGitEnv } from '../judge-isolation.mts';
 
 const BASELINE_SERVER_NAMES = ['codebase', 'context7', 'autonomous_bugs'] as const;
@@ -21,8 +28,11 @@ const BASELINE_TOOL_PREFIXES = BASELINE_SERVER_NAMES.map((name) => `mcp__${name}
 const EMPTY_MCP_CONFIG = '{"mcpServers":{}}';
 const REGISTRY_ENV = 'DEVKIT_JUDGE_MCP_CONFIG';
 
-type JsonRecord = Record<string, unknown>;
-type McpServers = Record<string, JsonRecord>;
+type JsonRecord = JsonObject;
+
+interface McpServers {
+  [name: string]: JsonRecord;
+}
 
 interface RegistryCacheEntry {
   stamp: string;
@@ -53,9 +63,6 @@ export interface PrepareJudgeMcpOptions {
   temporaryRoot?: string;
 }
 
-const isRecord = (value: unknown): value is JsonRecord =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 function warnOnce(key: string, message: string): void {
   if (warned.has(key)) return;
   warned.add(key);
@@ -72,7 +79,8 @@ function trustedRegistryPath(requested: string, cwd: string, explicit: boolean):
     if (!path.isAbsolute(requested)) return null;
     const entry = lstatSync(requested);
     if (!entry.isFile() || entry.isSymbolicLink()) return null;
-    if (typeof process.getuid === 'function' && entry.uid !== process.getuid()) return null;
+    const processUid = process.getuid?.();
+    if (processUid !== undefined && entry.uid !== processUid) return null;
     if ((entry.mode & 0o022) !== 0) return null;
     const canonical = realpathSync(requested);
     const canonicalCwd = realpathSync(cwd);
@@ -89,8 +97,8 @@ function readRegistry(file: string): JsonRecord | null {
     const stamp = `${stat.mtimeMs}:${stat.size}`;
     const cached = registryCache.get(file);
     if (cached?.stamp === stamp) return cached.value;
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
-    const value = isRecord(parsed) ? parsed : null;
+    const parsed = parseJson(readFileSync(file, 'utf8'));
+    const value = isJsonObject(parsed) ? parsed : null;
     registryCache.set(file, { stamp, value });
     return value;
   } catch {
@@ -98,17 +106,17 @@ function readRegistry(file: string): JsonRecord | null {
   }
 }
 
-function validServer(value: unknown): JsonRecord | null {
-  if (!isRecord(value) || value.disabled === true) return null;
+function validServer(value: JsonValue): JsonRecord | null {
+  if (!isJsonObject(value) || value.disabled === true) return null;
   const command = value.command;
   const url = value.url;
-  if (typeof command !== 'string' && typeof url !== 'string') return null;
+  if (!isJsonString(command) && !isJsonString(url)) return null;
   const { disabled: _disabled, ...server } = value;
   return server;
 }
 
-function serverTable(value: unknown): McpServers {
-  if (!isRecord(value)) return {};
+function serverTable(value: JsonValue) {
+  if (!isJsonObject(value)) return {};
   const result: McpServers = {};
   for (const [name, server] of Object.entries(value)) {
     const valid = validServer(server);
@@ -155,11 +163,11 @@ function selectedServers(
   registry: JsonRecord,
   serverNames: readonly string[],
   roots: readonly string[],
-): McpServers {
+) {
   const selected: McpServers = {};
   const rootServers = serverTable(registry.mcpServers);
-  const projects = isRecord(registry.projects) ? registry.projects : {};
-  const projectRows = roots.map((root) => projects[root]).filter(isRecord);
+  const projects = isJsonObject(registry.projects) ? registry.projects : {};
+  const projectRows = roots.map((root) => projects[root]).filter(isJsonObject);
 
   for (const name of serverNames) {
     let server: JsonRecord | null = rootServers[name] ?? null;
@@ -280,10 +288,11 @@ export function prepareJudgeMcpProfile(
       mode: 0o600,
       flag: 'wx',
     });
+    const privateDirectory = directory;
     return {
       args: ['--mcp-config', file, '--strict-mcp-config'],
       serverNames: present,
-      cleanup: () => rmSync(directory as string, { recursive: true, force: true }),
+      cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
     };
   } catch {
     if (directory) rmSync(directory, { recursive: true, force: true });

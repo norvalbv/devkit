@@ -1,11 +1,10 @@
 import { splitDiffByFile } from "../judge/diff-focus.mjs";
-/** Greedy-in-order capping: each segment gets up to `segmentCap` of the remaining `totalCap` room;
- * once room is gone, every further segment is OMITTED (named, never silently dropped). */
 export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
     const kept = [];
     const omitted = [];
     let used = 0;
     let truncated = 0;
+    let shownBytes = 0;
     for (const seg of segments) {
         const room = totalCap - used;
         if (room <= 0) {
@@ -16,14 +15,16 @@ export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
         if (seg.content.length <= cap) {
             kept.push(seg.content);
             used += seg.content.length;
+            shownBytes += Buffer.byteLength(seg.content, 'utf8');
         }
         else {
             truncated += 1;
+            shownBytes += Buffer.byteLength(seg.content.slice(0, cap), 'utf8');
             kept.push(`${seg.content.slice(0, cap)}\n[TRUNCATED: ${seg.label} — ${cap} of ${seg.content.length} chars shown; ${hint(seg.label)} for the rest]\n`);
             used += cap;
         }
     }
-    return { kept, omitted, truncated };
+    return { kept, omitted, truncated, shownBytes };
 }
 /** `capNamedSegments` + the OMITTED-list cutoff + the trailing INCOMPLETE-evidence warning —
  * everything after the caller's own leading context (e.g. a `--stat` map) rides first. */
@@ -46,6 +47,31 @@ function segmentPath(seg) {
     return seg.match(SEGMENT_PATH_RE)?.[1] ?? '(unknown path)';
 }
 const diffHint = (label) => `run \`git diff --cached -- ${label}\``;
+export function measureDiffEvidenceCap(fullDiff) {
+    const diff = String(fullDiff);
+    if (diff.length <= EVIDENCE_TOTAL_CAP)
+        return {
+            evidence_bytes_shown: Buffer.byteLength(diff, 'utf8'),
+            omitted_files: 0,
+            truncated_files: 0,
+        };
+    const segments = splitDiffByFile(diff).map((content) => ({
+        label: segmentPath(content),
+        content,
+    }));
+    const { omitted, truncated, shownBytes } = capNamedSegments(segments, {
+        totalCap: EVIDENCE_TOTAL_CAP,
+        segmentCap: SEGMENT_CAP,
+        omittedListMax: OMITTED_LIST_MAX,
+        hint: diffHint,
+        omittedFooterHint: '',
+    });
+    return {
+        evidence_bytes_shown: shownBytes,
+        omitted_files: omitted.length,
+        truncated_files: truncated,
+    };
+}
 /** Per-file capped diff evidence + explicit omission accounting. `stat` (the full `--stat` map)
  * always rides first — the complete inventory. */
 export function buildCappedDiffEvidence(fullDiff, stat) {

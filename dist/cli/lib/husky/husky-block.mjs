@@ -22,6 +22,7 @@ __dk_gate_deterministic() {
     [ "\${DEVKIT_RUN_MODE:-}" = "review" ] || exit 1
     dk_review_det_failed=1
 }`;
+export const PACKAGE_BIN_DIR_FRAGMENT = '__dk_package_bin_dir="$(bun pm bin)"';
 export const REVIEW_DETERMINISTIC_FINALIZER = `# devkit:review-deterministic-finalizer
 if [ "\${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
 # /devkit:review-deterministic-finalizer`;
@@ -33,7 +34,7 @@ if [ "\${dk_review_det_failed:-0}" -ne 0 ]; then exit 1; fi
 // hand-rolled DK_PREFIX_SKIP/DK_DET_FAILS shell protocol is gone.
 const deterministicFragment = (structureCmd, extras = []) => `# devkit:deterministic
 echo "🚧 Deterministic gates (aggregated)..."
-__dk_gate_deterministic bunx guard-deterministic --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')}
+__dk_gate_deterministic "$__dk_package_bin_dir/guard-deterministic" --hook "\${DK_HOOK_PATH:-$0}"${structureCmd ? ` --structure "${structureCmd}"` : ''}${extras.map((e) => ` --extra "${e.label}=${e.cmd}"`).join('')}
 # /devkit:deterministic`;
 // Guard run order: the deterministic orchestrator first (one aggregated report), AI gates last so
 // a doomed commit never pays for a judge. Explicit lists — never rely on object-key order.
@@ -44,7 +45,7 @@ const AI_GUARD_IDS = ['comments', 'decisions', 'review'];
 export const QAVIS_ADVISORY_ID = 'qavis-advisory';
 const QAVIS_FRAGMENT = `# devkit:guard-qavis-advisory
 qarc=0
-__dk_no_git_env bunx guard-qavis-advisory --gate || qarc=$?
+__dk_no_git_env "$__dk_package_bin_dir/guard-qavis-advisory" --gate || qarc=$?
 [ "$qarc" -eq 3 ] && exit 1
 # qarc 0 = continue (SILENT / advisory-only / receipt-cleared / qavis absent); 3 = strict-ship block
 # (the remedy — run qavis, or export GUARD_QAVIS_OK=1 — is printed by the bin).
@@ -66,7 +67,7 @@ if [ -n "$STAGED_FMT" ]; then
     rm -f "$UNSTAGED_FMT_FILE"
     if [ -n "$FMT_SAFE" ]; then
         echo "🎨 Formatting staged files..."
-        echo "$FMT_SAFE" | xargs bunx biome format --write 2>/dev/null || true
+        echo "$FMT_SAFE" | xargs "$__dk_package_bin_dir/biome" format --write 2>/dev/null || true
         echo "$FMT_SAFE" | xargs git add -f
     fi
 fi
@@ -119,6 +120,7 @@ export function buildGuardBlock(selection, pkgRel = '') {
     const pieces = [
         buildCommitTerminalFragment(handoff),
         ...DK_HOOK_HELPERS,
+        PACKAGE_BIN_DIR_FRAGMENT,
         DK_REVIEW_BASELINE_HELPER,
     ];
     // First so a first-gate block still records the run's terminal (the trap covers every exit path).

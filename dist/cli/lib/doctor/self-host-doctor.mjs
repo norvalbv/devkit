@@ -1,6 +1,6 @@
 /**
  * `devkit doctor` for a SELF-HOSTED repo (devkit itself): the hook is generated from source paths
- * rather than `bunx guard-*`, so it is compared against the generator directly instead of going
+ * rather than package-local `guard-*`, so it is compared against the generator directly instead of going
  * through the CheckResult pipeline. Split out of doctor.mts, which is at its line budget.
  */
 import { existsSync, readFileSync } from 'node:fs';

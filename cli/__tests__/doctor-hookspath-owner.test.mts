@@ -92,12 +92,12 @@ function pin(root: string, wt: string, target: string): void {
   git(wt, 'config', '--worktree', 'core.hooksPath', target);
 }
 
-async function results(root: string, cfg: object = HUSKY_CFG) {
+async function results(root: string, cfg: typeof HUSKY_CFG = HUSKY_CFG) {
   const { results: all } = await collectResults(root, cfg, { name: 'config.json', status: 'OK' });
   return all;
 }
 
-async function ownerCheck(root: string, cfg: object = HUSKY_CFG) {
+async function ownerCheck(root: string, cfg: typeof HUSKY_CFG = HUSKY_CFG) {
   return (await results(root, cfg)).find((r) => r.name === CHECK);
 }
 

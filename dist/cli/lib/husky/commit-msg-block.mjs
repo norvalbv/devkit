@@ -15,7 +15,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { detectGitRoot } from "../detect-git-root.mjs";
 import { markEnd, markStart } from "./husky.mjs";
-import { extractGuardBlock, PATH_SETUP, removeGuardBlock, replaceGuardBlock, } from "./husky-block.mjs";
+import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, } from "./husky-block.mjs";
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
 // Per-guard fragment sentinel ids — `review` contributes the COMPLETENESS judge here (its reviewer
@@ -39,12 +39,16 @@ __dk_clear_commit_state() {
     [ -n "$__dk_commit_state" ] && rm -f "$__dk_commit_state" 2>/dev/null || true
 }
 trap '__dk_clear_commit_state' EXIT`;
-// One judge invocation line. Package mode runs the bundled bin via bunx; standalone runs the
+// One judge invocation line. Package mode runs the repo-pinned local bin; standalone runs the
 // GLOBAL bin, command -v-guarded so a machine without devkit is never blocked (the standalone
 // pre-commit precedent). Both capture the exit into `rcVar` (see TESTED_STATUS_COMMENT).
 function invoke(standalone, cmd, rcVar) {
-    if (!standalone)
-        return `bunx ${cmd} --gate "$1" || ${rcVar}=$?`;
+    if (!standalone) {
+        const [bin, ...args] = cmd.split(' ');
+        const localBin = `"$__dk_package_bin_dir/${bin}"`;
+        return `[ -x ${localBin} ] || { echo "devkit: pinned ${bin} is missing — run bun install." >&2; exit 1; }
+${localBin}${args.length ? ` ${args.join(' ')}` : ''} --gate "$1" || ${rcVar}=$?`;
+    }
     const bin = cmd.split(' ')[0];
     return `if command -v ${bin} >/dev/null 2>&1; then ${cmd} --gate "$1" || ${rcVar}=$?; fi`;
 }
@@ -109,13 +113,17 @@ export function commitMsgGuards(guards = []) {
  * no commit-msg guard is selected (callers then remove any existing block instead).
  *
  * `pkgRel` (monorepo): package-scoped markers, and the judges run from the package dir (its staged
- * diff + guard.config.json). `standalone` swaps bunx for command -v-guarded global bins.
+ * diff + guard.config.json). `standalone` swaps local paths for command -v-guarded global bins.
  */
 export function buildCommitMsgBlock(selection, pkgRel = '', { standalone = false } = {}) {
     const selected = commitMsgGuards(selection.guards);
     if (!selected.length)
         return null;
-    const pieces = [COMMIT_ATTEMPT_HANDOFF, TESTED_STATUS_COMMENT];
+    const pieces = [
+        ...(standalone ? [] : [PACKAGE_BIN_DIR_FRAGMENT]),
+        COMMIT_ATTEMPT_HANDOFF,
+        TESTED_STATUS_COMMENT,
+    ];
     if (selected.includes('review'))
         pieces.push(completenessFragment(standalone));
     if (selected.includes('sentry'))
