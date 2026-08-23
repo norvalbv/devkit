@@ -6,6 +6,7 @@ import {
   writeRatchetBaseline,
 } from './baseline-paths.mts';
 import { LINES_BASELINE } from './size-policy.mts';
+import { lineBaselineFilesOrExit } from './size-line-authority.mts';
 
 export type LinesFreezeMode = 'shrink-only' | 'refresh';
 
@@ -20,10 +21,6 @@ interface OversizedFile {
   lines: number;
 }
 
-interface LinesBaseline {
-  files?: Record<string, number>;
-}
-
 export function freezeLinesBaseline(
   root: string,
   config: LinesConfig,
@@ -31,10 +28,11 @@ export function freezeLinesBaseline(
   mode: LinesFreezeMode,
 ): number {
   const baseline = readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE);
-  // SAFETY: freeze reads the Devkit-owned line baseline shape it writes below.
-  const previous: Record<string, number> = baseline
-    ? ((JSON.parse(baseline.contents) as LinesBaseline).files ?? {})
-    : {};
+  const previous = lineBaselineFilesOrExit(
+    baseline?.contents ?? null,
+    baseline?.relativePath ?? LINES_BASELINE,
+    'guard-size freeze unavailable',
+  );
   const match = sourceMatchers(config.sourceExtensions);
   const cap = (file: string) => (match.isTest(file) ? config.maxTestLines : config.maxLines);
   const raised =
