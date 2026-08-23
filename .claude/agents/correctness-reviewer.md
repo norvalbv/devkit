@@ -97,9 +97,12 @@ node $SCRIPT status
 `generate` enumerates the review items from the staged source files across the union of
 declared roots (`guard.config.json`). If it prints "No staged source files", exit early.
 
-## 3. Check each item, one at a time
-For each item: Grep/Read the staged files and their counterparties, then mark it:
-`node $SCRIPT check-item <name> --pass` or `--fail "reason"`.
+## 3. Check each item — report every distinct defect, not only the first
+For each item: Grep/Read the staged files and their counterparties. Search the item's WHOLE scope:
+when you find a defect, record it and KEEP SCANNING the remaining hunks under the same lens. Mark:
+`node $SCRIPT check-item <name> --pass`, or `--fail "reason"` once per DISTINCT defect — repeated
+`--fail` calls APPEND (up to 3 per item by default; GUARD_REVIEW_MAX_ISSUES_PER_LENS). Every reason
+names its file:line and the concrete failing input/interleaving. Never restate one defect twice.
 
 ### Correctness checks by category (exactly these four items — each is one pass over the diff):
 

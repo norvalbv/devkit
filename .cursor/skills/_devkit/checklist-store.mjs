@@ -87,6 +87,18 @@ export function createChecklistStore({
     }
   };
 
+  // Mirrors gate-engine/review/evidence/items.mts issuesPerLensCap() — the gate cannot be imported
+  // from a consumer asset, so both read the same env with the same default and clamp.
+  const issueCap = () => {
+    const n = Number.parseInt(
+      process.env.GUARD_REVIEW_MAX_ISSUES_PER_LENS ??
+        process.env.FRINK_REVIEW_MAX_ISSUES_PER_LENS ??
+        '',
+      10,
+    );
+    return Number.isFinite(n) && n >= 1 && n <= 10 ? n : 3;
+  };
+
   const checkItem = (name, pass, failReason) => {
     const data = loadOrExit('❌ No checklist');
     if (!data) return;
@@ -99,7 +111,15 @@ export function createChecklistStore({
     }
     item.status = pass ? 'pass' : 'fail';
     if (pass) item.issues = []; // a recovery pass clears the stale failure trail
-    if (!pass && failReason) item.issues.push(failReason);
+    if (!pass && failReason) {
+      if (item.issues.length >= issueCap()) {
+        log(
+          `⚠ ${name}: issue cap reached (${issueCap()}) — keeping the first ${issueCap()}; raise GUARD_REVIEW_MAX_ISSUES_PER_LENS to record more`,
+        );
+      } else {
+        item.issues.push(failReason);
+      }
+    }
     save(data);
     log(`✓ ${name}: ${item.status}${failReason ? ` (${failReason})` : ''}`);
   };
