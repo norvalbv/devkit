@@ -46,6 +46,10 @@ describe('search-code opt-in component', () => {
 
       expect(skill).toContain('`search-code search "<text>"`');
       expect(skill).not.toContain('tools/search-code/bin/semantic-search.mjs');
+      expect(skill).toContain(
+        'Semantic matching is intentionally not run as an advisory pre-push net',
+      );
+      expect(skill).not.toContain('+ the advisory `.husky/pre-push` net');
       expect(agent).toContain('`search-code search "<natural-language query>" --json`');
       expect(agent).not.toContain('tools/search-code/bin/semantic-search.mjs');
     }

@@ -47,7 +47,7 @@ fi
 
 ## Two detectors, one allowlist (overview)
 
-- **Embedding matcher** (`guard-dup`) — semantic, symbol-level. Catches renamed/paraphrased dups. Runs as the **blocking pre-commit gate** (`scan --new --changed --gate`, scoped to staged files) + the advisory `.husky/pre-push` net. Exit codes: 1 = block, 0 = clean, 2 = fail-open. A fail-open gate is NAMED in guard-deterministic's report (it proved nothing); if the dup gate opts out unexpectedly, `devkit doctor` reports whether the index is present but unwired. `GUARD_DETERMINISTIC_STRICT=1` makes an opt-out fatal.
+- **Embedding matcher** (`guard-dup`) — semantic, symbol-level. Catches renamed/paraphrased dups. Runs as the **blocking pre-commit gate** (`scan --new --changed --gate`, scoped to staged files). Semantic matching is intentionally not run as an advisory pre-push net: an unscoped full-index scan can make `git push` wait without progress. Exit codes: 1 = block, 0 = clean, 2 = fail-open. A fail-open gate is NAMED in guard-deterministic's report (it proved nothing); if the dup gate opts out unexpectedly, `devkit doctor` reports whether the index is present but unwired. `GUARD_DETERMINISTIC_STRICT=1` makes an opt-out fatal.
 - **Clone detector** (`guard-clone`) — verbatim, token-level (jscpd). Catches sub-chunk + inline-JSX (molecules) dups the matcher misses.
 
 This skill's agent runs both as a best-effort EARLY surface (step 3 searchCode = semantic; step 3b = clone detector); the husky gate is the deterministic authority. When the gate blocks, it prints a **pre-filled `add` / `add-clone` command** — **copy that command** rather than hand-building one (hand-built = empty metadata).

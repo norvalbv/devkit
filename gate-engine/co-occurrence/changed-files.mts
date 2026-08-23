@@ -26,7 +26,8 @@ const gitLines = (cmd: string, cwd: string): string[] => {
  * the WORKING TREE (jscpd opens files on disk; the matcher reads index rows built from disk),
  * so for a partially-staged file the content they judge is not the content being committed —
  * gating on it blocks a commit over code that isn't in it. Dropping those files makes the
- * scoped gate honest; the unscoped pre-push net still sees them.
+ * scoped gate honest, but means partially-staged files are explicitly not semantically verified;
+ * callers that require that coverage must stage the whole file before committing.
  *
  * A git failure → empty set (nothing scoped in).
  * @param cwd repo root for the git fallback.
