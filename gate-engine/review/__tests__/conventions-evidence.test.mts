@@ -25,6 +25,26 @@ afterEach(() => {
 });
 
 describe('conventions evidence completeness', () => {
+  const cappedRepo = () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    for (let index = 0; index < 93; index += 1)
+      writeFileSync(
+        join(repo, 'src', `config-${index}.json`),
+        `${JSON.stringify({ value: 'x'.repeat(9_000) })}\n`,
+      );
+    execSync('git add .', { cwd: repo });
+    return repo;
+  };
+
+  const unsubstantiatedFail = () =>
+    vi.fn(
+      async () =>
+        'NO_VIOLATIONS in the visible code.\n' +
+        '69 OMITTED and 3 TRUNCATED segments prevent a complete review.\n' +
+        'VERDICT: FAIL — incomplete evidence',
+    );
+
   it('directs the no-Bash reviewer to read omitted in-scope files before it passes', async () => {
     const repo = consumerRepo();
     mkdirSync(join(repo, 'src'), { recursive: true });
@@ -60,5 +80,135 @@ describe('conventions evidence completeness', () => {
     expect(call.args[1]).toContain('[TRUNCATED: CLAUDE.md');
     expect(call.args[1]).toContain('use Read to inspect every named rule file');
     expect(call.args[1]).toContain('Never treat incomplete evidence alone as a violation');
+  });
+
+  it('keeps a complete line-range finding blocking', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'Every config must set flag true.\n');
+    writeFileSync(join(repo, 'src', 'config.json'), '{ "flag": false }\n');
+    execSync('git add .', { cwd: repo });
+    const exec = vi.fn(
+      async () =>
+        'VIOLATION:\n' +
+        'OFFENDING: labels in quoted rule text\n' +
+        '— CLAUDE.md:1-2\n' +
+        'OFFENDING:\n' +
+        'VIOLATION: quoted source label\n' +
+        '— src/config.json:1–2\n' +
+        'VERDICT: FAIL — cited violation',
+    );
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('unsubstantiated conventions FAIL');
+  });
+
+  it('an unsubstantiated FAIL over a 93-file capped diff is inconclusive, not a rule violation', async () => {
+    const repo = cappedRepo();
+    const exec = unsubstantiatedFail();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(2);
+    expect(exec).toHaveBeenCalledOnce();
+    expect(exec.mock.calls[0][0].input).toContain('OMITTED');
+    expect(exec.mock.calls[0][0].input).toContain('TRUNCATED');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'response contract rejected an unsubstantiated FAIL',
+    );
+    expect(err.mock.calls.flat().join('\n')).not.toContain('conventions-reviewer FAILED');
+  });
+
+  it('strict ship mode fail-closes an unsubstantiated FAIL as exit 3, never exit 1', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = unsubstantiatedFail();
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('INCONCLUSIVE');
+    expect(err.mock.calls.flat().join('\n')).toContain('retrying once');
+    expect(err.mock.calls.flat().join('\n')).toContain('strict ship mode fails closed');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'judge response did not satisfy its declared contract',
+    );
+    expect(err.mock.calls.flat().join('\n')).toContain('69 OMITTED and 3 TRUNCATED');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('auth/quota');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('conventions-reviewer FAILED');
+  });
+
+  it('strict mode blocks when the one evidence retry returns a complete finding', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
+      .mockResolvedValueOnce(
+        'VIOLATION: Every config must set flag true. — CLAUDE.md:1\n' +
+          'OFFENDING: { "flag": false } — src/config-0.json:1\n' +
+          'VERDICT: FAIL — cited violation',
+      );
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
+    expect(err.mock.calls.flat().join('\n')).not.toContain('INCONCLUSIVE');
+  });
+
+  it('strict mode classifies an evidence-retry outage as an outage', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
+      .mockImplementationOnce(async (opts) => {
+        opts.onOutage?.('transient');
+        return null;
+      });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(err.mock.calls.flat().join('\n')).toContain('auth/quota');
+    expect(err.mock.calls.flat().join('\n')).not.toContain(
+      'complete cited VIOLATION/OFFENDING pair',
+    );
+  });
+
+  it('strict mode classifies a verdict-less evidence retry as a response-contract gap', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence')
+      .mockResolvedValueOnce('I could not finish reviewing the diff.');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(exec.mock.calls[1][0].args[1]).toContain('EVIDENCE-CONTRACT RETRY');
+    expect(exec.mock.calls[1][0].args[1]).toContain('complete cited VIOLATION/OFFENDING pair');
+    expect(err.mock.calls.flat().join('\n')).toContain(
+      'judge response did not satisfy its declared contract',
+    );
+    expect(err.mock.calls.flat().join('\n')).not.toContain('auth/quota');
+  });
+
+  it('strict mode caps outage recovery plus evidence validation at two judge calls', async () => {
+    process.env.GUARD_AI_STRICT = '1';
+    const repo = cappedRepo();
+    const exec = vi
+      .fn()
+      .mockImplementationOnce(async (opts) => {
+        opts.onOutage?.('transient');
+        return null;
+      })
+      .mockResolvedValueOnce('VERDICT: FAIL — incomplete evidence');
+
+    expect(await runReviewGate(repo, { exec })).toBe(3);
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 });

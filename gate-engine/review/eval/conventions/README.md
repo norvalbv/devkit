@@ -56,14 +56,17 @@ directory" has to be measured directly, not inferred from a recall/false-flag pa
 corpus's `scoping-*` rows exist for exactly this (see the dataset card below), and the bench reports
 decoys broken out **by kind** so the scoping metric doesn't disappear into the pooled ceiling.
 
-| headline | formula | why that metric | gate |
-|---|---|---|---|
-| **gap recall** | hit gold / all gold | a missed rule violation is what the reviewer exists to prevent | **hard floor 0.70** |
-| **false-flag rate** | flagged decoys / all decoys | re-litigating a recorded exception, or extending a rule past its CLAUDE.md scope, erodes trust in every future review | **hard ceiling 0.25** |
-| — `out-of-scope` flag rate (informational) | flagged / total, by decoy kind | the AC's own scoping-boundary metric — worth reading on its own | reported |
+| headline                                   | formula                                                   | why that metric                                                                                                       | gate                  |
+| ------------------------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| **gap recall**                             | hit gold / all gold                                       | a missed rule violation is what the reviewer exists to prevent                                                        | **hard floor 0.70**   |
+| **blocking-authority recall**              | gold matched by a production-validated finding / all gold | detects citation shapes the tolerant matcher sees but the gate would demote to inconclusive                           | **hard floor 0.70**   |
+| **false-flag rate**                        | flagged decoys / all decoys                               | re-litigating a recorded exception, or extending a rule past its CLAUDE.md scope, erodes trust in every future review | **hard ceiling 0.25** |
+| — `out-of-scope` flag rate (informational) | flagged / total, by decoy kind                            | the AC's own scoping-boundary metric — worth reading on its own                                                       | reported              |
 
 Same floor/ceiling **values** as completeness-eval (0.70 / 0.25) — set once from the house standard
-for an open-ended-finding reviewer bench, not retro-tuned.
+for an open-ended-finding reviewer bench, not retro-tuned. Blocking-authority recall reuses the
+recall floor but runs every matched gold finding through production's stricter citation parser, so
+the tolerant matcher cannot hide a real finding that production would fail open.
 
 ## Run
 
@@ -84,11 +87,11 @@ bad rows · `2` = could not run. Sweeps: `BENCH_MATCH_MODEL=haiku|sonnet` (match
 
 **The reviewer has NO model sweep, for a different underlying reason than completeness-eval's.**
 Completeness-eval's gate hardcodes opus by a **bench-external user ruling** ("the gap-finder gets
-the strongest model or it isn't worth running") — a choice this bench measures the *consequences*
+the strongest model or it isn't worth running") — a choice this bench measures the _consequences_
 of but did not itself decide. conventions-reviewer's single-pass haiku, no-cascade execution is a
 **ticket mandate** baked directly into `reviewers.mts`'s `REVIEWERS` table (`model: 'haiku'`, no
-`skill`) — see that file's own `Reviewer.model` docstring: *"Also used by conventions-reviewer, per
-the ticket's own haiku mandate."* There is no cascade to turn on and no alternate model the gate
+`skill`) — see that file's own `Reviewer.model` docstring: _"Also used by conventions-reviewer, per
+the ticket's own haiku mandate."_ There is no cascade to turn on and no alternate model the gate
 would ever run in production, so a bench-only sweep knob would measure a configuration that never
 ships — exactly completeness-eval's own "no model sweep on purpose" reasoning, applied here to a
 prompt-conditioned pin rather than a bench-external ruling.
@@ -100,15 +103,15 @@ prompt-conditioned pin rather than a bench-external ruling.
 - **Audit** (`matcher-audit`): joins a committed labels file (`matcher-audit-conventions.labels.jsonl`)
   against the latest run's saved transcripts and prints **percent agreement + Cohen's κ**.
   **Policy: κ < 0.7 → the matcher is not trusted; fix `matcher.mts` before reading headline metrics.**
-- **matcherHash**: `gate-engine/judge/matcher-core.mts` + this dir's `matcher.mts`, hashed into the
-  baseline alongside the gate hash — a matcher edit invalidates comparisons exactly like a gate
-  edit.
+- **matcherHash**: `gate-engine/judge/matcher-core.mts` + this dir's `matcher.mts` + the shared
+  `../../evidence/conventions.mts` parser, hashed into the baseline alongside the gate hash — a
+  matcher or parser edit invalidates comparisons exactly like a gate edit.
 - **CROSS-BENCH HAZARD (new versus decisions-eval, and versus completeness/critique pre-extraction):**
   `matcher-core.mts` is now **shared** by completeness-eval, critique-eval, and this bench (sc-1058's
   own ticket named this bench as the third-consumer extraction trigger). An edit to
   `matcher-core.mts` invalidates **all three** benches' `matcherHash` simultaneously — a single PR
   touching the shared engine can silently skip three benches' comparisons at once (each will report
-  "matcher changed since the baseline — regenerate with --baseline", which is *correct* per-bench
+  "matcher changed since the baseline — regenerate with --baseline", which is _correct_ per-bench
   but easy to read as three unrelated failures if the shared cause isn't obvious). **Re-run every
   consumer's `matcher-audit` after touching `matcher-core.mts`** — completeness's, critique's, and
   this one.
@@ -131,11 +134,11 @@ A comparison against `results.baseline.json` is **mechanically skipped** (never 
 when any of these differ from the run that produced the baseline:
 
 - `matchModel` / `matchRuns` (matcher config)
-- `gateHash` — `reviewers.mts` + `run-review.mts` + `claude-md.mts` + `diff-evidence.mts` +
+- `gateHash` — `reviewers.mts` + `run-review.mts` + `claude-md.mts` + `diff-evidence.mts` + the
+  reviewer's `evidence/*.mts` inputs (including the shared conventions parser) +
   `agents/conventions-reviewer.md`, hashed together. Everything that changes conventions-reviewer's
-  *behaviour* lives in this hash — including the two brand-new skill-less-reviewer evidence modules
-  (`claude-md.mts`, `diff-evidence.mts`) neither completeness-eval nor critique-eval depends on,
-  since neither of those gates is a `REVIEWERS`-table entry.
+  _behaviour_ lives in this hash; neither completeness-eval nor critique-eval is a `REVIEWERS`-table
+  entry, so those benches do not share these evidence inputs.
 - `matcherHash` — see the cross-bench hazard above.
 - `corpusHash` — the full row set as run (not a filtered subset; `--dev`/`--only` refuse to combine
   with `--baseline`/`--fail` for exactly this reason).
@@ -146,15 +149,28 @@ when any of these differ from the run that produced the baseline:
 **26 rows · 18 gold slots · 14 decoy slots.** One JSON object per line:
 
 ```json
-{ "id": "…", "category": "…", "difficulty": "clear|borderline|adversarial",
-  "provenance": "adapted", "note": "<why the labels are right — mandatory>",
-  "variantOf": null, "variantKind": "invariance|directional|null", "holdout": false,
+{
+  "id": "…",
+  "category": "…",
+  "difficulty": "clear|borderline|adversarial",
+  "provenance": "adapted",
+  "note": "<why the labels are right — mandatory>",
+  "variantOf": null,
+  "variantKind": "invariance|directional|null",
+  "holdout": false,
   "message": "<commit message — documentation only; this gate never reads it>",
-  "repo": { "base": {"path": "content"}, "staged": {"path": "content-or-null"} },
-  "gold":   [{ "id": "g1", "desc": "…", "paths": ["…"] }],
-  "decoys": [{ "id": "d1", "kind": "recorded-decision|out-of-scope|working-as-intended",
-               "targetSlug": "…", "desc": "…" }],
-  "expectedVerdict": "PASS|FAIL" }
+  "repo": { "base": { "path": "content" }, "staged": { "path": "content-or-null" } },
+  "gold": [{ "id": "g1", "desc": "…", "paths": ["…"] }],
+  "decoys": [
+    {
+      "id": "d1",
+      "kind": "recorded-decision|out-of-scope|working-as-intended",
+      "targetSlug": "…",
+      "desc": "…"
+    }
+  ],
+  "expectedVerdict": "PASS|FAIL"
+}
 ```
 
 - `gold[].paths` are matcher hints, not string-match keys. `expectedVerdict` is informational only
@@ -164,7 +180,7 @@ when any of these differ from the run that produced the baseline:
   decoy would never tempt the reviewer either way, since it has no checklist/Target-loading
   mechanism of its own and can only find the file via its own Read/Grep/Glob tools.
 - **Provenance: 100% `adapted`, 0% `mined`.** This is not a corner cut — it is structural. Every
-  *other* bench in this repo (completeness-eval, critique-eval, reviewer-eval) mines real findings
+  _other_ bench in this repo (completeness-eval, critique-eval, reviewer-eval) mines real findings
   from devkit's OWN history, because those reviewers judge devkit's own source against devkit's own
   conventions. conventions-reviewer's entire charter is the opposite: it checks a **consumer repo's**
   own written CLAUDE.md rules, never devkit's. devkit has no CLAUDE.md of its own to mine violations
@@ -247,7 +263,7 @@ zero claude calls, before any paid run).
   the "Run" section above. Every other reviewer this bench's siblings measure either cascades
   (reviewer-eval's four domain reviewers escalate haiku→opus on FAIL) or is pinned by a **bench
   finding** the ticket then encoded (correctness-reviewer: reviewer-eval measured that the opus
-  escalation *subtracts* recall and the pin followed from that measurement). conventions-reviewer's
+  escalation _subtracts_ recall and the pin followed from that measurement). conventions-reviewer's
   pin came first, from its own AC ("No Bash… single-pass"), not from a bench result — so there is no
   A/B this bench could ever run to justify sweeping it.
 - **An LLM matcher sits between judge output and metrics** (decisions parses closed labels): forced
@@ -278,9 +294,13 @@ change that motivated it, and the headline numbers — so the reviewer's measure
 greppable in one place. Validate any row by re-running `node bench.mts --fail` at that commit: the
 numbers must reproduce within the printed MDE.
 
-| date · change | gap recall (floor .70) | false-flag rate (ceiling .25) | out-of-scope flags | recorded-decision flags | verdict |
-|---|---|---|---|---|---|
-| 2026-07-09 · first baseline (haiku single-pass, no cascade) | 1.00 (18/18) [0.82, 1.00] | 0.07 (1/14) [0.01, 0.31] | 0/4 | 1/1 | PASS — both floors clear |
+| date · change                                               | gap recall (floor .70)    | blocking authority (floor .70) | false-flag rate (ceiling .25) | out-of-scope flags | recorded-decision flags | verdict                  |
+| ----------------------------------------------------------- | ------------------------- | ------------------------------- | ----------------------------- | ------------------ | ----------------------- | ------------------------ |
+| 2026-07-09 · first baseline (haiku single-pass, no cascade) | 1.00 (18/18) [0.82, 1.00] | n/a — metric not recorded       | 0.07 (1/14) [0.01, 0.31]      | 0/4                | 1/1                     | PASS — both floors clear |
+
+Blocking-authority recall was introduced by SC-1836 after this baseline was committed. The
+baseline artifact contains no production-authority field or raw transcripts, so the historical
+value cannot be reconstructed without inventing data; the next regenerated baseline must record it.
 
 **The one recorded-decision flag, explained (not hidden):** `layering-recorded-exception-pass`
 FAILs even though `docs/decisions/ui-data-import-for-offline-cache.md` records exactly this import

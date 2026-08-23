@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { devkitVersion } from '../../devkit-version.mts';
+import { parseConventionEvidencePairs, parseConventionFindings } from '../evidence/conventions.mts';
 import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
 import {
   allowedToolsFor,
   cacheKey,
   effectiveReviewConfig,
   escalatePrompt,
-  parseConventionFindings,
   parseReviewVerdict,
   REVIEWERS,
   rootsFor,
@@ -295,6 +295,9 @@ describe('conventions-reviewer (domain conventions, skill-less)', () => {
   it('is pinned single-pass to haiku, same mechanism as correctness', () => {
     expect(conv.model).toBe('haiku');
   });
+  it('declares the response contract that grants blocking authority', () => {
+    expect(conv.responseContract).toBe('conventions-v1');
+  });
   it("shares 'all''s root union — never ['.'], never restricted to a single declared-root kind", () => {
     expect([...rootsFor(conv, cfg)].sort()).toEqual(
       [
@@ -333,15 +336,233 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
       'OFFENDING: console.log(x) — src/a.ts:12\n' +
       'VERDICT: FAIL — logging rule violated';
     expect(parseConventionFindings(transcript)).toEqual([
-      { offendingPath: 'src/a.ts', offendingLine: 12 },
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 4,
+        offendingPath: 'src/a.ts',
+        offendingLine: 12,
+      },
     ]);
   });
-  it('multiple violations produce multiple distinct lenses', () => {
+  it('multiple complete violations produce multiple distinct lenses', () => {
     const transcript =
-      'OFFENDING: x — src/a.ts:1\nOFFENDING: y — src/b.ts:2\nVERDICT: FAIL — two violations';
+      'VIOLATION: rule a — CLAUDE.md:1\n' +
+      'OFFENDING: x — src/a.ts:1\n' +
+      'VIOLATION: rule b — docs/CLAUDE.md:2\n' +
+      'OFFENDING: y — src/b.ts:2\n' +
+      'VERDICT: FAIL — two violations';
     expect(parseConventionFindings(transcript)).toEqual([
-      { offendingPath: 'src/a.ts', offendingLine: 1 },
-      { offendingPath: 'src/b.ts', offendingLine: 2 },
+      { rulePath: 'CLAUDE.md', ruleLine: 1, offendingPath: 'src/a.ts', offendingLine: 1 },
+      {
+        rulePath: 'docs/CLAUDE.md',
+        ruleLine: 2,
+        offendingPath: 'src/b.ts',
+        offendingLine: 2,
+      },
+    ]);
+  });
+  it('accepts numeric line ranges while keeping their start as the stable lens line', () => {
+    const transcript =
+      'VIOLATION: multi-line rule — db/CLAUDE.md:3-4\n' +
+      'OFFENDING: multi-line call — src/db/client.ts:42–44\n' +
+      'VERDICT: FAIL — cited range';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'db/CLAUDE.md',
+        ruleLine: 3,
+        offendingPath: 'src/db/client.ts',
+        offendingLine: 42,
+      },
+    ]);
+  });
+  it('accepts an observed rule citation with no line when OFFENDING still has a stable lens', () => {
+    const transcript =
+      'VIOLATION: Components must not accept className. — packages/ui/CLAUDE.md\n' +
+      'OFFENDING: className?: string; — packages/ui/Button.tsx:10\n' +
+      'VERDICT: FAIL — cited rule';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'packages/ui/CLAUDE.md',
+        ruleLine: null,
+        offendingPath: 'packages/ui/Button.tsx',
+        offendingLine: 10,
+      },
+    ]);
+  });
+  it('accepts an observed parenthetical rule location', () => {
+    const transcript =
+      'VIOLATION: Never call console.* directly. — CLAUDE.md (repo root):2-3\n' +
+      "OFFENDING: console.log('total'); — services/orders/pricing.ts:4\n" +
+      'VERDICT: FAIL — cited rule';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md (repo root)',
+        ruleLine: 2,
+        offendingPath: 'services/orders/pricing.ts',
+        offendingLine: 4,
+      },
+    ]);
+  });
+  it('preserves wrapped quoted content that starts with non-closer protocol labels', () => {
+    const transcript =
+      'VIOLATION:\n' +
+      'OFFENDING: labels in quoted rule text\n' +
+      '— db/CLAUDE.md:3-4\n' +
+      'OFFENDING:\n' +
+      'VIOLATION: quoted source label\n' +
+      '— src/db/client.ts:42–44\n' +
+      'VERDICT: FAIL — cited wrapped labels';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'db/CLAUDE.md',
+        ruleLine: 3,
+        offendingPath: 'src/db/client.ts',
+        offendingLine: 42,
+      },
+    ]);
+  });
+  it('preserves protocol-label-like content before an inline citation trailer', () => {
+    const transcript =
+      'VIOLATION: Every migration must declare a primary key. — db/CLAUDE.md:3\n' +
+      'OFFENDING: CREATE TABLE order_events (\n' +
+      'VIOLATION: quoted column label\n' +
+      '); — db/migrations/0007_order_events.sql:1-5\n' +
+      'VERDICT: FAIL — cited wrapped content';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'db/CLAUDE.md',
+        ruleLine: 3,
+        offendingPath: 'db/migrations/0007_order_events.sql',
+        offendingLine: 1,
+      },
+    ]);
+  });
+  it('keeps mixed plain/em-dash citation blocks separate with correct lenses', () => {
+    const transcript =
+      'VIOLATION: rule A - CLAUDE.md:5\n' +
+      'OFFENDING: code A - foo.ts:10\n' +
+      'some unrelated prose\n' +
+      'VIOLATION:\n' +
+      'Real rule B text — CLAUDE.md:8\n' +
+      'OFFENDING: code B — bar.ts:20\n' +
+      'VERDICT: FAIL — two violations';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 5, offendingPath: 'foo.ts', offendingLine: 10 },
+      { rulePath: 'CLAUDE.md', ruleLine: 8, offendingPath: 'bar.ts', offendingLine: 20 },
+    ]);
+  });
+  it('does not mistake subtraction inside a wrapped quote for a citation trailer', () => {
+    const transcript =
+      'VIOLATION: Avoid manual result adjustment. — CLAUDE.md:5\n' +
+      'OFFENDING: const result = total - 1\n' +
+      '— src/utils.ts:20\n' +
+      'VERDICT: FAIL — cited subtraction';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 5,
+        offendingPath: 'src/utils.ts',
+        offendingLine: 20,
+      },
+    ]);
+  });
+  it('uses the final citation when a wrapped quote contains an incidental path:line', () => {
+    const transcript =
+      'VIOLATION: Cite the actual staged line. — CLAUDE.md:5\n' +
+      'OFFENDING: "the pattern used here resembles rule-9 — old/decoy.ts:10\n' +
+      'but actually flags this line" — src/actual.ts:200\n' +
+      'VERDICT: FAIL — cited wrapped content';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 5,
+        offendingPath: 'src/actual.ts',
+        offendingLine: 200,
+      },
+    ]);
+  });
+  it('rejects orphan VIOLATION and OFFENDING lines', () => {
+    expect(parseConventionFindings('VIOLATION: rule a — CLAUDE.md:1\nVERDICT: FAIL')).toEqual([]);
+    expect(parseConventionFindings('OFFENDING: x — src/a.ts:1\nVERDICT: FAIL')).toEqual([]);
+  });
+  it.each([
+    ['unrelated prose', 'Reviewer abandoned this point.\n'],
+    ['a code fence', '```\n'],
+    ['a verdict closer', 'VERDICT: FAIL — abandoned point\n'],
+  ])('does not pair an orphan violation across %s', (_boundary, boundary) => {
+    const transcript = `VIOLATION: Never use raw SQL. — CLAUDE.md:3\n${boundary}OFFENDING: const x = 1 — src/unrelated.ts:80`;
+    expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('treats a verdict closer before a delayed citation as a hard evidence boundary', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL.\n' +
+      'VERDICT: FAIL — abandoned point\n' +
+      '— CLAUDE.md:3\n' +
+      'OFFENDING: const x = 1 — src/unrelated.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([]);
+  });
+  it('preserves quoted verdict text without treating it as a protocol closer', () => {
+    const transcript =
+      'VIOLATION: Test fixtures must not hardcode verdict strings. — CLAUDE.md:5\n' +
+      'OFFENDING: The fixture writes\n' +
+      '"VERDICT: FAIL"\n' +
+      '— src/fixture.test.ts:42\n' +
+      'VERDICT: FAIL — cited fixture';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 5,
+        offendingPath: 'src/fixture.test.ts',
+        offendingLine: 42,
+      },
+    ]);
+  });
+  it('preserves a blank-line-separated evidence pair', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n\nOFFENDING: db.raw(query) — src/db.ts:80';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      {
+        violation: 'Never use raw SQL. — CLAUDE.md:3',
+        offending: 'db.raw(query) — src/db.ts:80',
+      },
+    ]);
+  });
+  it('rejects a missing rule citation even when the wrapped OFFENDING citation is complete', () => {
+    const transcript =
+      'VIOLATION: rule text\n' +
+      "OFFENDING: console.log('debug')\n" +
+      '— src/app.ts:42\n\n' +
+      'VERDICT: FAIL — uncited rule';
+    expect(parseConventionEvidencePairs(transcript)).toEqual([
+      {
+        violation: 'rule text',
+        offending: "console.log('debug') — src/app.ts:42",
+      },
+    ]);
+    expect(parseConventionFindings(transcript)).toEqual([]);
+  });
+  it('rejects arbitrary trailing prose where a line-less CLAUDE.md rule location is required', () => {
+    const transcript =
+      'VIOLATION: rule text — see repo guidelines for context\n' +
+      'OFFENDING: setState(x) — src/component.tsx:42\n' +
+      'VERDICT: FAIL — uncited rule';
+    expect(parseConventionFindings(transcript)).toEqual([]);
+  });
+  it('mixed malformed and valid blocks authorize only the complete pair', () => {
+    const transcript =
+      'OFFENDING: orphan — src/orphan.ts:9\n' +
+      'VIOLATION: real rule — CLAUDE.md:2\n' +
+      'OFFENDING: bad value — src/config.ts:4\n' +
+      'VERDICT: FAIL — one real violation\n' +
+      'VIOLATION: appendix — CLAUDE.md:8\n' +
+      'OFFENDING: too late — src/late.ts:3';
+    expect(parseConventionFindings(transcript)).toEqual([
+      {
+        rulePath: 'CLAUDE.md',
+        ruleLine: 2,
+        offendingPath: 'src/config.ts',
+        offendingLine: 4,
+      },
     ]);
   });
   it('no OFFENDING blocks → empty (a PASS transcript has none to key on)', () => {

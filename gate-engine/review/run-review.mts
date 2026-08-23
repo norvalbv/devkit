@@ -36,7 +36,9 @@ import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mts';
 import { loadCache } from './cache.mts';
 import { type CascadeResult, runCascade } from './cascade/reviewer.mts';
+import { RESPONSE_CONTRACT_REMEDY } from './contracts/response.mts';
 import { loadReviewerContext } from './evidence/commit-message.mts';
+import { responseContractFor } from './contracts/registry.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
@@ -65,12 +67,6 @@ import {
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mts';
 
 export { runCascade };
-
-// A missing brief / missing checklist artifact is a SYNC gap, not an auth/quota outage — the strict
-// remedy branches on it (see the inconclusive loop).
-const SYNC_INCONCLUSIVE_RE = /^agent brief |^checklist artifact missing/;
-// A cap kill, likewise, is the gate's OWN contention kill — not auth/quota.
-const TIMEOUT_INCONCLUSIVE_RE = /timed out$/;
 
 /**
  * The gate → exit code (see module contract). Selected reviewers run concurrently but BOUNDED to
@@ -157,14 +153,16 @@ export async function runReviewGate(
   // (ship-gates-converge-not-restart: amended-message retries must reuse cached PASSes).
   const ctx = await loadReviewerContext(cwd, stagedFiles(cwd));
   const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock);
-  // Prompt wrappers do not otherwise participate in this cache key. Re-run conventions once so
-  // cached verdicts earned from capped evidence receive the explicit Read recovery contract.
-  for (const { reviewer } of selected)
-    if (reviewer.name === 'conventions-reviewer')
+  // Response-contract identity participates uniformly: changing any checklist-free reviewer's
+  // blocking-authority protocol invalidates verdicts earned under the old contract.
+  for (const { reviewer } of selected) {
+    const responseContract = responseContractFor(reviewer.responseContract);
+    if (responseContract)
       targetSalts.set(
         reviewer.name,
-        `${targetSalts.get(reviewer.name) ?? ''}\0conventions-capped-evidence-read-v1`,
+        `${targetSalts.get(reviewer.name) ?? ''}\0${responseContract.identity}`,
       );
+  }
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
   const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey);
   for (const s of plan.scope)
@@ -243,6 +241,7 @@ export async function runReviewGate(
         name: task.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
+        inconclusiveCause: 'outage',
         escalated: false,
       })),
     gateStart,
@@ -265,24 +264,16 @@ export async function runReviewGate(
   if (fails.length > 0 || errors.length > 0) return finish(1);
   const inconclusive = results.filter((r) => r.status === 'inconclusive');
   for (const r of inconclusive) {
-    // The remedy must match the CAUSE (wording: judge/run-judge strictRemedy). A missing brief
-    // (cascadeVerdict) or missing checklist artifact (verifyChecklist) is a SYNC gap — auth/quota is
-    // actively wrong there and contradicts the reason; in a `devkit ship` worktree the briefs/skills
-    // must also be LINKED in (ship-branch.sh does this), an un-synced main checkout being the other
-    // cause. A cap kill is a TIMEOUT, also not auth/quota. Only a genuine dark judge keeps it.
-    const remedy = strictRemedy(
-      SYNC_INCONCLUSIVE_RE.test(r.reason)
-        ? 'sync'
-        : TIMEOUT_INCONCLUSIVE_RE.test(r.reason)
-          ? 'timeout'
-          : 'outage',
-    );
+    // Producers carry the machine cause; human-readable reasons are never parsed as an API.
+    const cause = r.inconclusiveCause ?? 'outage';
+    const remedy = cause === 'response-contract' ? RESPONSE_CONTRACT_REMEDY : strictRemedy(cause);
     console.error(
       strict
         ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
             `   Remedy: ${remedy} (completed verdicts are cached).`
         : `guard-review: ${r.name} inconclusive — ${r.reason} (fail-open, not cached)`,
     );
+    if (cause === 'response-contract' && r.transcript) console.error(r.transcript.trim());
   }
   if (inconclusive.length > 0) return finish(strict ? 3 : 2);
   return finish(0);
