@@ -38,6 +38,18 @@ function repo(name = '@norvalbv/devkit'): { base: string; root: string } {
 }
 
 describe('inspectDistIntegrity', () => {
+  it('is inert when package identity is malformed', async () => {
+    const { root } = repo();
+    writeFileSync(join(root, 'package.json'), '{ merge conflict');
+
+    await expect(inspectDistIntegrity(root, 'HEAD', [])).resolves.toEqual({
+      active: false,
+      unresolved: [],
+      unbriefed: [],
+      untracked: [],
+    });
+  });
+
   it('declares its dynamic parser as a runtime dependency', () => {
     expect(packageJson.dependencies['es-module-lexer']).toBeDefined();
   });

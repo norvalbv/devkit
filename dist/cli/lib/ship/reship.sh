@@ -83,6 +83,9 @@ BASE=$(git rev-parse FETCH_HEAD)
 # Match new-ship: run against the caller checkout before the detached worktree hides ignored,
 # unbriefed dist artifacts. The helper no-ops for every consumer repo.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SKILL_PROJECTION_INTEGRITY="$SCRIPT_DIR/skill-projection-integrity.mts"
+[ -f "$SKILL_PROJECTION_INTEGRITY" ] || SKILL_PROJECTION_INTEGRITY="$SCRIPT_DIR/skill-projection-integrity.mjs"
+node "$SKILL_PROJECTION_INTEGRITY" --root "$ROOT" || true
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"

@@ -9,9 +9,10 @@
  * guard.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { filesUnder, isDevkitShipRepo, repoPath } from './integrity-files.mts';
 
 interface UnresolvedImport {
   importer: string;
@@ -38,33 +39,6 @@ function git(root: string, args: string[]): string[] {
   return raw.toString('utf8').split('\0').filter(Boolean);
 }
 
-function repoPath(root: string, absolute: string): string {
-  return path.relative(root, absolute).split(path.sep).join('/');
-}
-
-function filesUnder(root: string, relativeDir: string): string[] {
-  const dir = path.join(root, relativeDir);
-  if (!existsSync(dir)) return [];
-  const files: string[] = [];
-  const walk = (absolute: string): void => {
-    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-      const child = path.join(absolute, entry.name);
-      if (entry.isDirectory()) walk(child);
-      else if (entry.isFile()) files.push(repoPath(root, child));
-    }
-  };
-  walk(dir);
-  return files.sort();
-}
-
-function packageName(root: string): string | undefined {
-  try {
-    return JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).name;
-  } catch {
-    return undefined;
-  }
-}
-
 function importTarget(root: string, importer: string, specifier: string): string {
   const importerUrl = pathToFileURL(path.join(root, importer));
   return repoPath(root, fileURLToPath(new URL(specifier, importerUrl)));
@@ -88,7 +62,7 @@ export async function inspectDistIntegrity(
   base: string,
   briefedPaths: string[],
 ): Promise<DistIntegrityReport> {
-  if (packageName(root) !== '@norvalbv/devkit') return { ...CLEAN_REPORT };
+  if (!isDevkitShipRepo(root)) return { ...CLEAN_REPORT };
 
   const physical = filesUnder(root, 'dist');
   const tracked = new Set(git(root, ['ls-files', '--cached', '-z', '--', 'dist']));
