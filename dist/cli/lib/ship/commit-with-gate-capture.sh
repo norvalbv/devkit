@@ -59,7 +59,8 @@ commit_with_gate_capture() {
   export DEVKIT_GATE_EVENTS="${DEVKIT_GATE_EVENTS:-$HOME/.devkit/telemetry/gate-events.jsonl}"
   export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${br//\//-}-$$-$(date +%s)")}"
   mkdir -p "$(dirname "$DEVKIT_GATE_EVENTS")" 2>/dev/null || true
-  local repo_name; repo_name="$(basename "$root")"
+  . "$(dirname "${BASH_SOURCE[0]}")/repo-identity.sh"
+  local repo_name; repo_name="$(devkit_repo_identity "$root")"
   # Also EXPORTED so the in-process gate envelope (judge/run-context.mts) can stamp repo/branch on
   # every event a ship emits. Without them a ship's gate events are repo-blind, and a shared
   # telemetry sink interleaves two repos' runs with no way to separate them (sc-1239).
