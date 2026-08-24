@@ -175,3 +175,22 @@ export function packDiffIntoChunks(files: string[], diffText: string, capBytes: 
   if (current.length > 0) chunks.push(current);
   return { chunks, bytesByPath };
 }
+
+/** Plan-level facts the chunk-telemetry wire format carries (sc-1999): how a reviewer's diff was
+ * packed. `planHash` is sha256-12 over the ordered per-chunk membership hashes, so any re-homing
+ * of files across chunks — including a packing-algorithm change — reads as a different plan. */
+export interface ChunkPlanFacts {
+  count: number;
+  capBytes: number;
+  planHash: string;
+}
+
+/** One judge task's chunk assignment. `filesSha` is sha256-12 of the chunk's file membership
+ * (paths joined on '\0', the same separator the bench's checkpoint keys use) — carried alongside
+ * the index because a bare index is unstable identity across packing changes (the PR #439 review
+ * rejected index-only keying for exactly that reason). Absent on every un-chunked task; production
+ * chunking (sc-1907) is what starts assigning it. */
+export interface ChunkAssignment extends ChunkPlanFacts {
+  index: number;
+  filesSha: string;
+}

@@ -194,6 +194,13 @@ export function emitMergedLensResults(splitParts, firstModel) {
                 lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
                 status: p.res.status,
                 secs: p.secs,
+                // Chunk-telemetry wire format (sc-1999): WHICH slice of the chunk plan this part judged,
+                // by index AND membership hash (a bare index is unstable across packing changes). Null on
+                // every un-chunked run — today that is every production run; sc-1907 starts assigning
+                // ReviewTask.chunk. The warehouse ingests non-null entries into its chunk-grain child
+                // table and must never widen its per-lens row for them.
+                chunk_index: p.task.chunk?.index ?? null,
+                chunk_files_sha: p.task.chunk?.filesSha ?? null,
                 ...(p.res.model ? { model: p.res.model } : {}),
                 ...(p.retried ? { retried: true } : {}),
             })),
