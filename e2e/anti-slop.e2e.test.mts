@@ -254,6 +254,33 @@ describe('e2e: packed anti-slop capability', () => {
     expect(out(growthCheck)).toContain('anti-slop/no-object-parameters');
   });
 
+  it('attributes inherited findings during a staged full scan without allowing growth', async () => {
+    const fx = await fixture();
+    const packageArgs = INIT_ARGS.filter((argument) => argument !== '--standalone');
+    expect(fx.run('devkit', packageArgs).status).toBe(0);
+    expect(fx.run('devkit', ['anti-slop', 'create']).status).toBe(0);
+    expect(fx.git('add', '-A').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'bootstrap').status).toBe(0);
+
+    const inherited = 'function inherited(value: object) { return value; }\n';
+    writeFileSync(join(fx.repoDir, 'inherited.ts'), inherited);
+    expect(fx.git('add', 'inherited.ts').status).toBe(0);
+    expect(fx.git('commit', '-qm', 'red base').status).toBe(0);
+
+    const packageJsonPath = join(fx.repoDir, 'package.json');
+    const packageJson = readFileSync(packageJsonPath, 'utf8');
+    writeFileSync(packageJsonPath, `${packageJson.trimEnd()}\n\n`);
+    expect(fx.git('add', 'package.json').status).toBe(0);
+    const inheritedCheck = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(inheritedCheck.status, out(inheritedCheck)).toBe(0);
+
+    writeFileSync(join(fx.repoDir, 'inherited.ts'), `${inherited}${inherited}`);
+    expect(fx.git('add', 'inherited.ts').status).toBe(0);
+    const growthCheck = fx.run('devkit', ['anti-slop', 'check', '--staged']);
+    expect(growthCheck.status, out(growthCheck)).toBe(1);
+    expect(out(growthCheck)).toContain('anti-slop/no-object-parameters');
+  });
+
   it('checks candidate findings normally when the CI base predates anti-slop', async () => {
     const fx = await fixture();
     const preInstallBase = fx.git('rev-parse', 'HEAD').stdout.trim();

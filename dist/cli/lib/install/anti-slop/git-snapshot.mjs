@@ -188,6 +188,8 @@ export function withStagedAntiSlopSnapshot(cwd, action) {
             fullScan,
             skipped,
             base: evidence.base,
+            baseTree: evidence.baseTree,
+            baseCheckoutCwd: cwd,
             introducedPaths: evidence.introducedPaths,
             renames: evidence.renames,
         });
@@ -202,6 +204,8 @@ export function withStagedAntiSlopSnapshot(cwd, action) {
             fullScan,
             skipped,
             base: evidence.base,
+            baseTree: evidence.baseTree,
+            baseCheckoutCwd: cwd,
             introducedPaths: evidence.introducedPaths,
             renames: evidence.renames,
         });

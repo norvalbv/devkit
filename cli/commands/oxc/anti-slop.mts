@@ -160,22 +160,27 @@ function inheritedBaseAllowance(
       ),
     ),
   ];
-  return withBaseAntiSlopSnapshot(cwd, envelope.baseTree, basePaths, (snapshot) => {
-    if (snapshot.paths.length === 0) return selected;
-    const inherited = migrateBaselineRenames(
-      baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)),
-      envelope.renames,
-    );
-    const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
-    for (const entry of inherited.entries) {
-      const committed = entries.get(entry.fingerprint);
-      if (!committed || entry.count > committed.count) entries.set(entry.fingerprint, entry);
-    }
-    return {
-      ...selected,
-      entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
-    };
-  });
+  return withBaseAntiSlopSnapshot(
+    envelope.baseCheckoutCwd ?? cwd,
+    envelope.baseTree,
+    basePaths,
+    (snapshot) => {
+      if (snapshot.paths.length === 0) return selected;
+      const inherited = migrateBaselineRenames(
+        baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)),
+        envelope.renames,
+      );
+      const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
+      for (const entry of inherited.entries) {
+        const committed = entries.get(entry.fingerprint);
+        if (!committed || entry.count > committed.count) entries.set(entry.fingerprint, entry);
+      }
+      return {
+        ...selected,
+        entries: [...entries.values()].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
+      };
+    },
+  );
 }
 
 function check(cwd: string, args: string[], envelope: GitBaselineEnvelope | null = null): number {

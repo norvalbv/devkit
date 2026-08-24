@@ -105,7 +105,7 @@ function inheritedBaseAllowance(cwd, selected, candidateGroups, envelope) {
             ? []
             : [reverseRenames.get(group.file) ?? group.file])),
     ];
-    return withBaseAntiSlopSnapshot(cwd, envelope.baseTree, basePaths, (snapshot) => {
+    return withBaseAntiSlopSnapshot(envelope.baseCheckoutCwd ?? cwd, envelope.baseTree, basePaths, (snapshot) => {
         if (snapshot.paths.length === 0)
             return selected;
         const inherited = migrateBaselineRenames(baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)), envelope.renames);
