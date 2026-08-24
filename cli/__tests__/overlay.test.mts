@@ -74,6 +74,9 @@ function workRepo() {
   return root;
 }
 
+const readCfgComponents = (root) =>
+  JSON.parse(readFileSync(join(root, '.devkit', 'config.json'), 'utf8')).components;
+
 // Seed an existing (untracked) .claude/settings.local.json — the user's own — before an overlay run.
 function seedLocalSettings(root, obj) {
   mkdirSync(join(root, '.claude'), { recursive: true });
@@ -125,6 +128,64 @@ describe('overlay (local-only) install', () => {
     );
     expect(baseline.files).toHaveProperty('src/legacy.ts');
     expect(existsSync(join(root, 'eslint', 'baselines', 'size.json'))).toBe(false);
+  });
+
+  it('enables the line-growth block on first install and grandfathers the giants', async () => {
+    const root = workRepo();
+    mkdirSync(join(root, 'src'), { recursive: true });
+    // 600 lines → over the 500 cap; must be grandfathered by the same first-install freeze.
+    writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+
+    const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(guard.maxLines).toBe(500);
+    expect(guard.maxTestLines).toBe(2000);
+    const lines = JSON.parse(
+      readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
+    );
+    expect(lines.files['src/giant.ts']).toBe(600);
+    expect(readCfgComponents(root).lineGrowth).toBe(true);
+  });
+
+  it('never writes the cap into a guard.config.json the repo already commits', async () => {
+    const root = workRepo();
+    writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
+    execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+
+    const guard = JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8'));
+    expect(guard.maxLines).toBeUndefined();
+    // The whole point: a committed file cannot be hidden by .git/info/exclude, so it stays clean.
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: root }).toString()).toBe('');
+  });
+
+  it('records a line-growth opt-out so upgrade never re-offers it', async () => {
+    const root = workRepo();
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...defaultSelection(), lineGrowth: false },
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+
+    expect(
+      JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines,
+    ).toBeUndefined();
+    expect(readCfgComponents(root).lineGrowth).toBe(false);
   });
 
   it('invisible + non-invasive: extends the repo, chains to the team hook, git status clean', async () => {
@@ -471,11 +532,11 @@ describe('overlay (local-only) install', () => {
       overlay: true,
       devkitRef: 'v0.9.0',
     };
-    await applyInit(root, opts); // no maxLines yet
+    await applyInit(root, opts); // cap written, but an empty tree has nothing to grandfather
     const linesBaseline = join(root, '.devkit', 'baselines', 'size-lines.json');
     expect(existsSync(linesBaseline)).toBe(false);
 
-    // turn on the raw-line cap AND add a legacy giant that would need grandfathering
+    // tighten the cap AND add a legacy giant that would need grandfathering
     const cfgPath = join(root, 'guard.config.json');
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
     cfg.maxLines = 50;
@@ -1192,6 +1253,46 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
 
     expect(await upgrade([], root)).toBe(0);
     expect(existsSync(sizeBaseline)).toBe(false); // adopted repo → freeze skipped, debt not laundered
+  });
+
+  it('back-fills the line-growth block for an overlay that predates it', async () => {
+    const root = workRepo();
+    await mkOverlay(root);
+    // A pre-feature overlay: no cap, and no recorded answer — so the offer treats it as never-asked.
+    const guardPath = join(root, 'guard.config.json');
+    const guard = JSON.parse(readFileSync(guardPath, 'utf8'));
+    for (const key of ['maxLines', '//maxLines', 'maxTestLines', '//maxTestLines'])
+      delete guard[key];
+    writeFileSync(guardPath, `${JSON.stringify(guard, null, 2)}\n`);
+    const cfg = readCfg(root);
+    delete cfg.components.lineGrowth;
+    writeFileSync(cfgPathOf(root), `${JSON.stringify(cfg, null, 2)}\n`);
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
+
+    expect(await upgrade([], root)).toBe(0);
+
+    const after = JSON.parse(readFileSync(guardPath, 'utf8'));
+    expect(after.maxLines).toBe(500);
+    expect(after.maxTestLines).toBe(2000);
+    // The back-fill grandfathers in the SAME step, so the giant never hard-errors on the next commit.
+    const lines = JSON.parse(
+      readFileSync(join(root, '.devkit', 'baselines', 'size-lines.json'), 'utf8'),
+    );
+    expect(lines.files['src/giant.ts']).toBe(600);
+    expect(readCfg(root).components.lineGrowth).toBe(true);
+  });
+
+  it('never re-offers the line-growth block once the cap is recorded (no re-nag)', async () => {
+    const root = workRepo();
+    await mkOverlay(root); // first install already wrote the cap
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'giant.ts'), Array(600).fill('const x = 1;').join('\n'));
+
+    expect(await upgrade([], root)).toBe(0);
+
+    // Adopted + already capped → the back-fill is skipped, so the new giant is NOT laundered in.
+    expect(existsSync(join(root, '.devkit', 'baselines', 'size-lines.json'))).toBe(false);
   });
 
   it('--dry-run writes nothing (a stale hook stays stale), exit 0', async () => {
