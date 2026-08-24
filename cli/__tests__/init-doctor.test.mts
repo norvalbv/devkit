@@ -373,6 +373,18 @@ describe('init — per-component flag selection', () => {
     expect(config(root).components.biome).toBe(false);
   });
 
+  it('--no-biome keeps the Electron structure preset without creating biome.jsonc', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'electron', '--yes', '--no-biome');
+
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
+    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
+    expect(existsSync(join(root, 'guard.config.json'))).toBe(true);
+    expect(config(root).components.biome).toBe(false);
+    expect(config(root).components.structure).toBe(true);
+  });
+
   it('--guards fanout,size → the deterministic orchestrator + the recorded subset, no AI guard', () => {
     const root = tmpRepo();
     devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'fanout,size');

@@ -7,7 +7,7 @@
  * fast (no network) → upgrade takes the installed==latest reconcile path deterministically.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -186,6 +186,23 @@ describe('devkit upgrade — full reconcile (component-lib repro)', () => {
     expect(up.status, up.stderr || up.stdout).toBe(0);
     expect(readFileSync(hookPath, 'utf8')).toContain('guard-structure staged');
     expect(config(root).components.structure).toBe(true);
+  });
+
+  it('does not recreate Biome config when an Electron structure consumer deselects it', () => {
+    const root = tmpRepo({ ...CLIB_PKG, devDependencies: { electron: '^30' } });
+    expect(run(root, 'init', '--stack', 'electron', '--yes', '--no-cursor').status).toBe(0);
+
+    const cfg = config(root);
+    cfg.components.biome = false;
+    writeFileSync(join(root, '.devkit', 'config.json'), `${JSON.stringify(cfg, null, 2)}\n`);
+    rmSync(join(root, 'biome.jsonc'));
+
+    const up = run(root, 'upgrade');
+    expect(up.status, up.stderr || up.stdout).toBe(0);
+    expect(existsSync(join(root, 'biome.jsonc'))).toBe(false);
+    expect(existsSync(join(root, 'eslint.config.mjs'))).toBe(true);
+    expect(existsSync(join(root, 'tsconfig.json'))).toBe(true);
+    expect(readFileSync(join(root, '.husky/pre-commit'), 'utf8')).not.toContain('biome format');
   });
 });
 

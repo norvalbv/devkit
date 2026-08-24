@@ -143,15 +143,16 @@ function installConfigs(cwd, sel, force, dryRun) {
         }
     }
 }
-function installStructureFiles(cwd, stack, force, dryRun) {
+function installStructureFiles(cwd, stack, sel, plan) {
+    const { force, dryRun } = plan;
     const tplDir = join(packageDir(), 'templates', stack);
     // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (stack rules).
-    const items = [
-        ...STRUCTURE_TEMPLATE_FILES[stack],
-        ['biome.jsonc', 'biome.jsonc'],
-        ['tsconfig.json', 'tsconfig.json'],
-        ['guard.config.json', 'guard.config.json'],
-    ];
+    const items = [...STRUCTURE_TEMPLATE_FILES[stack]];
+    if (sel.biome)
+        items.push(['biome.jsonc', 'biome.jsonc']);
+    if (sel.tsconfig)
+        items.push(['tsconfig.json', 'tsconfig.json']);
+    items.push(['guard.config.json', 'guard.config.json']);
     for (const [src, dest] of items) {
         const target = join(cwd, dest);
         // A `_shared/<file>` src resolves from templates/ (the universal shim/exempt shared across stacks);
@@ -688,7 +689,7 @@ export async function applyInit(cwd, plan) {
     else if (standalone)
         installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
     else if (isStructure)
-        installStructureFiles(cwd, stack, force, dryRun);
+        installStructureFiles(cwd, stack, selection, plan);
     else
         installConfigs(cwd, selection, force, dryRun);
     applyScanRoots(cwd, scanRoots, dryRun);
