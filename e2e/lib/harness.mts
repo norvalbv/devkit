@@ -177,7 +177,12 @@ export interface Fixture {
   /** The prefix-scoped env used for every run() (bins on PATH, git config isolated). */
   env: NodeJS.ProcessEnv;
   /** Run an installed bin (devkit / guard-*) or `git` in the fixture; returns the spawn result. */
-  run: (bin: string, args: string[], opts?: { input?: string }) => SpawnSyncReturns<string>;
+  run: (
+    bin: string,
+    args: string[],
+    /** `env` overlays the fixture env — for deliberately depriving a gate of a tool it needs. */
+    opts?: { input?: string; env?: Record<string, string> },
+  ) => SpawnSyncReturns<string>;
   /** Convenience: run `git` in the fixture. */
   git: (...args: string[]) => SpawnSyncReturns<string>;
   /** Remove the fixture repo (the symlink entry only — never the shared prefix target). */
@@ -218,7 +223,12 @@ export async function makeFixture(dirPrefix = 'devkit-e2e-repo-'): Promise<Fixtu
 
   const resolve = (bin: string) => (bin === 'git' ? GIT : join(binDir, bin));
   const run: Fixture['run'] = (bin, args, opts = {}) =>
-    spawnSync(resolve(bin), args, { cwd: repoDir, encoding: 'utf8', input: opts.input, env });
+    spawnSync(resolve(bin), args, {
+      cwd: repoDir,
+      encoding: 'utf8',
+      input: opts.input,
+      env: opts.env ? { ...env, ...opts.env } : env,
+    });
   const git: Fixture['git'] = (...args) => run('git', args);
 
   git('init', '-q', '-b', 'main');

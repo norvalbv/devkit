@@ -71,7 +71,7 @@ const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
 // the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
-const DETERMINISTIC = [
+export const DETERMINISTIC = [
   { id: 'size', module: '../ratchets/size-disable.mjs', args: ['gate'] },
   { id: 'fanout', module: '../ratchets/folder-fanout.mjs', args: ['gate'] },
   {
