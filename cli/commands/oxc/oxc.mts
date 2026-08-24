@@ -4,15 +4,17 @@ import { type OxcTool, runOxcRuntime } from '../../lib/install/oxc/runtime.mts';
 
 export const meta = {
   name: 'oxc',
-  summary: "Run Devkit's pinned Oxlint or Oxfmt (no global/direct consumer install).",
+  summary: "Run Devkit's pinned native Oxlint or Oxfmt (no consumer install).",
   help: `devkit oxc — run Devkit's pinned Oxc tools.
 
 Usage:
   devkit oxc lint [oxlint arguments...]
   devkit oxc fmt  [oxfmt arguments...]
 
-Arguments and exit status pass through to the underlying tool. Runtime resolution is relative to
-Devkit's own package and never falls back to PATH, a global install, or consumer node_modules/.bin.`,
+Arguments and exit status pass through to the underlying tool. The lint command keeps the complete
+repository Oxlint policy but reserves Devkit anti-slop execution for the baseline-aware
+\`devkit anti-slop\` command. Runtime resolution is relative to Devkit's own package and never falls
+back to PATH, a global install, or consumer node_modules/.bin.`,
 };
 
 export default function run(args: string[], cwd: string): number {

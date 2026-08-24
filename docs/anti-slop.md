@@ -97,13 +97,26 @@ rule without copying the managed stack:
 }
 ~~~
 
-Devkit Oxc lint runs these rules in the repository-root configuration alongside native and other
-custom Oxlint rules. Baseline operations deliberately disable nested config discovery so the real
-scan uses the same full root-to-managed-plugin chain that Devkit verifies with a sentinel. Put
-path-specific policy in the root config's `overrides`; a nested Oxlint config cannot shadow or
-silently replace the proved chain. Use Devkit anti-slop check for the baseline-aware adoption gate.
-Extending the anti-slop fragment directly is also rejected: the sentinel independently proves the
-repository root to managed Oxc base link and the managed base to anti-slop plugin link.
+The repository-root configuration combines native Oxlint policy and these rules, so rule severities
+and path-specific `overrides` stay in one place. Baseline operations deliberately disable nested
+config discovery and run the complete root-to-managed-plugin chain that Devkit verifies with a
+sentinel. A nested Oxlint config cannot shadow or silently replace that chain. Extending the
+anti-slop fragment directly is also rejected: the sentinel independently proves both managed links.
+
+Repositories with adopted anti-slop debt should keep ordinary native lint and the baseline-aware
+policy gate as two explicit commands:
+
+~~~bash
+devkit oxc lint --disable-nested-config .
+devkit anti-slop check
+~~~
+
+`devkit oxc lint` keeps the repository's root policy intact but substitutes no-op implementations
+for Devkit's anti-slop rules. Other native rules, custom plugins, categories, globals, ignores,
+settings, options, and overrides still run normally. `devkit anti-slop check` explicitly activates
+the real implementations and applies the shrink-only baseline. A direct `oxlint` invocation remains
+the combined, unbaselined diagnostic view. This split needs no second config and no consumer-owned
+copy of Devkit's rule list.
 
 ## Vendored rules and parity
 

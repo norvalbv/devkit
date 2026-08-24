@@ -42,6 +42,10 @@ describe('anti-slop capability lifecycle', () => {
     expect(readFileSync(join(cwd, '.devkit/anti-slop/plugin/package.json'), 'utf8')).toContain(
       '"#oxlint-plugins"',
     );
+    expect(existsSync(join(cwd, '.devkit/anti-slop/plugin/index.devkit-active.ts'))).toBe(true);
+    expect(readFileSync(join(cwd, '.devkit/anti-slop/plugin/index.ts'), 'utf8')).toContain(
+      'DEVKIT_INTERNAL_ANTI_SLOP_MODE',
+    );
     expect(existsSync(join(cwd, '.devkit/anti-slop/probe.ts'))).toBe(true);
     expect(readFileSync(join(cwd, '.devkit/oxc/oxlint.base.json'), 'utf8')).toContain(
       '../anti-slop/oxlint.json',
@@ -92,7 +96,7 @@ describe('anti-slop capability lifecycle', () => {
     );
     writeFileSync(
       join(cwd, '.oxlintrc.json'),
-      '{ "extends": ["./.devkit/oxc/oxlint.base.json"], "rules": {} }\n',
+      '{ "extends": ["./.devkit/oxc/oxlint.base.json"], "ignorePatterns": [".devkit"], "rules": {} }\n',
     );
     expect(checkAntiSlopCapability(cwd).every((result) => result.status === 'OK')).toBe(true);
 

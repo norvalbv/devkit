@@ -5,7 +5,7 @@
     "oxfmt": "0.63.0"
   },
   "antiSlop": true,
-  "baseDigest": "54b3f55d5cc2b617c0f4de6609c18d763636a17e6cff65fe33432b256f9ef91d",
+  "baseDigest": "ea10d569c46d88bb3bbd9f4fe62b75df9eda920a4ca82f3e7b1af1a755a81696",
   "configs": {
     "oxlint": {
       "path": ".oxlintrc.json",
