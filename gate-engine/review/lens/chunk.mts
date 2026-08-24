@@ -29,17 +29,29 @@ const SIMPLE_ESCAPES = new Map<string, number>([
  * single-character escapes above and octal `\NNN` byte escapes. A path git did not need to quote
  * (the common case) is returned unchanged. Escapes decode to raw BYTES first — git escapes
  * non-ASCII as octal byte sequences, not codepoints — so a multi-byte UTF-8 character split
- * across adjacent `\NNN` escapes reassembles correctly. */
+ * across adjacent `\NNN` escapes reassembles correctly. Literal (unescaped) runs re-encode as
+ * UTF-8 bytes, NOT UTF-16 code units — under `core.quotePath=false` git emits non-ASCII like `é`
+ * literally inside a still-quoted path (quoted for a tab, say), and pushing the lone code unit
+ * 0xE9 forges invalid UTF-8 that mangles the name into a 0-byte-packing key. */
 export function unquoteGitPath(raw: string): string {
   if (!QUOTED_PATH_RE.test(raw)) return raw;
   const inner = raw.slice(1, -1);
   const bytes: number[] = [];
+  // Start index of the pending literal run, or -1 — batching the run through Buffer.from also
+  // keeps surrogate pairs whole, where per-char charCodeAt would split them.
+  let literalStart = -1;
+  const flushLiteral = (end: number) => {
+    if (literalStart === -1) return;
+    bytes.push(...Buffer.from(inner.slice(literalStart, end), 'utf8'));
+    literalStart = -1;
+  };
   for (let i = 0; i < inner.length; i += 1) {
     const ch = inner[i];
     if (ch !== '\\') {
-      bytes.push(inner.charCodeAt(i));
+      if (literalStart === -1) literalStart = i;
       continue;
     }
+    flushLiteral(i);
     const next = inner[i + 1];
     const simple = next !== undefined ? SIMPLE_ESCAPES.get(next) : undefined;
     if (simple !== undefined) {
@@ -53,6 +65,7 @@ export function unquoteGitPath(raw: string): string {
       bytes.push(92);
     }
   }
+  flushLiteral(inner.length);
   return Buffer.from(bytes).toString('utf8');
 }
 

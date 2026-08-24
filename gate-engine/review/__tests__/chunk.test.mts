@@ -144,6 +144,15 @@ describe('unquoteGitPath escape table', () => {
       'a\x07b\x08c\x0cd\x0be\tf\ng\rh"i\\j',
     );
   });
+
+  it('re-encodes literal non-ASCII as UTF-8 bytes (quotePath=false) alongside escapes', () => {
+    // Under core.quotePath=false git leaves é LITERAL inside a path still quoted for its tab.
+    // A UTF-16 code-unit push would emit the lone byte 0xE9 — invalid UTF-8 — and mangle the
+    // name away from its staged twin; the literal run must re-encode as UTF-8 bytes instead.
+    expect(unquoteGitPath('"src/café\\tname.ts"')).toBe('src/café\tname.ts');
+    // Default quotePath spells the same é as octal UTF-8 byte escapes — still decodes.
+    expect(unquoteGitPath('"src/caf\\303\\251.ts"')).toBe('src/café.ts');
+  });
 });
 
 describe('paths containing literal spaces', () => {
