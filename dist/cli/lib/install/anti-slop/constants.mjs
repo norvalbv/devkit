@@ -7,6 +7,9 @@ export const ANTI_SLOP_CONFIG_REL = `${ANTI_SLOP_MANAGED_REL}/oxlint.json`;
 export const ANTI_SLOP_BASELINE_REL = '.anti-slop-baseline.json';
 export const ANTI_SLOP_LOCK_REL = '.devkit/anti-slop.lock';
 export const ANTI_SLOP_BASELINE_LOCK_REL = '.devkit/anti-slop-baseline.lock';
+export const ANTI_SLOP_EXECUTION_MODE_ENV = 'DEVKIT_INTERNAL_ANTI_SLOP_MODE';
+export const ANTI_SLOP_NATIVE_MODE = 'native-only';
+export const ANTI_SLOP_BASELINE_MODE = 'baseline';
 export const ANTI_SLOP_RULE_NAMES = [
     'no-chained-type-assertions',
     'no-conditional-empty-object-spread',
