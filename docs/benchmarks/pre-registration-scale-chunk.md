@@ -30,8 +30,10 @@ found it; tier B = file present only.
 | 7 | `2e0713a80df2` | 7,239 | 57 | 5 | 8 |
 | 8 | `63a1f928f40a` | 1,406 | 11 | 4 | 18 |
 
-Pooled tier-A n = 49. Sources: two repos (aliases only), seven branches; a diff is skipped (and
-reported skipped) if its branch ref or base commit cannot be materialized.
+Pooled tier-A n = 49. Sources: two repos (aliases only), eight branches — one diff per branch,
+verified against `commit_ships`/`commit_review_scope` telemetry (all eight `diff_sha256` prefixes
+above resolve to eight distinct branches); a diff is skipped (and reported skipped) if its branch
+ref or base commit cannot be materialized.
 
 ## Arms
 
@@ -66,6 +68,12 @@ diffs become scale-track corpus row candidates.
 
 Estimated ≈ $180–250 at $0.55 + $0.03/KB per judge task; hard stop: no new diff is launched once
 cumulative estimate exceeds $260. Checkpointed per task; a usage-limit kill resumes free.
+
+**Note — 2026-08-23 (POST-HOC).** The registered run itself stayed under the $260 hard stop
+(actual: ~$210–225, per `../experiments/2026-08-23-scale-probe/README.md`). The ~$130 extension
+described in Amendment 1 below is separate, owner-approved in-session spend on top of the
+registered run, not a retroactive raise of this $260 limit — the registered stop still governs
+the registered arms.
 
 ## Amendment — 2026-08-23 (POST-HOC, after round-1 results were seen)
 

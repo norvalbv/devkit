@@ -173,7 +173,7 @@ behind the harness PR; the confirmation round samples from those 230 under a fro
 Open the production-chunking story (sc-1907): `GUARD_CORRECTNESS_CHUNK` off-by-default wiring into
 `planReviewWork` with sticky chunk plans and `|chunk:` cache keys, gated on a properly-powered
 confirmation (K≥2 stable-flip machinery, granularity sweep incl. an import-graph-grouped
-`chunk:semantic` arm, precision verifier at scale) before any default flips. The 280 labelled
+`chunk:semantic` arm, precision verifier at scale) before any default flips. The 230 labelled
 archived diffs are the corpus for that round. The production decision metric is NOT recall alone:
 the rollout readout compares attempts-per-shipped-commit, wall-time-to-ship, and total judge $
 per shipped commit before/after (all derivable from existing ship/judge telemetry) — a higher

@@ -11,8 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execJudgeAsync } from '../../../../judge/run-judge.mts';
 import { extractLocations, linesMatch, readArchivedDiff, resolveToStaged } from './labels.mts';
-import { identityByPath } from '../../../lens/chunk.mts';
-import { filePathOf, splitDiffByFile } from '../../../../judge/diff-focus.mts';
+import { identityByPath, postImagePathOf } from '../../../lens/chunk.mts';
+import { splitDiffByFile } from '../../../../judge/diff-focus.mts';
 
 // The bench is not a gate run: silence the telemetry sink for the verifier's judge calls too.
 process.env.DEVKIT_NO_TELEMETRY = '1';
@@ -65,6 +65,10 @@ if (tornVerdicts > 0)
   console.error(`verify-extras: skipped ${tornVerdicts} torn verify.jsonl line(s)`);
 
 const extras: Extra[] = [];
+// Hoisted above the results-file loop: the key already carries diff/model/arm/lens/file/line-bucket
+// and is globally unique by construction, so a diff appearing in two results files (e.g. a re-run
+// writes results-<sha>-v2.json beside results-<sha>.json) must not enter `extras` twice.
+const seen = new Set<string>();
 for (const f of readdirSync(OUT)
   .filter((n) => n.startsWith('results-') && n.endsWith('.json'))
   .sort()) {
@@ -93,7 +97,6 @@ for (const f of readdirSync(OUT)
       res.labels.some((l) => l.file === resolved && linesMatch(l.line, line))
     );
   };
-  const seen = new Set<string>();
   for (const row of res.rows) {
     // Mirror score(): only terminal verdicts contribute — an error/inconclusive row earned no
     // hits on the recall side, so its findings must not count as noise on the precision side.
@@ -140,23 +143,35 @@ console.error(
   `verify-extras: ${extras.length} deduped extras (cap ${CAP}); ${[...verified.keys()].length} already verified`,
 );
 
-const hunkFor = (diffSha: string, file: string): string => {
+// Returns null (never a sentinel string) when the diff is unavailable or the file has no
+// resolvable hunk — a sentinel string would otherwise get judged by the haiku verifier as if it
+// were real code and its NOT-real verdict checkpointed permanently.
+const hunkFor = (diffSha: string, file: string): string | null => {
   const diff = readArchivedDiff(diffSha);
-  if (!diff) return '(diff unavailable)';
+  if (!diff) return null;
   // Same ambiguity-safe resolution as scoring: a mention that does not uniquely identify one
-  // changed file gets no hunk rather than a same-basename sibling's hunk.
+  // changed file gets no hunk rather than a same-basename sibling's hunk. Resolve segments with
+  // postImagePathOf — the SAME rename-aware, quote-aware rule identityByPath (Line 88's
+  // stagedPaths) uses, so the two closed sets of paths never disagree on a rename-only segment.
   const segs = splitDiffByFile(diff);
-  const paths = segs.map((seg) => filePathOf(seg));
+  const paths = segs.map((seg) => postImagePathOf(seg));
   const resolved = resolveToStaged(
     file,
     paths.filter((p): p is string => p !== null),
   );
   const seg = resolved === undefined ? undefined : segs[paths.indexOf(resolved)];
-  return (seg ?? '(file hunk not found in diff)').slice(0, 20_000);
+  return seg === undefined ? null : seg.slice(0, 20_000);
 };
 
 for (const e of extras.slice(0, CAP)) {
   if (verified.has(e.key)) continue;
+  const hunk = hunkFor(e.diff, e.file);
+  if (hunk === null) {
+    console.error(
+      `  ${e.key} → NO HUNK (unresolved location or archived diff missing) — not checkpointed`,
+    );
+    continue;
+  }
   const prompt =
     `You are auditing ONE code-review finding for plausibility. The staged diff hunk for the file is on stdin.\n` +
     `Finding (${e.lens}): ${e.text}\n` +
@@ -166,7 +181,7 @@ for (const e of extras.slice(0, CAP)) {
   const out = await execJudgeAsync({
     label: `scale-verify:${e.key.slice(0, 40)}`,
     args: ['-p', prompt, '--model', 'haiku'],
-    input: hunkFor(e.diff, e.file),
+    input: hunk,
     timeout: 120_000,
     cwd: process.cwd(),
   });
