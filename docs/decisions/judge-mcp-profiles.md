@@ -20,3 +20,4 @@ created: 2026-08-15
 **Category:** commit-gates
 **Source:** manual
 - 2026-08-15 — **Scope:** gate-engine/judge/**,gate-engine/review/**,agents/**,cli/lib/install/agent-assets/** — Claude agent assets require native mcpServers list frontmatter to survive Devkit projection and installation.
+- 2026-08-24 — Revisit-when condition fired (sc-2048): gpt-* judges now route to the codex exec runtime. The codex path runs judges with NO MCP profile for now — claude-CLI MCP flags do not translate, and spawnFor() documents the drop. Codex-native mapping is sc-2054; until it lands, the cascade's judgeMcpCapabilityFingerprint must not assert claude-profile capability for a codex-run verdict (sc-2053). Claude-path judges are byte-identical to this ruling.
