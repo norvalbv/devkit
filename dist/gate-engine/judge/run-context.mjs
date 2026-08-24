@@ -63,6 +63,33 @@ function git(args) {
         return null;
     }
 }
+let cachedRepoName;
+/** Repo identity for telemetry: the origin remote's name, else the MAIN checkout's dirname via
+ * git-common-dir. Gates often run inside temp git worktrees whose basename is a meaningless temp
+ * name ('worktree', 'dk-…'), which put 350/3,317 recent ship attempts into unattributable repo
+ * buckets (sc-2000). Memoized: the extra git calls run once per process, and the plain toplevel
+ * basename stays as the final fallback so no envelope ever loses its repo field outright. */
+function repoName(top) {
+    if (cachedRepoName !== undefined)
+        return cachedRepoName ?? (top ? path.basename(top) : '');
+    const remote = git(['remote', 'get-url', 'origin']);
+    const tail = remote
+        ?.replace(/\/+$/, '')
+        .replace(/\.git$/, '')
+        .split(/[/:]/)
+        .pop();
+    if (tail) {
+        cachedRepoName = tail;
+        return tail;
+    }
+    const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (common) {
+        cachedRepoName = path.basename(path.dirname(common));
+        return cachedRepoName;
+    }
+    cachedRepoName = null;
+    return top ? path.basename(top) : '';
+}
 /** Reuse pre-commit's attempt id in the separately launched commit-msg hook, but only for the same tree. */
 function handedOffCommitId(tree) {
     const statePath = git(['rev-parse', '--git-path', 'devkit-commit-attempt']);
@@ -95,7 +122,7 @@ function commitRunContext() {
     commitCtx = {
         id: attemptId || `commit-${tree}`,
         tree,
-        repo: top ? path.basename(top) : '',
+        repo: repoName(top),
         branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
     };
     return commitCtx;
@@ -168,7 +195,7 @@ export function runEnvelope() {
         return {
             ship_id: agent,
             run_mode: 'agent',
-            repo: top ? path.basename(top) : '',
+            repo: repoName(top),
             branch: git(['rev-parse', '--abbrev-ref', 'HEAD']) || '',
             source,
             devkit_version: runningVersion,
@@ -190,4 +217,5 @@ export function runEnvelope() {
 /** Test seam: drop the memoised commit context so a test can switch git state between assertions. */
 export function _resetRunContextForTests() {
     commitCtx = undefined;
+    cachedRepoName = undefined;
 }

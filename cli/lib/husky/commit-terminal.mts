@@ -27,6 +27,17 @@ ${
 }
     __dk_t0="$(date +%s)"
     __dk_esc() { printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g'; }
+    __dk_repo() {
+        # Repo identity = origin remote name, else main checkout dirname, else basename — a commit
+        # run inside a temp worktree must not stamp the worktree's meaningless basename (sc-2000).
+        __dk_r="$(git remote get-url origin 2>/dev/null | sed -E 's#/+$##; s#\\.git$##; s#.*[/:]##')"
+        if [ -z "$__dk_r" ]; then
+            __dk_c="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+            [ -n "$__dk_c" ] && __dk_r="$(basename "$(dirname "$__dk_c")")"
+        fi
+        [ -n "$__dk_r" ] || __dk_r="$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")"
+        printf '%s' "$__dk_r"
+    }
     __dk_commit_result() {
         [ -n "\${__dk_done:-}" ] && return 0
         __dk_done=1
@@ -39,7 +50,7 @@ ${
         mkdir -p "$(dirname "$__dk_events")" 2>/dev/null || return 0
         printf '{"type":"commit_result","ship_id":"%s","commit_tree":"%s","run_mode":"commit","repo":"%s","branch":"%s","exit_code":%d,"duration_s":%d,"ts":"%s"}\\n' \\
             "$(__dk_esc "$DEVKIT_COMMIT_ID")" "$__dk_tree" \\
-            "$(__dk_esc "$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")")" \\
+            "$(__dk_esc "$(__dk_repo)")" \\
             "$(__dk_esc "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)")" \\
             "\${1:-0}" "$(( $(date +%s) - __dk_t0 ))" \\
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$__dk_events" 2>/dev/null || true

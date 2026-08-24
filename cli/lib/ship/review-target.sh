@@ -185,7 +185,10 @@ if [ -z "$BRANCH" ]; then
   git_line_into SHORT_HEAD "$GIT_ROOT" rev-parse --short HEAD || exit 1
   BRANCH=detached-$SHORT_HEAD
 fi
-REPO_NAME=${GIT_ROOT##*/}
+# Repo identity via the shared remote-first chain (sc-2000) — a review launched from a temp
+# worktree must not stamp the worktree's basename.
+. "$(dirname "${BASH_SOURCE[0]}")/repo-identity.sh"
+REPO_NAME=$(devkit_repo_identity "$GIT_ROOT")
 TOKEN=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-')
 TOKEN=${TOKEN:0:64}
 RUN_ID="${TOKEN}-$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM}"
