@@ -4,7 +4,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
-import { ANTI_SLOP_IGNORE_PATTERNS } from './constants.mts';
+import {
+  ANTI_SLOP_BASELINE_MODE,
+  ANTI_SLOP_EXECUTION_MODE_ENV,
+  ANTI_SLOP_IGNORE_PATTERNS,
+} from './constants.mts';
 import { type FindingGroup, groupFindings, parseAntiSlopFindings } from './diagnostics.mts';
 import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from './lifecycle.mts';
 
@@ -85,7 +89,12 @@ function collectAntiSlopGroupsUnlocked(cwd: string, args: readonly string[]): Fi
       ...ANTI_SLOP_IGNORE_PATTERNS.flatMap((pattern) => ['--ignore-pattern', pattern]),
       ...scope.paths,
     ],
-    { cwd, encoding: 'utf8', maxBuffer: MAX_OUTPUT },
+    {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, [ANTI_SLOP_EXECUTION_MODE_ENV]: ANTI_SLOP_BASELINE_MODE },
+      maxBuffer: MAX_OUTPUT,
+    },
   );
   if (result.status === null) {
     throw new Error(

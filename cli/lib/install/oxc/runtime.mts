@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { packageDir } from '../../fs-helpers.mts';
+import { ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_NATIVE_MODE } from '../anti-slop/constants.mts';
 
 export type OxcTool = 'lint' | 'fmt';
 
@@ -127,6 +128,10 @@ export function runOxcRuntime(tool: OxcTool, args: string[], cwd: string): numbe
   }
   const result = spawnSync(process.execPath, [runtime.binPath, ...args], {
     cwd,
+    env:
+      tool === 'lint'
+        ? { ...process.env, [ANTI_SLOP_EXECUTION_MODE_ENV]: ANTI_SLOP_NATIVE_MODE }
+        : process.env,
     stdio: 'inherit',
   });
   if (result.status !== null) return result.status;

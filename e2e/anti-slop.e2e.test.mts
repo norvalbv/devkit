@@ -325,43 +325,61 @@ describe('e2e: packed anti-slop capability', () => {
     expect(init.status, out(init)).toBe(0);
     expect(existsSync(join(fx.repoDir, '.devkit/anti-slop/manifest.json'))).toBe(true);
     expect(existsSync(join(fx.repoDir, '.devkit/oxc/manifest.json'))).toBe(true);
-    const ordinaryProbe = fx.run('devkit', [
-      'oxc',
-      'lint',
-      '--format',
-      'json',
-      '.devkit/anti-slop/probe.ts',
-    ]);
-    expect([0, 1], out(ordinaryProbe)).toContain(ordinaryProbe.status);
-    expect(
-      JSON.parse(ordinaryProbe.stdout).diagnostics.filter((diagnostic: { code?: string }) =>
-        diagnostic.code?.startsWith('anti-slop('),
-      ),
-    ).toEqual([]);
-    const composed = fx.run('devkit', [
+    const managedProbe = fx.run('devkit', [
       'oxc',
       'lint',
       '--format',
       'json',
       '--disable-nested-config',
-      '.',
+      '.devkit/anti-slop/probe.ts',
     ]);
-    expect([0, 1], out(composed)).toContain(composed.status);
-    const composedPayload = JSON.parse(composed.stdout) as {
+    expect([0, 1], out(managedProbe)).toContain(managedProbe.status);
+    const managedProbeCodes = JSON.parse(managedProbe.stdout).diagnostics.map(
+      (diagnostic: { code?: string }) => diagnostic.code,
+    );
+    expect(managedProbeCodes).not.toContain('eslint(no-undef)');
+    expect(managedProbeCodes).not.toContain('anti-slop(no-object-parameters)');
+    writeFileSync(
+      join(fx.repoDir, '.oxlintrc.json'),
+      '{ "extends": ["./.devkit/oxc/oxlint.base.json"], "ignorePatterns": [".devkit"], "rules": { "no-debugger": "error", "anti-slop/no-runtime-typeof": ["warn", { "allowInTypeGuards": true }] } }\n',
+    );
+    writeFileSync(
+      join(fx.repoDir, 'native-target.ts'),
+      'function nativeTarget(value: object) { debugger; return value; }\n',
+    );
+    fx.env.DEVKIT_INTERNAL_ANTI_SLOP_MODE = 'baseline';
+    const native = fx.run('devkit', [
+      'oxc',
+      'lint',
+      '--format',
+      'json',
+      '--disable-nested-config',
+      'native-target.ts',
+    ]);
+    expect(native.status, out(native)).toBe(1);
+    const nativePayload: {
       diagnostics: Array<{ code?: string; filename?: string }>;
-    };
+    } = JSON.parse(native.stdout);
+    expect(nativePayload.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'eslint(no-debugger)',
+    );
     expect(
-      composedPayload.diagnostics.filter(
-        (diagnostic) =>
-          diagnostic.code?.startsWith('anti-slop(') &&
-          diagnostic.filename?.includes('.devkit/anti-slop/'),
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        code: 'anti-slop(no-object-parameters)',
-        filename: '.devkit/anti-slop/probe.ts',
-      }),
+      nativePayload.diagnostics.filter((diagnostic) => diagnostic.code?.startsWith('anti-slop(')),
+    ).toEqual([]);
+
+    delete fx.env.DEVKIT_INTERNAL_ANTI_SLOP_MODE;
+    const composed = fx.run('oxlint', [
+      '--format',
+      'json',
+      '--disable-nested-config',
+      'native-target.ts',
     ]);
+    expect(composed.status, out(composed)).toBe(1);
+    expect(
+      JSON.parse(composed.stdout).diagnostics.map(
+        (diagnostic: { code?: string }) => diagnostic.code,
+      ),
+    ).toEqual(expect.arrayContaining(['eslint(no-debugger)', 'anti-slop(no-object-parameters)']));
 
     writeFileSync(join(fx.repoDir, 'legacy.ts'), INITIAL);
     writeFileSync(join(fx.repoDir, 'held.ts'), INITIAL);
@@ -376,6 +394,7 @@ describe('e2e: packed anti-slop capability', () => {
     expect(missing.status, out(missing)).toBe(2);
     expect(existsSync(join(fx.repoDir, '.anti-slop-baseline.json'))).toBe(false);
 
+    fx.env.DEVKIT_INTERNAL_ANTI_SLOP_MODE = 'native-only';
     const create = fx.run('devkit', ['anti-slop', 'create', 'legacy.ts', 'held.ts']);
     expect(create.status, out(create)).toBe(0);
     const originalBaseline = readFileSync(join(fx.repoDir, '.anti-slop-baseline.json'), 'utf8');
