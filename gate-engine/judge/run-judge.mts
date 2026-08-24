@@ -23,6 +23,14 @@ import {
   unwrapClaudeResult,
   withResultArgs,
 } from './claude-result.mts';
+import {
+  codexFailure,
+  judgeBinFor,
+  type JudgeCli,
+  judgeCliFor,
+  parseCodexUsage,
+  unwrapCodexResult,
+} from './codex/result.mts';
 import { emitGateEvent } from './gate-events.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
 import { type JudgeMcpProfile, prepareJudgeMcpProfile } from './mcp/profile.mts';
@@ -46,10 +54,12 @@ function judgeErr(e: unknown): JudgeError {
 
 // The two dark-judge warning shapes, shared by the sync and async runners so the outage stays
 // visible with ONE wording (and the twin catch blocks don't diverge or trip the dup gate).
-function warnNoOutput(label: string): void {
+// Both name the BINARY that went dark: "check claude auth" on a codex outage sends the operator
+// to the wrong subscription entirely.
+function warnNoOutput(label: string, bin: string): void {
   // Ran (exit 0) but emitted nothing — a soft outage the parser would silently read as "no
   // verdict". Surface it so this variant of a dark judge is not silent either.
-  console.error(`⚠️  ${label}: claude judge returned no output — judgement skipped`);
+  console.error(`⚠️  ${label}: ${bin} judge returned no output — judgement skipped`);
 }
 
 // A timeout KILL (SIGTERM at the N-second cap) is the gate's OWN contention kill, not auth/quota — so
@@ -58,23 +68,31 @@ function warnNoOutput(label: string): void {
 // (ENOENT / 401 / non-zero exit). Pure fn (not the console.error wrapper) so the wording is unit-
 // testable without spawning `claude`. Retrying a timeout is a separate concern (sc-1048), so this
 // stays outage-only — no "will retry" claim the code doesn't honor.
-export function unavailableMessage(label: string, e: unknown, timeout?: number): string {
+export function unavailableMessage(
+  label: string,
+  e: JudgeError,
+  timeout?: number,
+  bin: string = 'claude',
+): string {
   if (isJudgeTimeout(e)) {
     // `> 0` too, not just finite — a 0ms cap would render a nonsense "after 0s".
     const secs =
       timeout != null && Number.isFinite(timeout) && timeout > 0
         ? `after ${Math.round(timeout / 1000)}s `
         : '';
-    return `⚠️  ${label}: claude judge timed out ${secs}(machine contention?) — judgement skipped`;
+    return `⚠️  ${label}: ${bin} judge timed out ${secs}(machine contention?) — judgement skipped`;
   }
-  const err = judgeErr(e);
-  const reason =
-    err.code ?? (err.status != null ? `exit ${err.status}` : (err.message ?? 'unknown'));
-  return `⚠️  ${label}: claude judge unavailable (${reason}; offline/quota/absent) — judgement skipped`;
+  const reason = e.code ?? (e.status != null ? `exit ${e.status}` : (e.message ?? 'unknown'));
+  return `⚠️  ${label}: ${bin} judge unavailable (${reason}; offline/quota/absent) — judgement skipped`;
 }
 
-function warnUnavailable(label: string, e: unknown, timeout?: number): void {
-  console.error(unavailableMessage(label, e, timeout));
+function warnUnavailable(
+  label: string,
+  e: JudgeError,
+  timeout: number | undefined,
+  bin: string,
+): void {
+  console.error(unavailableMessage(label, e, timeout, bin));
 }
 
 /**
@@ -273,10 +291,32 @@ function emitJudgeExec(
 /**
  * Unwrap one judge's stdout into the verdict text its caller expects, plus the spend to bill it.
  * Both come from the SAME parse of the same bytes, so a run can never be recorded with a cost that
- * belongs to different output.
+ * belongs to different output. The parser follows the binary that produced the bytes — a codex
+ * JSONL stream fed to the claude unwrapper would hand the verdict parser raw event noise. A codex
+ * stream carrying a terminal failure event (`turn.failed` / `error`) reads as a FAILURE, never as
+ * verdict text: falling through would record outcome 'ok' with raw JSONL as the transcript.
  */
-function readJudgeOutput(stdout: string): { text: string; usage: JudgeUsage | null } {
+function readJudgeOutput(
+  stdout: string,
+  cli: JudgeCli,
+): { text: string; usage: JudgeUsage | null } | { failure: string } {
+  if (cli.codex) {
+    const failure = codexFailure(stdout);
+    if (failure !== null) return { failure };
+    return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
+  }
   return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
+}
+
+/**
+ * Compose the spawn for the routed binary. MCP profile args are claude-CLI flags and do not
+ * translate — a codex judge runs without them (the bench arms this adapter exists for use none;
+ * a production gpt judge wanting MCP needs a codex-side profile mapping first — see the
+ * judge-mcp-profiles decision note).
+ */
+function spawnFor(args: string[], mcpArgs: string[]): JudgeCli {
+  const cli = judgeCliFor(args);
+  return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcpArgs, ...args]) };
 }
 
 export function execJudge(opts: ExecJudgeOpts): string | null {
@@ -287,7 +327,10 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     env,
   });
   try {
-    const out = execFileSync('claude', withResultArgs([...mcp.args, ...args]), {
+    // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
+    // outage warning carrying the translation error, keeping this function's never-throws contract.
+    const cli = spawnFor(args, mcp.args);
+    const out = execFileSync(cli.bin, cli.argv, {
       cwd,
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
       // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
@@ -302,16 +345,23 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
       stdio: ['pipe', 'pipe', 'ignore'],
     });
     if (!out || !String(out).trim()) {
-      warnNoOutput(label);
+      warnNoOutput(label, judgeBinFor(args));
       emitJudgeExec(opts, 'empty', startedAt);
       onOutage?.('empty');
       return null;
     }
-    const { text, usage } = readJudgeOutput(String(out));
-    emitJudgeExec(opts, 'ok', startedAt, text, usage);
-    return text;
+    const parsed = readJudgeOutput(String(out), cli);
+    if ('failure' in parsed) {
+      // The stream itself reported the turn failed (exit 0 notwithstanding) — an outage, retryable.
+      warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
+      emitJudgeExec(opts, 'transient', startedAt);
+      onOutage?.('transient');
+      return null;
+    }
+    emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+    return parsed.text;
   } catch (e) {
-    warnUnavailable(label, e, timeout);
+    warnUnavailable(label, judgeErr(e), timeout, judgeBinFor(args));
     const kind = isJudgeTimeout(e) ? 'timeout' : 'transient';
     emitJudgeExec(opts, kind, startedAt);
     onOutage?.(kind);
@@ -348,16 +398,19 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     // already had this same guard via its enclosing try/catch.
     const fail = (err: unknown) => {
       mcp.cleanup();
-      warnUnavailable(label, err, timeout);
+      warnUnavailable(label, judgeErr(err), timeout, judgeBinFor(args));
       const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
       emitJudgeExec(opts, kind, startedAt);
       onOutage?.(kind);
       resolve(null);
     };
     try {
+      // See the sync twin: routing inside the try keeps the never-rejects contract when argv
+      // translation itself throws.
+      const cli = spawnFor(args, mcp.args);
       const child = execFile(
-        'claude',
-        withResultArgs([...mcp.args, ...args]),
+        cli.bin,
+        cli.argv,
         {
           cwd,
           // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
@@ -375,15 +428,23 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
           }
           mcp.cleanup();
           if (!stdout || !String(stdout).trim()) {
-            warnNoOutput(label);
+            warnNoOutput(label, judgeBinFor(args));
             emitJudgeExec(opts, 'empty', startedAt);
             onOutage?.('empty');
             resolve(null);
             return;
           }
-          const { text, usage } = readJudgeOutput(String(stdout));
-          emitJudgeExec(opts, 'ok', startedAt, text, usage);
-          resolve(text);
+          const parsed = readJudgeOutput(String(stdout), cli);
+          if ('failure' in parsed) {
+            // See the sync twin: a stream-reported failed turn is an outage, retryable.
+            warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
+            emitJudgeExec(opts, 'transient', startedAt);
+            onOutage?.('transient');
+            resolve(null);
+            return;
+          }
+          emitJudgeExec(opts, 'ok', startedAt, parsed.text, parsed.usage);
+          resolve(parsed.text);
         },
       );
       // EPIPE guard: claude may exit (ENOENT wrapper, early crash) before stdin is consumed.
