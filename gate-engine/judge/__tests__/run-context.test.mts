@@ -126,6 +126,26 @@ describe('run-context', () => {
     expect(telemetrySink()).toMatch(/\.devkit[/\\]telemetry[/\\]gate-events\.jsonl$/);
   });
 
+  it('repo identity prefers the origin remote name over the directory basename (sc-2000)', () => {
+    const repo = gitRepo();
+    execSync('git remote add origin https://github.com/acme/actual-product.git', { cwd: repo });
+    process.chdir(repo);
+    _resetRunContextForTests();
+    expect(runEnvelope().repo).toBe('actual-product');
+  });
+
+  it('repo identity falls back to the MAIN checkout dirname when run from a linked worktree with no remote', () => {
+    const repo = gitRepo();
+    execSync('git commit -qm init', { cwd: repo });
+    const wt = join(repo, '..', `${repo.split('/').pop()}-wts`, 'worktree');
+    execSync(`git worktree add -q "${wt}" HEAD`, { cwd: repo });
+    repos.push(join(repo, '..', `${repo.split('/').pop()}-wts`));
+    process.chdir(wt);
+    _resetRunContextForTests();
+    // The worktree dir is literally named 'worktree' — the bucket 350/3,317 attempts fell into.
+    expect(runEnvelope().repo).toBe(repo.split('/').pop());
+  });
+
   it('off-ship, DEVKIT_NO_TELEMETRY=1: silent — runId null, empty envelope, no default sink', () => {
     process.env.DEVKIT_NO_TELEMETRY = '1';
     expect(telemetryEnabled()).toBe(false);
