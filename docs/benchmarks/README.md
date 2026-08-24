@@ -40,7 +40,7 @@ Hand-written records that sit beside the ledger; each number in them names its p
 - [`decisions-findings.md`](decisions-findings.md) — decision-log benchmarks: findings, corrections, open work (sc-1236).
 - [`reviewer-yield-vs-diff-size.md`](reviewer-yield-vs-diff-size.md) — the review gate returns ~1 issue per run above ~1k LOC and the corpus never measures that regime (2026-08-22).
 - [`corpus-growth.md`](corpus-growth.md) — how corpus rows are mined from telemetry and adapted.
-- [`experiments/`](experiments/) — one folder per investigation with its inputs, arms, and reports (latest: [`2026-08-22-ship-attempts-research`](experiments/2026-08-22-ship-attempts-research/README.md)).
+- [`experiments/`](experiments/) — one folder per investigation with its inputs, arms, and reports (latest: [`2026-08-23-scale-probe`](experiments/2026-08-23-scale-probe/README.md) — whole-diff vs chunked correctness review on 8 real 1k–7.2k-LOC diffs: chunking pooled ≥ whole-diff under all five mining/scoring rulesets tried (shipped ruleset: chunk:1000 8/23 vs whole 5/23 on decontaminated labels), but the ratio moves 1.375×–2.0× with the ruleset so no registered bar is treated as cleared — decision moved to the confirmation round; ~half the round's original labels were test-retest contamination, since fixed; haiku judges failed their arms; full correction record inside. Prior: [`2026-08-22-ship-attempts-research`](experiments/2026-08-22-ship-attempts-research/README.md)).
 
 ## Contributor workflow
 

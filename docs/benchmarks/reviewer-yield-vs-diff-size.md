@@ -72,6 +72,14 @@ context tokens halves contextual-issue detection across 8 models) and the 60 KB 
 This is by design — focused fixtures isolate one defect (`benchmark-methodology.md`) — but it means
 no benchmark number speaks to the regime where the gate actually runs or where the retry churn happens.
 
+> **Follow-up (2026-08-23):** the saturation prediction was tested on the SAME diffs by the
+> scale probe ([`experiments/2026-08-23-scale-probe/`](experiments/2026-08-23-scale-probe/README.md)):
+> chunking pooled ≥ whole-diff under all five mining/scoring rulesets tried (shipped ruleset:
+> chunk:1000 8/23 vs whole 5/23 decontaminated known defects re-found), largest gains exactly on
+> the biggest and most label-dense diffs — the content confound does not explain the plateau. No
+> registered bar is treated as cleared (ratio 1.375×–2.0× by ruleset; ~half the original labels
+> were test-retest contamination, since fixed); see the experiment's correction record.
+
 ## Limitations that travel with every number above
 
 - **Content confound.** Small and large diffs are different changes; part of the 4.9 → 0.14 drop is
