@@ -16,8 +16,9 @@ export function gitCached(cwd: string, args: string[], files: string[]): string 
 }
 
 export function stagedFiles(cwd: string): string[] {
-  return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
-    .split('\n')
-    .map((s) => s.trim())
+  // -z: NUL-separated RAW names. Without it git C-quotes paths containing tabs/unicode/quotes,
+  // and every byte-keyed consumer (chunk packing, evidence budgeting) silently misses them.
+  return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd, encoding: 'utf8' })
+    .split('\0')
     .filter(Boolean);
 }

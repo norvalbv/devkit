@@ -157,7 +157,12 @@ export function renderDecision(fm: Record<string, string>, body: string) {
 function firstClause(value: string | undefined) {
   const text = String(value).trim();
   const cut = text.search(TITLE_CUT_RE);
-  return (cut > 0 ? text.slice(0, cut) : text).slice(0, 100);
+  const clause = cut > 0 ? text.slice(0, cut) : text;
+  if (clause.length <= 100) return clause;
+  // Cap at a WORD boundary — a hard slice published headings ending mid-word ("…ids, h").
+  const capped = clause.slice(0, 100);
+  const lastSpace = capped.lastIndexOf(' ');
+  return lastSpace > 60 ? capped.slice(0, lastSpace) : capped;
 }
 
 export function renderTarget(date: string, options: TargetOptions) {
