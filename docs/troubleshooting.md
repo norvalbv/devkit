@@ -93,6 +93,14 @@ base, its failed-worktree cleanup removes the staged context that produced that 
 the retained caller-root gate log before recording the same pending evidence in shared Git-local
 state; it does not approve the rationale, and the next ship still runs the independent reviewer.
 
+A finding ID identifies the comment, not its position: it is derived from the file path and the
+comment text with indentation and line endings normalised. Editing code above or beside a justified
+paragraph no longer re-keys it, so the rationale survives the edit and the independent reviewer
+re-runs against the fresh code. Changing the comment text still produces a new ID and a new decision.
+Byte-identical paragraphs in one file are the exception: text alone cannot tell them apart, so they
+keep a position-sensitive ID. Editing near one of them re-keys it, and a pasted copy is always
+challenged on its own rather than inheriting the rationale its twin earned.
+
 The command records pending evidence under the repository's local Git metadata, so it is shared by
 linked worktrees but never committed. If two worktrees encounter the same finding ID, they may share
 identical evidence; conflicting rationale text is rejected instead of silently overwriting either
