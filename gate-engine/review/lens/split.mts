@@ -34,6 +34,7 @@
  */
 
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
+import type { ChunkAssignment } from './chunk.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { itemFields, mergeItemVectors } from '../evidence/items.mts';
@@ -249,6 +250,13 @@ export function emitMergedLensResults(
         lens: lensGroupId(p.task.sel.reviewer.lens ?? []),
         status: p.res.status,
         secs: p.secs,
+        // Chunk-telemetry wire format (sc-1999): WHICH slice of the chunk plan this part judged,
+        // by index AND membership hash (a bare index is unstable across packing changes). Null on
+        // every un-chunked run — today that is every production run; sc-1907 starts assigning
+        // ReviewTask.chunk. The warehouse ingests non-null entries into its chunk-grain child
+        // table and must never widen its per-lens row for them.
+        chunk_index: p.task.chunk?.index ?? null,
+        chunk_files_sha: p.task.chunk?.filesSha ?? null,
         ...(p.res.model ? { model: p.res.model } : {}),
         ...(p.retried ? { retried: true } : {}),
       })),
@@ -272,6 +280,10 @@ export type ReviewTask = {
    * derived clone against it always mismatches and would flip every split PASS to `error` in review
    * mode. The on-disk assets are identical either way, so the base selection is what to verify. */
   base: ReviewerSelection;
+  /** The chunk-plan slice this task judges (sc-1999 wire format; never in a cache key here — chunk
+   * identity reaches keys via sc-1907's own plan-suffix design). Absent on every un-chunked task,
+   * which today is all of them; production chunking (sc-1907) is the assigner. */
+  chunk?: ChunkAssignment;
 };
 
 /** Progress label. Group-qualified so a fanned-out reviewer's unfinished groups are named
