@@ -45,9 +45,12 @@ const CHUNK_BYTES_PER_LOC = 40;
 /** Chunk only when the diff meaningfully exceeds the cap — at or under 1.5x, one judge reading
  * the whole diff beats two reading halves. */
 const CHUNK_TRIGGER_RATIO = 1.5;
-/** Hard fan-out ceiling (recovery scheduling is proven at this concurrency, sc-1476). Oversized
- * diffs re-pack at doubled caps — fewer, larger chunks, never more judges. */
-const MAX_CHUNKS = 4;
+/** Safety backstop, NOT chunking policy: the configured cap governs granularity so production
+ * matches the benched condition (the largest benched diff, 7.2k LOC at cap 400, packs 18 chunks).
+ * Only a pathological diff repacks at doubled caps. Concurrency is bounded by the runner's judge
+ * pool (reviewConcurrency, default 6), not by chunk count, and sc-1476 recovery already defers
+ * out of the contended wave — so chunk count costs judge SPEND, not scheduling safety. */
+const MAX_CHUNKS = 24;
 
 interface ChunkedPlan {
   parts: ReviewTask[];

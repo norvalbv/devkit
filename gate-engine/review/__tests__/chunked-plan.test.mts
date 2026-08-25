@@ -150,15 +150,28 @@ describe('chunked mode', () => {
     expect(events[0].chunks).toHaveLength(chunkCount);
   });
 
-  it('caps fan-out at 4 chunks by re-packing at doubled caps, never by adding judges', () => {
+  it("packs at the configured cap — chunk count follows the cap, concurrency is the pool's job", () => {
     const many = Array.from({ length: 12 }, (_, i) => `src/m${String(i).padStart(2, '0')}.ts`);
     const diff = many.map((f) => segment(f, 380)).join('');
     const { tasks } = plan(many, diff, 400);
     const chunkCount = new Set(
       tasks.filter((t) => t.chunk !== undefined).map((t) => t.chunk?.index),
     ).size;
+    // ~380-LOC files against a 400-LOC cap: near one chunk per file, NOT repacked coarser — the
+    // benched granularity survives large diffs.
+    expect(chunkCount).toBeGreaterThanOrEqual(10);
+    expect(tasks).toHaveLength(chunkCount * 3 + 1);
+  });
+
+  it('repacks at doubled caps only past the MAX_CHUNKS safety backstop', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `src/p${String(i).padStart(2, '0')}.ts`);
+    const diff = many.map((f) => segment(f, 380)).join('');
+    const { tasks } = plan(many, diff, 400);
+    const chunkCount = new Set(
+      tasks.filter((t) => t.chunk !== undefined).map((t) => t.chunk?.index),
+    ).size;
     expect(chunkCount).toBeGreaterThanOrEqual(2);
-    expect(chunkCount).toBeLessThanOrEqual(4);
+    expect(chunkCount).toBeLessThanOrEqual(24);
     expect(tasks).toHaveLength(chunkCount * 3 + 1);
   });
 });

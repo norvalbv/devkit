@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
 import { retainNewest } from "./store-retention.mjs";
-const MAX_ENTRIES = 400; // sc-1907: a chunked attempt writes ≤13 keys; retry chains keep PASSes (size-bounded above)
+const MAX_ENTRIES = 400; // sc-1907: a chunked attempt writes 3/chunk+1 keys (≤73 at the backstop); attempts sharing a plan share keys
 const MAX_STORE_SIZE = 4 * 1024 * 1024;
 const MAX_OWNER_SIZE = 1_024;
 const LOCK_WAIT_MS = 5_000;

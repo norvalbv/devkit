@@ -14,3 +14,14 @@ created: 2026-08-24
 - Negative: Shipping dark on directional probe evidence (n=23 labels) instead of the pre-registered 112-label confirmation trades statistical certainty for build momentum and zero spend — accepted because the flag defaults off, keys are byte-identical when off, and the same telemetry that would judge a rollout also falsifies a bad probe signal.
 **Vision-fit:** n/a — internal tooling
 **Source:** manual
+
+## Target · 2026-08-25 — planReviewWork chunks the correctness reviewer when GUARD_CORRECTNESS_CHUNK=<loc> is set AND identit
+
+**Context:** Owner ruled (2026-08-25, during PR #456): run gpt-5.6-sol at chunk:400 as the LIVE production config now — this is a personal reviewer improved over time, not a best-in-class product; cost overrun is handled by rollback (env off), and full benches wait until the rest of the epic (telemetry collection) is built. Reviewing the implementation exposed that MAX_CHUNKS=4 with repack-at-doubled-caps silently judged any diff over ~1.6k LOC at 4-8x the benched chunk size — the benched condition (sol-c400, 13/23) was unreproducible exactly where chunking matters most.
+**Ruling:** planReviewWork chunks the correctness reviewer when GUARD_CORRECTNESS_CHUNK=<loc> is set AND identity bytes exceed 1.5x the cap: local lens groups fan out per whole-file next-fit chunk AT THE CONFIGURED CAP — MAX_CHUNKS=24 is a safety backstop (largest benched diff packs 18 at cap 400), not policy; repack-at-doubled-caps fires only past it. Concurrency is bounded by the runner's judge pool (reviewConcurrency, default 6), never by coarsening chunks. writer-reader-contracts stays whole-diff sharing the un-chunked key; per-chunk checklist state (+c<n>); OFF stays byte-identical (kill switch). Target live config: gpt-5.6-sol at cap 400 — armed only after sc-2073 lands (warehouse consumer guards), since arming first corrupts the weekly mining corpus.
+**Consequences:**
+- Positive: Positive: production runs reproduce the benched granularity, so the telemetry readout measures the condition that actually won (sol-c400 13/23); rollback stays one env var. Negative: judge count per attempt is now cap-proportional (a 7k-LOC diff at 400 spawns ~55 judges vs 13 before) — accepted by owner explicitly on subscription economics with rollback as the cost valve; sc-2073 becomes the hard arming gate.
+- Negative: Bench fidelity + owner velocity over bounded worst-case judge count; statistical confirmation deferred to post-epic benches per owner.
+**Vision-fit:** n/a — internal tooling
+**Source:** manual
+**Evidence-change:** Owner ruling 2026-08-25 supersedes the wait-for-readout arming posture (arm sol-5.6@chunk:400 live, rollback=env off, benches post-epic); and MAX_CHUNKS=4 was found to judge large diffs at 4-8x the benched chunk size — the winning benched condition was unreproducible in production
