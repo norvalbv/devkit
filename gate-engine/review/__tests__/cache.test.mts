@@ -98,17 +98,17 @@ describe('loadCache / savePasses / clearCache', () => {
     );
     expect(loadCache(repo)).toEqual({});
   });
-  it('prunes to the newest 100 entries', () => {
+  it('prunes to the newest 400 entries (sc-1907: a chunked attempt writes up to 13 keys)', () => {
     const repo = gitRepo();
     const many = {};
-    for (let i = 0; i < 130; i++) {
+    for (let i = 0; i < 430; i++) {
       many[`r:${i}`] = {
         at: `2026-01-01T00:00:${String(i % 60).padStart(2, '0')}.${i}Z`,
         model: 's',
       };
     }
     savePasses(repo, many);
-    expect(Object.keys(loadCache(repo)).length).toBe(100);
+    expect(Object.keys(loadCache(repo)).length).toBe(400);
   });
   it('reports a durable write', () => {
     const repo = gitRepo();

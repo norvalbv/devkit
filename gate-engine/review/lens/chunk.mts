@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { diffCacheIdentity, filePathOf, splitDiffByFile } from '../../judge/diff-focus.mts';
 
 /** One packed slice of a large diff: whole files only, sorted path order preserved. */
@@ -193,4 +194,33 @@ export interface ChunkPlanFacts {
 export interface ChunkAssignment extends ChunkPlanFacts {
   index: number;
   filesSha: string;
+}
+
+/** sha256-12 of a chunk's file membership (paths joined on '\0'): the identity half of every
+ * chunk key and telemetry row — a bare index is unstable across packing changes (see
+ * ChunkAssignment). */
+export function chunkFilesSha(files: readonly string[]): string {
+  return createHash('sha256').update(files.join('\0')).digest('hex').slice(0, 12);
+}
+
+/** sha256-12 over the ordered per-chunk membership hashes — the whole plan's identity: any
+ * re-homing of files across chunks reads as a different plan. */
+export function chunkPlanHash(chunks: readonly (readonly string[])[]): string {
+  return createHash('sha256')
+    .update(chunks.map((c) => chunkFilesSha(c)).join('\0'))
+    .digest('hex')
+    .slice(0, 12);
+}
+
+/** The sub-diff a chunk's judges receive: only the segments whose post-image path is in the
+ * chunk. Resolution MUST be postImagePathOf — the same rule that packed the chunk — or a
+ * renamed/quoted file would pack into a chunk whose sub-diff then omits it, judging silence. */
+export function chunkDiffText(diffText: string, files: readonly string[]): string {
+  const wanted = new Set(files.map((f) => unquoteGitPath(f)));
+  return splitDiffByFile(diffText)
+    .filter((seg) => {
+      const path = postImagePathOf(seg);
+      return path !== null && wanted.has(path);
+    })
+    .join('');
 }

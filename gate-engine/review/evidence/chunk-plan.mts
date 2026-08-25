@@ -11,8 +11,8 @@
  * one (ship, reviewer) scope row cannot carry them without becoming internally inconsistent. The
  * warehouse ingests these into chunk-grain child tables and leaves its per-reviewer tables alone.
  *
- * NOT called by production yet: un-chunked runs (today: all runs) emit nothing. Production
- * chunking (sc-1907) is the caller; the tests pin the wire shape until then.
+ * Called by planReviewWork's chunked branch (sc-1907) whenever GUARD_CORRECTNESS_CHUNK arms and
+ * a diff crosses the trigger; un-chunked runs emit nothing.
  */
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import type { ChunkPlanFacts } from '../lens/chunk.mts';
