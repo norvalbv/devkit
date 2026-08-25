@@ -248,7 +248,7 @@ describe('verdict store mutations', () => {
   it('conditionally merges into a matching generation with newest-entry pruning', () => {
     const file = path.join(tempRoot('verdict-generation-match'), 'review-cache.json');
     const entries = Object.fromEntries(
-      Array.from({ length: 100 }, (_, index) => [
+      Array.from({ length: 400 }, (_, index) => [
         `old-${index}`,
         { at: String(index).padStart(3, '0') },
       ]),
@@ -258,7 +258,7 @@ describe('verdict store mutations', () => {
     expect(generation).not.toBeNull();
     expect(saveEntriesIfGeneration(file, generation, { newest: { at: '999' } })).toBe('saved');
     expect(verdictStoreGeneration(file)).toBe(generation);
-    expect(Object.keys(loadEntries(file))).toHaveLength(100);
+    expect(Object.keys(loadEntries(file))).toHaveLength(400);
     expect(loadEntries(file)).toMatchObject({ newest: { at: '999' } });
     expect(loadEntries(file)).not.toHaveProperty('old-0');
   });

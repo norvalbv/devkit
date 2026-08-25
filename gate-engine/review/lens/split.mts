@@ -34,100 +34,24 @@
  */
 
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
+import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mts';
+import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mts';
+// Re-exported so every existing importer's path keeps working after the guard-size split.
+export {
+  CORRECTNESS_LENSES,
+  DEFAULT_LENS_GROUPS,
+  deriveLensReviewer,
+  FOUR_WAY_LENS_GROUPS,
+  lensGroupId,
+  resolveLensGroups,
+} from './groups.mts';
+export { resolveChunkCap } from './chunk-tasks.mts';
 import type { ChunkAssignment } from './chunk.mts';
+import { emitReviewChunkPlan } from '../evidence/chunk-plan.mts';
 import { emitGateEvent } from '../../judge/gate-events.mts';
 import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mts';
 import { itemFields, mergeItemVectors } from '../evidence/items.mts';
 import type { ChecklistReviewer, ReviewerSelection } from '../reviewers.mts';
-
-export const CORRECTNESS_LENSES = Object.freeze([
-  'state-transitions',
-  'concurrency-races',
-  'writer-reader-contracts',
-  'error-and-edge-classification',
-] as const);
-
-/** The pilot's paired shape: the measured-strong pair together, the measured-weak pair together.
- * No longer the default — kept addressable as `1`/`on` so the A/B's registered arm stays runnable. */
-export const DEFAULT_LENS_GROUPS: readonly (readonly string[])[] = Object.freeze([
-  Object.freeze(['concurrency-races', 'state-transitions']),
-  Object.freeze(['writer-reader-contracts', 'error-and-edge-classification']),
-]);
-
-/** One judge per lens — the shipped shape. See docs/decisions/correctness-lens-split-shipped.md:
- * this ships on DIRECTIONAL evidence, not a cleared bar. The 2026-08-04 A/B put it ahead of the
- * monolith on both co-primaries with zero regressions and ~35% lower per-row cost, but its
- * null-adjusted +4 sat under the repo's ~5-flip floor, and the arm that WAS pre-registered (the
- * paired shape above) failed. It is on because a configuration nobody runs mints no telemetry to
- * decide it with, and `off` reverts in one env var. */
-export const FOUR_WAY_LENS_GROUPS: readonly (readonly string[])[] = Object.freeze(
-  CORRECTNESS_LENSES.map((lens) => Object.freeze([lens])),
-);
-
-/** Stable id for a group — sorted, so `a,b` and `b,a` are the SAME group everywhere (state-file
- * name, cache key, progress label). Mirrors `lensPath` in the correctness checklist script. */
-export const lensGroupId = (group: readonly string[]): string => [...group].sort().join('+');
-
-/**
- * Parse `GUARD_CORRECTNESS_SPLIT` into lens groups, or null when the split is off.
- *
- * Accepted: unset → FOUR_WAY_LENS_GROUPS (the shipped shape) · `0`/`off` → null (the monolith, the
- * pre-2026-08 behaviour) · `1`/`on` → DEFAULT_LENS_GROUPS (the A/B's registered paired arm) · an
- * explicit spec `a,b|c,d` → those groups. An explicit spec must be a PARTITION of the four lenses:
- * a missing lens would silently stop being reviewed — a correctness lens dropping out of a BLOCKING
- * gate is exactly the blindness this reviewer exists to prevent — and a duplicated one would
- * double-judge the same class. Both throw rather than degrade.
- */
-export function resolveLensGroups(
-  raw = process.env.GUARD_CORRECTNESS_SPLIT,
-): readonly (readonly string[])[] | null {
-  const spec = String(raw ?? '').trim();
-  if (spec === '') return FOUR_WAY_LENS_GROUPS;
-  if (spec === '0' || spec.toLowerCase() === 'off') return null;
-  if (spec === '1' || spec.toLowerCase() === 'on') return DEFAULT_LENS_GROUPS;
-  const groups = spec
-    .split('|')
-    .map((g) =>
-      g
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-    )
-    .filter((g) => g.length > 0);
-  const flat = groups.flat();
-  const known = new Set<string>(CORRECTNESS_LENSES);
-  const unknown = flat.filter((l) => !known.has(l));
-  if (unknown.length > 0)
-    throw new Error(
-      `GUARD_CORRECTNESS_SPLIT: unknown lens ${unknown.join(', ')} — expected a subset of ${CORRECTNESS_LENSES.join(', ')}`,
-    );
-  if (new Set(flat).size !== flat.length)
-    throw new Error('GUARD_CORRECTNESS_SPLIT: a lens may appear in only one group');
-  if (flat.length !== CORRECTNESS_LENSES.length)
-    throw new Error(
-      `GUARD_CORRECTNESS_SPLIT: every lens must appear exactly once (missing ${CORRECTNESS_LENSES.filter((l) => !flat.includes(l)).join(', ') || 'none'})`,
-    );
-  return Object.freeze(groups.map((g) => Object.freeze(g)));
-}
-
-/** A per-group clone. Only the state file and the checklist commands become group-scoped — see the
- * module header on why the name must not. */
-export function deriveLensReviewer(
-  reviewer: ChecklistReviewer,
-  group: readonly string[],
-): ChecklistReviewer {
-  const arg = `--lens ${[...group].sort().join(',')}`;
-  return Object.freeze({
-    ...reviewer,
-    lens: group,
-    stateFile: `.claude/.correctness-review-${lensGroupId(group)}.json`,
-    cmds: Object.freeze({
-      gen: `${reviewer.cmds.gen} ${arg}`,
-      check: `${reviewer.cmds.check} ${arg}`,
-      fin: `${reviewer.cmds.fin ?? 'finalize'} ${arg}`,
-    }),
-  }) as ChecklistReviewer;
-}
 
 /**
  * The mandatory-checklist paragraph of a judge prompt.
@@ -289,8 +213,17 @@ export type ReviewTask = {
 /** Progress label. Group-qualified so a fanned-out reviewer's unfinished groups are named
  * individually — with a bare name repeated N times, `running − completed` could not say WHICH
  * group is still owed. */
-export const taskLabel = (t: { sel: ReviewerSelection; group?: string }): string =>
-  t.group ? `${t.sel.reviewer.name} [${t.group}]` : t.sel.reviewer.name;
+export const taskLabel = (t: {
+  sel: ReviewerSelection;
+  group?: string;
+  chunk?: ChunkAssignment;
+}): string => {
+  if (!t.group) return t.sel.reviewer.name;
+  // Chunked tasks repeat the same lens group once per slice — without the index, `running -
+  // completed` could not say WHICH chunk is still owed (the same blindness group-qualifying fixed).
+  const chunk = t.chunk ? ` #c${t.chunk.index}` : '';
+  return `${t.sel.reviewer.name} [${t.group}${chunk}]`;
+};
 
 /** Park a split group's outcome until every group of that reviewer has landed. */
 export function holdLensPart(
@@ -324,6 +257,7 @@ export function planReviewWork(
   salts: Map<string, string>,
   keyOf: (name: string, diff: string, salt: string) => string,
   groups = resolveLensGroups(),
+  chunkCap = resolveChunkCap(),
 ): {
   tasks: ReviewTask[];
   scope: { sel: ReviewerSelection; diff: string; cached: boolean }[];
@@ -347,16 +281,35 @@ export function planReviewWork(
     // and scope rows still get the RAW diffs[i] — only the key input is normalized.
     const idText = diffCacheIdentity(diffs[i]);
     const split = groups && name === 'correctness-reviewer' && sel.reviewer.skill ? groups : null;
-    const parts: ReviewTask[] = split
-      ? split.map((g) => ({
-          sel: { ...sel, reviewer: deriveLensReviewer(sel.reviewer as ChecklistReviewer, g) },
-          key: keyOf(name, idText, `${salt}|split:${lensGroupId(g)}`),
-          diffText: diffs[i],
-          splitOf: name,
-          group: lensGroupId(g),
-          base: sel,
-        }))
-      : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
+    // Chunked mode (GUARD_CORRECTNESS_CHUNK, default off): local lenses fan out per diff slice;
+    // null when off OR the diff is under the trigger — both fall through to the un-chunked shape
+    // whose keys stay byte-identical to the pre-chunking engine.
+    const chunked =
+      split && chunkCap !== null
+        ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)
+        : null;
+    if (chunked)
+      emitReviewChunkPlan(
+        name,
+        {
+          count: chunked.facts.count,
+          capBytes: chunked.facts.capBytes,
+          planHash: chunked.facts.planHash,
+        },
+        chunked.planEntries,
+      );
+    const parts: ReviewTask[] = chunked
+      ? chunked.parts
+      : split
+        ? split.map((g) => ({
+            sel: { ...sel, reviewer: deriveLensReviewer(sel.reviewer as ChecklistReviewer, g) },
+            key: keyOf(name, idText, `${salt}|split:${lensGroupId(g)}`),
+            diffText: diffs[i],
+            splitOf: name,
+            group: lensGroupId(g),
+            base: sel,
+          }))
+        : [{ sel, key: keyOf(name, idText, salt), diffText: diffs[i], base: sel }];
     const allCached = parts.every((p) => Boolean(cache[p.key]));
     scope.push({ sel, diff: diffs[i], cached: allCached });
     if (allCached) {

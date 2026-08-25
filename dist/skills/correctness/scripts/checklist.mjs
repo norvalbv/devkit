@@ -59,10 +59,29 @@ function extractLens(argv) {
   return { lens: [...new Set(lenses)], rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
 }
 
+// --chunk <n>: chunked mode (GUARD_CORRECTNESS_CHUNK) runs the SAME lens once per diff slice,
+// CONCURRENTLY — without a chunk-scoped state file two judges of one lens would clobber each
+// other's checklist (the exact collision --lens scoping already prevents between groups). Parsed
+// and stripped like --lens; absent → today's paths, byte-for-byte.
+function extractChunk(argv) {
+  const i = argv.indexOf('--chunk');
+  if (i === -1) return { chunk: null, rest: argv };
+  const raw = String(argv[i + 1] ?? '');
+  if (!/^\d+$/.test(raw)) {
+    console.error('❌ --chunk must be a non-negative integer chunk index');
+    process.exit(1);
+  }
+  return { chunk: raw, rest: [...argv.slice(0, i), ...argv.slice(i + 2)] };
+}
+
 // Group-scoped path. Sorted so the SAME group always resolves to the same file regardless of the
 // order the caller listed its lenses — otherwise `a,b` and `b,a` would be two different runs.
-const lensPath = (lens) =>
-  lens?.length ? `.claude/.correctness-review-${[...lens].sort().join('+')}.json` : CHECKLIST_PATH;
+// A chunked run appends its chunk index so parallel same-lens judges never share a file.
+const lensPath = (lens, chunk) => {
+  if (!lens?.length) return CHECKLIST_PATH;
+  const group = [...lens].sort().join('+');
+  return `.claude/.correctness-review-${group}${chunk != null ? `+c${chunk}` : ''}.json`;
+};
 
 const log = console.log;
 
@@ -211,8 +230,9 @@ function generate(lens) {
   for (const item of items) log(`  - [${item.category}] ${item.name}`);
 }
 
-const { lens, rest } = extractLens(process.argv.slice(2));
-ACTIVE_PATH = lensPath(lens);
+const { lens, rest: afterLens } = extractLens(process.argv.slice(2));
+const { chunk, rest } = extractChunk(afterLens);
+ACTIVE_PATH = lensPath(lens, chunk);
 const args = rest;
 const cmd = args[0];
 switch (cmd) {
