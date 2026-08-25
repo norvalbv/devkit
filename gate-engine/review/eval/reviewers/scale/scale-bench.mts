@@ -51,6 +51,7 @@ import {
   resolveToStaged,
   type ScaleLabel,
 } from './labels.mts';
+import { assertMergedParentRows } from '../warehouse-guards.mts';
 
 // ── args ─────────────────────────────────────────────────────────────────────────────────────────
 function arg(name: string, fallback?: string): string | undefined {
@@ -80,6 +81,7 @@ if (process.argv.includes('--clean')) {
   process.exit(0);
 }
 const DB = path.join(os.homedir(), '.claude-usage', 'usage.db');
+assertMergedParentRows(DB);
 // Pinned so an inherited shell override cannot silently change the disclosure cap the
 // pre-registration fixes at 3; also folded into the checkpoint execution identity below, since a
 // different cap changes what a judge is allowed to disclose.

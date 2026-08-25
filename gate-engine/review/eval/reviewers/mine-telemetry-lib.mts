@@ -384,3 +384,17 @@ export function buildHistogram(rows, keyFn = histogramKey) {
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]);
 }
+
+/**
+ * Map.set that refuses duplicates. The miner's indexes are keyed (ship, reviewer[, lens]) and
+ * feed the training corpus unattended (weekly cron) — a duplicate key means the warehouse's
+ * merged-parent-row contract broke (e.g. per-chunk rows leaking out of the sc-1999 child
+ * tables), and last-write-wins would mint wrong labels silently. Fail the run instead.
+ */
+export function setHard(map, key, value, what) {
+  if (map.has(key))
+    throw new Error(
+      `mine-telemetry: duplicate ${what} key ${key} — one row per key is load-bearing for the training corpus (sc-2073); refusing last-write-wins`,
+    );
+  map.set(key, value);
+}
