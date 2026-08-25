@@ -32,16 +32,16 @@
  * name, and gate-verdict-attribution expects ONE review_result row per reviewer — so renaming the
  * derived clones would void every committed waiver and split the telemetry in two.
  */
-import { diffCacheIdentity } from "../../judge/diff-focus.mjs";
-import { planChunkedParts, resolveChunkCap } from "./chunk-tasks.mjs";
-import { deriveLensReviewer, lensGroupId, resolveLensGroups } from "./groups.mjs";
+import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
+import { planChunkedParts, resolveChunkCap } from './chunk-tasks.mjs';
+import { deriveLensReviewer, lensGroupId, resolveLensGroups } from './groups.mjs';
 // Re-exported so every existing importer's path keeps working after the guard-size split.
-export { CORRECTNESS_LENSES, DEFAULT_LENS_GROUPS, deriveLensReviewer, FOUR_WAY_LENS_GROUPS, lensGroupId, resolveLensGroups, } from "./groups.mjs";
-export { resolveChunkCap } from "./chunk-tasks.mjs";
-import { emitReviewChunkPlan } from "../evidence/chunk-plan.mjs";
-import { emitGateEvent } from "../../judge/gate-events.mjs";
-import { composeTranscript, saveTranscript } from "../../judge/transcript-store.mjs";
-import { itemFields, mergeItemVectors } from "../evidence/items.mjs";
+export { CORRECTNESS_LENSES, DEFAULT_LENS_GROUPS, deriveLensReviewer, FOUR_WAY_LENS_GROUPS, lensGroupId, resolveLensGroups, } from './groups.mjs';
+export { resolveChunkCap } from './chunk-tasks.mjs';
+import { emitReviewChunkPlan } from '../evidence/chunk-plan.mjs';
+import { emitGateEvent } from '../../judge/gate-events.mjs';
+import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
+import { itemFields, mergeItemVectors } from '../evidence/items.mjs';
 /**
  * The mandatory-checklist paragraph of a judge prompt.
  *

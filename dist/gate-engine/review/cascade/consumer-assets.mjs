@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { checklistAssetPath, hasChecklist } from "../reviewers.mjs";
+import { checklistAssetPath, hasChecklist } from '../reviewers.mjs';
 const CONSUMER_SKILL_ROOTS = ['.claude', '.agents', '.cursor'];
 /** Resolve the provider-projected checklist root actually present in a consumer checkout. */
 export function consumerChecklistAssetRoot(cwd, reviewer) {

@@ -9,10 +9,10 @@
  * `# devkit:<id>` / `# /devkit:<id>` sentinels so removal is an exact slice, never a
  * brittle regex against shell prose.
  */
-import { GUARD_FRAGMENTS } from "./ai-guard-fragments.mjs";
-import { buildCommitTerminalFragment } from "./commit-terminal.mjs";
-import { markEnd, markStart } from "./husky.mjs";
-import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from "./review-fragments.mjs";
+import { GUARD_FRAGMENTS } from './ai-guard-fragments.mjs';
+import { buildCommitTerminalFragment } from './commit-terminal.mjs';
+import { markEnd, markStart } from './husky.mjs';
+import { DK_HOOK_HELPERS, DK_REVIEW_BASELINE_HELPER, selectedFragment, } from './review-fragments.mjs';
 // Commit/ship exits on failure; review remembers it. The OR-test stays safe under `sh -e`.
 const DK_DETERMINISTIC_GATE_HELPER = `dk_review_det_failed=0
 __dk_gate_deterministic() {

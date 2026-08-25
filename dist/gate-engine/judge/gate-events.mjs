@@ -17,7 +17,7 @@
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { runEnvelope, telemetrySink } from "./run-context.mjs";
+import { runEnvelope, telemetrySink } from './run-context.mjs';
 /**
  * Append one gate/reviewer/ship event to the telemetry sink (no-op when there is none). The sink is
  * the ship's DEVKIT_GATE_EVENTS, or — by default for every commit, unless DEVKIT_NO_TELEMETRY=1 — the

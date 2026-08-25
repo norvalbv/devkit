@@ -14,7 +14,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { runId, telemetrySink } from "./run-context.mjs";
+import { runId, telemetrySink } from './run-context.mjs';
 // Retention: keep the most-recent N run dirs (DEVKIT_TELEMETRY_KEEP, default 300). The always-on
 // opt-in captures every commit, so without a bound transcripts/ grows without limit.
 const DEFAULT_KEEP = 300;

@@ -5,20 +5,20 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { printQavisAdvisoryHealth } from "../../commands/doctor.mjs";
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { extractGuardBlock } from "../husky/husky-block.mjs";
-import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "../husky/self-host.mjs";
-import { checkAdhdSkill } from "../install/adhd-skill.mjs";
-import { readBaseline } from "../install/anti-slop/baseline.mjs";
-import { checkAntiSlopCapability, syncAntiSlopCapability, } from "../install/anti-slop/lifecycle.mjs";
-import { checkOxcCapability } from "../install/oxc/lifecycle.mjs";
-import { checkAgents, checkSkills } from "./asset-checks.mjs";
-import { check } from "./check-result.mjs";
-import { adviseSearchIndex } from "./guard-config-checks.mjs";
-import { checkHookRunner, checkHooksPathOwner } from "./hook-checks.mjs";
-import { printStrayGateCalls } from "./stray-gate-calls.mjs";
-import { inspectHookFailOpen, renderUnguardedGateCalls } from "./unguarded-gate-calls.mjs";
+import { printQavisAdvisoryHealth } from '../../commands/doctor.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { extractGuardBlock } from '../husky/husky-block.mjs';
+import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from '../husky/self-host.mjs';
+import { checkAdhdSkill } from '../install/adhd-skill.mjs';
+import { readBaseline } from '../install/anti-slop/baseline.mjs';
+import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/anti-slop/lifecycle.mjs';
+import { checkOxcCapability } from '../install/oxc/lifecycle.mjs';
+import { checkAgents, checkSkills } from './asset-checks.mjs';
+import { check } from './check-result.mjs';
+import { adviseSearchIndex } from './guard-config-checks.mjs';
+import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mjs';
+import { printStrayGateCalls } from './stray-gate-calls.mjs';
+import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mjs';
 export async function runSelfHostDoctor(cwd, cfg, fix) {
     const { gitRoot, pkgRel } = detectGitRoot(cwd);
     const hookPath = join(gitRoot, '.husky', 'pre-commit');

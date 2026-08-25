@@ -14,10 +14,10 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveFromCwd, resolveGuardConfig } from "../../config.mjs";
-import { parseDecision, parseIndex } from "../decision-format.mjs";
-import { axisNoteIds } from "../recall/note-relations.mjs";
-import { checkAxis } from "./checks.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
+import { parseDecision, parseIndex } from '../decision-format.mjs';
+import { axisNoteIds } from '../recall/note-relations.mjs';
+import { checkAxis } from './checks.mjs';
 function loadAxisDocs(dir) {
     return readdirSync(dir)
         .filter((f) => f.endsWith('.md') && f !== 'INDEX.md')

@@ -1,9 +1,9 @@
-import { isAgentProvider } from "../agent-assets/agent-providers.mjs";
-import { decodeHookRegistrationLedger, hookRegistrationDestination, } from "./codec.mjs";
-import { dataRecord, exactData } from "./plain-data.mjs";
-import { HOOK_REGISTRATIONS } from "./registrations.mjs";
-export { withAgentAssetLifecycleLock } from "../agent-asset-manifest/lock.mjs";
-export { readHookRegistrationLedger, writeHookRegistrationLedger } from "./codec.mjs";
+import { isAgentProvider } from '../agent-assets/agent-providers.mjs';
+import { decodeHookRegistrationLedger, hookRegistrationDestination, } from './codec.mjs';
+import { dataRecord, exactData } from './plain-data.mjs';
+import { HOOK_REGISTRATIONS } from './registrations.mjs';
+export { withAgentAssetLifecycleLock } from '../agent-asset-manifest/lock.mjs';
+export { readHookRegistrationLedger, writeHookRegistrationLedger } from './codec.mjs';
 const TRUSTED_PROJECTIONS = new WeakSet();
 const RUNNER_RE = /^(node|bash)\s+/;
 const CLAUDE_PROJECT_DIR_RE = /"\$CLAUDE_PROJECT_DIR"?\/?/g;

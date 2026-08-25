@@ -10,11 +10,11 @@
  */
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
-import { sourceMatchers } from "../config.mjs";
-import { devkitVersion } from "../devkit-version.mjs";
-import { withNamedAgentMcpTools } from "../judge/mcp/profile.mjs";
-import { checklistContractFor } from "./lens/split.mjs";
-export { parseReviewVerdict } from "./contracts/response.mjs";
+import { sourceMatchers } from '../config.mjs';
+import { devkitVersion } from '../devkit-version.mjs';
+import { withNamedAgentMcpTools } from '../judge/mcp/profile.mjs';
+import { checklistContractFor } from './lens/split.mjs';
+export { parseReviewVerdict } from './contracts/response.mjs';
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
 export function hasChecklist(reviewer) {

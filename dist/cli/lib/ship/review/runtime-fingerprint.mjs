@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
-import { runDirectReviewCli } from "./run-direct.mjs";
+import { runDirectReviewCli } from './run-direct.mjs';
 const ABSENT_FINGERPRINT = 'absent';
 function updateField(hash, value) {
     const size = typeof value === 'string' ? Buffer.byteLength(value) : value.byteLength;

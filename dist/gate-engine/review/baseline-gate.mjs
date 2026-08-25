@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseDiffHunks, rewriteFallowBaseline, } from "./baseline-fallow-paths.mjs";
+import { parseDiffHunks, rewriteFallowBaseline, } from './baseline-fallow-paths.mjs';
 const METADATA_FILE = 'metadata.json';
 const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?)$/i;
 const NEWLINE_RE = /\r?\n/;

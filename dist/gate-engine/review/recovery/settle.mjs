@@ -17,13 +17,13 @@
  * banner semantics: a parked reviewer is NOT completed until its recovery settles, so a kill
  * mid-phase still names it unfinished and the re-run converges on it).
  */
-import { emitGateEvent } from "../../judge/gate-events.mjs";
-import { composeTranscript, saveTranscript } from "../../judge/transcript-store.mjs";
-import { savePasses } from "../cache.mjs";
-import { archiveFailedDiff } from "../evidence/diff-archive.mjs";
-import { cachedLensFields, itemFields } from "../evidence/items.mjs";
-import { holdLensPart, taskLabel } from "../lens/split.mjs";
-import { writeProgress } from "../progress.mjs";
+import { emitGateEvent } from '../../judge/gate-events.mjs';
+import { composeTranscript, saveTranscript } from '../../judge/transcript-store.mjs';
+import { savePasses } from '../cache.mjs';
+import { archiveFailedDiff } from '../evidence/diff-archive.mjs';
+import { cachedLensFields, itemFields } from '../evidence/items.mjs';
+import { holdLensPart, taskLabel } from '../lens/split.mjs';
+import { writeProgress } from '../progress.mjs';
 export const retryableReason = (res) => res.retryable;
 /**
  * Settle one cascade outcome: asset re-verification, timing, PASS checkpoint, fail archive,

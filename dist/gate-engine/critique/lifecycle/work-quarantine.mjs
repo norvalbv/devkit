@@ -1,8 +1,8 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalPlanCritiqueRecordJson, PLAN_CRITIQUE_PROVIDERS, plainRecord, sha256Bytes, validText, } from "../evidence-record.mjs";
-import { managedPath, publishImmutable, readPrivateFileBounded } from "../immutable-file.mjs";
-import { resolvePlanCritiqueEvidenceRoot, withExistingPlanCritiquePersistenceLock, withPlanCritiquePersistenceLock, } from "../persistence-lock.mjs";
+import { canonicalPlanCritiqueRecordJson, PLAN_CRITIQUE_PROVIDERS, plainRecord, sha256Bytes, validText, } from '../evidence-record.mjs';
+import { managedPath, publishImmutable, readPrivateFileBounded } from '../immutable-file.mjs';
+import { resolvePlanCritiqueEvidenceRoot, withExistingPlanCritiquePersistenceLock, withPlanCritiquePersistenceLock, } from '../persistence-lock.mjs';
 const SHA256 = /^[0-9a-f]{64}$/;
 const QUARANTINE_PATH = ['work-quarantines'];
 function exactObject(value, fields) {

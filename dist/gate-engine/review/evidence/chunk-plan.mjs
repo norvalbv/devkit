@@ -14,7 +14,7 @@
  * Called by planReviewWork's chunked branch (sc-1907) whenever GUARD_CORRECTNESS_CHUNK arms and
  * a diff crosses the trigger; un-chunked runs emit nothing.
  */
-import { emitGateEvent } from "../../judge/gate-events.mjs";
+import { emitGateEvent } from '../../judge/gate-events.mjs';
 export function emitReviewChunkPlan(reviewer, plan, chunks) {
     emitGateEvent({
         type: 'review_chunk_plan',

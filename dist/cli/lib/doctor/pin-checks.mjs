@@ -22,10 +22,10 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmpSemver, DEP, latestTag, lsRemote, pinnedVersion } from "../../commands/update.mjs";
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { readJson } from "../fs-helpers.mjs";
-import { check } from "./check-result.mjs";
+import { cmpSemver, DEP, latestTag, lsRemote, pinnedVersion } from '../../commands/update.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { readJson } from '../fs-helpers.mjs';
+import { check } from './check-result.mjs';
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;
 const DEP_IN_RE = DEP.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&');

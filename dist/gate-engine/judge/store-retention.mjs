@@ -16,7 +16,7 @@
  * investigation a query instead of a study, per docs/decisions/gate-telemetry-self-describing.md.
  */
 import path from 'node:path';
-import { emitGateEvent } from "./gate-events.mjs";
+import { emitGateEvent } from './gate-events.mjs';
 /** Newest-first by `at`, capped — and any drop is reported before it happens. */
 export function retainNewest(entries, maxEntries, file) {
     const ranked = Object.entries(entries).sort((a, b) => String(b[1]?.at ?? '').localeCompare(String(a[1]?.at ?? '')));

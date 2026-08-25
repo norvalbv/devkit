@@ -1,8 +1,8 @@
 /** Authentication and fail-closed parsing for private repository-state manifests. */
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
-import { hasExactManifestKeys, hasValidManifestRoots, isSafeManifestAbsolutePath, } from "../manifest/validation.mjs";
-import { errorMessage, fail, objectValue } from "../shared/common.mjs";
+import { hasExactManifestKeys, hasValidManifestRoots, isSafeManifestAbsolutePath, } from '../manifest/validation.mjs';
+import { errorMessage, fail, objectValue } from '../shared/common.mjs';
 export const REVIEW_REPOSITORY_STATE_VERSION = 1;
 export const REVIEW_REPOSITORY_OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const SHA256 = /^[a-f0-9]{64}$/;

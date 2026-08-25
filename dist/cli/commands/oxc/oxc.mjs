@@ -1,5 +1,5 @@
 /** `devkit oxc` — run Devkit's pinned Oxlint/Oxfmt packages against the consumer cwd. */
-import { runOxcRuntime } from "../../lib/install/oxc/runtime.mjs";
+import { runOxcRuntime } from '../../lib/install/oxc/runtime.mjs';
 export const meta = {
     name: 'oxc',
     summary: "Run Devkit's pinned native Oxlint or Oxfmt (no consumer install).",

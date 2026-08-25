@@ -20,9 +20,9 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
-import { resolveGuardConfig } from "../config.mjs";
-import { gitPrefix, splitNul } from "../ratchets/git-index.mjs";
-import { buildStructureConfigs } from "./eslint-config.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { gitPrefix, splitNul } from '../ratchets/git-index.mjs';
+import { buildStructureConfigs } from './eslint-config.mjs';
 // The trichotomy as named verdicts, so a call site states what it concluded instead of a bare
 // number — `clean()` asserts a tree was read, `couldNotRun()` asserts one was not.
 const clean = () => ({ code: 0, errorCount: 0 });

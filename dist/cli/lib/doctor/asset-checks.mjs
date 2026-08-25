@@ -11,15 +11,15 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { skillNamesForSelection } from "../components.mjs";
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { packageDir, readJson, sha256 } from "../fs-helpers.mjs";
-import { isSafeAgentAssetPath } from "../install/agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest } from "../install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir, projectedAssetRel } from "../install/agent-assets/agent-assets.mjs";
-import { checkHookRegistrations } from "../install/install-hooks.mjs";
-import { bundledNames } from "../sync-manifest.mjs";
-import { check } from "./check-result.mjs";
+import { skillNamesForSelection } from '../components.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { packageDir, readJson, sha256 } from '../fs-helpers.mjs';
+import { isSafeAgentAssetPath } from '../install/agent-asset-manifest/lifecycle.mjs';
+import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mjs';
+import { agentAssetDir, projectedAssetRel } from '../install/agent-assets/agent-assets.mjs';
+import { checkHookRegistrations } from '../install/install-hooks.mjs';
+import { bundledNames } from '../sync-manifest.mjs';
+import { check } from './check-result.mjs';
 const AGENT_ASSET_CHECKS = {
     skills: ['skills', 'skills-manifest.json', 'run `devkit sync-skills`', 'file(s)'],
     agents: ['agents', 'agents-manifest.json', 'run `devkit sync-agents`', 'agent file(s)'],

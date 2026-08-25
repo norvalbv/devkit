@@ -1,4 +1,4 @@
-import { DK_NO_GIT_ENV_INLINE } from "./review-fragments.mjs";
+import { DK_NO_GIT_ENV_INLINE } from './review-fragments.mjs';
 export const GUARD_FRAGMENTS = {
     comments: `# devkit:guard-comments
 echo "🧯 Changed-comment firewall..."

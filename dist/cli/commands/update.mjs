@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir, readJson } from "../lib/fs-helpers.mjs";
+import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 export const DEP = '@norvalbv/devkit';
 /**
  * The devkit git remote for `git ls-remote` + `bun add`. Defaults to git+https: the repo is public,

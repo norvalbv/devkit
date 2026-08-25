@@ -1,5 +1,5 @@
 /** Shell fragments shared by package, standalone, overlay, and self-host review hooks. */
-import { GIT_ENV_VARS } from "../../../gate-engine/judge/judge-isolation.mjs";
+import { GIT_ENV_VARS } from '../../../gate-engine/judge/judge-isolation.mjs';
 // Run a gate with git's per-repository environment stripped. Git EXPORTS GIT_DIR/GIT_INDEX_FILE into
 // every hook, and for a hook run in a LINKED WORKTREE — how `devkit ship` commits — those values are
 // ABSOLUTE paths into the ship worktree's admin dir. They are inherited by every descendant, so any

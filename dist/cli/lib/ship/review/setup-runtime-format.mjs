@@ -2,8 +2,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { isSafeReviewRelativePath } from "./runtime-paths.mjs";
-import { isReviewSetupHash, REVIEW_SETUP_ABSENT } from "./setup-manifest-format.mjs";
+import { isSafeReviewRelativePath } from './runtime-paths.mjs';
+import { isReviewSetupHash, REVIEW_SETUP_ABSENT } from './setup-manifest-format.mjs';
 export const REVIEW_SETUP_RUNTIME_VERSION = 1;
 export const REVIEW_SETUP_RUNTIME_PROTOCOL = 'devkit-review-setup-v1';
 function fail(message) {

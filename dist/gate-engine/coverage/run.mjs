@@ -25,11 +25,11 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { coverageBypassed, resolveGuardConfig } from "../config.mjs";
-import { emitGateEvent } from "../judge/gate-events.mjs";
+import { coverageBypassed, resolveGuardConfig } from '../config.mjs';
+import { emitGateEvent } from '../judge/gate-events.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
-import { COVERAGE_FILE } from "./produce.mjs";
+import { COVERAGE_FILE } from './produce.mjs';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
 // configured are enforced; the rest are computed but ignored.
 const METRICS = ['statements', 'functions', 'branches', 'lines'];
