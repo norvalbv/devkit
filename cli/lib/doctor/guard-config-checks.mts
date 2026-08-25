@@ -225,7 +225,7 @@ export async function checkGuardConfig(
   const resolved = cfg.indexPath ?? null;
   const results = [check('guard.config.json', 'OK', 'valid (resolveGuardConfig parsed it)')];
   if (dupSelected) results.push(checkSearchIndex(cwd, resolved, searchCodeSelected));
-  const topology = reviewTopology(cwd, mod);
+  const topology = reviewTopology(cwd, cfg.review);
   if (topology) results.push(topology);
   const codex = codexRuntimeResult(cfg, cwd);
   if (codex) results.push(codex);
@@ -395,9 +395,11 @@ export function reviewTopologyResult(stack: Stack, review: ReviewRoots): CheckRe
  * devkit itself (a node-service with backendRoots declared passes anyway), but an overlay consumer
  * with a genuinely inverted topology gets no signal — recorded so that stays a decision.
  */
-function reviewTopology(cwd: string, mod: GateConfigModule): CheckResult | null {
+// Takes the caller's already-resolved review snapshot — a second resolveGuardConfig read here
+// could disagree with the index/codex checks if the file changes between reads.
+function reviewTopology(cwd: string, review: ReviewRoots): CheckResult | null {
   try {
-    return reviewTopologyResult(detectStack(cwd), mod.resolveGuardConfig(cwd).review);
+    return reviewTopologyResult(detectStack(cwd), review);
   } catch {
     return null;
   }
