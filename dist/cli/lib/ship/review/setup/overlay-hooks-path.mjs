@@ -20,7 +20,7 @@
  */
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { globalHookWired, globalInitPath } from "../../../overlay-global-hook.mjs";
+import { globalHookWired, globalInitPath } from '../../../overlay-global-hook.mjs';
 /** The hooksPath an overlay install writes, and the one review's private gate run always uses. */
 export const OVERLAY_HOOKS_PATH = '.devkit/hooks';
 /** The hooksPath husky reclaims to on every `prepare`. */

@@ -18,18 +18,18 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { applyOverlayConstraints, normalizeSelection } from "../lib/components.mjs";
-import { detectGitRoot } from "../lib/detect-git-root.mjs";
-import { detectStack } from "../lib/detect-stack.mjs";
-import { packageDir, readJson } from "../lib/fs-helpers.mjs";
-import { selfHostSelection } from "../lib/husky/self-host.mjs";
-import { resolveExistingAgentProviders } from "../lib/install/agent-assets/agent-providers.mjs";
-import { adoptAgentAssetCollisions } from "../lib/install/agent-assets/agent-surfaces.mjs";
-import { offerLineGrowth, offerNewGates, offerOptionalComponents, } from "../lib/install/upgrade-offers.mjs";
-import doctor from "./doctor.mjs";
-import { applyInit } from "./init.mjs";
-import { computeMigration } from "./migrate-config.mjs";
-import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from "./update.mjs";
+import { applyOverlayConstraints, normalizeSelection } from '../lib/components.mjs';
+import { detectGitRoot } from '../lib/detect-git-root.mjs';
+import { detectStack } from '../lib/detect-stack.mjs';
+import { packageDir, readJson } from '../lib/fs-helpers.mjs';
+import { selfHostSelection } from '../lib/husky/self-host.mjs';
+import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent-providers.mjs';
+import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-surfaces.mjs';
+import { offerLineGrowth, offerNewGates, offerOptionalComponents, } from '../lib/install/upgrade-offers.mjs';
+import doctor from './doctor.mjs';
+import { applyInit } from './init.mjs';
+import { computeMigration } from './migrate-config.mjs';
+import update, { cmpSemver, DEP, fetchLatestTag, needsRerun, repinPackageJson } from './update.mjs';
 export const meta = {
     name: 'upgrade',
     summary: 'Fully reconcile this repo to the installed devkit (one idempotent pass).',

@@ -8,13 +8,13 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from "./baseline-paths.mjs";
-import { hasStagedFiles, indexTreeRef, pullRequestScope, stagedSet } from "./git-index.mjs";
-import { freezeLinesBaseline } from "./size-lines-freeze.mjs";
-import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, tightenLineBaseline, } from "./size-line-authority.mjs";
-import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
-import { runPreflightCli } from "./size-preflight.mjs";
+import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, readRatchetBaseline, removeRatchetBaseline, SIZE_BASELINE, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { hasStagedFiles, indexTreeRef, pullRequestScope, stagedSet } from './git-index.mjs';
+import { freezeLinesBaseline } from './size-lines-freeze.mjs';
+import { lineBaselineForGate, lineCountsAtRef, lineViolationReport, tightenLineBaseline, } from './size-line-authority.mjs';
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
+import { runPreflightCli } from './size-preflight.mjs';
 const BASELINE = SIZE_BASELINE;
 // Only an actual directive comment counts — a line that merely MENTIONS the phrase
 // (string literal, prose comment) must not inflate the ratchet and falsely block.

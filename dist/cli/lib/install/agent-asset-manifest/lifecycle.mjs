@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { writeIfAbsent } from "../../fs-helpers.mjs";
-import { agentAssetDir, projectAgentAsset, projectedAssetRel, } from "../agent-assets/agent-assets.mjs";
-import { requireAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from "../agent-assets/agent-providers.mjs";
-import { encodeSyncManifestV2 } from "./codec.mjs";
-import { AGENT_ASSET_MANIFESTS } from "./compatibility.mjs";
-import { withAgentAssetLifecycleLock } from "./lock.mjs";
-import { readAgentAssetManifest } from "./reader.mjs";
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { writeIfAbsent } from '../../fs-helpers.mjs';
+import { agentAssetDir, projectAgentAsset, projectedAssetRel, } from '../agent-assets/agent-assets.mjs';
+import { requireAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../agent-assets/agent-providers.mjs';
+import { encodeSyncManifestV2 } from './codec.mjs';
+import { AGENT_ASSET_MANIFESTS } from './compatibility.mjs';
+import { withAgentAssetLifecycleLock } from './lock.mjs';
+import { readAgentAssetManifest } from './reader.mjs';
 export { withAgentAssetLifecycleLock };
 const digest = (content) => createHash('sha256').update(content).digest('hex');
 function unitFor(kind, logicalRel) {

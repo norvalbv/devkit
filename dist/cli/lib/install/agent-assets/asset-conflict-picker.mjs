@@ -7,11 +7,11 @@
  * default is always PRESERVE: an install must never silently clobber something a consumer wrote.
  */
 import { isCancel, multiselect } from '@clack/prompts';
-import { detectAgentConflicts } from "../../../commands/sync/sync-agents.mjs";
-import { detectSkillConflicts } from "../../../commands/sync/sync-skills.mjs";
-import { AGENT_TARGETS } from "../../components.mjs";
-import { selectedHookAssets } from "../hook-registration-ledger/selection.mjs";
-import { detectHookConflicts } from "../install-hooks.mjs";
+import { detectAgentConflicts } from '../../../commands/sync/sync-agents.mjs';
+import { detectSkillConflicts } from '../../../commands/sync/sync-skills.mjs';
+import { AGENT_TARGETS } from '../../components.mjs';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mjs';
+import { detectHookConflicts } from '../install-hooks.mjs';
 // Resolve the non-devkit-collision policy → an `override(kind, name)` predicate the sync step
 // consults. A collision is a same-named asset the consumer authored (on disk, unmanifested, content
 // DIVERGES from the bundle). DEFAULT is to PRESERVE it (never silently clobber a user asset): force

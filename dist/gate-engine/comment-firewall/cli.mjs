@@ -2,9 +2,9 @@
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { detectChangedComments } from "./detect.mjs";
-import { runCommentFirewall } from "./gate.mjs";
-import { ensureLegacyRationalesMigrated, listRationales, pruneRationales, recordRationale, } from "./rationales.mjs";
+import { detectChangedComments } from './detect.mjs';
+import { runCommentFirewall } from './gate.mjs';
+import { ensureLegacyRationalesMigrated, listRationales, pruneRationales, recordRationale, } from './rationales.mjs';
 const USAGE = `Usage:
   guard-comments gate
   guard-comments justify <finding-id> "<specific rationale>" [--ticket SC-123|URL] [--from-ship-log <absolute-path>]

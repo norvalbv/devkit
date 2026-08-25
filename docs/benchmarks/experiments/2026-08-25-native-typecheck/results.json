@@ -1,0 +1,493 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-25T00:19:25.364Z",
+  "environment": {
+    "hardware": "Apple M4",
+    "os": "macOS 26.5.1 (25F80)",
+    "node": "24.19.0",
+    "bun": "1.3.1",
+    "candidateLoadNote": "The same-checkout lanes alternated under heavy unrelated machine load; CPU is primary and wall time is contextual."
+  },
+  "parity": {
+    "rootShowConfigSha256": "93152368e6cb0babd50f59432646e456d4e2303e9024308ef5ec8aa11d8c58ca",
+    "fixtureFileCount": 2772,
+    "normalFileCount": 2768,
+    "matchedDiagnosticCodes": [
+      1110,
+      2307,
+      2322,
+      2304
+    ],
+    "matchedFileLineColumnAndMessage": true,
+    "skipLibCheckMatched": true,
+    "excludedSyncTestMatched": true,
+    "typescript6DiagnosticExitCode": 2,
+    "typescript7DiagnosticExitCode": 1,
+    "oxlintTypeCheckRejectedBecause": "The broad directory input selected root-tsconfig-excluded *.sync.test.ts files."
+  },
+  "ownershipOutcome": {
+    "devkit": "TypeScript 7 is a development-only compiler for Devkit's own type-check and build scripts.",
+    "consumers": "Each package owns its TypeScript dependency, configuration, and command.",
+    "prototypeWrapperShipped": false
+  },
+  "frink": {
+    "commit": "127884bf0d15d942506ff601a734e63e3ce3cfeb",
+    "comparison": "Same checkout, paired alternating lanes",
+    "commands": {
+      "typescript6": "node ./node_modules/typescript/bin/tsc --noEmit",
+      "devkitNative7": "node <devkit package>/dist/cli/index.mjs typecheck"
+    },
+    "warmupsDiscardedPerLane": 3,
+    "measuredSamplesPerLane": 10,
+    "samplingIntervalMs": 20,
+    "lanes": {
+      "typescript6": {
+        "compiler": "TypeScript 6.0.3",
+        "warmups": [
+          {
+            "index": 1,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 31610,
+            "userCpuMs": 32790,
+            "systemCpuMs": 1830,
+            "cpuMs": 34620,
+            "processTreeRssBytes": 2794569728,
+            "diagnostics": ""
+          },
+          {
+            "index": 2,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 34700,
+            "userCpuMs": 33890,
+            "systemCpuMs": 1380,
+            "cpuMs": 35270,
+            "processTreeRssBytes": 2866462720,
+            "diagnostics": ""
+          },
+          {
+            "index": 3,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 34250,
+            "userCpuMs": 32040,
+            "systemCpuMs": 1360,
+            "cpuMs": 33400,
+            "processTreeRssBytes": 2883928064,
+            "diagnostics": ""
+          }
+        ],
+        "samples": [
+          {
+            "index": 1,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 26710,
+            "userCpuMs": 31970,
+            "systemCpuMs": 1800,
+            "cpuMs": 33770,
+            "processTreeRssBytes": 2799058944,
+            "diagnostics": ""
+          },
+          {
+            "index": 2,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 37470,
+            "userCpuMs": 35720,
+            "systemCpuMs": 2190,
+            "cpuMs": 37910,
+            "processTreeRssBytes": 2955608064,
+            "diagnostics": ""
+          },
+          {
+            "index": 3,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 35720,
+            "userCpuMs": 32960,
+            "systemCpuMs": 1220,
+            "cpuMs": 34180,
+            "processTreeRssBytes": 2858123264,
+            "diagnostics": ""
+          },
+          {
+            "index": 4,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 40030,
+            "userCpuMs": 33820,
+            "systemCpuMs": 3160,
+            "cpuMs": 36980,
+            "processTreeRssBytes": 2714845184,
+            "diagnostics": ""
+          },
+          {
+            "index": 5,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 24220,
+            "userCpuMs": 30740,
+            "systemCpuMs": 1480,
+            "cpuMs": 32220,
+            "processTreeRssBytes": 2840592384,
+            "diagnostics": ""
+          },
+          {
+            "index": 6,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 27850,
+            "userCpuMs": 34000,
+            "systemCpuMs": 2120,
+            "cpuMs": 36120,
+            "processTreeRssBytes": 2808774656,
+            "diagnostics": ""
+          },
+          {
+            "index": 7,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 24670,
+            "userCpuMs": 32170,
+            "systemCpuMs": 1460,
+            "cpuMs": 33630,
+            "processTreeRssBytes": 2931146752,
+            "diagnostics": ""
+          },
+          {
+            "index": 8,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 32780,
+            "userCpuMs": 34740,
+            "systemCpuMs": 1960,
+            "cpuMs": 36700,
+            "processTreeRssBytes": 2727460864,
+            "diagnostics": ""
+          },
+          {
+            "index": 9,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 25060,
+            "userCpuMs": 31140,
+            "systemCpuMs": 1570,
+            "cpuMs": 32710,
+            "processTreeRssBytes": 2788065280,
+            "diagnostics": ""
+          },
+          {
+            "index": 10,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 26810,
+            "userCpuMs": 33560,
+            "systemCpuMs": 2100,
+            "cpuMs": 35660,
+            "processTreeRssBytes": 2703753216,
+            "diagnostics": ""
+          }
+        ],
+        "summary": {
+          "wallMs": {
+            "median": 27330,
+            "p95": 40030
+          },
+          "userCpuMs": {
+            "median": 33260,
+            "p95": 35720
+          },
+          "systemCpuMs": {
+            "median": 1880,
+            "p95": 3160
+          },
+          "cpuMs": {
+            "median": 34920,
+            "p95": 37910
+          },
+          "processTreeRssBytes": {
+            "median": 2803916800,
+            "p95": 2955608064
+          }
+        }
+      },
+      "devkitNative7": {
+        "compiler": "Devkit typecheck / TypeScript 7.0.2 native",
+        "warmups": [
+          {
+            "index": 1,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 11210,
+            "userCpuMs": 14670,
+            "systemCpuMs": 1310,
+            "cpuMs": 15980,
+            "processTreeRssBytes": 3550740480,
+            "diagnostics": ""
+          },
+          {
+            "index": 2,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 11170,
+            "userCpuMs": 14820,
+            "systemCpuMs": 1270,
+            "cpuMs": 16090,
+            "processTreeRssBytes": 3530588160,
+            "diagnostics": ""
+          },
+          {
+            "index": 3,
+            "kind": "warmup",
+            "exitCode": 0,
+            "wallMs": 6630,
+            "userCpuMs": 15210,
+            "systemCpuMs": 1250,
+            "cpuMs": 16460,
+            "processTreeRssBytes": 3398909952,
+            "diagnostics": ""
+          }
+        ],
+        "samples": [
+          {
+            "index": 1,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 8270,
+            "userCpuMs": 15280,
+            "systemCpuMs": 1230,
+            "cpuMs": 16510,
+            "processTreeRssBytes": 3363913728,
+            "diagnostics": ""
+          },
+          {
+            "index": 2,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 6080,
+            "userCpuMs": 16590,
+            "systemCpuMs": 1160,
+            "cpuMs": 17750,
+            "processTreeRssBytes": 3443294208,
+            "diagnostics": ""
+          },
+          {
+            "index": 3,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 7820,
+            "userCpuMs": 15960,
+            "systemCpuMs": 1590,
+            "cpuMs": 17550,
+            "processTreeRssBytes": 3272835072,
+            "diagnostics": ""
+          },
+          {
+            "index": 4,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 5460,
+            "userCpuMs": 15950,
+            "systemCpuMs": 1050,
+            "cpuMs": 17000,
+            "processTreeRssBytes": 3362816000,
+            "diagnostics": ""
+          },
+          {
+            "index": 5,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 7280,
+            "userCpuMs": 15070,
+            "systemCpuMs": 1140,
+            "cpuMs": 16210,
+            "processTreeRssBytes": 3332358144,
+            "diagnostics": ""
+          },
+          {
+            "index": 6,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 6540,
+            "userCpuMs": 14800,
+            "systemCpuMs": 1160,
+            "cpuMs": 15960,
+            "processTreeRssBytes": 3527229440,
+            "diagnostics": ""
+          },
+          {
+            "index": 7,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 5650,
+            "userCpuMs": 15080,
+            "systemCpuMs": 1150,
+            "cpuMs": 16230,
+            "processTreeRssBytes": 3362471936,
+            "diagnostics": ""
+          },
+          {
+            "index": 8,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 7190,
+            "userCpuMs": 15890,
+            "systemCpuMs": 1210,
+            "cpuMs": 17100,
+            "processTreeRssBytes": 3199401984,
+            "diagnostics": ""
+          },
+          {
+            "index": 9,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 7610,
+            "userCpuMs": 15620,
+            "systemCpuMs": 1150,
+            "cpuMs": 16770,
+            "processTreeRssBytes": 3511238656,
+            "diagnostics": ""
+          },
+          {
+            "index": 10,
+            "kind": "measured",
+            "exitCode": 0,
+            "wallMs": 7280,
+            "userCpuMs": 14380,
+            "systemCpuMs": 1070,
+            "cpuMs": 15450,
+            "processTreeRssBytes": 3379003392,
+            "diagnostics": ""
+          }
+        ],
+        "summary": {
+          "wallMs": {
+            "median": 7235,
+            "p95": 8270
+          },
+          "userCpuMs": {
+            "median": 15450,
+            "p95": 16590
+          },
+          "systemCpuMs": {
+            "median": 1155,
+            "p95": 1590
+          },
+          "cpuMs": {
+            "median": 16640,
+            "p95": 17750
+          },
+          "processTreeRssBytes": {
+            "median": 3363364864,
+            "p95": 3527229440
+          }
+        }
+      }
+    },
+    "deltaPercent": {
+      "medianWallMs": -73.5,
+      "medianCpuMs": -52.3,
+      "medianProcessTreeRssBytes": 20.0
+    }
+  },
+  "devkitSupportingSample": {
+    "commit": "b6eb83b05679eb303974809fac6a57140493eaf6",
+    "node": "22.20.0",
+    "method": "Five direct /usr/bin/time runs per compiler under the same concurrently loaded machine; not the formal B0 harness.",
+    "typescript6": {
+      "samples": [
+        {
+          "wallMs": 16430,
+          "userCpuMs": 9740,
+          "systemCpuMs": 710,
+          "cpuMs": 10450,
+          "maxRssBytes": 283967488
+        },
+        {
+          "wallMs": 16900,
+          "userCpuMs": 9680,
+          "systemCpuMs": 730,
+          "cpuMs": 10410,
+          "maxRssBytes": 272924672
+        },
+        {
+          "wallMs": 13450,
+          "userCpuMs": 9870,
+          "systemCpuMs": 700,
+          "cpuMs": 10570,
+          "maxRssBytes": 292634624
+        },
+        {
+          "wallMs": 13150,
+          "userCpuMs": 9710,
+          "systemCpuMs": 690,
+          "cpuMs": 10400,
+          "maxRssBytes": 296517632
+        },
+        {
+          "wallMs": 21170,
+          "userCpuMs": 10560,
+          "systemCpuMs": 920,
+          "cpuMs": 11480,
+          "maxRssBytes": 278757376
+        }
+      ],
+      "median": {
+        "wallMs": 16430,
+        "cpuMs": 10450,
+        "maxRssBytes": 283967488
+      }
+    },
+    "typescript7Native": {
+      "samples": [
+        {
+          "wallMs": 2720,
+          "userCpuMs": 1050,
+          "systemCpuMs": 210,
+          "cpuMs": 1260,
+          "maxRssBytes": 256000000
+        },
+        {
+          "wallMs": 2470,
+          "userCpuMs": 1310,
+          "systemCpuMs": 180,
+          "cpuMs": 1490,
+          "maxRssBytes": 258686976
+        },
+        {
+          "wallMs": 3170,
+          "userCpuMs": 1170,
+          "systemCpuMs": 170,
+          "cpuMs": 1340,
+          "maxRssBytes": 236535808
+        },
+        {
+          "wallMs": 2270,
+          "userCpuMs": 1180,
+          "systemCpuMs": 170,
+          "cpuMs": 1350,
+          "maxRssBytes": 256557056
+        },
+        {
+          "wallMs": 2050,
+          "userCpuMs": 1250,
+          "systemCpuMs": 170,
+          "cpuMs": 1420,
+          "maxRssBytes": 258686976
+        }
+      ],
+      "median": {
+        "wallMs": 2470,
+        "cpuMs": 1350,
+        "maxRssBytes": 256557056
+      }
+    },
+    "deltaPercent": {
+      "medianWallMs": -85.0,
+      "medianCpuMs": -87.1,
+      "medianMaxRssBytes": -9.7
+    }
+  }
+}

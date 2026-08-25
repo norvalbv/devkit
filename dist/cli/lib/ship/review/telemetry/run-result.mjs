@@ -1,6 +1,6 @@
 /** Exactly-once terminal telemetry for a managed `devkit review` invocation. */
-import { emitGateEvent } from "../../../../../gate-engine/judge/gate-events.mjs";
-import { runDirectReviewCli } from "../run-direct.mjs";
+import { emitGateEvent } from '../../../../../gate-engine/judge/gate-events.mjs';
+import { runDirectReviewCli } from '../run-direct.mjs';
 const NON_NEGATIVE_INTEGER = /^(?:0|[1-9]\d*)$/;
 function fail(message) {
     throw new Error(`devkit review: ${message}`);

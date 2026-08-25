@@ -4,7 +4,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from "../fs-helpers.mjs";
+import { readJson } from '../fs-helpers.mjs';
 // Re-stages the husky runner past its own gitignore on every install, so a fresh `git worktree add`
 // always finds it (sync-hook-runner). Guarded: a partial/production install must not fail just
 // because the gate tool isn't resolvable.

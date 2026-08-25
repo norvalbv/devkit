@@ -14,19 +14,19 @@
  */
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "../components.mjs";
-import { packageDir, readJson, sha256, writeIfAbsent } from "../fs-helpers.mjs";
-import { bundledNames, findConflicts, removeManifested, } from "../sync-manifest.mjs";
-import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "./agent-asset-manifest/compatibility.mjs";
-import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from "./agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest, resolveLegacyProviderTargets, } from "./agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "./agent-assets/agent-assets.mjs";
-import { requireAgentProviders } from "./agent-assets/agent-providers.mjs";
-import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from "./hook-registration-ledger/codec.mjs";
-import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, stripRetiredRegistrations, } from "./hook-registration-ledger/install-support.mjs";
-import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from "./hook-registration-ledger/lifecycle.mjs";
-import { HOOK_REGISTRATIONS } from "./hook-registration-ledger/registrations.mjs";
-import { bundledHookNames } from "./hook-registration-ledger/selection.mjs";
+import { AGENT_TARGETS } from '../components.mjs';
+import { packageDir, readJson, sha256, writeIfAbsent } from '../fs-helpers.mjs';
+import { bundledNames, findConflicts, removeManifested, } from '../sync-manifest.mjs';
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from './agent-asset-manifest/compatibility.mjs';
+import { findProviderNativeAssetConflicts, isSafeAgentAssetPath, removeProviderNativeAssets, requiresProviderNativeLifecycle, syncProviderNativeAssets, } from './agent-asset-manifest/lifecycle.mjs';
+import { readAgentAssetManifest, resolveLegacyProviderTargets, } from './agent-asset-manifest/reader.mjs';
+import { agentAssetDir } from './agent-assets/agent-assets.mjs';
+import { requireAgentProviders } from './agent-assets/agent-providers.mjs';
+import { HOOK_REGISTRATION_LEDGER_REL, hookRegistrationDestination, } from './hook-registration-ledger/codec.mjs';
+import { adopt, adoptExactLegacy, ledgerOf, ownedKey, providerDocument, publishPlan, release, skipProvider, stripRetiredRegistrations, } from './hook-registration-ledger/install-support.mjs';
+import { checkProjectedHookRegistrations, installProjectedHookRegistrations, projectHookRegistrations, readHookRegistrationLedger, removeLedgerAuthorizedHookRegistrations, transferHookRegistrationScope, withAgentAssetLifecycleLock, } from './hook-registration-ledger/lifecycle.mjs';
+import { HOOK_REGISTRATIONS } from './hook-registration-ledger/registrations.mjs';
+import { bundledHookNames } from './hook-registration-ledger/selection.mjs';
 const hookDirs = (targets) => targets.map((target) => agentAssetDir(target, 'hooks'));
 // Copy the bundled agent-hook scripts (agents-hooks/*.mjs|.sh) into the consumer's hook dirs and
 // write .devkit/agent-hooks-manifest.json (per-file sha256, like skills/agents). The registrations

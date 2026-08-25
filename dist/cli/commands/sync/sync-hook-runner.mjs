@@ -28,9 +28,9 @@
  */
 import { execFileSync } from 'node:child_process';
 import { closeSync, copyFileSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, } from 'node:fs';
-import { detectGitRoot } from "../../lib/detect-git-root.mjs";
-import { checkHookRunner, replaceableHooksPathPin, unreachableRunnerFiles, } from "../../lib/doctor/hook-checks.mjs";
-import { sharedHooksPath, worktreeHooksPathState } from "../../lib/doctor/hooks-path.mjs";
+import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { checkHookRunner, replaceableHooksPathPin, unreachableRunnerFiles, } from '../../lib/doctor/hook-checks.mjs';
+import { sharedHooksPath, worktreeHooksPathState } from '../../lib/doctor/hooks-path.mjs';
 export const meta = {
     name: 'sync-hook-runner',
     summary: 'Make this checkout run its OWN hooks (stage the runner; replace a sibling hooksPath pin).',

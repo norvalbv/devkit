@@ -1,4 +1,4 @@
-import { validateCategory } from "./recall/categories.mjs";
+import { validateCategory } from './recall/categories.mjs';
 const FM_ORDER = ['slug', 'created'];
 const INDEX_HEADER = '# Decision Index\n\n' +
     'Living architecture record — the current ruling per axis. Each row links to its full\n' +

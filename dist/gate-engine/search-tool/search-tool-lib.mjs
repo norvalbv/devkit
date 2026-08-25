@@ -23,8 +23,8 @@
  * Regexes are hoisted to module scope (devkit lint: useTopLevelRegex) — they are
  * the classifier's static grammar, reused on every hook invocation.
  */
-import { matchUnquoted, splitUnquotedSegments, tokenizeArgv } from "./search-tool-shell.mjs";
-export { hasCommandSearch, isPrimarySearchCommand, normalize } from "./search-tool-shell.mjs";
+import { matchUnquoted, splitUnquotedSegments, tokenizeArgv } from './search-tool-shell.mjs';
+export { hasCommandSearch, isPrimarySearchCommand, normalize } from './search-tool-shell.mjs';
 // --- extractPattern ---
 // `fd` shares grep's `PATTERN [PATH...]` argv convention (token 0 after the
 // bin name is the pattern, not a path) — unlike `find`, whose paths come

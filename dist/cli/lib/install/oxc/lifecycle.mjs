@@ -2,10 +2,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { withLock, writeFileAtomic } from "../../atomic-write.mjs";
-import { check } from "../../doctor/check-result.mjs";
-import { packageDir } from "../../fs-helpers.mjs";
-import { probeOxcRuntime } from "./runtime.mjs";
+import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
+import { check } from '../../doctor/check-result.mjs';
+import { packageDir } from '../../fs-helpers.mjs';
+import { probeOxcRuntime } from './runtime.mjs';
 const OXLINT_CONFIGS = [
     '.oxlintrc.json',
     '.oxlintrc.jsonc',

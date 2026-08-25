@@ -45,14 +45,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { envBool, resolveFromCwd, resolveGuardConfig } from "../config.mjs";
-import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from "./allowlist-io.mjs";
-import { flagReader } from "./argv.mjs";
-import { loadChangedSet } from "./changed-files.mjs";
-import { buildVectors, canVerify, chunkColumns, dot, freshnessNotice, orderKey, partitionFresh, verifierForIndex, } from "./chunk-index.mjs";
-import { classifyPair } from "./classify.mjs";
-import { isExpired } from "./decay.mjs";
-import { missingIndexMessage, refreshIndex } from "./index-refresh.mjs";
+import { envBool, resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { ALLOWLIST_CLI, loadAllowlist as loadAllowlistFile, saveAllowlist, symFileKey, } from './allowlist-io.mjs';
+import { flagReader } from './argv.mjs';
+import { loadChangedSet } from './changed-files.mjs';
+import { buildVectors, canVerify, chunkColumns, dot, freshnessNotice, orderKey, partitionFresh, verifierForIndex, } from './chunk-index.mjs';
+import { classifyPair } from './classify.mjs';
+import { isExpired } from './decay.mjs';
+import { missingIndexMessage, refreshIndex } from './index-refresh.mjs';
 // Hoisted per useTopLevelRegex — this runs once per index row in the normalize loop.
 const BACKSLASH_RE = /\\/g;
 // Package-relative ONLY for labels.json (engine-shipped bench fixtures). Every

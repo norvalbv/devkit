@@ -47,9 +47,9 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { check } from "./check-result.mjs";
-import { lastAndOrSegment, logicalLines, splitStatements, stripComment, words, } from "./hook-gate-scan.mjs";
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { check } from './check-result.mjs';
+import { lastAndOrSegment, logicalLines, splitStatements, stripComment, words, } from './hook-gate-scan.mjs';
 const CAPTURE_RE = /^[A-Za-z_][A-Za-z0-9_]*=\$\?$/;
 /** Keywords that open a condition list; everything up to `then`/`do` is suppressed. */
 const CONDITION_OPENERS = /^(if|elif|while|until)\b/;

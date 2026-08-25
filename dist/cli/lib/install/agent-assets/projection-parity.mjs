@@ -13,10 +13,10 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { listAgents } from "../../../commands/sync/sync-agents.mjs";
-import { walk } from "../../../commands/sync/sync-skills.mjs";
-import { skillNamesForSelection } from "../../components.mjs";
-import { agentAssetDir, projectAgentAsset, projectedAssetRel } from "./agent-assets.mjs";
+import { listAgents } from '../../../commands/sync/sync-agents.mjs';
+import { walk } from '../../../commands/sync/sync-skills.mjs';
+import { skillNamesForSelection } from '../../components.mjs';
+import { agentAssetDir, projectAgentAsset, projectedAssetRel } from './agent-assets.mjs';
 /** The logical files the writer would ship for `kind`, after the shared selection filter. */
 export function projectedLogicals({ root, kind, srcDir, selection = {}, }) {
     const src = join(root, srcDir);

@@ -10,13 +10,13 @@
  */
 import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir, sha256 } from "./fs-helpers.mjs";
-import { isTracked } from "./git-tracked.mjs";
-import { AGENT_ASSET_MANIFESTS, assertLegacyAssetWriterCompatible, } from "./install/agent-asset-manifest/compatibility.mjs";
-import { removeProviderNativeAssets, withAgentAssetLifecycleLock, } from "./install/agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest, resolveLegacyProviderTargets, } from "./install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "./install/agent-assets/agent-assets.mjs";
-export { decodeSyncManifest, encodeSyncManifestV2, } from "./install/agent-asset-manifest/codec.mjs";
+import { packageDir, sha256 } from './fs-helpers.mjs';
+import { isTracked } from './git-tracked.mjs';
+import { AGENT_ASSET_MANIFESTS, assertLegacyAssetWriterCompatible, } from './install/agent-asset-manifest/compatibility.mjs';
+import { removeProviderNativeAssets, withAgentAssetLifecycleLock, } from './install/agent-asset-manifest/lifecycle.mjs';
+import { readAgentAssetManifest, resolveLegacyProviderTargets, } from './install/agent-asset-manifest/reader.mjs';
+import { agentAssetDir } from './install/agent-assets/agent-assets.mjs';
+export { decodeSyncManifest, encodeSyncManifestV2, } from './install/agent-asset-manifest/codec.mjs';
 // ── ownership inference (forward: sync-time conflict detection) ───────────────────────────────
 // A consumer may author their OWN skill/agent/hook under a name devkit bundles. These tell the sync
 // step which on-disk asset is the user's (preserve) vs devkit's own (overwrite), via two signals:

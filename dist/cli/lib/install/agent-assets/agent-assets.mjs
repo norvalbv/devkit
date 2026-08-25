@@ -1,6 +1,6 @@
 import { basename, extname, isAbsolute } from 'node:path';
 import { TextDecoder } from 'node:util';
-import { isAgentProvider } from "./agent-providers.mjs";
+import { isAgentProvider } from './agent-providers.mjs';
 const FRONTMATTER_RE = /^(?:\uFEFF)?---[ \t]*\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m;
 const FRONTMATTER_KEY_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 const AGENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;

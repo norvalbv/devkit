@@ -6,7 +6,7 @@
  * manual lane runs the identical command in a plain terminal.
  */
 import { delimiter, dirname } from 'node:path';
-import { runPackagedScript } from "../lib/ship/run-packaged-script.mjs";
+import { runPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'ship',
     summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
