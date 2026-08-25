@@ -26,7 +26,7 @@ import {
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
 import { checkAgents, checkSkills } from './asset-checks.mts';
 import { type CheckResult, check } from './check-result.mts';
-import { adviseSearchIndex } from './guard-config-checks.mts';
+import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mts';
 import { printStrayGateCalls } from './stray-gate-calls.mts';
 import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mts';
@@ -138,6 +138,7 @@ export async function runSelfHostDoctor(
   // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
   // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
   await adviseSearchIndex(cwd, sel);
+  await adviseCodexRuntime(cwd);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
 
   // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the

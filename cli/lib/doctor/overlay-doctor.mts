@@ -17,7 +17,7 @@ import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mts';
 import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mts';
 import { checkAgentAssets, checkRegistrations } from './asset-checks.mts';
 import type { CheckResult } from './check-result.mts';
-import { adviseSearchIndex } from './guard-config-checks.mts';
+import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { repointHooksPath } from './hook-checks.mts';
 
 /** The recorded `.devkit/config.json` fields the overlay doctor consults. */
@@ -113,6 +113,7 @@ export async function runOverlayDoctor(
   // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
   // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
   await adviseSearchIndex(cwd, sel);
+  await adviseCodexRuntime(cwd);
   printQavisAdvisoryHealth(cwd, sel.guards ?? []);
   if (sel.fallow) {
     const wired =
