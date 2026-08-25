@@ -280,8 +280,8 @@ export function planReviewWork(
     // and scope rows still get the RAW diffs[i] — only the key input is normalized.
     const idText = diffCacheIdentity(diffs[i]);
     const split = groups && name === 'correctness-reviewer' && sel.reviewer.skill ? groups : null;
-    // GUARD_CORRECTNESS_CHUNK (default off): null when off or under the trigger — both fall
-    // through to the un-chunked shape with byte-identical keys.
+    // Chunk cap (env > guard.config.json > default; sc-2107): null when off or under the
+    // trigger — both fall through to the un-chunked shape with byte-identical keys.
     const chunked =
       split && chunkCap !== null
         ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)

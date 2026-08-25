@@ -3,7 +3,11 @@
   "sourceExtensions": ["mts"],
   "fanoutCap": 12,
   "indexPath": ".search-code/index.db",
+  "//review-models": "sc-2107: devkit's own installs run the benched winner (sol judges, 400-LOC correctness chunks). Requires the codex CLI (GUARD_CODEX_BIN pin supported); rollback = delete these three keys or set the GUARD_* env vars. Package DEFAULTS stay claude-era until sc-2054 parity lands.",
   "review": {
+    "model": "gpt-5.6-sol",
+    "correctnessModel": "gpt-5.6-sol",
+    "correctnessChunkLoc": 400,
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."

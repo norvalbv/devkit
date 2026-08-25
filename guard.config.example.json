@@ -53,7 +53,11 @@
   "coverage": { "statements": 60, "functions": 55 },
 
   "//review": "Topology the reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer. An EMPTY array disables that domain's reviewers entirely \u2014 \"frontendRoots\": [] means frontend-security-reviewer and frontend-performance-reviewer are never selected (the gate warns on stderr when a commit stages frontend files anyway; `devkit doctor` flags it against the detected stack). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "//review-models": "Optional judge knobs (env > this file > defaults): model = cascade first-pass for unpinned reviewers (default haiku); correctnessModel = the correctness reviewer's single-pass pin (default sonnet); correctnessChunkLoc = correctness chunk cap in LOC, 0 = un-chunked kill switch (default 0). A gpt-* model routes judges through the codex CLI \u2014 it must be installed (or GUARD_CODEX_BIN set) on every machine that commits.",
   "review": {
+    "model": "haiku",
+    "correctnessModel": "sonnet",
+    "correctnessChunkLoc": 0,
     "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
     "frontendRoots": ["src/renderer", "src/preload"],
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",

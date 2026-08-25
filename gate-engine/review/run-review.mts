@@ -17,7 +17,7 @@
  *            hook never renders an outage as "opus-confirmed FAIL"
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
- * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (default haiku — the
+ * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (env > guard.config.json review.model > haiku — the
  *   reviewer-eval bench validated the domain reviewers at haiku, 6/6 block/6/6 clean; a FAIL still
  *   escalates to opus, so opus stays the block authority) ·
  * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
@@ -43,7 +43,14 @@ import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
-import { emitMergedLensResults, mapLimit, planReviewWork, taskLabel } from './lens/split.mts';
+import {
+  emitMergedLensResults,
+  mapLimit,
+  planReviewWork,
+  resolveChunkCap,
+  resolveLensGroups,
+  taskLabel,
+} from './lens/split.mts';
 import { clearProgress, writeProgress } from './progress.mts';
 import {
   type ParkedRecovery,
@@ -56,6 +63,7 @@ import {
   cacheKey,
   effectiveReviewConfig,
   type ReviewerSelection,
+  resolveReviewModel,
   selectReviewers,
 } from './reviewers.mts';
 import {
@@ -131,7 +139,7 @@ export async function runReviewGate(
   }
 
   const cache = loadCache(cwd);
-  const firstModel = process.env.GUARD_REVIEW_MODEL ?? process.env.FRINK_REVIEW_MODEL ?? 'haiku';
+  const firstModel = resolveReviewModel(cfg);
   const concurrency = reviewConcurrency();
   timing.configure(
     selected.map((selection) => selection.reviewer.name),
@@ -153,7 +161,7 @@ export async function runReviewGate(
   // invalidates stale PASSes; the commit message + its semantic Target hits ride ONLY the prompt
   // (ship-gates-converge-not-restart: amended-message retries must reuse cached PASSes).
   const ctx = await loadReviewerContext(cwd, stagedFiles(cwd));
-  const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock);
+  const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock, firstModel);
   // Response-contract identity participates uniformly: changing any checklist-free reviewer's
   // blocking-authority protocol invalidates verdicts earned under the old contract.
   for (const { reviewer } of selected) {
@@ -165,7 +173,17 @@ export async function runReviewGate(
       );
   }
   // What has to be judged, incl. a split reviewer's fan-out, + one scope row each (lens/split.mts).
-  const plan = planReviewWork(selected, diffs, cache, targetSalts, cacheKey);
+  // chunkCap derives from the SAME resolved cfg snapshot as model/reviewer selection (W-3 +
+  // no torn plan): planReviewWork's own default would re-read the launcher's guard.config.json.
+  const plan = planReviewWork(
+    selected,
+    diffs,
+    cache,
+    targetSalts,
+    cacheKey,
+    resolveLensGroups(),
+    resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
+  );
   for (const s of plan.scope)
     emitReviewScope(s.sel, s.diff, promptIdentity(s.sel), s.cached, ctx.scopeFields);
   for (const line of plan.cachedLines) console.error(line);

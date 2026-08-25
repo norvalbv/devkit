@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveGuardConfig } from '../../config.mts';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
 import {
   FOUR_WAY_LENS_GROUPS,
@@ -61,9 +63,27 @@ afterEach(() => {
 });
 
 describe('resolveChunkCap', () => {
-  it('is OFF (null) when unset, empty, 0, or off — and parses a positive LOC cap', () => {
-    for (const v of [undefined, '', '0', 'off', 'OFF']) expect(resolveChunkCap(v)).toBeNull();
-    expect(resolveChunkCap('400')).toBe(400);
+  it('unset env falls to the CONFIGURED loc (passed explicitly — no ambient config read in tests)', () => {
+    for (const v of ['0', 'off', 'OFF']) expect(resolveChunkCap(v, 400)).toBeNull();
+    expect(resolveChunkCap(undefined, 400)).toBe(400);
+    expect(resolveChunkCap('', 400)).toBe(400);
+    expect(resolveChunkCap(undefined, 0)).toBeNull();
+    expect(resolveChunkCap('700', 0)).toBe(700);
+  });
+
+  it('guard.config.json review.correctnessChunkLoc sets the per-install default; env still wins', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'devkit-chunk-cfg-'));
+    try {
+      writeFileSync(join(dir, 'guard.config.json'), '{"review":{"correctnessChunkLoc":0}}');
+      const loc = (): number => resolveGuardConfig(dir).review.correctnessChunkLoc;
+      expect(resolveChunkCap(undefined, loc())).toBeNull();
+      writeFileSync(join(dir, 'guard.config.json'), '{"review":{"correctnessChunkLoc":700}}');
+      expect(resolveChunkCap(undefined, loc())).toBe(700);
+      expect(resolveChunkCap('off', loc())).toBeNull();
+      expect(resolveChunkCap('400', loc())).toBe(400);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('throws on a malformed value instead of silently running unchunked', () => {
