@@ -31,7 +31,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { withLock, writeFileAtomic } from "./atomic-write.mjs";
+import { withLock, writeFileAtomic } from './atomic-write.mjs';
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
 /** Run git in <root>; trimmed stdout, or null on failure (allowFail) — never throws by default. */
 export function git(root, args, { allowFail = true } = {}) {

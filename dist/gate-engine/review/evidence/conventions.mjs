@@ -1,4 +1,4 @@
-import { VERDICT_LINE_RE } from "../contracts/response.mjs";
+import { VERDICT_LINE_RE } from '../contracts/response.mjs';
 const CONVENTION_VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
 const CONVENTION_OFFENDING_START_RE = /^[\s>*#-]*\**OFFENDING\**\s*:\s*(.*)$/i;
 const CONVENTION_CLOSER_RE = /^[\s>*#-]*\**(VERDICT|NO_VIOLATIONS)\b/i;

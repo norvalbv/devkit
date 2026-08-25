@@ -9,15 +9,15 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS } from "../../lib/components.mjs";
-import { detectGitRoot } from "../../lib/detect-git-root.mjs";
-import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
-import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "../../lib/install/agent-asset-manifest/compatibility.mjs";
-import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from "../../lib/install/agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest } from "../../lib/install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "../../lib/install/agent-assets/agent-assets.mjs";
-import { resolveExistingAgentProviders } from "../../lib/install/agent-assets/agent-providers.mjs";
-import { findConflicts } from "../../lib/sync-manifest.mjs";
+import { AGENT_TARGETS } from '../../lib/components.mjs';
+import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from '../../lib/install/agent-asset-manifest/compatibility.mjs';
+import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from '../../lib/install/agent-asset-manifest/lifecycle.mjs';
+import { readAgentAssetManifest } from '../../lib/install/agent-asset-manifest/reader.mjs';
+import { agentAssetDir } from '../../lib/install/agent-assets/agent-assets.mjs';
+import { resolveExistingAgentProviders } from '../../lib/install/agent-assets/agent-providers.mjs';
+import { findConflicts } from '../../lib/sync-manifest.mjs';
 // Agents are a flat set of `.md` files (no nested references/ like skills) — a single readdir.
 // Exported for the self-host projection-parity test, which must enumerate exactly what this writer
 // enumerates rather than re-deriving the flat-`.md` rule.

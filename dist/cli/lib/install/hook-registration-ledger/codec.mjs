@@ -1,10 +1,10 @@
 import { lstatSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { firstDuplicateJsonKey } from "../../../../gate-engine/critique/json-duplicate-keys.mjs";
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { isWellFormedUnicode } from "../agent-assets/agent-assets.mjs";
-import { isAgentProvider } from "../agent-assets/agent-providers.mjs";
-import { readBoundedRegularFile } from "../strict-bounded-file-read.mjs";
+import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mjs';
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { isWellFormedUnicode } from '../agent-assets/agent-assets.mjs';
+import { isAgentProvider } from '../agent-assets/agent-providers.mjs';
+import { readBoundedRegularFile } from '../strict-bounded-file-read.mjs';
 export const HOOK_REGISTRATION_LEDGER_REL = '.devkit/agent-hook-registrations-manifest.json';
 const MAX_JSON_BYTES = 1024 * 1024;
 const UTF8 = new TextDecoder('utf-8', { fatal: true });

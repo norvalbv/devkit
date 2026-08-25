@@ -20,7 +20,7 @@
  * falls back to its hardcoded set and lets the worktree gate fail loud on the same bad config.
  */
 import { isAbsolute, relative, sep } from 'node:path';
-import { resolveFromCwd, resolveGuardConfig } from "../../../gate-engine/config.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../../../gate-engine/config.mjs';
 const root = process.argv[2] ?? process.cwd();
 const cfg = resolveGuardConfig(root);
 const pathFields = ['indexPath', 'allowlistPath', 'decisionsDir'];

@@ -1,11 +1,11 @@
 /** Fail-closed parser for the private setup manifest consumed by the review runner. */
 import { readFileSync } from 'node:fs';
 import { posix } from 'node:path';
-import { REVIEWABLE_GUARD_IDS } from "../../components.mjs";
-import { hasExactManifestKeys as exactKeys, hasValidManifestRoots, } from "./manifest/validation.mjs";
-import { isSafeReviewRelativePath } from "./runtime-paths.mjs";
-import { isReviewSetupHash, REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from "./setup-manifest-format.mjs";
-import { fail, objectValue } from "./shared/common.mjs";
+import { REVIEWABLE_GUARD_IDS } from '../../components.mjs';
+import { hasExactManifestKeys as exactKeys, hasValidManifestRoots, } from './manifest/validation.mjs';
+import { isSafeReviewRelativePath } from './runtime-paths.mjs';
+import { isReviewSetupHash, REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from './setup-manifest-format.mjs';
+import { fail, objectValue } from './shared/common.mjs';
 function manifestString(value, label) {
     if (typeof value !== 'string' || !value || value.includes('\0'))
         fail(`review setup manifest ${label} is invalid.`);

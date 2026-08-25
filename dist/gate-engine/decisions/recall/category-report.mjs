@@ -12,9 +12,9 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveFromCwd, resolveGuardConfig } from "../../config.mjs";
-import { currentTarget, parseDecision, sanitizeCell } from "../decision-format.mjs";
-import { CATEGORIES, isCategory } from "./categories.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
+import { currentTarget, parseDecision, sanitizeCell } from '../decision-format.mjs';
+import { CATEGORIES, isCategory } from './categories.mjs';
 // Long enough to keep a ruling recognisable, short enough that a report of ~10 axes stays scannable
 // on one screen — this is a terminal report, not the full record (`show <slug>` has that).
 const RULING_TRUNCATE = 100;

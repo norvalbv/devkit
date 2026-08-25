@@ -15,7 +15,7 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { LEGACY_STRUCTURE_BASELINE_DIR, LEGACY_STRUCTURE_EXEMPT, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from "../ratchets/baseline-paths.mjs";
+import { LEGACY_STRUCTURE_BASELINE_DIR, LEGACY_STRUCTURE_EXEMPT, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, } from '../ratchets/baseline-paths.mjs';
 async function importAcrossMigration(root, canonical, legacy) {
     const canonicalFile = join(root, canonical);
     const legacyFile = join(root, legacy);

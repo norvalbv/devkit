@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDir } from "../../fs-helpers.mjs";
+import { packageDir } from '../../fs-helpers.mjs';
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
 export const ADHD_SESSION_HOOK = 'adhd-session-start.mjs';
 export const ADHD_ANCHOR_HOOK = 'adhd-prompt-anchor.mjs';

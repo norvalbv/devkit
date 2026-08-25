@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { check } from "./check-result.mjs";
+import { check } from './check-result.mjs';
 // Strip // line comments so a jsonc config parses as JSON.
 const JSONC_LINE_COMMENT_RE = /^\s*\/\/.*$/gm;
 function jsoncText(path) {

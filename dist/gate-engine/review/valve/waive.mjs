@@ -18,8 +18,8 @@
  * command refuses them rather than silently writing a store entry reconcile() will never consult.
  */
 import { execFileSync } from 'node:child_process';
-import { FINGERPRINT_RE, loadOverrides, persist, withOverridesLock, } from "../overrides.mjs";
-import { REVIEWERS } from "../reviewers.mjs";
+import { FINGERPRINT_RE, loadOverrides, persist, withOverridesLock, } from '../overrides.mjs';
+import { REVIEWERS } from '../reviewers.mjs';
 // REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
 // shape), so `.find` on it directly can't be read through the shared `model` field below — every
 // entry IS structurally a `Reviewer` (optional fields simply absent), so this cast is sound.

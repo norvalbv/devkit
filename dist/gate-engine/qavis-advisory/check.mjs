@@ -26,7 +26,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { envFlag } from "../config.mjs";
+import { envFlag } from '../config.mjs';
 /**
  * Is the qavis CLI resolvable on PATH? `devkit doctor` asks this to report a dead advisory gate
  * OUTSIDE commit time — a plain filesystem scan, never a `route` call, so it costs no model spend.

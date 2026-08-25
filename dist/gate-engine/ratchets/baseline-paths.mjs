@@ -1,7 +1,7 @@
 import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { assertBaselineTrackable, indexTracksBaseline, stageBaselineMigration, stageBaseline, } from "./git-index.mjs";
+import { assertBaselineTrackable, indexTracksBaseline, stageBaselineMigration, stageBaseline, } from './git-index.mjs';
 export const FANOUT_BASELINE = '.devkit/baselines/fanout.json';
 export const LINES_BASELINE = '.devkit/baselines/size-lines.json';
 export const SIZE_BASELINE = '.devkit/baselines/size.json';

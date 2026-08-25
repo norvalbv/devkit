@@ -14,9 +14,9 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { resolveFromCwd, resolveGuardConfig } from "../../config.mjs";
-import { parseDecision, parseTargetFields } from "../decision-format.mjs";
-import { sections } from "./markdown.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../../config.mjs';
+import { parseDecision, parseTargetFields } from '../decision-format.mjs';
+import { sections } from './markdown.mjs';
 // id syntax retrieval.mts already mints for a block: `target:<date>` (modern) or `entry:<date>`
 // (legacy `## <date> —` schema, still 49 of 86 blocks in the real corpus). A `slug#` qualifier is
 // needed ONLY when the reference crosses axis files — unqualified always means "this axis", so a

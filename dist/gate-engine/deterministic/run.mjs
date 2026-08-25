@@ -41,9 +41,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { coverageBypassed, deterministicStrict, structureBypassed } from "../config.mjs";
-import { emitGateEvent, finishGateTiming } from "../judge/gate-events.mjs";
-import { prefixEntry, recordPrefix } from "../prefix-cache/prefix-cache.mjs";
+import { coverageBypassed, deterministicStrict, structureBypassed } from '../config.mjs';
+import { emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
+import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
 // the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS

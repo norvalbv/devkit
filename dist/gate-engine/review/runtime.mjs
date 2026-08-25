@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { consumerChecklistAssetRoot, readConsumerReviewAsset } from "./cascade/consumer-assets.mjs";
-import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from "./reviewers.mjs";
+import { consumerChecklistAssetRoot, readConsumerReviewAsset } from './cascade/consumer-assets.mjs';
+import { checklistAssetPath, checklistScriptAt, hasChecklist, REVIEWERS, } from './reviewers.mjs';
 const REVIEW_ROOTS_HELPER = 'skills/_devkit/review-roots.mjs';
 // Imported by every checklist script (createChecklistStore), so its bytes are execution inputs of
 // every checklist reviewer — the bench's gateHash already treats it that way (corpus.mts

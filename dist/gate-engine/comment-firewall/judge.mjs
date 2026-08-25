@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
-import { execJudge } from "../judge/run-judge.mjs";
-import { isJsonObject, isJsonString, parseJson } from "./types.mjs";
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
+import { isJsonObject, isJsonString, parseJson } from './types.mjs';
 export const COMMENT_JUDGE_POLICY = 'comment-paragraph-exception-v2';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-18.1';
 export const COMMENT_JUDGE_SCHEMA_VERSION = 1;

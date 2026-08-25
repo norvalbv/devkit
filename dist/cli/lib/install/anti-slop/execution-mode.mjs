@@ -1,8 +1,8 @@
 /** Install the managed entry shim that separates native lint from baseline-aware rule execution. */
 import { existsSync, renameSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_NATIVE_MODE } from "./constants.mjs";
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_NATIVE_MODE } from './constants.mjs';
 export function installExecutionModeWrapper(plugin, entry) {
     const entryName = basename(entry);
     const extension = extname(entryName);

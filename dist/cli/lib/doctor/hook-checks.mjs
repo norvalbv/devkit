@@ -11,15 +11,15 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { REVIEWABLE_GUARD_IDS } from "../components.mjs";
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { markEnd, markStart } from "../husky/husky.mjs";
-import { extractGuardBlock, QAVIS_ADVISORY_ID } from "../husky/husky-block.mjs";
-import { firstLine } from "../standalone.mjs";
-import { check } from "./check-result.mjs";
-import { foreignPin, hooksDir, isInside, isInsideResolved, sharedHooksPath, worktreeHooksPathState, worktreeScopedPin, } from "./hooks-path.mjs";
-import { strayGateCalls } from "./stray-gate-calls.mjs";
-import { checkFailOpenGuards } from "./unguarded-gate-calls.mjs";
+import { REVIEWABLE_GUARD_IDS } from '../components.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { markEnd, markStart } from '../husky/husky.mjs';
+import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../husky/husky-block.mjs';
+import { firstLine } from '../standalone.mjs';
+import { check } from './check-result.mjs';
+import { foreignPin, hooksDir, isInside, isInsideResolved, sharedHooksPath, worktreeHooksPathState, worktreeScopedPin, } from './hooks-path.mjs';
+import { strayGateCalls } from './stray-gate-calls.mjs';
+import { checkFailOpenGuards } from './unguarded-gate-calls.mjs';
 /**
  * `doctor --fix`'s repair for a husky-reclaimed `core.hooksPath` in OVERLAY mode. husky's `prepare`
  * resets it to `.husky/_` on every install, and until now `--fix` only WARNED — while `devkit review`

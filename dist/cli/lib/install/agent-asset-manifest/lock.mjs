@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readBoundedRegularFile } from "../strict-bounded-file-read.mjs";
+import { readBoundedRegularFile } from '../strict-bounded-file-read.mjs';
 const LOCK_WAIT_MS = 2_000;
 const SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
 const HELD_LOCKS = new Set();

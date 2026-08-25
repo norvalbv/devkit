@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { telemetrySink } from "../../judge/run-context.mjs";
+import { telemetrySink } from '../../judge/run-context.mjs';
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 // Independent of, and deliberately larger than, the judge-facing EVIDENCE_TOTAL_CAP
 // (diff-evidence.mts, 60000 chars) — that cap sizes what a JUDGE reads on stdin; this sizes

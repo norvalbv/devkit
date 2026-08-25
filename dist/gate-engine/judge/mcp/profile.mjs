@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { isJsonObject, isJsonString, parseJson, } from "../../comment-firewall/types.mjs";
-import { withoutGitEnv } from "../judge-isolation.mjs";
+import { isJsonObject, isJsonString, parseJson, } from '../../comment-firewall/types.mjs';
+import { withoutGitEnv } from '../judge-isolation.mjs';
 const BASELINE_SERVER_NAMES = ['codebase', 'context7', 'autonomous_bugs'];
 // Claude Code matches server-wide MCP permissions with the explicit `__*` suffix.
 // A bare `mcp__<server>` is an exact tool name, not a namespace grant.

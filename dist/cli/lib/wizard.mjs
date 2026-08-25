@@ -9,7 +9,7 @@
  * Ctrl-C / Esc at any prompt aborts cleanly via clack's isCancel (nothing is written).
  */
 import { cancel, confirm, intro, isCancel, multiselect, note, select } from '@clack/prompts';
-import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, OPTIONAL_COMPONENTS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from "./components.mjs";
+import { AGENT_TARGETS, COMPONENTS, DEFAULT_REVIEW_DECISIONS_DIR, GUARD_OPTIONS, OPTIONAL_COMPONENTS, RECOMMENDED_GUARD_IDS, REVIEWABLE_GUARD_IDS, } from './components.mjs';
 // The components that sync into an agent surface. Drives whether the wizard
 // asks the surface picker at all — no point choosing surfaces if none of these are selected.
 const AGENT_SURFACE_COMPONENTS = [

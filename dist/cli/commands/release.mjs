@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cancel, confirm, isCancel } from '@clack/prompts';
-import ship from "./ship.mjs";
+import ship from './ship.mjs';
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 /** Compute the next version. `bump` is patch|minor|major, or an explicit x.y.z. */
 export function nextVersion(current, bump) {

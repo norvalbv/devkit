@@ -6,8 +6,8 @@
  * (violating one is IN CHARTER). One renderer, two framings: the bytes a judge reads are the
  * contract, so the shape must never fork.
  */
-import { scopedTargets } from "../../decisions/scoped-targets.mjs";
-import { hasChecklist } from "../reviewers.mjs";
+import { scopedTargets } from '../../decisions/scoped-targets.mjs';
+import { hasChecklist } from '../reviewers.mjs';
 /** completeness.mts's original bytes, verbatim — its judge must keep reading exactly this. */
 export const COMPLETENESS_TARGETS_FRAMING = Object.freeze({
     header: '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',

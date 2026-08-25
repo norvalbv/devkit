@@ -20,10 +20,10 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultSelection, RECOMMENDED_GUARD_IDS } from "../components.mjs";
-import { readJson } from "../fs-helpers.mjs";
-import { markEnd } from "./husky.mjs";
-import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, REVIEW_DETERMINISTIC_FINALIZER, replaceGuardBlock, } from "./husky-block.mjs";
+import { defaultSelection, RECOMMENDED_GUARD_IDS } from '../components.mjs';
+import { readJson } from '../fs-helpers.mjs';
+import { markEnd } from './husky.mjs';
+import { buildFullHook, buildGuardBlock, extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, REVIEW_DETERMINISTIC_FINALIZER, replaceGuardBlock, } from './husky-block.mjs';
 // devkit's own structure-lint command (package.json `lint:structure` = `eslint cli gate-engine`)
 // and its hard Biome lint/assist gate (`lint` disables Biome's formatter explicitly — Biome exits 0 when
 // every diagnostic is warn-severity, so without that flag the gate PRINTS its findings into the log

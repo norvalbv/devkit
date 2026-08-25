@@ -16,12 +16,12 @@
 // diverges: a warn-by-default gate fails open (commit proceeds) while a deterministic-floor gate's
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
-import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from "./claude-result.mjs";
-import { codexFailure, judgeBinFor, judgeCliFor, parseCodexUsage, unwrapCodexResult, } from "./codex/result.mjs";
-import { emitGateEvent } from "./gate-events.mjs";
-import { withoutGitEnv } from "./judge-isolation.mjs";
-import { prepareJudgeMcpProfile } from "./mcp/profile.mjs";
-import { composeTranscript, saveTranscriptUnique } from "./transcript-store.mjs";
+import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
+import { codexFailure, judgeBinFor, judgeCliFor, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
+import { emitGateEvent } from './gate-events.mjs';
+import { withoutGitEnv } from './judge-isolation.mjs';
+import { prepareJudgeMcpProfile } from './mcp/profile.mjs';
+import { composeTranscript, saveTranscriptUnique } from './transcript-store.mjs';
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
 // field access is undefined — matching the original `e?.field` optional-chaining behaviour exactly.
 function judgeErr(e) {

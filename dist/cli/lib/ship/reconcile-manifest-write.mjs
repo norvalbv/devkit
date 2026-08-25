@@ -39,7 +39,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { withLock, writeFileAtomic } from "../atomic-write.mjs";
+import { withLock, writeFileAtomic } from '../atomic-write.mjs';
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns
 const PR_DIGITS = /^\d+$/; // a non-empty --pr is an integer; anything else → null
 /** Run git in <root>, return trimmed stdout, or null if the command fails (missing path, etc.). */

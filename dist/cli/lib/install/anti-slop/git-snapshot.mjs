@@ -3,8 +3,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseBaseline } from "./baseline.mjs";
-import { ANTI_SLOP_BASELINE_REL } from "./constants.mjs";
+import { parseBaseline } from './baseline.mjs';
+import { ANTI_SLOP_BASELINE_REL } from './constants.mjs';
 const MAX_GIT_OUTPUT = 128 * 1024 * 1024;
 const LINT_SOURCE = /\.(?:[cm]?[jt]sx?)$/u;
 const FULL_SCAN_FILES = new Set([

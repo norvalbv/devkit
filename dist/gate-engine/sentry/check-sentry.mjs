@@ -66,12 +66,12 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { envBool, resolveGuardConfig } from "../config.mjs";
-import { focusHunks } from "../judge/diff-focus.mjs";
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
-import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
-import { execJudge } from "../judge/run-judge.mjs";
-import { judgeSentryWithCache } from "./verdict-cache.mjs";
+import { envBool, resolveGuardConfig } from '../config.mjs';
+import { focusHunks } from '../judge/diff-focus.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
+import { judgeSentryWithCache } from './verdict-cache.mjs';
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
 // gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
 function envVar(name) {

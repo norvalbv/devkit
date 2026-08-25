@@ -22,9 +22,9 @@
  */
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { resolveFromCwd, resolveGuardConfig } from "../config.mjs";
-import { loadAllowlist, MODES, saveAllowlist, symFileKey, } from "./allowlist-io.mjs";
-import { daysRemaining, isExpired } from "./decay.mjs";
+import { resolveFromCwd, resolveGuardConfig } from '../config.mjs';
+import { loadAllowlist, MODES, saveAllowlist, symFileKey, } from './allowlist-io.mjs';
+import { daysRemaining, isExpired } from './decay.mjs';
 const LABEL = 'guard-dup-allowlist';
 // The freeze threshold baseline entries use (matcher runBaseline --decay-days default). A
 // re-add must never drop below it, else a baselined pair silently un-freezes (7-day decay).

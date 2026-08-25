@@ -1,4 +1,4 @@
-import { readTranscript } from "../../judge/transcript-store.mjs";
+import { readTranscript } from '../../judge/transcript-store.mjs';
 const FINDINGS_CAP = 12;
 const ISSUE_LINE_CHARS = 160;
 // A real code location, not any dotted-name:port — the extension allowlist keeps `db.internal:5432`

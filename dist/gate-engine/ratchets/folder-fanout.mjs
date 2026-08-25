@@ -20,9 +20,9 @@
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from "./baseline-paths.mjs";
-import { hasStagedFiles, indexFiles, treeFilesAtRef } from "./git-index.mjs";
+import { CONFIG_FILENAME, resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, readRatchetBaseline, removeRatchetBaseline, writeRatchetBaseline, } from './baseline-paths.mjs';
+import { hasStagedFiles, indexFiles, treeFilesAtRef } from './git-index.mjs';
 // Per-repo STATE, resolved against the consumer cwd (never __dirname).
 const BASELINE = FANOUT_BASELINE;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'out', '__snapshots__', '__tests__', '_shared']);

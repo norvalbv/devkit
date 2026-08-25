@@ -1,4 +1,4 @@
-import { ASSESSMENTS, CHANGE_TYPES, EVIDENCE_MODES, FRESHNESS_STATES, LIFECYCLES, METRIC_DIRECTIONS, METRIC_UNITS, } from "./types.mjs";
+import { ASSESSMENTS, CHANGE_TYPES, EVIDENCE_MODES, FRESHNESS_STATES, LIFECYCLES, METRIC_DIRECTIONS, METRIC_UNITS, } from './types.mjs';
 const ABSOLUTE_PATH_RE = /(?:^|[\s=:])(?:\/(?:Users|home|root|var|tmp|private|opt|srv|etc)(?:\/|$)|[A-Za-z]:[\\/]|\\\\[^\\\s]+\\)/;
 const EMAIL_RE = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 const UNPUBLISHED_REF_RE = /refs\/(?:heads|stash|remotes)\//;

@@ -24,8 +24,8 @@
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { loadScopedTargets, matchScope } from "./check-alignment.mjs";
-import { resolveSupersession } from "./recall/supersession.mjs";
+import { loadScopedTargets, matchScope } from './check-alignment.mjs';
+import { resolveSupersession } from './recall/supersession.mjs';
 // Filesystem walks yield OS-native separators; scope globs are ALWAYS authored repo-root-relative
 // with forward slashes. Without this, every scoped axis misreports as drifted on Windows — the same
 // normalization clone-detector.mts already applies to walk-produced paths.

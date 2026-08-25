@@ -32,10 +32,10 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig, resolveTreeExtensions } from "../../../gate-engine/config.mjs";
-import { STRUCTURE_BASELINE_DIR } from "../../../gate-engine/ratchets/baseline-paths.mjs";
-import { walkTree } from "../../../gate-engine/structure/walk.mjs";
-import { persistStructureBaseline } from "./structure-baseline-storage.mjs";
+import { resolveGuardConfig, resolveTreeExtensions } from '../../../gate-engine/config.mjs';
+import { STRUCTURE_BASELINE_DIR } from '../../../gate-engine/ratchets/baseline-paths.mjs';
+import { walkTree } from '../../../gate-engine/structure/walk.mjs';
+import { persistStructureBaseline } from './structure-baseline-storage.mjs';
 // ─── Regexes (verbatim from frink's generate-eslint-baseline.mjs) ───────────────
 const PASCAL = /^[A-Z][A-Za-z0-9]*$/;
 const HOOK_KEBAB = /^use-[a-z][a-z0-9-]*\.tsx?$/;

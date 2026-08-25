@@ -2,11 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync, } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { writeFileAtomic } from "../../../atomic-write.mjs";
-import { runDirectReviewCli } from "../run-direct.mjs";
-import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from "../runtime-paths.mjs";
-import { errorMessage, fail, gitEnvironment } from "../shared/common.mjs";
-import { parseReviewRepositoryStateManifest, REVIEW_REPOSITORY_OBJECT_ID, REVIEW_REPOSITORY_STATE_VERSION, reviewRepositoryManifestHash, } from "./manifest.mjs";
+import { writeFileAtomic } from '../../../atomic-write.mjs';
+import { runDirectReviewCli } from '../run-direct.mjs';
+import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from '../runtime-paths.mjs';
+import { errorMessage, fail, gitEnvironment } from '../shared/common.mjs';
+import { parseReviewRepositoryStateManifest, REVIEW_REPOSITORY_OBJECT_ID, REVIEW_REPOSITORY_STATE_VERSION, reviewRepositoryManifestHash, } from './manifest.mjs';
 const MAX_GIT_OUTPUT = 64 * 1024 * 1024;
 function spawnGit(root, args) {
     return spawnSync('git', ['-c', 'core.hooksPath=/dev/null', '-C', root, ...args], {

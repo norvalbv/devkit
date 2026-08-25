@@ -21,7 +21,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { loadReviewerTargetsBlocks } from "./targets-block.mjs";
+import { loadReviewerTargetsBlocks } from './targets-block.mjs';
 const MESSAGE_CAP_BYTES = 2_048;
 // Lines a judge could read as structure or as a verdict: markdown headers (would render like the
 // adjacent authoritative blocks) and the machine-parsed tokens (reviewers.mts VERDICT/OFFENDING

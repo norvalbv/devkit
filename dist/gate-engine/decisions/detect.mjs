@@ -25,15 +25,15 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGuardConfig } from "../config.mjs";
-import { splitDiffByFile } from "../judge/diff-focus.mjs";
-import { emitCacheHit, emitGateEvent, finishGateTiming } from "../judge/gate-events.mjs";
-import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from "../judge/judge-isolation.mjs";
-import { reportGateInfraFailure } from "../judge/odb-probe.mjs";
-import { execJudge } from "../judge/run-judge.mjs";
-import { composeTranscript, saveTranscript } from "../judge/transcript-store.mjs";
-import { git, stagedFiles } from "./git-io.mjs";
-import { saveVerdict, verdictKey, verdictMeta } from "./verdict-cache.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { splitDiffByFile } from '../judge/diff-focus.mjs';
+import { emitCacheHit, emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
+import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
+import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
+import { execJudge } from '../judge/run-judge.mjs';
+import { composeTranscript, saveTranscript } from '../judge/transcript-store.mjs';
+import { git, stagedFiles } from './git-io.mjs';
+import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mjs';
 const LOCKFILE_RE = /(^|\/)(bun\.lockb?|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/;
 const PKG_RE = /(^|\/)package\.json$/;
 const DEP_KEYS = [

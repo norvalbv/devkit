@@ -1,4 +1,4 @@
-import { DEFAULT_REVIEW_DECISIONS_DIR, REVIEWABLE_GUARD_IDS, } from "../../components.mjs";
+import { DEFAULT_REVIEW_DECISIONS_DIR, REVIEWABLE_GUARD_IDS, } from '../../components.mjs';
 /** Classify requested review guards once so init and review enforce the same allowlist. */
 export function reviewGuardIssues(requested, installed) {
     const issues = { invalid: [], unknown: [], uninstalled: [] };

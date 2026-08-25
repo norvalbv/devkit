@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { diffCacheIdentity, filePathOf, splitDiffByFile } from "../../judge/diff-focus.mjs";
+import { diffCacheIdentity, filePathOf, splitDiffByFile } from '../../judge/diff-focus.mjs';
 const QUOTED_PATH_RE = /^"[\s\S]*"$/;
 const OCTAL_ESCAPE_RE = /^[0-7]{1,3}/;
 /** Git's full C-quote single-character escape set (quote.c's cq_lookup): every entry must decode,

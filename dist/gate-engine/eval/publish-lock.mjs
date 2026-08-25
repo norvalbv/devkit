@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, constants, fchmodSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, unlinkSync, writeFileSync, } from 'node:fs';
 import { dirname } from 'node:path';
-import { isRecord } from "./schema.mjs";
+import { isRecord } from './schema.mjs';
 const LOCK_WAIT_ARRAY = new Int32Array(new SharedArrayBuffer(4));
 const LOCK_WAIT_MS = 10;
 const LOCK_ATTEMPTS = 500;

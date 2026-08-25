@@ -15,11 +15,11 @@
  * still holds: stderr does not.
  */
 import { createHash } from 'node:crypto';
-import { envFlag } from "../../config.mjs";
-import { emitGateEvent } from "../../judge/gate-events.mjs";
-import { saveTranscript } from "../../judge/transcript-store.mjs";
-import { measureDiffEvidenceCap } from "../diff-evidence.mjs";
-import { declaredRoots, hasChecklist, REVIEWERS, underRoot, } from "../reviewers.mjs";
+import { envFlag } from '../../config.mjs';
+import { emitGateEvent } from '../../judge/gate-events.mjs';
+import { saveTranscript } from '../../judge/transcript-store.mjs';
+import { measureDiffEvidenceCap } from '../diff-evidence.mjs';
+import { declaredRoots, hasChecklist, REVIEWERS, underRoot, } from '../reviewers.mjs';
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 export function emitReviewSkipped(reviewer, reason) {
     emitGateEvent({ type: 'review_skipped', reviewer, reason });

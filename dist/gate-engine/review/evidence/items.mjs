@@ -10,7 +10,7 @@
  * full vector spills to a sidecar and the event carries a ref; the counts and the status tally ride
  * inline either way, so a reader can always tell a spilled vector from a short one.
  */
-import { saveTranscriptUnique } from "../../judge/transcript-store.mjs";
+import { saveTranscriptUnique } from '../../judge/transcript-store.mjs';
 // Non-passing items sort FIRST so any truncation can never keep the passes and drop the findings.
 const ITEM_CAP = 40;
 const ISSUE_CHARS = 200;

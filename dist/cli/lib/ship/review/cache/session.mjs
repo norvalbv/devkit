@@ -1,10 +1,10 @@
 /** Generation-fenced transfer between stable and per-run `devkit review` verdict stores. */
 import { lstatSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { loadEntries, replaceEntries, saveEntriesIfGeneration, verdictStoreGeneration, } from "../../../../../gate-engine/judge/verdict-store.mjs";
-import { runDirectReviewCli } from "../run-direct.mjs";
-import { reviewPathWithin } from "../runtime-paths.mjs";
-import { fail } from "../shared/common.mjs";
+import { loadEntries, replaceEntries, saveEntriesIfGeneration, verdictStoreGeneration, } from '../../../../../gate-engine/judge/verdict-store.mjs';
+import { runDirectReviewCli } from '../run-direct.mjs';
+import { reviewPathWithin } from '../runtime-paths.mjs';
+import { fail } from '../shared/common.mjs';
 const PREPARE_PROTOCOL = 'devkit-review-cache-session-v1';
 const PROMOTION_PROTOCOL = 'devkit-review-cache-promotion-v1';
 const STABLE_READ_ATTEMPTS = 8;

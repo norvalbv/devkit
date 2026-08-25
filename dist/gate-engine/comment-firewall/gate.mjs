@@ -1,7 +1,7 @@
-import { devkitDataFile, loadEntries, saveEntries } from "../judge/verdict-store.mjs";
-import { detectChangedComments } from "./detect.mjs";
-import { commentJudgeModel, judgeComments, receiptKey } from "./judge.mjs";
-import { loadWorkingRationales } from "./rationales.mjs";
+import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
+import { detectChangedComments } from './detect.mjs';
+import { commentJudgeModel, judgeComments, receiptKey } from './judge.mjs';
+import { loadWorkingRationales } from './rationales.mjs';
 export const COMMENT_RECEIPTS_FILE = 'comment-firewall-receipts.json';
 const defaults = {
     detect: detectChangedComments,

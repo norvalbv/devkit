@@ -3,9 +3,9 @@
  * calls planChunkedParts per correctness selection; null (off / under trigger) falls back to the
  * un-chunked shape whose keys stay byte-identical to the pre-chunking engine.
  */
-import { diffCacheIdentity } from "../../judge/diff-focus.mjs";
-import { chunkDiffText, chunkFilesSha, chunkPlanHash, identityBytesByPath, packDiffIntoChunks, unquoteGitPath, } from "./chunk.mjs";
-import { deriveLensReviewer, lensGroupId } from "./groups.mjs";
+import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
+import { chunkDiffText, chunkFilesSha, chunkPlanHash, identityBytesByPath, packDiffIntoChunks, unquoteGitPath, } from './chunk.mjs';
+import { deriveLensReviewer, lensGroupId } from './groups.mjs';
 /**
  * Parse `GUARD_CORRECTNESS_CHUNK` into a chunk cap in LOC, or null when chunking is off (the
  * default — off keeps planReviewWork's keys and tasks byte-identical to the un-chunked engine).

@@ -2,10 +2,10 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { resolveOxcRuntime } from "../oxc/runtime.mjs";
-import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_IGNORE_PATTERNS, } from "./constants.mjs";
-import { groupFindings, parseAntiSlopFindings } from "./diagnostics.mjs";
-import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from "./lifecycle.mjs";
+import { resolveOxcRuntime } from '../oxc/runtime.mjs';
+import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_IGNORE_PATTERNS, } from './constants.mjs';
+import { groupFindings, parseAntiSlopFindings } from './diagnostics.mjs';
+import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from './lifecycle.mjs';
 const MAX_OUTPUT = 64 * 1024 * 1024;
 /** Resolve literal existing repository paths and expose their baseline-entry membership. */
 export function resolveAntiSlopScope(cwd, args) {

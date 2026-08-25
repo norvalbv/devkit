@@ -4,9 +4,9 @@ import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { runDirectReviewCli } from "../run-direct.mjs";
-import { reviewPathWithin } from "../runtime-paths.mjs";
-import { errorMessage, fail, gitEnvironment } from "../shared/common.mjs";
+import { runDirectReviewCli } from '../run-direct.mjs';
+import { reviewPathWithin } from '../runtime-paths.mjs';
+import { errorMessage, fail, gitEnvironment } from '../shared/common.mjs';
 const REVIEW_CACHE_NAMESPACE = 'devkit-review-cache-v1';
 const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 function assertPhysicalDirectory(path, label) {

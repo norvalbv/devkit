@@ -1,8 +1,8 @@
 /** Conflict-safe copying of frozen setup inputs into the private review worktree. */
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { reviewRuntimeFingerprint } from "../runtime-fingerprint.mjs";
-import { safeReviewDestination } from "../runtime-paths.mjs";
+import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mjs';
+import { safeReviewDestination } from '../runtime-paths.mjs';
 function fail(message) {
     throw new Error(`devkit review: ${message}`);
 }

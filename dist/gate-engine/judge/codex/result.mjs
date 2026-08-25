@@ -11,7 +11,7 @@
  * the final message and token usage — so the seam is argv translation + envelope parsing, not a
  * second judge pipeline.
  */
-import { withResultArgs } from "../claude-result.mjs";
+import { withResultArgs } from '../claude-result.mjs';
 /** Parse the JSONL stream ONCE at the I/O boundary; the verdict/usage/failure readers below all
  * branch on these domain events rather than re-scanning raw lines. */
 function codexEventsOf(raw) {

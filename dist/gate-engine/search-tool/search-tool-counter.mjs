@@ -23,9 +23,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveGuardConfig } from "../config.mjs";
-import { isExcludedTarget, isOutOfScanRoots, isPrimarySearchCommand, normalize, } from "./search-tool-lib.mjs";
-import { resolveSearchTools } from "./tools.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { isExcludedTarget, isOutOfScanRoots, isPrimarySearchCommand, normalize, } from './search-tool-lib.mjs';
+import { resolveSearchTools } from './tools.mjs';
 // Ecosystem-universal roots the semantic-search index never covers,
 // regardless of consumer config — never a hardcoded stack layout (see
 // docs/decisions/synced-assets-layout-agnostic.md).

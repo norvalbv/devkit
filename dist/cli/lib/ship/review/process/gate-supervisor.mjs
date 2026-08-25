@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:os';
-import { runDirectReviewCli } from "../run-direct.mjs";
-import { readProcessTable } from "./process-table.mjs";
+import { runDirectReviewCli } from '../run-direct.mjs';
+import { readProcessTable } from './process-table.mjs';
 const KILL_GRACE_MS = 10_000;
 const FORCED_CLEANUP_MAX_MS = KILL_GRACE_MS * 2;
 // The leader has exited but something in its group still holds the gate's stdio. Waiting for that to

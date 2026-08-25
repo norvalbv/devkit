@@ -13,7 +13,7 @@
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { whyHook } from "../decision-format.mjs";
+import { whyHook } from '../decision-format.mjs';
 /** How many qualifying notes the truncated PROSE surface shows before pointing at `show`. */
 const PROSE_QUALIFIERS = 3;
 // `why` is now the axis file's full Context (the INDEX cell was truncated to 70 chars), so bound it

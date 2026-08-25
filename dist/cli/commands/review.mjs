@@ -1,7 +1,7 @@
 /** `devkit review` — run the configured gate chain against a trusted checkout without committing. */
 import { delimiter, dirname } from 'node:path';
-import { packageDir } from "../lib/fs-helpers.mjs";
-import { runManagedPackagedScript } from "../lib/ship/run-packaged-script.mjs";
+import { packageDir } from '../lib/fs-helpers.mjs';
+import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'review',
     summary: 'Review a trusted checkout without committing or changing it.',

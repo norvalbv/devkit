@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { walk } from "../../commands/sync/sync-skills.mjs";
-import { readJson } from "../fs-helpers.mjs";
-import { readAgentAssetManifest } from "../install/agent-asset-manifest/reader.mjs";
-import { projectionDrift } from "../install/agent-assets/projection-parity.mjs";
-import { isDevkitRepo } from "./self-host.mjs";
+import { walk } from '../../commands/sync/sync-skills.mjs';
+import { readJson } from '../fs-helpers.mjs';
+import { readAgentAssetManifest } from '../install/agent-asset-manifest/reader.mjs';
+import { projectionDrift } from '../install/agent-assets/projection-parity.mjs';
+import { isDevkitRepo } from './self-host.mjs';
 function manifestTargets(root) {
     const manifest = readAgentAssetManifest(join(root, '.devkit', 'skills-manifest.json'), 'skills');
     if (!manifest)

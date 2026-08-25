@@ -1,10 +1,10 @@
 import { readSync } from 'node:fs';
 import { isatty } from 'node:tty';
 import { TextDecoder } from 'node:util';
-import { capturePlanCritiqueCompletedCallback } from "../capture-normalizer.mjs";
-import { clearPlanCritiqueWorkQuarantine, persistPlanCritiqueWorkQuarantine, } from "../lifecycle/work-quarantine.mjs";
-import { adaptClaudeFeatureCritiqueSubagentStop } from "../provider-adapters/claude-subagent-stop.mjs";
-import { getPlanCritiqueRepositoryContext } from "../repository-context.mjs";
+import { capturePlanCritiqueCompletedCallback } from '../capture-normalizer.mjs';
+import { clearPlanCritiqueWorkQuarantine, persistPlanCritiqueWorkQuarantine, } from '../lifecycle/work-quarantine.mjs';
+import { adaptClaudeFeatureCritiqueSubagentStop } from '../provider-adapters/claude-subagent-stop.mjs';
+import { getPlanCritiqueRepositoryContext } from '../repository-context.mjs';
 const MAX_HOOK_INPUT_BYTES = 4 * 1024 * 1024;
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 function readHookPayload() {

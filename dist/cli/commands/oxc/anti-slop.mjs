@@ -1,11 +1,11 @@
 /** `devkit anti-slop` — explicit, deterministic shrink-only baseline operations. */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { withLock } from "../../lib/atomic-write.mjs";
-import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from "../../lib/install/anti-slop/baseline.mjs";
-import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from "../../lib/install/anti-slop/constants.mjs";
-import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStagedAntiSlopSnapshot, } from "../../lib/install/anti-slop/git-snapshot.mjs";
-import { collectAntiSlopGroups, resolveAntiSlopScope, } from "../../lib/install/anti-slop/runner.mjs";
+import { withLock } from '../../lib/atomic-write.mjs';
+import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
+import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
+import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
 export const meta = {
     name: 'anti-slop',
     summary: 'Check vendored anti-slop rules with an explicit shrink-only baseline.',

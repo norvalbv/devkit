@@ -5,8 +5,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { markEnd, markStart } from "../husky/husky.mjs";
-import { isQuotedOrCommented } from "./hook-gate-scan.mjs";
+import { markEnd, markStart } from '../husky/husky.mjs';
+import { isQuotedOrCommented } from './hook-gate-scan.mjs';
 // Bins devkit itself emits into the managed block. A call to one of these from outside the markers
 // is (almost always) a hand-written copy that predates devkit owning the gate.
 const DEVKIT_GATE_BINS = [

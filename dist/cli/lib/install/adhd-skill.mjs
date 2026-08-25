@@ -14,9 +14,9 @@
  */
 import { cpSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { check } from "../doctor/check-result.mjs";
-import { packageDir } from "../fs-helpers.mjs";
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { check } from '../doctor/check-result.mjs';
+import { packageDir } from '../fs-helpers.mjs';
 /** The vendored skill's dir name, in devkit's bundle and in the consumer repo alike. */
 const ADHD_SKILL = 'i-have-adhd';
 /**

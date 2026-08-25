@@ -1,7 +1,7 @@
-import { firstDuplicateJsonKey } from "../../../../gate-engine/critique/json-duplicate-keys.mjs";
-import { LEGACY_AGENT_PROVIDERS } from "../agent-assets/agent-providers.mjs";
-import { readBoundedRegularFile } from "../strict-bounded-file-read.mjs";
-import { decodeSyncManifest } from "./codec.mjs";
+import { firstDuplicateJsonKey } from '../../../../gate-engine/critique/json-duplicate-keys.mjs';
+import { LEGACY_AGENT_PROVIDERS } from '../agent-assets/agent-providers.mjs';
+import { readBoundedRegularFile } from '../strict-bounded-file-read.mjs';
+import { decodeSyncManifest } from './codec.mjs';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 /** Strictly read one optional agent-asset manifest without following its leaf path. */

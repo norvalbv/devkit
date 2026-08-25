@@ -1,8 +1,8 @@
 /** Resolve one trusted, materialized review input without leaving symlinks in the private runtime. */
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { canonicalReviewDirectory, isSafeReviewRelativePath } from "./runtime-paths.mjs";
-import { reviewSetupStat } from "./setup/setup-runtime-copy.mjs";
+import { canonicalReviewDirectory, isSafeReviewRelativePath } from './runtime-paths.mjs';
+import { reviewSetupStat } from './setup/setup-runtime-copy.mjs';
 function fail(message) {
     throw new Error(`devkit review: ${message}`);
 }

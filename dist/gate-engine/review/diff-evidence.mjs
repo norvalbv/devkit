@@ -1,4 +1,4 @@
-import { splitDiffByFile } from "../judge/diff-focus.mjs";
+import { splitDiffByFile } from '../judge/diff-focus.mjs';
 export function capNamedSegments(segments, { totalCap, segmentCap, hint }) {
     const kept = [];
     const omitted = [];

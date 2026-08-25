@@ -35,7 +35,7 @@
  *      fallback message says so rather than implying a verified-clean staged set.
  */
 import { execFileSync } from 'node:child_process';
-import { emitGateInfraFailure } from "./gate-events.mjs";
+import { emitGateInfraFailure } from './gate-events.mjs';
 /** A submodule's commit lives in the SUBMODULE's object database; absent here by design. */
 const GITLINK_MODE = '160000';
 /** `cat-file --batch-check` echoes `<name> missing` for an object it cannot resolve. */

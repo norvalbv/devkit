@@ -9,7 +9,7 @@
  * wedge the agent's Bash (fail-open on unparseable stdin or any error).
  */
 import { readFileSync } from 'node:fs';
-import { decide } from "../lib/guard/protected-branch-guard.mjs";
+import { decide } from '../lib/guard/protected-branch-guard.mjs';
 export const meta = {
     name: 'guard-branch',
     summary: 'PreToolUse hook: block direct commits on a protected branch.',

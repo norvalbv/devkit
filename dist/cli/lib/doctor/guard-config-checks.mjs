@@ -34,11 +34,11 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
-import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from "../../../gate-engine/co-occurrence/index-refresh.mjs";
-import { REVIEWERS } from "../../../gate-engine/review/reviewers.mjs";
-import { detectStack } from "../detect-stack.mjs";
-import { packageDir, readJson } from "../fs-helpers.mjs";
-import { check } from "./check-result.mjs";
+import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
+import { REVIEWERS } from '../../../gate-engine/review/reviewers.mjs';
+import { detectStack } from '../detect-stack.mjs';
+import { packageDir, readJson } from '../fs-helpers.mjs';
+import { check } from './check-result.mjs';
 export const SEARCH_INDEX_CHECK = 'search-code index';
 /** Where `devkit init --search-code` puts the index — mirrors INDEX_PATH in install-search-code.mts. */
 const DEFAULT_INDEX = '.search-code/index.db';

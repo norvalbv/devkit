@@ -1,13 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { currentTarget, parseDecision, parseIndex } from "../decision-format.mjs";
-import { axisHash, cosine, EMBED_MODEL, embed, embedDisabled, loadVecIndex, saveVecIndex, } from "./embeddings.mjs";
-import { sections } from "./markdown.mjs";
-import { axisNotes } from "./note-relations.mjs";
-import { corpusIdf, orderQualifiers, tokenize } from "./qualifiers.mjs";
-export { cosine, EMBED_MODEL, EMBED_URL, embed } from "./embeddings.mjs";
+import { currentTarget, parseDecision, parseIndex } from '../decision-format.mjs';
+import { axisHash, cosine, EMBED_MODEL, embed, embedDisabled, loadVecIndex, saveVecIndex, } from './embeddings.mjs';
+import { sections } from './markdown.mjs';
+import { axisNotes } from './note-relations.mjs';
+import { corpusIdf, orderQualifiers, tokenize } from './qualifiers.mjs';
+export { cosine, EMBED_MODEL, EMBED_URL, embed } from './embeddings.mjs';
 // Re-exported so retrieval stays the single entry point for the recall path.
-export { corpusIdf, orderQualifiers } from "./qualifiers.mjs";
+export { corpusIdf, orderQualifiers } from './qualifiers.mjs';
 // Top-level regexes (these run in loops).
 const WS_RE = /\s+/g;
 const ANY_DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/g;

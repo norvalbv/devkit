@@ -1,4 +1,4 @@
-import { emitGateTiming } from "../../judge/gate-events.mjs";
+import { emitGateTiming } from '../../judge/gate-events.mjs';
 // 6, not 3: the correctness lens split turns one reviewer into up to four pool tasks, so a
 // backend commit schedules ~8 (4 lenses + 4 domain reviewers). At 6 the lens wave and most of the
 // fleet run in one wave and the review makespan approaches the slowest single judge instead of

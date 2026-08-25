@@ -3,8 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { packageDir } from "../../fs-helpers.mjs";
-import { ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_NATIVE_MODE } from "../anti-slop/constants.mjs";
+import { packageDir } from '../../fs-helpers.mjs';
+import { ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_NATIVE_MODE } from '../anti-slop/constants.mjs';
 const TOOL_PACKAGES = {
     lint: { packageName: 'oxlint', binName: 'oxlint' },
     fmt: { packageName: 'oxfmt', binName: 'oxfmt' },

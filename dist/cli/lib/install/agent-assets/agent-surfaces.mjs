@@ -1,14 +1,14 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from "../../../commands/sync/sync-agents.mjs";
-import { syncSkills } from "../../../commands/sync/sync-skills.mjs";
-import { AGENT_TARGETS } from "../../components.mjs";
-import { removeAgents, removeSkills } from "../../sync-manifest.mjs";
-import { hookRegistrationDestination } from "../hook-registration-ledger/codec.mjs";
-import { selectedHookAssets } from "../hook-registration-ledger/selection.mjs";
-import { reconcileHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "../install-hooks.mjs";
-import { agentAssetDir } from "./agent-assets.mjs";
-import { SUPPORTED_AGENT_PROVIDERS } from "./agent-providers.mjs";
+import { syncAgents } from '../../../commands/sync/sync-agents.mjs';
+import { syncSkills } from '../../../commands/sync/sync-skills.mjs';
+import { AGENT_TARGETS } from '../../components.mjs';
+import { removeAgents, removeSkills } from '../../sync-manifest.mjs';
+import { hookRegistrationDestination } from '../hook-registration-ledger/codec.mjs';
+import { selectedHookAssets } from '../hook-registration-ledger/selection.mjs';
+import { reconcileHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from '../install-hooks.mjs';
+import { agentAssetDir } from './agent-assets.mjs';
+import { SUPPORTED_AGENT_PROVIDERS } from './agent-providers.mjs';
 function pruneDeselectedSurfaces(gitRoot, selection, agentTargets, hookScripts, dryRun) {
     const prunedTargets = SUPPORTED_AGENT_PROVIDERS.filter((target) => !agentTargets.includes(target));
     const hasContent = prunedTargets.some((target) => ['skills', 'agents', 'hooks'].some((kind) => existsSync(join(gitRoot, agentAssetDir(target, kind)))) || existsSync(join(gitRoot, hookRegistrationDestination(target, 'shared'))));

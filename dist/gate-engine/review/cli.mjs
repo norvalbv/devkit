@@ -16,18 +16,18 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { envFlag, resolveGuardConfig } from "../config.mjs";
-import { recordAgentRun } from "../judge/run-judge.mjs";
-import { readTranscript } from "../judge/transcript-store.mjs";
-import { clearCache, loadCache } from "./cache.mjs";
-import { runCompleteness } from "./completeness.mjs";
-import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
-import { loadReviewerTargetsBlocks, reviewerTargetSalts } from "./evidence/targets-block.mjs";
-import { planReviewWork } from "./lens/split.mjs";
-import { cacheKey, selectReviewers } from "./reviewers.mjs";
-import { runReviewGate } from "./run-review.mjs";
-import { resolveReviewerIdentities, skippedReviewers } from "./runtime.mjs";
-import { runWaive } from "./valve/waive.mjs";
+import { envFlag, resolveGuardConfig } from '../config.mjs';
+import { recordAgentRun } from '../judge/run-judge.mjs';
+import { readTranscript } from '../judge/transcript-store.mjs';
+import { clearCache, loadCache } from './cache.mjs';
+import { runCompleteness } from './completeness.mjs';
+import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
+import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
+import { planReviewWork } from './lens/split.mjs';
+import { cacheKey, selectReviewers } from './reviewers.mjs';
+import { runReviewGate } from './run-review.mjs';
+import { resolveReviewerIdentities, skippedReviewers } from './runtime.mjs';
+import { runWaive } from './valve/waive.mjs';
 /**
  * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Cache
  * status is computed by `planReviewWork` — the gate's OWN planner — so scan can never diverge

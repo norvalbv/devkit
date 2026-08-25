@@ -6,7 +6,7 @@
  * and nothing else changes — no vitest.config edit, because the reports directory is overridden on
  * vitest's command line. See gate-engine/coverage/produce.mts for why that isolation is required.
  */
-import { produceCoverage } from "../../../gate-engine/coverage/produce.mjs";
+import { produceCoverage } from '../../../gate-engine/coverage/produce.mjs';
 export const meta = {
     name: 'coverage-run',
     summary: 'Run vitest with coverage in an isolated reports dir (parallel-agent safe).',

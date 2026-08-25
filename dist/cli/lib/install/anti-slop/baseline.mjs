@@ -2,8 +2,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from "./constants.mjs";
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mjs';
 function expectedFingerprint(entry) {
     return createHash('sha256')
         .update(JSON.stringify([entry.ruleId, entry.file, entry.diagnostic, entry.context]))

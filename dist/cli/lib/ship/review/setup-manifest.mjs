@@ -2,21 +2,21 @@
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { detectGitRoot } from "../../detect-git-root.mjs";
-import { gitOut, sameDir } from "../../doctor/hooks-path.mjs";
-import { reviewHookDrift } from "../../husky/review-drift.mjs";
-import { captureOrigHooksPath, overlayHookScriptDir } from "../../overlay.mjs";
-import { runDirectReviewCli } from "./run-direct.mjs";
-import { reviewRuntimeFingerprint } from "./runtime-fingerprint.mjs";
-import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
-import { OVERLAY_HOOKS_PATH, overlayHooksPathRejection, } from "./setup/overlay-hooks-path.mjs";
-import { reviewSetupStat } from "./setup/setup-runtime-copy.mjs";
-import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from "./setup-manifest-format.mjs";
-import { parseReviewSetupManifest } from "./setup-manifest-parse.mjs";
-import { REVIEW_SETUP_DOCTOR as DOCTOR, REVIEW_SETUP_INIT as INIT, REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR, parseReviewSetupProfile, } from "./setup-profile.mjs";
-import { errorMessage, fail } from "./shared/common.mjs";
-import { resolveReviewSource } from "./source-projection.mjs";
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { detectGitRoot } from '../../detect-git-root.mjs';
+import { gitOut, sameDir } from '../../doctor/hooks-path.mjs';
+import { reviewHookDrift } from '../../husky/review-drift.mjs';
+import { captureOrigHooksPath, overlayHookScriptDir } from '../../overlay.mjs';
+import { runDirectReviewCli } from './run-direct.mjs';
+import { reviewRuntimeFingerprint } from './runtime-fingerprint.mjs';
+import { canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from './runtime-paths.mjs';
+import { OVERLAY_HOOKS_PATH, overlayHooksPathRejection, } from './setup/overlay-hooks-path.mjs';
+import { reviewSetupStat } from './setup/setup-runtime-copy.mjs';
+import { REVIEW_SETUP_ABSENT, REVIEW_SETUP_VERSION, reviewSetupHash, } from './setup-manifest-format.mjs';
+import { parseReviewSetupManifest } from './setup-manifest-parse.mjs';
+import { REVIEW_SETUP_DOCTOR as DOCTOR, REVIEW_SETUP_INIT as INIT, REVIEW_SETUP_OVERLAY_DOCTOR as OVERLAY_DOCTOR, parseReviewSetupProfile, } from './setup-profile.mjs';
+import { errorMessage, fail } from './shared/common.mjs';
+import { resolveReviewSource } from './source-projection.mjs';
 const HUSKY_RUNNER_PATHS = [
     ['runner-source', '.husky/_', false],
     ['runner-pre-commit', '.husky/_/pre-commit', true],

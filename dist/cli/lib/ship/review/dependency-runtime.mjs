@@ -2,9 +2,9 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, constants, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { writeFileAtomic } from "../../atomic-write.mjs";
-import { runDirectReviewCli } from "./run-direct.mjs";
-import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from "./runtime-paths.mjs";
+import { writeFileAtomic } from '../../atomic-write.mjs';
+import { runDirectReviewCli } from './run-direct.mjs';
+import { canonicalReviewDirectory, canonicalReviewLeaf, reviewPathWithin, } from './runtime-paths.mjs';
 const MANIFEST_VERSION = 2;
 const NODE_MODULES = 'node_modules';
 function fail(message) {

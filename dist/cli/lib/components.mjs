@@ -7,7 +7,7 @@
  * One home for: the component order/labels (wizard copy), the recommended defaults
  * (--yes / non-TTY), and the guard sub-gate set (the husky `# devkit-guards` lines).
  */
-import { FRESH_DEFAULT_AGENT_PROVIDERS, normalizeAgentProviders, } from "./install/agent-assets/agent-providers.mjs";
+import { FRESH_DEFAULT_AGENT_PROVIDERS, normalizeAgentProviders, } from './install/agent-assets/agent-providers.mjs';
 /** The recommended-on gate-engine sub-gates (the --yes / non-TTY default guard set). */
 export const RECOMMENDED_GUARD_IDS = [
     'size',

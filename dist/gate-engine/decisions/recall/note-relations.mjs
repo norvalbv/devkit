@@ -22,7 +22,7 @@
  * independently they drift, and a perfectly valid reference reads as dangling — the gate then cries
  * wolf on correct work, which is how a gate gets switched off.
  */
-import { sections } from "./markdown.mjs";
+import { sections } from './markdown.mjs';
 /** A dated note bullet: `- <date> — <text>`. Shared with retrieval.mts so both read notes alike. */
 export const NOTE_LINE_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)$/;
 /** Top-level: axisNotes runs this once per note, per file, on every scan. */
