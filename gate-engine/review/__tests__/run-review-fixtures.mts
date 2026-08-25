@@ -23,6 +23,27 @@ export function trackReviewFixtureDir(dir: string): string {
 
 export function cleanupReviewFixtures(): void {
   while (trackedDirs.length) rmSync(trackedDirs.pop() as string, { recursive: true, force: true });
+  for (const key of Object.keys(pinnedEnv)) {
+    if (pinnedEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = pinnedEnv[key];
+    delete pinnedEnv[key];
+  }
+}
+
+// sc-2107 made the judge knobs config-resolvable (and devkit's own guard.config.json opts into
+// gpt judges). The fixture suite stubs CLAUDE-shaped judges (plain-text verdicts, --model argv),
+// so every fixture gate run pins the claude-era knobs unconditionally — ambient env must never
+// leak in. Codex-shaped judging is covered at the judge layer; resolution by the config tests.
+const pinnedEnv: Record<string, string | undefined> = {};
+function pinLegacyJudgeEnv(): void {
+  for (const [key, value] of [
+    ['GUARD_REVIEW_MODEL', 'haiku'],
+    ['GUARD_CORRECTNESS_MODEL', 'sonnet'],
+    ['GUARD_CORRECTNESS_CHUNK', 'off'],
+  ] as const) {
+    if (!(key in pinnedEnv)) pinnedEnv[key] = process.env[key];
+    process.env[key] = value;
+  }
 }
 
 // A consumer repo with a backend/frontend topology, synced agent briefs, and one staged file
@@ -33,6 +54,7 @@ export function consumerRepo({
   styles = false,
   emptyFrontendRoots = false,
 } = {}): string {
+  pinLegacyJudgeEnv();
   const repo = trackReviewFixtureDir(mkdtempSync(join(tmpdir(), 'guard-review-gate-')));
   execSync('git init -q', { cwd: repo });
   writeFileSync(

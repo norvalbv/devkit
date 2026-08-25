@@ -147,10 +147,14 @@ export function reviewerTargetSalts(
   selected: ReviewerSelection[],
   cacheSalts: Map<string, string>,
   saltBlock: string,
+  cascadeModel: string,
 ): Map<string, string> {
   const salted = (s: ReviewerSelection): string => {
     const base = cacheSalts.get(s.reviewer.name) ?? '';
-    return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}` : base;
+    // The judging model is part of verdict identity (sc-2053): a PASS earned by one model must
+    // not replay for another, or a model flip silently serves the old model's judgments.
+    const model = `\0model:${s.reviewer.model ?? cascadeModel}`;
+    return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}${model}` : `${base}${model}`;
   };
   return new Map(selected.map((s): [string, string] => [s.reviewer.name, salted(s)]));
 }

@@ -30,12 +30,12 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
-import { REVIEWERS } from '../../../gate-engine/review/reviewers.mjs';
+import { correctnessModel, resolveReviewModel, REVIEWERS, } from '../../../gate-engine/review/reviewers.mjs';
 import { detectStack } from '../detect-stack.mjs';
 import { packageDir, readJson } from '../fs-helpers.mjs';
 import { check } from './check-result.mjs';
@@ -152,22 +152,68 @@ export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
             check('guard.config.json', 'DRIFT', `cannot load the gate-engine config module: ${msg}`, 'reinstall @norvalbv/devkit — a devkit install fault, not a problem with your config'),
         ];
     }
-    // resolveGuardConfig throws on a corrupt file — THAT is the config-validity signal.
-    let resolved;
+    // resolveGuardConfig throws on a corrupt file — THAT is the config-validity signal. Resolved
+    // ONCE and reused below: a second read could throw unguarded if the file changes under us.
+    let cfg;
     try {
-        resolved = mod.resolveGuardConfig(cwd).indexPath ?? null;
+        cfg = mod.resolveGuardConfig(cwd);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return [check('guard.config.json', 'DRIFT', msg, 'fix the config JSON')];
     }
+    const resolved = cfg.indexPath ?? null;
     const results = [check('guard.config.json', 'OK', 'valid (resolveGuardConfig parsed it)')];
     if (dupSelected)
         results.push(checkSearchIndex(cwd, resolved, searchCodeSelected));
     const topology = reviewTopology(cwd, mod);
     if (topology)
         results.push(topology);
+    const codex = codexRuntimeResult(cfg, cwd);
+    if (codex)
+        results.push(codex);
     return results;
+}
+export const CODEX_RUNTIME_CHECK = 'codex judge runtime';
+/**
+ * DRIFT when the RESOLVED judge models (env > guard.config.json > defaults — the same resolvers
+ * the gate uses, so no second copy of the precedence) route judges to the codex CLI but no codex
+ * binary is resolvable. That combination is an undetected fail-open: every reviewer returns
+ * inconclusive and the gate exits 2 while reviewing nothing (sc-2107/sc-2054). Silent when no
+ * gpt-* model is configured — most installs — per this file's DRIFT-needs-positive-evidence rule.
+ */
+export function codexRuntimeResult(cfg, 
+// Relative pins / PATH entries resolve against the CONSUMER repo (where the judge spawns),
+// never the doctor's own process cwd.
+cwd = process.cwd()) {
+    const models = [resolveReviewModel(cfg), correctnessModel(cfg)];
+    const gpt = [...new Set(models.filter((m) => m.startsWith('gpt-')))];
+    if (gpt.length === 0)
+        return null;
+    // An existing DIRECTORY or non-executable file at the path still cannot judge anything —
+    // resolvable means an executable regular file, the same bar the spawn will apply.
+    const executable = (path) => {
+        const abs = resolve(cwd, path);
+        try {
+            accessSync(abs, constants.X_OK);
+            return statSync(abs).isFile();
+        }
+        catch {
+            return false;
+        }
+    };
+    const pinned = process.env.GUARD_CODEX_BIN;
+    const resolvable = pinned
+        ? executable(pinned)
+        : // An UNSET PATH is not an empty one: execvp falls back to the system default search path.
+            (process.env.PATH ?? '/usr/bin:/bin')
+                .split(':')
+                // POSIX: an EMPTY path entry means the current directory — spawn would honor it, so the
+                // doctor must too, or a valid (if odd) PATH reads as DRIFT.
+                .some((d) => executable(join(d === '' ? '.' : d, 'codex')));
+    if (resolvable)
+        return null;
+    return check(CODEX_RUNTIME_CHECK, 'DRIFT', `judge model ${gpt.join(', ')} routes reviewers through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — every reviewer would go inconclusive and the review gate fails open`, 'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.correctnessModel in guard.config.json');
 }
 /**
  * Print the index-wiring signal for the doctor modes that never build a CheckResult[] — overlay and
@@ -189,6 +235,20 @@ export async function adviseSearchIndex(cwd, sel) {
     console.log(`  ${index.status === 'OK' ? '✓' : '⚠'} ${index.name}: ${index.detail}`);
     if (index.status !== 'OK' && index.remediation)
         console.log(`      → ${index.remediation}`);
+}
+/**
+ * Codex-runtime advisory for the doctor modes that short-circuit before collectResults (self-host
+ * and overlay) — the same reachability hole adviseSearchIndex exists for, and the repo that MOST
+ * needs this one is devkit itself: the sole install whose committed config selects gpt judges.
+ */
+export async function adviseCodexRuntime(cwd) {
+    const results = await checkGuardConfig(cwd, false, false);
+    const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
+    if (!codex)
+        return;
+    console.log(`  ⚠ ${codex.name}: ${codex.detail}`);
+    if (codex.remediation)
+        console.log(`      → ${codex.remediation}`);
 }
 export const REVIEW_TOPOLOGY_CHECK = 'review topology';
 /**

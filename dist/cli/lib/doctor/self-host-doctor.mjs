@@ -15,7 +15,7 @@ import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/ant
 import { checkOxcCapability } from '../install/oxc/lifecycle.mjs';
 import { checkAgents, checkSkills } from './asset-checks.mjs';
 import { check } from './check-result.mjs';
-import { adviseSearchIndex } from './guard-config-checks.mjs';
+import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs';
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mjs';
 import { printStrayGateCalls } from './stray-gate-calls.mjs';
 import { inspectHookFailOpen, renderUnguardedGateCalls } from './unguarded-gate-calls.mjs';
@@ -97,6 +97,7 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
     // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
     await adviseSearchIndex(cwd, sel);
+    await adviseCodexRuntime(cwd);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.

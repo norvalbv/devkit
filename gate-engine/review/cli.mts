@@ -25,8 +25,8 @@ import { clearCache, loadCache } from './cache.mts';
 import { runCompleteness } from './completeness.mts';
 import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
-import { planReviewWork } from './lens/split.mts';
-import { cacheKey, selectReviewers } from './reviewers.mts';
+import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mts';
+import { cacheKey, resolveReviewModel, selectReviewers } from './reviewers.mts';
 import { runReviewGate } from './run-review.mts';
 import { resolveReviewerIdentities, skippedReviewers } from './runtime.mts';
 import { runWaive } from './valve/waive.mts';
@@ -50,9 +50,19 @@ async function scanReview(cwd = process.cwd()): Promise<number> {
     // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
     // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
     const { saltBlock } = await loadReviewerTargetsBlocks(cwd, stagedFiles(cwd));
-    const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock);
+    const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock, resolveReviewModel(cfg));
     const diffs = sels.map((s) => gitCached(cwd, [], s.files));
-    const plan = planReviewWork(sels, diffs, cache, salts, cacheKey);
+    // Same consumer-cwd chunk resolution as the gate (W-3) — a divergent default here would make
+    // scan disagree with the gate's plan on configured installs.
+    const plan = planReviewWork(
+      sels,
+      diffs,
+      cache,
+      salts,
+      cacheKey,
+      resolveLensGroups(),
+      resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc),
+    );
     for (const { sel, cached } of plan.scope) {
       console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);
     }

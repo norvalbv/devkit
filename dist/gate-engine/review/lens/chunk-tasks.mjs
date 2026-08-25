@@ -3,19 +3,26 @@
  * calls planChunkedParts per correctness selection; null (off / under trigger) falls back to the
  * un-chunked shape whose keys stay byte-identical to the pre-chunking engine.
  */
+import { resolveGuardConfig } from '../../config.mjs';
 import { diffCacheIdentity } from '../../judge/diff-focus.mjs';
 import { chunkDiffText, chunkFilesSha, chunkPlanHash, identityBytesByPath, packDiffIntoChunks, unquoteGitPath, } from './chunk.mjs';
 import { deriveLensReviewer, lensGroupId } from './groups.mjs';
 /**
- * Parse `GUARD_CORRECTNESS_CHUNK` into a chunk cap in LOC, or null when chunking is off (the
- * default — off keeps planReviewWork's keys and tasks byte-identical to the un-chunked engine).
- * A malformed value throws rather than silently running unchunked.
+ * The correctness chunk cap in LOC, or null when chunking is off. Resolution: the env var wins
+ * (it is the rollback/kill switch — off keeps keys byte-identical to the un-chunked engine),
+ * else guard.config.json review.correctnessChunkLoc, else the package default (0 = off; an
+ * install opts in, sc-2107). A malformed value throws rather than silently running unchunked.
  */
-export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK) {
-    const spec = String(raw ?? '')
+export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK, 
+// The engine passes its already-resolved snapshot (cfg.review.correctnessChunkLoc): re-reading
+// guard.config.json here could tear the plan if the file changes mid-run.
+configuredLoc = resolveGuardConfig().review.correctnessChunkLoc) {
+    let spec = String(raw ?? '')
         .trim()
         .toLowerCase();
-    if (spec === '' || spec === '0' || spec === 'off')
+    if (spec === '')
+        spec = String(configuredLoc);
+    if (spec === '0' || spec === 'off')
         return null;
     const n = Number(spec);
     if (!Number.isInteger(n) || n <= 0)
@@ -23,7 +30,7 @@ export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK) {
     // A BYTE-count misconfiguration parses fine but would never trigger; no honest LOC cap
     // exceeds 4000 (the whole-diff evidence cap is 60KB ≈ 1500 LOC).
     if (n > 4000)
-        throw new Error(`GUARD_CORRECTNESS_CHUNK: '${spec}' looks like a BYTE count — the unit is LOC (try ${Math.round(n / 40)})`);
+        throw new Error(`GUARD_CORRECTNESS_CHUNK / review.correctnessChunkLoc: '${spec}' looks like a BYTE count — the unit is LOC (try ${Math.round(n / 40)})`);
     return n;
 }
 /** LOC→identity-bytes conversion used everywhere chunk caps are sized (~40 bytes/line). */
