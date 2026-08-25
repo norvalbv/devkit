@@ -76,6 +76,7 @@ import {
   pickFailReason,
   resolveDiffPayload,
   selectFailLensRows,
+  setHard,
 } from './mine-telemetry-lib.mts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -214,13 +215,18 @@ function main() {
 
   const reviewStatus = new Map(); // `${shipId}::${reviewer}` -> status
   for (const r of reviews) {
-    reviewStatus.set(`${r.ship_id}::${r.reviewer}`, r.status);
+    setHard(reviewStatus, `${r.ship_id}::${r.reviewer}`, r.status, 'commit_reviews');
   }
   const statusOf = (shipId, reviewer) => reviewStatus.get(`${shipId}::${reviewer}`);
 
   const scopeByShipReviewer = new Map(); // same key -> diff_sha256
   for (const s of scopeRows)
-    scopeByShipReviewer.set(`${s.ship_id}::${s.reviewer}`, s.diff_sha256 ?? null);
+    setHard(
+      scopeByShipReviewer,
+      `${s.ship_id}::${s.reviewer}`,
+      s.diff_sha256 ?? null,
+      'commit_review_scope',
+    );
 
   const lensesByShipReviewer = new Map(); // key -> LensRow[]
   const lensStatus = new Map(); // `${shipId}::${reviewer}::${lens}` -> status
@@ -229,7 +235,7 @@ function main() {
     const key = `${l.ship_id}::${l.reviewer}`;
     if (!lensesByShipReviewer.has(key)) lensesByShipReviewer.set(key, []);
     lensesByShipReviewer.get(key).push(l);
-    lensStatus.set(`${l.ship_id}::${l.reviewer}::${l.lens}`, l.status);
+    setHard(lensStatus, `${l.ship_id}::${l.reviewer}::${l.lens}`, l.status, 'commit_review_lenses');
     if (l.disposition === 'waived') waivedLenses.push(l);
   }
   const lensStatusOf = (shipId, reviewer, lens) =>

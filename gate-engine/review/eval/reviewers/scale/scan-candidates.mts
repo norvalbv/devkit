@@ -8,8 +8,10 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { mineLabels, readArchivedDiff } from './labels.mts';
+import { assertMergedParentRows } from '../warehouse-guards.mts';
 
 const DB = path.join(os.homedir(), '.claude-usage', 'usage.db');
+assertMergedParentRows(DB);
 // SAFETY: sqlite3 -json prints a JSON array of row objects keyed by the selected column aliases.
 const rows = JSON.parse(
   execFileSync(
