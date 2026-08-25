@@ -59,11 +59,9 @@ export function resolveLensGroups(raw = process.env.GUARD_CORRECTNESS_SPLIT) {
 /** A per-group clone. Only the state file and the checklist commands become group-scoped — see the
  * module header on why the name must not. */
 export function deriveLensReviewer(reviewer, group, chunk) {
-    // `--chunk` scopes the STATE FILE per diff slice: chunked mode runs the same lens once per
-    // chunk, concurrently, and without it two judges of one lens would clobber each other's
-    // checklist — the same collision `--lens` scoping already prevents between groups. The script
-    // (skills/correctness/scripts/checklist.mjs lensPath) appends the identical `+c<n>` suffix, so
-    // gate and judge always resolve one file. Absent chunk → today's paths, byte-for-byte.
+    // `--chunk` scopes the state file per diff slice: one lens runs once per chunk concurrently,
+    // and two judges sharing a checklist would clobber each other. checklist.mjs's lensPath appends
+    // the identical `+c<n>` suffix. Absent chunk → today's paths, byte-for-byte.
     const suffix = chunk === undefined ? '' : ` --chunk ${chunk}`;
     const arg = `--lens ${[...group].sort().join(',')}${suffix}`;
     // SAFETY: a spread of a ChecklistReviewer overriding only lens/stateFile/cmds keeps the shape;

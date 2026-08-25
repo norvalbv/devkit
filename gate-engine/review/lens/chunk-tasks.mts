@@ -19,11 +19,9 @@ import { deriveLensReviewer, lensGroupId } from './groups.mts';
 import type { ReviewTask } from './split.mts';
 
 /**
- * Parse `GUARD_CORRECTNESS_CHUNK` into a chunk cap in LOC, or null when chunking is off — the
- * DEFAULT. Off means planReviewWork's keys and tasks are byte-identical to the pre-chunking
- * engine (the kill switch the sc-1907 rollout registers on). A malformed value throws rather
- * than silently running unchunked: a correctness knob that quietly no-ops is exactly the
- * blindness this reviewer exists to prevent.
+ * Parse `GUARD_CORRECTNESS_CHUNK` into a chunk cap in LOC, or null when chunking is off (the
+ * default — off keeps planReviewWork's keys and tasks byte-identical to the un-chunked engine).
+ * A malformed value throws rather than silently running unchunked.
  */
 export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK): number | null {
   const spec = String(raw ?? '')
@@ -33,10 +31,8 @@ export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK): numb
   const n = Number(spec);
   if (!Number.isInteger(n) || n <= 0)
     throw new Error(`GUARD_CORRECTNESS_CHUNK: expected 'off' or a positive LOC cap, got '${spec}'`);
-  // The unit is LOC; an earlier design draft used BYTES (24000). A byte-scale value is
-  // valid-but-wrong and would make chunking silently never trigger — the exact quiet no-op the
-  // malformed-value throw exists to prevent. The whole-diff evidence cap is 60KB (~1500 LOC), so
-  // no honest LOC cap approaches this bound.
+  // A BYTE-count misconfiguration parses fine but would never trigger; no honest LOC cap
+  // exceeds 4000 (the whole-diff evidence cap is 60KB ≈ 1500 LOC).
   if (n > 4000)
     throw new Error(
       `GUARD_CORRECTNESS_CHUNK: '${spec}' looks like a BYTE count — the unit is LOC (try ${Math.round(n / 40)})`,
@@ -46,13 +42,11 @@ export function resolveChunkCap(raw = process.env.GUARD_CORRECTNESS_CHUNK): numb
 
 /** LOC→identity-bytes conversion used everywhere chunk caps are sized (~40 bytes/line). */
 const CHUNK_BYTES_PER_LOC = 40;
-/** Chunk only when the diff meaningfully exceeds the cap — at or under 1.5x, one judge per lens
- * reads the whole diff better than two judges reading halves (bench: whole beats chunks on small
- * diffs for every default-effort model). */
+/** Chunk only when the diff meaningfully exceeds the cap — at or under 1.5x, one judge reading
+ * the whole diff beats two reading halves. */
 const CHUNK_TRIGGER_RATIO = 1.5;
-/** Hard ceiling on judge fan-out per reviewer: 4 chunks x 3 local lenses + 1 cross-file judge.
- * Oversized diffs re-pack at doubled caps until they fit — fewer, larger chunks, never more
- * judges (recovery scheduling is proven at this concurrency, sc-1476). */
+/** Hard fan-out ceiling (recovery scheduling is proven at this concurrency, sc-1476). Oversized
+ * diffs re-pack at doubled caps — fewer, larger chunks, never more judges. */
 const MAX_CHUNKS = 4;
 
 interface ChunkedPlan {
@@ -63,12 +57,10 @@ interface ChunkedPlan {
 
 /**
  * The chunked task plan for ONE correctness selection, or null when the diff is under the
- * trigger (callers then fall back to the un-chunked shape). Local lens groups fan out per chunk
- * over the CHUNK'S files — the judge's evidence, override-valve diff, and checklist state all
- * derive from `sel.files`, so scoping the derived selection scopes the whole judge. Any group
- * carrying `writer-reader-contracts` stays whole-diff (its lens is the cross-file guard), and its
- * key deliberately matches the un-chunked key: the judged content is identical in both modes, so
- * a verdict earned either side of the flag serves the other.
+ * trigger. Local lens groups fan out per chunk, scoped through the derived `sel.files` (evidence,
+ * override valve, and checklist state all derive from it). Groups carrying
+ * `writer-reader-contracts` stay whole-diff on the un-chunked key, so a verdict earned either
+ * side of the flag serves the other.
  */
 export function planChunkedParts(
   sel: ReviewerSelection,
@@ -101,9 +93,8 @@ export function planChunkedParts(
     const sub = chunkDiffText(diffText, files);
     const subId = diffCacheIdentity(sub);
     let chunkBytes = 0;
-    // Same unquote fallback as packDiffIntoChunks' own lookup: a git-QUOTED staged name (space/
-    // non-ASCII under core.quotePath) misses the raw key and would silently zero this chunk's
-    // telemetry bytes — the very field the sc-1907 rollout readout consumes.
+    // Same unquote fallback as packDiffIntoChunks: a git-quoted staged name misses the raw key
+    // and would zero this chunk's telemetry bytes.
     for (const f of files)
       chunkBytes += packed.bytesByPath.get(f) ?? packed.bytesByPath.get(unquoteGitPath(f)) ?? 0;
     planEntries.push({ index, files_sha: filesSha, file_count: files.length, bytes: chunkBytes });
@@ -119,8 +110,8 @@ export function planChunkedParts(
       parts.push({
         sel: {
           ...sel,
-          // SAFETY: planReviewWork only calls this planner when sel.reviewer.skill is set — the
-          // checklist type guard's own predicate — so the correctness entry is a ChecklistReviewer.
+          // SAFETY: planReviewWork only calls this planner when sel.reviewer.skill is set, so
+          // the entry is a ChecklistReviewer.
           reviewer: deriveLensReviewer(sel.reviewer as ChecklistReviewer, g, index),
           files: [...files],
         },

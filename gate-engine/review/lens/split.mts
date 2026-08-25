@@ -219,8 +219,7 @@ export const taskLabel = (t: {
   chunk?: ChunkAssignment;
 }): string => {
   if (!t.group) return t.sel.reviewer.name;
-  // Chunked tasks repeat the same lens group once per slice — without the index, `running -
-  // completed` could not say WHICH chunk is still owed (the same blindness group-qualifying fixed).
+  // Chunk-qualified for the same reason groups are: name WHICH slice is still owed.
   const chunk = t.chunk ? ` #c${t.chunk.index}` : '';
   return `${t.sel.reviewer.name} [${t.group}${chunk}]`;
 };
@@ -281,9 +280,8 @@ export function planReviewWork(
     // and scope rows still get the RAW diffs[i] — only the key input is normalized.
     const idText = diffCacheIdentity(diffs[i]);
     const split = groups && name === 'correctness-reviewer' && sel.reviewer.skill ? groups : null;
-    // Chunked mode (GUARD_CORRECTNESS_CHUNK, default off): local lenses fan out per diff slice;
-    // null when off OR the diff is under the trigger — both fall through to the un-chunked shape
-    // whose keys stay byte-identical to the pre-chunking engine.
+    // GUARD_CORRECTNESS_CHUNK (default off): null when off or under the trigger — both fall
+    // through to the un-chunked shape with byte-identical keys.
     const chunked =
       split && chunkCap !== null
         ? planChunkedParts(sel, diffs[i], idText, salt, keyOf, split, chunkCap)

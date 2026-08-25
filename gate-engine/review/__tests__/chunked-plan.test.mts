@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-// (keys hash the diff's normalized CACHE IDENTITY, not the raw bytes — see planReviewWork)
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { diffCacheIdentity } from '../../judge/diff-focus.mts';
@@ -12,10 +11,8 @@ import {
 import { hasChecklist, REVIEWERS, type ReviewerSelection } from '../reviewers.mts';
 import { cleanupReviewFixtures, consumerRepo } from './run-review-fixtures.mts';
 
-// sc-1907: production chunked correctness review behind GUARD_CORRECTNESS_CHUNK. These tests pin
-// the two load-bearing contracts: OFF is byte-identical to the pre-chunking engine (the rollout's
-// kill switch), and ON fans local lenses out per diff slice while the cross-file lens stays
-// whole-diff on a key both modes share.
+// sc-1907: pins the two load-bearing contracts — OFF is byte-identical to the pre-chunking
+// engine (the kill switch), ON fans local lenses per slice with the cross-file lens whole-diff.
 
 const correctness = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
 if (!correctness || !hasChecklist(correctness))
@@ -72,8 +69,7 @@ describe('resolveChunkCap', () => {
   it('throws on a malformed value instead of silently running unchunked', () => {
     expect(() => resolveChunkCap('four hundred')).toThrow(/GUARD_CORRECTNESS_CHUNK/);
     expect(() => resolveChunkCap('-3')).toThrow(/GUARD_CORRECTNESS_CHUNK/);
-    // A byte-scale value (an earlier design draft's unit) must throw naming the LOC unit — a
-    // valid-but-wrong cap would make chunking silently never trigger.
+    // A byte-scale cap parses fine but would silently never trigger — must throw naming LOC.
     expect(() => resolveChunkCap('24000')).toThrow(/LOC/);
   });
 });
@@ -119,10 +115,8 @@ describe('chunked mode', () => {
     expect(cross).toHaveLength(1);
     expect(cross[0].group).toBe('writer-reader-contracts');
     expect(cross[0].diffText).toBe(bigDiff);
-    // The cross-file key matches the un-chunked mode's key for the same lens: identical judged
-    // content on both sides of the flag, so a verdict earned either side serves the other.
-    // SAFETY: the un-chunked four-way plan always contains the writer-reader group (asserted by
-    // the kill-switch test above), so find() cannot miss.
+    // Cross-file key === un-chunked key: identical judged content, verdicts transfer across the flag.
+    // SAFETY: the four-way plan always contains the writer-reader group, so find() cannot miss.
     const off = plan(files, bigDiff, null).tasks.find(
       (t) => t.group === 'writer-reader-contracts',
     ) as ReviewTask;
@@ -136,7 +130,6 @@ describe('chunked mode', () => {
       expect(t.chunk?.count).toBe(chunkCount);
       expect(t.sel.files.length).toBeLessThan(files.length);
       expect(t.diffText.length).toBeLessThan(bigDiff.length);
-      // The derived judge is chunk-scoped end to end: state file AND checklist commands.
       expect(t.sel.reviewer.stateFile).toContain(`+c${t.chunk?.index}`);
       // SAFETY: chunked tasks carry lens-derived CHECKLIST reviewers, which always define cmds.
       expect((t.sel.reviewer as { cmds: { check: string } }).cmds.check).toContain(
