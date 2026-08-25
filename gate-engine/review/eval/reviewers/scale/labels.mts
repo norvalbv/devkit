@@ -15,6 +15,7 @@ import path from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { readFileSync } from 'node:fs';
 import { identityByPath } from '../../../lens/chunk.mts';
+import { assertMergedParentRows } from '../warehouse-guards.mts';
 
 export interface ScaleLabel {
   lens: string;
@@ -95,6 +96,7 @@ export function queryLensFails(
   sinceTs: string,
   ownDiffSha: string,
 ): LensRow[] {
+  assertMergedParentRows(dbPath);
   const sql = `select l.ts as ts, l.lens as lens, l.issues_json as issues_json, sc.diff_sha256 as diff_sha256
     from commit_review_lenses l
     join commit_ships s on s.ship_id = l.ship_id
