@@ -20,5 +20,11 @@
       }
     }
   ],
-  "ignorePatterns": ["node_modules", "templates", "bun.lock", "dist"]
+  "ignorePatterns": [
+    "node_modules",
+    "templates/**/*.json",
+    "templates/**/*.jsonc",
+    "bun.lock",
+    "dist"
+  ]
 }
