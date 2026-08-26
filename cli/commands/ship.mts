@@ -46,8 +46,11 @@ Usage:
                       ship deletes its record; a stale (>6h) or foreign record is refused by name.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
-  --no-qavis-publish  Do not publish a passed staged Qavis result into the PR description for this
-                      ship. The Qavis gate still runs; this suppresses only the post-push PR write.
+  --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
+                      publication. The Qavis gate still runs; only the post-push hand-off is skipped.
+                      That hand-off is INERT until the installed qavis exposes a publication
+                      subcommand (sc-2161) — until then ship names the gap once and prints the
+                      \`qavis qa --pr … --annotate description\` remedy instead.
   --pr                Re-push: add the changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force) instead of opening a new PR.
   --                  Force everything after it to be a file path (ships a dash-leading filename).

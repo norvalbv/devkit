@@ -51,6 +51,73 @@ export function qavisOnPath(env = process.env, cwd = process.cwd()) {
         }
     });
 }
+/**
+ * Does the installed qavis register a `publish` subcommand? `devkit doctor` asks this so the OTHER
+ * inert qavis path — ship's post-push evidence hand-off (cli/lib/ship/publish-qavis.sh) — is visible
+ * outside a post-push stderr line that a headless shipping agent may never read. sc-2161 owns the
+ * qavis half; until it lands, a qavis we can read answers `false`.
+ *
+ * Matches the WHOLE command word in the `--help` Commands block: "publish" also appears in qavis's
+ * prose, and `qavis publish --help` exits 0 on a qavis WITHOUT publish (commander answers `--help`
+ * before rejecting the unknown operand), so neither a substring nor an exit status can be trusted.
+ * A trailing `|` counts as a word end because commander renders an aliased subcommand as
+ * `publish|pub`. Must stay in lockstep with publish-qavis.sh's probe — ship and doctor answering
+ * this question differently is how an operator gets told two things about one binary.
+ * `--help` only — never a `route`/`qa` call, so this costs no model spend.
+ *
+ * `null` is a THIRD state, not a synonym for false: the probe could not ask (spawn failed, `--help`
+ * timed out, output had no readable Commands block), which is not evidence that publish is absent.
+ * Collapsing it would have doctor assert "this qavis has no publication subcommand" about a binary
+ * it never managed to interrogate — the same defect the 2026-07-22 ruling on this axis fixed for the
+ * advisory gate, where a bare null read exactly like a healthy verdict. Ship treats null and false
+ * alike (decline to invoke) because for ship they mean the same thing; doctor must not.
+ */
+/** Exported so a hang-regression test can bound its own wait without hard-coding this number. */
+export const QAVIS_HELP_TIMEOUT_MS = 5_000;
+export function qavisSupportsPublish() {
+    let help;
+    try {
+        help = execFileSync('qavis', ['--help'], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            // Explicit `env` so the lookup uses the LIVE PATH. Bun's execFileSync resolves the executable
+            // against the PATH it started with and ignores a later `process.env.PATH` write, so without
+            // this the probe can answer for a different binary than the shell probe found — measured, and
+            // the exact divergence this pair exists to prevent. Node honours the mutation either way.
+            env: process.env,
+            // execFileSync waits forever by default, so a qavis whose --help never returns would hang
+            // `devkit doctor` outright rather than degrade. A health report may not become the outage it
+            // is meant to describe; on timeout the throw lands in the catch and answers "could not ask"
+            // rather than "absent". `--help` measures in tenths of a second.
+            timeout: QAVIS_HELP_TIMEOUT_MS,
+        });
+    }
+    catch {
+        return null; // never ran, or was killed at the timeout — no evidence either way
+    }
+    const lines = help.split('\n');
+    const commands = lines.findIndex((line) => line.startsWith('Commands:'));
+    // No Commands block ⇒ not a help output we can read ⇒ unknown, never "scan the whole text".
+    if (commands === -1)
+        return null;
+    // Stop at the next unindented line: that is a new section header (`Examples:`, anything an
+    // `addHelpText('after', …)` appends), and its indented body is prose, not registered commands.
+    // Scanning to end-of-help would read `Examples:\n  publish --pr 1` as a capability and put ship
+    // straight back to invoking a subcommand that does not exist.
+    const block = [];
+    for (const line of lines.slice(commands + 1)) {
+        if (/^\S/.test(line))
+            break;
+        block.push(line);
+    }
+    return block.some((line) => {
+        // Take the whole rendered term and split it, rather than anchoring `publish` to the start:
+        // commander renders `name|alias`, so `publish` can sit on EITHER side of the pipe and the CLI
+        // dispatches on both. The `[a-z]` start mirrors the shell probe's awk exactly.
+        const term = /^ {2}([a-z]\S*)/.exec(line);
+        return term !== null && term[1].split('|').includes('publish');
+    });
+}
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */
 export const QAVIS_RECIPE = path.join('.qavis', 'recipe.json');
 function defaultRoute(cwd) {

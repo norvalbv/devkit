@@ -1,15 +1,71 @@
 #!/usr/bin/env bash
 # Qavis owns receipt validation, upload policy, and PR rendering. devkit supplies the shipped range.
+#
+# devkit ships the CALLER for a publication subcommand qavis does not expose yet — sc-2161 owns the
+# qavis half. PR #417 landed this call against an assumed companion that was never pushed, so every
+# ship carrying a pass receipt printed `unknown command 'publish'` AND a retry line naming that same
+# impossible command (sc-2028). Hence: probe before invoking, and when publication is unavailable say
+# so ONCE, with a remedy that actually runs.
+#
+# The remedy is deliberately NOT run for you. `qavis qa --pr` re-provisions a base worktree, boots the
+# app and re-judges it — minutes plus model spend on EVERY ship, and its fresh verdict can contradict
+# the staged pass the receipt already recorded. The receipt exists precisely to avoid re-paying that.
+
+# Does the installed qavis register a `publish` subcommand?
+#
+# Parses the `--help` Commands block and matches the WHOLE command word: "publish" also occurs in
+# qavis's descriptive prose, so a substring grep false-positives. `qavis publish --help` is NOT a
+# usable probe — commander answers `--help` before it errors on the unknown operand, so it exits 0
+# and would march us straight back into the bug this fixes.
+#
+# Every failure arm resolves to "absent": not invoking is the safe direction, since invoking is what
+# broke. Callers run under `set -euo pipefail`, so this is only ever evaluated as an `if` CONDITION —
+# which suppresses errexit for the whole body. A publication probe must never be able to kill a ship
+# that has already pushed (see docs/decisions/fail-open-needs-an-errexit-safe-call.md).
+# `</dev/null`: this spawns a SECOND process on a path that has already pushed and opened the PR. A
+# qavis that reads stdin would otherwise swallow the operator's piped body — or block there forever,
+# after the push landed and before the reconcile-manifest write.
+#
+# The awk splits each term on `|` because commander renders an aliased subcommand as `publish|pub`
+# (its help.js builds the term that way), and matching the rendered term literally would report
+# absent for a publish that exists — a false negative nothing else in the system would contradict.
+# It also stops at the next UNINDENTED line, because anything a help text appends after the Commands
+# block (`Examples:` and friends) is prose: reading `Examples:\n  publish --pr 1` as a registered
+# command is a false POSITIVE, which sends ship back to invoking a subcommand that does not exist.
+qavis_supports_publish() {
+  local help=''
+  help=$(qavis --help 2>/dev/null </dev/null) || return 1
+  printf '%s\n' "$help" \
+    | awk '/^Commands:/ { c = 1; next }
+           c && /^[^[:space:]]/ { c = 0 }
+           c && /^  [a-z]/ { n = split($1, names, "|"); for (i = 1; i <= n; i++) print names[i] }' \
+    | grep -qx publish
+}
+
+# ONE stderr line naming WHY, then the remedy that IS supported today. The advisory gate's standing
+# rule (docs/decisions/qavis-advisory-gate.md, 2026-07-22): fail-open stays exit 0, but it says why —
+# silence made a dead path indistinguishable from a healthy one. Never print a `qavis publish` retry
+# here: on this arm that command cannot run, and an impossible remedy is worse than none.
+warn_qavis_publication_unavailable() {
+  local root=$1 pr=$2 why=$3
+  echo "qavis publish: pass receipt exists, but $why — PR evidence was not published." >&2
+  echo "  Attach it from the receipt's PR head instead:" >&2
+  printf '  qavis qa --pr %q --repo %q --annotate description\n' "$pr" "$root" >&2
+}
 
 publish_qavis_receipt() {
   local root=$1 pr=$2 base=$3 head=$4 output=''
+  # Ahead of every probe, so a consumer that has never run qavis pays zero process spawns.
   [ -f "$root/.qavis/receipt.json" ] || return 0
 
   if ! command -v qavis >/dev/null 2>&1; then
-    echo "qavis publish: pass receipt exists, but qavis is not on PATH; PR evidence was not published." >&2
-    echo "  Retry after installing/upgrading qavis:" >&2
-    printf '  qavis publish --pr %q --repo %q --base %q --head %q\n' \
-      "$pr" "$root" "$base" "$head" >&2
+    warn_qavis_publication_unavailable "$root" "$pr" 'qavis is not on PATH'
+    return 0
+  fi
+
+  if ! qavis_supports_publish; then
+    warn_qavis_publication_unavailable "$root" "$pr" \
+      'the installed qavis exposes no publication subcommand (sc-2161)'
     return 0
   fi
 
@@ -17,6 +73,7 @@ publish_qavis_receipt() {
     [ -n "$output" ] && echo "qavis publish: $output" >&2
     return 0
   fi
+  # Reached only when `publish` EXISTS and failed, so this retry line is one the operator can run.
   echo "qavis publish: PR opened/pushed, but evidence publication failed." >&2
   [ -n "$output" ] && echo "  $output" >&2
   echo "  Retry only the publication step:" >&2
