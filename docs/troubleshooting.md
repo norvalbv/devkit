@@ -169,6 +169,29 @@ discard cached _passes_, never hide a failure:
   and any restage of the staged diff re-judges (the cache is diff-tier-only), so remove the file only when
   a cached block is provably stale (e.g. after rolling devkit back).
 
+## `managed Oxlint base manifest digest is stale; refusing an incomplete baseline`
+
+Also seen as `anti-slop capability is not fully integrated`. This is **provenance drift, not your
+content**: it compares devkit's committed managed state (`.devkit/oxc/manifest.json`,
+`.devkit/anti-slop/manifest.json`) against the devkit package that's actually running, and fails when
+the two disagree.
+
+- **During a `devkit ship` / `devkit ship --pr`** you shouldn't see it: the ship worktree is cut from
+  the base (for `--pr`, the existing PR branch tip), so a branch that forked before a gate-infra
+  change carries that change's *predecessor* — while the gates come from the caller's linked
+  `node_modules`. `prepare_gate_worktree` therefore refreshes the managed state from the running
+  package and prints `↳ shipping: refreshed managed capability state …`. That refresh touches the
+  **working tree only** — it is never staged and never reaches the commit, so the PR branch stays
+  self-consistent for its own CI. If you instead see `↳ shipping: managed capability refresh skipped
+  — <reason>`, the reason names the fix (usually `devkit doctor --fix`).
+- **On a plain commit**, your checkout's managed state lags the devkit you upgraded to. Run
+  `devkit doctor --fix` and commit the refreshed `.devkit/` bytes.
+
+One knock-on is expected after a devkit upgrade: the newer rule set runs against your existing
+`.anti-slop-baseline.json`, so rules added since the baseline was written can surface findings you
+didn't introduce. That block is deliberate — fix or explicitly re-baseline, and note that a
+re-baseline is a change to the baseline file, so it belongs in the commit.
+
 ## `✗ deterministic gates failed: <names>`
 
 The deterministic gates (structure, fanout, size, dup, clone …) run all-and-**aggregate**: instead of
