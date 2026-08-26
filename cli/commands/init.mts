@@ -6,7 +6,6 @@ import {
   enableLineGrowth,
   hasLineCap,
   LINE_CAP,
-  setMaxLines,
 } from '../../gate-engine/ratchets/size-disable.mts';
 import {
   IMPORT_WALL_BASELINE,
@@ -63,6 +62,7 @@ import {
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
+import * as upgradeOffers from '../lib/install/upgrade-offers.mts';
 import { installOverlay } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mts';
@@ -307,22 +307,6 @@ function applyScanRoots(cwd: string, scanRoots: string[] | null, dryRun: boolean
   }
   writeFileSync(path, next);
   console.log(`  ✓ guard.config.json scanRoots = ${value}`);
-}
-
-// Enable the per-file line-growth block on FIRST adoption: write `maxLines` into guard.config.json so
-// the guard-size ratchet caps source files. Called BEFORE the step-4 freeze so that same first-init
-// `guard-size freeze` grandfathers the current giants into size-lines.json. Callers gate this on
-// !repoAdopted — enabling the cap on an already-adopted repo without a fresh freeze would hard-error
-// its giants, so that path goes through `devkit upgrade`'s offer (which freezes in the same step).
-function applyMaxLines(cwd: string, on: boolean, dryRun: boolean) {
-  if (!on) return;
-  if (dryRun) {
-    console.log(`  [dry-run] set guard.config.json maxLines = ${LINE_CAP} (line-growth block)`);
-    return;
-  }
-  if (setMaxLines(cwd)) {
-    console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
-  }
 }
 
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
@@ -703,6 +687,8 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
     '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
   );
   const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
+  const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
+  upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
     console.log('  freeze baselines (grandfather current tree)');
     runFreezes(cwd, dryRun, { overlay: true });
@@ -731,11 +717,12 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       searchSteering: false, // never wired in overlay (no resolvable bin without the package)
       fallow: fallowWired,
       antiSlop: false,
+      lineGrowth: Boolean(selection.lineGrowth),
       adhd: Boolean(selection.adhd),
       priorArtGate: Boolean(selection.priorArtGate),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     } as Record<string, unknown>,
-    plan.undecided,
+    upgradeOffers.overlayUndecidedLineGrowth(cwd, selection, plan.undecided),
     prevConfig?.components,
   );
   overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
@@ -866,10 +853,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   applyScanRoots(cwd, scanRoots, dryRun);
   // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)
   // and only when the size guard runs it. An adopted repo enables it via `devkit upgrade` (freeze +
-  // cap in one step), never here — this apply pass would set the cap with no matching freeze.
-  applyMaxLines(
+  // cap in one step), never here. Self-host is excluded: its guard.config.json is hand-owned.
+  upgradeOffers.applyMaxLines(
     cwd,
-    // Self-host never writes maxLines — guard.config.json is hand-owned (and has no maxLines by design).
     !selfHost &&
       !repoAdopted(cwd) &&
       Boolean(selection.lineGrowth) &&
