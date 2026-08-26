@@ -125,6 +125,28 @@ refresh_ship_reviewer_assets() {
   echo "  ↳ $purpose: refreshed reviewer agents + skills from running devkit package" >&2
 }
 
+# Refresh devkit-MANAGED capability state (.devkit/oxc/*, .devkit/anti-slop/*) in the throwaway ship
+# worktree from the CURRENT running devkit package — the same reasoning as its reviewer-asset sibling
+# above, one file-set over. The worktree is cut from $BASE, so for `ship --pr` those bytes are the PR
+# branch's FORK POINT, while the gates that judge them arrive through the caller's linked node_modules.
+# Once a gate-infra change lands on the base, that mismatch makes every re-push to a pre-change branch
+# die on "managed Oxlint base manifest digest is stale" regardless of the staged content (sc-2099).
+# WORKING TREE ONLY: the helper never touches the index, so ship_assert_staged_unchanged still holds
+# byte-exact and the commit (made without `-a`) carries exactly the briefed paths.
+refresh_ship_managed_capability() {
+  local wt=$1 root=$2 purpose=$3 script_dir tool
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd) || return 0
+  tool="$script_dir/managed-capability-runtime.mts"
+  [ -f "$tool" ] || tool="$script_dir/managed-capability-runtime.mjs"
+  [ -f "$tool" ] || {
+    echo "  ↳ $purpose: managed capability runtime helper unavailable — skipped" >&2
+    return 0
+  }
+  # Advisory BY CONSTRUCTION, not by oversight: a skip only re-exposes today's behaviour, and the
+  # capability gate inside the worktree still runs and still fails closed. Never abort the ship here.
+  node "$tool" project "$wt" "$root" || true
+}
+
 # The repo's MAIN worktree — `git worktree list` reports it first, by definition.
 gate_main_worktree() {
   local root=$1 main
@@ -403,7 +425,13 @@ prepare_gate_worktree() {
   # trusting the caller copy (or treating its absence as an opt-out). Tag validation shares this
   # preparation helper but does not run the reviewer gate, so keep its minimal worktree unchanged.
   if [ "$purpose" = shipping ]; then
-    refresh_ship_reviewer_assets "$wt" "$root" "$purpose"
+    # `|| return 1` keeps the reviewer refresh FAIL-CLOSED: it used to be the last statement, so its
+    # status was this function's, and a bare second call below would silently swallow it.
+    refresh_ship_reviewer_assets "$wt" "$root" "$purpose" || return 1
+    # `|| true` enforces the advisory contract HERE too, not just inside the callee: a future edit
+    # that lets the managed refresh return non-zero must never turn a best-effort projection into a
+    # hard gate that aborts the ship under the caller's `set -e`.
+    refresh_ship_managed_capability "$wt" "$root" "$purpose" || true
   fi
 }
 
