@@ -123,11 +123,13 @@ const LINE_GROWTH_FILES = ['guard.config.json', LINES_BASELINE, LEGACY_LINES_BAS
 // `.git/info/exclude` hides untracked files only, so overlay must skip anything git already tracks.
 export function overlayOwnsLineGrowth(cwd: string): boolean {
   const { gitRoot, pkgRel } = detectGitRoot(cwd);
+  // detectGitRoot falls back to cwd when it found no repo at all — then nothing is tracked.
+  if (!existsSync(join(gitRoot, '.git'))) return true;
   const pfx = pkgRel ? `${pkgRel}/` : '';
   try {
     return LINE_GROWTH_FILES.every((rel) => !isTracked(gitRoot, `${pfx}${rel}`));
   } catch {
-    return true; // no index to consult (not a git repo) — nothing is tracked, nothing can be dirtied
+    return false; // git could not answer, so tracked-ness is unknown: refuse rather than risk a write.
   }
 }
 
@@ -143,18 +145,25 @@ export function applyMaxLines(cwd: string, on: boolean, dryRun: boolean): void {
   }
 }
 
+// Absent, never false: a recorded false is the durable decline normalizeSelection must not re-default.
+export function overlayUndecidedLineGrowth(
+  cwd: string,
+  sel: Selection,
+  undecided?: string[],
+): string[] | undefined {
+  if (!sel.lineGrowth || hasLineCap(cwd)) return undecided;
+  return [...(undecided ?? []), 'lineGrowth'];
+}
+
 /** {@link applyMaxLines} under overlay's extra condition: it may only write what git does not track. */
 export function applyOverlayMaxLines(
   cwd: string,
   sel: Selection,
   adopted: boolean,
+  owns: boolean,
   dryRun: boolean,
 ): void {
-  const on =
-    !adopted &&
-    Boolean(sel.lineGrowth) &&
-    Boolean(sel.guards?.includes('size')) &&
-    overlayOwnsLineGrowth(cwd);
+  const on = !adopted && Boolean(sel.lineGrowth) && Boolean(sel.guards?.includes('size')) && owns;
   applyMaxLines(cwd, on, dryRun);
 }
 

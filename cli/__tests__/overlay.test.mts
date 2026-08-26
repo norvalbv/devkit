@@ -170,6 +170,52 @@ describe('overlay (local-only) install', () => {
     expect(guard.maxLines).toBeUndefined();
     // The whole point: a committed file cannot be hidden by .git/info/exclude, so it stays clean.
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: root }).toString()).toBe('');
+    // ...and the config must not claim a cap that was never written. Absent, not false: a false
+    // reads as a durable decline and would suppress the offer even once the file becomes untracked.
+    expect('lineGrowth' in readCfgComponents(root)).toBe(false);
+  });
+
+  it('keeps a line-growth decline durable even when the files are tracked', async () => {
+    const root = workRepo();
+    writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
+    execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+
+    await applyInit(root, {
+      stack: 'react-app',
+      selection: { ...defaultSelection(), lineGrowth: false },
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    });
+
+    // A refusal to write must never erase an answer: absent would re-default to true and re-nag.
+    expect(readCfgComponents(root).lineGrowth).toBe(false);
+  });
+
+  it('never claims the cap on a re-run that wrote nothing because the repo was adopted', async () => {
+    const root = workRepo();
+    const opts = {
+      stack: 'react-app',
+      selection: defaultSelection(),
+      overlay: true,
+      devkitRef: 'v0.7.0',
+    };
+    // First run with a tracked config: no cap written, key absent.
+    writeFileSync(join(root, 'guard.config.json'), '{ "scanRoots": ["src"] }\n');
+    execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'team guard config'], { cwd: root });
+    await applyInit(root, opts);
+    expect('lineGrowth' in readCfgComponents(root)).toBe(false);
+
+    // The team untracks it, but the repo is now adopted so the write is deferred to `devkit upgrade`.
+    execFileSync('git', ['rm', '--cached', '-q', 'guard.config.json'], { cwd: root });
+    execFileSync('git', ['commit', '-qm', 'untrack guard config'], { cwd: root });
+    await applyInit(root, opts);
+
+    expect(
+      JSON.parse(readFileSync(join(root, 'guard.config.json'), 'utf8')).maxLines,
+    ).toBeUndefined();
+    expect('lineGrowth' in readCfgComponents(root)).toBe(false); // still no cap → still no claim
   });
 
   it('records a line-growth opt-out so upgrade never re-offers it', async () => {

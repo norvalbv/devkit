@@ -62,7 +62,7 @@ import {
 import { installSearchCode } from '../lib/install/install-search-code.mts';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mts';
 import { type PackageJson, patchPackageJson } from '../lib/install/package-json.mts';
-import { applyMaxLines, applyOverlayMaxLines } from '../lib/install/upgrade-offers.mts';
+import * as upgradeOffers from '../lib/install/upgrade-offers.mts';
 import { installOverlay } from '../lib/overlay.mts';
 import { installGlobalHook } from '../lib/overlay-global-hook.mts';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mts';
@@ -688,8 +688,8 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
     '  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n',
   );
   const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
-  // Before the freeze below, so that freeze grandfathers the current giants (the package ordering).
-  applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), dryRun);
+  const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
+  upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
   if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
     console.log('  freeze baselines (grandfather current tree)');
     runFreezes(cwd, dryRun, { overlay: true });
@@ -723,7 +723,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
       priorArtGate: Boolean(selection.priorArtGate),
       agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     } as Record<string, unknown>,
-    plan.undecided,
+    upgradeOffers.overlayUndecidedLineGrowth(cwd, selection, plan.undecided),
     prevConfig?.components,
   );
   overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
@@ -854,10 +854,9 @@ export async function applyInit(cwd: string, plan: InitPlan) {
   applyScanRoots(cwd, scanRoots, dryRun);
   // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)
   // and only when the size guard runs it. An adopted repo enables it via `devkit upgrade` (freeze +
-  // cap in one step), never here — this apply pass would set the cap with no matching freeze.
-  applyMaxLines(
+  // cap in one step), never here. Self-host is excluded: its guard.config.json is hand-owned.
+  upgradeOffers.applyMaxLines(
     cwd,
-    // Self-host never writes maxLines — guard.config.json is hand-owned (and has no maxLines by design).
     !selfHost &&
       !repoAdopted(cwd) &&
       Boolean(selection.lineGrowth) &&
