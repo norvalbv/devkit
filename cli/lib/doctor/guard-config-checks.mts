@@ -187,6 +187,9 @@ export async function checkGuardConfig(
   cwd: string,
   dupSelected: boolean,
   searchCodeSelected: boolean,
+  // Required, never defaulted: a silent false here retires the codex check for a caller that
+  // wanted it. Only the `review` guard reads review.model / review.correctnessModel.
+  reviewSelected: boolean,
 ): Promise<CheckResult[]> {
   const path = join(cwd, 'guard.config.json');
   if (!existsSync(path)) {
@@ -227,7 +230,7 @@ export async function checkGuardConfig(
   if (dupSelected) results.push(checkSearchIndex(cwd, resolved, searchCodeSelected));
   const topology = reviewTopology(cwd, cfg.review);
   if (topology) results.push(topology);
-  const codex = codexRuntimeResult(cfg, cwd);
+  const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
   if (codex) results.push(codex);
   return results;
 }
@@ -296,7 +299,7 @@ export async function adviseSearchIndex(
   sel: { guards?: string[]; searchCode?: boolean },
 ): Promise<void> {
   if (!sel.guards?.includes('dup')) return;
-  const results = await checkGuardConfig(cwd, true, sel.searchCode === true);
+  const results = await checkGuardConfig(cwd, true, sel.searchCode === true, false);
   const index = results.find((r) => r.name === SEARCH_INDEX_CHECK);
   if (!index) return;
   console.log(`  ${index.status === 'OK' ? '✓' : '⚠'} ${index.name}: ${index.detail}`);
@@ -308,8 +311,13 @@ export async function adviseSearchIndex(
  * and overlay) — the same reachability hole adviseSearchIndex exists for, and the repo that MOST
  * needs this one is devkit itself: the sole install whose committed config selects gpt judges.
  */
-export async function adviseCodexRuntime(cwd: string): Promise<void> {
-  const results = await checkGuardConfig(cwd, false, false);
+export async function adviseCodexRuntime(cwd: string, sel: { guards?: string[] }): Promise<void> {
+  const results = await checkGuardConfig(
+    cwd,
+    false,
+    false,
+    sel.guards?.includes('review') === true,
+  );
   const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
   if (!codex) return;
   console.log(`  ⚠ ${codex.name}: ${codex.detail}`);

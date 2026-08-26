@@ -2,7 +2,11 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { codexRuntimeResult } from '../lib/doctor/guard-config-checks.mts';
+import {
+  CODEX_RUNTIME_CHECK,
+  checkGuardConfig,
+  codexRuntimeResult,
+} from '../lib/doctor/guard-config-checks.mts';
 
 // sc-2107: a gpt-* judge model with no resolvable codex binary is an undetected fail-open (every
 // reviewer inconclusive, gate exit 2, nothing reviewed). This check gives it a doctor signal.
@@ -72,5 +76,28 @@ describe('codexRuntimeResult', () => {
     process.env.GUARD_REVIEW_MODEL = 'haiku';
     process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
     expect(codexRuntimeResult(cfg('gpt-5.6-sol', 'gpt-5.6-sol'))).toBeNull();
+  });
+});
+
+describe('checkGuardConfig — the codex runtime check is scoped to the review guard', () => {
+  const repo = () => {
+    const root = mkdtempSync(join(tmpdir(), 'codex-scope-'));
+    roots.push(root);
+    writeFileSync(join(root, 'guard.config.json'), JSON.stringify({ scanRoots: ['src'] }));
+    return root;
+  };
+
+  it('stays silent for a Claude-judged guard like comments, which never reads review.model', async () => {
+    process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
+    process.env.PATH = '/nonexistent-codex-scope';
+    const results = await checkGuardConfig(repo(), false, false, false);
+    expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)).toBeUndefined();
+  });
+
+  it('DRIFTs when the review guard IS selected and no codex resolves', async () => {
+    process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-sol';
+    process.env.PATH = '/nonexistent-codex-scope';
+    const results = await checkGuardConfig(repo(), false, false, true);
+    expect(results.find((r) => r.name === CODEX_RUNTIME_CHECK)?.status).toBe('DRIFT');
   });
 });

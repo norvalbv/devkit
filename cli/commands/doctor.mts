@@ -364,6 +364,7 @@ async function collectResults(
         cwd,
         sel.guards?.includes('dup') === true,
         sel.searchCode === true,
+        sel.guards?.includes('review') === true,
       )),
     );
   if (sel.structure && sel.husky) results.push(checkStructureLint(cwd, stack));
