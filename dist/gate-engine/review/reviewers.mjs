@@ -87,12 +87,12 @@ export const REVIEWERS = Object.freeze([
         // broadcast/classifier surface-cue) that are MODEL-INVARIANT — precision is a DESIGN problem,
         // not a bigger-model problem. Recall DOES scale with model (0.76→0.92), so the finder runs a
         // strong pinned model (K=1 evidence; a confirming flip-table run is still owed). The pin VALUE
-        // is config-resolved in selectReviewers (review.correctnessModel, sc-2107; gpt defaults wait
-        // on sc-2054 parity) — single-pass semantics stay. Cross-domain false-blocks are caught
+        // is config-resolved in selectReviewers (review.correctnessModel — default gpt-5.6-sol
+        // since sc-2054 parity) — single-pass semantics stay. Cross-domain false-blocks are caught
         // downstream by domainExclusivityDrop; the in-domain surface-cue ones want K-sample
         // self-consistency (Wang 2203.11171), NOT a same-family refute pass (it overturned real FAILs
         // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
-        model: 'sonnet',
+        model: 'gpt-5.6-sol',
     }),
     Object.freeze({
         name: 'conventions-reviewer',
@@ -191,8 +191,9 @@ export function resolveReviewModel(cfg) {
 }
 /**
  * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
- * script (the one non-git Bash prefix a judge gets — scoped to that exact script path, so the
- * judge can drive its checklist but still cannot write files, stage, or commit), PLUS the
+ * script (the one non-git Bash prefix a judge gets — scoped to that exact script path: a CLAUDE
+ * judge cannot write files, stage, or commit; a codex judge is workspace-write, so the same
+ * contract is enforced after the fact by run-review's staged-tree tamper check, sc-2054), PLUS the
  * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
  */
 export function allowedToolsFor(reviewer, cfg, assetRoot = '.claude') {
