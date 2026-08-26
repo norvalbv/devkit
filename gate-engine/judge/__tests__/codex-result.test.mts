@@ -47,6 +47,7 @@ describe('parseClaudeArgv', () => {
       prompt: 'JUDGE THIS',
       systemPrompt: null,
       readOnly: true,
+      allowedTools: null,
     });
   });
 
@@ -67,6 +68,7 @@ describe('parseClaudeArgv', () => {
       prompt: 'REVIEW THIS',
       systemPrompt: null,
       readOnly: false,
+      allowedTools: ['Bash(node:*) Read'],
     });
   });
 

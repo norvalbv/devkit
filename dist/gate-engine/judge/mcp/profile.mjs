@@ -170,6 +170,7 @@ function emptyProfile() {
     return {
         args: ['--mcp-config', EMPTY_MCP_CONFIG, '--strict-mcp-config'],
         serverNames: [],
+        servers: {},
         cleanup: () => { },
     };
 }
@@ -211,6 +212,7 @@ export function prepareJudgeMcpProfile(profile, options) {
         return {
             args: ['--mcp-config', file, '--strict-mcp-config'],
             serverNames: present,
+            servers,
             cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
         };
     }

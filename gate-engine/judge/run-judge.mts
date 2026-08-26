@@ -33,7 +33,11 @@ import {
 } from './codex/result.mts';
 import { emitGateEvent } from './gate-events.mts';
 import { withoutGitEnv } from './judge-isolation.mts';
-import { type JudgeMcpProfile, prepareJudgeMcpProfile } from './mcp/profile.mts';
+import {
+  type JudgeMcpProfile,
+  type PreparedJudgeMcpProfile,
+  prepareJudgeMcpProfile,
+} from './mcp/profile.mts';
 import { composeTranscript, saveTranscriptUnique } from './transcript-store.mts';
 
 // The error thrown/handed back by a `claude` spawn — a Node exec error augmented with these fields.
@@ -309,14 +313,14 @@ function readJudgeOutput(
 }
 
 /**
- * Compose the spawn for the routed binary. MCP profile args are claude-CLI flags and do not
- * translate — a codex judge runs without them (the bench arms this adapter exists for use none;
- * a production gpt judge wanting MCP needs a codex-side profile mapping first — see the
- * judge-mcp-profiles decision note).
+ * Compose the spawn for the routed binary. The claude path prepends the profile's --mcp-config
+ * flags; the codex path translates the SAME selected servers into codex-native `-c mcp_servers.*`
+ * config with secrets forwarded through the spawn env by NAME (sc-2054 — see codexMcpArgs). Both
+ * runtimes now honor the judge-mcp-profiles Target.
  */
-function spawnFor(args: string[], mcpArgs: string[]): JudgeCli {
-  const cli = judgeCliFor(args);
-  return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcpArgs, ...args]) };
+function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile): JudgeCli {
+  const cli = judgeCliFor(args, mcp.servers);
+  return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
 }
 
 export function execJudge(opts: ExecJudgeOpts): string | null {
@@ -329,13 +333,13 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   try {
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
-    const cli = spawnFor(args, mcp.args);
+    const cli = spawnFor(args, mcp);
     const out = execFileSync(cli.bin, cli.argv, {
       cwd,
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
       // hook run in a linked worktree (how ship commits), and a tool-using judge that touches
       // another repo would write ITS index over the ship's staged diff. See withoutGitEnv.
-      env: withoutGitEnv(env),
+      env: { ...withoutGitEnv(env), ...cli.extraEnv },
       input,
       encoding: 'utf8',
       timeout,
@@ -407,14 +411,14 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
-      const cli = spawnFor(args, mcp.args);
+      const cli = spawnFor(args, mcp);
       const child = execFile(
         cli.bin,
         cli.argv,
         {
           cwd,
           // env: see the execJudge twin — the git-env scrub applies to every judge spawn.
-          env: withoutGitEnv(env),
+          env: { ...withoutGitEnv(env), ...cli.extraEnv },
           encoding: 'utf8',
           timeout,
           // See the execJudge twin: SIGKILL so the cap is a guaranteed kill, not a trappable request.

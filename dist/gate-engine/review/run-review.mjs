@@ -17,7 +17,7 @@
  *            hook never renders an outage as "opus-confirmed FAIL"
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
- * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (env > guard.config.json review.model > haiku — the
+ * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (env > guard.config.json review.model > gpt-5.6-sol — the
  *   reviewer-eval bench validated the domain reviewers at haiku, 6/6 block/6/6 clean; a FAIL still
  *   escalates to opus, so opus stays the block authority) ·
  * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
@@ -40,7 +40,7 @@ import { loadReviewerContext } from './evidence/commit-message.mjs';
 import { responseContractFor } from './contracts/registry.mjs';
 import { renderFindingsBlockForParts } from './evidence/findings.mjs';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mjs';
-import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
+import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mjs';
 import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults, mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
@@ -57,7 +57,45 @@ export { runCascade };
  */
 export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
     const timing = new ReviewGateTiming();
-    const finish = (code) => timing.finish(code);
+    let preJudgeTree;
+    let preJudgeHead = null;
+    // Judge-integrity choke point (sc-2054): EVERY exit after the snapshot was taken re-verifies
+    // the staged tree AND HEAD — pass (0), the all-cache-hit early return, and the fail-open
+    // inconclusive exit (2) alike, since 2 still lets a plain commit proceed. Any violation exits 1
+    // regardless of the original code: tamper is a hard fail, never an inconclusive. Tree null
+    // fails closed; a moved HEAD (nested `git commit` leaves write-tree identical) fails too.
+    const finish = (code) => {
+        if (preJudgeTree !== undefined) {
+            // Endpoint verification is the SAME stable-read bracket as the start snapshot (tree read
+            // between two agreeing HEAD reads, tree re-read to agree): a write landing between two
+            // unbracketed reads would let both comparisons pass individually. An actor still mutating
+            // after the last read is the post-hook-exit window — git's own boundary, waived on record.
+            let postTree = null;
+            let postHead = null;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                const h1 = headHash(cwd);
+                const t = stagedTreeHash(cwd);
+                if (h1 !== null && t !== null && headHash(cwd) === h1 && stagedTreeHash(cwd) === t) {
+                    postTree = t;
+                    postHead = h1;
+                    break;
+                }
+            }
+            if (preJudgeTree === null || postTree === null) {
+                console.error('guard-review: staged tree is UNVERIFIABLE (git write-tree failed — unmerged paths?) — blocking: write-capable judges may run in this gate and their effect on the commit cannot be ruled out. Resolve the index and re-run.');
+                return timing.finish(1);
+            }
+            if (postHead === null || postTree !== preJudgeTree || postHead !== preJudgeHead) {
+                console.error(postHead === null
+                    ? 'guard-review: HEAD is UNREADABLE after the review gate — blocking: repository state cannot be verified.'
+                    : postTree !== preJudgeTree
+                        ? `guard-review: STAGED TREE CHANGED during the review gate (${preJudgeTree.slice(0, 12)} → ${postTree.slice(0, 12)}) — the bytes to be committed are not the bytes reviewed. Blocking: re-stage deliberately and re-run.`
+                        : `guard-review: HEAD MOVED during the review gate (${String(preJudgeHead).slice(0, 12)} → ${postHead.slice(0, 12)}) — something committed mid-review. Blocking: inspect the repo before trusting this commit.`);
+                return timing.finish(1);
+            }
+        }
+        return timing.finish(code);
+    };
     if (envFlag('NO_REVIEW')) {
         emitReviewSkipped(null, 'gate_disabled');
         return finish(0);
@@ -77,6 +115,21 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         }
         if (reviewMode)
             cfg = effectiveReviewConfig(cfg);
+        // Snapshot before ANY read: every byte the gate evaluates postdates this instant, so the
+        // finish-time recheck catches movement across the gate's whole life (judge or otherwise).
+        // Stable-read pair: HEAD is read on BOTH sides of the tree read and must agree, or a commit
+        // landing between the two reads would silently become the baseline. Unstable after retries
+        // (or unreadable) → null → the choke point fails closed.
+        preJudgeTree = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+            const before = headHash(cwd);
+            const tree = stagedTreeHash(cwd);
+            if (before !== null && tree !== null && headHash(cwd) === before) {
+                preJudgeTree = tree;
+                preJudgeHead = before;
+                break;
+            }
+        }
         const staged = stagedFiles(cwd);
         selected = selectReviewers(staged, cfg);
         const skip = skippedReviewers();
@@ -100,6 +153,13 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         }
         // One domain diff per reviewer (its cache identity): the exact staged bytes in its files.
         diffs = selected.map((s) => gitCached(cwd, [], s.files));
+        // Evidence bracket: the tree must still be the snapshot AFTER the diffs are read, or the
+        // judges would review swapped-in bytes while the endpoints agree (the single-swap TOCTOU).
+        // A double swap timed inside this bracket is an actor with full repo write access racing
+        // sub-millisecond windows — outside this gate's trust boundary (such an actor can edit .git
+        // directly); hashing cannot close it and locking the index would break every parallel tool.
+        if (stagedTreeHash(cwd) !== preJudgeTree)
+            throw new Error('staged tree changed while review evidence was being read — re-run the gate');
     }
     catch (e) {
         // sc-1366: both branches read the staged diff, so both can die on an unreadable object. Review

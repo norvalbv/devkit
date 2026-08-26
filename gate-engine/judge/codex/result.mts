@@ -2,8 +2,9 @@
  * `codex exec --json` support: how devkit runs a judge on an OpenAI Codex subscription instead of
  * the `claude` CLI. Routing is BY MODEL ID — a `gpt-*` model (e.g. `gpt-5.6-sol`) spawns
  * `codex exec`; every other id keeps the claude path byte-for-byte, so execJudge's five callers
- * never change their argv and the production gates are untouched until someone configures a gpt
- * model explicitly.
+ * never change their argv. Since sc-2054 the gpt path is the SHIPPED DEFAULT (review.model in
+ * gate-engine/config.mts), with MCP profiles injected codex-natively and staged-tree tamper
+ * detection standing in for claude's tool-allowlist confinement. It originated as a bench-only seam (sc-2048).
  *
  * Why: ship-gate judge volume drains the owner's Claude subscription while the Codex subscription
  * has headroom (sc-2048). The two CLIs are near-isomorphic for a headless judge — prompt as argv,
@@ -96,10 +97,13 @@ export interface ClaudeArgvParts {
    * the closest analog is prepending the brief to the prompt — see codexExecArgs. */
   systemPrompt: string | null;
   /** `--disallowedTools *` (JUDGE_READ_ONLY) maps to codex's read-only sandbox; an investigating
-   * judge (`--allowedTools …`) needs workspace-write so it can run the checklist script. Codex's
-   * read-only sandbox is still an agentic loop (it may read files), which is WIDER than a pure-text
-   * claude judge — a documented divergence, acceptable for warn-by-default gates. */
+   * judge (`--allowedTools …`) needs workspace-write so it can run the checklist script (codex
+   * cannot confine cwd — its writable-roots only ADD). The claude tool-allowlist's cannot-write
+   * contract is replaced by run-review's staged-tree tamper detection (sc-2054). */
   readOnly: boolean;
+  /** The claude `--allowedTools` grants, comma-split — the codex path maps `mcp__<server>__…`
+   * entries onto per-server `enabled_tools` allowlists (sc-2054). */
+  allowedTools: string[] | null;
 }
 
 /** What an actual CLI option looks like (`-x`, `--kebab-or_snake`). A judge PROMPT may also start
@@ -111,6 +115,7 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
   let prompt: string | null = null;
   let systemPrompt: string | null = null;
   let readOnly = false;
+  let allowedTools: string[] | null = null;
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
     if (token === '-p') {
@@ -128,6 +133,11 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
       if (token === '--model') model = args[i + 1] ?? null;
       if (token === '--append-system-prompt') systemPrompt = args[i + 1] ?? null;
       if (token === '--disallowedTools') readOnly = true;
+      if (token === '--allowedTools')
+        allowedTools = (args[i + 1] ?? '')
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean);
       i += 1;
       continue;
     }
@@ -140,7 +150,7 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
     }
     prompt = token;
   }
-  return { model, prompt, systemPrompt, readOnly };
+  return { model, prompt, systemPrompt, readOnly, allowedTools };
 }
 
 /**
@@ -150,7 +160,7 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
  * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
  * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
  */
-export function codexExecArgs(parts: ClaudeArgvParts): string[] {
+export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): string[] {
   if (!parts.model || !parts.prompt)
     throw new Error('codex judge: argv carries no --model or no prompt — cannot translate');
   // Codex exec has no system-prompt flag: an agent brief (`--append-system-prompt`) is prepended
@@ -172,6 +182,7 @@ export function codexExecArgs(parts: ClaudeArgvParts): string[] {
     parts.readOnly ? 'read-only' : 'workspace-write',
     '-c',
     'web_search="disabled"',
+    ...mcpArgv,
     '--ignore-user-config',
     '--ignore-rules',
     '--skip-git-repo-check',
@@ -187,6 +198,100 @@ export interface JudgeCli {
   bin: string;
   argv: string[];
   codex: boolean;
+  /** Env additions for the judge SPAWN (mcp secret forwarding — values never ride argv). */
+  extraEnv?: Record<string, string>;
+}
+
+/** One MCP server definition as the judge registry stores it (claude mcpServers shape). Typed as
+ * EXPECTED at the JSON boundary — values are re-checked by representation below, never trusted
+ * (the registry is a user-editable file). */
+export interface CodexMcpServerDef {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
+/** The codex-native translation of a judge MCP profile: `-c` argv plus spawn-env additions. */
+export interface CodexMcpInjection {
+  argv: string[];
+  extraEnv: Record<string, string>;
+}
+
+/** True when the runtime representation is a real string (a JSON number/object is not its own
+ * template image) — the same untrusted-boundary idiom gate-engine/config.mts uses. */
+const isStr = (v: string | undefined): v is string => v != null && `${v}` === v;
+
+const MCP_NAME_RE = /^[\w-]+$/;
+const tomlStr = (v: string): string => JSON.stringify(v);
+
+/**
+ * Translate the judge's prepared MCP server map into codex-native per-invocation config
+ * (`-c mcp_servers.*`, sc-2054). Hermeticity holds: with --ignore-user-config the injected
+ * servers are the ONLY servers (codex's twin of --strict-mcp-config). Secrets never ride argv:
+ * env VALUES go into the spawn environment and are forwarded by NAME via `env_vars` (codex
+ * starts server children env_clear'ed, so nothing else leaks through). The claude
+ * `--allowedTools mcp__<server>__<tool>` grants map onto `enabled_tools` — `mcp__<server>__*`
+ * grants every tool; a server with NO grant is not injected at all.
+ */
+export function codexMcpArgs(
+  servers: Record<string, CodexMcpServerDef>,
+  allowedTools: string[] | null,
+): CodexMcpInjection {
+  const argv: string[] = [];
+  const extraEnv: Record<string, string> = {};
+  for (const [name, def] of Object.entries(servers)) {
+    if (!MCP_NAME_RE.test(name)) {
+      console.error(
+        `codex judge: mcp server name ${JSON.stringify(name)} not addressable via -c — skipped`,
+      );
+      continue;
+    }
+    const grants = (allowedTools ?? [])
+      .filter((t) => t.startsWith(`mcp__${name}__`))
+      .map((t) => t.slice(`mcp__${name}__`.length));
+    if (allowedTools !== null && grants.length === 0) continue; // no grant → do not inject
+    if (!isStr(def.command) || def.command === '') {
+      // A url-typed server the claude profile admits is not yet expressible on the codex path
+      // (StreamableHttp mapping unverified against the pinned binary) — a VISIBLE opt-out, never
+      // a silent one: the judge runs without this server and the operator can see why.
+      if (isStr(def.url))
+        console.error(
+          `codex judge: mcp server ${name} is url-typed — not yet mapped to codex config; judge runs without it`,
+        );
+      continue;
+    }
+    // Buffered per server: a server that turns out inexpressible (env collision) must leave NO
+    // trace in argv — a half-injected server is worse than an absent one.
+    const serverArgv: string[] = ['-c', `mcp_servers.${name}.command=${tomlStr(def.command)}`];
+    const serverEnv: Record<string, string> = {};
+    const args = Array.isArray(def.args) ? def.args.filter(isStr) : [];
+    if (args.length > 0)
+      serverArgv.push('-c', `mcp_servers.${name}.args=[${args.map(tomlStr).join(',')}]`);
+    let expressible = true;
+    if (def.env && !Array.isArray(def.env)) {
+      const names: string[] = [];
+      for (const [key, value] of Object.entries(def.env)) {
+        if (!isStr(value)) continue;
+        if (key in extraEnv && extraEnv[key] !== value) {
+          console.error(`codex judge: mcp env ${key} collides across servers — ${name} skipped`);
+          expressible = false;
+          break;
+        }
+        serverEnv[key] = value;
+        names.push(key);
+      }
+      if (expressible && names.length > 0)
+        serverArgv.push('-c', `mcp_servers.${name}.env_vars=[${names.map(tomlStr).join(',')}]`);
+    }
+    if (!expressible) continue;
+    if (grants.length > 0 && !grants.includes('*'))
+      serverArgv.push('-c', `mcp_servers.${name}.enabled_tools=[${grants.map(tomlStr).join(',')}]`);
+    serverArgv.push('-c', `mcp_servers.${name}.startup_timeout_sec=10`);
+    argv.push(...serverArgv);
+    Object.assign(extraEnv, serverEnv);
+  }
+  return { argv, extraEnv };
 }
 
 /** The codex binary to spawn: overridable so an operator can pin ONE build when several sit on
@@ -200,11 +305,20 @@ const codexBin = (): string => process.env.GUARD_CODEX_BIN || 'codex';
  * cannot make two call sites disagree about which binary ran. The claude branch reproduces the
  * pre-adapter spawn exactly (withResultArgs included), which the routing test pins.
  */
-export function judgeCliFor(args: string[]): JudgeCli {
+export function judgeCliFor(
+  args: string[],
+  mcpServers: Record<string, CodexMcpServerDef> = {},
+): JudgeCli {
   const parts = parseClaudeArgv(args);
   if (!isCodexModel(parts.model))
     return { bin: 'claude', argv: withResultArgs(args), codex: false };
-  return { bin: codexBin(), argv: codexExecArgs(parts), codex: true };
+  const mcp = codexMcpArgs(mcpServers, parts.allowedTools);
+  return {
+    bin: codexBin(),
+    argv: codexExecArgs(parts, mcp.argv),
+    codex: true,
+    extraEnv: mcp.extraEnv,
+  };
 }
 
 /** The binary NAME for outage wording — must never throw (it runs inside catch blocks, including

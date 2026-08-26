@@ -22,8 +22,8 @@ import type { ReviewTask } from './split.mts';
 /**
  * The correctness chunk cap in LOC, or null when chunking is off. Resolution: the env var wins
  * (it is the rollback/kill switch — off keeps keys byte-identical to the un-chunked engine),
- * else guard.config.json review.correctnessChunkLoc, else the package default (0 = off; an
- * install opts in, sc-2107). A malformed value throws rather than silently running unchunked.
+ * else guard.config.json review.correctnessChunkLoc, else the package default (400 since
+ * sc-2054 parity; 0 disables). A malformed value throws rather than silently running unchunked.
  */
 export function resolveChunkCap(
   raw = process.env.GUARD_CORRECTNESS_CHUNK,
