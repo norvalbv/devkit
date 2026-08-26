@@ -29,7 +29,8 @@ const write = (root, rel, content) => {
 const writeConfig = (root, cfg) =>
   writeFileSync(join(root, 'guard.config.json'), JSON.stringify(cfg));
 const gitInit = (root) => {
-  execFileSync('git', ['init', '-q'], { cwd: root });
+  // Pinned: `git switch main` below is otherwise hostage to the machine's init.defaultBranch.
+  execFileSync('git', ['init', '-q', '--initial-branch=main'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 't@t.t'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 't'], { cwd: root });
 };

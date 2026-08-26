@@ -30,6 +30,7 @@ import {
   offerLineGrowth,
   offerNewGates,
   offerOptionalComponents,
+  overlayOwnsLineGrowth,
 } from '../lib/install/upgrade-offers.mts';
 import doctor from './doctor.mts';
 import { applyInit } from './init.mts';
@@ -226,6 +227,7 @@ export default async function upgrade(args: string[], cwd: string): Promise<numb
     // `undecided` pass-through: applyOverlay writes its own components block, so without it an
     // overlay upgrade records a decline nobody made and the offer never fires again.
     const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
+    await offerLineGrowth(cwd, sel, dryRun, { canWrite: () => overlayOwnsLineGrowth(cwd) });
     const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
       unavailable: ['antiSlop'],
     });
