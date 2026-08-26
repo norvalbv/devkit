@@ -5,12 +5,13 @@
  * `--apply`, a `git merge --ff-only` that the stale tree BLOCKED now SUCCEEDS — proving reconcile
  * makes the tree pullable without moving the shared HEAD.
  */
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ffBlockers, loadManifest, reconcileBranch } from '../lib/reconcile.mts';
+import { ffBlockers, loadManifest, reconcileBranch, reconcilePath } from '../lib/reconcile.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'index.mts');
@@ -30,11 +31,15 @@ const G =
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
 
-/** Fresh work repo on 0.0.9 with a bare local origin; `OLD` seeded into every file in `files`. */
-function makeRepo(files) {
-  const origin = mkTmp('reco-origin-');
+/**
+ * Fresh work repo on 0.0.9 with a bare local origin; `OLD` seeded into every file in `files`.
+ * `prefix` exists so one suite can build the repo under a path containing a SPACE — the shape the
+ * reported crash was misdiagnosed as, and the one a future shell-string refactor would break.
+ */
+function makeRepo(files, prefix = 'reco') {
+  const origin = mkTmp(`${prefix}-origin-`);
   execFileSync('git', ['init', '-q', '--bare', origin], { env: GENV });
-  const root = mkTmp('reco-work-');
+  const root = mkTmp(`${prefix}-work-`);
   const g = G(root);
   g('init', '-q', '-b', '0.0.9');
   g('config', 'user.email', 'a@b.c');
@@ -65,6 +70,19 @@ function mergeUpstream(root, g, base, changes) {
   g('push', '-q', 'origin', '0.0.9');
   g('reset', '-q', '--hard', base);
   g('branch', '-q', '-D', 'feat/up');
+}
+
+/** Publish a merged upstream commit on any `ref` (slashes fine), then pin local back to BASE. */
+function pushUpstreamOnto(root, g, base, ref, changes) {
+  g('checkout', '-q', '--detach', base);
+  for (const [n, c] of Object.entries(changes)) {
+    writeFileSync(join(root, n), c);
+    g('add', '--', n);
+  }
+  g('commit', '-q', '-m', `upstream ${ref}`);
+  g('push', '-q', 'origin', `HEAD:refs/heads/${ref}`);
+  g('checkout', '-q', '0.0.9');
+  g('reset', '-q', '--hard', base);
 }
 
 /** Build a manifest entry the way ship-branch.sh's writer would (blobSha from the SHIPPED worktree). */
@@ -98,6 +116,18 @@ const runCli = (root, ...args) =>
   spawnSync(process.execPath, [CLI, 'reconcile', '--main-repo', root, ...args], {
     encoding: 'utf8',
     env: { ...GENV, DEVKIT_RECONCILE_MERGED_OVERRIDE: 'MERGED' },
+  });
+
+/** The same run, launched concurrently — the only way to put two reconciles in one tree at once. */
+const runCliAsync = (root, ...args) =>
+  new Promise((resolve) => {
+    const p = spawn(process.execPath, [CLI, 'reconcile', '--main-repo', root, '--apply', ...args], {
+      env: { ...GENV, DEVKIT_RECONCILE_MERGED_OVERRIDE: 'MERGED' },
+    });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (out += d));
+    p.on('close', (status) => resolve({ status, out }));
   });
 
 /**
@@ -353,6 +383,221 @@ describe('reconcile — ff-pullability is measured, not claimed', () => {
   });
 });
 
+describe('reconcile — the restore target is a resolved commit, never a shared ref', () => {
+  it('restores from the resolved sha though .git/FETCH_HEAD is emptied, then repointed', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'OLD-BAR\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'NEW-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n'); // pristine shipped copies of both
+    writeFileSync(join(root, 'bar.ts'), 'NEW-BAR\n');
+    const { paths } = entryFor(root, g, base, [{ path: 'foo.ts' }, { path: 'bar.ts' }]);
+    g('fetch', '-q', 'origin', 'refs/heads/0.0.9');
+    const upstream = g('rev-parse', 'refs/remotes/origin/0.0.9^{commit}');
+
+    // A peer's FAILED fetch truncates the shared file to zero bytes — `checkout FETCH_HEAD` then
+    // dies with "invalid reference", which is the crash that took a whole --apply run down.
+    writeFileSync(join(root, '.git', 'FETCH_HEAD'), '');
+    expect(reconcilePath(root, paths[0], upstream, true)).toEqual({ restored: true });
+    expect(g('rev-parse', ':foo.ts')).toBe(g('rev-parse', `${upstream}:foo.ts`));
+
+    // A peer's SUCCESSFUL fetch of another ref is the worse case: the checkout SUCCEEDS and stages
+    // a blob from a commit this branch never reconciled against, with no warning anywhere.
+    writeFileSync(join(root, '.git', 'FETCH_HEAD'), `${base}\t\tbranch '0.0.8' of origin\n`);
+    expect(reconcilePath(root, paths[1], upstream, true)).toEqual({ restored: true });
+    expect(g('rev-parse', ':bar.ts')).toBe(g('rev-parse', `${upstream}:bar.ts`));
+    expect(g('rev-parse', ':bar.ts')).not.toBe(g('rev-parse', `${base}:bar.ts`));
+  });
+
+  it('reconciles against the base BRANCH when the remote also carries a tag of that name', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    // A release tag named like the base branch — devkit runs in repos it does not own. git's DWIM
+    // prefers refs/tags/ over refs/heads/, so a bare `fetch origin 0.0.9` reconciles against the TAG.
+    g('tag', '-a', '0.0.9', '-m', 'release', base);
+    g('push', '-q', 'origin', 'refs/tags/0.0.9');
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.warnings).toEqual([]);
+    expect(res.restored).toEqual(['foo.ts']);
+    expect(g('rev-parse', ':foo.ts')).toBe(g('rev-parse', `${res.upstreamSha}:foo.ts`));
+    expect(g('rev-parse', ':foo.ts')).not.toBe(g('rev-parse', `${base}:foo.ts`)); // not the tag's stale blob
+  });
+});
+
+describe('reconcile — a refused write warns, it does not kill the run', () => {
+  /** A peer's git holding the index — the realistic write failure in an N-agent tree. */
+  const lockIndex = (root) => writeFileSync(join(root, '.git', 'index.lock'), '');
+
+  it("names git's stderr and exit status, keeps the entry, and reports nothing restored", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    lockIndex(root);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.restored).toEqual([]); // a write that never landed is never reported as one
+    expect(res.restoreFailures).toEqual(['foo.ts']);
+    expect(res.action).toBe('keep'); // the debt record outlives the failure
+    expect(res.warnings[0]).toMatch(/foo\.ts: restore failed/);
+    expect(res.warnings[0]).toMatch(/exit 128/); // the bare "Command failed" said none of this
+    expect(res.warnings[0]).toMatch(/index\.lock/);
+  });
+
+  it('a shipped DELETE whose staging is refused warns instead of claiming a restore', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'gone.ts': 'BYE\n' });
+    mergeUpstream(root, g, base, { 'gone.ts': null });
+    rmSync(join(root, 'gone.ts')); // the shipped deletion, already applied locally
+    const entry = entryFor(root, g, base, [{ path: 'gone.ts', op: 'delete' }]);
+    lockIndex(root);
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    expect(res.restored).toEqual([]); // used to print "✓ restored" and prune the entry
+    expect(res.restoreFailures).toEqual(['gone.ts']);
+    expect(res.action).toBe('keep');
+    expect(res.warnings[0]).toMatch(/gone\.ts: staging the deletion failed/);
+  });
+});
+
+describe('reconcile — base refs the manifest can actually carry', () => {
+  it('a non-standard refspec cannot reach resolution: the fetch names its own destination', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    // A repo whose refspec maps somewhere else entirely never writes refs/remotes/origin/0.0.9. The
+    // fetch carries its own destination, so no remote config can decide what this run reconciles to.
+    g('config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/elsewhere/*');
+    g('update-ref', '-d', 'refs/remotes/origin/0.0.9');
+
+    const res = reconcileBranch({ mainRepo: root, branch: 'feat/x', entry, apply: true });
+    const probe = spawnSync(
+      'git',
+      ['-C', root, 'rev-parse', '--verify', 'refs/remotes/origin/0.0.9'],
+      {
+        env: GENV,
+        encoding: 'utf8',
+      },
+    );
+    expect(probe.status).not.toBe(0); // nothing read it, and nothing recreated it
+    expect(res.warnings).toEqual([]);
+    expect(res.restored).toEqual(['foo.ts']);
+    expect(g('rev-parse', ':foo.ts')).toBe(g('rev-parse', `${res.upstreamSha}:foo.ts`));
+    expect(ffPullSucceeds(root, g)).toBe(true);
+    // The pin is dropped once read — a shared checkout must not collect a ref per run.
+    expect(g('for-each-ref', '--format=%(refname)', 'refs/devkit/')).toBe('');
+  });
+
+  it('a baseRef that exists only as a TAG is refused with a warning, never reconciled', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'OLD-BAR\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'NEW-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'NEW-BAR\n');
+    const tagOnly = { ...entryFor(root, g, base, [{ path: 'bar.ts' }]), baseRef: 'v9' };
+    g('tag', '-a', 'v9', '-m', 'release', base);
+    g('push', '-q', 'origin', 'refs/tags/v9');
+    writeManifest(root, {
+      'aaa/tag-base': tagOnly,
+      'zzz/live': entryFor(root, g, base, [{ path: 'foo.ts' }]),
+    });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/fetch origin v9 failed/); // a PR base is a branch; a tag cannot stand in
+    expect(r.stdout).not.toMatch(/restored bar\.ts/); // the bare-name fetch used to "reconcile" it
+    expect(r.stdout).toMatch(/✓ restored foo\.ts/); // and it costs the live branch nothing
+    expect(g('rev-parse', ':bar.ts')).toBe(g('rev-parse', `${base}:bar.ts`)); // left byte-for-byte
+  });
+
+  it('a slashed baseRef (release/1.x) fetches, restores and prunes like any other', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    pushUpstreamOnto(root, g, base, 'release/1.x', { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const entry = { ...entryFor(root, g, base, [{ path: 'foo.ts' }]), baseRef: 'release/1.x' };
+    writeManifest(root, { 'feat/x': entry });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/✓ restored foo\.ts/);
+    expect(loadManifest(root).branches['feat/x']).toBeUndefined(); // fully reconciled → pruned
+  });
+
+  it('two live base refs in one run each restore against their OWN resolved sha', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'OLD-BAR\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    pushUpstreamOnto(root, g, base, 'release/1.x', { 'bar.ts': 'NEW-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'NEW-BAR\n');
+    writeManifest(root, {
+      'feat/main': entryFor(root, g, base, [{ path: 'foo.ts' }]),
+      'feat/rel': { ...entryFor(root, g, base, [{ path: 'bar.ts' }]), baseRef: 'release/1.x' },
+    });
+
+    const out = JSON.parse(runCli(root, '--apply', '--json').stdout);
+    const [main, rel] = out.branches;
+    expect(main.restored).toEqual(['foo.ts']);
+    expect(rel.restored).toEqual(['bar.ts']);
+    expect(main.upstreamSha).not.toBe(rel.upstreamSha); // one shared ref would collapse these to one
+    expect(Object.keys(out.ffBlockersByBase).sort()).toEqual(['0.0.9', 'release/1.x']);
+    expect(out.ffPullable).toBe(true);
+  });
+});
+
+describe('reconcile — the shared tree: spaces, locks and a racing peer', () => {
+  it('restores in a checkout whose path contains a space', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' }, 'reco space');
+    expect(root).toContain(' '); // the shape the crash was misdiagnosed as; argv-exec, never a shell
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/✓ restored foo\.ts/);
+    expect(ffPullSucceeds(root, g)).toBe(true);
+  });
+
+  it('a locked index leaves every path retryable, and the next run finishes and prunes', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n', 'bar.ts': 'OLD-BAR\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n', 'bar.ts': 'NEW-BAR\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeFileSync(join(root, 'bar.ts'), 'NEW-BAR\n');
+    const paths = [{ path: 'foo.ts' }, { path: 'bar.ts' }];
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, paths) });
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+
+    const blocked = JSON.parse(runCli(root, '--apply', '--json').stdout);
+    expect(blocked.branches[0].restoreFailures).toEqual(['foo.ts', 'bar.ts']);
+    expect(blocked.branches[0].restored).toEqual([]);
+    expect(loadManifest(root).branches['feat/x'].paths).toHaveLength(2); // no debt lost to a failure
+
+    rmSync(join(root, '.git', 'index.lock')); // the peer's git finishes
+    const r = runCli(root, '--apply');
+    expect(r.stdout).toMatch(/✓ restored foo\.ts/);
+    expect(r.stdout).toMatch(/✓ restored bar\.ts/);
+    expect(loadManifest(root).branches['feat/x']).toBeUndefined();
+    expect(ffPullSucceeds(root, g), 'the retry really finished the job').toBe(true);
+  });
+
+  it('two --apply runs racing in the same checkout both exit 0 and converge', async () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
+
+    // The production shape: N agents share one checkout, so two reconciles can overlap on the index
+    // AND on .git/FETCH_HEAD. Whichever loses a lock must warn, not die and not stage a stale blob.
+    const both = await Promise.all([runCliAsync(root), runCliAsync(root)]);
+    for (const { status, out } of both) {
+      expect(status).toBe(0);
+      expect(out).not.toMatch(/Command failed/); // the bare Node message the crash used to print
+    }
+    g('fetch', '-q', 'origin', '0.0.9');
+    expect(g('rev-parse', ':foo.ts')).toBe(g('rev-parse', 'FETCH_HEAD:foo.ts'));
+  });
+});
+
 describe('reconcile — merge state + manifest', () => {
   it('an un-merged PR keeps the entry, touches nothing', () => {
     process.env.DEVKIT_RECONCILE_MERGED_OVERRIDE = 'OPEN';
@@ -493,6 +738,40 @@ describe('reconcile — CLI surface', () => {
     const out = JSON.parse(runCli(root, '--json').stdout);
     expect(out.ffPullable).toBeNull(); // don't-know, never a machine-readable all-clear
     expect(out.ffUnverifiedBases).toEqual(['no-such-ref']);
+  });
+
+  it('--apply survives a refused restore: names it, exits 0, and carries it in --json', () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    writeManifest(root, { 'feat/x': entryFor(root, g, base, [{ path: 'foo.ts' }]) });
+    writeFileSync(join(root, '.git', 'index.lock'), ''); // a peer's git holds the index
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0); // advisory exit is unchanged; the failure travels in the output
+    expect(r.stdout).toMatch(/restore failed/);
+    expect(r.stdout).not.toMatch(/the tree is now ff-pullable/); // nothing was restored to claim it
+    expect(r.stdout).not.toMatch(/Finalize with/);
+    const out = JSON.parse(runCli(root, '--apply', '--json').stdout);
+    expect(out.branches[0].restored).toEqual([]);
+    expect(out.branches[0].restoreFailures).toEqual(['foo.ts']); // what a chaining caller gates on
+    expect(out.ffPullable).toBe(false);
+  });
+
+  it("a vanished baseRef ordered FIRST does not strand a later branch's restores", () => {
+    const { root, g, base } = makeRepo({ 'foo.ts': 'OLD\n' });
+    mergeUpstream(root, g, base, { 'foo.ts': 'NEW\n' });
+    writeFileSync(join(root, 'foo.ts'), 'NEW\n');
+    const ok = entryFor(root, g, base, [{ path: 'foo.ts' }]);
+    // The retired base goes first: its failed fetch truncates .git/FETCH_HEAD to zero bytes, which
+    // is the shared state everything after it used to read. Guard, not a repro — this already held.
+    writeManifest(root, { 'aaa/dead-base': { ...ok, baseRef: '0.0.10' }, 'zzz/live': ok });
+
+    const r = runCli(root, '--apply');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/fetch origin 0\.0\.10 failed/);
+    expect(r.stdout).toMatch(/✓ restored foo\.ts/);
+    expect(ffPullSucceeds(root, g), 'the restore really landed').toBe(true);
   });
 
   it('--json carries ffPullable:false and the blockers keyed by base ref', () => {
