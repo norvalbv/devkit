@@ -52,6 +52,9 @@ export type JudgeMcpProfile = { kind: 'none' } | NamedAgentMcpProfile;
 export interface PreparedJudgeMcpProfile {
   args: string[];
   serverNames: string[];
+  /** The selected server definitions themselves — the codex path translates these into
+   * `-c mcp_servers.*` config (sc-2054) instead of the claude --mcp-config flags in `args`. */
+  servers: McpServers;
   cleanup: () => void;
 }
 
@@ -236,6 +239,7 @@ function emptyProfile(): PreparedJudgeMcpProfile {
   return {
     args: ['--mcp-config', EMPTY_MCP_CONFIG, '--strict-mcp-config'],
     serverNames: [],
+    servers: {},
     cleanup: () => {},
   };
 }
@@ -292,6 +296,7 @@ export function prepareJudgeMcpProfile(
     return {
       args: ['--mcp-config', file, '--strict-mcp-config'],
       serverNames: present,
+      servers,
       cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
     };
   } catch {

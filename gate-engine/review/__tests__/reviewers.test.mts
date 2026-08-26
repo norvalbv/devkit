@@ -224,8 +224,8 @@ describe('selectReviewers', () => {
 
 describe('correctness-reviewer (domain all)', () => {
   const corr = REVIEWERS.find((r) => r.name === 'correctness-reviewer');
-  it('is pinned single-pass to sonnet (bench: recall 0.76→0.92 vs haiku; the opus cascade subtracts recall — see run-review.mts)', () => {
-    expect(corr.model).toBe('sonnet');
+  it('is pinned single-pass (bench: recall scales with model; the opus cascade subtracts recall) — shipped pin gpt-5.6-sol since sc-2054', () => {
+    expect(corr.model).toBe('gpt-5.6-sol');
     // correctness (sonnet) and conventions are the two deliberately model-pinned exceptions;
     // domain reviewers stay unpinned so they keep the haiku→opus cascade.
     const pinned = new Set(['correctness-reviewer', 'conventions-reviewer']);

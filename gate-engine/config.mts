@@ -216,11 +216,11 @@ export const DEFAULTS = Object.freeze({
     // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
     // headless judges (the SAME files the root agent dispatches interactively).
     agentsDir: '.claude/agents',
-    // sc-2107: legacy-safe package defaults — gpt-* judges need the codex CLI + sc-2054 parity
-    // to be EVERY install's default; an install opts into the benched winner in its own config.
-    model: 'haiku',
-    correctnessModel: 'sonnet',
-    correctnessChunkLoc: 0,
+    // sc-2054: parity landed (MCP mapping + tamper detection), so the benched winner IS the
+    // default. Installs without the codex CLI: doctor DRIFTs; override here or via GUARD_* envs.
+    model: 'gpt-5.6-sol',
+    correctnessModel: 'gpt-5.6-sol',
+    correctnessChunkLoc: 400,
   }),
   noLog: false, // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases)
   noLlm: false,

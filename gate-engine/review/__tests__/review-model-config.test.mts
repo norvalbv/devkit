@@ -6,10 +6,10 @@ import { resolveGuardConfig } from '../../config.mts';
 import { reviewerTargetSalts } from '../evidence/targets-block.mts';
 import { correctnessModel, resolveReviewModel, selectReviewers } from '../reviewers.mts';
 
-// sc-2107: the judge knobs resolve env > guard.config.json > package defaults (still claude-era
-// until sc-2054 codex parity; devkit's own config opts into sol). These tests pin the resolution
-// order, the config-resolved correctness pin, and the model term in the cache salt (sc-2053: a
-// verdict must not survive a model change).
+// sc-2107/sc-2054: the judge knobs resolve env > guard.config.json > package defaults (the
+// benched winner, sol@400, since codex parity landed). These tests pin the resolution order, the
+// config-resolved correctness pin, and the model term in the cache salt (sc-2053: a verdict must
+// not survive a model change).
 
 const envKeys = ['GUARD_REVIEW_MODEL', 'FRINK_REVIEW_MODEL', 'GUARD_CORRECTNESS_MODEL'] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
@@ -42,11 +42,11 @@ function cfgIn(json?: ReviewConfigFile) {
 }
 
 describe('model resolution: env > guard.config.json > shipped default', () => {
-  it('package defaults stay claude-era until sc-2054 parity: haiku cascade, sonnet pin, chunking off', () => {
+  it('package defaults are the benched winner since sc-2054 parity: sol judges, chunk 400', () => {
     const cfg = cfgIn();
-    expect(resolveReviewModel(cfg)).toBe('haiku');
-    expect(correctnessModel(cfg)).toBe('sonnet');
-    expect(cfg.review.correctnessChunkLoc).toBe(0);
+    expect(resolveReviewModel(cfg)).toBe('gpt-5.6-sol');
+    expect(correctnessModel(cfg)).toBe('gpt-5.6-sol');
+    expect(cfg.review.correctnessChunkLoc).toBe(400);
   });
 
   it('malformed file values fall to the defaults — a number model never reaches judge argv, a string cap never silently disables chunking', () => {
@@ -54,19 +54,19 @@ describe('model resolution: env > guard.config.json > shipped default', () => {
     roots.push(dir);
     writeFileSync(
       join(dir, 'guard.config.json'),
-      '{"review":{"model":7,"correctnessModel":" gpt-5.6-sol ","correctnessChunkLoc":"off"}}',
+      '{"review":{"model":7,"correctnessModel":" sonnet ","correctnessChunkLoc":"off"}}',
     );
     const cfg = resolveGuardConfig(dir);
-    expect(cfg.review.model).toBe('haiku');
+    expect(cfg.review.model).toBe('gpt-5.6-sol');
     // A padded value is honored TRIMMED — whitespace must never reach --model.
-    expect(cfg.review.correctnessModel).toBe('gpt-5.6-sol');
-    expect(cfg.review.correctnessChunkLoc).toBe(0);
+    expect(cfg.review.correctnessModel).toBe('sonnet');
+    expect(cfg.review.correctnessChunkLoc).toBe(400);
   });
 
   it('guard.config.json overrides per installation; env overrides the file', () => {
-    const cfg = cfgIn({ review: { model: 'gpt-5.6-sol', correctnessModel: 'gpt-5.6-sol' } });
-    expect(resolveReviewModel(cfg)).toBe('gpt-5.6-sol');
-    expect(correctnessModel(cfg)).toBe('gpt-5.6-sol');
+    const cfg = cfgIn({ review: { model: 'haiku', correctnessModel: 'sonnet' } });
+    expect(resolveReviewModel(cfg)).toBe('haiku');
+    expect(correctnessModel(cfg)).toBe('sonnet');
     process.env.GUARD_REVIEW_MODEL = 'gpt-5.6-terra';
     process.env.GUARD_CORRECTNESS_MODEL = 'opus';
     expect(resolveReviewModel(cfg)).toBe('gpt-5.6-terra');
@@ -74,8 +74,8 @@ describe('model resolution: env > guard.config.json > shipped default', () => {
     // An empty/blank env var is unset, not a pin — falls to the FILE value, never --model ''.
     process.env.GUARD_REVIEW_MODEL = '';
     process.env.GUARD_CORRECTNESS_MODEL = '  ';
-    expect(resolveReviewModel(cfg)).toBe('gpt-5.6-sol');
-    expect(correctnessModel(cfg)).toBe('gpt-5.6-sol');
+    expect(resolveReviewModel(cfg)).toBe('haiku');
+    expect(correctnessModel(cfg)).toBe('sonnet');
   });
 });
 
@@ -84,10 +84,8 @@ describe('selectReviewers applies the config-resolved correctness pin', () => {
     const staged = ['src/a.ts'];
     const pick = (cfg: ReturnType<typeof resolveGuardConfig>) =>
       selectReviewers(staged, cfg).find((s) => s.reviewer.name === 'correctness-reviewer');
-    expect(pick(cfgIn())?.reviewer.model).toBe('sonnet');
-    expect(pick(cfgIn({ review: { correctnessModel: 'gpt-5.6-sol' } }))?.reviewer.model).toBe(
-      'gpt-5.6-sol',
-    );
+    expect(pick(cfgIn())?.reviewer.model).toBe('gpt-5.6-sol');
+    expect(pick(cfgIn({ review: { correctnessModel: 'sonnet' } }))?.reviewer.model).toBe('sonnet');
     process.env.GUARD_CORRECTNESS_MODEL = 'haiku';
     expect(pick(cfgIn())?.reviewer.model).toBe('haiku');
   });
@@ -108,7 +106,7 @@ describe('the judging model is part of verdict-cache identity (sc-2053)', () => 
     expect(a.get(name)).toContain('model:gpt-5.6-sol');
     expect(a.get(name)).not.toBe(b.get(name));
     // The correctness pin, not the cascade default, is its identity: same salt under both.
-    expect(a.get('correctness-reviewer')).toContain('model:sonnet');
+    expect(a.get('correctness-reviewer')).toContain('model:gpt-5.6-sol');
     expect(a.get('correctness-reviewer')).toBe(b.get('correctness-reviewer'));
   });
 });
