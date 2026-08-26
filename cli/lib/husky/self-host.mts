@@ -105,7 +105,7 @@ const SELF_HOST_OXFMT_HARD = 'node_modules/.bin/oxfmt --threads 1 --write || exi
 // broad extension-only filter would let Oxfmt rewrite evidence, fixtures, vendored sources, or
 // generated output that the adopted 558-file parity experiment never selected.
 const SELF_HOST_FORMAT_FILTER =
-  "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\\.jsonc?|skills/.*\\.mjs|\\.co-occurrence-allowlist\\.json|\\.fallowrc\\.jsonc|\\.oxfmtrc\\.json|biome\\.jsonc|eslint\\.config\\.mjs|guard\\.config(\\.example)?\\.json|package\\.json|search-code\\.config\\.json|tsconfig(\\.build)?\\.json|vitest(\\.e2e)?\\.config\\.mjs|vitest\\.setup\\.mjs)$'";
+  "grep -E '^((cli|gate-engine)/.*\\.(tsx?|jsx?|css|jsonc?|mjs|mts)|(tsconfig|biome)/.*\\.jsonc?|skills/.*\\.mjs|templates/.*\\.mjs|\\.co-occurrence-allowlist\\.json|\\.fallowrc\\.jsonc|\\.oxfmtrc\\.json|biome\\.jsonc|eslint\\.config\\.mjs|guard\\.config(\\.example)?\\.json|package\\.json|search-code\\.config\\.json|tsconfig(\\.build)?\\.json|vitest(\\.e2e)?\\.config\\.mjs|vitest\\.setup\\.mjs)$'";
 // The `./dist/<...>.mjs` → `<...>.mts` transform pieces (hoisted — useTopLevelRegex).
 const DIST_PREFIX_RE = /^\.\/dist\//;
 const MJS_EXT_RE = /\.mjs$/;

@@ -46,6 +46,12 @@ import { testExecFileSync as execFileSync } from './_helpers.mts';
 // The repo root (where package.json + .husky live) — resolved from THIS file, not cwd, so the parity
 // check is robust to however vitest is launched.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// sc-1962: emitted templates must ship formatter-canonical or `devkit upgrade` can never
+// reconcile them, so the staged-format scope now covers templates/**/*.mjs — but NOT the JSON
+// templates, whose `//`-prefixed keys guardConfigChange reads and a formatter pass would reflow.
+const TEMPLATE_UNFORMATTED = 'export default {answer:42}\n';
+const TEMPLATE_FORMATTED = 'export default { answer: 42 };\n';
+const TEMPLATE_GUARD_CONFIG = '{"//backends":"comment key","backends":{"vercel":true}}\n';
 
 const HOOK_SEL = {
   ...selfHostSelection(),
@@ -174,13 +180,29 @@ describe('buildSelfHostHook', () => {
     symlinkSync(join(ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
     mkdirSync(join(root, 'cli'), { recursive: true });
     mkdirSync(join(root, 'docs', 'benchmarks'), { recursive: true });
+    mkdirSync(join(root, 'templates', 'electron', '.devkit'), { recursive: true });
     writeFileSync(join(root, '.oxfmtrc.json'), '{}\n');
     writeFileSync(join(root, 'cli', 'sample.mts'), 'const value={answer:42}\n');
     writeFileSync(join(root, 'cli', 'partial.mts'), 'const partial={staged:true}\n');
     writeFileSync(join(root, 'docs', 'benchmarks', 'catalog.json'), '{"evidence":true}\n');
+    writeFileSync(join(root, 'templates', 'electron', 'eslint.config.mjs'), TEMPLATE_UNFORMATTED);
+    writeFileSync(
+      join(root, 'templates', 'electron', '.devkit', 'exempt.mjs'),
+      TEMPLATE_UNFORMATTED,
+    );
+    writeFileSync(join(root, 'templates', 'electron', 'guard.config.json'), TEMPLATE_GUARD_CONFIG);
     execFileSync(
       'git',
-      ['add', '.oxfmtrc.json', 'cli/sample.mts', 'cli/partial.mts', 'docs/benchmarks/catalog.json'],
+      [
+        'add',
+        '.oxfmtrc.json',
+        'cli/sample.mts',
+        'cli/partial.mts',
+        'docs/benchmarks/catalog.json',
+        'templates/electron/eslint.config.mjs',
+        'templates/electron/.devkit/exempt.mjs',
+        'templates/electron/guard.config.json',
+      ],
       { cwd: root },
     );
     writeFileSync(join(root, 'cli', 'partial.mts'), 'const partial={working:true}\n');
@@ -210,6 +232,25 @@ describe('buildSelfHostHook', () => {
     expect(execFileSync('git', ['show', ':cli/partial.mts'], { cwd: root, encoding: 'utf8' })).toBe(
       'const partial={staged:true}\n',
     );
+
+    for (const rel of [
+      'templates/electron/eslint.config.mjs',
+      'templates/electron/.devkit/exempt.mjs',
+    ]) {
+      expect(readFileSync(join(root, rel), 'utf8')).toBe(TEMPLATE_FORMATTED);
+      expect(execFileSync('git', ['show', `:${rel}`], { cwd: root, encoding: 'utf8' })).toBe(
+        TEMPLATE_FORMATTED,
+      );
+    }
+    expect(readFileSync(join(root, 'templates/electron/guard.config.json'), 'utf8')).toBe(
+      TEMPLATE_GUARD_CONFIG,
+    );
+    expect(
+      execFileSync('git', ['show', ':templates/electron/guard.config.json'], {
+        cwd: root,
+        encoding: 'utf8',
+      }),
+    ).toBe(TEMPLATE_GUARD_CONFIG);
   });
 
   it('blocks the self-host hook when Oxfmt fails', () => {
