@@ -203,3 +203,40 @@ ship_assert_commit_scope() {
     return 1
   fi
 }
+
+# ship_record_gate_adds <worktree> <base> <state-file> <out-file>
+# Write, NUL-delimited, every path the GATE CHAIN put in the commit that the caller never briefed.
+#
+# WHY: the check above deliberately TOLERATES a ratchet gate staging a lowered baseline so it rides
+# the same commit (see this file's header). ship-branch.sh's resume path did not, so a commit whose
+# gates widened it could pass every gate, land, and then be unpublishable by the identical retry that
+# is its documented recovery (sc-2089). The resume needs the same tolerance — but bounded to paths a
+# gate REALLY wrote, never to a guessed list of baseline filenames, or a narrowed retry could smuggle
+# an unbriefed change into a PR. This instant is the only place that still knows both sides, so it
+# writes the answer down and ship pins it beside the gate receipt.
+#
+# Both sides are enumerated with `git diff -z` so the record is byte-comparable with the resume
+# side's own enumeration and stays binary safe for unusual filenames. The briefed side is derived
+# from the staged TREE on line 1 of the state file, NOT from its newline-delimited path list: a path
+# containing a newline would split there, read as unbriefed, and silently widen the record.
+ship_record_gate_adds() {
+  local wt=$1 base=$2 state=$3 out=$4 tree briefed path
+  local -a exclude=()
+  tree=$(_ship_state_tree "$state") || return 1
+  [ -n "$tree" ] || return 1
+  briefed=$(mktemp "${TMPDIR:-/tmp}/ship-briefed.XXXXXX") || return 1
+  if ! git -C "$wt" diff --no-renames --name-only -z "$base" "$tree" > "$briefed"; then
+    rm -f "$briefed"
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    exclude+=(":(exclude,literal)$path")
+  done < "$briefed"
+  rm -f "$briefed"
+  # `literal` is load-bearing: without it a briefed path containing a glob character would exclude
+  # its NEIGHBOURS too, dropping real gate writes out of the record. A pathspec made only of negative
+  # entries means "everything except these", so an empty briefed set correctly records the whole
+  # changed set rather than nothing.
+  git -C "$wt" diff --no-renames --name-only -z "$base" HEAD \
+    -- ${exclude[@]+"${exclude[@]}"} > "$out"
+}

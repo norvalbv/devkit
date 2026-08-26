@@ -178,6 +178,18 @@ export function hasAnyCommand(...commands) {
   );
 }
 
+// macOS ships bash 3.2 as /bin/bash, which exercises neither dialect split devkit's shell depends on
+// (trap-interrupted `wait`, and "${arr[@]}" on an empty array under set -u). null when only 3.2.
+export function findModernBash() {
+  for (const candidate of ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash']) {
+    const probe = testSpawnSync(candidate, ['-c', 'printf %s "${BASH_VERSINFO[0]}"'], {
+      encoding: 'utf8',
+    });
+    if (probe.status === 0 && Number(probe.stdout) >= 4) return candidate;
+  }
+  return null;
+}
+
 const FIXTURE_PKG = { name: 'fx', version: '0.0.0', type: 'module' };
 
 /**
