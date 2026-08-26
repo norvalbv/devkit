@@ -13,9 +13,9 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { markEnd, markStart } from "./husky.mjs";
-import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, } from "./husky-block.mjs";
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { markEnd, markStart } from './husky.mjs';
+import { extractGuardBlock, PACKAGE_BIN_DIR_FRAGMENT, PATH_SETUP, removeGuardBlock, replaceGuardBlock, } from './husky-block.mjs';
 /** The guard ids whose gates run at commit-msg (not pre-commit), in emit order. */
 export const COMMIT_MSG_GUARD_IDS = ['review', 'sentry'];
 // Per-guard fragment sentinel ids — `review` contributes the COMPLETENESS judge here (its reviewer

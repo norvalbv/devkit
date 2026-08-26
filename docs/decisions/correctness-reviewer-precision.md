@@ -19,3 +19,4 @@ created: 2026-07-10
 **Revisit-when:** K-sample self-consistency is built AND bench-measured to beat clean-pass 0.86 without recall loss; OR the decoy corpus grows enough that clean-pass CI resolves 0.95 (~n>=120 decoys); OR a cross-family (non-Claude) verifier becomes available in the gate.
 **Scope:** gate-engine/review/**,agents/correctness-reviewer.md,skills/correctness/**
 **Source:** collab · https://github.com/norvalbv/devkit/pull/57
+- 2026-08-24 — Revisit-when condition met (sc-2048): a cross-family (non-Claude) verifier is now spawnable in the gate — codex exec judges (gpt-5.6-sol/terra) through the same execJudge seam. Rejected (a)'s premise ('unavailable in a Claude-only stack') no longer holds. Order of operations: sc-2049 benches gpt protocol compliance + recall first; a cross-family verify pass is re-targeted only on bench evidence, not on availability alone.

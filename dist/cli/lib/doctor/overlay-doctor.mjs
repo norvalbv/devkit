@@ -8,14 +8,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { resolveExistingAgentProviders } from "../install/agent-assets/agent-providers.mjs";
-import { selectedHookAssets } from "../install/hook-registration-ledger/selection.mjs";
-import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from "../overlay.mjs";
-import { globalHookInstalled, globalInitPath } from "../overlay-global-hook.mjs";
-import { checkAgentAssets, checkRegistrations } from "./asset-checks.mjs";
-import { adviseSearchIndex } from "./guard-config-checks.mjs";
-import { repointHooksPath } from "./hook-checks.mjs";
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mjs';
+import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mjs';
+import { HEAL_ALIAS_NAME, isHealAlias, syncOverlayHook } from '../overlay.mjs';
+import { globalHookInstalled, globalInitPath } from '../overlay-global-hook.mjs';
+import { checkAgentAssets, checkRegistrations } from './asset-checks.mjs';
+import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs';
+import { repointHooksPath } from './hook-checks.mjs';
 // Reason: flat signal reporting keeps the exit code gated only on hook + path.
 // fallow-ignore-next-line complexity
 export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) {
@@ -86,6 +86,7 @@ export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) 
     // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
     // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
     await adviseSearchIndex(cwd, sel);
+    await adviseCodexRuntime(cwd);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     if (sel.fallow) {
         const wired = hookOk &&

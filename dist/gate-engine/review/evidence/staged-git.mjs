@@ -13,8 +13,48 @@ export function gitCached(cwd, args, files) {
     });
 }
 export function stagedFiles(cwd) {
-    return execFileSync('git', ['diff', '--cached', '--name-only'], { cwd, encoding: 'utf8' })
-        .split('\n')
-        .map((s) => s.trim())
+    // -z: NUL-separated RAW names. Without it git C-quotes paths containing tabs/unicode/quotes,
+    // and every byte-keyed consumer (chunk packing, evidence budgeting) silently misses them.
+    return execFileSync('git', ['diff', '--cached', '--name-only', '-z'], { cwd, encoding: 'utf8' })
+        .split('\0')
         .filter(Boolean);
+}
+/**
+ * Content hash of the staged INDEX (`git write-tree`), or null when the index cannot form a tree
+ * (unmerged paths) — callers must treat null as "cannot verify", never as "verified". sc-2054:
+ * codex judges run workspace-write (the checklist state file needs cwd writes and codex cannot
+ * confine cwd), so the gate snapshots the staged tree before the judge wave and refuses to pass
+ * if ANY judge changed what would be committed — tamper DETECTION where prevention is impossible.
+ */
+export function stagedTreeHash(cwd) {
+    try {
+        return execFileSync('git', ['write-tree'], { cwd, encoding: 'utf8' }).trim() || null;
+    }
+    catch {
+        return null;
+    }
+}
+/** HEAD identity, `unborn:<ref>` before the first commit (a determinate state carrying the
+ * symbolic target, so even switching unborn branches reads as movement), or null when HEAD is
+ * UNREADABLE — callers must fail closed on null, never fold it into a determinate state, or two
+ * broken reads would compare equal and wave tampering through. Paired with stagedTreeHash: a
+ * nested `git commit` moves HEAD while leaving `git write-tree` identical. */
+export function headHash(cwd) {
+    const read = (args) => {
+        try {
+            return execFileSync('git', args, {
+                cwd,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
+            }).trim();
+        }
+        catch {
+            return null;
+        }
+    };
+    const sha = read(['rev-parse', '--verify', 'HEAD']);
+    if (sha !== null)
+        return sha;
+    const ref = read(['symbolic-ref', '-q', 'HEAD']);
+    return ref !== null ? `unborn:${ref}` : null;
 }

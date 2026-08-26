@@ -41,9 +41,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { coverageBypassed, deterministicStrict, structureBypassed } from "../config.mjs";
-import { emitGateEvent, finishGateTiming } from "../judge/gate-events.mjs";
-import { prefixEntry, recordPrefix } from "../prefix-cache/prefix-cache.mjs";
+import { coverageBypassed, deterministicStrict, structureBypassed } from '../config.mjs';
+import { emitGateEvent, finishGateTiming } from '../judge/gate-events.mjs';
+import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Sibling gate modules are spawned as `node <path>`. In dev the tree is .mts (Node strips types at
 // the repo root); in the shipped dist it is compiled .mjs. Derive the runtime extension from THIS
@@ -67,7 +67,7 @@ const OBJECT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 // The deterministic guard set, in fixed registry order. Each runs as `node <path> <args>` — a sibling
 // module under gate-engine, so it resolves the same way in every install mode. Their exit contract is
 // the invariant this orchestrator preserves: 0 clean, 1 violation, 2 fail-open (could-not-run).
-const DETERMINISTIC = [
+export const DETERMINISTIC = [
     { id: 'size', module: '../ratchets/size-disable.mjs', args: ['gate'] },
     { id: 'fanout', module: '../ratchets/folder-fanout.mjs', args: ['gate'] },
     {

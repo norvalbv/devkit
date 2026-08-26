@@ -14,7 +14,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { writeFileAtomic } from "../atomic-write.mjs";
+import { writeFileAtomic } from '../atomic-write.mjs';
 export const EMBED_URL = 'http://localhost:11434/api/embed';
 export const EMBED_MODEL = 'nomic-embed-text';
 export function cosine(a, b) {

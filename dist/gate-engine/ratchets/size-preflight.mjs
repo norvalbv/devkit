@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { LEGACY_LINES_BASELINE, readRatchetBaseline } from "./baseline-paths.mjs";
-import { stagedSet, treeTextAtRef } from "./git-index.mjs";
-import { decodeLineBaseline } from "./size-line-authority.mjs";
-import { LINES_BASELINE, SIZE_SKIP_DIRS } from "./size-policy.mjs";
+import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
+import { stagedSet, treeTextAtRef } from './git-index.mjs';
+import { decodeLineBaseline } from './size-line-authority.mjs';
+import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
 function readLinesBaseline(contents, label) {
     const decoded = decodeLineBaseline(contents, label);
     if (decoded.error)

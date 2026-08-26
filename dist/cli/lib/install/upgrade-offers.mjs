@@ -15,8 +15,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
-import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from "../../../gate-engine/ratchets/size-disable.mjs";
-import { GUARD_IDS, GUARD_OPTIONS, newBundledGates, unofferedComponents, } from "../components.mjs";
+import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from '../../../gate-engine/ratchets/size-disable.mjs';
+import { GUARD_IDS, GUARD_OPTIONS, newBundledGates, unofferedComponents, } from '../components.mjs';
 const interactive = () => Boolean(process.stdout.isTTY && process.stdin.isTTY);
 export async function offerNewGates(recordedDisabled, sel, dryRun, options = {}) {
     const disabled = GUARD_IDS.filter((guard) => recordedDisabled?.includes(guard) && !sel.guards.includes(guard));

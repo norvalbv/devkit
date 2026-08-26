@@ -2,11 +2,11 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { runDirectReviewCli } from "../run-direct.mjs";
-import { reviewRuntimeFingerprint } from "../runtime-fingerprint.mjs";
-import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, safeReviewDestination, } from "../runtime-paths.mjs";
-import { fail } from "../shared/common.mjs";
-import { resolveReviewSource } from "../source-projection.mjs";
+import { runDirectReviewCli } from '../run-direct.mjs';
+import { reviewRuntimeFingerprint } from '../runtime-fingerprint.mjs';
+import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, safeReviewDestination, } from '../runtime-paths.mjs';
+import { fail } from '../shared/common.mjs';
+import { resolveReviewSource } from '../source-projection.mjs';
 const VERSION = 1;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SQLITE_SUFFIXES = ['', '-wal', '-shm', '-journal'];

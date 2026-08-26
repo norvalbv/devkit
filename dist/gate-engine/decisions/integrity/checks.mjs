@@ -26,9 +26,9 @@
  * Zero LLM calls, zero network, pure string/AST work over already-loaded text — cheap enough to run
  * on every commit touching docs/decisions/**.
  */
-import { parseTargetFields } from "../decision-format.mjs";
-import { sections } from "../recall/markdown.mjs";
-import { validateAxisAmends } from "../recall/note-relations.mjs";
+import { parseTargetFields } from '../decision-format.mjs';
+import { sections } from '../recall/markdown.mjs';
+import { validateAxisAmends } from '../recall/note-relations.mjs';
 export const INTEGRITY_CHECK_IDS = [
     'index-stale',
     'frontmatter-slug-mismatch',

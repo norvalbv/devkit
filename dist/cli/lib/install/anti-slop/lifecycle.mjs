@@ -1,15 +1,17 @@
 /** Install, verify, and remove Devkit's pinned self-contained anti-slop plugin. */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
-import { withLock, writeFileAtomic } from "../../atomic-write.mjs";
-import { check } from "../../doctor/check-result.mjs";
-import { packageDir } from "../../fs-helpers.mjs";
-import { assertOxcCapabilityReady, oxcBaseCapabilityIssue, syncOxcCapability, } from "../oxc/lifecycle.mjs";
-import { resolveOxcRuntime } from "../oxc/runtime.mjs";
-import { ANTI_SLOP_CONFIG_REL, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANAGED_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_RULE_IDS, ANTI_SLOP_UPSTREAM, renderAntiSlopConfig, } from "./constants.mjs";
+import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
+import { check } from '../../doctor/check-result.mjs';
+import { packageDir } from '../../fs-helpers.mjs';
+import { assertOxcCapabilityReady, oxcBaseCapabilityIssue, syncOxcCapability, } from '../oxc/lifecycle.mjs';
+import { resolveOxcRuntime } from '../oxc/runtime.mjs';
+import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANAGED_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_RULE_IDS, ANTI_SLOP_UPSTREAM, renderAntiSlopConfig, } from './constants.mjs';
+import { installExecutionModeWrapper } from './execution-mode.mjs';
 const PROBE_REL = `${ANTI_SLOP_MANAGED_REL}/probe.ts`;
 const PROBE_RULE = 'anti-slop/no-object-parameters';
 const PROBE_RULE_CODE = 'anti-slop(no-object-parameters)';
@@ -117,6 +119,7 @@ function syncUnlocked(cwd, dryRun) {
         const plugin = join(staging, 'plugin');
         mkdirSync(plugin, { recursive: true });
         cpSync(source.root, plugin, { recursive: true });
+        installExecutionModeWrapper(plugin, source.entry);
         makePluginApiTrackable(plugin, apiSource);
         cpSync(join(packageDir(), 'anti-slop', 'LICENSE'), join(staging, 'LICENSE'));
         writeFileAtomic(join(staging, 'oxlint.json'), config);
@@ -201,18 +204,33 @@ function probeIntegration(cwd) {
     catch (error) {
         return { ok: false, detail: error instanceof Error ? error.message : String(error) };
     }
-    const result = spawnSync(process.execPath, [
-        runtime.binPath,
-        '--format',
-        'json',
-        '--no-ignore',
-        '--disable-nested-config',
-        '--deny',
-        PROBE_RULE,
-        '--deny',
-        'no-undef',
-        PROBE_REL,
-    ], { cwd, encoding: 'utf8', maxBuffer: PROBE_MAX_OUTPUT, timeout: 10_000 });
+    const probeRoot = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-probe-'));
+    const probePath = join(probeRoot, 'devkit-anti-slop-integration-probe.ts');
+    let result;
+    try {
+        writeFileAtomic(probePath, PROBE_SOURCE);
+        result = spawnSync(process.execPath, [
+            runtime.binPath,
+            '--format',
+            'json',
+            '--no-ignore',
+            '--disable-nested-config',
+            '--deny',
+            PROBE_RULE,
+            '--deny',
+            'no-undef',
+            probePath,
+        ], {
+            cwd,
+            encoding: 'utf8',
+            env: { ...process.env, [ANTI_SLOP_EXECUTION_MODE_ENV]: ANTI_SLOP_BASELINE_MODE },
+            maxBuffer: PROBE_MAX_OUTPUT,
+            timeout: 10_000,
+        });
+    }
+    finally {
+        rmSync(probeRoot, { recursive: true, force: true });
+    }
     if (result.status === null) {
         return {
             ok: false,

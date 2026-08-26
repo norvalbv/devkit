@@ -10,13 +10,13 @@
  * next run re-spawns a judge (50-100s median, 30-min cap) for a verdict that was already earned —
  * and it was previously SILENT. A replay of ~/.devkit/telemetry/gate-events.jsonl over 3,035 review
  * judge executions found 99.5% of misses were on keys never cached before and ZERO were
- * evicted-then-needed, so the 100-entry cap is not currently costing anything. That measurement is a
+ * evicted-then-needed, so the entry cap (100 at measurement time; 400 since sc-1907's chunked fan-out) was not costing anything. That measurement is a
  * snapshot of one machine's working set, not a property of the design: more worktrees per repo, more
  * reviewers, or a wider lens split all push toward the cap. Emitting the drop makes the next such
  * investigation a query instead of a study, per docs/decisions/gate-telemetry-self-describing.md.
  */
 import path from 'node:path';
-import { emitGateEvent } from "./gate-events.mjs";
+import { emitGateEvent } from './gate-events.mjs';
 /** Newest-first by `at`, capped — and any drop is reported before it happens. */
 export function retainNewest(entries, maxEntries, file) {
     const ranked = Object.entries(entries).sort((a, b) => String(b[1]?.at ?? '').localeCompare(String(a[1]?.at ?? '')));

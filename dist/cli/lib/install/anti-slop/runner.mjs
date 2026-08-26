@@ -2,10 +2,10 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { resolveOxcRuntime } from "../oxc/runtime.mjs";
-import { ANTI_SLOP_IGNORE_PATTERNS } from "./constants.mjs";
-import { groupFindings, parseAntiSlopFindings } from "./diagnostics.mjs";
-import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from "./lifecycle.mjs";
+import { resolveOxcRuntime } from '../oxc/runtime.mjs';
+import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_IGNORE_PATTERNS, } from './constants.mjs';
+import { groupFindings, parseAntiSlopFindings } from './diagnostics.mjs';
+import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from './lifecycle.mjs';
 const MAX_OUTPUT = 64 * 1024 * 1024;
 /** Resolve literal existing repository paths and expose their baseline-entry membership. */
 export function resolveAntiSlopScope(cwd, args) {
@@ -67,7 +67,12 @@ function collectAntiSlopGroupsUnlocked(cwd, args) {
         '--disable-nested-config',
         ...ANTI_SLOP_IGNORE_PATTERNS.flatMap((pattern) => ['--ignore-pattern', pattern]),
         ...scope.paths,
-    ], { cwd, encoding: 'utf8', maxBuffer: MAX_OUTPUT });
+    ], {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, [ANTI_SLOP_EXECUTION_MODE_ENV]: ANTI_SLOP_BASELINE_MODE },
+        maxBuffer: MAX_OUTPUT,
+    });
     if (result.status === null) {
         throw new Error(`Oxlint failed: ${result.error?.message ?? (result.signal ? `signal ${result.signal}` : 'unknown error')}`);
     }

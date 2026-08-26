@@ -3,8 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, } from 'node:fs';
 import path from 'node:path';
-import { devkitDataFile, withStoreLock } from "../judge/verdict-store.mjs";
-import { isJsonObject, isJsonString, parseJson } from "./types.mjs";
+import { devkitDataFile, withStoreLock } from '../judge/verdict-store.mjs';
+import { isJsonObject, isJsonString, parseJson } from './types.mjs';
 export const RATIONALES_FILE = 'devkit/comment-firewall-rationales.json';
 const STORE_MAX_BYTES = 1024 * 1024;
 const RATIONALE_MAX_CHARS = 2_000;
@@ -259,7 +259,7 @@ export function recordRationale(cwd, findingId, rationale, ticket, now = new Dat
             otherOwner &&
             (existing.rationale !== entry.rationale || existing.ticket !== entry.ticket)) {
             mutationError =
-                'another worktree owns different evidence for this finding; prune that ownership or use the same rationale';
+                'another worktree owns different evidence for this finding; record the identical rationale text, or unstage it in that worktree and run guard-comments prune there';
             return;
         }
         entry.worktrees = [...new Set([...(existing?.worktrees ?? []), owner])];

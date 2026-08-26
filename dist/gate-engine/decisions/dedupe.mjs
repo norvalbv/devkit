@@ -4,7 +4,7 @@
  * Split from decisions.mts so the writer stays under its size budget, and because this is a
  * hygiene check over the corpus rather than part of recording a decision.
  */
-import { bm25Rank, loadAxisRows } from "./recall/retrieval.mjs";
+import { bm25Rank, loadAxisRows } from './recall/retrieval.mjs';
 /** How many neighbouring axes to surface when a NEW one is created. */
 const NEAREST_ON_NEW = 3;
 /**

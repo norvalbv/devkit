@@ -63,7 +63,7 @@ describe('guard-structure gate — zero consumer deps', () => {
     return runStructureGate(root).then((r) => expect(r.code).toBe(0));
   });
 
-  it('exit 0 when the declared tree is absent (nothing present to lint)', async () => {
+  it('exit 2 when the declared tree is absent (inspected nothing — not clean)', async () => {
     const root = repo({
       scanRoots: ['src'],
       structure: {
@@ -78,13 +78,28 @@ describe('guard-structure gate — zero consumer deps', () => {
       },
     });
     // no src/ dir at all → the root is filtered out before ESLint, so no "all ignored" throw.
-    expect((await runStructureGate(root)).code).toBe(0);
+    const result = await runStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('did NOT run');
   });
 
-  it('exit 0 when no structure trees are declared (e.g. the generic guard.config)', async () => {
+  it('exit 2 when no structure trees are declared (e.g. the generic guard.config)', async () => {
     const root = repo({ scanRoots: ['src'], structure: { trees: [] } });
     write(root, 'src/whatever.ts');
-    expect((await runStructureGate(root)).code).toBe(0);
+    const result = await runStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('did NOT run');
+  });
+
+  it('exit 2 when a present root declares no grammar (the electron/preset consumer)', async () => {
+    const root = repo({
+      scanRoots: ['src'],
+      structure: { trees: [{ name: 'lib', root: 'src', sourceExtensions: ['ts'] }] },
+    });
+    write(root, 'src/whatever.ts');
+    const result = await runStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('preset-only');
   });
 
   it('exit 0 when only ignored files are present (no throw leaks out)', async () => {
@@ -299,5 +314,27 @@ describe('guard-structure staged execution', () => {
     await expect(runStagedStructureGate(pkg)).resolves.toMatchObject({ code: 0 });
     expect(error).toHaveBeenCalledWith(expect.stringContaining('src/Ok.ts'));
     error.mockRestore();
+  });
+
+  it('exit 0 when nothing structure-relevant is staged (delegation must not become an opt-out)', async () => {
+    const root = repo();
+    write(root, 'guard.config.json', JSON.stringify(config));
+    write(root, 'src/Ok.ts');
+    write(root, 'README.md');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'README.md'], { cwd: root });
+
+    await expect(runStagedStructureGate(root)).resolves.toMatchObject({ code: 0 });
+  });
+
+  it('exit 2, not 1, when the electron path has no locally pinned eslint binary', async () => {
+    const root = repo({ scanRoots: ['src'], sourceExtensions: ['ts'] });
+    write(root, 'src/whatever.ts');
+    initializeGit(root);
+    execFileSync('git', ['add', '--', 'guard.config.json', 'src/whatever.ts'], { cwd: root });
+
+    const result = await runStagedStructureGate(root);
+    expect(result.code).toBe(2);
+    expect(result.text).toContain('did NOT run');
   });
 });

@@ -49,9 +49,10 @@ const CASES: Case[] = [
   { bin: 'guard-review', args: [], expect: 'Usage: guard-review' },
   { bin: 'guard-sentry', args: [], expect: 'sentry-judge' },
   { bin: 'guard-size', args: [], expect: 'usage: guard-size' },
-  // Bare `guard-structure` defaults to `gate`, which is legitimately silent on a clean tree — an
-  // unknown verb is the invocation that must speak.
-  { bin: 'guard-structure', args: ['bogus-verb'], expect: 'usage: guard-structure' },
+  // Bare `guard-structure` defaults to `gate`. It used to be silent here — a fixture declares no
+  // structure grammar, and the gate answered 0 with no output, which is indistinguishable from a
+  // dead shim. It now names the opt-out, so the real verb is the stronger probe.
+  { bin: 'guard-structure', args: [], expect: 'did NOT run' },
 ];
 
 const created: Fixture[] = [];

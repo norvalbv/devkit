@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { normalizeSelection, structureCmdFor } from "../components.mjs";
-import { detectGitRoot } from "../detect-git-root.mjs";
-import { readJson } from "../fs-helpers.mjs";
-import { syncOverlayHook } from "../overlay.mjs";
-import { buildGuardBlock, buildStandaloneBlock, extractGuardBlock } from "./husky-block.mjs";
-import { buildSelfHostBlock, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from "./self-host.mjs";
+import { normalizeSelection, structureCmdFor } from '../components.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { readJson } from '../fs-helpers.mjs';
+import { syncOverlayHook } from '../overlay.mjs';
+import { buildGuardBlock, buildStandaloneBlock, extractGuardBlock } from './husky-block.mjs';
+import { buildSelfHostBlock, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from './self-host.mjs';
 /** Exact generator-backed hook drift check used before `devkit review` executes target code. */
 export function reviewHookDrift(cwd) {
     const cfg = readJson(join(cwd, '.devkit', 'config.json'));

@@ -1,4 +1,4 @@
-import { parseConventionFindings } from "../evidence/conventions.mjs";
+import { parseConventionFindings } from '../evidence/conventions.mjs';
 const RESPONSE_CONTRACTS = {
     'conventions-v1': Object.freeze({
         identity: 'conventions-v1:quote-and-cite',

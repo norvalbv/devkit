@@ -304,7 +304,7 @@ export function recordRationale(
       (existing.rationale !== entry.rationale || existing.ticket !== entry.ticket)
     ) {
       mutationError =
-        'another worktree owns different evidence for this finding; prune that ownership or use the same rationale';
+        'another worktree owns different evidence for this finding; record the identical rationale text, or unstage it in that worktree and run guard-comments prune there';
       return;
     }
     entry.worktrees = [...new Set([...(existing?.worktrees ?? []), owner])];

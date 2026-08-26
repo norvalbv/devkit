@@ -1,6 +1,6 @@
 {
   "name": "@norvalbv/devkit",
-  "version": "0.55.1",
+  "version": "0.57.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -65,19 +65,20 @@
     "lint:structure": "eslint cli gate-engine",
     "benchmarks:check": "bun gate-engine/eval/cli.mts check",
     "benchmarks:render": "bun gate-engine/eval/cli.mts render",
-    "benchmarks:typecheck": "tsc -p gate-engine/eval/tsconfig.json",
+    "benchmarks:typecheck": "node ./node_modules/@typescript/native/bin/tsc -p gate-engine/eval/tsconfig.json --noEmit",
     "comments:eval": "node gate-engine/comment-firewall/eval/run.mts",
     "search-eval:check": "node gate-engine/search-tool/eval/eval.mts --fail",
     "format": "oxfmt --write 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'biome/**/*.{json,jsonc}' 'skills/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.setup.mjs",
     "format:check": "oxfmt --check 'cli/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'gate-engine/**/*.{ts,tsx,js,jsx,mts,mjs,css,json,jsonc}' 'tsconfig/**/*.{json,jsonc}' 'biome/**/*.{json,jsonc}' 'skills/**/*.mjs' .co-occurrence-allowlist.json .fallowrc.jsonc .oxfmtrc.json eslint.config.mjs guard.config.example.json guard.config.json package.json search-code.config.json tsconfig.build.json tsconfig.json vitest.config.mjs vitest.e2e.config.mjs vitest.setup.mjs",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit",
     "prepare": "husky",
     "guard:freeze": "node gate-engine/ratchets/folder-fanout.mjs freeze && node gate-engine/ratchets/size-disable.mjs freeze",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
+    "build": "node ./node_modules/@typescript/native/bin/tsc -p tsconfig.build.json && node scripts/copy-dist-assets.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
     "@typescript-eslint/parser": "^8.0.0",
+    "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "^4.1.10",
     "husky": "^9.1.7",
     "typescript": "^6.0.3",

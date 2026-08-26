@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { sourceMatchers } from "../config.mjs";
-import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from "./baseline-paths.mjs";
-import { mergeBaseRef, treeTextAtRef } from "./git-index.mjs";
-import { SIZE_SKIP_DIRS } from "./size-policy.mjs";
+import { sourceMatchers } from '../config.mjs';
+import { LEGACY_LINES_BASELINE, LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
+import { mergeBaseRef, treeTextAtRef } from './git-index.mjs';
+import { SIZE_SKIP_DIRS } from './size-policy.mjs';
 class LineAuthorityError extends Error {
 }
 function parseBaseline(contents, label) {

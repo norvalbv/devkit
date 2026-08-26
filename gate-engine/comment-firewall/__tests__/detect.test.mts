@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectChangedComments, parsePatchHunks, scanCommentTokens } from '../detect.mts';
+import { runCommentFirewall } from '../gate.mts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -319,5 +320,190 @@ describe('detectChangedComments', () => {
       findings: [],
       unsupported: [{ extension: 'py', path: 'src/a.py' }],
     });
+  });
+});
+
+describe('finding id stability', () => {
+  const PARAGRAPH = [
+    '// The wire format counts UTF-16 code units, not code points.',
+    '// Surrogate pairs therefore consume two units on this path.',
+    '// Callers slicing by code point must convert before indexing.',
+  ].join('\n');
+
+  const BASE = Array.from({ length: 24 }, (_, index) => `const base${index} = ${index};`);
+
+  function withParagraph(extra: string[] = [], paragraph = PARAGRAPH): string {
+    return [...extra, ...BASE.slice(0, 12), paragraph, ...BASE.slice(12), ''].join('\n');
+  }
+
+  function stagedId(root: string, source: string): string {
+    writeFileSync(path.join(root, 'src/a.ts'), source);
+    git(root, ['add', 'src/a.ts']);
+    const findings = detectChangedComments(root).findings;
+    if (findings.length !== 1) throw new Error(`expected one finding, got ${findings.length}`);
+    return findings[0]?.id ?? '';
+  }
+
+  function baseRepo(): string {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), `${BASE.join('\n')}\n`);
+    commitAll(root, 'base');
+    return root;
+  }
+
+  it('survives an unrelated insertion far above it in the same file', () => {
+    const root = baseRepo();
+    const before = stagedId(root, withParagraph());
+    const after = stagedId(root, withParagraph(['const inserted = 0;']));
+    expect(after).toBe(before);
+  });
+
+  it('survives an unrelated insertion inside its own context window', () => {
+    const root = baseRepo();
+    const before = stagedId(root, withParagraph());
+    const near = [...BASE.slice(0, 11), 'const inserted = 0;', ...BASE.slice(11, 12)];
+    const after = stagedId(root, [...near, PARAGRAPH, ...BASE.slice(12), ''].join('\n'));
+    expect(after).toBe(before);
+  });
+
+  it('still re-keys when the comment text itself changes', () => {
+    const root = baseRepo();
+    const before = stagedId(root, withParagraph());
+    const edited = PARAGRAPH.replace('two units', 'three units');
+    const after = stagedId(root, withParagraph([], edited));
+    expect(after).not.toBe(before);
+  });
+
+  it('gives two byte-identical paragraphs in one file distinct ids', () => {
+    const root = baseRepo();
+    writeFileSync(
+      path.join(root, 'src/a.ts'),
+      [
+        ...BASE.slice(0, 12),
+        PARAGRAPH,
+        'const separator = 0;',
+        PARAGRAPH,
+        ...BASE.slice(12),
+        '',
+      ].join('\n'),
+    );
+    git(root, ['add', 'src/a.ts']);
+    const ids = detectChangedComments(root).findings.map((finding) => finding.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+});
+
+describe('finding id identity semantics', () => {
+  const BLOCK = [
+    '/* The retry budget is three attempts because the upstream',
+    ' * gateway coalesces bursts inside a five second window.',
+    ' * Exceeding it trips their per-tenant throttle.',
+    ' */',
+  ].join('\n');
+
+  const INDENTED_BLOCK = [
+    'function wrap(): void {',
+    '  /* The retry budget is three attempts because the upstream',
+    '   * gateway coalesces bursts inside a five second window.',
+    '   * Exceeding it trips their per-tenant throttle.',
+    '   */',
+    '  return;',
+    '}',
+  ].join('\n');
+
+  const TWIN = [
+    '// The cache key omits the tenant on this legacy path.',
+    '// Adding it would invalidate every warm entry at once.',
+    '// The migration in SC-1 removes the exception entirely.',
+  ].join('\n');
+
+  function repoWith(committed: string): string {
+    const root = fixture();
+    writeFileSync(path.join(root, 'src/a.ts'), committed);
+    commitAll(root, 'base');
+    return root;
+  }
+
+  function stageAndDetect(root: string, source: string) {
+    writeFileSync(path.join(root, 'src/a.ts'), source);
+    git(root, ['add', 'src/a.ts']);
+    return detectChangedComments(root).findings;
+  }
+
+  it('survives a re-indent when an extract refactor wraps the paragraph', () => {
+    const root = repoWith('const anchor = 1;\n');
+    const [flat] = stageAndDetect(root, `const anchor = 1;\n${BLOCK}\n`);
+    const [indented] = stageAndDetect(root, `const anchor = 1;\n${INDENTED_BLOCK}\n`);
+    expect(indented?.id).toBe(flat?.id);
+  });
+
+  it('reserves an ordinal for an untouched twin above the changed paragraph', () => {
+    const alone = repoWith('const anchor = 1;\n');
+    const [first] = stageAndDetect(alone, `const anchor = 1;\n${TWIN}\n`);
+
+    const twinned = repoWith(`${TWIN}\nconst anchor = 1;\n`);
+    const [second] = stageAndDetect(twinned, `${TWIN}\nconst anchor = 1;\n${TWIN}\n`);
+
+    expect(second?.comment).toBe(first?.comment);
+    expect(second?.id).not.toBe(first?.id);
+  });
+
+  it("never lets a byte-identical copy pasted above inherit its twin's rationale", () => {
+    const root = repoWith('const anchor = 1;\n');
+    const [original] = stageAndDetect(root, `const anchor = 1;\n${TWIN}\n`);
+    commitAll(root, 'justified paragraph');
+
+    const pastedAbove = stageAndDetect(root, `${TWIN}\nconst anchor = 1;\n${TWIN}\n`);
+    expect(pastedAbove).toHaveLength(1);
+    expect(pastedAbove[0]?.comment).toBe(original?.comment);
+    expect(pastedAbove[0]?.id).not.toBe(original?.id);
+  });
+});
+
+describe('gate outcome after an unrelated line shift', () => {
+  const PARAGRAPH = [
+    '// Offsets in this protocol are UTF-16 code units, not bytes.',
+    '// A surrogate pair therefore advances the cursor by two.',
+    '// Byte-based slicing corrupts every message past the first.',
+  ].join('\n');
+  const RATIONALE = {
+    rationale: 'The external protocol defines offsets in UTF-16 code units, unlike byte length.',
+    at: '2026-08-15T00:00:00.000Z',
+  };
+
+  it('routes a still-justified paragraph to review instead of blocking it again', () => {
+    const root = fixture();
+    const base = Array.from({ length: 24 }, (_, index) => `const base${index} = ${index};`);
+    writeFileSync(path.join(root, 'src/a.ts'), `${base.join('\n')}\n`);
+    commitAll(root, 'base');
+
+    const body = (extra: string[]): string =>
+      [...extra, ...base.slice(0, 12), PARAGRAPH, ...base.slice(12), ''].join('\n');
+    writeFileSync(path.join(root, 'src/a.ts'), body([]));
+    git(root, ['add', 'src/a.ts']);
+    const justified = detectChangedComments(root).findings[0]?.id ?? '';
+    expect(justified).toMatch(/^[0-9a-f]{12}$/);
+
+    writeFileSync(path.join(root, 'src/a.ts'), body(['const inserted = 0;']));
+    git(root, ['add', 'src/a.ts']);
+
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const judge = vi.fn(() => ({
+      [justified]: { verdict: 'PASS' as const, reason: 'load-bearing' },
+    }));
+    const exit = runCommentFirewall(root, {
+      loadRationales: () => ({ version: 1, entries: { [justified]: RATIONALE } }),
+      loadReceipts: () => ({}),
+      saveReceipt: () => true,
+      judge,
+      model: () => 'haiku',
+      now: () => '2026-08-24T00:00:00.000Z',
+      strict: () => false,
+    });
+    vi.restoreAllMocks();
+
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(exit).toBe(0);
   });
 });

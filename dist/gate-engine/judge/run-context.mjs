@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { devkitVersion } from "../devkit-version.mjs";
+import { devkitVersion } from '../devkit-version.mjs';
 const LINE_SPLIT_RE = /\r?\n/;
 function truthy(v) {
     if (v === undefined)

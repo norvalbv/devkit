@@ -259,15 +259,14 @@ function installConfigs(cwd: string, sel: Selection, force: boolean, dryRun: boo
   }
 }
 
-function installStructureFiles(cwd: string, stack: string, force: boolean, dryRun: boolean) {
+function installStructureFiles(cwd: string, stack: string, sel: Selection, plan: InitPlan) {
+  const { force, dryRun } = plan;
   const tplDir = join(packageDir(), 'templates', stack);
   // Structure-stack biome.jsonc / tsconfig.json supersede the generic ones (stack rules).
-  const items: [string, string][] = [
-    ...STRUCTURE_TEMPLATE_FILES[stack],
-    ['biome.jsonc', 'biome.jsonc'],
-    ['tsconfig.json', 'tsconfig.json'],
-    ['guard.config.json', 'guard.config.json'],
-  ];
+  const items: [string, string][] = [...STRUCTURE_TEMPLATE_FILES[stack]];
+  if (sel.biome) items.push(['biome.jsonc', 'biome.jsonc']);
+  if (sel.tsconfig) items.push(['tsconfig.json', 'tsconfig.json']);
+  items.push(['guard.config.json', 'guard.config.json']);
   for (const [src, dest] of items) {
     const target = join(cwd, dest);
     // A `_shared/<file>` src resolves from templates/ (the universal shim/exempt shared across stacks);
@@ -849,7 +848,7 @@ export async function applyInit(cwd: string, plan: InitPlan) {
     console.log('  • self-host: configs are hand-owned — leaving them untouched');
   } else if (standalone)
     installStandaloneConfigs(cwd, stack, selection, force, dryRun, isStructure);
-  else if (isStructure) installStructureFiles(cwd, stack, force, dryRun);
+  else if (isStructure) installStructureFiles(cwd, stack, selection, plan);
   else installConfigs(cwd, selection, force, dryRun);
   applyScanRoots(cwd, scanRoots, dryRun);
   // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)

@@ -131,12 +131,14 @@ export const REVIEWERS = Object.freeze([
     // clean-pass 0.86. The earlier "precision 1.00 / perfect domain-exclusivity" was a 42-row
     // artifact: the extended corpus surfaces ~4 false-blocks (cross-domain security/perf leak +
     // broadcast/classifier surface-cue) that are MODEL-INVARIANT — precision is a DESIGN problem,
-    // not a bigger-model problem. Recall DOES scale with model (0.76→0.92), so the finder runs sonnet
-    // (K=1 evidence; a confirming flip-table run is still owed). Cross-domain false-blocks are caught
+    // not a bigger-model problem. Recall DOES scale with model (0.76→0.92), so the finder runs a
+    // strong pinned model (K=1 evidence; a confirming flip-table run is still owed). The pin VALUE
+    // is config-resolved in selectReviewers (review.correctnessModel — default gpt-5.6-sol
+    // since sc-2054 parity) — single-pass semantics stay. Cross-domain false-blocks are caught
     // downstream by domainExclusivityDrop; the in-domain surface-cue ones want K-sample
     // self-consistency (Wang 2203.11171), NOT a same-family refute pass (it overturned real FAILs
     // here, 0.78→0.67; Huang 2310.01798). Precision ~0.95 is unmeasurable until the decoy corpus grows.
-    model: 'sonnet',
+    model: 'gpt-5.6-sol',
   }),
   Object.freeze({
     name: 'conventions-reviewer',
@@ -220,14 +222,35 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
     // test files are ~half a branch diff's bytes: excluding them keeps the judge inside its
     // timeout on a ship-sized diff. Test adequacy is the testing reviewer's charter.
     if (reviewer.domain === 'all') files = files.filter((f) => !isTest(f.split('/').pop() ?? ''));
+    // The correctness pin is config-resolved (env > guard.config.json > default) so every
+    // installation can move it without a package edit; the static REVIEWERS entry only carries
+    // the shipped default. Applied HERE because both the gate and the scan CLI select through
+    // this function — resolving it anywhere later would let their cache salts diverge.
+    if (reviewer.name === 'correctness-reviewer')
+      return { reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }), files };
     return { reviewer, files };
   }).filter((s) => s.files.length > 0);
 }
 
+/** A model env var as an override: set AND non-blank — `GUARD_X=''` must fall through, never pin
+ * an empty `--model` onto a judge. */
+const envModel = (name: string): string | undefined => process.env[name]?.trim() || undefined;
+
+/** env > guard.config.json > shipped default — the correctness single-pass pin. */
+export function correctnessModel(cfg: { review: { correctnessModel: string } }): string {
+  return envModel('GUARD_CORRECTNESS_MODEL') ?? cfg.review.correctnessModel;
+}
+
+/** env > guard.config.json > shipped default — the cascade first-pass model for UNPINNED reviewers. */
+export function resolveReviewModel(cfg: { review: { model: string } }): string {
+  return envModel('GUARD_REVIEW_MODEL') ?? envModel('FRINK_REVIEW_MODEL') ?? cfg.review.model;
+}
+
 /**
  * Comma-joined --allowedTools value for one reviewer: the read-only base, PLUS its own checklist
- * script (the one non-git Bash prefix a judge gets — scoped to that exact script path, so the
- * judge can drive its checklist but still cannot write files, stage, or commit), PLUS the
+ * script (the one non-git Bash prefix a judge gets — scoped to that exact script path: a CLAUDE
+ * judge cannot write files, stage, or commit; a codex judge is workspace-write, so the same
+ * contract is enforced after the fact by run-review's staged-tree tamper check, sc-2054), PLUS the
  * consumer's semantic search tool for commit-guard, plus every named agent's strict MCP baseline.
  */
 export function allowedToolsFor(

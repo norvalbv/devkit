@@ -20,9 +20,22 @@ import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ESLint } from 'eslint'; // devkit's OWN eslint (now a dependency), never the consumer's
-import { resolveGuardConfig } from "../config.mjs";
-import { gitPrefix, splitNul } from "../ratchets/git-index.mjs";
-import { buildStructureConfigs } from "./eslint-config.mjs";
+import { resolveGuardConfig } from '../config.mjs';
+import { gitPrefix, splitNul } from '../ratchets/git-index.mjs';
+import { buildStructureConfigs } from './eslint-config.mjs';
+// The trichotomy as named verdicts, so a call site states what it concluded instead of a bare
+// number — `clean()` asserts a tree was read, `couldNotRun()` asserts one was not.
+const clean = () => ({ code: 0, errorCount: 0 });
+const violations = (errorCount, text) => ({
+    code: 1,
+    errorCount,
+    text,
+});
+const couldNotRun = (reason) => ({
+    code: 2,
+    errorCount: 0,
+    text: `guard-structure: gate did NOT run — ${reason}`,
+});
 // ESLint throws "No files matching the pattern" for an absent tree and "…are ignored" when every file
 // in a present tree is ignored — both mean "nothing to lint" (clean), not a failure. Hoisted (perf).
 const NOTHING_TO_LINT_RE = /No files matching|are ignored/i;
@@ -173,7 +186,7 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
             console.error(`⚠️  Structure deletion probe deferred to CI (no remaining source file): ${unprobedRoots.join(', ')}`);
         }
         if (!plan.targets.length && !probeTargets.length)
-            return { code: 0, errorCount: 0 };
+            return clean();
         const cfg = resolveGuardConfig(cwd);
         const trees = cfg.structure?.trees ?? [];
         const configDriven = trees.some((tree) => Boolean(tree.grammar));
@@ -181,29 +194,24 @@ export async function runStagedStructureGate(cwd = process.cwd()) {
             return runStructureGate(cwd, unique([...plan.targets, ...probeTargets]));
         const eslintBin = join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
         if (!existsSync(eslintBin)) {
-            return {
-                code: 1,
-                errorCount: 0,
-                text: 'guard-structure: electron structure lint needs the locally pinned eslint binary',
-            };
+            return couldNotRun('electron structure lint needs the locally pinned eslint binary');
         }
         try {
             execFileSync(process.execPath, ['--preserve-symlinks', eslintBin, '--', ...unique([...plan.targets, ...probeTargets])], { cwd, stdio: 'inherit' });
-            return { code: 0, errorCount: 0 };
+            return clean();
         }
         catch {
-            return { code: 1, errorCount: 0, text: 'guard-structure: local eslint failed' };
+            return violations(0, 'guard-structure: local eslint failed');
         }
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return { code: 2, errorCount: 0, text: `guard-structure: ${message}` };
+        return couldNotRun(message);
     }
 }
 /**
  * Run the folder-structure gate over a repo's declared structure roots. `cwd` is the consumer root
- * (holds guard.config.json + .devkit baseline/policy state). Result code: 0 = clean / nothing to lint,
- * 1 = violations, 2 = fail-open (internal error).
+ * (holds guard.config.json + .devkit baseline/policy state). Returns one of the named verdicts.
  */
 export async function runStructureGate(cwd = process.cwd(), targets) {
     try {
@@ -212,12 +220,11 @@ export async function runStructureGate(cwd = process.cwd(), targets) {
         const trees = cfg.structure?.trees ?? [];
         const roots = (targets ??
             trees.map((t) => t.root).filter((r) => (r ? existsSync(join(cwd, r)) : false))).filter((target) => existsSync(join(cwd, target)));
-        // Nothing declared / nothing present (generic guard.config, electron-only preset, empty tree).
         if (!roots.length)
-            return { code: 0, errorCount: 0 };
+            return couldNotRun('no structure root is both declared in guard.config.json and present on disk');
         const baseConfig = await buildStructureConfigs(cwd);
         if (!baseConfig.length)
-            return { code: 0, errorCount: 0 }; // no grammar trees (preset-only)
+            return couldNotRun("no structure.trees[].grammar declared (preset-only consumer); this repo's own structure lint is the wall here");
         const eslint = new ESLint({ cwd, overrideConfigFile: true, baseConfig });
         // Lint each root INDEPENDENTLY. ESLint 10's lintFiles fail-fasts on the FIRST unmatched/all-ignored
         // pattern, so a single ignored/empty root in a batched `lintFiles(roots)` would throw and mask a
@@ -238,15 +245,15 @@ export async function runStructureGate(cwd = process.cwd(), targets) {
         }
         const errorCount = allResults.reduce((n, r) => n + r.errorCount, 0);
         if (errorCount === 0)
-            return { code: 0, errorCount: 0 };
+            return clean();
         const text = await (await eslint.loadFormatter('stylish')).format(allResults);
-        return { code: 1, errorCount, text };
+        return violations(errorCount, text);
     }
     catch (e) {
         // Fail OPEN (exit 2), like the ratchet gates when their baseline is missing — a structure gate
         // that can't run must never wedge a commit. guard-deterministic treats 2 as fail-open (continue).
         const message = e instanceof Error ? e.message : String(e);
-        return { code: 2, errorCount: 0, text: `guard-structure: ${message}` };
+        return couldNotRun(message);
     }
 }
 export async function runCli(cmd = 'gate') {

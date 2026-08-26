@@ -1,6 +1,6 @@
 /** Shared structural invariants for authenticated review manifests. */
 import { isAbsolute } from 'node:path';
-import { reviewPathWithin } from "../runtime-paths.mjs";
+import { reviewPathWithin } from '../runtime-paths.mjs';
 export function hasExactManifestKeys(value, expected) {
     return Object.keys(value).sort().join('\0') === [...expected].sort().join('\0');
 }

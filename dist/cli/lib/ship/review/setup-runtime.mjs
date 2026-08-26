@@ -2,18 +2,18 @@
 import { spawnSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
-import { runDirectReviewCli } from "./run-direct.mjs";
-import { reviewRuntimeFingerprint } from "./runtime-fingerprint.mjs";
-import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from "./runtime-paths.mjs";
-import { overlayHooksPathRejection } from "./setup/overlay-hooks-path.mjs";
-import { copyMergedReviewSetup, reviewSetupStat, safeReviewSetupDestination, } from "./setup/setup-runtime-copy.mjs";
-import { REVIEW_SETUP_ABSENT, reviewSetupHash } from "./setup-manifest-format.mjs";
-import { parseReviewSetupManifest } from "./setup-manifest-parse.mjs";
-import { encodeReviewSetupRuntimeFields, parseReviewSetupRuntimeManifest, reviewSetupRuntimeHash, REVIEW_SETUP_RUNTIME_VERSION as VERSION, } from "./setup-runtime-format.mjs";
-import { fail } from "./shared/common.mjs";
-import { resolveReviewSource } from "./source-projection.mjs";
+import { runDirectReviewCli } from './run-direct.mjs';
+import { reviewRuntimeFingerprint } from './runtime-fingerprint.mjs';
+import { assertSymlinkFreeReviewTree, canonicalReviewDirectory, canonicalReviewLeaf, isSafeReviewRelativePath, reviewPathWithin, } from './runtime-paths.mjs';
+import { overlayHooksPathRejection } from './setup/overlay-hooks-path.mjs';
+import { copyMergedReviewSetup, reviewSetupStat, safeReviewSetupDestination, } from './setup/setup-runtime-copy.mjs';
+import { REVIEW_SETUP_ABSENT, reviewSetupHash } from './setup-manifest-format.mjs';
+import { parseReviewSetupManifest } from './setup-manifest-parse.mjs';
+import { encodeReviewSetupRuntimeFields, parseReviewSetupRuntimeManifest, reviewSetupRuntimeHash, REVIEW_SETUP_RUNTIME_VERSION as VERSION, } from './setup-runtime-format.mjs';
+import { fail } from './shared/common.mjs';
+import { resolveReviewSource } from './source-projection.mjs';
 const CHAIN_MIRROR = '.devkit/review-chain-root';
-export { encodeReviewSetupRuntimeFields } from "./setup-runtime-format.mjs";
+export { encodeReviewSetupRuntimeFields } from './setup-runtime-format.mjs';
 function canonicalManifestRoot(path, label) {
     const canonical = canonicalReviewDirectory(path, label);
     if (canonical !== path)

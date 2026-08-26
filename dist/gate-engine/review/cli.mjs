@@ -16,18 +16,18 @@
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { envFlag, resolveGuardConfig } from "../config.mjs";
-import { recordAgentRun } from "../judge/run-judge.mjs";
-import { readTranscript } from "../judge/transcript-store.mjs";
-import { clearCache, loadCache } from "./cache.mjs";
-import { runCompleteness } from "./completeness.mjs";
-import { gitCached, stagedFiles } from "./evidence/staged-git.mjs";
-import { loadReviewerTargetsBlocks, reviewerTargetSalts } from "./evidence/targets-block.mjs";
-import { planReviewWork } from "./lens/split.mjs";
-import { cacheKey, selectReviewers } from "./reviewers.mjs";
-import { runReviewGate } from "./run-review.mjs";
-import { resolveReviewerIdentities, skippedReviewers } from "./runtime.mjs";
-import { runWaive } from "./valve/waive.mjs";
+import { envFlag, resolveGuardConfig } from '../config.mjs';
+import { recordAgentRun } from '../judge/run-judge.mjs';
+import { readTranscript } from '../judge/transcript-store.mjs';
+import { clearCache, loadCache } from './cache.mjs';
+import { runCompleteness } from './completeness.mjs';
+import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
+import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
+import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mjs';
+import { cacheKey, resolveReviewModel, selectReviewers } from './reviewers.mjs';
+import { runReviewGate } from './run-review.mjs';
+import { resolveReviewerIdentities, skippedReviewers } from './runtime.mjs';
+import { runWaive } from './valve/waive.mjs';
 /**
  * `guard-review scan` — reviewer→files mapping + cache status, no judges. Informational. Cache
  * status is computed by `planReviewWork` — the gate's OWN planner — so scan can never diverge
@@ -47,9 +47,11 @@ async function scanReview(cwd = process.cwd()) {
         // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
         // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
         const { saltBlock } = await loadReviewerTargetsBlocks(cwd, stagedFiles(cwd));
-        const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock);
+        const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock, resolveReviewModel(cfg));
         const diffs = sels.map((s) => gitCached(cwd, [], s.files));
-        const plan = planReviewWork(sels, diffs, cache, salts, cacheKey);
+        // Same consumer-cwd chunk resolution as the gate (W-3) — a divergent default here would make
+        // scan disagree with the gate's plan on configured installs.
+        const plan = planReviewWork(sels, diffs, cache, salts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
         for (const { sel, cached } of plan.scope) {
             console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);
         }

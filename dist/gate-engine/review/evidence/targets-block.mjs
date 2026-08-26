@@ -6,8 +6,8 @@
  * (violating one is IN CHARTER). One renderer, two framings: the bytes a judge reads are the
  * contract, so the shape must never fork.
  */
-import { scopedTargets } from "../../decisions/scoped-targets.mjs";
-import { hasChecklist } from "../reviewers.mjs";
+import { scopedTargets } from '../../decisions/scoped-targets.mjs';
+import { hasChecklist } from '../reviewers.mjs';
 /** completeness.mts's original bytes, verbatim — its judge must keep reading exactly this. */
 export const COMPLETENESS_TARGETS_FRAMING = Object.freeze({
     header: '## RELEVANT RECORDED TARGETS (authoritative — a recorded decision is NOT a completeness gap)',
@@ -97,10 +97,13 @@ export async function loadReviewerTargetsBlocks(cwd, files, query = '') {
  * `saltBlock` MUST be the scope-only render: the commit message and its semantic Target hits NEVER
  * enter this salt (ship-gates-converge-not-restart — amended-message retries must converge).
  */
-export function reviewerTargetSalts(selected, cacheSalts, saltBlock) {
+export function reviewerTargetSalts(selected, cacheSalts, saltBlock, cascadeModel) {
     const salted = (s) => {
         const base = cacheSalts.get(s.reviewer.name) ?? '';
-        return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}` : base;
+        // The judging model is part of verdict identity (sc-2053): a PASS earned by one model must
+        // not replay for another, or a model flip silently serves the old model's judgments.
+        const model = `\0model:${s.reviewer.model ?? cascadeModel}`;
+        return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}${model}` : `${base}${model}`;
     };
     return new Map(selected.map((s) => [s.reviewer.name, salted(s)]));
 }

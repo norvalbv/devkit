@@ -13,7 +13,7 @@
 // Read tool — that's prose guidance to the LLM, not something this deterministic module does.
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { renderCappedSegments } from "./diff-evidence.mjs";
+import { renderCappedSegments } from './diff-evidence.mjs';
 // A CLAUDE.md's own size rarely needs deep truncation, but one huge file must not crowd out every
 // other governing file's rules from the budget.
 const CLAUDE_MD_TOTAL_CAP = 60000;

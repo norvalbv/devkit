@@ -7,21 +7,21 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, } from 'node:fs';
 import { join } from 'node:path';
-import { syncAgents } from "../commands/sync/sync-agents.mjs";
-import { syncSkills } from "../commands/sync/sync-skills.mjs";
-import { AGENT_TARGETS, normalizeSelection } from "./components.mjs";
-import { detectGitRoot } from "./detect-git-root.mjs";
-import { packageDir, readJson, writeIfAbsent } from "./fs-helpers.mjs";
-import { trackedPathPredicate } from "./git-tracked.mjs";
-import { buildOverlayHook, buildPassthroughHook } from "./husky/husky-block.mjs";
-import { ADHD_SKILL_DIR, syncAdhdSkill } from "./install/adhd-skill.mjs";
-import { selectedHookAssets } from "./install/hook-registration-ledger/selection.mjs";
-import { detectFallow, installFallow, saveFallowBaselines } from "./install/install-fallow.mjs";
-import { installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from "./install/install-hooks.mjs";
-import { overlayAssetExcludes } from "./install/overlay-asset-excludes.mjs";
-import { addToGitExclude } from "./install/overlay-excludes.mjs";
-import { firstLine } from "./standalone.mjs";
-import { removeAgents, removeSkills } from "./sync-manifest.mjs";
+import { syncAgents } from '../commands/sync/sync-agents.mjs';
+import { syncSkills } from '../commands/sync/sync-skills.mjs';
+import { AGENT_TARGETS, normalizeSelection } from './components.mjs';
+import { detectGitRoot } from './detect-git-root.mjs';
+import { packageDir, readJson, writeIfAbsent } from './fs-helpers.mjs';
+import { trackedPathPredicate } from './git-tracked.mjs';
+import { buildOverlayHook, buildPassthroughHook } from './husky/husky-block.mjs';
+import { ADHD_SKILL_DIR, syncAdhdSkill } from './install/adhd-skill.mjs';
+import { selectedHookAssets } from './install/hook-registration-ledger/selection.mjs';
+import { detectFallow, installFallow, saveFallowBaselines } from './install/install-fallow.mjs';
+import { installHookRegistrations, removeHookRegistrations, removeHookScripts, syncHookScripts, } from './install/install-hooks.mjs';
+import { overlayAssetExcludes } from './install/overlay-asset-excludes.mjs';
+import { addToGitExclude } from './install/overlay-excludes.mjs';
+import { firstLine } from './standalone.mjs';
+import { removeAgents, removeSkills } from './sync-manifest.mjs';
 const LOCAL_HOOKS = '.devkit/hooks';
 // every `bun install`; this LOCAL (uncommitted) alias re-points it back to our hooks dir right
 // before a commit, so `git ci …` keeps devkit's gates wired without touching anything committed.

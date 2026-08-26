@@ -27,6 +27,7 @@
   // names a PACKAGE (not a file) and is a genuine false positive for devkit:
   "ignoreDependencies": [
     "jscpd", // spawned as a BINARY by guard-clone (clone-detector.mjs), never imported
+    "@typescript/native", // Devkit-only TypeScript 7 CLI, invoked by package scripts rather than imported
     // Imported ONLY by templates/**/eslint.config.mjs — shipped text the CONSUMER installs into its
     // own repo; deliberately NOT a devkit dependency (see template headers).
     "@typescript-eslint/parser"

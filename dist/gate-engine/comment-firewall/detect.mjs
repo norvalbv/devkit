@@ -9,10 +9,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { ts } from 'ts-morph';
-import { resolveGuardConfig, sourceMatchers } from "../config.mjs";
-import { gitPrefix } from "../ratchets/git-index.mjs";
+import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
+import { gitPrefix } from '../ratchets/git-index.mjs';
 export const COMMENT_ADAPTER_VERSION = 'typescript-scanner-v2';
-export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v4';
+export const COMMENT_FINDING_POLICY = 'changed-comment-paragraph-v5';
 const SUPPORTED_EXTENSIONS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts']);
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const CONTEXT_LINES = 4;
@@ -20,6 +20,8 @@ const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const LEADING_DOT_SLASH = /^\.\//;
 const TRAILING_SLASH = /\/$/;
 const TRAILING_CARRIAGE_RETURN = /\r$/;
+const TRAILING_BLANKS = /[ \t\r]+$/;
+const LEADING_BLANKS = /^[ \t]+/;
 const TRAILING_STRUCTURAL_PUNCTUATION = /^(?:[)\]};,.:]+|<\/(?:[A-Za-z][\w:.-]*|)>)+$/;
 const LINE_COMMENT_PREFIX = /^\s*\/\/[/!]?[ \t]?/;
 const BLOCK_COMMENT_PREFIX = /^\s*\/\*+!?[ \t]?/;
@@ -283,10 +285,33 @@ export function paragraphCommentTokens(tokens) {
     flushRun();
     return paragraphs;
 }
-function changedTokens(source, extension, hunks) {
-    return paragraphCommentTokens(scanCommentTokens(source, extension)).filter((token) => hunks.some((hunk) => hunkIntersects(hunk, token)) && requiresChallenge(token, hunks));
+/** Identity text: indentation and line endings must not re-key a finding. */
+function normalizeComment(text) {
+    return text
+        .split('\n')
+        .map((line) => line.replace(TRAILING_BLANKS, '').replace(LEADING_BLANKS, ''))
+        .join('\n');
 }
-function findingFor(file, extension, source, token, hunks) {
+function changedParagraphs(source, extension, hunks) {
+    const paragraphs = paragraphCommentTokens(scanCommentTokens(source, extension));
+    const totals = new Map();
+    for (const token of paragraphs) {
+        const key = normalizeComment(token.text);
+        totals.set(key, (totals.get(key) ?? 0) + 1);
+    }
+    const seen = new Map();
+    const changed = [];
+    for (const token of paragraphs) {
+        const key = normalizeComment(token.text);
+        const ordinal = seen.get(key) ?? 0;
+        seen.set(key, ordinal + 1);
+        if (hunks.some((hunk) => hunkIntersects(hunk, token)) && requiresChallenge(token, hunks)) {
+            changed.push({ token, twin: (totals.get(key) ?? 0) > 1 ? { ordinal } : null });
+        }
+    }
+    return changed;
+}
+function findingFor(file, extension, source, token, hunks, twin) {
     const relevantDiff = hunks
         .filter((hunk) => hunkIntersects(hunk, token))
         .map((hunk) => hunk.text)
@@ -297,9 +322,8 @@ function findingFor(file, extension, source, token, hunks) {
         policy: COMMENT_FINDING_POLICY,
         adapter: COMMENT_ADAPTER_VERSION,
         path: file,
-        comment: token.text,
-        context,
-        relevantDiff,
+        comment: normalizeComment(token.text),
+        twin: twin && { ordinal: twin.ordinal, context },
     }));
     return {
         id,
@@ -342,8 +366,8 @@ export function detectChangedComments(cwd = process.cwd()) {
             // Ordinary commit: the first-parent staged patch is the complete attribution set.
         }
         const source = stagedBlob(cwd, file);
-        for (const token of changedTokens(source, extension, effective)) {
-            findings.push(findingFor(file, extension, source, token, effective));
+        for (const { token, twin } of changedParagraphs(source, extension, effective)) {
+            findings.push(findingFor(file, extension, source, token, effective, twin));
         }
     }
     return { findings, unsupported };

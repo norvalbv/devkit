@@ -35,7 +35,7 @@ import {
 import path from 'node:path';
 import { retainNewest } from './store-retention.mts';
 
-const MAX_ENTRIES = 100;
+const MAX_ENTRIES = 400; // sc-1907: a chunked attempt writes 3/chunk+1 keys (≤73 at the backstop); attempts sharing a plan share keys
 const MAX_STORE_SIZE = 4 * 1024 * 1024;
 const MAX_OWNER_SIZE = 1_024;
 const LOCK_WAIT_MS = 5_000;

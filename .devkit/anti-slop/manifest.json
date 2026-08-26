@@ -19,7 +19,7 @@
     "anti-slop/no-widen-then-assert",
     "anti-slop/require-safety-comment-for-type-assertion"
   ],
-  "pluginDigest": "40a480e9670b4c28fed3ec7577e1b1f4321c58ab41ddacd46709fe21a5a15f96",
+  "pluginDigest": "460c4e1526026d188557d0e5e23a97c1dabcf4b1a22c86c2922ed27bffd10a5d",
   "configDigest": "a1755ce4c9bd74b4800717f1f316b1047d638dc59d6277c4844b59c55306c496",
   "probeDigest": "bf2c2181804ac4004aed98aa41133e080068be9b2e9bf9d47a459ce75c6cdb87",
   "probeConfigDigest": "b9bfbd93519b843df6bd175b91f5742bb67be649cac5c82492621e5a7bbd7604"

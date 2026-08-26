@@ -9,15 +9,15 @@
  */
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { AGENT_TARGETS, skillNamesForSelection, } from "../../lib/components.mjs";
-import { detectGitRoot } from "../../lib/detect-git-root.mjs";
-import { packageDir, readJson, sha256, writeIfAbsent } from "../../lib/fs-helpers.mjs";
-import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from "../../lib/install/agent-asset-manifest/compatibility.mjs";
-import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from "../../lib/install/agent-asset-manifest/lifecycle.mjs";
-import { readAgentAssetManifest } from "../../lib/install/agent-asset-manifest/reader.mjs";
-import { agentAssetDir } from "../../lib/install/agent-assets/agent-assets.mjs";
-import { resolveExistingAgentProviders } from "../../lib/install/agent-assets/agent-providers.mjs";
-import { findConflicts } from "../../lib/sync-manifest.mjs";
+import { AGENT_TARGETS, skillNamesForSelection, } from '../../lib/components.mjs';
+import { detectGitRoot } from '../../lib/detect-git-root.mjs';
+import { packageDir, readJson, sha256, writeIfAbsent } from '../../lib/fs-helpers.mjs';
+import { assertLegacyAssetWriterCompatible, nextLegacyManifestGeneratedAt, } from '../../lib/install/agent-asset-manifest/compatibility.mjs';
+import { findProviderNativeAssetConflicts, requiresProviderNativeLifecycle, syncProviderNativeAssets, withAgentAssetLifecycleLock, } from '../../lib/install/agent-asset-manifest/lifecycle.mjs';
+import { readAgentAssetManifest } from '../../lib/install/agent-asset-manifest/reader.mjs';
+import { agentAssetDir } from '../../lib/install/agent-assets/agent-assets.mjs';
+import { resolveExistingAgentProviders } from '../../lib/install/agent-assets/agent-providers.mjs';
+import { findConflicts } from '../../lib/sync-manifest.mjs';
 /**
  * True when a manifest-owned skill tree is still exactly what devkit wrote: every recorded file
  * present with its recorded sha, and nothing extra alongside them. A skill is deleted as a UNIT,

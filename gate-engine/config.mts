@@ -19,12 +19,10 @@
  *   3. GUARD_* environment variables (with FRINK_* read as back-compat fallback aliases)
  *
  * ── Path semantics ────────────────────────────────────────────────────────────────
- * Relative path fields (scanRoots, decisionsDir, fanoutExempt, allowlistPath,
- * indexPath) are returned EXACTLY as configured — relative — and each engine joins
- * them onto the same `cwd` it was handed. Keeping them relative (not pre-joined here)
- * means an engine can present clean repo-relative paths in its output while still
- * resolving against the consumer cwd. `resolveFromCwd(cfg, cwd, field)` is the helper
- * engines use to get the absolute form when they need to touch the filesystem.
+ * Relative path fields (scanRoots, decisionsDir, fanoutExempt, allowlistPath, indexPath) are
+ * returned EXACTLY as configured — relative — and each engine joins them onto the same `cwd` it
+ * was handed, presenting clean repo-relative paths while still resolving against the consumer
+ * cwd. `resolveFromCwd(cfg, cwd, field)` yields the absolute form for filesystem access.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -57,6 +55,10 @@ export interface ReviewConfig {
   shortcutTracking: boolean;
   accessibility: { skipTouchTargets: boolean };
   agentsDir: string;
+  // sc-2107 judge knobs: env (GUARD_* — see resolvers) > guard.config.json > defaults; 0 = off.
+  model: string; // cascade first pass for UNPINNED reviewers
+  correctnessModel: string; // the correctness single-pass pin
+  correctnessChunkLoc: number;
 }
 
 /**
@@ -91,9 +93,8 @@ export interface GuardConfig {
   cwd: string;
 }
 
-// Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the
-// readFileSync/JSON.parse boundary). A malformed value is tolerated exactly as the runtime
-// tolerates it (the arr()/finite guards below), never trusted for correctness.
+// Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the JSON
+// boundary). Malformed values are tolerated via the arr()/str()/finite guards, never trusted.
 interface RawGuardConfigFile {
   boundaries?: string[];
   scanRoots?: string[];
@@ -121,6 +122,9 @@ interface RawGuardConfigFile {
     shortcutTracking?: boolean;
     accessibility?: { skipTouchTargets?: boolean };
     agentsDir?: string;
+    model?: string;
+    correctnessModel?: string;
+    correctnessChunkLoc?: number;
   };
   research?: { referenceCheckouts?: string[] };
   noLog?: boolean;
@@ -129,13 +133,10 @@ interface RawGuardConfigFile {
 
 export const CONFIG_FILENAME = 'guard.config.json';
 
-// Defaults are deliberately frink-agnostic: an empty/`src`-only repo gets a sane,
-// non-frink-specific baseline. Frink's old hardcoded BOUNDARIES / grandfathered
-// fanout roots are NOT defaults here — a consumer opts into them via guard.config.json.
+// Frink-agnostic defaults: old hardcoded BOUNDARIES / fanout roots are opt-in via guard.config.json.
 export const DEFAULTS = Object.freeze({
-  // Cross-trust-boundary prefixes for the decision smell gate (was frink detect.mjs
-  // BOUNDARIES const). Empty by default: a generic repo has no trust boundaries to
-  // straddle, so the cross-boundary-move smell simply never fires until configured.
+  // Cross-trust-boundary prefixes for the decision smell gate. Empty by default: a generic repo
+  // has no boundaries to straddle, so the cross-boundary-move smell never fires until configured.
   boundaries: [],
   // Where the ratchets / structure scans look for implementation files.
   scanRoots: ['src'],
@@ -143,9 +144,8 @@ export const DEFAULTS = Object.freeze({
   // verbatim-clone scope is often deliberately narrower than semantic-dup scope: a repo can want
   // the matcher over every backend root while the clone gate only polices its UI + main process.
   cloneRoots: [],
-  // Source extensions the ratchets count. Default TS — a JS/MJS
-  // codebase (devkit itself, a node CLI) sets `["mjs","js"]` so the gates actually SEE its files.
-  // Tests are excluded from implementation fan-out but have their own optional size ceiling.
+  // Source extensions the ratchets count. Default TS — a JS/MJS codebase sets `["mjs","js"]` so
+  // the gates SEE its files. Tests are excluded from fan-out but have their own size ceiling.
   sourceExtensions: ['ts', 'tsx'],
   // Folder-structure topology (the structure-lint engine). Declared ONCE here; devkit's interpreter
   // generates the eslint rule + drives the baseline walk from this SAME spec (no drift). Empty by
@@ -199,17 +199,14 @@ export const DEFAULTS = Object.freeze({
   // Test command the testing agents run (markdown-prompt agents READ this). null =>
   // agents fall back to the consumer's documented package.json `test` script.
   testCommand: null,
-  // Coverage-gate config (the `coverage` guard READs this; only runs when selected). `{}` =
-  // active-strict: no percentage floor, but absent coverage/coverage-final.json FAILS HARD (a
-  // selected coverage gate must never silently pass unverified). `false` = explicit opt-out;
-  // `{ statements, functions, lines?, branches? }` enforces the keys present. See coverage/run.mts.
+  // Coverage-gate config: `{}` = active-strict (no % floor, but absent coverage data FAILS HARD —
+  // a selected gate never silently passes unverified); `false` = explicit opt-out;
+  // `{ statements, ... }` enforces the keys present. See coverage/run.mts.
   coverage: Object.freeze({}) as CoverageConfig,
-  // Review-agent topology (the reviewer subagents READ these). Frink-agnostic defaults: a generic
-  // repo treats `src` as its only backend root and declares NO frontend topology — an empty array
-  // means selectReviewers never picks that domain at all, so the frontend reviewers simply do not
-  // run (the gate warns on stderr if such a commit stages frontend files; `devkit doctor` flags the
-  // combination against the detected stack). Enforces WCAG touch targets + skips the
-  // tracker/Shortcut rule until opted in.
+  // Review-agent topology (the reviewer subagents READ these). Generic defaults: `src` as the only
+  // backend root, NO frontend topology (empty array = selectReviewers never picks that domain; the
+  // gate warns on stderr if such a commit stages frontend files). Enforces WCAG touch targets +
+  // skips the tracker/Shortcut rule until opted in.
   review: Object.freeze({
     backendRoots: ['src'],
     frontendRoots: [],
@@ -219,9 +216,13 @@ export const DEFAULTS = Object.freeze({
     // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
     // headless judges (the SAME files the root agent dispatches interactively).
     agentsDir: '.claude/agents',
+    // sc-2054: parity landed (MCP mapping + tamper detection), so the benched winner IS the
+    // default. Installs without the codex CLI: doctor DRIFTs; override here or via GUARD_* envs.
+    model: 'gpt-5.6-sol',
+    correctnessModel: 'gpt-5.6-sol',
+    correctnessChunkLoc: 400,
   }),
-  // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases). Bypass + pure-regex.
-  noLog: false,
+  noLog: false, // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases)
   noLlm: false,
 });
 
@@ -238,10 +239,8 @@ function envVar(name: string): string | undefined {
   return process.env[`FRINK_${name}`];
 }
 
-// Env values are strings; treat presence of a non-empty, non-"0", non-"false" value
-// as truthy (so `GUARD_NO_LOG=1`, `=true`, `=yes` all enable; `=0`/`=false`/empty don't).
-// Exported for hard-by-default gates that must distinguish unset (→ default) from an
-// explicit `=0` soften (envFlag can't — it folds unset and `=0` both to false).
+// Truthy env: non-empty, non-"0", non-"false" enables. Exported for hard-by-default gates that
+// must distinguish unset (→ default) from an explicit `=0` soften (envFlag folds those).
 export function envBool(name: string): boolean | undefined {
   const v = envVar(name);
   if (v === undefined) return undefined;
@@ -250,9 +249,8 @@ export function envBool(name: string): boolean | undefined {
   return true;
 }
 
-// A GUARD_*/FRINK_* flag as a plain boolean — false when unset — for direct `if (envFlag(x))` use.
-// Distinct from envBool's undefined-when-unset (which lets config resolution fall through to
-// file/DEFAULT via ??). Exported so the review/decisions gates share one truthy-env predicate.
+// A GUARD_*/FRINK_* flag as a plain boolean — false when unset — vs envBool's undefined-when-unset
+// (which lets config resolution fall through via ??). One shared truthy-env predicate.
 export function envFlag(name: string): boolean {
   return envBool(name) ?? false;
 }
@@ -313,8 +311,7 @@ export function deterministicStrict(): boolean {
 }
 
 // Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
-// unparseable / not an object => throw: a typo'd config must fail loudly, never silently
-// degrade to defaults and quietly weaken a gate.
+// unparseable / not an object => throw: a typo'd config must fail loudly, never weaken a gate.
 function loadConfigFile(cwd: string): RawGuardConfigFile {
   const file = resolve(cwd, CONFIG_FILENAME);
   if (!existsSync(file)) return {};
@@ -335,6 +332,13 @@ function loadConfigFile(cwd: string): RawGuardConfigFile {
 }
 
 const arr = <T,>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? v : fallback);
+// Malformed review knobs fall to DEFAULTS (a non-string model must never reach judge argv; a
+// non-numeric cap must never silently disable chunking): `${v}` === v accepts only a real string
+// representation, Number.isInteger rejects every non-number one — typed as expected, not trusted.
+const str = (v: string | undefined, d: string): string =>
+  v != null && `${v}` === v && v.trim() !== '' ? v.trim() : d;
+const nonNegInt = (v: number | undefined, d: number): number =>
+  v !== undefined && Number.isInteger(v) && v >= 0 ? v : d;
 
 /**
  * Resolve the effective governance-gate config for a consumer repo.
@@ -347,6 +351,8 @@ const arr = <T,>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? v : fall
 // fallow-ignore-next-line complexity
 export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
   const file = loadConfigFile(cwd);
+  const fr = file.review ?? {};
+  const dr = DEFAULTS.review;
 
   const noLogEnv = envBool('NO_LOG');
   const noLlmEnv = envBool('DECISION_NO_LLM');
@@ -417,11 +423,11 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     // accessibility) without restating the whole block.
     review: {
       ...DEFAULTS.review,
-      ...(file.review ?? {}),
-      accessibility: {
-        ...DEFAULTS.review.accessibility,
-        ...(file.review?.accessibility ?? {}),
-      },
+      ...fr,
+      model: str(fr.model, dr.model),
+      correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
+      correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
+      accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
     },
     // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:
     // an empty resolution means the leg attests `unavailable`, never a silent scan of
