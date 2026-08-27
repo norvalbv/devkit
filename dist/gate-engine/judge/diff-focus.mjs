@@ -1,9 +1,13 @@
 // Shared diff-evidence primitives for the diff-fed judge gates. Every gate that hands its `claude -p`
-// judge a slice of the staged diff (sentry's focusDiff, the decisions `detect` judge, the domain
-// reviewers) first splits the diff into per-file segments — three near-identical copies of the same
-// `diff --git` split regex. This is the one shared primitive. `focusHunks` additionally selects the
-// RELEVANT hunks per file (sentry's pattern, generalized) so any gate can send the judge just the
-// signal, keyed on its own per-hunk predicate.
+// judge a slice of the staged diff first splits the diff into per-file segments — near-identical
+// copies of the same `diff --git` split regex. This is the one shared primitive. `selectHunks`
+// additionally selects the RELEVANT hunks per file (sentry's pattern, generalized) so any gate can
+// send the judge just the signal, keyed on its own per-hunk predicate, and `renderSelection` turns a
+// selection back into the judge-facing text.
+//
+// The split is STRUCTURED (a selection, not a string) because a cap-aware packer must be able to drop
+// individual hunks and still report WHICH ones went — a gate that blocks on absent evidence has to
+// know the difference between "not in the diff" and "cut by the cap" (sc-1984).
 //
 // Deterministic EVIDENCE selection only — the LLM still decides the verdict.
 // Real `git diff --cached` prefixes each file with `diff --git`; a hand-authored / preamble-free diff
@@ -34,12 +38,11 @@ export function filePathOf(segment) {
     return segment.match(GIT_PATH_RE)?.[1] ?? null;
 }
 /**
- * Focus a diff to its RELEVANT hunks: a header listing every changed file, then only the hunks for
- * which `isRelevant(hunk)` holds, then a count of what was dropped. A file with no relevant hunk stays
- * in the header (so the judge still knows the commit's shape). `omitNoun` labels the dropped hunks in
- * the omission line (e.g. sentry uses 'non-error').
+ * Select a diff's RELEVANT hunks: every changed file's path, the hunks for which `isRelevant(hunk)`
+ * holds grouped under their file, and a count of what the predicate rejected. A file with no relevant
+ * hunk survives in `files` only (so the judge still knows the commit's shape).
  */
-export function focusHunks(diff, isRelevant, omitNoun = 'unrelated') {
+export function selectHunks(diff, isRelevant) {
     const files = [];
     const kept = [];
     let omitted = 0;
@@ -59,11 +62,23 @@ export function focusHunks(diff, isRelevant, omitNoun = 'unrelated') {
                 omitted += 1;
         }
         if (relevant.length)
-            kept.push(`${head.trim()}\n${relevant.join('\n')}`.trim());
+            kept.push({ path: file, head, hunks: relevant });
     }
+    return { files, kept, omitted };
+}
+/**
+ * Render a selection as judge-facing evidence: the changed-file header, the predicate's omission line,
+ * any extra `notes` a packer needs to declare (each bracketed on its own line — e.g. what a cap
+ * dropped), then the kept hunks grouped under their file header.
+ *
+ * `omitNoun` labels the predicate's omission line (e.g. sentry uses 'non-error').
+ */
+export function renderSelection({ files, kept, omitted }, omitNoun = 'unrelated', notes = []) {
     const header = files.length ? `CHANGED FILES: ${files.join(', ')}\n` : '';
     const note = omitted ? `[${omitted} ${omitNoun} hunk(s) omitted]\n` : '';
-    return `${header}${note}${kept.join('\n')}`.trim();
+    const extra = notes.map((n) => `[${n}]\n`).join('');
+    const body = kept.map((f) => `${f.head.trim()}\n${f.hunks.join('\n')}`.trim()).join('\n');
+    return `${header}${note}${extra}${body}`.trim();
 }
 // A purely-additive Sentry instrumentation line — matched CONSERVATIVELY, because every match is
 // erased from the cache identity and can therefore never invalidate an earned verdict:
@@ -87,6 +102,21 @@ const HUNK_HEADER_RE = /^@@ /;
 const HUNK_FUNC_RE = /^@@ [^@]*@@ ?/;
 const HUNK_OLD_START_RE = /^@@ -(\d+)/;
 const INDEX_LINE_RE = /^index [0-9a-f]+\.\.[0-9a-f]+/;
+/**
+ * A hunk's POSITION-STABLE identity, from its `@@` header: git's FUNCTION CONTEXT (the text after the
+ * second `@@`), or — where git emits none (JSON, hunks above a file's first anchor-matching line) —
+ * `:<old-side start line>`, which a purely-additive restage cannot move (both diffs share the
+ * pre-image). Shared by the cache identity below and the sentry capture inventory, which both need to
+ * name a hunk WITHOUT using a line number an insertion would shift.
+ *
+ * TRIMMED because a diff read on Windows (core.autocrlf) ends every line with `\r`, which would
+ * otherwise ride INSIDE the anchor: a control character in the judge payload, a split dedup key
+ * (`fanOut()\r` vs `fanOut()`), and a cache identity that churns when a repo toggles autocrlf.
+ */
+export function hunkAnchor(headerLine) {
+    const func = headerLine.replace(HUNK_FUNC_RE, '').trim();
+    return func ? func : `:${headerLine.match(HUNK_OLD_START_RE)?.[1] ?? '?'}`;
+}
 function sentryAdditive(content) {
     return SENTRY_CAPTURE_RE.test(content) || SENTRY_IMPORT_RE.test(content);
 }
@@ -142,8 +172,7 @@ export function diffCacheIdentity(diff) {
                 // Anchor on git's function context; where git emits none (JSON, top-of-file hunks, .sh
                 // preambles), fall back to the OLD-side start line — stable across a purely-additive
                 // restage (the pre-image is shared), yet distinct across relocations within the file.
-                const func = line.replace(HUNK_FUNC_RE, '');
-                anchor = func ? `@ ${func}` : `@ :${line.match(HUNK_OLD_START_RE)?.[1] ?? '?'}`;
+                anchor = `@ ${hunkAnchor(line)}`;
                 continue;
             }
             if (line.startsWith('-') || (line.startsWith('+') && !sentryAdditive(line.slice(1).trim()))) {
