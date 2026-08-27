@@ -221,9 +221,7 @@ const folderStructure = createFolderStructure({
     // Empty registry => a regex that matches NOTHING, so every lib folder is
     // "unregistered". That is SAFE because the baseline generator grandfathers
     // every existing lib file at init time; new lib folders then need a domain.
-    lib_domain: RENDERER_LIB_DOMAINS.length
-      ? `^(${RENDERER_LIB_DOMAINS.join('|')})$`
-      : '^$',
+    lib_domain: RENDERER_LIB_DOMAINS.length ? `^(${RENDERER_LIB_DOMAINS.join('|')})$` : '^$',
     // Seals the frozen legacy dirs (matches nothing).
     frozen_dir_migrate_to_lib: '^$',
   },
@@ -245,7 +243,10 @@ const folderStructure = createFolderStructure({
       { name: 'wdyr.ts' },
       { name: 'index.html' },
       { name: 'login.html' },
-      { name: 'components', children: [{ ruleId: 'componentFolder' }, { ruleId: 'groupingFolder' }] },
+      {
+        name: 'components',
+        children: [{ ruleId: 'componentFolder' }, { ruleId: 'groupingFolder' }],
+      },
       { name: 'features', children: [{ ruleId: 'featureFolder' }] },
       {
         name: 'hooks',
