@@ -38,9 +38,28 @@ const PIN_RE = /#v(\d+\.\d+\.\d+)/; // the #vX.Y.Z tag pinned on the devkit dep 
 
 /** -1 / 0 / 1 comparing two x.y.z strings numerically. */
 export function cmpSemver(a: string, b: string): number {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+  const pa = a.split('.');
+  const pb = b.split('.');
+  for (let i = 0; i < 3; i++) {
+    // BigInt, not Number: a component above Number.MAX_SAFE_INTEGER rounds, so two DISTINCT
+    // versions can compare equal — and "equal" is the permissive answer everywhere this is used
+    // (an older runner would read as in-sync and be allowed to publish managed state). Unparseable
+    // input keeps the old arithmetic's unordered outcome rather than throwing at a call site that
+    // has never had to handle one.
+    let left: bigint;
+    let right: bigint;
+    try {
+      left = BigInt(pa[i] ?? '0');
+      right = BigInt(pb[i] ?? '0');
+    } catch {
+      // NaN, NOT 0 — the exact value the previous arithmetic produced. Not every caller is
+      // sign-only: `update` tests `cmpSemver(latest, current) <= 0`, where 0 means "already up to
+      // date" and silently skips the update, while NaN fails that comparison and proceeds.
+      return Number.NaN;
+    }
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  return 0;
 }
 
 /**

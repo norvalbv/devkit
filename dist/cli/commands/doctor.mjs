@@ -13,7 +13,8 @@ import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } fro
 import { checkGuardConfig, SEARCH_INDEX_CHECK } from '../lib/doctor/guard-config-checks.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
-import { checkLockPin, checkPin } from '../lib/doctor/pin-checks.mjs';
+import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
+import { ALLOW_SKEW_ENV, delegateToPinned, printSkewBanner, runnerSkew, skewCheck, } from '../lib/doctor/pin/runner-identity.mjs';
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mjs';
@@ -322,7 +323,13 @@ Usage:
            \`devkit update\` shipped a new hook shape). Exit 0 all-ok, 1 drift, 2 not-initialized.
 
 Also warns if the RUNNING devkit is older than this repo's init stamp or a hand-declared
-"minDevkit":"x.y.z" floor in .devkit/config.json.`,
+"minDevkit":"x.y.z" floor in .devkit/config.json.
+
+Runner skew: if the devkit you invoked is OLDER than the one this repo pins, doctor says so in every
+mode and refuses to rewrite managed state (.devkit/oxc) in the older shape. With --fix it re-execs
+the repo's own node_modules/.bin/devkit and returns that binary's exit code; when no pinned binary
+resolves it writes nothing and prints the install command instead. DEVKIT_ALLOW_SKEWED_FIX=1 forces
+the write anyway — it announces itself and is recorded in the managed manifest.`,
 };
 export default async function run(args, cwd) {
     const fix = args.includes('--fix');
@@ -335,11 +342,39 @@ export default async function run(args, cwd) {
         return 2;
     }
     const cfg = (readJson(join(cwd, '.devkit', 'config.json')) ?? {});
+    // Ahead of every mode branch: an older devkit rewrites managed state in ITS shape, so the skew
+    // has to be named — and handed off — in overlay and self-host too, not only package mode. The
+    // remedy is a hand-off rather than a refusal because a command devkit prescribes must be one
+    // devkit can perform (docs/decisions/overlay-self-heal.md, Target 2026-08-05).
+    const skew = runnerSkew(cwd, cfg);
+    const packageMode = !cfg.overlay && !cfg.selfHost;
+    // The opt-out only means anything if it reaches the WRITER, so a forced run must fall through to
+    // the normal repair rather than hand off — the pinned binary is not the one being forced.
+    if (skew.kind === 'older' && !process.env[ALLOW_SKEW_ENV]) {
+        // Package mode reports skew as a check row below, so the banner would say it twice; overlay and
+        // self-host have no row, and --fix leads with it because it precedes the hand-off.
+        if (fix || !packageMode)
+            printSkewBanner(skew);
+        if (fix) {
+            // The pinned binary prints its own full diagnosis, so ours would only duplicate it.
+            const delegated = delegateToPinned(skew, ['doctor', ...args], cwd);
+            if (delegated !== null)
+                return delegated;
+            console.log(`\n  ✗ No pinned devkit to hand off to — nothing written. Run: ${skew.remediation}`);
+            return 1;
+        }
+    }
+    // `|| 1` on skew: drift is drift in every mode, so a skewed overlay/self-host doctor must not
+    // report 0 where package mode reports 1 for the identical condition.
+    const skewed = skew.kind === 'older';
     if (cfg.overlay)
-        return runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth);
+        return (await runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth)) || +skewed;
     if (cfg.selfHost)
-        return runSelfHostDoctor(cwd, cfg, fix);
+        return (await runSelfHostDoctor(cwd, cfg, fix)) || +skewed;
     const { results, sel } = await collectResults(cwd, cfg, configResult);
+    const skewRow = skewCheck(skew);
+    if (skewRow)
+        results.unshift(skewRow);
     console.log('devkit doctor\n');
     const glyph = { OK: '✓', DRIFT: '⚠', MISSING: '✗' };
     for (const r of results) {

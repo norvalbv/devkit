@@ -30,6 +30,7 @@ import {
   structureCmdFor,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
+import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mts';
 import { detectStack } from '../lib/detect-stack.mts';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mts';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mts';
@@ -1037,6 +1038,11 @@ export const meta = {
 // fallow-ignore-next-line complexity
 export default async function run(args: string[], cwd: string) {
   const flags = initFlags.parseFlags(args);
+  // Refuse a skewed runner HERE, not at the managed-Oxc write near the end: by then the package.json
+  // patch, hook chain, baselines, skills/agents and the search-code wiring have all been rewritten
+  // by the older devkit, so the throw would leave a half-applied init whose remedy ("doctor --fix")
+  // is not the command that would finish it. A dry run writes nothing, so it stays open. (sc-2100)
+  if (!flags.dryRun) assertRunnerMayWrite(cwd);
   const detectedStack = flags.stack ?? detectStack(cwd);
   // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
   const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';

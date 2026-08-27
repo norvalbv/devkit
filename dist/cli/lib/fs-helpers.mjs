@@ -27,9 +27,11 @@ export function readJson(path) {
         throw new Error(`${path} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
     }
 }
+/** sha256 hex digest of in-memory content. The one place devkit hashes managed bytes. */
+export const digest = (content) => createHash('sha256').update(content).digest('hex');
 /** sha256 hex digest of a file's bytes. */
 export function sha256(path) {
-    return createHash('sha256').update(readFileSync(path)).digest('hex');
+    return digest(readFileSync(path));
 }
 /** True iff `path` exists AND is a symlink (does NOT follow it). False if absent. */
 function isSymlink(path) {

@@ -117,7 +117,7 @@ describe('ship managed capability refresh', () => {
       writeFileSync(join(dir, '.devkit/oxc/oxlint.base.json'), '{"stale":true}\n');
       writeFileSync(join(dir, '.oxlintrc.json'), EXTENDING_OXLINTRC);
     });
-    expect(oxcBaseCapabilityIssue(wt)).toBe('managed Oxlint base manifest digest is stale');
+    expect(oxcBaseCapabilityIssue(wt)).toMatch(/^managed Oxlint base manifest digest is stale/);
 
     writeFileSync(join(wt, 'note.txt'), 'shipped\n');
     git(['add', '--', 'note.txt']);

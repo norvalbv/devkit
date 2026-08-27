@@ -23,10 +23,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cmpSemver, DEP, latestTag, lsRemote, pinnedVersion } from '../../commands/update.mts';
-import { detectGitRoot } from '../detect-git-root.mts';
-import { readJson } from '../fs-helpers.mts';
-import { type CheckResult, check } from './check-result.mts';
+import { cmpSemver, DEP, latestTag, lsRemote, pinnedVersion } from '../../../commands/update.mts';
+import { detectGitRoot } from '../../detect-git-root.mts';
+import { readJson } from '../../fs-helpers.mts';
+import { type CheckResult, check } from '../check-result.mts';
 
 // A devkit dep ref counts as "pinned" when it ends in a #v<digit> tag.
 const PINNED_TAG = /#v\d/;

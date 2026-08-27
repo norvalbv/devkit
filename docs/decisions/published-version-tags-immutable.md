@@ -17,6 +17,6 @@ created: 2026-08-04
 **Rejected:** (a) Treat this as a consumer-side lockfile refresh and close it — LOSES ON RECURRENCE: it fixes one lockfile and leaves the next dead pin just as undiagnosable. (b) Skip the check whenever DEVKIT_REPO is set — LOSES ON COVERAGE: DEVKIT_REPO is documented as an ssh host alias for the SAME repo, and the ssh form is exactly the one that recorded the 40-char SHA that broke here, so the skip would blind the affected cohort; the check derives its remote from the consumer's own package.json ref instead. (c) Query ls-remote --tags only — LOSES ON PRECISION: a lockfile recording a branch commit from before a re-pin is healthy, so --tags alone false-DRIFTs it; the check reads --tags --heads and skips when the lockfile's recorded request disagrees with package.json. (d) Publish devkit to a registry and drop git-tag pins entirely — the real cure for the whole class, but a large change across release, init, update, doctor and every consumer; not taken now.
 **Anchored-bet:** [BET]
 **Revisit-when:** devkit publishes to a package registry instead of git tags (which retires the whole failure mode), or bun stops recording a resolved object per git dep
-**Scope:** cli/commands/release.mts,cli/lib/doctor/pin-checks.mts,cli/commands/update.mts
+**Scope:** cli/commands/release.mts,cli/lib/doctor/pin/pin-checks.mts,cli/commands/update.mts
 **Category:** self-host-release
 **Source:** manual

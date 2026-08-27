@@ -26,6 +26,20 @@ describe('cmpSemver', () => {
     expect(cmpSemver('1.0.0', '0.9.9')).toBeGreaterThan(0);
     expect(cmpSemver('0.9.1', '0.9.1')).toBe(0);
   });
+
+  // Number rounds both of these to 9007199254740992, so a float compare calls two distinct versions
+  // equal — the permissive answer, which would let an older runner publish managed state (sc-2100).
+  it('orders components beyond Number.MAX_SAFE_INTEGER exactly', () => {
+    expect(cmpSemver('1.9007199254740992.0', '1.9007199254740993.0')).toBeLessThan(0);
+    expect(cmpSemver('9007199254740993.0.0', '9007199254740992.0.0')).toBeGreaterThan(0);
+  });
+
+  // Unordered must stay NaN, not 0: `update` tests `cmpSemver(latest, current) <= 0` to mean
+  // "already up to date", so a 0 here would silently skip a real update instead of proceeding.
+  it('treats an unparseable component as unordered rather than throwing', () => {
+    expect(cmpSemver('main', '1.0.0')).toBeNaN();
+    expect(cmpSemver('1.0.0', 'main')).toBeNaN();
+  });
 });
 
 describe('latestTag', () => {
