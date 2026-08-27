@@ -5,7 +5,7 @@
  * returns first, or an option that is accepted but never forwarded.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import doctorRun from '../commands/doctor.mts';
@@ -48,13 +48,25 @@ function skewedRepo(cfg: FixtureConfig = {}, { bin = false } = {}): string {
   );
   const nm = join(root, 'node_modules', '@norvalbv', 'devkit');
   mkdirSync(nm, { recursive: true });
-  writeFileSync(join(nm, 'package.json'), JSON.stringify({ version: NEWER }));
+  writeFileSync(
+    join(nm, 'package.json'),
+    JSON.stringify({ version: NEWER, bin: { devkit: './dist/cli/index.mjs' } }),
+  );
   if (bin) {
+    // The package's own JS entrypoint — what delegation actually spawns, via process.execPath.
+    // Real code, not a mock: proves the hand-off execs on this platform without a shell.
+    mkdirSync(join(nm, 'dist', 'cli'), { recursive: true });
+    writeFileSync(
+      join(nm, 'dist', 'cli', 'index.mjs'),
+      `import {writeFileSync} from 'node:fs';\n` +
+        `writeFileSync(${JSON.stringify(join(root, 'delegated.txt'))}, process.argv.slice(2).join(' '));\n` +
+        `process.exit(7);\n`,
+    );
+    // The POSIX shim beside it: named in output, never spawned.
     mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
-    const p = join(root, 'node_modules', '.bin', 'devkit');
-    // A real script, not a mock: proves the hand-off actually execs something on this platform.
-    writeFileSync(p, `#!/bin/sh\necho "$@" > "${join(root, 'delegated.txt')}"\nexit 7\n`);
-    chmodSync(p, 0o755);
+    const shim = join(root, 'node_modules', '.bin', 'devkit');
+    writeFileSync(shim, '#!/bin/sh\n');
+    chmodSync(shim, 0o755);
   }
   return root;
 }
@@ -186,19 +198,32 @@ describe('a hand-off that cannot spawn falls back to the refusal', () => {
   // A non-executable bin is a real shape: a partially-restored node_modules, a bad umask, or
   // Windows (where bun writes devkit.cmd and the extensionless `devkit` is a POSIX shell script).
   // "We could not hand off" is NOT "the child ran and failed" — the user must still get the remedy.
-  it('a non-executable pinned bin refuses with the remediation, not a bare exit code', async () => {
+  it('a missing entrypoint refuses with the remediation, not a bare exit code', async () => {
     const root = skewedRepo({}, { bin: true });
-    chmodSync(join(root, 'node_modules', '.bin', 'devkit'), 0o644);
+    rmSync(join(root, 'node_modules', '@norvalbv', 'devkit', 'dist'), { recursive: true });
     expect(await doctorRun(['--fix'], root)).toBe(1);
     expect(printed()).toContain('nothing written');
     expect(existsSync(join(root, MANIFEST_REL))).toBe(false);
   });
 
-  it('a pinned bin that is a directory does not masquerade as a successful hand-off', async () => {
-    const root = skewedRepo();
-    mkdirSync(join(root, 'node_modules', '.bin', 'devkit'), { recursive: true });
+  it('an entrypoint that is a directory does not masquerade as a successful hand-off', async () => {
+    const root = skewedRepo({}, { bin: true });
+    const entry = join(root, 'node_modules', '@norvalbv', 'devkit', 'dist', 'cli', 'index.mjs');
+    rmSync(entry);
+    mkdirSync(entry, { recursive: true });
     expect(await doctorRun(['--fix'], root)).toBe(1);
     expect(printed()).toContain('nothing written');
+  });
+
+  // On Windows bun writes devkit.cmd beside an extensionless POSIX script Node cannot spawn, and
+  // accessSync(X_OK) is a no-op there — so an X_OK check would call the unusable one runnable and
+  // the hand-off would die at spawn. Delegation targets the package's JS entry instead, so a shim
+  // that is unusable (or absent entirely) changes nothing.
+  it('delegates without the .bin shim being runnable at all', async () => {
+    const root = skewedRepo({}, { bin: true });
+    rmSync(join(root, 'node_modules', '.bin'), { recursive: true });
+    expect(await doctorRun(['--fix'], root)).toBe(7);
+    expect(readFileSync(join(root, 'delegated.txt'), 'utf8').trim()).toBe('doctor --fix');
   });
 });
 

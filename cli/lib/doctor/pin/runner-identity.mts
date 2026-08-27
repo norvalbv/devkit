@@ -22,7 +22,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { cmpSemver, DEP } from '../../../commands/update.mts';
 import { detectGitRoot } from '../../detect-git-root.mts';
@@ -34,7 +34,13 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 // Anchored at the end: only a bare release tag is an orderable pin — see `declaredPin`.
 const DECLARED_TAG = /#v(\d+\.\d+\.\d+)$/;
 const BIN_REL = join('node_modules', '.bin', 'devkit');
-const INSTALLED_PKG_REL = join('node_modules', '@norvalbv', 'devkit', 'package.json');
+const INSTALLED_DIR_REL = join('node_modules', '@norvalbv', 'devkit');
+const INSTALLED_PKG_REL = join(INSTALLED_DIR_REL, 'package.json');
+const DEFAULT_ENTRY = join('dist', 'cli', 'index.mjs');
+// Windows writes devkit.cmd BESIDE the extensionless POSIX script, so both exist and only the .cmd
+// is runnable there — order by platform rather than by existence, or the printed remedy is a
+// command the reader's own shell cannot execute. POSIX never wants the .cmd.
+const BIN_DISPLAY_NAMES = process.platform === 'win32' ? ['devkit.cmd', 'devkit'] : ['devkit'];
 
 /** Set on a delegated child so it repairs instead of handing off again. */
 export const DELEGATED_ENV = 'DEVKIT_SKEW_DELEGATED';
@@ -43,14 +49,18 @@ export const ALLOW_SKEW_ENV = 'DEVKIT_ALLOW_SKEWED_FIX';
 
 export type SkewKind = 'none' | 'older' | 'newer' | 'unknown';
 
-/** The one field runner identity reads out of any package manifest. */
+/** The fields runner identity reads out of a package manifest. */
 interface VersionedPackage {
   version?: string;
+  bin?: { devkit?: string };
 }
 
-/** An installed devkit and the binary beside it — always read from the SAME root. */
+/** An installed devkit, its spawnable entrypoint, and the bin path to SHOW — one root, always. */
 interface InstalledDevkit {
   version?: string;
+  /** The package's own JS entrypoint, spawned via process.execPath. */
+  entry?: string;
+  /** node_modules/.bin path, for the printed remedy only — never spawned. */
   bin?: string;
 }
 
@@ -74,7 +84,9 @@ export interface RunnerSkew {
   kind: SkewKind;
   running?: string;
   pinned?: string;
-  /** Absolute path to the repo's OWN devkit bin, when one exists to hand off to. */
+  /** The repo's OWN devkit entrypoint, spawned via process.execPath when a hand-off is possible. */
+  pinnedEntry?: string;
+  /** The `.bin` path named in output. Display only — see `entrypoint`. */
   pinnedBin?: string;
   /** What to tell the user to run. Never a bare `bunx devkit` — see the module header. */
   remediation: string;
@@ -128,13 +140,14 @@ function runningVersion(): string | undefined {
 function installedAt(cwd: string): InstalledDevkit {
   let versionOnly: InstalledDevkit = {};
   for (const root of roots(cwd)) {
+    const pkgDir = join(root, INSTALLED_DIR_REL);
     const version = semver(readJson<VersionedPackage>(join(root, INSTALLED_PKG_REL))?.version);
     if (!version) continue;
-    const bin = executable(join(root, BIN_REL));
-    // A root with BOTH wins outright. A manifest with no runnable bin is only a fallback — a
-    // partial package-local install must not mask a complete one further up, or a monorepo
-    // `--fix` refuses while a perfectly good hand-off target sits at the git root.
-    if (bin) return { version, bin };
+    const entry = entrypoint(pkgDir);
+    // A root with a SPAWNABLE entrypoint wins outright. A manifest with no entry is only a
+    // fallback — a partial package-local install must not mask a complete one further up, or a
+    // monorepo `--fix` refuses while a perfectly good hand-off target sits at the git root.
+    if (entry) return { version, entry, bin: displayBin(root) };
     versionOnly = versionOnly.version ? versionOnly : { version };
   }
   return versionOnly;
@@ -154,20 +167,34 @@ function declaredPin(cwd: string): string | undefined {
   return undefined;
 }
 
-/**
- * Only a bin we could actually hand off to counts. Presence is not enough: a partially-restored
- * node_modules, a bad umask, or Windows (where bun writes devkit.cmd beside a POSIX `devkit`
- * script) all leave a path that exists and cannot be executed. Resolving those to `undefined`
- * routes the caller to the install remediation instead of a hand-off that dies on spawn.
- */
-function executable(bin: string): string | undefined {
+function isFile(path: string): boolean {
   try {
-    if (!statSync(bin).isFile()) return undefined;
-    accessSync(bin, constants.X_OK);
-    return bin;
+    return statSync(path).isFile();
   } catch {
-    return undefined; // absent, not a file, or not executable
+    return false; // absent, or not a file
   }
+}
+
+/**
+ * The pinned package's own JS entrypoint — NOT `node_modules/.bin/devkit`.
+ *
+ * The bin directory is a platform shim: on POSIX it is a shell script, on Windows bun writes
+ * `devkit.cmd` beside an extensionless script Node cannot spawn at all (and `accessSync(X_OK)` is
+ * a no-op there, so the unusable one still looks executable). Spawning a `.cmd` needs a shell,
+ * which would put user-supplied argv through shell interpretation in a tool that runs inside repos
+ * it does not own. Resolving the package's declared `bin.devkit` and running it with
+ * `process.execPath` sidesteps the shim entirely and behaves identically on every platform — the
+ * same thing `applyFix` already does for its own re-exec.
+ */
+function entrypoint(pkgDir: string): string | undefined {
+  const declared = readJson<VersionedPackage>(join(pkgDir, 'package.json'))?.bin?.devkit;
+  const entry = join(pkgDir, declared ?? DEFAULT_ENTRY);
+  return isFile(entry) ? entry : undefined;
+}
+
+/** The `.bin` path to PRINT. Display only: the remedy a human types, never what devkit spawns. */
+function displayBin(root: string): string | undefined {
+  return BIN_DISPLAY_NAMES.map((name) => join(root, 'node_modules', '.bin', name)).find(isFile);
 }
 
 function remediationFor(
@@ -209,13 +236,16 @@ export function runnerSkew(cwd: string, cfg: RunnerConfig = readConfig(cwd)): Ru
     const pinned = overlay ? overlayPin(cfg.devkitRef) : higher(installed, declared);
     // Only offer a hand-off when the installed binary actually satisfies what package.json asks
     // for; otherwise it is the same stale code and the honest remedy is an install, not a re-exec.
-    const pinnedBin = overlay || pinned !== installed ? undefined : install.bin;
+    const stale = overlay || pinned !== installed;
+    const pinnedEntry = stale ? undefined : install.entry;
+    const pinnedBin = stale ? undefined : install.bin;
     const remediation = remediationFor(overlay, pinned, pinnedBin);
-    if (!running || !pinned) return { kind: 'unknown', running, pinned, pinnedBin, remediation };
+    if (!running || !pinned)
+      return { kind: 'unknown', running, pinned, pinnedEntry, pinnedBin, remediation };
 
     const delta = cmpSemver(running, pinned);
     const kind: SkewKind = delta < 0 ? 'older' : delta > 0 ? 'newer' : 'none';
-    return { kind, running, pinned, pinnedBin, remediation };
+    return { kind, running, pinned, pinnedEntry, pinnedBin, remediation };
   } catch {
     return { kind: 'unknown', remediation: '' };
   }
@@ -253,10 +283,14 @@ export function delegateToPinned(
   env: NodeJS.ProcessEnv = process.env,
   exec: typeof execFileSync = execFileSync,
 ): number | null {
-  if (!skew.pinnedBin || env[DELEGATED_ENV]) return null;
-  console.log(`    Delegating to the pinned devkit: ${skew.pinnedBin}\n`);
+  if (!skew.pinnedEntry || env[DELEGATED_ENV]) return null;
+  console.log(`    Delegating to the pinned devkit: ${skew.pinnedBin ?? skew.pinnedEntry}\n`);
   try {
-    exec(skew.pinnedBin, args, { cwd, stdio: 'inherit', env: { ...env, [DELEGATED_ENV]: '1' } });
+    exec(process.execPath, [skew.pinnedEntry, ...args], {
+      cwd,
+      stdio: 'inherit',
+      env: { ...env, [DELEGATED_ENV]: '1' },
+    });
     return 0;
   } catch (error) {
     // SAFETY: execFileSync's own throw is the only one reachable here, and its shape distinguishes

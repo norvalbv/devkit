@@ -21,7 +21,7 @@
  * devkit executes inside repos it does not own, so it must not tell them to run a stranger's code.
  */
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { cmpSemver, DEP } from '../../../commands/update.mjs';
 import { detectGitRoot } from '../../detect-git-root.mjs';
@@ -32,7 +32,13 @@ const SEMVER = /^\d+\.\d+\.\d+$/;
 // Anchored at the end: only a bare release tag is an orderable pin — see `declaredPin`.
 const DECLARED_TAG = /#v(\d+\.\d+\.\d+)$/;
 const BIN_REL = join('node_modules', '.bin', 'devkit');
-const INSTALLED_PKG_REL = join('node_modules', '@norvalbv', 'devkit', 'package.json');
+const INSTALLED_DIR_REL = join('node_modules', '@norvalbv', 'devkit');
+const INSTALLED_PKG_REL = join(INSTALLED_DIR_REL, 'package.json');
+const DEFAULT_ENTRY = join('dist', 'cli', 'index.mjs');
+// Windows writes devkit.cmd BESIDE the extensionless POSIX script, so both exist and only the .cmd
+// is runnable there — order by platform rather than by existence, or the printed remedy is a
+// command the reader's own shell cannot execute. POSIX never wants the .cmd.
+const BIN_DISPLAY_NAMES = process.platform === 'win32' ? ['devkit.cmd', 'devkit'] : ['devkit'];
 /** Set on a delegated child so it repairs instead of handing off again. */
 export const DELEGATED_ENV = 'DEVKIT_SKEW_DELEGATED';
 /** Visible opt-out (docs/decisions/gate-opt-out-is-visible-and-detectable.md). */
@@ -81,15 +87,16 @@ function runningVersion() {
 function installedAt(cwd) {
     let versionOnly = {};
     for (const root of roots(cwd)) {
+        const pkgDir = join(root, INSTALLED_DIR_REL);
         const version = semver(readJson(join(root, INSTALLED_PKG_REL))?.version);
         if (!version)
             continue;
-        const bin = executable(join(root, BIN_REL));
-        // A root with BOTH wins outright. A manifest with no runnable bin is only a fallback — a
-        // partial package-local install must not mask a complete one further up, or a monorepo
-        // `--fix` refuses while a perfectly good hand-off target sits at the git root.
-        if (bin)
-            return { version, bin };
+        const entry = entrypoint(pkgDir);
+        // A root with a SPAWNABLE entrypoint wins outright. A manifest with no entry is only a
+        // fallback — a partial package-local install must not mask a complete one further up, or a
+        // monorepo `--fix` refuses while a perfectly good hand-off target sits at the git root.
+        if (entry)
+            return { version, entry, bin: displayBin(root) };
         versionOnly = versionOnly.version ? versionOnly : { version };
     }
     return versionOnly;
@@ -108,22 +115,33 @@ function declaredPin(cwd) {
     }
     return undefined;
 }
-/**
- * Only a bin we could actually hand off to counts. Presence is not enough: a partially-restored
- * node_modules, a bad umask, or Windows (where bun writes devkit.cmd beside a POSIX `devkit`
- * script) all leave a path that exists and cannot be executed. Resolving those to `undefined`
- * routes the caller to the install remediation instead of a hand-off that dies on spawn.
- */
-function executable(bin) {
+function isFile(path) {
     try {
-        if (!statSync(bin).isFile())
-            return undefined;
-        accessSync(bin, constants.X_OK);
-        return bin;
+        return statSync(path).isFile();
     }
     catch {
-        return undefined; // absent, not a file, or not executable
+        return false; // absent, or not a file
     }
+}
+/**
+ * The pinned package's own JS entrypoint — NOT `node_modules/.bin/devkit`.
+ *
+ * The bin directory is a platform shim: on POSIX it is a shell script, on Windows bun writes
+ * `devkit.cmd` beside an extensionless script Node cannot spawn at all (and `accessSync(X_OK)` is
+ * a no-op there, so the unusable one still looks executable). Spawning a `.cmd` needs a shell,
+ * which would put user-supplied argv through shell interpretation in a tool that runs inside repos
+ * it does not own. Resolving the package's declared `bin.devkit` and running it with
+ * `process.execPath` sidesteps the shim entirely and behaves identically on every platform — the
+ * same thing `applyFix` already does for its own re-exec.
+ */
+function entrypoint(pkgDir) {
+    const declared = readJson(join(pkgDir, 'package.json'))?.bin?.devkit;
+    const entry = join(pkgDir, declared ?? DEFAULT_ENTRY);
+    return isFile(entry) ? entry : undefined;
+}
+/** The `.bin` path to PRINT. Display only: the remedy a human types, never what devkit spawns. */
+function displayBin(root) {
+    return BIN_DISPLAY_NAMES.map((name) => join(root, 'node_modules', '.bin', name)).find(isFile);
 }
 function remediationFor(overlay, pinned, bin) {
     if (bin)
@@ -160,13 +178,15 @@ export function runnerSkew(cwd, cfg = readConfig(cwd)) {
         const pinned = overlay ? overlayPin(cfg.devkitRef) : higher(installed, declared);
         // Only offer a hand-off when the installed binary actually satisfies what package.json asks
         // for; otherwise it is the same stale code and the honest remedy is an install, not a re-exec.
-        const pinnedBin = overlay || pinned !== installed ? undefined : install.bin;
+        const stale = overlay || pinned !== installed;
+        const pinnedEntry = stale ? undefined : install.entry;
+        const pinnedBin = stale ? undefined : install.bin;
         const remediation = remediationFor(overlay, pinned, pinnedBin);
         if (!running || !pinned)
-            return { kind: 'unknown', running, pinned, pinnedBin, remediation };
+            return { kind: 'unknown', running, pinned, pinnedEntry, pinnedBin, remediation };
         const delta = cmpSemver(running, pinned);
         const kind = delta < 0 ? 'older' : delta > 0 ? 'newer' : 'none';
-        return { kind, running, pinned, pinnedBin, remediation };
+        return { kind, running, pinned, pinnedEntry, pinnedBin, remediation };
     }
     catch {
         return { kind: 'unknown', remediation: '' };
@@ -188,11 +208,15 @@ export function printSkewBanner(skew) {
  * test can supply a real stand-in rather than mocking the child_process module.
  */
 export function delegateToPinned(skew, args, cwd, env = process.env, exec = execFileSync) {
-    if (!skew.pinnedBin || env[DELEGATED_ENV])
+    if (!skew.pinnedEntry || env[DELEGATED_ENV])
         return null;
-    console.log(`    Delegating to the pinned devkit: ${skew.pinnedBin}\n`);
+    console.log(`    Delegating to the pinned devkit: ${skew.pinnedBin ?? skew.pinnedEntry}\n`);
     try {
-        exec(skew.pinnedBin, args, { cwd, stdio: 'inherit', env: { ...env, [DELEGATED_ENV]: '1' } });
+        exec(process.execPath, [skew.pinnedEntry, ...args], {
+            cwd,
+            stdio: 'inherit',
+            env: { ...env, [DELEGATED_ENV]: '1' },
+        });
         return 0;
     }
     catch (error) {

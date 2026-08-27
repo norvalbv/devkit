@@ -62,7 +62,15 @@ function repo(pin: string, { installed = true, bin = installed, at = '' } = {}):
   if (installed) {
     const nm = join(root, 'node_modules', '@norvalbv', 'devkit');
     mkdirSync(nm, { recursive: true });
-    writeFileSync(join(nm, 'package.json'), JSON.stringify({ version: pin }));
+    writeFileSync(
+      join(nm, 'package.json'),
+      JSON.stringify({ version: pin, bin: { devkit: './dist/cli/index.mjs' } }),
+    );
+    if (bin) {
+      // The spawnable entrypoint. The .bin shim below is display-only — delegation never runs it.
+      mkdirSync(join(nm, 'dist', 'cli'), { recursive: true });
+      writeFileSync(join(nm, 'dist', 'cli', 'index.mjs'), 'process.exit(0);\n');
+    }
   }
   if (bin) {
     mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
@@ -76,11 +84,13 @@ function repo(pin: string, { installed = true, bin = installed, at = '' } = {}):
 afterEach(cleanup);
 
 describe('runnerSkew', () => {
-  it('older: names both versions and resolves the pinned bin to hand off to', () => {
+  it('older: names both versions and resolves a hand-off target', () => {
     const s = runnerSkew(repo(NEWER));
     expect(s.kind).toBe('older');
     expect(s.running).toBe(RUNNING);
     expect(s.pinned).toBe(NEWER);
+    // Spawned: the package's own JS entry. Printed: the .bin path a human would type.
+    expect(s.pinnedEntry).toMatch(/@norvalbv\/devkit\/dist\/cli\/index\.mjs$/);
     expect(s.pinnedBin).toMatch(/node_modules\/\.bin\/devkit$/);
   });
 
@@ -137,7 +147,8 @@ describe('remediation strings', () => {
 
   it('names the resolved binary by absolute path when one exists', () => {
     const s = runnerSkew(repo(NEWER));
-    expect(s.remediation).toContain(s.pinnedBin);
+    expect(s.pinnedBin).toBeDefined(); // guards the ?? '' below from passing vacuously
+    expect(s.remediation).toContain(s.pinnedBin ?? '');
     expect(skewCheck(s)?.remediation).toBe(s.remediation);
   });
 
@@ -173,7 +184,7 @@ describe('assertRunnerMayWrite', () => {
 });
 
 describe('delegateToPinned', () => {
-  it('re-execs the pinned binary and returns its exit code', () => {
+  it('re-execs the pinned entrypoint under this node and returns its exit code', () => {
     const skew = runnerSkew(repo(NEWER));
     const calls: Array<[string, string[], ExecOpts]> = [];
     const code = delegateToPinned(
@@ -185,8 +196,9 @@ describe('delegateToPinned', () => {
     );
     expect(code).toBe(0);
     const [bin, args, opts] = calls[0];
-    expect(bin).toBe(skew.pinnedBin);
-    expect(args).toEqual(['doctor', '--fix']);
+    // process.execPath, never a shell: a .cmd hand-off would put user argv through a shell.
+    expect(bin).toBe(process.execPath);
+    expect(args).toEqual([skew.pinnedEntry, 'doctor', '--fix']);
     expect(opts.env?.[DELEGATED_ENV]).toBe('1'); // recursion marker
   });
 
@@ -339,7 +351,7 @@ describe('opt-out and delegation markers are separate powers', () => {
 describe('resolution does not strand a usable hand-off', () => {
   // A package-local manifest with no runnable bin must not mask a COMPLETE install at the git root:
   // returning the partial one refuses a monorepo --fix while a valid hand-off target sits up-tree.
-  it('prefers the root that has both a version and an executable', () => {
+  it('prefers the root that has both a version and a spawnable entrypoint', () => {
     const root = mkTmp('skew-partial-');
     const pkg = join(root, 'packages', 'app');
     mkdirSync(join(pkg, '.devkit'), { recursive: true });
@@ -353,18 +365,19 @@ describe('resolution does not strand a usable hand-off', () => {
     const pkgNm = join(pkg, 'node_modules', '@norvalbv', 'devkit');
     mkdirSync(pkgNm, { recursive: true });
     writeFileSync(join(pkgNm, 'package.json'), JSON.stringify({ version: NEWER }));
-    // Complete install at the git root.
+    // Complete install at the git root: manifest AND a spawnable entrypoint.
     const rootNm = join(root, 'node_modules', '@norvalbv', 'devkit');
-    mkdirSync(rootNm, { recursive: true });
-    writeFileSync(join(rootNm, 'package.json'), JSON.stringify({ version: NEWER }));
-    mkdirSync(join(root, 'node_modules', '.bin'), { recursive: true });
-    const bin = join(root, 'node_modules', '.bin', 'devkit');
-    writeFileSync(bin, '#!/bin/sh\n');
-    chmodSync(bin, 0o755);
+    mkdirSync(join(rootNm, 'dist', 'cli'), { recursive: true });
+    writeFileSync(
+      join(rootNm, 'package.json'),
+      JSON.stringify({ version: NEWER, bin: { devkit: './dist/cli/index.mjs' } }),
+    );
+    const entry = join(rootNm, 'dist', 'cli', 'index.mjs');
+    writeFileSync(entry, 'process.exit(0);\n');
 
     const s = runnerSkew(pkg);
     expect(s.kind).toBe('older');
-    expect(s.pinnedBin).toBe(bin); // hand-off available, not a refusal
+    expect(s.pinnedEntry).toBe(entry); // hand-off available, not a refusal
   });
 });
 
