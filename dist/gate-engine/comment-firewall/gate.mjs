@@ -43,11 +43,15 @@ function evidenceFor(finding, rationales) {
     return evidence?.rationale.trim() ? evidence : undefined;
 }
 /** Recompute the evidence just before publishing PASS, closing the stage-while-judge-runs race. */
-function allRemainCurrent(cwd, pending, deps, model) {
+function allRemainCurrent(cwd, expected, deps, model) {
     const refreshed = deps.detect(cwd);
+    if (refreshed.unsupported.length > 0 || refreshed.findings.length !== expected.length)
+        return false;
     const currentById = new Map(refreshed.findings.map((finding) => [finding.id, finding]));
+    if (currentById.size !== expected.length)
+        return false;
     const rationales = deps.loadRationales(cwd);
-    return pending.every((item) => {
+    return expected.every((item) => {
         const current = currentById.get(item.finding.id);
         if (!current)
             return false;
@@ -87,6 +91,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
     // edit must never persist a verdict from model B under model A's receipt key.
     const model = deps.model(cwd);
     const missing = [];
+    const snapshot = [];
     const pending = [];
     for (const finding of detection.findings) {
         const rationale = evidenceFor(finding, rationales);
@@ -95,8 +100,10 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
             continue;
         }
         const key = receiptKey(finding, rationale, model);
+        const item = { finding, rationale, key };
+        snapshot.push(item);
         if (!passReceipt(receipts[key]))
-            pending.push({ finding, rationale, key });
+            pending.push(item);
     }
     if (missing.length > 0) {
         printMissing(missing);
@@ -117,7 +124,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         return deps.strict() ? 3 : 2;
     }
     try {
-        if (!allRemainCurrent(cwd, pending, deps, model)) {
+        if (!allRemainCurrent(cwd, snapshot, deps, model)) {
             console.error('guard-comments: local evidence changed during review; stale batch discarded.');
             return 1;
         }
