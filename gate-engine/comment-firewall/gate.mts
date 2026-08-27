@@ -29,7 +29,7 @@ interface FirewallDeps {
   strict: () => boolean;
 }
 
-interface PendingReview {
+interface FindingSnapshot {
   finding: CommentFinding;
   rationale: CommentRationale;
   key: string;
@@ -98,14 +98,17 @@ function evidenceFor(
 /** Recompute the evidence just before publishing PASS, closing the stage-while-judge-runs race. */
 function allRemainCurrent(
   cwd: string,
-  pending: PendingReview[],
+  expected: FindingSnapshot[],
   deps: FirewallDeps,
   model: string,
 ): boolean {
   const refreshed = deps.detect(cwd);
+  if (refreshed.unsupported.length > 0 || refreshed.findings.length !== expected.length)
+    return false;
   const currentById = new Map(refreshed.findings.map((finding) => [finding.id, finding]));
+  if (currentById.size !== expected.length) return false;
   const rationales = deps.loadRationales(cwd);
-  return pending.every((item) => {
+  return expected.every((item) => {
     const current = currentById.get(item.finding.id);
     if (!current) return false;
     const rationale = evidenceFor(current, rationales);
@@ -151,7 +154,8 @@ export function runCommentFirewall(
   // edit must never persist a verdict from model B under model A's receipt key.
   const model = deps.model(cwd);
   const missing: CommentFinding[] = [];
-  const pending: PendingReview[] = [];
+  const snapshot: FindingSnapshot[] = [];
+  const pending: FindingSnapshot[] = [];
   for (const finding of detection.findings) {
     const rationale = evidenceFor(finding, rationales);
     if (!rationale) {
@@ -159,7 +163,9 @@ export function runCommentFirewall(
       continue;
     }
     const key = receiptKey(finding, rationale, model);
-    if (!passReceipt(receipts[key])) pending.push({ finding, rationale, key });
+    const item = { finding, rationale, key };
+    snapshot.push(item);
+    if (!passReceipt(receipts[key])) pending.push(item);
   }
   if (missing.length > 0) {
     printMissing(missing);
@@ -188,7 +194,7 @@ export function runCommentFirewall(
   }
 
   try {
-    if (!allRemainCurrent(cwd, pending, deps, model)) {
+    if (!allRemainCurrent(cwd, snapshot, deps, model)) {
       console.error('guard-comments: local evidence changed during review; stale batch discarded.');
       return 1;
     }
