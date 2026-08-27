@@ -6,7 +6,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { diffCacheIdentity, filePathOf, focusHunks, splitDiffByFile } from '../diff-focus.mts';
+import {
+  diffCacheIdentity,
+  filePathOf,
+  hunkAnchor,
+  renderSelection,
+  selectHunks,
+  splitDiffByFile,
+} from '../diff-focus.mts';
 
 const git = (path: string, hunk: string) =>
   `diff --git a/${path} b/${path}\nindex 111..222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,3 @@\n${hunk}`;
@@ -45,8 +52,12 @@ describe('filePathOf', () => {
   });
 });
 
-describe('focusHunks', () => {
+describe('selectHunks + renderSelection', () => {
   const rel = (h: string) => /\bcatch\b|capture/.test(h);
+  // The two compose into the evidence text every diff-fed judge reads; asserting on the rendering
+  // keeps these cases readable while the packer (sentry/evidence.mts) consumes the structure.
+  const focusHunks = (diff: string, isRelevant: (h: string) => boolean, omitNoun?: string) =>
+    renderSelection(selectHunks(diff, isRelevant), omitNoun);
 
   it('keeps a relevant hunk, drops an irrelevant one to header + omission', () => {
     const kept = focusHunks(git('src/a.ts', '+  catch (e) {}'), rel);
@@ -67,10 +78,42 @@ describe('focusHunks', () => {
     expect(out).toContain('src/lib/catch-utils.ts'); // listed in the header, hunk not kept
   });
 
+  it('reports the structure a packer needs: kept hunks per file + the rejected count', () => {
+    const diff = `${git('src/a.ts', '+  catch (e) {}')}\n${git('src/ui.tsx', '+  <span />')}`;
+    const sel = selectHunks(diff, rel);
+    expect(sel.files).toEqual(['src/a.ts', 'src/ui.tsx']);
+    expect(sel.kept).toHaveLength(1);
+    expect(sel.kept[0].path).toBe('src/a.ts');
+    expect(sel.kept[0].hunks).toHaveLength(1);
+    expect(sel.omitted).toBe(1);
+  });
+
+  it('extra notes render bracketed, between the omission line and the hunks', () => {
+    const out = focusHunks(git('src/a.ts', '+  catch (e) {}'), rel);
+    const withNote = renderSelection(
+      selectHunks(git('src/a.ts', '+  catch (e) {}'), rel),
+      'non-error',
+      ['2 further hunk(s) dropped by the evidence cap'],
+    );
+    expect(withNote).toContain('[2 further hunk(s) dropped by the evidence cap]');
+    expect(withNote.indexOf('dropped by the evidence cap')).toBeLessThan(withNote.indexOf('catch'));
+    expect(out).not.toContain('dropped by the evidence cap');
+  });
+
   it('omitNoun labels the omission line', () => {
     expect(focusHunks(git('src/a.ts', '+  noop();'), rel, 'non-error')).toContain(
       'non-error hunk(s) omitted',
     );
+  });
+});
+
+describe('hunkAnchor', () => {
+  it.each([
+    ['@@ -1,2 +1,3 @@ function run() {', 'function run() {'], // git's function context
+    ['@@ -12,2 +12,3 @@', ':12'], // no context (JSON, top-of-file) → old-side start line
+    ['@@ bogus', '@@ bogus'], // unparseable → the raw line stands in as the anchor, never a crash
+  ])('anchor of %j → %j', (header, expected) => {
+    expect(hunkAnchor(header)).toBe(expected);
   });
 });
 

@@ -5,7 +5,15 @@
 // covered in check-sentry.test.mts).
 
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,5 +94,120 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
 
   it('a SKIP verdict passes (exit 0) under the hard default', () => {
     expect(gate({ PATH: stubPath('echo SKIP\n') }, 'fix(x): y').status).toBe(0);
+  });
+});
+
+describe('diff tier, spawned against a REAL staged diff (sc-1984: authority follows the evidence)', () => {
+  const dirs: string[] = [];
+  const tmp = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  /** A git repo with `body` staged as src/exec.ts, plus a stubbed `claude` that always says MONITOR. */
+  const stagedRepo = (body: string) => {
+    const repo = tmp('sentry-diff-repo-');
+    for (const args of [
+      ['init', '-q'],
+      ['config', 'user.email', 't@t'],
+      ['config', 'user.name', 't'],
+    ]) {
+      spawnSync('git', args, { cwd: repo });
+    }
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'exec.ts'), body);
+    spawnSync('git', ['add', '-A'], { cwd: repo });
+    return repo;
+  };
+  /** Always-MONITOR `claude`, tee-ing the judge's stdin (what it was SHOWN) and appending one line
+   * per invocation to `callFile` (how many SAMPLES the run voted). */
+  const monitorStub = (payloadFile?: string, callFile?: string) => {
+    const dir = tmp('sentry-diff-stub-');
+    const fake = join(dir, 'claude');
+    const sink = payloadFile ? `cat >>'${payloadFile}'` : 'cat >/dev/null';
+    const count = callFile ? `echo call >>'${callFile}'\n` : '';
+    writeFileSync(fake, `#!/bin/sh\n${sink}\n${count}echo MONITOR\n`);
+    chmodSync(fake, 0o755);
+    return `${dir}:${process.env.PATH}`;
+  };
+  const gate = (repo: string, subject: string, payloadFile?: string, callFile?: string) =>
+    spawnSync('node', [SCRIPT, '--gate', subject], {
+      cwd: repo,
+      env: {
+        ...process.env,
+        PATH: monitorStub(payloadFile, callFile),
+        GUARD_SENTRY_CONTEXT: 'diff',
+        // Pin the judge so these assert gate LOGIC, not model routing: the default now resolves from
+        // the repo's `review.model` (sc-2190), which can select a non-claude runtime the stub below
+        // does not intercept.
+        GUARD_SENTRY_MODEL: 'haiku',
+        GUARD_SENTRY_WATCHLIST: join(tmp('sentry-diff-wl-'), 'wl.md'),
+        DEVKIT_RUN_MODE: 'review',
+        DEVKIT_REVIEW_DATA_ROOT: tmp('sentry-diff-store-'),
+        DEVKIT_NO_TELEMETRY: '1',
+        // Git's per-repo control vars are already stripped by vitest.setup.mjs, so a hook-launched
+        // run cannot point these spawns at devkit's own index (see judge-isolation's GIT_ENV_VARS).
+      },
+      encoding: 'utf8',
+    });
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('SHOWS the judge a wrapper capture that the old selector dropped (the sc-1984 false block)', () => {
+    // The reported failure was not a bad verdict — it was a verdict reached on evidence containing
+    // zero lines of code, because `captureContained` matched no error token and the hunk was dropped
+    // as a distractor. The judge then blocked for the absence of the very call in the staged diff.
+    const payload = join(tmp('sentry-diff-payload-'), 'stdin.txt');
+    gate(
+      stagedRepo("export async function fanOut() {\n  captureContained('fan-out not-ok');\n}\n"),
+      'fix(exec): report a not-ok fan-out result',
+      payload,
+    );
+    const shown = readFileSync(payload, 'utf8');
+    expect(shown).toContain('captureContained'); // the hunk itself reaches the judge…
+    expect(shown).toContain('CAPTURES ADDED BY THIS COMMIT'); // …and the deterministic ground truth
+    expect(shown).toContain('src/exec.ts:');
+  });
+
+  it('a real swallow with NO capture still blocks — the floor removes false blocks, not teeth', () => {
+    const r = gate(
+      stagedRepo('export function save() {\n  try { write(); } catch (e) { log.warn(e); }\n}\n'),
+      'fix(save): swallow a write failure',
+    );
+    expect(r.status).toBe(1);
+  });
+
+  it('samples follow the POST-degrade hard: 3 when it can block, 1 when it cannot', () => {
+    // run() must derive evidence -> hard -> samples in that order. If `hard` were resolved before the
+    // evidence (as it was pre-sc-1984), a degraded run would still pay the 3-sample blocking vote and
+    // key its cache slot as though it had blocking authority.
+    const calls = (subject: string, body: string) => {
+      const file = join(tmp('sentry-diff-calls-'), 'calls.txt');
+      writeFileSync(file, '');
+      const r = gate(stagedRepo(body), subject, undefined, file);
+      return {
+        status: r.status,
+        samples: readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).length,
+      };
+    };
+    const sufficient = calls(
+      'fix(save): swallow a write failure',
+      'export function save() {\n  try { write(); } catch (e) { log.warn(e); }\n}\n',
+    );
+    expect(sufficient).toEqual({ status: 1, samples: 3 }); // confidence contract intact where it blocks
+
+    const degraded = calls('fix(ui): badge spacing', 'export const Badge = () => "x";\n');
+    expect(degraded).toEqual({ status: 0, samples: 1 }); // advisory runs spend one sample, never three
+  });
+
+  it('a diff with no error-handling hunk at all is advisory only, and says so', () => {
+    const r = gate(
+      stagedRepo('export const Badge = () => <span className="x" />;\n'),
+      'fix(ui): badge spacing',
+    );
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('advisory only');
+    expect(r.stderr).toContain('no error-handling hunk');
   });
 });

@@ -8,13 +8,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderSelection } from '../../judge/diff-focus.mts';
+import { buildEvidence, selectSentryHunks, type SentryEvidence } from '../evidence.mts';
 import {
   buildContext,
   buildPrompt,
   cleanMessage,
   effectiveHard,
   extractEvidence,
-  focusDiff,
   judge,
   majority,
   parseSentryVerdict,
@@ -110,17 +111,47 @@ describe('sentryExit (block bounded to hard-mode + confident MONITOR)', () => {
   });
 });
 
-describe('effectiveHard (a hard block requires diff evidence on the diff tier)', () => {
+describe('effectiveHard (a hard block requires SUFFICIENT evidence on the diff tier)', () => {
+  // sc-1984: authority follows the evidence the judge was actually shown, not the raw diff's size.
+  const ev = (sufficient: boolean): SentryEvidence => ({
+    packed: {
+      text: 'CHANGED FILES: src/a.ts',
+      capturesComplete: sufficient,
+      droppedByCap: 0,
+      keptCount: 1,
+    },
+    inventory: { entries: [], extra: 0, ok: true },
+    sufficient,
+    exempt: false,
+  });
+
   it.each([
-    // [hardEnv, tier, diff, expected]
-    [true, 'diff', '--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-a\n+b', true],
-    [true, 'diff', '', false], // amend / --allow-empty: message-only fallback never blocks
-    [true, 'diff', '   \n', false],
-    [true, 'message', '', true], // explicitly configured message tier keeps its hard block
-    [true, 'names', '', true],
-    [false, 'diff', 'x', false],
-  ])('effectiveHard(%j, %j, %j) → %j', (hardEnv, tier, diff, expected) => {
-    expect(effectiveHard(hardEnv, tier, diff)).toBe(expected);
+    // [hardEnv, tier, evidence, expected]
+    [true, 'diff', ev(true), true], // complete capture evidence → the block stands
+    [true, 'diff', ev(false), false], // incomplete → advisory only, never exit 1
+    [true, 'diff', null, false], // amend / --allow-empty: message-only fallback never blocks
+    [true, 'message', null, true], // explicitly configured message tier keeps its hard block…
+    [true, 'names', null, true], // …and is not degraded by a vacuously-insufficient hunk flag
+    [true, 'message', ev(false), true],
+    [false, 'diff', ev(true), false], // GUARD_SENTRY_HARD=0 softens regardless
+  ])('effectiveHard(%j, %j, %j) → %j', (hardEnv, tier, evidence, expected) => {
+    expect(effectiveHard(hardEnv, tier, evidence)).toBe(expected);
+  });
+
+  it('a real diff whose only error signal is a wrapper capture is SUFFICIENT (sc-1984)', () => {
+    // The reported false block: the commit adds `captureContained(...)` on an error path, the old
+    // selector matched no error token, and the gate blocked on evidence containing zero lines of code.
+    const diff = [
+      'diff --git a/src/exec.ts b/src/exec.ts',
+      '--- a/src/exec.ts',
+      '+++ b/src/exec.ts',
+      '@@ -10,2 +10,3 @@ async function fanOut() {',
+      "+    captureContained('fan-out finished not-ok', result.code);",
+    ].join('\n');
+    const evidence = buildEvidence(diff);
+    expect(evidence.packed.text).toContain('captureContained');
+    expect(evidence.inventory.entries[0]).toContain('src/exec.ts');
+    expect(effectiveHard(true, 'diff', evidence)).toBe(true);
   });
 });
 
@@ -160,7 +191,7 @@ describe('buildContext (names tier appends files; diff tier appends the staged d
     const out = buildContext('fix: swallow', 'M\tsrc/a.ts', diff, 'diff');
     expect(out).toContain('STAGED DIFF');
     expect(out).toContain('reply SKIP');
-    expect(out).toContain('captureException(e);'); // the error hunk survives focusDiff
+    expect(out).toContain('captureException(e);'); // the error hunk survives the selection
   });
 
   it('diff tier with no diff degrades to message-only', () => {
@@ -175,9 +206,33 @@ describe('buildContext (names tier appends files; diff tier appends the staged d
   });
 });
 
-describe('focusDiff (decisions-style evidence selection — error hunks only)', () => {
+describe('buildContext wiring (the payload keyed is the payload judged)', () => {
+  it('the passed-in evidence yields byte-identical output to recomputing it', () => {
+    // run() computes the evidence ONCE and threads it into both effectiveHard and buildContext, then
+    // hashes the resulting string into the verdict-cache key. If the injected and recomputed payloads
+    // could differ, a run would be judged on one string and keyed on another — a cache that replays
+    // the wrong verdict. The bench and the eval take the recompute path, so the two must not drift.
+    const diff =
+      'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@ save()\n+  catch (e) { captureContained(e); }';
+    const evidence = buildEvidence(diff);
+    expect(buildContext('fix: x', '', diff, 'diff', evidence)).toBe(
+      buildContext('fix: x', '', diff, 'diff'),
+    );
+  });
+
+  it('the diff tier carries the capture inventory AFTER the hunks, message tier carries neither', () => {
+    const diff =
+      'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@ save()\n+  catch (e) { captureContained(e); }';
+    const out = buildContext('fix: x', '', diff, 'diff');
+    expect(out.indexOf('STAGED DIFF')).toBeLessThan(out.indexOf('CAPTURES ADDED BY THIS COMMIT'));
+    expect(buildContext('fix: x', '', diff, 'message')).not.toContain('CAPTURES ADDED');
+  });
+});
+
+describe('selectSentryHunks (decisions-style evidence selection — error hunks only)', () => {
   const fileDiff = (path: string, hunkBody: string) =>
     `--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,3 @@\n${hunkBody}`;
+  const focusDiff = (diff: string) => renderSelection(selectSentryHunks(diff), 'non-error');
 
   it('keeps a hunk that adds a capture', () => {
     expect(focusDiff(fileDiff('src/a.ts', '+  captureException(e);'))).toContain(
@@ -236,7 +291,7 @@ describe('focusDiff (decisions-style evidence selection — error hunks only)', 
   });
 
   it('KEEPS a comment/string capture hunk (evidence selection) — the LLM, not the regex, judges it', () => {
-    // focusDiff shows the hunk to the judge; it does NOT decide. A commented capture is kept as
+    // The selection shows the hunk to the judge; it does NOT decide. A commented capture is kept
     // evidence; the prompt tells the judge a comment/string capture does not count (see mon-decoy-*).
     const out = focusDiff(
       fileDiff('src/a.ts', '+  // captureException(e) later\n+  catch (e) { log.warn(e); }'),

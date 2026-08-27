@@ -1,0 +1,22 @@
+---
+slug: sentry-block-requires-sufficient-capture-evidence
+created: 2026-08-26
+---
+
+# sentry-block-requires-sufficient-capture-evidence
+
+## Target · 2026-08-26 — The sentry gate blocks only on capture evidence it can prove it showed the judge
+
+**Context:** The hard sentry commit-msg judge blocked a valid, tested commit for a Fan Out error path it said lacked instrumentation, while the staged diff added a captureContained call and a regression test asserting it; the judge's own reply said the capture was not visible in its truncated diff. Three mechanisms hid it: the relevance regex knew only captureException/captureMessage/captureMainMessage so a wrapper-only hunk was dropped as a distractor; the 6000-char evidence slice could cut a later capture while an earlier swallow survived; and effectiveHard read the RAW staged diff, so a run whose focused evidence contained zero lines of code still carried full blocking authority. The only escape was a human-approved GUARD_NO_SENTRY_JUDGE=1 bypass, which is the trust erosion reviewer-blocks-require-validated-evidence was written to stop. Blocking severity: a correct PR could not be committed autonomously.
+**Ruling:** Blocking authority follows evidence SUFFICIENCY, not diff size. On the diff tier a confident MONITOR may exit 1 only when the gate can prove it showed the judge whatever would have cleared the commit: at least one selected hunk of real code, every capture-bearing hunk packed whole, and a computed capture inventory. Short of that the run warns and watchlists. Capture relevance is receiver-checked rather than an identifier list (unqualified or Sentry.-qualified, look-alikes such as Error.captureStackTrace denied), the cap drops WHOLE hunks lowest-priority first so a capture is never cut while a swallow survives, and a surface-bound inventory of every added capture rides along independently of the cap. An explicitly configured message/names tier keeps its hard block; GUARD_SENTRY_DIFF_FULL waives the floor as the owner's declared A/B choice.
+**Consequences:**
+- Positive: A correct, instrumented commit is no longer blocked for the absence of evidence the gate withheld, so the bypass stops being the routine remedy and keeps its meaning. The block is retained wherever the capture evidence is complete, including large multi-surface commits where a real un-instrumented swallow is most likely to hide, so removing the false blocks costs no teeth.
+- Negative: A commit whose error handling uses vocabulary the selector does not recognise now warns instead of blocking, so a genuine swallow can pass advisory-only until the taxonomy learns it; the degrade is named on stderr and emitted as a gate_degraded event rather than being inferable, and the capture matcher becomes an accuracy surface that must be maintained.
+**Vision-fit:** n/a — internal tooling (devkit commit gates).
+**Researched:** Feature critique of story sc-1984 reproduced all three mechanisms against the live modules; precedent read across reviewer-blocks-require-validated-evidence (2026-08-23), detect-judge-evidence-only-input (2026-07-01) and review-gate-in-chain.
+**Rejected:** (a) Degrade on ANY truncation or dropped hunk — LOSES: surrenders the block on most large multi-surface commits, and a warn on the commit path is structurally dark (18 unseen MONITOR verdicts in 17 days). (b) Widen the capture regex alone — LOSES: a keyword list always has a tail (reportSwallowed, trackFailure, a Result-typed branch), and each miss re-enters the same zero-evidence block. (c) Give the judge tools to investigate, or chunk the evidence — LOSES: this judge is a 3-sample haiku vote inside commit-msg against a ~20-40s claude -p cold start, so exploration costs 3xN cold starts; detect-judge-evidence-only-input already rejected agentic on this budget. (d) Extend reviewer-blocks-require-validated-evidence's Scope to cover this gate — LOSES: its one-word prose MONITOR cannot satisfy that record's parsed-finding contract, so it would arm check-alignment against a ruling this gate cannot meet.
+**Anchored-bet:** [BET]
+**Revisit-when:** The sentry eval shows the sufficiency floor letting real MONITOR cases through (recall drop on the grown corpus), or the sentry judge gains a parsed finding contract that could satisfy reviewer-blocks-require-validated-evidence directly.
+**Scope:** gate-engine/sentry/**
+**Category:** commit-gates
+**Source:** collab · SC-1984
