@@ -15,6 +15,19 @@
 #         # body via stdin. The <branch> is the existing PR's head branch.
 set -euo pipefail
 
+# Only review-target.sh implements run-packaged-script.mts's signal-lock handshake. See the matching
+# comment in ship-branch.sh: an inherited-but-unread lock root leaks into every gate and can silence
+# signal forwarding to this shell entirely.
+unset DEVKIT_MANAGED_SIGNAL_ROOT
+
+# Before ANY git that can reach the network. Under the managed spawn this script runs in a background
+# process group, where a tool that opens /dev/tty is SIGTTIN-suspended rather than prompted — a silent
+# hang, not an error. ls-remote/fetch happen long before the PR body is read, so these cannot wait for
+# the redirect below: an unknown host key or a passphrase with no agent would wedge the run. Same
+# ordering review-target.sh uses. An explicit GIT_SSH_COMMAND stays the caller's.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+
 # `--pr` is the MODE flag: ship.mts routes on it, then forwards argv VERBATIM — so it still arrives
 # here, and wherever the caller put it. Strip a LEADING one before reading positionals; the parse loop
 # below drops a trailing one. Without this, the spelling the help text itself documents
@@ -89,6 +102,15 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 
 # Re-pushes pay the same gate cost and can inherit the same stale checkout baseline as new ships.
 . "$SCRIPT_DIR/prepare-gate-worktree.sh"
+. "$SCRIPT_DIR/ship-run-record.sh"
+. "$SCRIPT_DIR/worktree-registry.sh"
+. "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
+# Re-ship leaves orphans too. Its worktree is --detach and blocks no future run, so nothing forced
+# the issue -- but without this a killed re-ship's directory lingered until some unrelated NEW ship
+# happened to target the same branch. Reclamation here can only ever remove a worktree: every reship
+# record carries branch_created=0, and branch deletion is gated on 1.
+PREFLIGHT_HINT=
+ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"
@@ -99,6 +121,9 @@ STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/reship-staged.XXXXXX")
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
+# Match new-ship: the body is the only stdin read, so hand descendants /dev/null and make credential
+# prompts fail loudly instead of suspending a background process group via SIGTTIN.
+exec 0</dev/null
 
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 cleanup() {
@@ -118,6 +143,10 @@ gate_signal_handoff_init
 
 # Detached worktree at the PR branch tip — the new commit is parented on origin/<branch>.
 git worktree add -q --detach "$WT" "$BASE" >&2
+# branch_created=0 always: this worktree is detached and holds no branch, so nothing may ever delete
+# one on its behalf. The record exists so a leftover re-ship worktree is attributable to the process
+# that made it, the same way new-ship's is.
+ship_run_record_begin "$WT" "$BR" "$BASE" 0 reship
 
 # Copy the CURRENT content of each path over the fetched tip (add/modify), or delete it. The commit
 # diff is therefore (origin/<branch> tip → your current files) = exactly the new delta, with no
@@ -147,7 +176,7 @@ git -C "$WT" diff --cached --quiet && { echo "no changes vs origin/$BR — nothi
 ship_record_staged_state "$WT" "$STAGED_STATE"
 # ...and prove the objects it names are readable — write-tree cannot, once its cache-tree is persisted
 # (sc-1420). Same pair of checkpoints as new-ship.
-ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
+ship_assert_staged_objects_readable "$WT" "after staging" || { ship_run_keep "staged objects unreadable after staging"; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
 prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
@@ -167,13 +196,13 @@ export DEVKIT_SHIP_MODE=reship   # tags the ship_attempt telemetry (retry onto a
 export DEVKIT_RUN_MODE=ship      # never inherit a caller's review allowlist into a real ship
 # Preflight before the multi-minute chain, then prove the commit still holds the briefed work before
 # anything leaves the machine. Same invariants as new-ship (assert-staged-set.sh).
-ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
-ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
+ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
+ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { ship_run_keep "staged objects unreadable before the commit"; exit 1; }
 commit_with_gate_capture "$WT" "$ROOT" "$BR" "$TITLE" "$BODY"
 # Preserve the public signal contract across the post-wait reap window; a recorded interruption
 # must stop before commit-scope verification or push even when its forwarded PID already exited.
 [ "$REQUESTED_SIGNAL_STATUS" -eq 0 ] || exit "$REQUESTED_SIGNAL_STATUS"
-ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { ship_run_keep "commit scope assertion failed"; exit 1; }
 
 if [ -n "${SHIP_DRY_RUN:-}" ]; then
   echo "DRY: committed locally onto $BR (worktree $WT), skipped push." >&2
