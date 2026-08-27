@@ -86,7 +86,7 @@ export async function runOverlayDoctor(cwd, cfg, fix, printQavisAdvisoryHealth) 
     // Overlay short-circuits before collectResults, so the dup gate's silent opt-out would otherwise
     // be undetectable here. Advisory: overlay health is gated on hook + hooksPath.
     await adviseSearchIndex(cwd, sel);
-    await adviseCodexRuntime(cwd);
+    await adviseCodexRuntime(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     if (sel.fallow) {
         const wired = hookOk &&

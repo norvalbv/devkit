@@ -6,7 +6,7 @@
  * invariant: N agents share one tree, so its branch ref is never moved under them). Reads the
  * per-branch manifest that ship-branch.sh wrote (frink: scripts/git/reconcile-manifest-write.mjs).
  *
- * Restore is `git checkout FETCH_HEAD -- <path>`, which stages the merged blob into the INDEX.
+ * Restore is `git checkout <upstreamSha> -- <path>`, which stages the merged blob into the INDEX.
  * That converts an UN-pullable stale-worktree edit (worktree=merged, index=stale-HEAD → a plain
  * `git pull --ff-only` aborts on "local changes would be overwritten") into a PULLABLE
  * staged-matching edit (index==target → git read-tree case-3 → the next ff-pull fast-forwards
@@ -16,7 +16,7 @@
  * The gate is THREE blobs per path, and the index/worktree distinction is load-bearing:
  *   indexBlob  = `git rev-parse :<path>`        (what a pull would see — drives "already done")
  *   curBlob    = `git hash-object -- <path>`    (worktree — detects a human's post-ship edit)
- *   upstream   = `git rev-parse FETCH_HEAD:<p>` (the merged target)
+ *   upstream   = `git rev-parse <upstreamSha>:<p>` (the merged target)
  *   shipped    = manifest blobSha               (what we sent to the PR)
  * already-reconciled (index==upstream==worktree) → skip; worktree ∈ {shipped, upstream} →
  * restore (stage, idempotent); worktree foreign to both → skip+warn (never clobber a human edit).
@@ -33,18 +33,43 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock, writeFileAtomic } from './atomic-write.mjs';
 const ABSENT = Symbol('absent'); // a file/blob that does not exist on a given side (≠ any sha)
-/** Run git in <root>; trimmed stdout, or null on failure (allowFail) — never throws by default. */
-export function git(root, args, { allowFail = true } = {}) {
+const MAX_BUFFER = 64 * 1024 * 1024; // a few thousand dirty paths overflow Node's 1 MiB default
+/** Run a git PROBE in <root>: trimmed stdout, or null on any failure. Never throws. */
+export function git(root, args) {
     try {
         return execFileSync('git', ['-C', root, ...args], {
             encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
+            stdio: ['ignore', 'pipe', 'pipe'], // stderr piped, never inherited: a probe must stay silent
+            maxBuffer: MAX_BUFFER,
         }).trim();
     }
+    catch {
+        return null;
+    }
+}
+/**
+ * Run a git WRITE: null when it landed, else what git actually said. Neither silent nor fatal — an
+ * unhandled throw here killed a run mid-manifest with Node's bare `Command failed: git -C <root>
+ * checkout …`: the argv and nothing else — no exit status, no stderr, and an unquoted repo path that
+ * reads as a path-quoting bug when the cause was elsewhere. The status is rendered, never assumed.
+ */
+function gitWrite(root, args) {
+    try {
+        execFileSync('git', ['-C', root, ...args], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            maxBuffer: MAX_BUFFER,
+        });
+        return null;
+    }
     catch (e) {
-        if (allowFail)
-            return null;
-        throw e;
+        // SAFETY: execFileSync throws Error-shaped values carrying git's exit status and its stderr.
+        const err = e;
+        // Just the DIAGNOSIS line: git pads a fatal with advice paragraphs an operator skims past.
+        const said = String(err.stderr ?? '');
+        const why = (said.match(/^\s*(fatal|error):.*/m) ?? said.match(/^\s*\S.*/m))?.[0].trim() ?? '';
+        const code = err.status ?? '?'; // null on a spawn failure (ENOENT), where there is no exit code
+        return `git ${args.join(' ')} failed (exit ${code})${why ? `: ${why}` : ''}`;
     }
 }
 /**
@@ -59,7 +84,7 @@ function gitZ(root, args) {
         return execFileSync('git', ['-C', root, '--no-optional-locks', ...args], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
-            maxBuffer: 64 * 1024 * 1024, // a few thousand dirty paths overflow Node's 1 MiB default
+            maxBuffer: MAX_BUFFER, // a few thousand dirty paths overflow Node's 1 MiB default
         })
             .split('\0')
             .filter((s) => s.length > 0);
@@ -131,12 +156,15 @@ export function detectMerged({ repo, prNumber, branch, }) {
         return 'UNKNOWN';
     }
 }
-/** Three-way gate + restore for one path. Returns {restored?} | {done?} | {warning}. */
-function reconcilePath(mainRepo, P, apply) {
+/**
+ * Three-way gate + restore for one path → {restored?} | {done?} | {warning, failed?}. Gate and write
+ * read the SAME caller-resolved `upstreamSha`; a re-read between them lets a peer's fetch choose.
+ */
+export function reconcilePath(mainRepo, P, upstreamSha, apply) {
     if (P.path.startsWith('/') || P.path.split('/').includes('..')) {
         return { warning: `${P.path}: non-relative path refused (repo-relative paths only)` };
     }
-    const upstream = blobAt(mainRepo, 'FETCH_HEAD', P.path);
+    const upstream = blobAt(mainRepo, upstreamSha, P.path);
     const cur = worktreeBlob(mainRepo, P.path);
     const idx = indexBlob(mainRepo, P.path);
     if (P.op === 'delete') {
@@ -148,8 +176,12 @@ function reconcilePath(mainRepo, P, apply) {
             return { warning: `${P.path}: re-created after a shipped deletion — left as-is` };
         if (idx === ABSENT)
             return { done: true }; // deletion already staged
-        if (apply)
-            git(mainRepo, ['rm', '--cached', '--ignore-unmatch', '--', P.path]); // stage the deletion → pullable
+        if (apply) {
+            // stage the deletion → pullable. Swallowing this used to print "✓ restored" and prune the entry.
+            const failure = gitWrite(mainRepo, ['rm', '--cached', '--ignore-unmatch', '--', P.path]);
+            if (failure)
+                return { warning: `${P.path}: staging the deletion failed — ${failure}`, failed: true };
+        }
         return { restored: true };
     }
     // modify / add
@@ -160,8 +192,9 @@ function reconcilePath(mainRepo, P, apply) {
             return {
                 warning: `${P.path}: upstream merged a different shape (path absent) — resolve by hand`,
             };
-        if (apply)
-            git(mainRepo, ['checkout', 'FETCH_HEAD', '--', P.path], { allowFail: false });
+        const failure = apply ? gitWrite(mainRepo, ['checkout', upstreamSha, '--', P.path]) : null;
+        if (failure)
+            return { warning: `${P.path}: restore failed — ${failure}`, failed: true };
         return { restored: true };
     }
     return { warning: `${P.path}: edited after ship — left byte-for-byte as you have it` };
@@ -277,10 +310,17 @@ export function ffBlockers(root, upstream, exempt) {
 }
 /** Reconcile one manifest branch (STEP A–D). Pure read under !apply. */
 export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
-    // ffBlockers: null on every early return below — none of them reaches a valid FETCH_HEAD, and
+    // ffBlockers: null on every early return below — none of them resolves an upstream commit, and
     // reporting [] there would let the renderer read a verified all-clear out of a branch that never
     // fetched. Only the full path at the bottom produces a measurement.
-    const base = { branch, restored: [], warnings: [], upstreamSha: null, baseRef: entry.baseRef };
+    const base = {
+        branch,
+        restored: [],
+        restoreFailures: [],
+        warnings: [],
+        upstreamSha: null,
+        baseRef: entry.baseRef,
+    };
     const merged = detectMerged({ repo: entry.repo, prNumber: entry.prNumber, branch });
     if (merged !== 'MERGED') {
         return {
@@ -290,7 +330,12 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
             warnings: merged === 'UNKNOWN' ? ['gh unavailable — merge state unknown'] : [],
         };
     }
-    if (git(mainRepo, ['fetch', 'origin', entry.baseRef]) === null) {
+    // Fetch the BRANCH — a remote tag of that name wins git's DWIM, and the prefix also makes a
+    // '-'-leading baseRef unreadable as a flag — into a ref THIS PROCESS OWNS. No shared landing site
+    // can answer "what did I just fetch?": .git/FETCH_HEAD is one file every peer rewrites, and a
+    // peer's fetch of this base advances refs/remotes/origin/<baseRef> between our fetch and our read.
+    const pin = `refs/devkit/reconcile/${process.pid}/${entry.baseRef}`;
+    if (git(mainRepo, ['fetch', 'origin', `+refs/heads/${entry.baseRef}:${pin}`]) === null) {
         return {
             ...base,
             merged: true,
@@ -299,15 +344,17 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
         };
     }
     const localTip = git(mainRepo, ['rev-parse', entry.baseRef]) ?? git(mainRepo, ['rev-parse', 'HEAD']); // fall back to the checked-out tip if baseRef isn't a local branch
-    const fetchHead = git(mainRepo, ['rev-parse', 'FETCH_HEAD']);
-    if (!localTip || !fetchHead)
+    const upstreamSha = git(mainRepo, ['rev-parse', `${pin}^{commit}`]); // ^{commit} peels a tag
+    // Dropped once read; gc's two-week floor keeps the objects, so no pin outlives the run that made it.
+    git(mainRepo, ['update-ref', '-d', pin]);
+    if (!localTip || !upstreamSha)
         return {
             ...base,
             merged: true,
             action: 'keep',
-            warnings: ['could not resolve baseRef/FETCH_HEAD'],
+            warnings: [`could not resolve ${entry.baseRef} or its fetched upstream commit`],
         };
-    if (!isAncestor(mainRepo, localTip, fetchHead)) {
+    if (!isAncestor(mainRepo, localTip, upstreamSha)) {
         return {
             ...base,
             merged: true,
@@ -318,11 +365,14 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
         };
     }
     const restored = [];
+    const restoreFailures = [];
     const warnings = [];
     for (const P of entry.paths) {
-        const r = reconcilePath(mainRepo, P, apply);
+        const r = reconcilePath(mainRepo, P, upstreamSha, apply);
         if (r.restored)
             restored.push(P.path);
+        if (r.failed)
+            restoreFailures.push(P.path);
         if (r.warning)
             warnings.push(r.warning);
     }
@@ -345,10 +395,11 @@ export function reconcileBranch({ mainRepo, branch, entry, apply, }) {
         merged: true,
         action,
         restored,
+        restoreFailures,
         warnings,
-        // Carried, not measured: FETCH_HEAD is overwritten by the next branch's fetch, so this resolved
-        // sha is the only way the caller can measure this base ref once every branch has restored.
-        upstreamSha: fetchHead,
+        // Carried, not re-resolved: the tracking ref moves on the next fetch of this base, so the sha
+        // this branch restored FROM is the only thing the caller can honestly measure it against.
+        upstreamSha,
         baseRef: entry.baseRef,
     };
 }

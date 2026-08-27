@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { adoptManagedCapability } from './base-capability.mjs';
 import { parseBaseline } from './baseline.mjs';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mjs';
 const MAX_GIT_OUTPUT = 128 * 1024 * 1024;
@@ -146,13 +147,17 @@ function extractTree(root, tree, destination) {
         throw new Error(`anti-slop: could not materialize staged Git tree: ${extracted.stderr?.toString().trim() || `tar exit ${extracted.status}`}`);
     }
 }
-/** Run an action against selected files from the exact base tree used by a CI comparison. */
-export function withBaseAntiSlopSnapshot(cwd, baseTree, paths, action) {
+/**
+ * Run an action against selected files from the exact base tree used by a CI comparison.
+ * `cwd` locates the REPOSITORY; `capabilityCwd` holds the capability to judge it with (sc-2084).
+ */
+export function withBaseAntiSlopSnapshot(cwd, capabilityCwd, baseTree, paths, action) {
     const repo = layout(cwd);
     const temp = mkdtempSync(join(tmpdir(), 'devkit-anti-slop-base-'));
     try {
         extractTree(repo.root, baseTree, temp);
         const snapshotCwd = join(temp, repo.prefix);
+        adoptManagedCapability(capabilityCwd, snapshotCwd);
         const existingPaths = paths.filter((path) => existsSync(join(snapshotCwd, path)));
         return action({ cwd: snapshotCwd, paths: existingPaths });
     }

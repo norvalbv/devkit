@@ -202,13 +202,20 @@ KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so n
 RECOVERY_INDEX=
 RECOVERY_PARENT=  # the preserved commit's OWN parent: what its diff and manifest anchor on, since $BASE may have advanced since it was cut
 RECOVERY_PATHS_ALL=
+RECOVERY_PATHS_CALLER=
 RECOVERY_PATHS_SCOPED=
 RECOVERY_RECEIPT_REF="refs/devkit/ship-receipts/$BR"
+# Sibling of the receipt, pinned in the same place at the same instant: a blob holding the
+# NUL-delimited paths this ship's own gate chain added beyond the brief (sc-2089). The receipt proves
+# the commit was gated; this proves which parts of it the caller did not ask for but devkit wrote.
+RECOVERY_GATE_ADDS_REF="refs/devkit/ship-gate-adds/$BR"
+GATE_ADDS_FILE=$(mktemp "${TMPDIR:-/tmp}/ship-gate-adds.XXXXXX")
 BRANCH_CREATED= # only this invocation's branch may be auto-deleted on an empty/failed commit
 cleanup() {
-  rm -f "$PATCH" "$STAGED_STATE"
+  rm -f "$PATCH" "$STAGED_STATE" "$GATE_ADDS_FILE"
   [ -z "$RECOVERY_INDEX" ] || rm -f "$RECOVERY_INDEX"
   [ -z "$RECOVERY_PATHS_ALL" ] || rm -f "$RECOVERY_PATHS_ALL"
+  [ -z "$RECOVERY_PATHS_CALLER" ] || rm -f "$RECOVERY_PATHS_CALLER"
   [ -z "$RECOVERY_PATHS_SCOPED" ] || rm -f "$RECOVERY_PATHS_SCOPED"
   # A staged-set invariant fired. Removing the worktree would destroy the only copy of the bad index
   # and leave nothing to diagnose from, so hand it to the operator instead (worktree AND branch).
@@ -295,10 +302,42 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     fi
   fi
 
+  # Similarity is not provenance. Only ship itself writes this private ref after a gated commit has
+  # actually landed; without the exact receipt, a hand-made/--no-verify commit must never skip gates.
+  # Checked BEFORE the scope comparison so provenance is what refuses an unreceipted branch, and so
+  # the gate-authored tolerance below is only ever consulted for a commit devkit itself gated. The
+  # order is cosmetic for the VERDICT — every check here is guarded on an empty $RECOVERY_REASON and
+  # they are therefore conjunctive — but a tolerance granted before provenance is established reads
+  # like a hole even when it is not one.
+  RECOVERY_RECEIPT=$(git rev-parse -q --verify "$RECOVERY_RECEIPT_REF^{commit}" 2>/dev/null || true)
+  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_RECEIPT" != "$RECOVERY_COMMIT" ]; then
+    RECOVERY_REASON="it has no matching prior-ship gate receipt"
+  fi
+
+  # The paths ship's OWN gate chain added to this commit beyond the brief, recorded beside the
+  # receipt the instant the commit landed (ship_record_gate_adds). A ratchet gate stages a lowered
+  # baseline so it rides the same commit; assert-staged-set.sh tolerates that on the way IN, so the
+  # resume has to tolerate it on the way BACK or a fully gated commit can never be published at all
+  # — the sc-2089 deadlock. Tolerance is keyed on this RECORD and never on a guessed list of baseline
+  # filenames: a path the caller briefed itself is by construction absent from the record, so a
+  # NARROWED retry cannot smuggle a change its brief no longer names into the PR. An absent record (a
+  # receipt minted by an older devkit) leaves the array empty, and an empty exclude list makes the
+  # comparison below byte-identical to the strict one it replaces — fail closed by construction.
+  GATE_ADD_EXCLUDE=()
+  if [ -z "$RECOVERY_REASON" ]; then
+    RECOVERY_GATE_ADDS_BLOB=$(git rev-parse -q --verify "$RECOVERY_GATE_ADDS_REF^{blob}" 2>/dev/null || true)
+    if [ -n "$RECOVERY_GATE_ADDS_BLOB" ]; then
+      while IFS= read -r -d '' gate_path; do
+        GATE_ADD_EXCLUDE+=(":(exclude,literal)$gate_path")
+      done < <(git cat-file blob "$RECOVERY_GATE_ADDS_BLOB")
+    fi
+  fi
+
   # Ask Git to resolve the caller's pathspecs, then compare that exact NUL-delimited set with the
   # complete changed-path set. This accepts equivalent spellings such as `./note.txt`, stays binary
   # safe for unusual filenames, and uses --no-renames so BOTH sides of a rename must be briefed.
   RECOVERY_PATHS_ALL=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-all.XXXXXX")
+  RECOVERY_PATHS_CALLER=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-caller.XXXXXX")
   RECOVERY_PATHS_SCOPED=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-paths-scoped.XXXXXX")
   # Anchored on the commit's OWN parent, not $BASE: scope means "what this commit changed", and with an
   # advanced base `git diff $BASE $COMMIT` also carries the INVERSE of everything merged in since, so
@@ -308,27 +347,82 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # empty, and a bare `git diff ""` would abort under -e before the reason is ever printed.
   if [ -z "$RECOVERY_REASON" ]; then
     git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- > "$RECOVERY_PATHS_ALL"
-    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "${PATHS[@]}" \
-      > "$RECOVERY_PATHS_SCOPED"
+    # Both sides drop the gate-authored paths, so what remains on each is the CALLER's half of the
+    # commit. Equality then states exactly "this brief names everything in the commit that the gates
+    # did not write themselves" — the same claim as `changed \ briefed ⊆ record`, expressed in git's
+    # own pathspec algebra so it stays NUL-exact instead of going through a sort/comm round trip.
+    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
+      -- ${GATE_ADD_EXCLUDE[@]+"${GATE_ADD_EXCLUDE[@]}"} > "$RECOVERY_PATHS_CALLER"
+    git diff --name-only --no-renames -z "$RECOVERY_PARENT" "$RECOVERY_COMMIT" \
+      -- "${PATHS[@]}" ${GATE_ADD_EXCLUDE[@]+"${GATE_ADD_EXCLUDE[@]}"} > "$RECOVERY_PATHS_SCOPED"
+    # Emptiness stays on the UNFILTERED set: a brief consisting solely of a path a gate also touches
+    # is a legitimate ship (a manual baseline burn-down), and testing the filtered set would refuse
+    # it with a reason that is not true.
     if [ ! -s "$RECOVERY_PATHS_ALL" ]; then
       RECOVERY_REASON="its commit has no scoped changes"
-    elif ! cmp -s "$RECOVERY_PATHS_ALL" "$RECOVERY_PATHS_SCOPED"; then
+    elif ! cmp -s "$RECOVERY_PATHS_CALLER" "$RECOVERY_PATHS_SCOPED"; then
       RECOVERY_REASON="its commit changes paths outside the requested scope"
+      # Name them. The bare reason sent the sc-2089 reporter through two more failed attempts before
+      # they gave up on the resume entirely. SCOPED is always a subset of CALLER, so the difference
+      # is one-directional. Rendering through newlines is safe HERE and only here: the verdict was
+      # already decided NUL-exactly above, so a path containing a newline degrades this hint rather
+      # than the decision.
+      RECOVERY_SCOPE_N=0
+      RECOVERY_SCOPE_LIST=
+      while IFS= read -r offending; do
+        [ -n "$offending" ] || continue
+        RECOVERY_SCOPE_N=$((RECOVERY_SCOPE_N + 1))
+        if [ "$RECOVERY_SCOPE_N" -le 5 ]; then
+          RECOVERY_SCOPE_LIST="${RECOVERY_SCOPE_LIST:+$RECOVERY_SCOPE_LIST }$offending"
+        fi
+      done < <(comm -23 \
+        <(tr '\0' '\n' < "$RECOVERY_PATHS_CALLER" | sort -u) \
+        <(tr '\0' '\n' < "$RECOVERY_PATHS_SCOPED" | sort -u))
+      if [ "$RECOVERY_SCOPE_N" -gt 5 ]; then
+        RECOVERY_SCOPE_LIST="$RECOVERY_SCOPE_LIST (+$((RECOVERY_SCOPE_N - 5)) more)"
+      fi
+      RECOVERY_HINTS+=("unbriefed paths ($RECOVERY_SCOPE_N): $RECOVERY_SCOPE_LIST")
+      RECOVERY_HINTS+=("brief them too, or re-run the ORIGINAL invocation — a retry that narrows the scope cannot resume a commit the wider one made")
     fi
-  fi
-
-  # Similarity is not provenance. Only ship itself writes this private ref after a gated commit has
-  # actually landed; without the exact receipt, a hand-made/--no-verify commit must never skip gates.
-  RECOVERY_RECEIPT=$(git rev-parse -q --verify "$RECOVERY_RECEIPT_REF^{commit}" 2>/dev/null || true)
-  if [ -z "$RECOVERY_REASON" ] && [ "$RECOVERY_RECEIPT" != "$RECOVERY_COMMIT" ]; then
-    RECOVERY_REASON="it has no matching prior-ship gate receipt"
   fi
 
   if [ -z "$RECOVERY_REASON" ]; then
     RECOVERY_INDEX=$(mktemp "${TMPDIR:-/tmp}/ship-recovery-index.XXXXXX")
     rm -f "$RECOVERY_INDEX" # read-tree must create it; an empty file is not a valid index
     GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" read-tree "$RECOVERY_COMMIT"
-    GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" add -f -A -- "${PATHS[@]}"
+    # `git add` FATALS (exit 128) on a pathspec that matches nothing, and set -e turns that into a
+    # dead resume. Two briefed pathspecs legitimately match nothing here, so both are filtered out
+    # before the add rather than allowed to kill a commit that already passed every gate (sc-2089).
+    RECOVERY_ADD_PATHS=()
+    for p in "${PATHS[@]}"; do
+      # (a) Commit-authoritative. Everything this pathspec contributes to the commit was written by
+      # the gate chain, INSIDE the ephemeral worktree — $ROOT still holds the pre-gate bytes, so
+      # re-adding from the caller's tree would guarantee a mismatch against a commit that is correct
+      # and unfixable by the operator, whose copy of those bytes no longer exists anywhere. read-tree
+      # already supplied the right content; leave it alone. Probes are newline-framed on purpose:
+      # only emptiness is read, and `-z` inside $() makes bash strip NULs and warn on stderr.
+      if [ "${#GATE_ADD_EXCLUDE[@]}" -gt 0 ] &&
+         [ -n "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p")" ] &&
+         [ -z "$(git -C "$ROOT" diff --name-only --no-renames "$RECOVERY_PARENT" "$RECOVERY_COMMIT" -- "$p" "${GATE_ADD_EXCLUDE[@]}")" ]; then
+        continue
+      fi
+      # (b) A path the commit DELETED. read-tree has already applied the deletion, so it is in
+      # neither the recovery index nor the worktree and there is nothing left to re-add. There is no
+      # --ignore-unmatch on `git add`, so the probe has to come first. Framed on $ROOT like every
+      # other git call here, NOT `[ -e "$p" ]`, which resolves against the caller's cwd and misses a
+      # broken symlink. --others deliberately WITHOUT --exclude-standard so a force-added ignored
+      # file still counts as present. A path the caller has since RE-CREATED matches again, stays in
+      # the add set, and still refuses via the tree comparison below — as it must.
+      if [ -z "$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" ls-files --cached --others -- "$p")" ]; then
+        continue
+      fi
+      RECOVERY_ADD_PATHS+=("$p")
+    done
+    # `git add -A --` with NO pathspec stages the WHOLE worktree, so an empty set must be an explicit
+    # skip. Nothing is lost by skipping: read-tree's index already IS the commit's tree.
+    if [ "${#RECOVERY_ADD_PATHS[@]}" -gt 0 ]; then
+      GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" add -f -A -- "${RECOVERY_ADD_PATHS[@]}"
+    fi
     RECOVERY_TREE=$(GIT_INDEX_FILE="$RECOVERY_INDEX" git -C "$ROOT" write-tree)
     BRANCH_TREE=$(git rev-parse "$RECOVERY_COMMIT^{tree}")
     if [ "$RECOVERY_TREE" != "$BRANCH_TREE" ]; then
@@ -449,7 +543,20 @@ else
     # changes a successful child to 1 when mandatory gate-log persistence fails, and retry must keep
     # failing closed in that case. A later retry may skip gates only when this ref names its exact tip.
     case "$COMMIT_STATUS" in
-      0|124|129|130|131|137|143) git update-ref "$RECOVERY_RECEIPT_REF" "$SHIP_COMMIT" ;;
+      0|124|129|130|131|137|143)
+        git update-ref "$RECOVERY_RECEIPT_REF" "$SHIP_COMMIT"
+        # Pin what the gate chain added beyond the brief, so a retry can resume a commit its OWN
+        # gates widened instead of refusing it as out-of-scope (sc-2089). Written only where the
+        # receipt is, so a record can never authorise a commit that has no receipt. Best effort by
+        # design: every failure path here leaves the retry on the strict comparison, which is the
+        # safe direction, and none of them may cost a ship that has already passed every gate.
+        if ship_record_gate_adds "$WT" "$BASE" "$STAGED_STATE" "$GATE_ADDS_FILE"; then
+          GATE_ADDS_BLOB=$(git -C "$ROOT" hash-object -w --stdin < "$GATE_ADDS_FILE" 2>/dev/null || true)
+          if [ -n "$GATE_ADDS_BLOB" ]; then
+            git update-ref "$RECOVERY_GATE_ADDS_REF" "$GATE_ADDS_BLOB"
+          fi
+        fi
+        ;;
     esac
   fi
   # A signal can land after the gate supervisor exits but before its reap callback clears the PID.
@@ -552,3 +659,7 @@ else
   git branch -D "$BR" 2>/dev/null || true
 fi
 git update-ref -d "$RECOVERY_RECEIPT_REF" "${RECOVERY_COMMIT:-${SHIP_COMMIT:-}}" 2>/dev/null || true
+# No compare-and-delete for the sibling record: the receipt uses one because it names a COMMIT a
+# concurrent actor could legitimately advance, whereas this blob is devkit-private, rewritten whole
+# on every ship to this branch, and worthless once the commit it describes is published.
+git update-ref -d "$RECOVERY_GATE_ADDS_REF" 2>/dev/null || true

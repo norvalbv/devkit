@@ -133,7 +133,10 @@ export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
  * reported by the first result, and a second line about a key missing from a file that does not
  * parse names the same root cause twice.
  */
-export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
+export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected, 
+// Required, never defaulted: a silent false here retires the codex check for a caller that
+// wanted it. Only the `review` guard reads review.model / review.correctnessModel.
+reviewSelected) {
     const path = join(cwd, 'guard.config.json');
     if (!existsSync(path)) {
         return [check('guard.config.json', 'MISSING', 'absent', 'run `devkit init`', true)];
@@ -170,7 +173,7 @@ export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
     const topology = reviewTopology(cwd, cfg.review);
     if (topology)
         results.push(topology);
-    const codex = codexRuntimeResult(cfg, cwd);
+    const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
     if (codex)
         results.push(codex);
     return results;
@@ -242,7 +245,7 @@ cwd = process.cwd()) {
 export async function adviseSearchIndex(cwd, sel) {
     if (!sel.guards?.includes('dup'))
         return;
-    const results = await checkGuardConfig(cwd, true, sel.searchCode === true);
+    const results = await checkGuardConfig(cwd, true, sel.searchCode === true, false);
     const index = results.find((r) => r.name === SEARCH_INDEX_CHECK);
     if (!index)
         return;
@@ -255,8 +258,8 @@ export async function adviseSearchIndex(cwd, sel) {
  * and overlay) — the same reachability hole adviseSearchIndex exists for, and the repo that MOST
  * needs this one is devkit itself: the sole install whose committed config selects gpt judges.
  */
-export async function adviseCodexRuntime(cwd) {
-    const results = await checkGuardConfig(cwd, false, false);
+export async function adviseCodexRuntime(cwd, sel) {
+    const results = await checkGuardConfig(cwd, false, false, sel.guards?.includes('review') === true);
     const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
     if (!codex)
         return;

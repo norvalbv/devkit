@@ -206,6 +206,7 @@ export default function reconcile(args, cwd) {
                 merged: false,
                 action: 'keep',
                 restored: [],
+                restoreFailures: [], // nothing was attempted, so nothing could refuse
                 warnings: [entry ? 'empty manifest entry' : 'no such branch in manifest'],
                 upstreamSha: null, // never fetched
                 baseRef: null, // no manifest entry ⇒ no upstream it could even be measured against
@@ -219,6 +220,9 @@ export default function reconcile(args, cwd) {
         // file that differs from another base's upstream says nothing about theirs.
         const { verdicts, unverified } = measureBases(mainRepo, results, f.apply);
         console.log(JSON.stringify({
+            // Each branch carries `restoreFailures`: a write the gate cleared and git refused. The
+            // exit stays 0 (advisory — chained callers must not break on debt), so that array is the
+            // only thing a machine caller can gate on before acting on ffPullable.
             branches: results,
             ffBlockersByBase: Object.fromEntries(verdicts.map((v) => [v.ref, v.blockers])),
             ffUnverifiedBases: unverified, // base refs no branch could measure at all

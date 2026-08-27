@@ -275,7 +275,7 @@ async function collectResults(cwd, cfg, configResult) {
         if (on)
             results.push(checkExtends(cwd, file, want, 'extends', overrides.has(file)));
     if (sel.guards?.length || sel.structure)
-        results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true)));
+        results.push(...(await checkGuardConfig(cwd, sel.guards?.includes('dup') === true, sel.searchCode === true, sel.guards?.includes('review') === true)));
     if (sel.structure && sel.husky)
         results.push(checkStructureLint(cwd, stack));
     const hooks = selectedHookAssets(sel);

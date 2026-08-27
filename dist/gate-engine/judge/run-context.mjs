@@ -41,7 +41,11 @@ export function telemetryEnabled() {
 export function originatingAgent() {
     if (truthy(process.env.CLAUDECODE))
         return 'claude';
-    if (process.env.CODEX_HOME || process.env.CODEX_CLI_PATH)
+    if (process.env.CODEX_HOME ||
+        process.env.CODEX_CLI_PATH ||
+        process.env.CODEX_SESSION_ID ||
+        process.env.CODEX_THREAD_ID ||
+        process.env.CODEX_APP_TOOLS_PIPE_PATH)
         return 'codex';
     return 'unknown';
 }

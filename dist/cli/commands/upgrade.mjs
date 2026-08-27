@@ -25,7 +25,7 @@ import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { selfHostSelection } from '../lib/husky/self-host.mjs';
 import { resolveExistingAgentProviders } from '../lib/install/agent-assets/agent-providers.mjs';
 import { adoptAgentAssetCollisions } from '../lib/install/agent-assets/agent-surfaces.mjs';
-import { offerLineGrowth, offerNewGates, offerOptionalComponents, } from '../lib/install/upgrade-offers.mjs';
+import { offerLineGrowth, offerNewGates, offerOptionalComponents, overlayOwnsLineGrowth, } from '../lib/install/upgrade-offers.mjs';
 import doctor from './doctor.mjs';
 import { applyInit } from './init.mjs';
 import { computeMigration } from './migrate-config.mjs';
@@ -180,6 +180,7 @@ export default async function upgrade(args, cwd) {
         // `undecided` pass-through: applyOverlay writes its own components block, so without it an
         // overlay upgrade records a decline nobody made and the offer never fires again.
         const disabledGuards = await offerNewGates(cfg.components?.disabledGuards, sel, dryRun);
+        await offerLineGrowth(cwd, sel, dryRun, { canWrite: () => overlayOwnsLineGrowth(cwd) });
         const undecidedOverlay = await offerOptionalComponents(cfg.components, sel, dryRun, {
             unavailable: ['antiSlop'],
         });
