@@ -2,11 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, outro } from '@clack/prompts';
-import { enableLineGrowth, hasLineCap, LINE_CAP, setMaxLines, } from '../../gate-engine/ratchets/size-disable.mjs';
+import { enableLineGrowth, hasLineCap, LINE_CAP, } from '../../gate-engine/ratchets/size-disable.mjs';
 import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, reportRatchetBaselineMigration, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mjs';
 import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
+import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
 import { packageDir, readJson, writeIfAbsent } from '../lib/fs-helpers.mjs';
 import { generateImportWallBaseline } from '../lib/generate/generate-import-wall-baseline.mjs';
@@ -26,6 +27,7 @@ import { ensureFallowGitignore, installFallow, saveFallowBaselines, wireFallowHo
 import { installSearchCode } from '../lib/install/install-search-code.mjs';
 import * as oxcLifecycle from '../lib/install/oxc/lifecycle.mjs';
 import { patchPackageJson } from '../lib/install/package-json.mjs';
+import * as upgradeOffers from '../lib/install/upgrade-offers.mjs';
 import { installOverlay } from '../lib/overlay.mjs';
 import { installGlobalHook } from '../lib/overlay-global-hook.mjs';
 import { installStandaloneConfigs, installStandaloneHook } from '../lib/standalone.mjs';
@@ -193,22 +195,6 @@ function applyScanRoots(cwd, scanRoots, dryRun) {
     }
     writeFileSync(path, next);
     console.log(`  ✓ guard.config.json scanRoots = ${value}`);
-}
-// Enable the per-file line-growth block on FIRST adoption: write `maxLines` into guard.config.json so
-// the guard-size ratchet caps source files. Called BEFORE the step-4 freeze so that same first-init
-// `guard-size freeze` grandfathers the current giants into size-lines.json. Callers gate this on
-// !repoAdopted — enabling the cap on an already-adopted repo without a fresh freeze would hard-error
-// its giants, so that path goes through `devkit upgrade`'s offer (which freezes in the same step).
-function applyMaxLines(cwd, on, dryRun) {
-    if (!on)
-        return;
-    if (dryRun) {
-        console.log(`  [dry-run] set guard.config.json maxLines = ${LINE_CAP} (line-growth block)`);
-        return;
-    }
-    if (setMaxLines(cwd)) {
-        console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
-    }
 }
 // Wire the pre-commit hook from the selection. The hook lives at `hookRoot` (the git root —
 // `cwd` for a single-package repo, else the monorepo root). `pkgRel` scopes the block + `cd`s
@@ -567,6 +553,8 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     console.log(`devkit init${dryRun ? ' (dry-run)' : ''} — OVERLAY (local-only) — stack=${stack}, devkit=${devkitRef}`);
     console.log('  invisible to git (.git/info/exclude); extends the repo; edits nothing committed\n');
     const { origHooksPath, fallowWired } = installOverlay(cwd, selection, stack, force, dryRun);
+    const ownsLineGrowth = upgradeOffers.overlayOwnsLineGrowth(cwd);
+    upgradeOffers.applyOverlayMaxLines(cwd, selection, repoAdopted(cwd), ownsLineGrowth, dryRun);
     if (selection.guards?.includes('fanout') || selection.guards?.includes('size')) {
         console.log('  freeze baselines (grandfather current tree)');
         runFreezes(cwd, dryRun, { overlay: true });
@@ -592,10 +580,11 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         searchSteering: false, // never wired in overlay (no resolvable bin without the package)
         fallow: fallowWired,
         antiSlop: false,
+        lineGrowth: Boolean(selection.lineGrowth),
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
         agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
-    }, plan.undecided, prevConfig?.components);
+    }, upgradeOffers.overlayUndecidedLineGrowth(cwd, selection, plan.undecided), prevConfig?.components);
     overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit'), { recursive: true });
@@ -695,10 +684,8 @@ export async function applyInit(cwd, plan) {
     applyScanRoots(cwd, scanRoots, dryRun);
     // Line-growth block: write the cap only on FIRST adoption (so step-4's freeze grandfathers giants)
     // and only when the size guard runs it. An adopted repo enables it via `devkit upgrade` (freeze +
-    // cap in one step), never here — this apply pass would set the cap with no matching freeze.
-    applyMaxLines(cwd, 
-    // Self-host never writes maxLines — guard.config.json is hand-owned (and has no maxLines by design).
-    !selfHost &&
+    // cap in one step), never here. Self-host is excluded: its guard.config.json is hand-owned.
+    upgradeOffers.applyMaxLines(cwd, !selfHost &&
         !repoAdopted(cwd) &&
         Boolean(selection.lineGrowth) &&
         selection.guards.includes('size'), dryRun);
@@ -863,6 +850,12 @@ export const meta = {
 // fallow-ignore-next-line complexity
 export default async function run(args, cwd) {
     const flags = initFlags.parseFlags(args);
+    // Refuse a skewed runner HERE, not at the managed-Oxc write near the end: by then the package.json
+    // patch, hook chain, baselines, skills/agents and the search-code wiring have all been rewritten
+    // by the older devkit, so the throw would leave a half-applied init whose remedy ("doctor --fix")
+    // is not the command that would finish it. A dry run writes nothing, so it stays open. (sc-2100)
+    if (!flags.dryRun)
+        assertRunnerMayWrite(cwd);
     const detectedStack = flags.stack ?? detectStack(cwd);
     // Mode: --overlay / --standalone seed it; the wizard asks (so the interactive flow exposes it).
     const detectedMode = flags.overlay ? 'overlay' : flags.standalone ? 'standalone' : 'package';

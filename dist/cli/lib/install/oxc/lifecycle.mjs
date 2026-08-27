@@ -1,10 +1,10 @@
 /** Collision-safe install, drift, and uninstall lifecycle for core Oxc repository state. */
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
 import { check } from '../../doctor/check-result.mjs';
-import { packageDir } from '../../fs-helpers.mjs';
+import { assertRunnerMayWrite, runnerSkew } from '../../doctor/pin/runner-identity.mjs';
+import { digest, packageDir } from '../../fs-helpers.mjs';
 import { probeOxcRuntime } from './runtime.mjs';
 const OXLINT_CONFIGS = [
     '.oxlintrc.json',
@@ -18,7 +18,6 @@ const OXFMT_STARTER = '{}\n';
 const MANIFEST_REL = '.devkit/oxc/manifest.json';
 const BASE_REL = '.devkit/oxc/oxlint.base.json';
 const LOCK_REL = '.devkit/oxc.lock';
-const digest = (content) => createHash('sha256').update(content).digest('hex');
 const fileDigest = (path) => digest(readFileSync(path));
 function baseContent(antiSlop) {
     const source = readFileSync(join(packageDir(), 'oxc', 'oxlint.base.json'), 'utf8');
@@ -65,14 +64,27 @@ function assertNoConfigCollisions(cwd) {
         }
     }
 }
-/** Read-only preflight used before a dependent capability publishes managed state. */
-export function assertOxcCapabilityReady(cwd) {
+/**
+ * Preflight for a dependent capability. Pass `publish` when the caller is about to MUTATE its own
+ * managed tree: anti-slop replaces its tree before the Oxc writer ever runs, so a runner refused
+ * only downstream would leave older-shaped state stranded if the process died before the rollback.
+ * `pinRoot` judges a different tree than the one written — ship publishes into a worktree (sc-2099).
+ */
+export function assertOxcCapabilityReady(cwd, publish) {
+    if (publish)
+        assertRunnerMayWrite(publish.pinRoot ?? cwd);
     const lint = probeOxcRuntime('lint');
     const fmt = probeOxcRuntime('fmt');
     if (!lint.ok || !fmt.ok || !lint.runtime || !fmt.runtime) {
         throw new Error(`bundled Oxc runtime unavailable: ${lint.detail}; ${fmt.detail}`);
     }
     assertNoConfigCollisions(cwd);
+}
+// Name the devkit that produced the bytes, so a stale digest distinguishes "the content drifted"
+// from "a different devkit version wrote this" — the second is invisible without a stamp, and is
+// the whole of sc-2100. Works where no node_modules pin exists to compare against (overlay, ship).
+function writtenBy(manifest) {
+    return manifest.devkitRef ? `written by ${manifest.devkitRef}` : 'writer unrecorded';
 }
 /** Require the managed base bytes and recorded digest to match the current selected capabilities. */
 export function oxcBaseCapabilityIssue(cwd) {
@@ -81,7 +93,7 @@ export function oxcBaseCapabilityIssue(cwd) {
         return 'managed Oxc manifest is missing or invalid';
     const expected = digest(baseContent(manifest.antiSlop));
     if (manifest.baseDigest !== expected)
-        return 'managed Oxlint base manifest digest is stale';
+        return `managed Oxlint base manifest digest is stale (${writtenBy(manifest)})`;
     const path = join(cwd, BASE_REL);
     if (!existsSync(path) || fileDigest(path) !== expected)
         return 'managed Oxlint base is missing or drifted';
@@ -97,7 +109,7 @@ function ownershipFor(cwd, names, starterPath, starter, previous, dryRun) {
         writeFileAtomic(join(cwd, starterPath), starter);
     return { path: starterPath, createdDigest: digest(starter) };
 }
-function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop) {
+function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop, pinRoot, allowSkew) {
     const previous = readManifest(cwd);
     const lint = probeOxcRuntime('lint');
     const fmt = probeOxcRuntime('fmt');
@@ -108,6 +120,10 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop) {
     // half-installed linter config (and vice versa).
     assertNoConfigCollisions(cwd);
     const base = baseContent(antiSlop);
+    // Validated HERE, immediately before the first write rather than on entry: the runtime probes
+    // above take seconds, and a concurrent `bun install` moving the pin inside that window would let
+    // an older devkit publish state the new pin rejects. Dry runs write nothing, so they stay open.
+    const skew = dryRun ? null : assertRunnerMayWrite(pinRoot ?? cwd, allowSkew);
     if (!dryRun) {
         mkdirSync(join(cwd, '.devkit', 'oxc'), { recursive: true });
         writeFileAtomic(join(cwd, BASE_REL), base);
@@ -129,9 +145,22 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop) {
             baseDigest: digest(base),
             configs: { oxlint, oxfmt },
         };
+        if (skew?.running)
+            manifest.devkitRef = `v${skew.running}`;
+        // Only reachable through the visible opt-out — assertRunnerMayWrite throws otherwise.
+        if (skew?.kind === 'older')
+            manifest.writtenUnderSkew = true;
         if (dryRun) {
             console.log(`  [dry-run] sync ${BASE_REL} + ${MANIFEST_REL}; preserve existing root configs`);
             return;
+        }
+        // The pin is re-read once more before the manifest — the LAST write — because nothing devkit
+        // holds serialises a concurrent `bun install`. Throwing here leaves the base updated but the
+        // manifest's old digest intact, which `oxcBaseCapabilityIssue` reports as drift and the next
+        // doctor repairs. A mid-flight pin change therefore fails into a detectable state, never a
+        // silent one that a newer pin would later reject without explanation.
+        if (skew && runnerSkew(pinRoot ?? cwd).pinned !== skew.pinned) {
+            throw new Error(`devkit pin changed to ${runnerSkew(pinRoot ?? cwd).pinned} while publishing managed state (was ${skew.pinned}) — re-run \`devkit doctor --fix\``);
         }
         writeFileAtomic(join(cwd, MANIFEST_REL), `${JSON.stringify(manifest, null, 2)}\n`);
         console.log(`  ✓ Oxc capability: oxlint@${manifest.pins.oxlint} + oxfmt@${manifest.pins.oxfmt}`);
@@ -150,13 +179,13 @@ function syncOxcCapabilityUnlocked(cwd, dryRun, antiSlop) {
     }
 }
 /** Install or upgrade managed base/provenance while preserving every existing root config byte. */
-export function syncOxcCapability(cwd, { dryRun = false, antiSlop = false } = {}) {
+export function syncOxcCapability(cwd, { dryRun = false, antiSlop = false, pinRoot, allowSkew } = {}) {
     if (dryRun) {
         syncOxcCapabilityUnlocked(cwd, true, antiSlop);
         return;
     }
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
-    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, antiSlop));
+    withLock(join(cwd, LOCK_REL), () => syncOxcCapabilityUnlocked(cwd, false, antiSlop, pinRoot, allowSkew));
 }
 function parseJsonConfig(cwd, ownership) {
     if (!ownership.path.endsWith('.json'))

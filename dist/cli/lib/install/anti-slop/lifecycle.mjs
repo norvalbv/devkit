@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { withLock, writeFileAtomic } from '../../atomic-write.mjs';
 import { check } from '../../doctor/check-result.mjs';
-import { packageDir } from '../../fs-helpers.mjs';
+import { digest, packageDir } from '../../fs-helpers.mjs';
 import { assertOxcCapabilityReady, oxcBaseCapabilityIssue, syncOxcCapability, } from '../oxc/lifecycle.mjs';
 import { resolveOxcRuntime } from '../oxc/runtime.mjs';
 import { ANTI_SLOP_BASELINE_MODE, ANTI_SLOP_CONFIG_REL, ANTI_SLOP_EXECUTION_MODE_ENV, ANTI_SLOP_LOCK_REL, ANTI_SLOP_MANAGED_REL, ANTI_SLOP_MANIFEST_REL, ANTI_SLOP_PLUGIN_API_VERSION, ANTI_SLOP_RULE_IDS, ANTI_SLOP_UPSTREAM, renderAntiSlopConfig, } from './constants.mjs';
@@ -21,7 +21,6 @@ const PROBE_SOURCE = `function devkitManagedProbe(value: object) { void ${BASE_P
 const PROBE_CONFIG_SOURCE = `${JSON.stringify({ extends: ['../oxc/oxlint.base.json'], rules: { [PROBE_RULE]: 'off' } }, null, 2)}\n`;
 const PROBE_MAX_OUTPUT = 2 * 1024 * 1024;
 const PLUGIN_MODULE = /\.(?:m?js|ts)$/u;
-const digest = (content) => createHash('sha256').update(content).digest('hex');
 function treeDigest(root) {
     const hash = createHash('sha256');
     const files = readdirSync(root, { recursive: true, withFileTypes: true })
@@ -159,7 +158,8 @@ function syncUnlocked(cwd, dryRun) {
     }
 }
 /** Install/upgrade the managed plugin without fetching or changing a consumer dependency stack. */
-export function syncAntiSlopCapability(cwd, { dryRun = false } = {}) {
+export function syncAntiSlopCapability(cwd, opts = {}) {
+    const { dryRun = false, pinRoot } = opts;
     if (dryRun) {
         assertOxcCapabilityReady(cwd);
         syncUnlocked(cwd, true);
@@ -168,22 +168,21 @@ export function syncAntiSlopCapability(cwd, { dryRun = false } = {}) {
     }
     mkdirSync(join(cwd, '.devkit'), { recursive: true });
     withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-        assertOxcCapabilityReady(cwd);
+        assertOxcCapabilityReady(cwd, { pinRoot });
         const replacement = syncUnlocked(cwd, false);
         if (!replacement)
             throw new Error('anti-slop managed replacement was not prepared');
         try {
-            syncOxcCapability(cwd, { antiSlop: true });
+            syncOxcCapability(cwd, { antiSlop: true, pinRoot });
             replacement.commit();
             console.log(`  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`);
         }
         catch (error) {
             replacement.rollback();
             try {
-                syncOxcCapability(cwd, {
-                    antiSlop: existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL)) &&
-                        existsSync(join(cwd, ANTI_SLOP_CONFIG_REL)),
-                });
+                const restored = existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL)) &&
+                    existsSync(join(cwd, ANTI_SLOP_CONFIG_REL));
+                syncOxcCapability(cwd, { antiSlop: restored, pinRoot });
             }
             catch {
                 // Preserve the original sync failure; doctor can repair any residual managed Oxc drift.

@@ -98,10 +98,14 @@ export function projectManagedCapability(wt, root) {
     }
     const antiSlop = antiSlopSelected(physicalRoot, physicalWt);
     try {
+        // pinRoot is the CALLER's checkout, not the worktree: refreshing the worktree FROM the running
+        // package is the whole point of sc-2099, but the pin deciding whether this runner may publish
+        // at all lives in the caller's tree. Both paths must carry it, or the nested writer re-judges
+        // the worktree's own package.json and skips a ship that was legitimately in sync.
         if (antiSlop)
-            syncAntiSlopCapability(physicalWt);
+            syncAntiSlopCapability(physicalWt, { pinRoot: physicalRoot });
         else
-            syncOxcCapability(physicalWt, { antiSlop: false });
+            syncOxcCapability(physicalWt, { antiSlop: false, pinRoot: physicalRoot });
     }
     catch (error) {
         // The bundled Oxc runtime can be unavailable (optional platform binaries), or a consumer config
