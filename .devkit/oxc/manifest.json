@@ -15,5 +15,6 @@
       "path": ".oxfmtrc.json",
       "createdDigest": null
     }
-  }
+  },
+  "devkitRef": "v0.57.1"
 }
