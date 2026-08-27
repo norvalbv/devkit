@@ -5,12 +5,17 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
 import {
+  adoptManagedCapability,
+  AntiSlopCapabilityError,
+  withManagedCapabilityLock,
+} from './base-capability.mts';
+import {
   ANTI_SLOP_BASELINE_MODE,
   ANTI_SLOP_EXECUTION_MODE_ENV,
   ANTI_SLOP_IGNORE_PATTERNS,
 } from './constants.mts';
 import { type FindingGroup, groupFindings, parseAntiSlopFindings } from './diagnostics.mts';
-import { antiSlopCapabilityIssue, withAntiSlopCapabilityLock } from './lifecycle.mts';
+import { antiSlopCapabilityIssue } from './lifecycle.mts';
 
 const MAX_OUTPUT = 64 * 1024 * 1024;
 
@@ -61,21 +66,28 @@ export function resolveAntiSlopScope(cwd: string, args: readonly string[]): Anti
   };
 }
 
-/** Run the installed capability under the repository's combined Oxlint config. */
-export function collectAntiSlopGroups(cwd: string, args: readonly string[]): FindingGroup[] {
+/**
+ * Run the installed capability under the repository's combined Oxlint config. `pinCapabilityTo`
+ * copies the capability THIS lint used, under the same lock, so a later step cannot judge another.
+ */
+export function collectAntiSlopGroups(
+  cwd: string,
+  args: readonly string[],
+  pinCapabilityTo?: string,
+): FindingGroup[] {
   if (!existsSync(resolve(cwd, '.devkit'))) {
     throw new Error('anti-slop is not installed — run `devkit init --anti-slop`');
   }
-  return withAntiSlopCapabilityLock(cwd, () => collectAntiSlopGroupsUnlocked(cwd, args));
+  return withManagedCapabilityLock(cwd, () => {
+    const groups = collectAntiSlopGroupsUnlocked(cwd, args);
+    if (pinCapabilityTo) adoptManagedCapability(cwd, pinCapabilityTo);
+    return groups;
+  });
 }
 
 function collectAntiSlopGroupsUnlocked(cwd: string, args: readonly string[]): FindingGroup[] {
   const issue = antiSlopCapabilityIssue(cwd);
-  if (issue) {
-    throw new Error(
-      `anti-slop capability is not fully integrated (${issue}); refusing an incomplete baseline`,
-    );
-  }
+  if (issue) throw new AntiSlopCapabilityError(issue);
   const scope = resolveAntiSlopScope(cwd, args);
   const runtime = resolveOxcRuntime('lint');
   const result = spawnSync(
