@@ -21,20 +21,26 @@ import {
 import { verifyChecklist } from '../runtime.mts';
 
 // A frink-shaped review config without touching disk: defaults + explicit roots.
+const defaults = resolveGuardConfig('/nonexistent-cwd-defaults-only');
 const cfg = {
-  ...resolveGuardConfig('/nonexistent-cwd-defaults-only'),
+  ...defaults,
   scanRoots: ['src', 'server'],
   review: {
+    ...defaults.review,
     backendRoots: ['src/main', 'server'],
     frontendRoots: ['src/renderer', 'src/preload'],
-    trustBoundaries: '',
-    shortcutTracking: false,
-    accessibility: { skipTouchTargets: false },
-    agentsDir: '.claude/agents',
   },
 };
 
 const names = (sel) => sel.map((s) => s.reviewer.name);
+
+describe('test fixture invariant', () => {
+  it('keeps the resolved review model knobs — dropping them would silently un-pin every config-resolved reviewer', () => {
+    expect(cfg.review.model).toBe(defaults.review.model);
+    expect(cfg.review.escalationModel).toBe(defaults.review.escalationModel);
+    expect(cfg.review.correctnessModel).toBe(defaults.review.correctnessModel);
+  });
+});
 
 describe('parseReviewVerdict', () => {
   it('clean PASS', () => {

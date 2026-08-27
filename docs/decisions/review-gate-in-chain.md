@@ -71,3 +71,4 @@ created: 2026-07-02
 **Scope:** gate-engine/review/**,gate-engine/judge/**,agents/**,skills/**,cli/lib/ship/**
 **Source:** manual
 **Evidence-change:** Production telemetry that did not exist at the 2026-07-02 ruling: with the first pass moved to the codex family (sc-2107/2054), commit_reviews 08-10..27 shows sol FAILing 12–37% of domain runs (haiku 0–3%) and the hardcoded opus escalator overturning ~90% of them — 121 opus escalations in three days on Anthropic quota. Owner re-ruled 2026-08-27 (sc-2190).
+- 2026-08-27 — **Scope:** gate-engine/review/**,gate-engine/judge/**,gate-engine/comment-firewall/**,gate-engine/sentry/**,gate-engine/decisions/**,agents/**,skills/**,cli/lib/ship/** — The 2026-08-27 Target extends the cascade ruling to every former-haiku gate judge (comment-firewall, sentry, decision-alignment/smell/depth), but the Scope only watched review/judge paths — future changes in those judges would bypass Capture C (PR #474 review finding).

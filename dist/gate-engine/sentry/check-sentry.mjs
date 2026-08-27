@@ -81,8 +81,7 @@ function envVar(name) {
 }
 const CWD = process.cwd();
 const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
-/** Samples follow the confidence contract: a run that can BLOCK votes a 3-sample majority;
- * warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
+/** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
 export function resolveSamples(hard) {
     const env = Number(envVar('SENTRY_SAMPLES') ?? '');
     return env > 0 ? env : hard ? 3 : 1;
@@ -259,13 +258,14 @@ function runJudgeOnce(input, model, prompt) {
  * N times and majority-votes (self-consistency). Shared so the gate and the benchmark exercise the
  * exact same path — prompt/parser/voting never drift.
  */
-export function judge(input, { model = modelSpec(), samples = 1, prompt = SENTRY_JUDGE_PROMPT } = {}) {
+export function judge(input, { model, samples = 1, prompt = SENTRY_JUDGE_PROMPT } = {}) {
     if (envVar('SENTRY_NO_LLM') || !String(input).trim())
         return null;
     try {
+        const judgeModel = model ?? modelSpec(); // config read stays behind the fail-open guard
         const runs = [];
         for (let i = 0; i < Math.max(1, samples); i += 1) {
-            const r = runJudgeOnce(input, model, prompt);
+            const r = runJudgeOnce(input, judgeModel, prompt);
             if (r === null)
                 return null; // judge dark (execJudge warned once) — don't re-warn per sample
             runs.push(r);

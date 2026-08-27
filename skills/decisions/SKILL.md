@@ -175,7 +175,8 @@ default gpt-5.6-sol), which gets the full transcript + the same tools and confir
 escalation-confirmed CONTRADICT** (realign, or re-target with `--evidence-change`). This
 catches the real flip-flop — code silently deviating from an existing target — deterministically
 (the scope glob is the match, the LLM only judges contradiction). Bounded block; fail-open at every
-step if `claude` is absent/times out; `GUARD_NO_LOG=1` bypass.
+step if the judge runtime (codex for gpt-* models, `claude` otherwise) is absent or times out;
+`GUARD_NO_LOG=1` bypass.
 Recording a Target **alongside its first implementation** in one commit is fine — a normal step toward
 the target judges ALIGN; if a false CONTRADICT ever blocks that combined commit, `GUARD_NO_LOG=1`.
 

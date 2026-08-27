@@ -97,7 +97,7 @@ interface SentryVerdict {
 
 // Overrides for `judge` — all optional; each falls back to the module env default.
 interface SentryJudgeOpts {
-  model?: string;
+  model?: string; // resolved lazily INSIDE judge's try — malformed config must fail-open there
   samples?: number;
   prompt?: string;
 }
@@ -105,8 +105,7 @@ interface SentryJudgeOpts {
 const CWD = process.cwd();
 const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
 
-/** Samples follow the confidence contract: a run that can BLOCK votes a 3-sample majority;
- * warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
+/** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
 export function resolveSamples(hard: boolean): number {
   const env = Number(envVar('SENTRY_SAMPLES') ?? '');
   return env > 0 ? env : hard ? 3 : 1;
@@ -317,13 +316,14 @@ function runJudgeOnce(input: string, model: string, prompt: string): SentryRun |
  */
 export function judge(
   input: string,
-  { model = modelSpec(), samples = 1, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
+  { model, samples = 1, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
 ): SentryVerdict | null {
   if (envVar('SENTRY_NO_LLM') || !String(input).trim()) return null;
   try {
+    const judgeModel = model ?? modelSpec(); // config read stays behind the fail-open guard
     const runs: SentryRun[] = [];
     for (let i = 0; i < Math.max(1, samples); i += 1) {
-      const r = runJudgeOnce(input, model, prompt);
+      const r = runJudgeOnce(input, judgeModel, prompt);
       if (r === null) return null; // judge dark (execJudge warned once) — don't re-warn per sample
       runs.push(r);
     }
