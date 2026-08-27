@@ -192,6 +192,72 @@ export function createPreservedCommit({ dir, env, git, branch, tempPrefix }) {
   return git(['rev-parse', branch]).trim();
 }
 
+/** A preserved commit shaped for the resume SCOPE checks (sc-2089). `briefed`/`deleted` reach the
+ *  commit AND $ROOT; `gate*` reach only the commit, as a ratchet gate does inside the worktree. */
+export function createScopedPreservedCommit({
+  dir,
+  env,
+  git,
+  branch,
+  tracked = {},
+  briefed = {},
+  gateAuthored = {},
+  gateDeleted = [],
+  deleted = [],
+}) {
+  const write = (root, rel, body) => {
+    mkdirSync(join(root, rel, '..'), { recursive: true });
+    writeFileSync(join(root, rel), body);
+  };
+  for (const [rel, body] of Object.entries(tracked)) write(dir, rel, body);
+  if (Object.keys(tracked).length > 0) {
+    git(['add', '-A', '--', ...Object.keys(tracked)], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'seed tracked'], { stdio: 'ignore' });
+  }
+
+  const preservedWt = mkdtempSync(join(tmpdir(), `ship-scope-${branch.replace(/\W/g, '-')}-`));
+  dirs.push(preservedWt);
+  git(['worktree', 'add', '-q', '-b', branch, preservedWt]);
+  for (const [rel, body] of Object.entries({ ...briefed, ...gateAuthored }))
+    write(preservedWt, rel, body);
+  for (const rel of [...deleted, ...gateDeleted]) rmSync(join(preservedWt, rel), { force: true });
+  execFileSync(
+    'git',
+    [
+      'add',
+      '-A',
+      '--',
+      ...Object.keys(briefed),
+      ...Object.keys(gateAuthored),
+      ...deleted,
+      ...gateDeleted,
+    ],
+    { cwd: preservedWt, env },
+  );
+  execFileSync('git', ['commit', '--no-verify', '-q', '-m', 'ship it', '-m', 'pr body'], {
+    cwd: preservedWt,
+    env,
+  });
+  git(['worktree', 'remove', '--force', preservedWt]);
+
+  for (const [rel, body] of Object.entries(briefed)) write(dir, rel, body);
+  for (const rel of deleted) rmSync(join(dir, rel), { force: true });
+  return git(['rev-parse', branch]).trim();
+}
+
+/** Mint the gate-adds record ship writes beside the receipt, in the exact `git diff -z` framing
+ *  ship_record_gate_adds produces: every entry NUL-TERMINATED, including the last. */
+export function mintGateAddsRecord(dir, env, git, branch, paths) {
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+    cwd: dir,
+    env,
+    encoding: 'utf8',
+    input: paths.map((p) => `${p}\0`).join(''),
+  }).trim();
+  git(['update-ref', `refs/devkit/ship-gate-adds/${branch}`, blob]);
+  return blob;
+}
+
 export function addOverlay(dir, overlayHook) {
   mkdirSync(join(dir, '.devkit/hooks'), { recursive: true });
   writeFileSync(
@@ -212,6 +278,31 @@ export function seedReshipRepo() {
   const seeded = seedShipRepo({ origin: bare });
   seeded.git(['push', '-q', 'origin', 'work:pr-open'], { stdio: 'ignore' });
   return { ...seeded, bare };
+}
+
+/** The hook exits 0 but leaks a pipe-holding child, so git lands the commit and the gate supervisor
+ *  then returns 124 while reaping that descendant — the Story #1550 state, verbatim. */
+export const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
+
+/** Swap the hook in AFTER seeding: a seeder's own commits would run LEAKING_HOOK with TEST_HOOK_COUNT
+ *  unset, and the failed append fails the commit. */
+export function installHook(dir, body) {
+  const hook = join(dir, '.husky/_/pre-commit');
+  writeFileSync(hook, `#!/bin/sh\n${body}\n`);
+  chmodSync(hook, 0o755);
+}
+
+/** ghStub on PATH + a hook-run ledger. Publishing tests need both. */
+export function publishEnvFor(dir, env) {
+  const hookCount = join(dir, 'hook-count');
+  return {
+    hookCount,
+    publishEnv: {
+      ...env,
+      PATH: `${ghStub('echo https://github.com/acme/app/pull/42')}:${env.PATH ?? process.env.PATH ?? ''}`,
+      TEST_HOOK_COUNT: hookCount,
+    },
+  };
 }
 
 export function ghStub(prBody) {

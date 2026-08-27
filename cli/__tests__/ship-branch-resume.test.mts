@@ -1,6 +1,6 @@
 /** Resuming a commit preserved by a post-commit gate timeout, when the BASE MOVED under it. Sibling of
  *  ship-branch.test.mts, which keeps the moved-base-free resume cases and has no maxTestLines headroom. */
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -9,44 +9,21 @@ import {
   createPreservedCommit,
   dirs,
   GIT_ENV,
-  ghStub,
+  installHook,
+  LEAKING_HOOK,
   localBranchExists,
   manifestOf,
+  publishEnvFor,
   remoteBranchExists,
   scriptPath,
   seedBaseRepo,
   seedShipRepoLocalRemote,
 } from './_ship-branch-fixture.mts';
 
-/** The hook exits 0 but leaks a pipe-holding child, so git lands the commit and the gate supervisor
- *  then returns 124 while reaping that descendant — the Story #1550 state, verbatim. */
-const LEAKING_HOOK = 'echo run >> "$TEST_HOOK_COUNT"\nsleep 30 &';
-
-/** Swap the hook in AFTER seeding. Seeders make their own commits, so handing LEAKING_HOOK to a seeder
- *  would run it during the seed — where TEST_HOOK_COUNT is unset and the append fails the commit. */
-function installHook(dir, body) {
-  const hook = join(dir, '.husky/_/pre-commit');
-  writeFileSync(hook, `#!/bin/sh\n${body}\n`);
-  chmodSync(hook, 0o755);
-}
-
 /** createPreservedCommit leaves note.txt UNTRACKED in $ROOT, and git refuses a checkout/merge that
  *  would overwrite it. Every caller here is about to take the branch's own copy anyway. */
 function clearUntrackedNote(dir) {
   rmSync(join(dir, 'note.txt'), { force: true });
-}
-
-/** ghStub on PATH + a hook-run ledger. Publishing tests need both. */
-function publishEnvFor(dir, env) {
-  const hookCount = join(dir, 'hook-count');
-  return {
-    hookCount,
-    publishEnv: {
-      ...env,
-      PATH: `${ghStub('echo https://github.com/acme/app/pull/42')}:${env.PATH ?? process.env.PATH ?? ''}`,
-      TEST_HOOK_COUNT: hookCount,
-    },
-  };
 }
 
 /** Mint the receipt ship would have written, skipping a real ceiling. Valid only where the variable
