@@ -10,13 +10,13 @@
  * network/db/fs/native/IPC failure handled without crashing. Those never reach a handler unless the
  * code calls captureException explicitly. This nudges the author at commit time.
  *
- * HARD-BY-DEFAULT — a confident MONITOR blocks (exit 1) unless softened for one run with
- * *_SENTRY_HARD=0. The warn channel measured structurally dark in the consumer (frink: 18 unseen
- * MONITOR verdicts in 17 days) and the 2026-07-12 Target rules all judge gates hard by default —
+ * HARD-BY-DEFAULT — a confident MONITOR blocks (exit 1) unless softened with *_SENTRY_HARD=0, and
+ * only on evidence the gate can prove it showed the judge (sc-1984: `sufficient` in ./evidence). The
+ * warn channel measured structurally dark in the consumer (frink: 18 unseen MONITOR verdicts in 17
+ * days) and the 2026-07-12 Target rules all judge gates hard by default —
  * the exit code is the only channel that reliably reaches a headless agent. The block stays
- * bounded: `effectiveHard` degrades an empty-staged-diff run (amend/--allow-empty) to warn +
- * watchlist, an ambiguous/split vote never blocks, and hard mode votes a 3-sample majority (the
- * confidence contract).
+ * bounded: `effectiveHard` degrades an empty-staged-diff or incomplete-evidence run to warn, an
+ * ambiguous/split vote never blocks, and hard mode votes a 3-sample majority (confidence contract).
  *
  * Lives in the `commit-msg` hook, NOT pre-commit: the message only exists once git has it (passed as
  * the message-file path); pre-commit can't see it on interactive commits.
@@ -26,7 +26,7 @@
  *     that a swallowed error is ALREADY instrumented in the same commit, so it re-flags a surface the
  *     diff already fixed (measured: message precision 0.46 regardless of model). A FULL diff can
  *     confuse a cheap model via distractors (arXiv 2412.10079) — but FOCUSING it to error-handling
- *     hunks (focusDiff, the decisions-detect pattern) removes them. So the default feeds the FOCUSED
+ *     hunks (the decisions-detect pattern) removes them. So the default feeds the FOCUSED
  *     diff, the same "evaluate the live diff" contract the decisions/reviewer judges use. On the eval
  *     (127 cases: 104 real-derived, F1 ~0.89-0.91 across runs, + a deliberately-hard 23-row authored
  *     elimination tier) haiku+focused-diff = F1 ~0.87 overall vs message F1 0.56, and focused beats
@@ -49,12 +49,13 @@
  *   SENTRY_CONTEXT=message|names|diff (default diff, focused) ·
  *   SENTRY_SAMPLES=N (default 3 when hard, 1 when warn) ·
  *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd) ·
- *   SENTRY_DIFF_FULL=1 (feed the whole diff, not just error-handling hunks — A/B).
+ *   SENTRY_DIFF_FULL=1 (whole diff, not just error-handling hunks — A/B; waives the evidence floor).
  *
  * DATA BOUNDARY: the `diff` tier sends the FOCUSED staged source (error-handling hunks, capped 6000c)
- * to the configured Claude judge — more than the message tier's metadata. focusDiff limits it to
- * error-relevant hunks, never whole files. Set SENTRY_CONTEXT=message to send only the commit message,
- * or NO_SENTRY_JUDGE=1 to disable the judge entirely.
+ * to the configured Claude judge — more than the message tier's metadata — never whole files, plus a
+ * capture INVENTORY over the whole staged diff: paths, hunk anchors and capture SYMBOL names only,
+ * never source lines or argument text (sc-1984, so absence is never inferred from a cap). Set
+ * SENTRY_CONTEXT=message to send only the commit message, or NO_SENTRY_JUDGE=1 to disable the judge.
  * No `claude` binary / offline / quota-exhausted → fail-open, but execJudge prints one stderr warning
  * so the dark judge is VISIBLE (no longer a silent no-op). See ../judge/run-judge.mjs.
  *
@@ -69,11 +70,12 @@ import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envBool, resolveGuardConfig } from '../config.mts';
-import { focusHunks } from '../judge/diff-focus.mts';
+import { emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { resolveReviewModel } from '../review/reviewers.mts';
+import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
@@ -110,7 +112,7 @@ export function resolveSamples(hard: boolean): number {
   const env = Number(envVar('SENTRY_SAMPLES') ?? '');
   return env > 0 ? env : hard ? 3 : 1;
 }
-// Default = diff, FOCUSED (see buildContext/focusDiff). The eval (gate-engine/sentry/eval, 103 cases)
+// Default = diff, FOCUSED (see buildContext + ./evidence). The eval (gate-engine/sentry/eval)
 // picked it: haiku+focused-diff = F1 ~0.91 (0.90–0.93 across runs; precision ~0.90) vs message 0.46/0.71
 // (F1 0.56 — message flags every already-instrumented swallow). Focusing to error-handling hunks beats
 // the full diff (0.83), beats sonnet-full (0.88), AND edges sonnet-focused (0.92) — context + focus
@@ -184,53 +186,28 @@ export function shouldJudge(message: string): boolean {
   return SENTRY_JUDGE_TYPE_RE.test(subjectOf(message));
 }
 
-// Cap the staged-diff evidence fed to the `diff` tier.
-const DIFF_EVIDENCE_CAP = 6000;
-
-// A hunk is error-handling-relevant if it touches a catch/throw/reject/.catch, a log.warn|error, or a
-// Sentry capture — the swallow-vs-capture signal the judge needs. Everything else is a distractor.
-const ERROR_HUNK_RE =
-  /\b(?:try|catch|throw|reject|captureException|captureMessage|captureMainMessage)\b|\.catch\s*\(|(?:log|logger|console)\.(?:warn|error)/;
-
-/**
- * FOCUS the staged diff to just its error-handling hunks — the decisions-detect pattern (send the
- * judge the signal, not the whole commit): a header listing every changed file, then ONLY the
- * error-relevant hunks per file, then an omission count. Dropping distractors is a MEASURED win on the
- * 104-case eval (haiku 0.83→~0.91) — it kills borderline over-fires and stops the cap from truncating
- * the signal out of a big commit. Deterministic EVIDENCE selection only; the LLM still decides.
- * The per-file split + hunk focus live in ../judge/diff-focus (shared with detect + the reviewers).
- */
-export function focusDiff(diffText: string): string {
-  return focusHunks(diffText, (h) => ERROR_HUNK_RE.test(h), 'non-error');
-}
-
 /** Build the stdin payload for the judge.
  *   message : commit subject/body only (the tuned default).
  *   names   : + the changed-file list (status + path), never hunks.
- *   diff    : + the staged diff, FOCUSED to its error-handling hunks (focusDiff — the decisions
- *             pattern), then capped — lets the judge SEE whether the change already instruments the
- *             error it handles (so a MONITOR self-clears when the capture is present). The directive is
- *             inlined so the MODEL decides from the diff — no regex verdict. GUARD_SENTRY_DIFF_FULL=1
- *             feeds the whole diff instead (A/B escape hatch). */
+ *   diff    : + the error-handling hunks packed capture-first + the capture inventory (buildEvidence)
+ *             — lets the judge SEE whether the change already instruments the error it handles (so a
+ *             MONITOR self-clears when the capture is present) and, when the cap bit, WHAT went
+ *             missing rather than inferring from silence. The directive is inlined so the MODEL
+ *             decides from the diff — no regex verdict.
+ * `evidence` is passed in by the gate (computed once, shared with effectiveHard); the bench and tests
+ * may omit it and have it computed here. */
 export function buildContext(
   message: string,
   nameStatus: string,
   diff = '',
   tier: string = CONTEXT_TIER,
+  evidence?: SentryEvidence,
 ): string {
   const msg = String(message).trim().slice(0, 2000);
   const base = `COMMIT MESSAGE:\n${msg}`;
   if (tier === 'diff' && diff && String(diff).trim()) {
-    const focused = envVar('SENTRY_DIFF_FULL') ? '' : focusDiff(diff);
-    // Truncation fail-safe: if the (focused) evidence overflows the cap, a later swallow can be cut
-    // while an early capture survives — the judge must NOT read that absence as instrumented. Mark it
-    // incomplete (mirrors the decisions detect judge's INCOMPLETE fail-safe). focusDiff makes overflow
-    // rare (error hunks only), but a genuinely large multisurface commit can still hit it.
-    const full = focused || String(diff).trim();
-    const evidence =
-      full.length > DIFF_EVIDENCE_CAP
-        ? `${full.slice(0, DIFF_EVIDENCE_CAP)}\n[EVIDENCE TRUNCATED — later hunks omitted; a swallow whose capture is not shown here may still be UN-instrumented. Do NOT infer SKIP from an absent capture.]`
-        : full;
+    const ev = evidence ?? buildEvidence(diff);
+    const inventory = renderInventory(ev.inventory);
     return (
       `${base}\n\n` +
       'STAGED DIFF (error-handling hunks; ground truth over the message). If this diff ALREADY adds a ' +
@@ -243,7 +220,8 @@ export function buildContext(
       'is added anywhere in this diff. A removal is NOT elimination if the failure stays silent: the ' +
       'caller still swallows it, the swallow merely moved or narrowed, or a crash became a silent ' +
       'no-op. Reply MONITOR when a swallowed error-class is introduced or touched and the ' +
-      `diff adds NO real capture for it:\n${evidence}`
+      `diff adds NO real capture for it:\n${ev.packed.text}` +
+      (inventory ? `\n\n${inventory}` : '')
     );
   }
   if (tier !== 'names' || !nameStatus || !String(nameStatus).trim()) return base;
@@ -365,8 +343,8 @@ function stagedDiff() {
 
 // Durable backlog so the advisory is actionable after the commit — the file is the TODO list.
 // Best-effort: a watchlist write must never fail the commit. Leaves an unstaged edit the author
-// reviews and commits when they action it.
-// Separator between subject and evidence — shared so line-format and dedup never drift (em-dash, U+2014).
+// reviews and commits when they action it. The separator between subject and evidence is shared so
+// line-format and dedup never drift (em-dash, U+2014).
 const WATCHLIST_EVIDENCE_SEP = ' — ';
 
 // The watchlist line for a subject + evidence — the durable-backlog format.
@@ -429,6 +407,14 @@ export function reportLine(result: SentryVerdict | null): string {
   return `sentry-judge: ${verdict}${result?.evidence ? ` — ${result.evidence}` : ''}`;
 }
 
+/** Name a withheld block on stderr AND in telemetry: a gate that quietly stops blocking is
+ * indistinguishable from one that never ran (gate-telemetry-self-describing). */
+function reportDegrade(evidence: SentryEvidence | null): void {
+  const cause = degradeCause(evidence);
+  console.error(`sentry-judge: advisory only — ${cause}, so a MONITOR cannot block this commit.`);
+  emitGateEvent({ type: 'gate_degraded', judge: 'sentry-advisory', cause });
+}
+
 /** Gate-mode side effects: warn on MONITOR, log to the watchlist only on the warn path. Returns exit code. */
 function applyGateResult(result: SentryVerdict | null, message: string, hard: boolean): number {
   const code = sentryExit(result?.verdict ?? null, hard);
@@ -443,13 +429,23 @@ function applyGateResult(result: SentryVerdict | null, message: string, hard: bo
   return code;
 }
 
-/** Hard mode may only BLOCK on diff evidence. With an empty staged diff (amend with nothing
- * restaged, --allow-empty), the diff tier silently degrades to message-only judging — the exact
- * config whose precision the eval REJECTED for blocking (a "fix silent X" subject reads MONITOR
- * with no diff to self-clear against). Downgrade to warn + watchlist; never exit 1 on it.
- * An explicitly configured message/names tier keeps its hard block — that is the owner's choice. */
-export function effectiveHard(hardEnv: boolean, tier: string, diff: string): boolean {
-  return hardEnv && (tier !== 'diff' || diff.trim() !== '');
+/**
+ * Hard mode may only BLOCK on evidence the gate can PROVE it showed the judge (sc-1984, following
+ * reviewer-blocks-require-validated-evidence). On the diff tier that is `evidence.sufficient`; short
+ * of it — an empty staged diff (amend/--allow-empty, which silently degrades the tier to message-only
+ * judging, the exact config the eval REJECTED for blocking), no selected hunk, or a capture the cap
+ * had to cut — the run warns + watchlists instead. It never exits 1 on evidence it never showed.
+ * An explicitly configured message/names tier keeps its hard block — the owner's choice, so it
+ * short-circuits FIRST: a hunk-derived flag reads vacuously insufficient there.
+ */
+export function effectiveHard(
+  hardEnv: boolean,
+  tier: string,
+  evidence: SentryEvidence | null,
+): boolean {
+  if (!hardEnv) return false;
+  if (tier !== 'diff') return true;
+  return evidence?.sufficient === true;
 }
 
 /** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
@@ -472,10 +468,14 @@ export function run(gate: boolean): void {
     }
     const nameStatus = CONTEXT_TIER === 'names' ? stagedNameStatus() : '';
     const diff = CONTEXT_TIER === 'diff' ? stagedDiff() : '';
-    // Hard-by-default (envBool distinguishes unset → hard from an explicit =0 soften); resolve it
-    // BEFORE judging so the samples default can follow it. Report mode never blocks → warn tier.
-    const hard = gate && effectiveHard(envBool('SENTRY_HARD') ?? true, CONTEXT_TIER, diff);
-    const input = buildContext(message, nameStatus, diff, CONTEXT_TIER);
+    // Evidence FIRST: it decides both what the judge sees and whether this run may block, so it must
+    // exist before `hard` — and `hard` before `samples`, which follows the confidence contract.
+    const evidence = CONTEXT_TIER === 'diff' && diff.trim() ? buildEvidence(diff) : null;
+    const hardEnv = envBool('SENTRY_HARD') ?? true; // unset → hard; an explicit =0 softens
+    const hard = gate && effectiveHard(hardEnv, CONTEXT_TIER, evidence); // report mode never blocks
+    if (gate && hardEnv && !hard) reportDegrade(evidence);
+    if (evidence?.exempt) console.error('sentry-judge: DIFF_FULL — evidence floor waived (A/B)');
+    const input = buildContext(message, nameStatus, diff, CONTEXT_TIER, evidence ?? undefined);
     const opts = { model: modelSpec(), samples: resolveSamples(hard), prompt: SENTRY_JUDGE_PROMPT };
     // Diff-tier only: message/names evidence can't change with the demanded FIX, so a cached hard
     // MONITOR would replay forever there. A bypassed run (SENTRY_NO_LLM) earns and replays nothing.
