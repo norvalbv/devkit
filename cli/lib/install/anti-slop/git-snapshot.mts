@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { adoptManagedCapability } from './base-capability.mts';
 import { type AntiSlopBaseline, parseBaseline } from './baseline.mts';
 import { ANTI_SLOP_BASELINE_REL } from './constants.mts';
 
@@ -192,9 +193,13 @@ function extractTree(root: string, tree: string, destination: string): void {
   }
 }
 
-/** Run an action against selected files from the exact base tree used by a CI comparison. */
+/**
+ * Run an action against selected files from the exact base tree used by a CI comparison.
+ * `cwd` locates the REPOSITORY; `capabilityCwd` holds the capability to judge it with (sc-2084).
+ */
 export function withBaseAntiSlopSnapshot<T>(
   cwd: string,
+  capabilityCwd: string,
   baseTree: string,
   paths: readonly string[],
   action: (snapshot: { cwd: string; paths: string[] }) => T,
@@ -204,6 +209,7 @@ export function withBaseAntiSlopSnapshot<T>(
   try {
     extractTree(repo.root, baseTree, temp);
     const snapshotCwd = join(temp, repo.prefix);
+    adoptManagedCapability(capabilityCwd, snapshotCwd);
     const existingPaths = paths.filter((path) => existsSync(join(snapshotCwd, path)));
     return action({ cwd: snapshotCwd, paths: existingPaths });
   } finally {
