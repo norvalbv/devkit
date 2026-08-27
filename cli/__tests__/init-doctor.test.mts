@@ -586,10 +586,16 @@ describe('doctor — selection-aware', () => {
     // A recipe with no qavis on PATH — the silently-dead gate this check exists to surface.
     mkdirSync(join(root, '.qavis'), { recursive: true });
     writeFileSync(join(root, '.qavis', 'recipe.json'), '{}');
+    const pathWithoutQavisOrCodex = '/usr/bin:/bin';
+    const claudeFamilyJudgePins = {
+      GUARD_REVIEW_MODEL: 'haiku',
+      GUARD_REVIEW_ESCALATION_MODEL: 'opus',
+      GUARD_CORRECTNESS_MODEL: 'opus',
+    };
     const dead = spawnSync(process.execPath, [CLI, 'doctor'], {
       cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, PATH: '/usr/bin:/bin' }, // scrub qavis off PATH, keep git
+      env: { ...process.env, PATH: pathWithoutQavisOrCodex, ...claudeFamilyJudgePins },
     });
     expect(dead.stdout).toMatch(/qavis-advisory: .*present but qavis is NOT on PATH/);
     expect(dead.status, dead.stderr).toBe(0);
