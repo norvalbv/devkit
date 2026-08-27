@@ -378,14 +378,14 @@ describe('exit 4 renders as an object-database fault, never as a verdict', () =>
     const { status, out } = runHook({ 'guard-review': 4 });
     expect(status).toBe(1);
     expect(out).toContain('unexpected exit 4');
-    expect(out).not.toContain('opus-confirmed');
+    expect(out).not.toContain('escalation-confirmed');
     expect(out).not.toContain('auth/quota');
   });
 
   it('exit 1 and exit 3 DO still carry their verdict remedies — the contrast that matters', () => {
     // Non-vacuity guard: if these ever stopped printing, the two assertions above would pass for
     // the wrong reason and this suite would be measuring nothing.
-    expect(runHook({ 'guard-review': 1 }).out).toContain('opus-confirmed');
+    expect(runHook({ 'guard-review': 1 }).out).toContain('escalation-confirmed');
     expect(runHook({ 'guard-review': 3 }).out).toContain('auth/quota');
   });
 });

@@ -312,7 +312,7 @@ describe('assembled hook execution (stubbed bins, sh -e)', () => {
     const r = runHook({ REVIEW_RC: '3' });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain('strict ship mode failed closed');
-    expect(r.stdout).not.toContain('opus-confirmed');
+    expect(r.stdout).not.toContain('escalation-confirmed');
   });
 
   it('guard-review exit 2 (non-strict inconclusive) fails open', () => {
@@ -384,7 +384,7 @@ describe('parallel completeness prewarm (ship message file present)', () => {
   it('a fleet FAIL blocks as the fleet, never as the parallel completeness verdict', () => {
     const r = runHook({ REVIEW_RC: '1', COMP_RC: '1' }, undefined, { shipMsg: true });
     expect(r.status).toBe(1);
-    expect(r.stdout).toContain('opus-confirmed');
+    expect(r.stdout).toContain('escalation-confirmed');
     expect(r.stdout).not.toContain('Confirmed completeness gap');
   });
 
