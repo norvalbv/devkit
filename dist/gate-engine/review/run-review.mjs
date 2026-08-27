@@ -3,23 +3,24 @@
  * root-agent-invoked subagents (+ forgeable `.passed` marker files) run HERE, in-chain, as
  * parallel headless judges over the staged diff.
  *
- * Per selected reviewer, a CASCADE (check-alignment shape): the first pass (sonnet) investigates
- * with read-only tools; ONLY its FAIL escalates to opus, which re-investigates with the full
- * first-pass transcript and independently confirms or overturns. A block requires an
- * opus-confirmed FAIL.
+ * Per selected reviewer, a CASCADE (check-alignment shape): the first pass (review.model)
+ * investigates with read-only tools; ONLY its FAIL escalates to the escalation model
+ * (review.escalationModel), which re-investigates with the full first-pass transcript and
+ * independently confirms or overturns. A block requires an escalation-confirmed FAIL. Pinned
+ * reviewers (correctness) run single-pass and block directly.
  *
  * Contract:
- *   exit 1 = at least one opus-confirmed FAIL
+ *   exit 1 = at least one confirmed FAIL
  *   exit 2 = no FAIL, but at least one judge was inconclusive (outage / no VERDICT line) → the
  *            hook treats this as fail-open (non-strict runs only)
  *   exit 3 = strict runs only (GUARD_AI_STRICT, set by devkit ship): a judge stayed inconclusive
  *            after the retry, or the gate could not run — FAIL-CLOSED, distinct from exit 1 so a
- *            hook never renders an outage as "opus-confirmed FAIL"
+ *            hook never renders an outage as "confirmed FAIL"
  *   exit 0 = every selected reviewer PASSed (live, or via the diff-hash cache), or nothing to do
  *
- * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (env > guard.config.json review.model > gpt-5.6-sol — the
- *   reviewer-eval bench validated the domain reviewers at haiku, 6/6 block/6/6 clean; a FAIL still
- *   escalates to opus, so opus stays the block authority) ·
+ * Knobs: GUARD_NO_REVIEW=1 skip · GUARD_REVIEW_MODEL first-pass model (env > guard.config.json
+ *   review.model > gpt-5.6-terra@high) · GUARD_REVIEW_ESCALATION_MODEL the FAIL re-investigator
+ *   (env > review.escalationModel > gpt-5.6-sol — the block authority for unpinned reviewers) ·
  * GUARD_REVIEW_SKIP comma-list of reviewer names to disable individually ·
  * GUARD_REVIEW_CONCURRENCY max judge cascades in flight (default 6, floor 1) ·
  * GUARD_AI_STRICT=1 ship mode (first-pass retry once, then fail closed) · cfg.noLlm skip.
@@ -45,7 +46,7 @@ import { reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { emitMergedLensResults, mapLimit, planReviewWork, resolveChunkCap, resolveLensGroups, taskLabel, } from './lens/split.mjs';
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
-import { cacheKey, effectiveReviewConfig, resolveReviewModel, selectReviewers, } from './reviewers.mjs';
+import { cacheKey, effectiveReviewConfig, resolveEscalationModel, resolveReviewModel, selectReviewers, } from './reviewers.mjs';
 import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, skippedReviewers, } from './runtime.mjs';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mjs';
 export { runCascade };
@@ -171,6 +172,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     }
     const cache = loadCache(cwd);
     const firstModel = resolveReviewModel(cfg);
+    const escalationModel = resolveEscalationModel(cfg);
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = gateJudgeEnv(reviewMode, cfg);
@@ -182,7 +184,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     // invalidates stale PASSes; the commit message + its semantic Target hits ride ONLY the prompt
     // (ship-gates-converge-not-restart: amended-message retries must reuse cached PASSes).
     const ctx = await loadReviewerContext(cwd, stagedFiles(cwd));
-    const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock, firstModel);
+    const targetSalts = reviewerTargetSalts(selected, cacheSalts, ctx.saltBlock, firstModel, escalationModel);
     // Response-contract identity participates uniformly: changing any checklist-free reviewer's
     // blocking-authority protocol invalidates verdicts earned under the old contract.
     for (const { reviewer } of selected) {
@@ -204,7 +206,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     }
     if (plan.tasks.length === 0)
         return finish(0);
-    console.error(`guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → opus on FAIL)…`);
+    console.error(`guard-review: running ${plan.tasks.map((t) => t.sel.reviewer.name).join(', ')} (≤${concurrency} concurrent, ${firstModel} → ${escalationModel} on FAIL)…`);
     // Checkpoint each PASS as it lands, so a killed ship reruns only unfinished reviewers. The
     // progress JSON names unfinished work; heartbeat lines remain for humans. The catch prevents one
     // rejected cascade from abandoning its siblings (see mapLimit).
@@ -232,6 +234,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         cfg,
         exec,
         firstModel,
+        escalationModel,
         retryFirst: strict,
         assetRoot,
         judgeEnv,
@@ -276,7 +279,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const fails = results.filter((r) => r.status === 'fail');
     const findingsPrinted = new Set();
     for (const f of fails) {
-        console.error(`guard-review: ${f.name} FAILED${f.escalated ? ' (opus-confirmed)' : ''} — ${f.reason || 'see findings below'}`);
+        console.error(`guard-review: ${f.name} FAILED${f.escalated ? ' (escalation-confirmed)' : ''} — ${f.reason || 'see findings below'}`);
         // A split reviewer fails as several lens-part results under one name: render its block ONCE,
         // merged across the failing parts, so a multi-lens failure never fragments or double-counts.
         if (!findingsPrinted.has(f.name)) {

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
+import { resolveGuardConfig } from '../config.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
+import { resolveReviewModel } from '../review/reviewers.mjs';
 import { isJsonObject, isJsonString, parseJson } from './types.mjs';
 export const COMMENT_JUDGE_POLICY = 'comment-paragraph-exception-v2';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-18.1';
 export const COMMENT_JUDGE_SCHEMA_VERSION = 1;
 export const COMMENT_JUDGE_CAPABILITY_PROFILE = 'strict-empty-mcp-v1';
-const DEFAULT_MODEL = 'haiku';
 const TIMEOUT_MS = 120_000;
 const MAX_BATCH_EVIDENCE_CHARS = 120_000;
 const MAX_BATCH_FINDINGS = 200;
@@ -126,8 +127,10 @@ export function parseCommentJudgeBatch(raw, expectedFindingIds) {
         return null;
     }
 }
-export function commentJudgeModel(env = process.env) {
-    return env.GUARD_COMMENTS_MODEL?.trim() || DEFAULT_MODEL;
+/** GUARD_COMMENTS_MODEL > the light judge model (review.model: env > guard.config.json > default).
+ * The consumer cwd's config is read so a per-installation family choice covers this judge too. */
+export function commentJudgeModel(env = process.env, cwd = process.cwd()) {
+    return env.GUARD_COMMENTS_MODEL?.trim() || resolveReviewModel(resolveGuardConfig(cwd));
 }
 export function commentJudgeDisabled(env = process.env) {
     return Boolean(env.GUARD_NO_LLM);
@@ -135,13 +138,16 @@ export function commentJudgeDisabled(env = process.env) {
 export function judgeComment(cwd, finding, rationale) {
     return judgeComments(cwd, [{ finding, rationale }])?.[finding.id] ?? null;
 }
-export function judgeComments(cwd, items) {
+/** `model` defaults to a fresh resolution, but the GATE passes the value it keyed receipts with —
+ * one resolution per run, so a mid-run guard.config.json edit can never split receipt identity
+ * from the model that actually judged. */
+export function judgeComments(cwd, items, model = commentJudgeModel(process.env, cwd)) {
     if (commentJudgeDisabled())
         return null;
     const input = judgeBatchInput(items);
     const raw = execJudge({
         label: 'comment-firewall',
-        args: ['-p', '--model', commentJudgeModel(), ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, PROMPT],
+        args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, PROMPT],
         input,
         timeout: TIMEOUT_MS,
         cwd,

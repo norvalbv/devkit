@@ -44,9 +44,9 @@ The jargon you'll meet in devkit's help, prompts, and gate output — in one pla
   (a `claude` outage, or inconclusive after its one retry) it **blocks** the ship instead of skipping.
   Armed by `GUARD_AI_STRICT=1`, which only `devkit ship` exports; an ad-hoc `git commit` stays fail-open.
 - **exit-3 contract** — a strict AI gate that fails closed exits **3**, kept distinct from a real finding's
-  exit **1** (and a deterministic fail-open's **2**). Exit 3 means "the judge couldn't run — check `claude`
-  auth and re-run", never "the code failed review", so a hook never renders an outage as an opus-confirmed
-  FAIL. Only ship's `GUARD_AI_STRICT` produces it; hand-authored consumer hooks must special-case it.
+  exit **1** (and a deterministic fail-open's **2**). Exit 3 means "the judge couldn't run — check the judge CLI's
+  auth (codex for gpt-* judges, `claude` otherwise) and re-run", never "the code failed review", so a hook never renders an outage as an
+  escalation-confirmed FAIL. Only ship's `GUARD_AI_STRICT` produces it; hand-authored consumer hooks must special-case it.
 - **deterministic-prefix cache** (`guard-prefix`) — once every deterministic gate passes, their all-green
   result is cached against the staged tree's hash under `.devkit/`, armed only under `DEVKIT_SHIP=1` (a ship
   worktree, where working tree ≡ index, is the key's soundness bound). A re-run with an unchanged staged tree

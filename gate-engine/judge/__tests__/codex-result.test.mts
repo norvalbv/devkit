@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   codexExecArgs,
+  parseModelSpec,
   codexFailure,
   isCodexModel,
   judgeBinFor,
@@ -225,5 +226,55 @@ describe('parseCodexUsage', () => {
   it('returns null, never a zero-filled row, when no usage event parses', () => {
     expect(parseCodexUsage('{"type":"turn.started"}')).toBeNull();
     expect(parseCodexUsage(null)).toBeNull();
+  });
+});
+
+describe('judgeCliFor — forced read-only sandbox', () => {
+  it('pins a tool-equipped write-free judge (no --disallowedTools) to the read-only sandbox', () => {
+    const argv = [
+      '-p',
+      'judge this',
+      '--model',
+      'gpt-5.6-terra@high',
+      '--allowedTools',
+      'Read,Grep',
+    ];
+    const cli = judgeCliFor(argv, {}, true);
+    expect(cli.argv[cli.argv.indexOf('--sandbox') + 1]).toBe('read-only');
+    // Without the pin the same argv maps to workspace-write — the authority the flag removes.
+    expect(judgeCliFor(argv, {}).argv[judgeCliFor(argv, {}).argv.indexOf('--sandbox') + 1]).toBe(
+      'workspace-write',
+    );
+  });
+});
+
+describe('parseModelSpec — model@effort', () => {
+  const parts = (model: string) => ({
+    model,
+    prompt: 'p',
+    systemPrompt: null,
+    readOnly: true,
+    allowedTools: null,
+  });
+  it('splits a reasoning-effort suffix and leaves a bare id untouched', () => {
+    expect(parseModelSpec('gpt-5.6-terra@high')).toEqual({
+      model: 'gpt-5.6-terra',
+      effort: 'high',
+    });
+    expect(parseModelSpec('gpt-5.6-sol')).toEqual({ model: 'gpt-5.6-sol', effort: null });
+  });
+  it('refuses an unknown effort or an empty model rather than spawning at the wrong effort', () => {
+    expect(() => parseModelSpec('gpt-5.6-terra@ultra')).toThrow(/unknown reasoning effort "ultra"/);
+    expect(() => parseModelSpec('@high')).toThrow(/model spec/);
+    expect(() => parseModelSpec('gpt@5.6@high')).toThrow(/model spec/); // multiple separators
+    expect(() => parseModelSpec('gpt-5.6-terra@')).toThrow(/model spec/);
+  });
+  it('codexExecArgs forwards the effort as a -c model_reasoning_effort override (judges run --ignore-user-config) and nothing for a bare id', () => {
+    const withEffort = codexExecArgs(parts('gpt-5.6-terra@high'));
+    expect(withEffort.slice(0, 3)).toEqual(['exec', '--model', 'gpt-5.6-terra']);
+    expect(withEffort[withEffort.indexOf('model_reasoning_effort="high"') - 1]).toBe('-c');
+    const bare = codexExecArgs(parts('gpt-5.6-sol'));
+    expect(bare.slice(0, 3)).toEqual(['exec', '--model', 'gpt-5.6-sol']);
+    expect(bare.join(' ')).not.toContain('model_reasoning_effort');
   });
 });

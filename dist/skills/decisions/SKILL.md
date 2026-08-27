@@ -165,15 +165,18 @@ legacy deletion) with **no decision staged**; `claude -p` clears a routine chang
 ## Capture C — alignment gate (`guard-decisions check-alignment`) — the flip-flop guard
 
 For every Target with a `--scope`, when a staged file matches that scope, an **agentic judge**
-(`claude -p` with read-only tools: Read/Grep/Glob/`git diff --cached`) *investigates* the staged
+(headless, with read-only tools: Read/Grep/Glob/`git diff --cached`) *investigates* the staged
 changes itself — no stuffed/truncated diff — then rules **ALIGN / CONTRADICT / UNCLEAR** with a
 rationale + final `VERDICT:` line (tool-equipped judges beat single-shot on code — Agent-as-a-Judge,
-arXiv:2410.10934). **Cascade:** haiku judges every scoped commit; only its CONTRADICT escalates to
-opus, which gets haiku's full transcript + the same tools and confirms or overturns. A **block
-requires an opus-confirmed CONTRADICT** (realign, or re-target with `--evidence-change`). This
+arXiv:2410.10934). **Cascade:** the light judge (`review.model`, default gpt-5.6-terra@high) judges
+every scoped commit; only its CONTRADICT escalates to the escalation model (`review.escalationModel`,
+default gpt-5.6-sol), which gets the full transcript + the same tools and confirms or overturns
+(gpt-* judges run through the codex CLI in its read-only sandbox). A **block requires an
+escalation-confirmed CONTRADICT** (realign, or re-target with `--evidence-change`). This
 catches the real flip-flop — code silently deviating from an existing target — deterministically
 (the scope glob is the match, the LLM only judges contradiction). Bounded block; fail-open at every
-step if `claude` is absent/times out; `GUARD_NO_LOG=1` bypass.
+step if the judge runtime (codex for gpt-* models, `claude` otherwise) is absent or times out;
+`GUARD_NO_LOG=1` bypass.
 Recording a Target **alongside its first implementation** in one commit is fine — a normal step toward
 the target judges ALIGN; if a false CONTRADICT ever blocks that combined commit, `GUARD_NO_LOG=1`.
 

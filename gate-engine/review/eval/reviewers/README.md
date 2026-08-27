@@ -161,7 +161,9 @@ Written BEFORE the first sweep; the sweep does not get to move the goalposts. Ha
 DEFAULT candidate: agents are improved against haiku, and at the end the expensive models must
 justify their cost against the improved agents — not the other way round.
 
-Keep haiku as the production first pass (`GUARD_REVIEW_MODEL` default → `'haiku'`) **iff both**,
+Keep haiku as the production first pass (`GUARD_REVIEW_MODEL` default → `'haiku'` at the time of
+this registration; the shipped default has since moved to the codex family, `gpt-5.6-terra@high`
+with a `gpt-5.6-sol` escalation — see review-gate-in-chain) **iff both**,
 measured on the final improved agents:
 
 1. Sonnet shows no statistically significant one-directional IMPROVEMENT over haiku on

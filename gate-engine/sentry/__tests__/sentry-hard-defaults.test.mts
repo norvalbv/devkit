@@ -57,6 +57,7 @@ describe('gate mode is hard by default (spawned; stubbed claude, message tier, t
     return spawnSync('node', [SCRIPT, '--gate', msg], {
       env: {
         ...process.env,
+        GUARD_REVIEW_MODEL: 'haiku', // stubbed `claude` on PATH; the default judge family is codex
         GUARD_SENTRY_CONTEXT: 'message',
         GUARD_SENTRY_WATCHLIST: join(wlDir, 'wl.md'),
         DEVKIT_RUN_MODE: 'review',

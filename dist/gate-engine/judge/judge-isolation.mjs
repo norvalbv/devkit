@@ -67,3 +67,12 @@ export function withoutGitEnv(env = process.env) {
         delete clean[name];
     return clean;
 }
+/**
+ * The light judge model — the shipped default for the former-haiku gate judges (the cascade
+ * first pass, conventions, comment-firewall, sentry, decision-alignment/smell/depth). A
+ * `model@effort` spec: judges run `--ignore-user-config`, so argv is the only effort channel —
+ * the codex adapter splits the suffix into `-c model_reasoning_effort`. ONE constant so a family
+ * flip is one edit; per-install overrides ride guard.config.json review.model / GUARD_* envs.
+ * Provenance, telemetry basis, and rollback: review-gate-in-chain (sc-2190).
+ */
+export const LIGHT_JUDGE_MODEL = 'gpt-5.6-terra@high';

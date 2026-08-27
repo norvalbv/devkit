@@ -12,7 +12,7 @@
  *   node bench.mts coverage          # 0 LLM calls: catalog/type coverage of the corpus
  *
  * Knobs: BENCH_MODEL first pass (default sonnet; a model-pinned reviewer ignores it) ·
- * BENCH_CASCADE=off skips the opus escalation · BENCH_CONCURRENCY · GUARD_CORRECTNESS_SPLIT arm.
+ * BENCH_CASCADE=off skips escalation · BENCH_ESCALATE_MODEL pins the escalator (default opus — changing it changes the measured condition) · BENCH_CONCURRENCY · GUARD_CORRECTNESS_SPLIT arm.
  *
  * Scoring is DETERMINISTIC (no LLM matcher): expected verdict vs the captured first-pass verdict +
  * the cascade outcome + the checklist artifact snapshotted per judge pass (runCascade deletes it
@@ -73,6 +73,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../../..');
 
 const MODEL = process.env.BENCH_MODEL ?? 'sonnet';
+process.env.GUARD_REVIEW_ESCALATION_MODEL = process.env.BENCH_ESCALATE_MODEL ?? 'opus'; // pinned — sectionKey/meta record only the first-pass model; an ambient escalator would blend conditions
 const CASCADE = (process.env.BENCH_CASCADE ?? 'on') !== 'off';
 const CONCURRENCY = Math.max(1, Number.parseInt(process.env.BENCH_CONCURRENCY ?? '2', 10) || 2);
 
@@ -89,8 +90,7 @@ export const BENCH_REVIEWERS = REVIEWERS.filter(
   (r) => r.domain === 'backend' || r.domain === 'frontend' || r.domain === 'all',
 );
 
-// Per-pass wall-clock estimates (seconds) for the budget line. Checklist workflow ≈ 4–10 tool
-// turns on top of diff reading; escalation reruns the whole workflow on opus.
+// Per-pass wall-clock estimates (seconds) for the budget line. Checklist ≈ 4–10 tool turns on top of diff reading; escalation reruns the whole workflow on the escalator.
 const EST_FIRST_SECS = { haiku: 70, sonnet: 135, opus: 270 };
 const EST_ESCALATE_SECS = 210;
 

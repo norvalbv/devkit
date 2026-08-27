@@ -10,6 +10,7 @@ import { codexRuntimeResult } from '../lib/doctor/guard-config-checks.mts';
 const envKeys = [
   'GUARD_CODEX_BIN',
   'GUARD_REVIEW_MODEL',
+  'GUARD_REVIEW_ESCALATION_MODEL',
   'GUARD_CORRECTNESS_MODEL',
   'PATH',
 ] as const;
@@ -20,6 +21,7 @@ beforeEach(() => {
   for (const key of envKeys) savedEnv[key] = process.env[key];
   delete process.env.GUARD_CODEX_BIN;
   delete process.env.GUARD_REVIEW_MODEL;
+  delete process.env.GUARD_REVIEW_ESCALATION_MODEL;
   delete process.env.GUARD_CORRECTNESS_MODEL;
 });
 
@@ -31,8 +33,14 @@ afterEach(() => {
   }
 });
 
-const cfg = (model: string, correctness: string) => ({
-  review: { backendRoots: [], frontendRoots: [], model, correctnessModel: correctness },
+const cfg = (model: string, correctness: string, escalation = 'opus') => ({
+  review: {
+    backendRoots: [],
+    frontendRoots: [],
+    model,
+    escalationModel: escalation,
+    correctnessModel: correctness,
+  },
 });
 
 describe('codexRuntimeResult', () => {
@@ -71,6 +79,33 @@ describe('codexRuntimeResult', () => {
     process.env.PATH = '/nonexistent-doctor-codex';
     process.env.GUARD_REVIEW_MODEL = 'haiku';
     process.env.GUARD_CORRECTNESS_MODEL = 'sonnet';
-    expect(codexRuntimeResult(cfg('gpt-5.6-sol', 'gpt-5.6-sol'))).toBeNull();
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
+    expect(codexRuntimeResult(cfg('gpt-5.6-sol', 'gpt-5.6-sol', 'gpt-5.6-sol'))).toBeNull();
+  });
+
+  it('the escalation model is a judge too: a gpt-* escalator alone routes through codex', () => {
+    process.env.PATH = '/nonexistent-doctor-codex';
+    const res = codexRuntimeResult(cfg('haiku', 'sonnet', 'gpt-5.6-sol'));
+    expect(res?.status).toBe('DRIFT');
+    expect(res?.detail).toContain('gpt-5.6-sol');
+    expect(res?.remediation).toContain('review.escalationModel');
+  });
+
+  it('a model@effort spec the adapter would refuse DRIFTs now, naming the effort — not at the next commit', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'devkit-codex-bin-'));
+    roots.push(dir);
+    writeFileSync(join(dir, 'codex'), '#!/bin/sh\n');
+    chmodSync(join(dir, 'codex'), 0o755);
+    process.env.GUARD_CODEX_BIN = join(dir, 'codex');
+    expect(codexRuntimeResult(cfg('gpt-5.6-terra@high', 'gpt-5.6-sol'))).toBeNull();
+    const res = codexRuntimeResult(cfg('gpt-5.6-terra@ultra', 'gpt-5.6-sol'));
+    expect(res?.status).toBe('DRIFT');
+    expect(res?.detail).toContain('"ultra"');
+  });
+
+  it('an @effort suffix on a CLAUDE model DRIFTs even with no codex in play — claude would receive it verbatim', () => {
+    const res = codexRuntimeResult(cfg('sonnet@high', 'sonnet', 'opus'));
+    expect(res?.status).toBe('DRIFT');
+    expect(res?.detail).toContain('sonnet@high');
   });
 });

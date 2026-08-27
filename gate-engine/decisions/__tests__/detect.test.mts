@@ -537,6 +537,7 @@ describe('--gate (integration, real git repo)', () => {
           // Clear it by default; the strict cases opt back in via extraEnv.
           GUARD_AI_STRICT: '',
           FRINK_AI_STRICT: '',
+          GUARD_REVIEW_MODEL: 'haiku', // the stub on PATH is a fake `claude`; default is codex-family
           DEVKIT_NO_TELEMETRY: '1', // capture is on by default — disable so tests don't hit the real sink
           PATH: `${stubClaude(script)}:${process.env.PATH}`,
           ...extraEnv,

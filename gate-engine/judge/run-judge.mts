@@ -195,6 +195,9 @@ interface ExecJudgeOpts {
   transcript?: boolean;
   /** Strict MCP profile. Omitted means a pure/internal judge with no MCP servers. */
   mcpProfile?: JudgeMcpProfile;
+  /** Tool-equipped but write-free judge: pin the codex path to the read-only sandbox (see
+   * judgeCliFor). Required for any codex judge on a gate without staged-tree tamper detection. */
+  codexReadOnly?: boolean;
 }
 
 /** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
@@ -318,8 +321,8 @@ function readJudgeOutput(
  * config with secrets forwarded through the spawn env by NAME (sc-2054 — see codexMcpArgs). Both
  * runtimes now honor the judge-mcp-profiles Target.
  */
-function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile): JudgeCli {
-  const cli = judgeCliFor(args, mcp.servers);
+function spawnFor(args: string[], mcp: PreparedJudgeMcpProfile, codexReadOnly = false): JudgeCli {
+  const cli = judgeCliFor(args, mcp.servers, codexReadOnly);
   return cli.codex ? cli : { ...cli, argv: withResultArgs([...mcp.args, ...args]) };
 }
 
@@ -333,7 +336,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   try {
     // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
     // outage warning carrying the translation error, keeping this function's never-throws contract.
-    const cli = spawnFor(args, mcp);
+    const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
     const out = execFileSync(cli.bin, cli.argv, {
       cwd,
       // Never the caller's env verbatim: git leaks an ABSOLUTE GIT_INDEX_FILE/GIT_DIR into every
@@ -411,7 +414,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     try {
       // See the sync twin: routing inside the try keeps the never-rejects contract when argv
       // translation itself throws.
-      const cli = spawnFor(args, mcp);
+      const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
       const child = execFile(
         cli.bin,
         cli.argv,

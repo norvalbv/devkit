@@ -398,7 +398,8 @@ describe('run dispatch (in-process; covers readMessage + skipReason + applyGateR
 describe('check-sentry gate — fail-open / bypass / free-skip (provider-absent degrades silently)', () => {
   const gate = (env, msg) =>
     spawnSync('node', [SCRIPT, '--gate', msg], {
-      env: { ...process.env, ...privateStore(), ...env },
+      // GUARD_REVIEW_MODEL: the stub on PATH is a fake `claude`; the default is codex-family.
+      env: { ...process.env, GUARD_REVIEW_MODEL: 'haiku', ...privateStore(), ...env },
       encoding: 'utf8',
     });
   // Stub `claude` on PATH so the real judge path runs (runJudgeOnce + the sample loop). Stubs return
@@ -471,6 +472,7 @@ describe('check-sentry judge() in-process — runJudgeOnce + sample loop', () =>
     writeFileSync(fake, `#!/bin/sh\ncat >/dev/null\n${script}`);
     chmodSync(fake, 0o755);
     vi.stubEnv('PATH', `${dir}:${process.env.PATH}`);
+    vi.stubEnv('GUARD_REVIEW_MODEL', 'haiku'); // the stub is a fake `claude`
   };
   afterEach(() => {
     vi.unstubAllEnvs();
