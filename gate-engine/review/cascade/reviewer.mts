@@ -14,6 +14,8 @@ import {
   escalatePrompt,
   hasChecklist,
   type PromptExtras,
+  resolveEscalationModel,
+  resolveReviewModel,
   type ReviewerSelection,
   wrapConventionsPrompt,
   wrapPrompt,
@@ -38,6 +40,8 @@ export interface CascadeOpts {
   cfg: GuardConfig;
   exec?: typeof execJudgeAsync;
   firstModel?: string;
+  /** The FAIL-escalation model for UNPINNED reviewers; resolves from cfg when absent. */
+  escalationModel?: string;
   retryFirst?: boolean;
   assetRoot?: string;
   judgeEnv?: NodeJS.ProcessEnv;
@@ -86,7 +90,8 @@ async function cascadeVerdict(
     cwd,
     cfg,
     exec = execJudgeAsync,
-    firstModel = 'haiku',
+    firstModel = resolveReviewModel(cfg),
+    escalationModel = resolveEscalationModel(cfg),
     retryFirst = false,
     assetRoot,
     judgeEnv,
@@ -266,7 +271,7 @@ async function cascadeVerdict(
   let secondOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const second = await exec({
     label: `review:${reviewer.name}:escalate`,
-    args: args(escalatePrompt(prompt, first), 'opus'),
+    args: args(escalatePrompt(prompt, first), escalationModel),
     input,
     timeout: DEEP_JUDGE_TIMEOUT_MS,
     cwd,

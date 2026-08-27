@@ -45,7 +45,7 @@
  *
  * Knobs (read GUARD_* first, then FRINK_* as a back-compat alias):
  *   NO_SENTRY_JUDGE=1 (skip) · SENTRY_NO_LLM=1 (skip — can't judge without the LLM) ·
- *   SENTRY_HARD (default ON — =0 softens a confident MONITOR to warn) · SENTRY_MODEL (default haiku) ·
+ *   SENTRY_HARD (default ON — =0 softens a confident MONITOR to warn) · SENTRY_MODEL (default: review.model, the light judge) ·
  *   SENTRY_CONTEXT=message|names|diff (default diff, focused) ·
  *   SENTRY_SAMPLES=N (default 3 when hard, 1 when warn) ·
  *   SENTRY_WATCHLIST=<path> (default docs/sentry-watchlist.md, relative to the consumer cwd) ·
@@ -73,6 +73,7 @@ import { focusHunks } from '../judge/diff-focus.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
+import { resolveReviewModel } from '../review/reviewers.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
 
 // Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
@@ -96,17 +97,15 @@ interface SentryVerdict {
 
 // Overrides for `judge` — all optional; each falls back to the module env default.
 interface SentryJudgeOpts {
-  model?: string;
+  model?: string; // resolved lazily INSIDE judge's try — malformed config must fail-open there
   samples?: number;
   prompt?: string;
 }
 
 const CWD = process.cwd();
+const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
 
-const MODEL = envVar('SENTRY_MODEL') ?? 'haiku';
-
-/** Samples follow the confidence contract: a run that can BLOCK votes a 3-sample majority;
- * warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
+/** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
 export function resolveSamples(hard: boolean): number {
   const env = Number(envVar('SENTRY_SAMPLES') ?? '');
   return env > 0 ? env : hard ? 3 : 1;
@@ -317,13 +316,14 @@ function runJudgeOnce(input: string, model: string, prompt: string): SentryRun |
  */
 export function judge(
   input: string,
-  { model = MODEL, samples = 1, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
+  { model, samples = 1, prompt = SENTRY_JUDGE_PROMPT }: SentryJudgeOpts = {},
 ): SentryVerdict | null {
   if (envVar('SENTRY_NO_LLM') || !String(input).trim()) return null;
   try {
+    const judgeModel = model ?? modelSpec(); // config read stays behind the fail-open guard
     const runs: SentryRun[] = [];
     for (let i = 0; i < Math.max(1, samples); i += 1) {
-      const r = runJudgeOnce(input, model, prompt);
+      const r = runJudgeOnce(input, judgeModel, prompt);
       if (r === null) return null; // judge dark (execJudge warned once) — don't re-warn per sample
       runs.push(r);
     }
@@ -476,7 +476,7 @@ export function run(gate: boolean): void {
     // BEFORE judging so the samples default can follow it. Report mode never blocks → warn tier.
     const hard = gate && effectiveHard(envBool('SENTRY_HARD') ?? true, CONTEXT_TIER, diff);
     const input = buildContext(message, nameStatus, diff, CONTEXT_TIER);
-    const opts = { model: MODEL, samples: resolveSamples(hard), prompt: SENTRY_JUDGE_PROMPT };
+    const opts = { model: modelSpec(), samples: resolveSamples(hard), prompt: SENTRY_JUDGE_PROMPT };
     // Diff-tier only: message/names evidence can't change with the demanded FIX, so a cached hard
     // MONITOR would replay forever there. A bypassed run (SENTRY_NO_LLM) earns and replays nothing.
     const result =

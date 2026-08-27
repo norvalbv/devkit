@@ -11,7 +11,7 @@
  * and exploration removes the truncated-diff blind spot.
  *
  * CASCADE (arXiv:2511.07396 shape): haiku judges every scoped commit (cheap, one call). ONLY a haiku
- * CONTRADICT escalates to opus, which gets haiku's full transcript (the evidence, not a lossy
+ * CONTRADICT escalates to the escalation model, which gets the full transcript (the evidence, not a lossy
  * summary) plus the same tools, and independently confirms or overturns. A block requires an
  * opus-confirmed CONTRADICT — opus latency is paid only when a block is already on the table.
  *
@@ -46,6 +46,7 @@ import { emitCacheHit } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudge, strictRemedy } from '../judge/run-judge.mjs';
+import { resolveEscalationModel, resolveReviewModel } from '../review/reviewers.mjs';
 import { currentTarget, effectiveScope, parseDecision } from './decisions.mjs';
 import { git, stagedFiles } from './git-io.mjs';
 import { hasVerdict, saveVerdict, verdictKey } from './verdict-cache.mjs';
@@ -183,22 +184,28 @@ function runJudge(cwd, model, prompt, stdinText, timeout) {
         input: stdinText,
         timeout,
         cwd,
+        // Read-only tools; the decisions gate has no tamper detection — codex stays read-only-sandboxed.
+        codexReadOnly: true,
     });
 }
 /**
- * Cascade with full observability: haiku investigates every scoped commit; ONLY its CONTRADICT
- * escalates to opus (unless `escalate` is off), which re-investigates with haiku's full transcript
- * as the handoff. Fail-open at both steps. Returns null on the noLlm/no-files guard, else
+ * Cascade with full observability: the light judge (review.model) investigates every scoped
+ * commit; ONLY its CONTRADICT escalates to the escalation model (review.escalationModel — unless
+ * `escalate` is off), which re-investigates with the first pass's full transcript as the handoff.
+ * Fail-open at both steps. Returns null on the noLlm/no-files guard, else
  * `{firstRaw, firstVerdict, finalRaw, finalVerdict, escalated}` — the gate consumes finalVerdict
- * via judge(); eval/bench.mjs consumes the intermediate fields to score haiku-alone vs cascade.
- * The opts exist for the bench; the gate never passes them, so gate semantics are the defaults.
+ * via judge(); eval/bench.mjs consumes the intermediate fields to score first-pass-alone vs
+ * cascade. The opts exist for the bench; the gate never passes them, so gate semantics resolve
+ * from config.
  */
-export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel = 'haiku', escalateModel = 'opus', escalate = true, } = {}) {
+export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel, escalateModel, escalate = true, } = {}) {
     const cfg = resolveGuardConfig(cwd);
     if (cfg.noLlm || files.length === 0)
         return null;
     const stat = git(cwd, ['diff', '--cached', '--stat', '--', ...files]);
-    const first = runJudge(cwd, firstModel, ALIGN_PROMPT(target.ruling, target.vision, files), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
+    // Gate semantics follow the review knobs (env > guard.config.json > default): the light judge
+    // model investigates, the escalation model confirms. The bench passes both explicitly.
+    const first = runJudge(cwd, firstModel ?? resolveReviewModel(cfg), ALIGN_PROMPT(target.ruling, target.vision, files), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
     if (first === null)
         return {
             firstRaw: null,
@@ -216,7 +223,7 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel =
             finalVerdict: firstVerdict,
             escalated: false,
         };
-    const second = runJudge(cwd, escalateModel, ESCALATE_PROMPT(target.ruling, target.vision, files, first), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
+    const second = runJudge(cwd, escalateModel ?? resolveEscalationModel(cfg), ESCALATE_PROMPT(target.ruling, target.vision, files, first), stat, ALIGNMENT_JUDGE_TIMEOUT_MS);
     return {
         firstRaw: first,
         firstVerdict,
@@ -225,7 +232,7 @@ export function judgeDetailed(files, target, cwd = process.cwd(), { firstModel =
         escalated: true,
     };
 }
-/** Block = opus-confirmed CONTRADICT; every guard/outage path stays null (fail-open). */
+/** Block = escalation-confirmed CONTRADICT; every guard/outage path stays null (fail-open). */
 export function judge(files, target, cwd = process.cwd()) {
     const d = judgeDetailed(files, target, cwd);
     return d === null ? null : d.finalVerdict;
@@ -277,10 +284,17 @@ function stagedDecisionTargets(cwd, changed, decisionsRel) {
  * exercises the exact prompt/argv/truncation/timeout the gate runs — and can distinguish outage
  * (raw null) from parse-null, which judgeDepth below deliberately conflates.
  */
-export function runDepthJudge(cwd, block, model = 'haiku') {
+export function runDepthJudge(cwd, block, model) {
     return execJudge({
         label: 'decision-depth',
-        args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, DEPTH_PROMPT],
+        args: [
+            '-p',
+            '--model',
+            model ?? resolveReviewModel(resolveGuardConfig(cwd)),
+            ...JUDGE_READ_ONLY,
+            ...JUDGE_ISOLATION,
+            DEPTH_PROMPT,
+        ],
         input: String(block).slice(0, 12000),
         timeout: 120000,
         cwd,

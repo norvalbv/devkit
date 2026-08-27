@@ -25,6 +25,7 @@
  * cwd. `resolveFromCwd(cfg, cwd, field)` yields the absolute form for filesystem access.
  */
 import { existsSync, readFileSync } from 'node:fs';
+import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mjs';
 import { isAbsolute, resolve } from 'node:path';
 export const CONFIG_FILENAME = 'guard.config.json';
 // Frink-agnostic defaults: old hardcoded BOUNDARIES / fanout roots are opt-in via guard.config.json.
@@ -110,17 +111,15 @@ export const DEFAULTS = Object.freeze({
         // Where the synced reviewer agent .md briefs live — guard-review wraps these for its
         // headless judges (the SAME files the root agent dispatches interactively).
         agentsDir: '.claude/agents',
-        // sc-2054: parity landed (MCP mapping + tamper detection), so the benched winner IS the
-        // default. Installs without the codex CLI: doctor DRIFTs; override here or via GUARD_* envs.
-        model: 'gpt-5.6-sol',
+        // Codex family (sc-2054 parity): unpinned cascade terra@high → sol (sc-2190), correctness sol@400 (benched).
+        model: LIGHT_JUDGE_MODEL,
+        escalationModel: 'gpt-5.6-sol',
         correctnessModel: 'gpt-5.6-sol',
         correctnessChunkLoc: 400,
     }),
     noLog: false, // GUARD_NO_LOG / GUARD_DECISION_NO_LLM (+ FRINK_* aliases)
     noLlm: false,
 });
-// Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the
-// original frink gates. Returns undefined when neither is set.
 /** A millisecond duration, or undefined for anything that is not a usable positive number. */
 function positiveMs(v) {
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
@@ -221,8 +220,7 @@ function loadConfigFile(cwd) {
 }
 const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
 // Malformed review knobs fall to DEFAULTS (a non-string model must never reach judge argv; a
-// non-numeric cap must never silently disable chunking): `${v}` === v accepts only a real string
-// representation, Number.isInteger rejects every non-number one — typed as expected, not trusted.
+// non-numeric cap must never silently disable chunking): representation guards, typed not trusted.
 const str = (v, d) => v != null && `${v}` === v && v.trim() !== '' ? v.trim() : d;
 const nonNegInt = (v, d) => v !== undefined && Number.isInteger(v) && v >= 0 ? v : d;
 /**
@@ -297,12 +295,12 @@ export function resolveGuardConfig(cwd = process.cwd()) {
             : file.coverage && typeof file.coverage === 'object' && !Array.isArray(file.coverage)
                 ? file.coverage
                 : DEFAULTS.coverage,
-        // Review-agent topology. Shallow-merge so a consumer can set one key (and nested
-        // accessibility) without restating the whole block.
+        // Review-agent topology, shallow-merged so a consumer can set one key without restating the block.
         review: {
             ...DEFAULTS.review,
             ...fr,
             model: str(fr.model, dr.model),
+            escalationModel: str(fr.escalationModel, dr.escalationModel),
             correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
             correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
             accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },

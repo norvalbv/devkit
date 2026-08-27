@@ -33,6 +33,7 @@ import { emitCacheHit, emitGateEvent, finishGateTiming } from '../judge/gate-eve
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
+import { resolveReviewModel } from '../review/reviewers.mts';
 import { composeTranscript, saveTranscript } from '../judge/transcript-store.mts';
 import { git, stagedFiles } from './git-io.mts';
 import { saveVerdict, verdictKey, verdictMeta } from './verdict-cache.mts';
@@ -357,16 +358,16 @@ export function parseVerdict(raw: string): 'ROUTINE' | 'DECISION' | null {
 }
 
 /**
- * One smell-downgrade judge run → raw transcript, or null on outage (execJudge warns once).
- * Pure-text judge: JUDGE_READ_ONLY strips tools, JUDGE_ISOLATION silences host hooks and keeps the
- * run off the session store; READ_ONLY splices BEFORE ISOLATION so the variadic `--disallowedTools *`
- * is bounded by `--settings`, positional prompt last. Exported so eval/bench.mjs exercises the exact
- * prompt/argv/truncation/timeout the gate runs.
+ * One smell-downgrade judge run → raw transcript, or null on outage (execJudge warns once). Model:
+ * the light judge (review.model) unless the bench pins one. Pure-text: JUDGE_READ_ONLY strips tools;
+ * JUDGE_ISOLATION silences host hooks + skips the session store; READ_ONLY splices BEFORE ISOLATION
+ * (variadic `--disallowedTools *` bounded by `--settings`), prompt last. Exported for eval/bench.mjs.
  */
-export function runDetectJudge(cwd: string, diff: string, model: string = 'haiku'): string | null {
+export function runDetectJudge(cwd: string, diff: string, model?: string): string | null {
+  const judgeModel = model ?? resolveReviewModel(resolveGuardConfig(cwd));
   return execJudge({
     label: 'decision-smell',
-    args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, CLAUDE_PROMPT],
+    args: ['-p', '--model', judgeModel, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, CLAUDE_PROMPT],
     input: String(diff).slice(0, 12000),
     timeout: 30000,
     cwd,
@@ -374,10 +375,9 @@ export function runDetectJudge(cwd: string, diff: string, model: string = 'haiku
 }
 
 // LLM downgrade: a confident ROUTINE clears a regex block; DECISION / error → the block stands.
-// Never escalates. An outage is surfaced as 'OUTAGE' (distinct from a judged DECISION) so the
-// gate can say WHY the block stood — a dark judge must never read as a confirmed smell verdict.
-// Returns the raw judge transcript alongside the verdict so the caller can persist it (fetchable
-// evidence for the dashboard); raw is null when the judge did not run (noLlm/empty) or on outage.
+// Never escalates. An outage surfaces as 'OUTAGE' (distinct from a judged DECISION) so the gate can
+// say WHY the block stood — a dark judge must never read as a confirmed smell verdict. Returns the raw
+// transcript too (persistable dashboard evidence); null when the judge did not run or on outage.
 function judgeWithClaude(
   cwd: string,
   noLlm: boolean,
