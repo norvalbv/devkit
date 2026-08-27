@@ -38,6 +38,7 @@ function pinLegacyJudgeEnv(): void {
   for (const [key, value] of [
     ['GUARD_REVIEW_MODEL', 'haiku'],
     ['GUARD_CORRECTNESS_MODEL', 'sonnet'],
+    ['GUARD_REVIEW_ESCALATION_MODEL', 'opus'],
     ['GUARD_CORRECTNESS_CHUNK', 'off'],
   ] as const) {
     if (!(key in pinnedEnv)) pinnedEnv[key] = process.env[key];

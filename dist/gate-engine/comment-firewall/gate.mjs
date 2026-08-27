@@ -9,7 +9,7 @@ const defaults = {
     loadReceipts: loadEntries,
     saveReceipt: saveEntries,
     judge: judgeComments,
-    model: commentJudgeModel,
+    model: (cwd) => commentJudgeModel(process.env, cwd),
     now: () => new Date().toISOString(),
     strict: () => Boolean(process.env.GUARD_AI_STRICT),
 };
@@ -43,7 +43,7 @@ function evidenceFor(finding, rationales) {
     return evidence?.rationale.trim() ? evidence : undefined;
 }
 /** Recompute the evidence just before publishing PASS, closing the stage-while-judge-runs race. */
-function allRemainCurrent(cwd, pending, deps) {
+function allRemainCurrent(cwd, pending, deps, model) {
     const refreshed = deps.detect(cwd);
     const currentById = new Map(refreshed.findings.map((finding) => [finding.id, finding]));
     const rationales = deps.loadRationales(cwd);
@@ -52,7 +52,7 @@ function allRemainCurrent(cwd, pending, deps) {
         if (!current)
             return false;
         const rationale = evidenceFor(current, rationales);
-        return Boolean(rationale && receiptKey(current, rationale, deps.model()) === item.key);
+        return Boolean(rationale && receiptKey(current, rationale, model) === item.key);
     });
 }
 /**
@@ -83,6 +83,9 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         return 0;
     const receiptFile = devkitDataFile(cwd, COMMENT_RECEIPTS_FILE);
     const receipts = deps.loadReceipts(receiptFile);
+    // ONE model resolution per run, used for keying, judging, AND revalidation — a mid-run config
+    // edit must never persist a verdict from model B under model A's receipt key.
+    const model = deps.model(cwd);
     const missing = [];
     const pending = [];
     for (const finding of detection.findings) {
@@ -91,7 +94,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
             missing.push(finding);
             continue;
         }
-        const key = receiptKey(finding, rationale, deps.model());
+        const key = receiptKey(finding, rationale, model);
         if (!passReceipt(receipts[key]))
             pending.push({ finding, rationale, key });
     }
@@ -103,7 +106,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         return 0;
     let results;
     try {
-        results = deps.judge(cwd, pending.map(({ finding, rationale }) => ({ finding, rationale })));
+        results = deps.judge(cwd, pending.map(({ finding, rationale }) => ({ finding, rationale })), model);
     }
     catch (cause) {
         console.error(`guard-comments: deterministic review-batch limit exceeded; split the staged change — ${cause instanceof Error ? cause.message : cause}`);
@@ -114,7 +117,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         return deps.strict() ? 3 : 2;
     }
     try {
-        if (!allRemainCurrent(cwd, pending, deps)) {
+        if (!allRemainCurrent(cwd, pending, deps, model)) {
             console.error('guard-comments: local evidence changed during review; stale batch discarded.');
             return 1;
         }
@@ -132,7 +135,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
                 verdict: 'PASS',
                 findingId: item.finding.id,
                 path: item.finding.path,
-                model: deps.model(),
+                model,
                 reason: results[item.finding.id]?.reason,
             },
         ]));

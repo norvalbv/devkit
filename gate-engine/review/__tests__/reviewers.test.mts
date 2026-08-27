@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { LIGHT_JUDGE_MODEL } from '../../judge/judge-isolation.mts';
 import { devkitVersion } from '../../devkit-version.mts';
 import { parseConventionEvidencePairs, parseConventionFindings } from '../evidence/conventions.mts';
 import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
@@ -227,7 +228,7 @@ describe('correctness-reviewer (domain all)', () => {
   it('is pinned single-pass (bench: recall scales with model; the opus cascade subtracts recall) — shipped pin gpt-5.6-sol since sc-2054', () => {
     expect(corr.model).toBe('gpt-5.6-sol');
     // correctness (sonnet) and conventions are the two deliberately model-pinned exceptions;
-    // domain reviewers stay unpinned so they keep the haiku→opus cascade.
+    // domain reviewers stay unpinned so they keep the first-pass→escalation cascade.
     const pinned = new Set(['correctness-reviewer', 'conventions-reviewer']);
     for (const r of REVIEWERS.filter((r) => !pinned.has(r.name))) expect(r.model).toBeUndefined();
   });
@@ -292,8 +293,8 @@ describe('conventions-reviewer (domain conventions, skill-less)', () => {
     expect(conv.stateFile).toBeUndefined();
     expect(conv.cmds).toBeUndefined();
   });
-  it('is pinned single-pass to haiku, same mechanism as correctness', () => {
-    expect(conv.model).toBe('haiku');
+  it('is pinned single-pass at the light judge default, same mechanism as correctness', () => {
+    expect(conv.model).toBe(LIGHT_JUDGE_MODEL);
   });
   it('declares the response contract that grants blocking authority', () => {
     expect(conv.responseContract).toBe('conventions-v1');

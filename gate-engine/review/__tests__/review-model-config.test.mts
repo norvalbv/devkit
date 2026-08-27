@@ -4,14 +4,24 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { reviewerTargetSalts } from '../evidence/targets-block.mts';
-import { correctnessModel, resolveReviewModel, selectReviewers } from '../reviewers.mts';
+import {
+  correctnessModel,
+  resolveEscalationModel,
+  resolveReviewModel,
+  selectReviewers,
+} from '../reviewers.mts';
 
 // sc-2107/sc-2054: the judge knobs resolve env > guard.config.json > package defaults (the
 // benched winner, sol@400, since codex parity landed). These tests pin the resolution order, the
 // config-resolved correctness pin, and the model term in the cache salt (sc-2053: a verdict must
 // not survive a model change).
 
-const envKeys = ['GUARD_REVIEW_MODEL', 'FRINK_REVIEW_MODEL', 'GUARD_CORRECTNESS_MODEL'] as const;
+const envKeys = [
+  'GUARD_REVIEW_MODEL',
+  'FRINK_REVIEW_MODEL',
+  'GUARD_REVIEW_ESCALATION_MODEL',
+  'GUARD_CORRECTNESS_MODEL',
+] as const;
 const savedEnv: Partial<Record<(typeof envKeys)[number], string | undefined>> = {};
 const roots: string[] = [];
 
@@ -31,7 +41,12 @@ afterEach(() => {
 });
 
 interface ReviewConfigFile {
-  review?: { model?: string; correctnessModel?: string; correctnessChunkLoc?: number };
+  review?: {
+    model?: string;
+    escalationModel?: string;
+    correctnessModel?: string;
+    correctnessChunkLoc?: number;
+  };
 }
 
 function cfgIn(json?: ReviewConfigFile) {
@@ -42,11 +57,22 @@ function cfgIn(json?: ReviewConfigFile) {
 }
 
 describe('model resolution: env > guard.config.json > shipped default', () => {
-  it('package defaults are the benched winner since sc-2054 parity: sol judges, chunk 400', () => {
+  it('package defaults: light judges terra@high, sol escalation, correctness sol @ chunk 400 (2026-08-27 ruling)', () => {
     const cfg = cfgIn();
-    expect(resolveReviewModel(cfg)).toBe('gpt-5.6-sol');
+    expect(resolveReviewModel(cfg)).toBe('gpt-5.6-terra@high');
+    expect(resolveEscalationModel(cfg)).toBe('gpt-5.6-sol');
     expect(correctnessModel(cfg)).toBe('gpt-5.6-sol');
     expect(cfg.review.correctnessChunkLoc).toBe(400);
+  });
+
+  it('the escalation model resolves env > file > default and never reaches argv blank', () => {
+    expect(resolveEscalationModel(cfgIn({ review: { escalationModel: 'opus' } }))).toBe('opus');
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'gpt-5.6-terra@xhigh';
+    expect(resolveEscalationModel(cfgIn({ review: { escalationModel: 'opus' } }))).toBe(
+      'gpt-5.6-terra@xhigh',
+    );
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = '  ';
+    expect(resolveEscalationModel(cfgIn({ review: { escalationModel: 'opus' } }))).toBe('opus');
   });
 
   it('malformed file values fall to the defaults — a number model never reaches judge argv, a string cap never silently disables chunking', () => {
@@ -54,10 +80,11 @@ describe('model resolution: env > guard.config.json > shipped default', () => {
     roots.push(dir);
     writeFileSync(
       join(dir, 'guard.config.json'),
-      '{"review":{"model":7,"correctnessModel":" sonnet ","correctnessChunkLoc":"off"}}',
+      '{"review":{"model":7,"escalationModel":[],"correctnessModel":" sonnet ","correctnessChunkLoc":"off"}}',
     );
     const cfg = resolveGuardConfig(dir);
-    expect(cfg.review.model).toBe('gpt-5.6-sol');
+    expect(cfg.review.model).toBe('gpt-5.6-terra@high');
+    expect(cfg.review.escalationModel).toBe('gpt-5.6-sol');
     // A padded value is honored TRIMMED — whitespace must never reach --model.
     expect(cfg.review.correctnessModel).toBe('sonnet');
     expect(cfg.review.correctnessChunkLoc).toBe(400);
@@ -95,8 +122,8 @@ describe('the judging model is part of verdict-cache identity (sc-2053)', () => 
   it('a different model yields a different salt for pinned and unpinned reviewers alike', () => {
     const sels = selectReviewers(['src/a.ts'], cfgIn());
     expect(sels.length).toBeGreaterThan(1);
-    const a = reviewerTargetSalts(sels, new Map(), 'block', 'gpt-5.6-sol');
-    const b = reviewerTargetSalts(sels, new Map(), 'block', 'haiku');
+    const a = reviewerTargetSalts(sels, new Map(), 'block', 'gpt-5.6-sol', 'opus');
+    const b = reviewerTargetSalts(sels, new Map(), 'block', 'haiku', 'opus');
     // (cascade args differ; the pinned correctness salt must NOT follow them)
     const unpinned = sels.find(
       (s) => !s.reviewer.model && s.reviewer.name !== 'correctness-reviewer',
@@ -108,5 +135,20 @@ describe('the judging model is part of verdict-cache identity (sc-2053)', () => 
     // The correctness pin, not the cascade default, is its identity: same salt under both.
     expect(a.get('correctness-reviewer')).toContain('model:gpt-5.6-sol');
     expect(a.get('correctness-reviewer')).toBe(b.get('correctness-reviewer'));
+  });
+
+  it("the escalation model joins an UNPINNED reviewer's identity only — its PASS may have been earned on escalation", () => {
+    const sels = selectReviewers(['src/a.ts'], cfgIn());
+    const a = reviewerTargetSalts(sels, new Map(), 'block', 'gpt-5.6-terra@high', 'gpt-5.6-sol');
+    const b = reviewerTargetSalts(sels, new Map(), 'block', 'gpt-5.6-terra@high', 'opus');
+    const unpinned = sels.find((s) => !s.reviewer.model);
+    if (!unpinned) throw new Error('fixture: expected at least one unpinned reviewer selection');
+    expect(a.get(unpinned.reviewer.name)).toContain('escalate:gpt-5.6-sol');
+    expect(a.get(unpinned.reviewer.name)).not.toBe(b.get(unpinned.reviewer.name));
+    // Pinned reviewers never escalate: correctness AND conventions ignore the escalator.
+    for (const name of ['correctness-reviewer', 'conventions-reviewer']) {
+      expect(a.get(name)).toBe(b.get(name));
+      expect(a.get(name)).not.toContain('escalate:');
+    }
   });
 });

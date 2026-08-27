@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
 import { type GuardConfig, sourceMatchers } from '../config.mts';
 import { devkitVersion } from '../devkit-version.mts';
+import { LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import type { ReviewerResponseContractName } from './contracts/registry.mts';
 import { checklistContractFor } from './lens/split.mts';
@@ -37,14 +38,15 @@ export interface Reviewer {
    * presence tells `wrapPrompt` the brief's own command lines carry no `--lens` and so cannot be
    * deferred to. Never set on a REVIEWERS table entry. */
   lens?: readonly string[];
-  /** When set, the reviewer runs SINGLE-PASS at this model — no sonnet→opus cascade, its FAIL
+  /** When set, the reviewer runs SINGLE-PASS at this model — no first-pass→escalation cascade, its FAIL
    * blocks directly. Used by the correctness reviewer: the reviewer-eval bench measured that the
    * opus escalation OVERTURNS real correctness bugs (a "confirm or overturn" opus, handed a subtle
    * race/contract bug, tends to overturn), dropping gold recall from 0.78 first-pass to 0.67
    * end-to-end. A cascade also cannot fix a first-pass MISS. So this lens gets one strong-enough
    * pass and no second-guessing. Domain reviewers leave it unset — the cascade HELPS them (opus
-   * overturns their false-FAILs on decoys). Also used by conventions-reviewer, per the ticket's
-   * own haiku mandate.
+   * overturns their false-FAILs on decoys). Also used by conventions-reviewer — single-pass at
+   * the light judge model (review.model), config-resolved in selectReviewers like correctness;
+   * the table entry carries the shipped default.
    */
   model?: string;
 }
@@ -118,7 +120,7 @@ export const REVIEWERS = Object.freeze([
   // root are ONE finding, so this reviewer sees SOURCE files across the UNION of declared roots.
   // Four ALWAYS-ON lenses — a correctness bug has no reliable lexical signature, so a regex gate
   // would blind exactly the class this reviewer exists to catch. Runs SINGLE-PASS at a pinned
-  // model (see `model` below and the Reviewer.model docstring) — no haiku→opus cascade: the
+  // model (see `model` below and the Reviewer.model docstring) — no escalation cascade: the
   // escalation was bench-measured to OVERTURN real correctness bugs, so its FAIL blocks directly.
   Object.freeze({
     name: 'correctness-reviewer',
@@ -143,7 +145,7 @@ export const REVIEWERS = Object.freeze([
   Object.freeze({
     name: 'conventions-reviewer',
     domain: 'conventions',
-    model: 'haiku',
+    model: LIGHT_JUDGE_MODEL,
     responseContract: 'conventions-v1',
   }),
 ]);
@@ -228,6 +230,10 @@ export function selectReviewers(stagedFiles: string[], cfg: GuardConfig): Review
     // this function — resolving it anywhere later would let their cache salts diverge.
     if (reviewer.name === 'correctness-reviewer')
       return { reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }), files };
+    // conventions is the other single-pass pin: it runs at the light judge model (review.model —
+    // the same knob as the cascade first pass), resolved here for the same salt-coherence reason.
+    if (reviewer.name === 'conventions-reviewer')
+      return { reviewer: Object.freeze({ ...reviewer, model: resolveReviewModel(cfg) }), files };
     return { reviewer, files };
   }).filter((s) => s.files.length > 0);
 }
@@ -244,6 +250,14 @@ export function correctnessModel(cfg: { review: { correctnessModel: string } }):
 /** env > guard.config.json > shipped default — the cascade first-pass model for UNPINNED reviewers. */
 export function resolveReviewModel(cfg: { review: { model: string } }): string {
   return envModel('GUARD_REVIEW_MODEL') ?? envModel('FRINK_REVIEW_MODEL') ?? cfg.review.model;
+}
+
+/** env > guard.config.json > shipped default — the model that re-investigates an UNPINNED
+ * reviewer's first-pass FAIL (confirm or overturn; its verdict is final). Config-owned since the
+ * 2026-08-27 ruling: it was a hardcoded 'opus', which put every codex-family FAIL on Anthropic
+ * quota. Pinned (single-pass) reviewers never escalate, so this never applies to them. */
+export function resolveEscalationModel(cfg: { review: { escalationModel: string } }): string {
+  return envModel('GUARD_REVIEW_ESCALATION_MODEL') ?? cfg.review.escalationModel;
 }
 
 /**
@@ -383,11 +397,12 @@ export function wrapConventionsPrompt(
   );
 }
 
-/** Escalation prompt: opus independently re-verifies a first-pass FAIL (check-alignment shape). */
+/** Escalation prompt: the escalation model independently re-verifies a first-pass FAIL
+ * (check-alignment shape). */
 export function escalatePrompt(wrappedPrompt: string, firstPass: string): string {
   return (
     `${wrappedPrompt}\n\n` +
-    'A first-pass reviewer (smaller model) judged FAIL. Its full notes:\n' +
+    'A first-pass reviewer judged FAIL. Its full notes:\n' +
     '─────\n' +
     `${firstPass}\n` +
     '─────\n' +

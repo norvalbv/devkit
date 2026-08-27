@@ -77,7 +77,7 @@ if [ -n "$comp_pid" ]; then
     fi
 fi
 if [ "$rrc" -eq 1 ]; then
-    echo "   A reviewer FAILED (opus-confirmed). Fix the findings above, then re-run."
+    echo "   A reviewer FAILED (escalation-confirmed). Fix the findings above, then re-run."
     exit 1
 elif [ "$rrc" -eq 3 ]; then
     echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."

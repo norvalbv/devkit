@@ -148,12 +148,17 @@ export function reviewerTargetSalts(
   cacheSalts: Map<string, string>,
   saltBlock: string,
   cascadeModel: string,
+  escalationModel: string,
 ): Map<string, string> {
   const salted = (s: ReviewerSelection): string => {
     const base = cacheSalts.get(s.reviewer.name) ?? '';
     // The judging model is part of verdict identity (sc-2053): a PASS earned by one model must
-    // not replay for another, or a model flip silently serves the old model's judgments.
-    const model = `\0model:${s.reviewer.model ?? cascadeModel}`;
+    // not replay for another, or a model flip silently serves the old model's judgments. An
+    // UNPINNED reviewer's PASS may have been earned by the escalation pass (FAIL overturned), so
+    // the escalation model joins its identity too; pinned reviewers never escalate.
+    const model = s.reviewer.model
+      ? `\0model:${s.reviewer.model}`
+      : `\0model:${cascadeModel}\0escalate:${escalationModel}`;
     return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}${model}` : `${base}${model}`;
   };
   return new Map(selected.map((s): [string, string] => [s.reviewer.name, salted(s)]));

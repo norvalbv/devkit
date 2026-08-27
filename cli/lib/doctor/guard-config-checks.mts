@@ -32,8 +32,10 @@ import {
   missingIndexMessage,
   staleIndexMessage,
 } from '../../../gate-engine/co-occurrence/index-refresh.mts';
+import { parseModelSpec } from '../../../gate-engine/judge/codex/result.mts';
 import {
   correctnessModel,
+  resolveEscalationModel,
   resolveReviewModel,
   REVIEWERS,
 } from '../../../gate-engine/review/reviewers.mts';
@@ -59,7 +61,7 @@ export interface ReviewRoots {
 interface GateConfigModule {
   resolveGuardConfig(cwd: string): {
     indexPath?: string | null;
-    review: ReviewRoots & { model: string; correctnessModel: string };
+    review: ReviewRoots & { model: string; escalationModel: string; correctnessModel: string };
   };
 }
 
@@ -243,14 +245,33 @@ export const CODEX_RUNTIME_CHECK = 'codex judge runtime';
  */
 export function codexRuntimeResult(
   cfg: {
-    review: ReviewRoots & { model: string; correctnessModel: string };
+    review: ReviewRoots & { model: string; escalationModel: string; correctnessModel: string };
   },
   // Relative pins / PATH entries resolve against the CONSUMER repo (where the judge spawns),
   // never the doctor's own process cwd.
   cwd: string = process.cwd(),
 ): CheckResult | null {
-  const models = [resolveReviewModel(cfg), correctnessModel(cfg)];
+  const models = [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
   const gpt = [...new Set(models.filter((m) => m.startsWith('gpt-')))];
+  // A model spec the spawn layer would mishandle is a config defect the doctor should name now —
+  // otherwise every affected judge fails at the next commit. The @effort suffix is codex-only:
+  // the claude path passes `--model` verbatim, so `sonnet@high` would reach claude untranslated.
+  for (const spec of new Set(models)) {
+    try {
+      if (spec.includes('@') && !spec.startsWith('gpt-'))
+        throw new Error(
+          `judge model ${JSON.stringify(spec)} carries a reasoning-effort suffix, but only codex (gpt-*) models support one — the claude CLI would receive it verbatim`,
+        );
+      parseModelSpec(spec);
+    } catch (e) {
+      return check(
+        CODEX_RUNTIME_CHECK,
+        'DRIFT',
+        e instanceof Error ? e.message : String(e),
+        'fix the spec in guard.config.json review.model / review.escalationModel / review.correctnessModel (or the GUARD_* env override)',
+      );
+    }
+  }
   if (gpt.length === 0) return null;
   // An existing DIRECTORY or non-executable file at the path still cannot judge anything —
   // resolvable means an executable regular file, the same bar the spawn will apply.
@@ -277,7 +298,7 @@ export function codexRuntimeResult(
     CODEX_RUNTIME_CHECK,
     'DRIFT',
     `judge model ${gpt.join(', ')} routes reviewers through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — every reviewer would go inconclusive and the review gate fails open`,
-    'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.correctnessModel in guard.config.json',
+    'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.escalationModel / review.correctnessModel in guard.config.json',
   );
 }
 

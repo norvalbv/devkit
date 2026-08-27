@@ -8,7 +8,7 @@ import { responseContractFor } from '../contracts/registry.mjs';
 import { attachItems } from '../evidence/items.mjs';
 import { gitCached } from '../evidence/staged-git.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
-import { allowedToolsFor, escalatePrompt, hasChecklist, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
+import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
 import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
 import { consumerChecklistAssetRoot } from './consumer-assets.mjs';
 /** Run one reviewer with checklist verification, override handling, and cleanup. */
@@ -41,7 +41,7 @@ export async function runCascade(sel, opts) {
         cleanupChecklistState(cwd, sel.reviewer);
     }
 }
-async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = 'haiku', retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, promptExtras, }, checklistRoot) {
+async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeAsync, firstModel = resolveReviewModel(cfg), escalationModel = resolveEscalationModel(cfg), retryFirst = false, assetRoot, judgeEnv, checklistRecoveryReason, promptExtras, }, checklistRoot) {
     const env = withStagedFiles(judgeEnv ?? process.env, reviewer, files);
     const body = agentBody(cwd, cfg, reviewer.name, assetRoot);
     if (body === null)
@@ -201,7 +201,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
     let secondOutage;
     const second = await exec({
         label: `review:${reviewer.name}:escalate`,
-        args: args(escalatePrompt(prompt, first), 'opus'),
+        args: args(escalatePrompt(prompt, first), escalationModel),
         input,
         timeout: DEEP_JUDGE_TIMEOUT_MS,
         cwd,
