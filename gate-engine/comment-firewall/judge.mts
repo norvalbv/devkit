@@ -13,7 +13,7 @@ import { isJsonObject, isJsonString, parseJson } from './types.mts';
 
 export const COMMENT_JUDGE_POLICY = 'comment-paragraph-exception-v2';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-18.1';
-export const COMMENT_JUDGE_SCHEMA_VERSION = 1;
+export const COMMENT_JUDGE_SCHEMA_VERSION = 2;
 export const COMMENT_JUDGE_CAPABILITY_PROFILE = 'strict-empty-mcp-v1';
 const TIMEOUT_MS = 120_000;
 const MAX_BATCH_EVIDENCE_CHARS = 120_000;
@@ -21,6 +21,7 @@ const MAX_BATCH_FINDINGS = 200;
 const FENCED_JSON = /^```(?:json)?\s*\n([\s\S]*?)\n```(?:\s*([\s\S]*))?$/i;
 const VERDICT_WORD = /\b(?:PASS|FAIL)\b/i;
 const STRUCTURED_TAIL = /[{}]|```/;
+const UNIFIED_HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(.*)$/;
 
 const PROMPT = `You are the independent exception reviewer for a changed-comment paragraph firewall.
 
@@ -204,6 +205,18 @@ export function judgeComments(
   return parsed;
 }
 
+/** Cache identity keeps hunk cardinality, section context, and body bytes; only absolute starts go. */
+function receiptDiffIdentity(diff: string): string {
+  return diff
+    .split('\n')
+    .map((line) => {
+      const header = line.match(UNIFIED_HUNK_HEADER);
+      if (!header) return line;
+      return `@@ -_,${header[1] ?? '1'} +_,${header[2] ?? '1'} @@${header[3] ?? ''}`;
+    })
+    .join('\n');
+}
+
 export function receiptKey(
   finding: CommentFinding,
   rationale: CommentRationale,
@@ -224,7 +237,7 @@ export function receiptKey(
           adapter: finding.adapterVersion,
           comment: finding.comment,
           context: finding.context,
-          relevantDiff: finding.relevantDiff,
+          relevantDiff: receiptDiffIdentity(finding.relevantDiff),
         },
         rationale: rationale.rationale,
         ticket: rationale.ticket ?? null,

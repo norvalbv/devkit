@@ -209,6 +209,100 @@ describe('runCommentFirewall', () => {
     expect(saveReceipt).not.toHaveBeenCalled();
   });
 
+  it('persists PASS when only hunk start coordinates shift during the model call', () => {
+    quiet();
+    const shifted = {
+      ...finding,
+      startLine: 102,
+      endLine: 102,
+      relevantDiff: '@@ -101 +101,2 @@\n+// The wire format uses UTF-16 code units.',
+    };
+    const saveReceipt = vi.fn(() => true);
+    let calls = 0;
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => (calls++ === 0 ? detection() : detection([shifted])),
+        loadRationales: () => store({ [finding.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        model: () => 'haiku',
+      }),
+    ).toBe(0);
+    expect(saveReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards PASS when a new finding appears during the model call', () => {
+    quiet();
+    const shifted = {
+      ...finding,
+      startLine: 102,
+      endLine: 102,
+      relevantDiff: '@@ -101 +101,2 @@\n+// The wire format uses UTF-16 code units.',
+    };
+    const added = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const saveReceipt = vi.fn(() => true);
+    let calls = 0;
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => (calls++ === 0 ? detection() : detection([shifted, added])),
+        loadRationales: () => store({ [finding.id]: rationale, [added.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        model: () => 'haiku',
+      }),
+    ).toBe(1);
+    expect(saveReceipt).not.toHaveBeenCalled();
+  });
+
+  it('discards PASS when unsupported staged source appears during the model call', () => {
+    quiet();
+    const saveReceipt = vi.fn(() => true);
+    let calls = 0;
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () =>
+          calls++ === 0
+            ? detection()
+            : {
+                findings: [finding],
+                unsupported: [{ extension: 'py', path: 'src/new.py' }],
+              },
+        loadRationales: () => store({ [finding.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        model: () => 'haiku',
+      }),
+    ).toBe(1);
+    expect(saveReceipt).not.toHaveBeenCalled();
+  });
+
+  it('discards PASS when an already-receipted finding changes during another review', () => {
+    quiet();
+    const cached = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const changedCached = {
+      ...cached,
+      relevantDiff: `${cached.relevantDiff}\n+const changed = true;`,
+    };
+    const cachedKey = receiptKey(cached, rationale, 'haiku');
+    const saveReceipt = vi.fn(() => true);
+    let calls = 0;
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () =>
+          calls++ === 0 ? detection([finding, cached]) : detection([finding, changedCached]),
+        loadRationales: () => store({ [finding.id]: rationale, [cached.id]: rationale }),
+        loadReceipts: () => ({ [cachedKey]: { verdict: 'PASS' } }),
+        saveReceipt,
+        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        model: () => 'haiku',
+      }),
+    ).toBe(1);
+    expect(saveReceipt).not.toHaveBeenCalled();
+  });
+
   it('reviews all pending rationales in one batch and persists both decisions together', () => {
     quiet();
     const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
