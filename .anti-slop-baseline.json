@@ -75,14 +75,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/doctor/pin-checks.test.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const pkg: Record<string, unknown> = { name: 'consumer', version: '1.0.0', ...o.pkgExtra };",
-      "fingerprint": "02566e33705ee280532576e40b493ac7b53a9949a6d762d63424df58126db81e",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-known-value-widening",
       "file": "gate-engine/critique/__tests__/evidence-bindings.test.mts",
       "diagnostic": "The explicit anonymous object type on binding `changingScope` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
@@ -987,6 +979,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-known-value-widening",
+      "file": "cli/lib/doctor/pin/pin-checks.test.mts",
+      "diagnostic": "The explicit open dictionary type on binding `pkg` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
+      "context": "const pkg: Record<string, unknown> = { name: 'consumer', version: '1.0.0', ...o.pkgExtra };",
+      "fingerprint": "183bd90b9a9369b0f72676424fef538d7f2fe2734c57a2386a25b91dee915b77",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/persistence-lock.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -1137,14 +1137,6 @@
       "context": "const directory = managedPath(anchor, ['records'], true) as string;",
       "fingerprint": "1b4bbea44d2a11a4b58a7c81a97a97b229fa5b4cf4f38487fd3b00c56843589f",
       "count": 8
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `readJudgeOutput` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };",
-      "fingerprint": "1b6835aad0f754c39ae401494a336722ed8a3fb9543c3200673db1d45ac0b0ef",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
@@ -1939,14 +1931,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-module-mocking",
-      "file": "cli/lib/doctor/pin-checks.test.mts",
-      "diagnostic": "Replace module mocking with dependency injection through a real interface, service layer, or faithful test implementation.",
-      "context": "vi.mock('node:child_process', () => ({ execFileSync: vi.fn(() => '') }));",
-      "fingerprint": "2e155c9427d407f0c53cba212ceae26a1396e3fde9575ee0c49d3dcda073a369",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/dependency-preflight.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2396,6 +2380,14 @@
     },
     {
       "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/doctor/pin/pin-checks.test.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "const pkg: Record<string, unknown> = { name: 'consumer', version: '1.0.0', ...o.pkgExtra };",
+      "fingerprint": "380fedcedb201830646aeb501139633c39a3f6fa8d7ce5511a2264be3d9e9352",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
       "file": "cli/lib/ship/review/projection/runtime.mts",
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "function validateLinkState(state: Record<string, unknown>, linked: boolean): void {",
@@ -2504,14 +2496,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `repositoryPath` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return { absolute, relative: repoPath };",
       "fingerprint": "39eabd1f4e4153d992c736defd1725feadb149dd3718364233b9776c0112f4a3",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/doctor/pin-checks.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "const pkg = readJson(join(cwd, 'package.json')) as Record<string, unknown> | null;",
-      "fingerprint": "3abe198f9146c7e4217f3268c4878b326b67ae428bd44461fb2a8ac4522c5167",
       "count": 1
     },
     {
@@ -2936,14 +2920,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "entries: Record<string, unknown>;",
       "fingerprint": "428dbfd2ba8f5501716207850b34345ec809a8e5fcb5c804906939c914f8c6da",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/doctor/pin-checks.test.mts",
-      "diagnostic": "The explicit open dictionary type on binding `pkg` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "const pkg: Record<string, unknown> = { name: 'consumer', version: '1.0.0', ...o.pkgExtra };",
-      "fingerprint": "42dbb40d70a6a5c7ba50df34394a57b1a044a6f73a952df830e24fa04db44b77",
       "count": 1
     },
     {
@@ -4931,6 +4907,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
+      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
+      "context": "const pkg = readJson(join(cwd, 'package.json')) as Record<string, unknown> | null;",
+      "fingerprint": "6d9ed5481f502004e9501938140234b0f64ba78156f58d15dc741d7ec283a4c6",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/review/runtime.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -5033,6 +5017,14 @@
       "context": "value: unknown,",
       "fingerprint": "6fb7ae1a202552d6bc42fc06d1d22542bf4491ab822b044def0b73b0787f2716",
       "count": 2
+    },
+    {
+      "ruleId": "anti-slop/no-module-mocking",
+      "file": "cli/lib/doctor/pin/pin-checks.test.mts",
+      "diagnostic": "Replace module mocking with dependency injection through a real interface, service layer, or faithful test implementation.",
+      "context": "vi.mock('node:child_process', () => ({ execFileSync: vi.fn(() => '') }));",
+      "fingerprint": "6fc2676cc05c7d8d0a4bbb9dd808b5f220321c93e5249e8034c223c978d8e17b",
+      "count": 1
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
@@ -5225,14 +5217,6 @@
       "context": "const promiseAction = (() => Promise.resolve('async')) as unknown as () => string;",
       "fingerprint": "733cc0c3bcd7acf992101e97575feec922ccfbc3f7d7e0f0ccc687e55150f065",
       "count": 2
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/doctor/pin-checks.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
-      "fingerprint": "73a0448f85d32d292563a3e6c28f1114b9977def74e52795bbc59022aa5d05ef",
-      "count": 1
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
@@ -7436,6 +7420,14 @@
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
+      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
+      "fingerprint": "9e6d3ad2777d70f2e5f087da581704735e8c141c0ab00f99a50e4a97c619d1e2",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-runtime-typeof",
       "file": "cli/lib/ship/review/setup-runtime-format.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof guard !== 'string') fail('invalid setup runtime fields.');",
@@ -7452,10 +7444,10 @@
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/doctor/pin-checks.mts",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const pkg = readJson(join(cwd, 'package.json')) as Record<string, unknown> | null;",
-      "fingerprint": "9ececc2f009318631000508e9c3137b4ced413fc13928951515e5f1c90410c24",
+      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
+      "fingerprint": "9ec88d5d04cd229f7d58d7f5fcd7c1378e146e8ef4c99dfc884146cab9af707a",
       "count": 1
     },
     {
@@ -7624,14 +7616,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "errors.push((error as Error).message);",
       "fingerprint": "a25ec209854245909cf6c7bc517c6b1dd87193014ae0215a635095a311a77c86",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "e2e/anti-slop.e2e.test.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const composedPayload = JSON.parse(composed.stdout) as {",
-      "fingerprint": "a26604cb4915c3d97115b71767d7152eaf07b7bf03c7d717adcd7588fa37145f",
       "count": 1
     },
     {
@@ -8724,14 +8708,6 @@
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/doctor/pin-checks.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
-      "fingerprint": "b757c69bb8951b20f3925e5ba1496c88abfcee54dd859791dda93862e78e6c34",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/schema.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof value.predecessorEventId !== 'string' || !value.predecessorEventId)",
@@ -9339,14 +9315,6 @@
       "count": 2
     },
     {
-      "ruleId": "anti-slop/no-unsafe-dictionary-type",
-      "file": "cli/lib/doctor/pin-checks.mts",
-      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
-      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
-      "fingerprint": "c41112926aa76706cfd4e4d8da8faab0ce4209dee2931d76729b270ab3a44104",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/install/hook-registration-ledger/codec.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -9360,6 +9328,14 @@
       "diagnostic": "Replace module mocking with dependency injection through a real interface, service layer, or faithful test implementation.",
       "context": "vi.mock('node:child_process', () => ({ execFileSync: vi.fn() }));",
       "fingerprint": "c43c7d4d6f0b428c58fad92fc6db2a1f3a21cb4cc46270eb0d0f15c939e4fb97",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
+      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
+      "context": "const pkg = readJson(join(cwd, 'package.json')) as {",
+      "fingerprint": "c477edf4d206d934c75eb57baa609b9c0d4a32a50a386ec8f6b075fde116488e",
       "count": 1
     },
     {
@@ -9400,6 +9376,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "!(ASSESSMENTS as readonly string[]).includes(requestedAssessment)",
       "fingerprint": "c5937bfecddb8c14b36279103b92444e861483606e7f13745d646bfd2b7d4b40",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "const pkg = readJson(join(cwd, 'package.json')) as Record<string, unknown> | null;",
+      "fingerprint": "c5bbfc34b331aa7207f3614dea4075f9940af37990cc671b007f0441da12eada",
       "count": 1
     },
     {
@@ -9779,14 +9763,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/doctor/pin-checks.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const pkg = readJson(join(cwd, 'package.json')) as {",
-      "fingerprint": "ccf1084b0e80a09caaaee57ce7ec40ef34aff91d94c3d391e2f97ea64328cf46",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -10016,14 +9992,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "rows = db",
       "fingerprint": "d2fb9389bd3840c25092e8e40d9adcb57890b57d70bef63ece3979d939901006",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "gate-engine/review/lens/split.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "return Object.freeze({",
-      "fingerprint": "d3177fa3e9b980bf0473d356c1016d5e8978561e5e7dff518ec5fc19946c8a91",
       "count": 1
     },
     {
@@ -10939,6 +10907,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-dictionary-type",
+      "file": "cli/lib/doctor/pin/pin-checks.mts",
+      "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
+      "context": "return !!v && typeof v === 'object' && DEP in (v as Record<string, unknown>);",
+      "fingerprint": "e6b7aa27c7048f16bb0457f9cafde404d2c4be51636fc51834b3d07cb029f12c",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/generate/generate-structure-baseline.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11048,14 +11024,6 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "let cfg: Record<string, unknown>;",
       "fingerprint": "e947f6b174ca0e9b2c193b5a606abdcd8bae74233b3ece5c8dab1fa8130a53b3",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `e` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "function warnUnavailable(label: string, e: unknown, timeout?: number): void {",
-      "fingerprint": "ea04f0f4c7a702025a8ca5296652526ee93b87c2db2381c536f1e5535e59a84c",
       "count": 1
     },
     {
@@ -11968,14 +11936,6 @@
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
       "context": "...(t.splitOf ? cachedLensFields(res) : {}), // spill-safe lens re-seed (sc-1475)",
       "fingerprint": "fbdb425e74888333a2a58f977234260a63c55e20876114d3b7403df2546dfdb7",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-unknown-parameters",
-      "file": "gate-engine/judge/run-judge.mts",
-      "diagnostic": "Parameter `e` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
-      "context": "export function unavailableMessage(label: string, e: unknown, timeout?: number): string {",
-      "fingerprint": "fbeaf63898383d698efdb271e684737074c5696c6f2f05902ebc9aa89a4741aa",
       "count": 1
     },
     {
