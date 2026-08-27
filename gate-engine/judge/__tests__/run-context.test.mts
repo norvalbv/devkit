@@ -28,6 +28,9 @@ const ENV = [
   'CLAUDECODE',
   'CODEX_HOME',
   'CODEX_CLI_PATH',
+  'CODEX_SESSION_ID',
+  'CODEX_THREAD_ID',
+  'CODEX_APP_TOOLS_PIPE_PATH',
 ];
 const saved: Record<string, string | undefined> = {};
 let origCwd: string;
@@ -239,6 +242,16 @@ describe('run-context', () => {
       process.env.DEVKIT_SHIP_ID = 'ship-x';
       expect(runEnvelope()).toMatchObject({ ship_id: 'ship-x', source: 'codex' });
     });
+
+    it.each(['CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_APP_TOOLS_PIPE_PATH'])(
+      '%s identifies a Codex Desktop run',
+      (key) => {
+        process.env[key] = 'codex-desktop-marker';
+        expect(originatingAgent()).toBe('codex');
+        process.env.DEVKIT_SHIP_ID = 'ship-desktop';
+        expect(runEnvelope()).toMatchObject({ ship_id: 'ship-desktop', source: 'codex' });
+      },
+    );
 
     it('CLAUDECODE wins when both are present (Claude is the active agent)', () => {
       process.env.CLAUDECODE = '1';
