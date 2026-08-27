@@ -1,8 +1,10 @@
 /** `devkit anti-slop` — explicit, deterministic shrink-only baseline operations. */
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withLock } from '../../lib/atomic-write.mts';
+import { AntiSlopCapabilityError } from '../../lib/install/anti-slop/base-capability.mts';
 import {
   type AntiSlopBaseline,
   baselineFromGroups,
@@ -138,8 +140,30 @@ function checkBaselineEnvelope(
   return 1;
 }
 
+/** Name what the allowance forgave: it is transient, so silence would hide adopted debt. */
+function reportInheritedForgiveness(
+  before: ReadonlyArray<FindingGroup & { additionalCount: number }>,
+  after: ReadonlyArray<FindingGroup & { additionalCount: number }>,
+): void {
+  // Keyed by fingerprint, the baseline's own identity: a location key collides when one rule
+  // reports two messages at one span.
+  const remaining = new Map(after.map((group) => [group.fingerprint, group.additionalCount]));
+  const perRule = new Map<string, number>();
+  for (const group of before) {
+    const forgiven = group.additionalCount - (remaining.get(group.fingerprint) ?? 0);
+    if (forgiven > 0) perRule.set(group.ruleId, (perRule.get(group.ruleId) ?? 0) + forgiven);
+  }
+  if (perRule.size === 0) return;
+  const total = [...perRule.values()].reduce((sum, count) => sum + count, 0);
+  const rules = [...perRule.keys()].sort((a, b) => a.localeCompare(b));
+  console.log(
+    `anti-slop: base allowance forgave ${total} inherited finding(s) across ${rules.length} rule(s): ${rules.join(', ')}`,
+  );
+}
+
 function inheritedBaseAllowance(
   cwd: string,
+  capabilityCwd: string | null,
   selected: AntiSlopBaseline,
   candidateGroups: readonly FindingGroup[],
   envelope: GitBaselineEnvelope | null,
@@ -162,14 +186,24 @@ function inheritedBaseAllowance(
   ];
   return withBaseAntiSlopSnapshot(
     envelope.baseCheckoutCwd ?? cwd,
+    capabilityCwd ?? cwd,
     envelope.baseTree,
     basePaths,
     (snapshot) => {
       if (snapshot.paths.length === 0) return selected;
-      const inherited = migrateBaselineRenames(
-        baselineFromGroups(collectAntiSlopGroups(snapshot.cwd, snapshot.paths)),
-        envelope.renames,
-      );
+      let baseGroups: FindingGroup[];
+      try {
+        baseGroups = collectAntiSlopGroups(snapshot.cwd, snapshot.paths);
+      } catch (error: unknown) {
+        // Residual failure is the base tree's own consumer state. Skipping the allowance blames
+        // MORE, never less, so degrade loudly instead of hiding the finding (sc-2084).
+        if (!(error instanceof AntiSlopCapabilityError)) throw error;
+        console.error(
+          `anti-slop: inherited base allowance skipped — ${error.issue}; inherited findings may be reported as new`,
+        );
+        return selected;
+      }
+      const inherited = migrateBaselineRenames(baselineFromGroups(baseGroups), envelope.renames);
       const entries = new Map(selected.entries.map((entry) => [entry.fingerprint, entry]));
       for (const entry of inherited.entries) {
         const committed = entries.get(entry.fingerprint);
@@ -193,22 +227,36 @@ function check(cwd: string, args: string[], envelope: GitBaselineEnvelope | null
     ...baseline,
     entries: baseline.entries.filter((entry) => scope.includes(entry.file)),
   };
-  const candidateGroups = collectAntiSlopGroups(cwd, args);
-  const allowance = inheritedBaseAllowance(cwd, selected, candidateGroups, envelope);
-  const comparison = compareBaseline(allowance, candidateGroups);
-  printNew(comparison.newGroups);
-  const errors = comparison.newGroups.filter((group) => group.severity === 'error');
-  const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
-  if (errors.length > 0) {
-    console.error(
-      `anti-slop: FAIL — ${errors.reduce((sum, group) => sum + group.additionalCount, 0)} new error finding(s); baseline unchanged`,
+  // The base comparison must judge the SAME capability the candidate was linted with; pinning it
+  // inside that lint's own lock keeps a concurrent capability sync from swapping it underneath.
+  const pin =
+    envelope?.base && envelope.baseTree
+      ? mkdtempSync(join(tmpdir(), 'devkit-anti-slop-capability-'))
+      : null;
+  try {
+    const candidateGroups = collectAntiSlopGroups(cwd, args, pin ?? undefined);
+    const allowance = inheritedBaseAllowance(cwd, pin, selected, candidateGroups, envelope);
+    const comparison = compareBaseline(allowance, candidateGroups);
+    printNew(comparison.newGroups);
+    reportInheritedForgiveness(
+      compareBaseline(selected, candidateGroups).newGroups,
+      comparison.newGroups,
     );
-    return 1;
+    const errors = comparison.newGroups.filter((group) => group.severity === 'error');
+    const warnings = comparison.newGroups.filter((group) => group.severity === 'warning');
+    if (errors.length > 0) {
+      console.error(
+        `anti-slop: FAIL — ${errors.reduce((sum, group) => sum + group.additionalCount, 0)} new error finding(s); baseline unchanged`,
+      );
+      return 1;
+    }
+    console.log(
+      `anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}`,
+    );
+    return 0;
+  } finally {
+    if (pin) rmSync(pin, { recursive: true, force: true });
   }
-  console.log(
-    `anti-slop: PASS — ${comparison.currentCount} current finding(s), ${comparison.resolvedCount} ready to prune${warnings.length ? `, ${warnings.length} warning fingerprint(s)` : ''}`,
-  );
-  return 0;
 }
 
 function inspect(cwd: string, json: boolean): number {

@@ -142,6 +142,7 @@ describe('anti-slop staged Git snapshot', () => {
 
     withBaseAntiSlopSnapshot(
       root,
+      root,
       envelope.baseTree,
       ['src/file.ts', 'src/candidate.ts'],
       (snapshot) => {
