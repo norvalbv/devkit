@@ -151,3 +151,73 @@ describe('guard-review record-agent', () => {
     expect(events()).toEqual([]);
   });
 });
+
+describe('record-agent usage flags', () => {
+  it('books valid usage flags as top-level judge_exec keys', () => {
+    const r = runCli(
+      [
+        'record-agent',
+        'prior-art',
+        '--model',
+        'opus',
+        '--input-tokens',
+        '1200',
+        '--output-tokens',
+        '300',
+        '--cache-creation',
+        '10',
+        '--cache-read',
+        '900',
+        '--cost-usd',
+        '0.42',
+        '--session-id',
+        'sess-9',
+        '--billing',
+        'api',
+      ],
+      'the agent verdict',
+    );
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).toMatchObject({
+      type: 'judge_exec',
+      judge: 'prior-art',
+      outcome: 'ok',
+      input_tokens: 1200,
+      output_tokens: 300,
+      cache_creation: 10,
+      cache_read: 900,
+      cost_usd: 0.42,
+      session_id: 'sess-9',
+      billing: 'api',
+    });
+  });
+
+  it('omits malformed or negative usage values instead of emitting zeros', () => {
+    const r = runCli(
+      // '1200oops': parseFloat would read 1200 and fabricate usage — whole-string parsing must not.
+      [
+        'record-agent',
+        'prior-art',
+        '--input-tokens',
+        'abc',
+        '--output-tokens',
+        '-5',
+        '--cost-usd',
+        '',
+        '--cache-read',
+        '1200oops',
+        '--cache-creation',
+        '1.5',
+      ],
+      'verdict',
+    );
+    expect(r.status).toBe(0);
+    const [ev] = events();
+    expect(ev).not.toHaveProperty('input_tokens');
+    expect(ev).not.toHaveProperty('output_tokens');
+    expect(ev).not.toHaveProperty('cost_usd');
+    expect(ev).not.toHaveProperty('cache_read');
+    expect(ev).not.toHaveProperty('cache_creation'); // 1.5: token counters are integers
+  });
+});

@@ -39,7 +39,7 @@ import { renderTargets } from './evidence/targets-block.mts';
 
 export { renderTargets, type TargetBlock } from './evidence/targets-block.mts';
 
-import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mts';
+import { emitCacheHit, emitGateBypass, finishGateTiming } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mts';
 import {
   judgeMcpCapabilityFingerprint,
@@ -125,7 +125,10 @@ export async function runCompleteness(
   const startedAt = Date.now();
   const finish = (code: number, cacheState: 'none' | 'full' = 'none', effectiveMs?: number) =>
     finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
-  if (envFlag('NO_COMPLETENESS')) return finish(0);
+  if (envFlag('NO_COMPLETENESS')) {
+    emitGateBypass('completeness', 'GUARD_NO_COMPLETENESS');
+    return finish(0);
+  }
   let prompt: string;
   let diff: string;
   let allowedTools = withNamedAgentMcpTools(TOOLS);
