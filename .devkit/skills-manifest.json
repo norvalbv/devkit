@@ -2,11 +2,11 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.57.1",
-  "generatedAt": "2026-08-28T12:16:19.214Z",
+  "generatedAt": "2026-08-28T15:42:09.020Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-    "_devkit/review-roots.mjs": "2546509b7be8522af3e9fad11d457726d539b053bb8593c5e8d6473480c87a18",
+    "_devkit/review-roots.mjs": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
     "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
     "api-security/scripts/checklist.mjs": "3c4cd9e29aa2ef20e9a99f265bf20800ceaeb0027a5d1f137b2b456eb5bd8b9d",
     "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -36,14 +36,14 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "e78ccf732c44fce58b07001f414a2afaee13f8673cc0845749a74053382f1fda"
+    "using-devkit/SKILL.md": "4d1f7206666e15a94b7f9166e9be17b926131934adfd45a63c2c8d678ec6bd04"
   },
   "providers": {
     "claude": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "2546509b7be8522af3e9fad11d457726d539b053bb8593c5e8d6473480c87a18",
+        "_devkit/review-roots.mjs": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "3c4cd9e29aa2ef20e9a99f265bf20800ceaeb0027a5d1f137b2b456eb5bd8b9d",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -73,14 +73,14 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e78ccf732c44fce58b07001f414a2afaee13f8673cc0845749a74053382f1fda"
+        "using-devkit/SKILL.md": "4d1f7206666e15a94b7f9166e9be17b926131934adfd45a63c2c8d678ec6bd04"
       }
     },
     "cursor": {
       "files": {
         "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
         "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
-        "_devkit/review-roots.mjs": "2546509b7be8522af3e9fad11d457726d539b053bb8593c5e8d6473480c87a18",
+        "_devkit/review-roots.mjs": "dda5d77f78f4e9e9aed70eb2c83f70e764907deff72d91b67c0f91d88772fadc",
         "api-security/SKILL.md": "5916bc98f288a0b7269ec9df416692509c449274026afc93013388c40c13415e",
         "api-security/scripts/checklist.mjs": "3c4cd9e29aa2ef20e9a99f265bf20800ceaeb0027a5d1f137b2b456eb5bd8b9d",
         "backend-performance/SKILL.md": "5ff0858b34ffc91d677976dd279f27714d934aa5062f0a3f6b38088e7bd10ddb",
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "e78ccf732c44fce58b07001f414a2afaee13f8673cc0845749a74053382f1fda"
+        "using-devkit/SKILL.md": "4d1f7206666e15a94b7f9166e9be17b926131934adfd45a63c2c8d678ec6bd04"
       }
     }
   }
