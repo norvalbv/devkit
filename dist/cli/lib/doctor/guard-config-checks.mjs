@@ -180,7 +180,8 @@ reviewSelected) {
         results.push(codex);
     if (codex && claudeBindable(cwd)) {
         codex.fixable = true;
-        codex.remediation += ' — or `devkit doctor --fix` binds the claude family (haiku/opus/sonnet, chunking off) into guard.config.json';
+        codex.remediation +=
+            ' — or `devkit doctor --fix` binds the claude family (haiku/opus/sonnet, chunking off) into guard.config.json';
     }
     else if (codex) {
         const explicit = explicitFamilyKeys(cwd);
@@ -280,7 +281,12 @@ export async function adviseSearchIndex(cwd, sel) {
  */
 export async function adviseCodexRuntime(cwd, sel) {
     const results = await checkGuardConfig(cwd, false, false, sel.guards?.includes('review') === true);
-    const ADVISED = new Set([CODEX_RUNTIME_CHECK, CLAUDE_RUNTIME_CHECK, FAMILY_STALE_CHECK, JUDGE_AUTH_CHECK]);
+    const ADVISED = new Set([
+        CODEX_RUNTIME_CHECK,
+        CLAUDE_RUNTIME_CHECK,
+        FAMILY_STALE_CHECK,
+        JUDGE_AUTH_CHECK,
+    ]);
     for (const row of results.filter((r) => ADVISED.has(r.name))) {
         console.log(`  ⚠ ${row.name}: ${row.detail}`);
         if (row.remediation)
