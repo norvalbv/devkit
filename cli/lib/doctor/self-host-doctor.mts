@@ -6,7 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { printQavisAdvisoryHealth } from '../../commands/doctor.mts';
+import { printQavisAdvisoryHealth } from './qavis-health.mts';
 import type { Selection } from '../components.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { extractGuardBlock } from '../husky/husky-block.mts';

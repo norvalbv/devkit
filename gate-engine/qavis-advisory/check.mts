@@ -24,7 +24,7 @@
  * (Both must be EXPORTED to survive the ship subprocess chain — an inline prefix can be stripped.)
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mts';
 
@@ -33,10 +33,21 @@ import { envFlag } from '../config.mts';
  * OUTSIDE commit time — a plain filesystem scan, never a `route` call, so it costs no model spend.
  * `env` is a parameter purely so tests can drive a synthetic PATH.
  */
-export function qavisOnPath(env: NodeJS.ProcessEnv = process.env): boolean {
-  return (env.PATH ?? '')
-    .split(path.delimiter)
-    .some((dir) => dir && existsSync(path.join(dir, 'qavis')));
+export function qavisOnPath(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): boolean {
+  return (env.PATH ?? '').split(path.delimiter).some((dir) => {
+    if (!dir) return false;
+    // Relative PATH entries resolve against the cwd the SPAWN would use — the hook shells the
+    // gate from the git root, so doctor must judge from there, not from its own process cwd.
+    const candidate = path.resolve(cwd, dir, 'qavis');
+    try {
+      // Same bar the spawn applies: an executable regular file — a directory or a chmod-x-less
+      // file named `qavis` would report healthy and then fail every launch.
+      accessSync(candidate, constants.X_OK);
+      return statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 /** A qavis repo advertises how to launch its app here; absent ⇒ nothing for qavis to QA. */

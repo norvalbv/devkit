@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { printQavisAdvisoryHealth } from '../../commands/doctor.mjs';
+import { printQavisAdvisoryHealth } from './qavis-health.mjs';
 import { detectGitRoot } from '../detect-git-root.mjs';
 import { extractGuardBlock } from '../husky/husky-block.mjs';
 import { buildSelfHostBlock, installSelfHostHook, SELF_HOST_EXTRAS, SELF_HOST_STRUCTURE_CMD, selfHostSelection, } from '../husky/self-host.mjs';

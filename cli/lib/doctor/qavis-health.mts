@@ -1,0 +1,29 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { QAVIS_RECIPE, qavisOnPath } from '../../../gate-engine/qavis-advisory/check.mts';
+import { detectGitRoot } from '../detect-git-root.mts';
+import { QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
+
+/**
+ * qavis-advisory health — ADVISORY, printed by every doctor mode, never a CheckResult and never a
+ * `--fix` target. Deliberately outside the exit code: a repo that keeps the guard selected but has
+ * no qavis installed is a choice, not drift.
+ *
+ * What it catches is the gate's one blind spot: it fails OPEN when qavis can't be reached, so a
+ * missing binary looks exactly like a healthy "nothing to QA" at commit time. Resolved against the
+ * git ROOT because that's the cwd the husky fragment shells the gate from — doctor should report
+ * what the hook would actually see, not what this cwd sees.
+ */
+export function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
+  if (!guards.includes(QAVIS_ADVISORY_ID)) return;
+  const { gitRoot } = detectGitRoot(cwd);
+  if (!existsSync(join(gitRoot, QAVIS_RECIPE))) {
+    console.log(`  · ${QAVIS_ADVISORY_ID}: no ${QAVIS_RECIPE} — gate inert (nothing to QA)`);
+  } else if (!qavisOnPath(process.env, gitRoot)) {
+    console.log(
+      `  · ${QAVIS_ADVISORY_ID}: ${QAVIS_RECIPE} present but qavis is NOT on PATH — the QA advisory is skipped on every commit (install qavis, or drop the guard)`,
+    );
+  } else {
+    console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present)`);
+  }
+}
