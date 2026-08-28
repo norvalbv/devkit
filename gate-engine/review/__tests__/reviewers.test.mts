@@ -337,17 +337,24 @@ describe('correctness-reviewer (domain all)', () => {
       'README.md',
       '.github/workflows/gate.yml',
       'packages/ui/.storybook/main.ts',
-      '.env.example',
     ];
-    const generated = [
+    const excluded = [
       '.agents/skills/correctness/SKILL.md',
       '.claude/agents/correctness-reviewer.md',
       '.codex/agents/correctness-reviewer.toml',
       '.cursor/agents/correctness-reviewer.md',
       '.devkit/agents-manifest.json',
+      '.env',
+      '.env.local',
+      '.envrc',
+      'packages/api/.env.production',
+      'packages/api/.envrc',
+      'packages/ui/node_modules/package/index.js',
+      'packages/ui/dist/index.mjs',
+      'packages/ui/coverage/coverage-final.json',
     ];
     const selected = selectReviewers(
-      [...authored, ...generated, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
+      [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
       self,
     );
     expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual(

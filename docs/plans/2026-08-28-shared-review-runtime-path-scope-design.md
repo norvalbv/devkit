@@ -40,7 +40,19 @@ Three shapes were evaluated:
   "review": {
     "paths": {
       "include": ["**"],
-      "exclude": [".claude/**", ".cursor/**", ".devkit/**", "node_modules/**", "dist/**"]
+      "exclude": [
+        ".claude/**",
+        ".cursor/**",
+        ".devkit/**",
+        ".env*",
+        "**/.env*",
+        "node_modules/**",
+        "**/node_modules/**",
+        "dist/**",
+        "**/dist/**",
+        "coverage/**",
+        "**/coverage/**"
+      ]
     }
   }
 }
@@ -50,7 +62,8 @@ When absent, every reviewer preserves its legacy selector exactly. When present,
 required and non-empty, `exclude` may be empty, patterns are repository-relative POSIX globs, and
 exclusion wins. The configured policy is authoritative across the repository and is not intersected
 with `sourceExtensions` as a global eligibility test. The repository-wide `**` sentinel includes
-dot-prefixed files and directories at any depth.
+dot-prefixed files and directories at any depth. Credential-bearing environment files and generated,
+dependency, build, and coverage directories are excluded at both repository and workspace depth.
 
 After shared eligibility:
 
