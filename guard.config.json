@@ -6,7 +6,7 @@
   "review": {
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
-    "correctnessPaths": {
+    "paths": {
       "include": [
         "agents-hooks/**/*.sh",
         "cli/**/*.mts",

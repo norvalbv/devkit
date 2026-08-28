@@ -27,7 +27,7 @@ import { gitCached, stagedFiles } from './evidence/staged-git.mts';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mts';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mts';
 import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mts';
-import { selectRepositoryReviewers as selectReviewers } from './scope/repository.mts';
+import { selectRepositoryReviewers } from './scope/repository.mts';
 import { runReviewGate } from './run-review.mts';
 import { resolveReviewerIdentities, skippedReviewers } from './runtime.mts';
 import { runWaive } from './valve/waive.mts';
@@ -46,7 +46,7 @@ async function printReviewScan(cwd: string): Promise<void> {
   // reported as work the gate would skip-by-cache — the gate never plans it at all.
   const skip = skippedReviewers();
   const staged = stagedFiles(cwd);
-  const sels = selectReviewers(staged, cfg).filter(
+  const sels = selectRepositoryReviewers(staged, cfg).filter(
     (selection) => !skip.has(selection.reviewer.name),
   );
   const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);

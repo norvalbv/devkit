@@ -33,13 +33,13 @@ node $SCRIPT finalize     # Verify every item was resolved; refuses if any are p
 node $SCRIPT cleanup      # Remove checklist
 ```
 
-Optional `review.correctnessPaths` include/exclude globs in `guard.config.json` define runtime
-scope independently of `sourceExtensions`; exclude wins. When the block is absent, the script keeps
-the legacy union of declared roots filtered by source extensions. The gate-injected staged list is
+Optional shared `review.paths` include/exclude globs in `guard.config.json` define reviewable runtime
+scope independently of `sourceExtensions`; exclude wins. When the block is absent, this script keeps
+its legacy union of declared roots filtered by source extensions. The gate-injected staged list is
 authoritative, so the checklist never re-filters files that the gate selected.
 
 Exactly four items (`state-transitions`, `concurrency-races`, `writer-reader-contracts`,
-`error-and-edge-classification`) are ALWAYS enumerated when any source file is staged — a
+`error-and-edge-classification`) are ALWAYS enumerated when any selected runtime path is staged — a
 correctness bug has no reliable lexical signature, so they never regex-gate to zero, and never
 more than four: each lens is a pass over the same diff, so item count multiplies judge
 wall-clock. Broadcast/dedup rides the contracts lens; retries and discarded returns ride the

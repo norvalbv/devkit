@@ -33,6 +33,7 @@ const cfg = {
 };
 
 const names = (sel) => sel.map((s) => s.reviewer.name);
+const filesFor = (sel, reviewer) => sel.find((s) => s.reviewer.name === reviewer)?.files;
 
 describe('test fixture invariant', () => {
   it('keeps the resolved review model knobs — dropping them would silently un-pin every config-resolved reviewer', () => {
@@ -255,52 +256,71 @@ describe('correctness-reviewer (domain all)', () => {
     const sel = selectReviewers(['src/main/data.json'], cfg);
     expect(names(sel)).not.toContain('correctness-reviewer');
   });
-  it('uses explicit repo-wide runtime paths without widening commit-guard', () => {
+  it('applies explicit repo-wide runtime paths to the whole reviewer fleet without widening language tooling', () => {
     const scoped = {
       ...cfg,
       review: {
         ...cfg.review,
-        correctnessPaths: {
-          include: ['agents-hooks/**/*.sh', 'runtime/**'],
+        paths: {
+          include: ['src/**'],
           exclude: ['**/*.test.*'],
         },
       },
     };
     const sel = selectReviewers(
-      ['agents-hooks/ship.sh', 'runtime/worker.custom', 'runtime/worker.test.sh'],
+      [
+        'src/main/ship.sh',
+        'src/main/worker.custom',
+        'src/main/worker.test.sh',
+        'src/renderer/app.css',
+      ],
       scoped,
     );
-    expect(sel.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
-      'agents-hooks/ship.sh',
-      'runtime/worker.custom',
+    expect(filesFor(sel, 'api-security-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+    ]);
+    expect(filesFor(sel, 'backend-performance-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+    ]);
+    expect(filesFor(sel, 'frontend-security-reviewer')).toEqual(['src/renderer/app.css']);
+    expect(filesFor(sel, 'frontend-performance-reviewer')).toEqual(['src/renderer/app.css']);
+    expect(filesFor(sel, 'correctness-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+      'src/renderer/app.css',
+    ]);
+    expect(filesFor(sel, 'conventions-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+      'src/renderer/app.css',
     ]);
     expect(names(sel)).not.toContain('commit-guard');
   });
 
-  it('unions HEAD and staged correctness policy when the caller supplies a baseline config', () => {
+  it('unions HEAD and staged path policy for every reviewer when the caller supplies a baseline config', () => {
     const baseline = {
       ...cfg,
       review: {
         ...cfg.review,
-        correctnessPaths: { include: ['legacy-runtime/**'], exclude: [] },
+        paths: { include: ['src/main/legacy/**'], exclude: [] },
       },
     };
     const staged = {
       ...cfg,
       review: {
         ...cfg.review,
-        correctnessPaths: { include: ['new-runtime/**'], exclude: [] },
+        paths: { include: ['src/main/new/**'], exclude: [] },
       },
     };
     const selected = selectReviewers(
-      ['legacy-runtime/a.sh', 'new-runtime/b.sh', 'outside/c.sh'],
+      ['src/main/legacy/a.ts', 'src/main/new/b.ts', 'outside/c.ts'],
       staged,
       baseline,
     );
-    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
-      'legacy-runtime/a.sh',
-      'new-runtime/b.sh',
-    ]);
+    for (const selection of selected)
+      expect(selection.files).toEqual(['src/main/legacy/a.ts', 'src/main/new/b.ts']);
   });
 
   it('Devkit self-scope includes executable helpers and excludes tests/eval prose', () => {
@@ -318,6 +338,12 @@ describe('correctness-reviewer (domain all)', () => {
       self,
     );
     expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
+      'agents-hooks/decision-stop-check.sh',
+      'cli/index.mts',
+      'skills/_devkit/review-roots.mjs',
+      'skills/correctness/scripts/checklist.mjs',
+    ]);
+    expect(selected.find((s) => s.reviewer.name === 'conventions-reviewer')?.files).toEqual([
       'agents-hooks/decision-stop-check.sh',
       'cli/index.mts',
       'skills/_devkit/review-roots.mjs',

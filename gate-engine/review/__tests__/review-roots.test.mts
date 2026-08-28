@@ -16,10 +16,10 @@ import { describe, expect, it } from 'vitest';
 import {
   authoritativeStagedFilesOverride,
   isNonEmptyStringArray,
-  normalizeCorrectnessPaths,
+  normalizeReviewPaths,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
-  selectCorrectnessFiles,
+  selectReviewFiles,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../../skills/_devkit/review-roots.mjs';
@@ -208,10 +208,10 @@ describe('stagedFilesOverride — the gate-injected authoritative file list (sc-
   });
 });
 
-describe('review.correctnessPaths', () => {
+describe('review.paths', () => {
   it('canonicalizes include/exclude patterns so config reordering does not churn cache identity', () => {
     expect(
-      normalizeCorrectnessPaths({
+      normalizeReviewPaths({
         include: [' scripts/**/*.sh ', './src/**', 'src/**'],
         exclude: ['**/*.test.*', '**/__tests__/**'],
       }),
@@ -240,12 +240,12 @@ describe('review.correctnessPaths', () => {
       },
     ],
   ])('rejects %s instead of silently selecting zero', (_label, value) => {
-    expect(() => normalizeCorrectnessPaths(value)).toThrow(/correctnessPaths/);
+    expect(() => normalizeReviewPaths(value)).toThrow(/review\.paths/);
   });
 
   it('allows a broad subtree exclusion when another include remains reviewable', () => {
     expect(
-      normalizeCorrectnessPaths({
+      normalizeReviewPaths({
         include: ['src/**', 'scripts/**'],
         exclude: ['src/**'],
       }),
@@ -263,8 +263,8 @@ describe('review.correctnessPaths', () => {
       'scripts/logo.png',
     ];
     expect(
-      selectCorrectnessFiles(files, {
-        correctnessPaths: {
+      selectReviewFiles(files, {
+        paths: {
           include: ['src/**', 'scripts/**'],
           exclude: ['**/*.test.*'],
         },
@@ -276,8 +276,8 @@ describe('review.correctnessPaths', () => {
 
   it('absent scope preserves legacy roots + sourceExtensions + test exclusion', () => {
     expect(
-      selectCorrectnessFiles(['src/a.mts', 'src/a.test.mts', 'src/run.sh', 'outside/a.mts'], {
-        correctnessPaths: undefined,
+      selectReviewFiles(['src/a.mts', 'src/a.test.mts', 'src/run.sh', 'outside/a.mts'], {
+        paths: undefined,
         roots: ['src'],
         sourceExtensions: ['mts'],
       }),

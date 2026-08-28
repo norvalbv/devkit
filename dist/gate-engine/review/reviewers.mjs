@@ -10,12 +10,11 @@
  */
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
-import { sourceMatchers } from '../config.mjs';
 import { devkitVersion } from '../devkit-version.mjs';
 import { LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mjs';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mjs';
 import { checklistContractFor } from './lens/split.mjs';
-import { correctnessReviewerFiles, domainReviewerFiles } from './scope/policy.mjs';
+import { reviewerFilesAcrossPolicies } from './scope/policy.mjs';
 export { declaredRoots, rootsFor, underRoot } from './scope/policy.mjs';
 export { parseReviewVerdict } from './contracts/response.mjs';
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
@@ -130,21 +129,21 @@ function configuredReviewer(reviewer, cfg) {
         return reviewer;
     return Object.freeze({ ...reviewer, model: resolveReviewModel(cfg) });
 }
-export function selectReviewers(stagedFiles, cfg, baselineCfg, correctnessCfg = cfg) {
-    const { isSource } = sourceMatchers(cfg.sourceExtensions);
+export function selectReviewers(stagedFiles, cfg, baselineCfg) {
     return REVIEWERS.map((reviewer) => {
+        const files = reviewerFilesAcrossPolicies(reviewer, stagedFiles, cfg, baselineCfg);
         if (reviewer.name === 'correctness-reviewer') {
             return {
                 reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }),
-                files: correctnessReviewerFiles(stagedFiles, correctnessCfg, baselineCfg),
+                files,
             };
         }
-        const files = domainReviewerFiles(reviewer, stagedFiles, cfg, isSource);
         // Backend/frontend judges read code diffs, and their checklist scripts skip prose files
         // outright — selecting a reviewer for a prose-only diff strands its judge with an empty
         // checklist (scored inconclusive, fail-closed under ship). Keep selection and script agreed.
         // commit-guard remains coupled to sourceExtensions: semantic duplication is a language-aware
-        // capability, unlike correctness's explicit runtime path policy above.
+        // capability. review.paths defines shared eligibility without pretending every reviewer can
+        // interpret every language equally.
         // The correctness pin is config-resolved (env > guard.config.json > default) so every
         // installation can move it without a package edit; the static REVIEWERS entry only carries
         // the shipped default. Applied HERE because both the gate and the scan CLI select through

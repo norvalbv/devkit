@@ -47,7 +47,7 @@ import { emitMergedLensResults, mapLimit, planReviewWork, resolveChunkCap, resol
 import { clearProgress, writeProgress } from './progress.mjs';
 import { retryableReason, runDeferredRecoveries, settleReviewOutcome, } from './recovery/settle.mjs';
 import { cacheKey, effectiveReviewConfig, resolveEscalationModel, resolveReviewModel, } from './reviewers.mjs';
-import { selectRepositoryReviewers as selectReviewers } from './scope/repository.mjs';
+import { selectRepositoryReviewers } from './scope/repository.mjs';
 import { gateJudgeEnv, passAssetVerifier, preflightReviewAssets, resolveReviewerIdentities, skippedReviewers, } from './runtime.mjs';
 import { ReviewGateTiming, reviewConcurrency } from './telemetry/timing.mjs';
 export { runCascade };
@@ -133,7 +133,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             }
         }
         const staged = stagedFiles(cwd);
-        selected = selectReviewers(staged, cfg);
+        selected = selectRepositoryReviewers(staged, cfg);
         const skip = skippedReviewers();
         const knobDropped = new Set();
         if (skip.size > 0) {

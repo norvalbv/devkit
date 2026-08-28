@@ -11,13 +11,13 @@
 
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
-import { type GuardConfig, sourceMatchers } from '../config.mts';
+import type { GuardConfig } from '../config.mts';
 import { devkitVersion } from '../devkit-version.mts';
 import { LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mts';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mts';
 import type { ReviewerResponseContractName } from './contracts/registry.mts';
 import { checklistContractFor } from './lens/split.mts';
-import { correctnessReviewerFiles, domainReviewerFiles } from './scope/policy.mts';
+import { reviewerFilesAcrossPolicies } from './scope/policy.mts';
 
 export { declaredRoots, rootsFor, underRoot } from './scope/policy.mts';
 
@@ -191,22 +191,21 @@ export function selectReviewers(
   stagedFiles: string[],
   cfg: GuardConfig,
   baselineCfg?: GuardConfig,
-  correctnessCfg = cfg,
 ): ReviewerSelection[] {
-  const { isSource } = sourceMatchers(cfg.sourceExtensions);
   return REVIEWERS.map((reviewer) => {
+    const files = reviewerFilesAcrossPolicies(reviewer, stagedFiles, cfg, baselineCfg);
     if (reviewer.name === 'correctness-reviewer') {
       return {
         reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }),
-        files: correctnessReviewerFiles(stagedFiles, correctnessCfg, baselineCfg),
+        files,
       };
     }
-    const files = domainReviewerFiles(reviewer, stagedFiles, cfg, isSource);
     // Backend/frontend judges read code diffs, and their checklist scripts skip prose files
     // outright — selecting a reviewer for a prose-only diff strands its judge with an empty
     // checklist (scored inconclusive, fail-closed under ship). Keep selection and script agreed.
     // commit-guard remains coupled to sourceExtensions: semantic duplication is a language-aware
-    // capability, unlike correctness's explicit runtime path policy above.
+    // capability. review.paths defines shared eligibility without pretending every reviewer can
+    // interpret every language equally.
     // The correctness pin is config-resolved (env > guard.config.json > default) so every
     // installation can move it without a package edit; the static REVIEWERS entry only carries
     // the shipped default. Applied HERE because both the gate and the scan CLI select through

@@ -28,7 +28,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mts';
 import { isAbsolute, resolve } from 'node:path';
-import { normalizeCorrectnessPaths } from '../skills/_devkit/review-roots.mjs';
+import { normalizeReviewPaths, type ReviewPaths } from '../skills/_devkit/review-roots.mjs';
 import { parseJsonObject } from './config-json.mts';
 
 // ── Shared config types ──────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ export interface ReviewConfig {
   escalationModel: string; // the cascade's FAIL-escalation second pass for UNPINNED reviewers
   correctnessModel: string; // the correctness single-pass pin
   correctnessChunkLoc: number;
-  correctnessPaths?: { include: string[]; exclude: string[] };
+  paths?: ReviewPaths;
 }
 
 /**
@@ -98,9 +98,9 @@ export interface GuardConfig {
   cwd: string;
 }
 
-type RawReviewConfig = Partial<Omit<ReviewConfig, 'accessibility' | 'correctnessPaths'>> & {
+type RawReviewConfig = Partial<Omit<ReviewConfig, 'accessibility' | 'paths'>> & {
   accessibility?: Partial<ReviewConfig['accessibility']>;
-  correctnessPaths?: { include?: string[]; exclude?: string[] };
+  paths?: { include?: string[]; exclude?: string[] };
 };
 
 // Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the JSON
@@ -412,7 +412,7 @@ function resolveLoadedGuardConfig(file: RawGuardConfigFile, cwd: string): GuardC
       escalationModel: str(fr.escalationModel, dr.escalationModel),
       correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
       correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
-      correctnessPaths: normalizeCorrectnessPaths(fr.correctnessPaths),
+      paths: normalizeReviewPaths(fr.paths),
       accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
     },
     // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:

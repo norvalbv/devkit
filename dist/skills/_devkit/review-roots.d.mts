@@ -2,24 +2,24 @@ export function isNonEmptyStringArray(value: unknown): value is string[];
 export function stagedFilesOverride(): string[] | null;
 export function authoritativeStagedFilesOverride(): string[] | null;
 export function normalizeRepositoryFile(file: string, name?: string): string;
-export interface CorrectnessPaths {
-  include: string[];
-  exclude: string[];
+export interface ReviewPaths {
+  readonly include: readonly string[];
+  readonly exclude: readonly string[];
 }
-export interface CorrectnessPathsInput {
-  include?: string[];
-  exclude?: string[];
+export interface ReviewPathsInput {
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
 }
-export function normalizeCorrectnessPaths(
-  value: CorrectnessPathsInput | undefined,
+export function normalizeReviewPaths(
+  value: ReviewPathsInput | undefined,
   name?: string,
-): CorrectnessPaths | undefined;
-export function selectCorrectnessFiles(
-  files: string[],
+): ReviewPaths | undefined;
+export function selectReviewFiles(
+  files: readonly string[],
   options: {
-    correctnessPaths?: CorrectnessPaths;
-    roots: string[];
-    sourceExtensions: string[];
+    paths?: ReviewPaths;
+    roots: readonly string[];
+    sourceExtensions: readonly string[];
   },
 ): string[];
 export function normalizeReviewRoots(value: unknown, name: string): string[];

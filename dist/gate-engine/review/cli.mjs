@@ -25,7 +25,7 @@ import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mjs';
 import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mjs';
-import { selectRepositoryReviewers as selectReviewers } from './scope/repository.mjs';
+import { selectRepositoryReviewers } from './scope/repository.mjs';
 import { runReviewGate } from './run-review.mjs';
 import { resolveReviewerIdentities, skippedReviewers } from './runtime.mjs';
 import { runWaive } from './valve/waive.mjs';
@@ -43,7 +43,7 @@ async function printReviewScan(cwd) {
     // reported as work the gate would skip-by-cache — the gate never plans it at all.
     const skip = skippedReviewers();
     const staged = stagedFiles(cwd);
-    const sels = selectReviewers(staged, cfg).filter((selection) => !skip.has(selection.reviewer.name));
+    const sels = selectRepositoryReviewers(staged, cfg).filter((selection) => !skip.has(selection.reviewer.name));
     const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
     // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
     // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.

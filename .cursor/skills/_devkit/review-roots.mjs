@@ -2,9 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, matchesGlob, win32 } from 'node:path';
 
-const MAX_CORRECTNESS_PATTERNS = 128;
-const MAX_CORRECTNESS_PATTERN_LENGTH = 512;
-const CORRECTNESS_PATH_KEYS = new Set(['include', 'exclude']);
+const MAX_REVIEW_PATTERNS = 128;
+const MAX_REVIEW_PATTERN_LENGTH = 512;
+const REVIEW_PATH_KEYS = new Set(['include', 'exclude']);
 const RE_GLOB_META = /[*?[\]{}()]/;
 const RE_WILDCARD_SEGMENT = /^\*{1,2}$/;
 const RE_TEST_INFIX = /\.(test|spec)\./;
@@ -73,7 +73,7 @@ export function authoritativeStagedFilesOverride() {
   return [...new Set(files.map((file) => normalizeRepositoryFile(file)))];
 }
 
-function validateCorrectnessGlob(pattern, name) {
+function validateReviewGlob(pattern, name) {
   try {
     matchesGlob('devkit-glob-validation-probe', pattern);
   } catch {
@@ -90,11 +90,11 @@ function assertStringPatterns(value, name) {
   if (!isNonEmptyStringArray(value)) throw new Error(`${name} must be a JSON string array`);
 }
 
-function normalizeCorrectnessPattern(entry, name) {
+function normalizeReviewPattern(entry, name) {
   const pattern = entry.trim().replace(/^(?:\.\/)+/, '');
   const unsafeChecks = [
     !pattern,
-    pattern.length > MAX_CORRECTNESS_PATTERN_LENGTH,
+    pattern.length > MAX_REVIEW_PATTERN_LENGTH,
     pattern.includes('\0'),
     pattern.includes('\\'),
     isAbsolute(pattern),
@@ -106,17 +106,17 @@ function normalizeCorrectnessPattern(entry, name) {
   ];
   if (unsafeChecks.includes(true))
     throw new Error(`${name} contains an unsafe or invalid repository-relative glob`);
-  validateCorrectnessGlob(pattern, name);
+  validateReviewGlob(pattern, name);
   return pattern;
 }
 
-function normalizeCorrectnessPatterns(value, name, { allowEmpty }) {
+function normalizeReviewPatterns(value, name, { allowEmpty }) {
   if (!Array.isArray(value)) throw new Error(`${name} must be a JSON string array`);
   rejectMissingIncludes(value.length, name, allowEmpty);
   assertStringPatterns(value, name);
-  if (value.length > MAX_CORRECTNESS_PATTERNS)
-    throw new Error(`${name} must contain at most ${MAX_CORRECTNESS_PATTERNS} patterns`);
-  const normalized = value.map((entry) => normalizeCorrectnessPattern(entry, name));
+  if (value.length > MAX_REVIEW_PATTERNS)
+    throw new Error(`${name} must contain at most ${MAX_REVIEW_PATTERNS} patterns`);
+  const normalized = value.map((entry) => normalizeReviewPattern(entry, name));
   return [...new Set(normalized)].sort();
 }
 
@@ -145,23 +145,23 @@ function rejectFullyExcludedScope(include, exclude, name) {
   );
   if (allCovered)
     throw new Error(
-      `${name}.exclude must not disable the entire correctness reviewer; leave at least one include scope reviewable`,
+      `${name}.exclude must not disable the entire review scope; leave at least one include scope reviewable`,
     );
 }
 
-/** Strict, canonical config boundary for review.correctnessPaths. */
-export function normalizeCorrectnessPaths(value, name = 'review.correctnessPaths') {
+/** Strict, canonical config boundary for review.paths. */
+export function normalizeReviewPaths(value, name = 'review.paths') {
   if (value === undefined) return undefined;
   if (Object.prototype.toString.call(value) !== '[object Object]')
     throw new Error(`${name} must be an object with include and exclude arrays`);
   const keys = Object.keys(value);
-  if (!keys.every((key) => CORRECTNESS_PATH_KEYS.has(key)))
+  if (!keys.every((key) => REVIEW_PATH_KEYS.has(key)))
     throw new Error(`${name} only accepts include and exclude`);
   const include = Object.freeze(
-    normalizeCorrectnessPatterns(value.include, `${name}.include`, { allowEmpty: false }),
+    normalizeReviewPatterns(value.include, `${name}.include`, { allowEmpty: false }),
   );
   const exclude = Object.freeze(
-    normalizeCorrectnessPatterns(optionalPatterns(value.exclude), `${name}.exclude`, {
+    normalizeReviewPatterns(optionalPatterns(value.exclude), `${name}.exclude`, {
       allowEmpty: true,
     }),
   );
@@ -173,13 +173,13 @@ const underReviewRoot = (file, root) =>
   root === '.' || file === root || file.startsWith(`${root.replace(/\/$/, '')}/`);
 
 /**
- * The single correctness file selector used by the gate and standalone checklist. Configured paths
- * are repo-wide and authoritative; the absent-block branch intentionally preserves legacy roots +
- * sourceExtensions behavior for existing consumers.
+ * The shared review-path selector used by the gate and standalone correctness checklist.
+ * Configured paths are repo-wide and authoritative; the absent-block branch intentionally
+ * preserves correctness's legacy roots + sourceExtensions behavior for existing consumers.
  */
-export function selectCorrectnessFiles(files, { correctnessPaths, roots, sourceExtensions }) {
-  if (correctnessPaths !== undefined) {
-    const scope = normalizeCorrectnessPaths(correctnessPaths);
+export function selectReviewFiles(files, { paths, roots, sourceExtensions }) {
+  if (paths !== undefined) {
+    const scope = normalizeReviewPaths(paths);
     return files.filter((file) => {
       normalizeRepositoryFile(file);
       if (RE_OPAQUE_BINARY.test(file)) return false;

@@ -27,7 +27,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mjs';
 import { isAbsolute, resolve } from 'node:path';
-import { normalizeCorrectnessPaths } from '../skills/_devkit/review-roots.mjs';
+import { normalizeReviewPaths } from '../skills/_devkit/review-roots.mjs';
 import { parseJsonObject } from './config-json.mjs';
 export const CONFIG_FILENAME = 'guard.config.json';
 // Frink-agnostic defaults: old hardcoded BOUNDARIES / fanout roots are opt-in via guard.config.json.
@@ -291,7 +291,7 @@ function resolveLoadedGuardConfig(file, cwd) {
             escalationModel: str(fr.escalationModel, dr.escalationModel),
             correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
             correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
-            correctnessPaths: normalizeCorrectnessPaths(fr.correctnessPaths),
+            paths: normalizeReviewPaths(fr.paths),
             accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
         },
         // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:

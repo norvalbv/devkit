@@ -22,11 +22,11 @@
   "//sourceExtensions": "Impl-file extensions the ratchets + structure rule count. A React app is ['ts','tsx'].",
   "sourceExtensions": ["ts", "tsx"],
 
-  "//review": "Topology the reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer. An EMPTY array disables that domain's reviewers entirely \u2014 \"frontendRoots\": [] means frontend-security-reviewer and frontend-performance-reviewer are never selected (the gate warns on stderr when a commit stages frontend files anyway; `devkit doctor` flags it against the detected stack). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
+  "//review": "paths.include/exclude defines the shared reviewable runtime universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
   "review": {
     "backendRoots": [],
     "frontendRoots": ["src"],
-    "correctnessPaths": {
+    "paths": {
       "include": ["src/**"],
       "exclude": [
         "**/__tests__/**",
@@ -34,9 +34,7 @@
         "**/*.spec.*",
         "**/fixtures/**",
         "**/*.md",
-        "**/*.mdx",
-        "**/*.css",
-        "**/*.scss"
+        "**/*.mdx"
       ]
     },
     "trustBoundaries": "",

@@ -67,7 +67,7 @@ import {
   resolveEscalationModel,
   resolveReviewModel,
 } from './reviewers.mts';
-import { selectRepositoryReviewers as selectReviewers } from './scope/repository.mts';
+import { selectRepositoryReviewers } from './scope/repository.mts';
 import {
   gateJudgeEnv,
   passAssetVerifier,
@@ -167,7 +167,7 @@ export async function runReviewGate(
       }
     }
     const staged = stagedFiles(cwd);
-    selected = selectReviewers(staged, cfg);
+    selected = selectRepositoryReviewers(staged, cfg);
     const skip = skippedReviewers();
     const knobDropped = new Set<string>();
     if (skip.size > 0) {

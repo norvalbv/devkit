@@ -6,10 +6,10 @@
  * Checks a staged diff for correctness bug classes: state-machine integrity, concurrency/races,
  * writer/reader contracts, recovery/failure modes, classifier edge cases.
  *
- * Scope comes from optional review.correctnessPaths include/exclude globs. When absent, the legacy
- * UNION of declared roots + sourceExtensions remains exact for backward compatibility.
+ * Scope comes from optional shared review.paths include/exclude globs. When absent, the legacy
+ * correctness UNION of declared roots + sourceExtensions remains exact for backward compatibility.
  *
- * Unlike the domain checklists, the four lenses are ALWAYS enumerated when any source file is
+ * Unlike the domain checklists, the four lenses are ALWAYS enumerated when any selected runtime path is
  * staged — they never regex-gate to zero. A correctness bug has no reliable lexical signature
  * ("no auth keywords → nothing to check" blindness is exactly what this reviewer exists to
  * prevent). Exactly four items, never more: each lens is a pass over the SAME diff, so item
@@ -23,10 +23,10 @@ import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   authoritativeStagedFilesOverride,
   isNonEmptyStringArray,
-  normalizeCorrectnessPaths,
+  normalizeReviewPaths,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
-  selectCorrectnessFiles,
+  selectReviewFiles,
 } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
@@ -137,12 +137,18 @@ function sourceExtensions() {
   return ['ts', 'tsx'];
 }
 
-function correctnessPaths() {
+function isMissingReviewConfig(error) {
+  if (error instanceof SyntaxError) return true;
+  if (!(error instanceof Error)) return false;
+  return 'code' in error && error.code === 'ENOENT';
+}
+
+function reviewPaths() {
   try {
     const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
-    return normalizeCorrectnessPaths(c?.review?.correctnessPaths);
+    return normalizeReviewPaths(c?.review?.paths);
   } catch (error) {
-    if (error instanceof SyntaxError) return undefined;
+    if (isMissingReviewConfig(error)) return undefined;
     throw error;
   }
 }
@@ -163,8 +169,8 @@ function getStagedFiles() {
     console.error(`❌ correctness: \`git diff --cached\` failed — ${e.message ?? e}`);
     process.exit(1);
   }
-  return selectCorrectnessFiles(output.split('\0').filter(Boolean), {
-    correctnessPaths: correctnessPaths(),
+  return selectReviewFiles(output.split('\0').filter(Boolean), {
+    paths: reviewPaths(),
     roots: unionRoots(),
     sourceExtensions: sourceExtensions(),
   });

@@ -12,10 +12,10 @@ state machines, cross-module contracts, recovery paths, classifier edge cases. B
 run scripts, report findings as file:line one-liners, no essays.
 
 <architecture_context>
-Scope is **consumer-defined** by `review.correctnessPaths` include/exclude globs in
+Scope is **consumer-defined** by the shared `review.paths` include/exclude globs in
 `guard.config.json`. It is independent of `sourceExtensions`, so runtime shell scripts and other
-explicitly included text files receive the same review as application source. Older consumers that
-omit the block retain the declared-roots + sourceExtensions scope. Correctness is NOT
+explicitly included text files receive the same review as application source across the reviewer
+fleet. Older consumers that omit the block retain each reviewer's legacy scope. Correctness is NOT
 domain-sliceable — a writer in one runtime tree and its reader in another are ONE finding.
 `review.trustBoundaries` (optional prose) describes which side is which.
 </architecture_context>

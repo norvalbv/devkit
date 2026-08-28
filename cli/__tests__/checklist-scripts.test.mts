@@ -294,7 +294,7 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.files).toEqual(files);
   });
 
-  it('standalone correctness uses configured runtime paths instead of sourceExtensions', () => {
+  it('standalone correctness uses shared review runtime paths instead of sourceExtensions', () => {
     const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-paths-'));
     dirs.push(repo);
     const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -304,7 +304,7 @@ describe('skill checklist script (spawned source)', () => {
       JSON.stringify({
         sourceExtensions: ['mts'],
         review: {
-          correctnessPaths: {
+          paths: {
             include: ['agents-hooks/**', 'src/**'],
             exclude: ['**/*.test.*'],
           },
@@ -326,6 +326,25 @@ describe('skill checklist script (spawned source)', () => {
       readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
     );
     expect(state.files).toEqual(['agents-hooks/ship.sh', 'src/main.mts']);
+  });
+
+  it('standalone correctness treats a missing guard.config.json as unset review paths', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-no-config-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src', 'main.ts'), 'export const main = true;\n');
+    git(['add', '.']);
+    const script = fileURLToPath(
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+    );
+    const r = spawnSync('node', [script, 'generate'], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual(['src/main.ts']);
   });
 
   it.each(REVIEW_ROOT_CASES)(

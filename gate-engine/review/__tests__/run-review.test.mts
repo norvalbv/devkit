@@ -200,12 +200,12 @@ describe('runReviewGate — cascade + exit contract', () => {
       'review:correctness-reviewer',
     ]);
   });
-
   it('review mode injects scanRoots for an empty frontend topology into selector and judges', async () => {
     const repo = consumerRepo({ frontend: true });
     const config = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
     config.review.frontendRoots = [];
     writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(config));
+    execSync('git add guard.config.json', { cwd: repo });
     const assets = reviewAssets();
     process.env.DEVKIT_RUN_MODE = 'review';
     process.env.DEVKIT_REVIEW_ASSET_ROOT = assets;
@@ -1240,8 +1240,8 @@ describe('runReviewGate — cascade + exit contract', () => {
     const cfg = JSON.parse(readFileSync(join(repo, 'guard.config.json'), 'utf8'));
     cfg.decisionsDir = 'docs/decisions';
     writeFileSync(join(repo, 'guard.config.json'), JSON.stringify(cfg));
+    execSync('git add guard.config.json', { cwd: repo });
   };
-
   it('governing Targets render into the domain judge prompt under the reviewer framing (sc-1441)', async () => {
     const repo = consumerRepo({ backend: true });
     withDecisions(repo);

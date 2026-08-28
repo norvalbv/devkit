@@ -1,5 +1,5 @@
-import { selectCorrectnessFiles } from '../../../skills/_devkit/review-roots.mjs';
-import type { GuardConfig } from '../../config.mts';
+import { selectReviewFiles } from '../../../skills/_devkit/review-roots.mjs';
+import { type GuardConfig, sourceMatchers } from '../../config.mts';
 
 export interface ReviewerDomain {
   domain: string;
@@ -32,37 +32,74 @@ export function underRoot(file: string, root: string): boolean {
   return file === normalizedRoot || file.startsWith(`${normalizedRoot}/`);
 }
 
-function correctnessFiles(stagedFiles: string[], cfg: GuardConfig): string[] {
-  return selectCorrectnessFiles(stagedFiles, {
-    correctnessPaths: cfg.review.correctnessPaths,
+function scopedReviewFiles(stagedFiles: string[], cfg: GuardConfig): string[] {
+  return selectReviewFiles(stagedFiles, {
+    paths: cfg.review.paths,
     roots: declaredRoots(cfg),
     sourceExtensions: cfg.sourceExtensions,
   });
 }
 
-/** Current plus HEAD policy when guard.config.json changes, preventing same-commit self-exemption. */
-export function correctnessReviewerFiles(
+function filesUnderReviewerRoots(
+  reviewer: ReviewerDomain,
+  files: string[],
+  cfg: GuardConfig,
+  configuredScope: boolean,
+): string[] {
+  if (configuredScope && UNION_ROOT_DOMAINS.has(reviewer.domain)) return files;
+  const roots = rootsFor(reviewer, cfg);
+  return files.filter((file) => roots.some((root) => underRoot(file, root)));
+}
+
+function withoutProse(reviewer: ReviewerDomain, files: string[]): string[] {
+  if (!PROSE_FILTERED_DOMAINS.has(reviewer.domain)) return files;
+  return files.filter((file) => !RE_PROSE_FILE.test(file));
+}
+
+function sourceFiles(files: string[], cfg: GuardConfig): string[] {
+  const { isSource } = sourceMatchers(cfg.sourceExtensions);
+  return files.filter((file) => isSource(file.split('/').pop() ?? ''));
+}
+
+function initialReviewFiles(stagedFiles: string[], cfg: GuardConfig): string[] {
+  if (cfg.review.paths === undefined) return stagedFiles;
+  return scopedReviewFiles(stagedFiles, cfg);
+}
+
+function allReviewerFiles(files: string[], stagedFiles: string[], cfg: GuardConfig): string[] {
+  if (cfg.review.paths !== undefined) return files;
+  return scopedReviewFiles(stagedFiles, cfg);
+}
+
+function codeReviewerFiles(reviewer: ReviewerDomain, files: string[], cfg: GuardConfig): string[] {
+  if (reviewer.domain !== 'code') return files;
+  return sourceFiles(files, cfg);
+}
+
+function reviewerFiles(
+  reviewer: ReviewerDomain,
+  stagedFiles: string[],
+  cfg: GuardConfig,
+): string[] {
+  const configuredScope = cfg.review.paths !== undefined;
+  const files = initialReviewFiles(stagedFiles, cfg);
+  if (reviewer.domain === 'all') return allReviewerFiles(files, stagedFiles, cfg);
+  const domainFiles = withoutProse(
+    reviewer,
+    filesUnderReviewerRoots(reviewer, files, cfg, configuredScope),
+  );
+  return codeReviewerFiles(reviewer, domainFiles, cfg);
+}
+
+/** Union each reviewer's staged and HEAD selection so a config change cannot self-exempt. */
+export function reviewerFilesAcrossPolicies(
+  reviewer: ReviewerDomain,
   stagedFiles: string[],
   cfg: GuardConfig,
   baselineCfg?: GuardConfig,
 ): string[] {
-  const selected = new Set(correctnessFiles(stagedFiles, cfg));
-  for (const file of baselineCfg ? correctnessFiles(stagedFiles, baselineCfg) : [])
+  const selected = new Set(reviewerFiles(reviewer, stagedFiles, cfg));
+  for (const file of baselineCfg ? reviewerFiles(reviewer, stagedFiles, baselineCfg) : [])
     selected.add(file);
   return stagedFiles.filter((file) => selected.has(file));
-}
-
-export function domainReviewerFiles(
-  reviewer: ReviewerDomain,
-  stagedFiles: string[],
-  cfg: GuardConfig,
-  isSource: (file: string) => boolean,
-): string[] {
-  const roots = rootsFor(reviewer, cfg);
-  let files = stagedFiles.filter((file) => roots.some((root) => underRoot(file, root)));
-  if (PROSE_FILTERED_DOMAINS.has(reviewer.domain))
-    files = files.filter((file) => !RE_PROSE_FILE.test(file));
-  if (reviewer.domain === 'code')
-    files = files.filter((file) => isSource(file.split('/').pop() ?? ''));
-  return files;
 }

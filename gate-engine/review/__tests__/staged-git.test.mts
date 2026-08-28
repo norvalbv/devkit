@@ -57,10 +57,18 @@ describe('review staged Git evidence', () => {
     expect(indexFile(root, 'guard.config.json')).toBe(config);
   });
 
-  it('selects correctness from staged policy plus HEAD when the worktree has a third policy', () => {
+  it('selects every reviewer from staged policy plus HEAD when the worktree has a third policy', () => {
     const root = repo();
     const policy = (path: string) =>
-      `${JSON.stringify({ review: { correctnessPaths: { include: [`${path}/**`], exclude: [] } } })}\n`;
+      `${JSON.stringify({
+        scanRoots: ['legacy-runtime', 'new-runtime'],
+        sourceExtensions: ['sh'],
+        review: {
+          backendRoots: ['legacy-runtime', 'new-runtime'],
+          frontendRoots: [],
+          paths: { include: [`${path}/**`], exclude: [] },
+        },
+      })}\n`;
     writeFileSync(join(root, 'guard.config.json'), policy('legacy-runtime'));
     execFileSync('git', ['add', 'guard.config.json'], { cwd: root });
     execFileSync('git', ['commit', '-qm', 'policy a'], { cwd: root });
@@ -77,8 +85,42 @@ describe('review staged Git evidence', () => {
     writeFileSync(join(root, 'guard.config.json'), policy('worktree-only'));
 
     const selected = selectRepositoryReviewers(stagedFiles(root), resolveGuardConfig(root));
-    expect(selected.find((entry) => entry.reviewer.name === 'correctness-reviewer')?.files).toEqual(
-      ['legacy-runtime/a.sh', 'new-runtime/b.sh'],
+    expect(selected.map((entry) => entry.reviewer.name)).toEqual([
+      'api-security-reviewer',
+      'backend-performance-reviewer',
+      'commit-guard',
+      'correctness-reviewer',
+      'conventions-reviewer',
+    ]);
+    for (const entry of selected)
+      expect(entry.files).toEqual(['legacy-runtime/a.sh', 'new-runtime/b.sh']);
+  });
+
+  it('ignores an unstaged worktree policy that would exempt staged runtime files', () => {
+    const root = repo();
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'a.ts'), 'export const a = 1;\n');
+    execFileSync('git', ['add', 'src/a.ts'], { cwd: root });
+    writeFileSync(
+      join(root, 'guard.config.json'),
+      `${JSON.stringify({
+        scanRoots: ['other'],
+        review: {
+          backendRoots: ['other'],
+          frontendRoots: [],
+          paths: { include: ['other/**'], exclude: [] },
+        },
+      })}\n`,
     );
+
+    const selected = selectRepositoryReviewers(stagedFiles(root), resolveGuardConfig(root));
+    expect(selected.map((entry) => entry.reviewer.name)).toEqual([
+      'api-security-reviewer',
+      'backend-performance-reviewer',
+      'commit-guard',
+      'correctness-reviewer',
+      'conventions-reviewer',
+    ]);
+    for (const entry of selected) expect(entry.files).toEqual(['src/a.ts']);
   });
 });
