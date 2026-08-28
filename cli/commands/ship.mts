@@ -21,8 +21,10 @@ Usage:
   below are optional, NOT free-floating: \`ship --base main <branch> "<title>"\` binds the branch
   name to --base and is rejected. Ship CREATES <branch>. An unrelated local branch is rejected; an
   exact commit preserved by a prior post-commit failure is resumed after its ship gate receipt, base,
-  message, paths and current scoped tree are verified. On origin, use --pr to append to the existing
-  PR branch instead.
+  message, paths and current scoped tree are verified. Paths that ship's OWN gates added to that
+  commit (a ratchet baseline it lowered) are exempt from the path and tree checks — recorded when the
+  commit landed, so narrowing <path...> on the retry still refuses. On origin, use --pr to append to
+  the existing PR branch instead.
 
   --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
                       HEAD / current branch. <path...> content is still read from your working tree,

@@ -24,7 +24,8 @@ import { runCompleteness } from './completeness.mjs';
 import { gitCached, stagedFiles } from './evidence/staged-git.mjs';
 import { loadReviewerTargetsBlocks, reviewerTargetSalts } from './evidence/targets-block.mjs';
 import { planReviewWork, resolveChunkCap, resolveLensGroups } from './lens/split.mjs';
-import { cacheKey, resolveReviewModel, selectReviewers } from './reviewers.mjs';
+import { cacheKey, resolveEscalationModel, resolveReviewModel } from './reviewers.mjs';
+import { selectRepositoryReviewers } from './scope/repository.mjs';
 import { runReviewGate } from './run-review.mjs';
 import { resolveReviewerIdentities, skippedReviewers } from './runtime.mjs';
 import { runWaive } from './valve/waive.mjs';
@@ -35,26 +36,30 @@ import { runWaive } from './valve/waive.mjs';
  * lens-split suffix and made a cached correctness-reviewer structurally unreportable). Scan is
  * not authoritative under review mode (no packaged-asset preflight here).
  */
+async function printReviewScan(cwd) {
+    const cfg = resolveGuardConfig(cwd);
+    const cache = loadCache(cwd);
+    // Same GUARD_REVIEW_SKIP filter as the gate: a skipped reviewer's cached PASS must not be
+    // reported as work the gate would skip-by-cache — the gate never plans it at all.
+    const skip = skippedReviewers();
+    const staged = stagedFiles(cwd);
+    const sels = selectRepositoryReviewers(staged, cfg).filter((selection) => !skip.has(selection.reviewer.name));
+    const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
+    // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
+    // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
+    const { saltBlock } = await loadReviewerTargetsBlocks(cwd, staged);
+    const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock, resolveReviewModel(cfg), resolveEscalationModel(cfg));
+    const diffs = sels.map((selection) => gitCached(cwd, [], selection.files));
+    // Same consumer-cwd chunk resolution as the gate (W-3) — a divergent default here would make
+    // scan disagree with the gate's plan on configured installs.
+    const plan = planReviewWork(sels, diffs, cache, salts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
+    for (const { sel, cached } of plan.scope) {
+        console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);
+    }
+}
 async function scanReview(cwd = process.cwd()) {
     try {
-        const cfg = resolveGuardConfig(cwd);
-        const cache = loadCache(cwd);
-        // Same GUARD_REVIEW_SKIP filter as the gate: a skipped reviewer's cached PASS must not be
-        // reported as work the gate would skip-by-cache — the gate never plans it at all.
-        const skip = skippedReviewers();
-        const sels = selectReviewers(stagedFiles(cwd), cfg).filter((s) => !skip.has(s.reviewer.name));
-        const { cacheSalts } = resolveReviewerIdentities(false, new Map(), sels, cwd, cfg);
-        // Same salt composition as the gate (sc-1441/sc-1442: scope-only Target bytes join checklist
-        // salts) — keying on cacheSalts alone reported '[cached PASS]' for entries the gate re-judges.
-        const { saltBlock } = await loadReviewerTargetsBlocks(cwd, stagedFiles(cwd));
-        const salts = reviewerTargetSalts(sels, cacheSalts, saltBlock, resolveReviewModel(cfg));
-        const diffs = sels.map((s) => gitCached(cwd, [], s.files));
-        // Same consumer-cwd chunk resolution as the gate (W-3) — a divergent default here would make
-        // scan disagree with the gate's plan on configured installs.
-        const plan = planReviewWork(sels, diffs, cache, salts, cacheKey, resolveLensGroups(), resolveChunkCap(process.env.GUARD_CORRECTNESS_CHUNK, cfg.review.correctnessChunkLoc));
-        for (const { sel, cached } of plan.scope) {
-            console.log(`${sel.reviewer.name}${cached ? ' [cached PASS]' : ''}: ${sel.files.join(', ')}`);
-        }
+        await printReviewScan(cwd);
     }
     catch (e) {
         console.error(`guard-review: scan failed — ${e instanceof Error ? e.message : String(e)}`);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectChangedComments, parsePatchHunks, scanCommentTokens } from '../detect.mts';
 import { runCommentFirewall } from '../gate.mts';
+import { receiptKey } from '../judge.mts';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -472,7 +473,7 @@ describe('gate outcome after an unrelated line shift', () => {
     at: '2026-08-15T00:00:00.000Z',
   };
 
-  it('routes a still-justified paragraph to review instead of blocking it again', () => {
+  it('reuses a persisted PASS without review after a distant line shift', () => {
     const root = fixture();
     const base = Array.from({ length: 24 }, (_, index) => `const base${index} = ${index};`);
     writeFileSync(path.join(root, 'src/a.ts'), `${base.join('\n')}\n`);
@@ -482,19 +483,20 @@ describe('gate outcome after an unrelated line shift', () => {
       [...extra, ...base.slice(0, 12), PARAGRAPH, ...base.slice(12), ''].join('\n');
     writeFileSync(path.join(root, 'src/a.ts'), body([]));
     git(root, ['add', 'src/a.ts']);
-    const justified = detectChangedComments(root).findings[0]?.id ?? '';
+    const initial = detectChangedComments(root).findings[0];
+    const justified = initial?.id ?? '';
     expect(justified).toMatch(/^[0-9a-f]{12}$/);
+    if (!initial) throw new Error('expected the initial comment finding');
+    const receipt = receiptKey(initial, RATIONALE, 'haiku');
 
     writeFileSync(path.join(root, 'src/a.ts'), body(['const inserted = 0;']));
     git(root, ['add', 'src/a.ts']);
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const judge = vi.fn(() => ({
-      [justified]: { verdict: 'PASS' as const, reason: 'load-bearing' },
-    }));
+    const judge = vi.fn();
     const exit = runCommentFirewall(root, {
       loadRationales: () => ({ version: 1, entries: { [justified]: RATIONALE } }),
-      loadReceipts: () => ({}),
+      loadReceipts: () => ({ [receipt]: { verdict: 'PASS' } }),
       saveReceipt: () => true,
       judge,
       model: () => 'haiku',
@@ -503,7 +505,7 @@ describe('gate outcome after an unrelated line shift', () => {
     });
     vi.restoreAllMocks();
 
-    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge).not.toHaveBeenCalled();
     expect(exit).toBe(0);
   });
 });

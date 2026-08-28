@@ -160,9 +160,38 @@ export function parseClaudeArgv(args: string[]): ClaudeArgvParts {
  * (the codex twin of `--no-session-persistence`), `--skip-git-repo-check` (bench scratch dirs are
  * not always repos). Evidence still arrives on stdin — codex appends it as a `<stdin>` block.
  */
+/** Reasoning efforts codex accepts for `model_reasoning_effort` (codex-rs config). */
+const REASONING_EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh']);
+
+/** A judge model spec split into the codex model id and its optional reasoning effort. */
+export interface ModelSpec {
+  model: string;
+  effort: string | null;
+}
+
+/**
+ * `gpt-5.6-terra@high` → `{ model: 'gpt-5.6-terra', effort: 'high' }`; a bare id carries no
+ * effort. Judges run `--ignore-user-config`, so a configured effort never applies — the suffix is
+ * the ONLY way a spec reaches `-c model_reasoning_effort`. An unknown effort throws rather than
+ * spawning at the wrong effort: the spec is config-owned (guard.config.json / GUARD_* envs), and a
+ * silently-dropped suffix would make the judge look like the benched condition while not being it.
+ */
+export function parseModelSpec(spec: string): ModelSpec {
+  const at = spec.lastIndexOf('@');
+  if (at < 0) return { model: spec, effort: null };
+  const model = spec.slice(0, at);
+  const effort = spec.slice(at + 1);
+  if (model === '' || model.includes('@') || !REASONING_EFFORTS.has(effort))
+    throw new Error(
+      `codex judge: unknown reasoning effort ${JSON.stringify(effort)} in model spec ${JSON.stringify(spec)} — expected <model>@${[...REASONING_EFFORTS].join('|')}`,
+    );
+  return { model, effort };
+}
+
 export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): string[] {
   if (!parts.model || !parts.prompt)
     throw new Error('codex judge: argv carries no --model or no prompt — cannot translate');
+  const spec = parseModelSpec(parts.model);
   // Codex exec has no system-prompt flag: an agent brief (`--append-system-prompt`) is prepended
   // to the prompt instead. A labeled block, so the model sees the brief/task boundary the two
   // claude message slots used to provide.
@@ -174,10 +203,11 @@ export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): s
   // here are pinned by a captured fixture and a failure-event test. Web search is disabled the way
   // the vendor SDK does it (`-c` override): no claude judge ever had a web tool, and a judge must
   // not browse.
-  return [
-    'exec',
-    '--model',
-    parts.model,
+  const argv = ['exec', '--model', spec.model];
+  // TOML string, the same quoting the bench's effort wrappers used (`-c model_reasoning_effort="high"`).
+  if (spec.effort !== null)
+    argv.push('-c', `model_reasoning_effort=${JSON.stringify(spec.effort)}`);
+  argv.push(
     '--sandbox',
     parts.readOnly ? 'read-only' : 'workspace-write',
     '-c',
@@ -191,7 +221,8 @@ export function codexExecArgs(parts: ClaudeArgvParts, mcpArgv: string[] = []): s
     'never',
     '--json',
     prompt,
-  ];
+  );
+  return argv;
 }
 
 export interface JudgeCli {
@@ -308,8 +339,14 @@ const codexBin = (): string => process.env.GUARD_CODEX_BIN || 'codex';
 export function judgeCliFor(
   args: string[],
   mcpServers: Record<string, CodexMcpServerDef> = {},
+  // A tool-equipped judge that never WRITES (decision-alignment: Read/Grep/Glob/git diff) maps to
+  // codex's read-only sandbox even though its claude argv has no `--disallowedTools *` — without
+  // this, routing it to codex silently upgrades it to workspace-write on a gate (decisions) that
+  // has no staged-tree tamper detection. Callers assert read-only; the flag never widens access.
+  forceReadOnlySandbox = false,
 ): JudgeCli {
-  const parts = parseClaudeArgv(args);
+  const parsed = parseClaudeArgv(args);
+  const parts = forceReadOnlySandbox ? { ...parsed, readOnly: true } : parsed;
   if (!isCodexModel(parts.model))
     return { bin: 'claude', argv: withResultArgs(args), codex: false };
   const mcp = codexMcpArgs(mcpServers, parts.allowedTools);

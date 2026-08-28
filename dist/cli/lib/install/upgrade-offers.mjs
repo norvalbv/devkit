@@ -15,7 +15,10 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirm, isCancel, multiselect } from '@clack/prompts';
-import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, } from '../../../gate-engine/ratchets/size-disable.mjs';
+import { LEGACY_LINES_BASELINE, LINES_BASELINE, } from '../../../gate-engine/ratchets/baseline-paths.mjs';
+import { enableLineGrowth, hasLineCap, LINE_CAP, previewGrandfather, setMaxLines, } from '../../../gate-engine/ratchets/size-disable.mjs';
+import { detectGitRoot } from '../detect-git-root.mjs';
+import { isTracked } from '../git-tracked.mjs';
 import { GUARD_IDS, GUARD_OPTIONS, newBundledGates, unofferedComponents, } from '../components.mjs';
 const interactive = () => Boolean(process.stdout.isTTY && process.stdin.isTTY);
 export async function offerNewGates(recordedDisabled, sel, dryRun, options = {}) {
@@ -75,6 +78,46 @@ export async function offerNewGates(recordedDisabled, sel, dryRun, options = {})
         : '  • no gates selected (recorded — this will not be offered again)');
     return GUARD_IDS.filter((guard) => answeredDisabled.has(guard));
 }
+// The files enabling the block writes: the cap lands in guard.config.json, and the freeze that
+// grandfathers the current giants writes (or clears) the lines baseline.
+const LINE_GROWTH_FILES = ['guard.config.json', LINES_BASELINE, LEGACY_LINES_BASELINE];
+// `.git/info/exclude` hides untracked files only, so overlay must skip anything git already tracks.
+export function overlayOwnsLineGrowth(cwd) {
+    const { gitRoot, pkgRel } = detectGitRoot(cwd);
+    // detectGitRoot falls back to cwd when it found no repo at all — then nothing is tracked.
+    if (!existsSync(join(gitRoot, '.git')))
+        return true;
+    const pfx = pkgRel ? `${pkgRel}/` : '';
+    try {
+        return LINE_GROWTH_FILES.every((rel) => !isTracked(gitRoot, `${pfx}${rel}`));
+    }
+    catch {
+        return false; // git could not answer, so tracked-ness is unknown: refuse rather than risk a write.
+    }
+}
+// Callers gate `on` to first adoption: without the freeze that follows, existing giants hard-error.
+export function applyMaxLines(cwd, on, dryRun) {
+    if (!on)
+        return;
+    if (dryRun) {
+        console.log(`  [dry-run] set guard.config.json maxLines = ${LINE_CAP} (line-growth block)`);
+        return;
+    }
+    if (setMaxLines(cwd)) {
+        console.log(`  ✓ guard.config.json maxLines = ${LINE_CAP} (per-file line-growth block)`);
+    }
+}
+// Absent, never false: a recorded false is the durable decline normalizeSelection must not re-default.
+export function overlayUndecidedLineGrowth(cwd, sel, undecided) {
+    if (!sel.lineGrowth || hasLineCap(cwd))
+        return undecided;
+    return [...(undecided ?? []), 'lineGrowth'];
+}
+/** {@link applyMaxLines} under overlay's extra condition: it may only write what git does not track. */
+export function applyOverlayMaxLines(cwd, sel, adopted, owns, dryRun) {
+    const on = !adopted && Boolean(sel.lineGrowth) && Boolean(sel.guards?.includes('size')) && owns;
+    applyMaxLines(cwd, on, dryRun);
+}
 // Print the outcome of a line-growth enable — honest when an unreadable guard.config.json meant the
 // cap was NOT written (enableLineGrowth skips rather than crashing on a corrupt file).
 function reportLineGrowth({ enabled, grandfathered, }) {
@@ -92,12 +135,13 @@ function reportLineGrowth({ enabled, grandfathered, }) {
  *
  * Mutates `sel.lineGrowth` on a decline; the caller's applyInit persists it.
  */
-export async function offerLineGrowth(cwd, sel, dryRun) {
+export async function offerLineGrowth(cwd, sel, dryRun, { canWrite = () => true } = {}) {
     if (!sel.husky ||
         !sel.guards.includes('size') ||
         !sel.lineGrowth ||
         !existsSync(join(cwd, 'guard.config.json')) ||
-        hasLineCap(cwd))
+        hasLineCap(cwd) ||
+        !canWrite())
         return;
     console.log('\n3b. line-growth block');
     if (dryRun) {
@@ -117,8 +161,12 @@ export async function offerLineGrowth(cwd, sel, dryRun) {
         sel.lineGrowth = false; // record the decline so upgrade never re-nags
         console.log('  • line-growth block not enabled');
     }
-    else {
+    else if (canWrite()) {
+        // Re-checked: the prompt above is unbounded, so the answer can outlive the entry condition.
         reportLineGrowth(enableLineGrowth(cwd));
+    }
+    else {
+        console.log('  • line-growth block not enabled — the files it writes became git-tracked');
     }
 }
 /**

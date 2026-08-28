@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { superviseGateCommand } from '../lib/ship/review/process/gate-supervisor.mts';
 import {
+  findModernBash,
   processAlive,
   rootRegistry,
   testSpawnSync as spawnSync,
@@ -280,17 +281,8 @@ function outerReviewWrapper(root: string, command: string[], env: NodeJS.Process
 }
 
 // bash >= 4 reports 128+signum from a `wait` that a pending trap interrupted, without collecting the
-// job; bash 3.2 collects on the first read. macOS ships 3.2 as /bin/bash, so a run there exercises
-// nothing — resolve a modern bash explicitly and skip loudly rather than pass having proved nothing.
-function findModernBash(): string | null {
-  for (const candidate of ['bash', '/opt/homebrew/bin/bash', '/usr/local/bin/bash']) {
-    const probe = spawnSync(candidate, ['-c', 'printf %s "${BASH_VERSINFO[0]}"'], {
-      encoding: 'utf8',
-    });
-    if (probe.status === 0 && Number(probe.stdout) >= 4) return candidate;
-  }
-  return null;
-}
+// job; bash 3.2 collects on the first read. The resolver lives in _helpers.mts — ship-branch's
+// empty-array expansions split on the same version boundary and need the identical probe.
 const MODERN_BASH = findModernBash();
 
 // Ship-shaped on purpose: only ship sets GATE_SIGNAL_DEFER_EXIT, and without it forward_gate_signal

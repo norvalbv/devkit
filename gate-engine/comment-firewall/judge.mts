@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
+import { resolveGuardConfig } from '../config.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { execJudge } from '../judge/run-judge.mts';
+import { resolveReviewModel } from '../review/reviewers.mts';
 import type {
   CommentFinding,
   CommentJudgeBatchResult,
@@ -11,15 +13,15 @@ import { isJsonObject, isJsonString, parseJson } from './types.mts';
 
 export const COMMENT_JUDGE_POLICY = 'comment-paragraph-exception-v2';
 export const COMMENT_JUDGE_PROMPT_VERSION = '2026-08-18.1';
-export const COMMENT_JUDGE_SCHEMA_VERSION = 1;
+export const COMMENT_JUDGE_SCHEMA_VERSION = 2;
 export const COMMENT_JUDGE_CAPABILITY_PROFILE = 'strict-empty-mcp-v1';
-const DEFAULT_MODEL = 'haiku';
 const TIMEOUT_MS = 120_000;
 const MAX_BATCH_EVIDENCE_CHARS = 120_000;
 const MAX_BATCH_FINDINGS = 200;
 const FENCED_JSON = /^```(?:json)?\s*\n([\s\S]*?)\n```(?:\s*([\s\S]*))?$/i;
 const VERDICT_WORD = /\b(?:PASS|FAIL)\b/i;
 const STRUCTURED_TAIL = /[{}]|```/;
+const UNIFIED_HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(.*)$/;
 
 const PROMPT = `You are the independent exception reviewer for a changed-comment paragraph firewall.
 
@@ -156,8 +158,13 @@ export function parseCommentJudgeBatch(
   }
 }
 
-export function commentJudgeModel(env: NodeJS.ProcessEnv = process.env): string {
-  return env.GUARD_COMMENTS_MODEL?.trim() || DEFAULT_MODEL;
+/** GUARD_COMMENTS_MODEL > the light judge model (review.model: env > guard.config.json > default).
+ * The consumer cwd's config is read so a per-installation family choice covers this judge too. */
+export function commentJudgeModel(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  return env.GUARD_COMMENTS_MODEL?.trim() || resolveReviewModel(resolveGuardConfig(cwd));
 }
 
 export function commentJudgeDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -172,15 +179,19 @@ export function judgeComment(
   return judgeComments(cwd, [{ finding, rationale }])?.[finding.id] ?? null;
 }
 
+/** `model` defaults to a fresh resolution, but the GATE passes the value it keyed receipts with —
+ * one resolution per run, so a mid-run guard.config.json edit can never split receipt identity
+ * from the model that actually judged. */
 export function judgeComments(
   cwd: string,
   items: Array<{ finding: CommentFinding; rationale: CommentRationale }>,
+  model: string = commentJudgeModel(process.env, cwd),
 ): CommentJudgeBatchResult | null {
   if (commentJudgeDisabled()) return null;
   const input = judgeBatchInput(items);
   const raw = execJudge({
     label: 'comment-firewall',
-    args: ['-p', '--model', commentJudgeModel(), ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, PROMPT],
+    args: ['-p', '--model', model, ...JUDGE_READ_ONLY, ...JUDGE_ISOLATION, PROMPT],
     input,
     timeout: TIMEOUT_MS,
     cwd,
@@ -192,6 +203,18 @@ export function judgeComments(
     console.error(`guard-comments: malformed judge output: ${raw.slice(0, 2_000)}`);
   }
   return parsed;
+}
+
+/** Cache identity keeps hunk cardinality, section context, and body bytes; only absolute starts go. */
+function receiptDiffIdentity(diff: string): string {
+  return diff
+    .split('\n')
+    .map((line) => {
+      const header = line.match(UNIFIED_HUNK_HEADER);
+      if (!header) return line;
+      return `@@ -_,${header[1] ?? '1'} +_,${header[2] ?? '1'} @@${header[3] ?? ''}`;
+    })
+    .join('\n');
 }
 
 export function receiptKey(
@@ -214,7 +237,7 @@ export function receiptKey(
           adapter: finding.adapterVersion,
           comment: finding.comment,
           context: finding.context,
-          relevantDiff: finding.relevantDiff,
+          relevantDiff: receiptDiffIdentity(finding.relevantDiff),
         },
         rationale: rationale.rationale,
         ticket: rationale.ticket ?? null,

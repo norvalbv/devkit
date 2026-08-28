@@ -97,12 +97,16 @@ export async function loadReviewerTargetsBlocks(cwd, files, query = '') {
  * `saltBlock` MUST be the scope-only render: the commit message and its semantic Target hits NEVER
  * enter this salt (ship-gates-converge-not-restart — amended-message retries must converge).
  */
-export function reviewerTargetSalts(selected, cacheSalts, saltBlock, cascadeModel) {
+export function reviewerTargetSalts(selected, cacheSalts, saltBlock, cascadeModel, escalationModel) {
     const salted = (s) => {
         const base = cacheSalts.get(s.reviewer.name) ?? '';
         // The judging model is part of verdict identity (sc-2053): a PASS earned by one model must
-        // not replay for another, or a model flip silently serves the old model's judgments.
-        const model = `\0model:${s.reviewer.model ?? cascadeModel}`;
+        // not replay for another, or a model flip silently serves the old model's judgments. An
+        // UNPINNED reviewer's PASS may have been earned by the escalation pass (FAIL overturned), so
+        // the escalation model joins its identity too; pinned reviewers never escalate.
+        const model = s.reviewer.model
+            ? `\0model:${s.reviewer.model}`
+            : `\0model:${cascadeModel}\0escalate:${escalationModel}`;
         return hasChecklist(s.reviewer) ? `${base}\0${saltBlock}${model}` : `${base}${model}`;
     };
     return new Map(selected.map((s) => [s.reviewer.name, salted(s)]));

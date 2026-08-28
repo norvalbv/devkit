@@ -118,7 +118,11 @@ export const GUARD_OPTIONS = [
         hint: 'challenge changed comments; explicit rationale gets independent Haiku review',
     },
     { id: 'decisions', label: 'decisions', hint: 'architectural-decision log gate' },
-    { id: 'review', label: 'review', hint: 'in-chain reviewer judges (sonnet → opus; model spend)' },
+    {
+        id: 'review',
+        label: 'review',
+        hint: 'in-chain reviewer judges (config-resolved cascade; model spend)',
+    },
     {
         id: 'sentry',
         label: 'sentry',

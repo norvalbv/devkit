@@ -97,7 +97,7 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
     // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
     await adviseSearchIndex(cwd, sel);
-    await adviseCodexRuntime(cwd);
+    await adviseCodexRuntime(cwd, sel);
     printQavisAdvisoryHealth(cwd, sel.guards ?? []);
     // The dogfood repo is gated by the same mechanism devkit ships to consumers, so it owes itself the
     // same worktree-safety verdict — a self-host repo whose runner is unreachable gates nothing either.

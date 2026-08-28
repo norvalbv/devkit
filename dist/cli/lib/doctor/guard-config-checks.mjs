@@ -35,7 +35,8 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
-import { correctnessModel, resolveReviewModel, REVIEWERS, } from '../../../gate-engine/review/reviewers.mjs';
+import { parseModelSpec } from '../../../gate-engine/judge/codex/result.mjs';
+import { correctnessModel, resolveEscalationModel, resolveReviewModel, REVIEWERS, } from '../../../gate-engine/review/reviewers.mjs';
 import { detectStack } from '../detect-stack.mjs';
 import { packageDir, readJson } from '../fs-helpers.mjs';
 import { check } from './check-result.mjs';
@@ -132,7 +133,10 @@ export function checkSearchIndex(cwd, resolved, searchCodeSelected) {
  * reported by the first result, and a second line about a key missing from a file that does not
  * parse names the same root cause twice.
  */
-export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
+export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected, 
+// Required, never defaulted: a silent false here retires the codex check for a caller that
+// wanted it. Only the `review` guard reads review.model / review.correctnessModel.
+reviewSelected) {
     const path = join(cwd, 'guard.config.json');
     if (!existsSync(path)) {
         return [check('guard.config.json', 'MISSING', 'absent', 'run `devkit init`', true)];
@@ -169,7 +173,7 @@ export async function checkGuardConfig(cwd, dupSelected, searchCodeSelected) {
     const topology = reviewTopology(cwd, cfg.review);
     if (topology)
         results.push(topology);
-    const codex = codexRuntimeResult(cfg, cwd);
+    const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
     if (codex)
         results.push(codex);
     return results;
@@ -186,8 +190,21 @@ export function codexRuntimeResult(cfg,
 // Relative pins / PATH entries resolve against the CONSUMER repo (where the judge spawns),
 // never the doctor's own process cwd.
 cwd = process.cwd()) {
-    const models = [resolveReviewModel(cfg), correctnessModel(cfg)];
+    const models = [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
     const gpt = [...new Set(models.filter((m) => m.startsWith('gpt-')))];
+    // A model spec the spawn layer would mishandle is a config defect the doctor should name now —
+    // otherwise every affected judge fails at the next commit. The @effort suffix is codex-only:
+    // the claude path passes `--model` verbatim, so `sonnet@high` would reach claude untranslated.
+    for (const spec of new Set(models)) {
+        try {
+            if (spec.includes('@') && !spec.startsWith('gpt-'))
+                throw new Error(`judge model ${JSON.stringify(spec)} carries a reasoning-effort suffix, but only codex (gpt-*) models support one — the claude CLI would receive it verbatim`);
+            parseModelSpec(spec);
+        }
+        catch (e) {
+            return check(CODEX_RUNTIME_CHECK, 'DRIFT', e instanceof Error ? e.message : String(e), 'fix the spec in guard.config.json review.model / review.escalationModel / review.correctnessModel (or the GUARD_* env override)');
+        }
+    }
     if (gpt.length === 0)
         return null;
     // An existing DIRECTORY or non-executable file at the path still cannot judge anything —
@@ -213,7 +230,7 @@ cwd = process.cwd()) {
                 .some((d) => executable(join(d === '' ? '.' : d, 'codex')));
     if (resolvable)
         return null;
-    return check(CODEX_RUNTIME_CHECK, 'DRIFT', `judge model ${gpt.join(', ')} routes reviewers through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — every reviewer would go inconclusive and the review gate fails open`, 'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.correctnessModel in guard.config.json');
+    return check(CODEX_RUNTIME_CHECK, 'DRIFT', `judge model ${gpt.join(', ')} routes reviewers through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — every reviewer would go inconclusive and the review gate fails open`, 'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.escalationModel / review.correctnessModel in guard.config.json');
 }
 /**
  * Print the index-wiring signal for the doctor modes that never build a CheckResult[] — overlay and
@@ -228,7 +245,7 @@ cwd = process.cwd()) {
 export async function adviseSearchIndex(cwd, sel) {
     if (!sel.guards?.includes('dup'))
         return;
-    const results = await checkGuardConfig(cwd, true, sel.searchCode === true);
+    const results = await checkGuardConfig(cwd, true, sel.searchCode === true, false);
     const index = results.find((r) => r.name === SEARCH_INDEX_CHECK);
     if (!index)
         return;
@@ -241,8 +258,8 @@ export async function adviseSearchIndex(cwd, sel) {
  * and overlay) — the same reachability hole adviseSearchIndex exists for, and the repo that MOST
  * needs this one is devkit itself: the sole install whose committed config selects gpt judges.
  */
-export async function adviseCodexRuntime(cwd) {
-    const results = await checkGuardConfig(cwd, false, false);
+export async function adviseCodexRuntime(cwd, sel) {
+    const results = await checkGuardConfig(cwd, false, false, sel.guards?.includes('review') === true);
     const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
     if (!codex)
         return;

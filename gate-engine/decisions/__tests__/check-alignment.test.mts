@@ -185,6 +185,9 @@ describe('--gate (integration, real git repo)', () => {
         // The ship exports GUARD_AI_STRICT=1, which the pre-push vitest inherits and would flip
         // these fail-open cases to exit 3. Clear it by default; strict cases opt in via extraEnv.
         GUARD_AI_STRICT: '',
+        // The light-judge knobs default to the codex family; these stubs are a fake `claude`.
+        GUARD_REVIEW_MODEL: 'haiku',
+        GUARD_REVIEW_ESCALATION_MODEL: 'opus',
         FRINK_AI_STRICT: '',
         PATH: `${bin}:${process.env.PATH}`, // our stub wins; git still resolves from the tail
         ...extraEnv,
@@ -364,6 +367,7 @@ describe('--gate (integration, real git repo)', () => {
     const env = {
       ...process.env,
       GUARD_DECISIONS_DIR: join(repo, 'docs', 'decisions'),
+      GUARD_REVIEW_MODEL: 'haiku', // the stub on PATH is a fake `claude`; the default is codex-family
       PATH: `${bin}:${process.env.PATH}`,
     };
     const warn = spawnSync('node', [GATE, '--gate'], { cwd: repo, encoding: 'utf8', env });
@@ -405,11 +409,16 @@ describe('judge cascade (in-process, stubbed claude on PATH)', () => {
     sh('git add rogue.ts');
     delete process.env.GUARD_DECISION_NO_LLM;
     delete process.env.FRINK_DECISION_NO_LLM;
+    // The light-judge knobs default to the codex family; the stub on PATH is a fake `claude`.
+    process.env.GUARD_REVIEW_MODEL = 'haiku';
+    process.env.GUARD_REVIEW_ESCALATION_MODEL = 'opus';
   });
   afterEach(() => {
     process.env.PATH = savedPath;
     delete process.env.CLAUDE_STUB_LOG;
     delete process.env.GUARD_DECISION_NO_LLM;
+    delete process.env.GUARD_REVIEW_MODEL;
+    delete process.env.GUARD_REVIEW_ESCALATION_MODEL;
     rmSync(repo, { recursive: true, force: true });
   });
 

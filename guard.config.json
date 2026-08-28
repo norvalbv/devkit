@@ -6,6 +6,26 @@
   "review": {
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
+    "paths": {
+      "include": ["**"],
+      "exclude": [
+        ".agents/**",
+        ".claude/**",
+        ".codex/**",
+        ".cursor/**",
+        ".devkit/**",
+        ".env*",
+        "**/.env*",
+        "node_modules/**",
+        "**/node_modules/**",
+        "dist/**",
+        "**/dist/**",
+        "coverage/**",
+        "**/coverage/**",
+        "*.lock",
+        "**/*.lock"
+      ]
+    },
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."
   },
   "structure": {
@@ -44,7 +64,7 @@
         "name": "gate-engine",
         "root": "gate-engine",
         "sourceExtensions": ["mts"],
-        "entryAllowlist": ["config.mts", "devkit-version.mts"],
+        "entryAllowlist": ["config-json.mts", "config.mts", "devkit-version.mts"],
         "ignoredDirs": ["eval"],
         "libDomains": {
           "@root": [
@@ -68,7 +88,7 @@
           ]
         },
         "grammar": {
-          "files": ["config.mts"],
+          "files": ["config-json.mts", "config.mts"],
           "domainGate": "@root",
           "recurse": "engineModule",
           "rules": {

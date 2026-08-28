@@ -21,13 +21,15 @@ interface FirewallDeps {
   judge: (
     cwd: string,
     items: Array<{ finding: CommentFinding; rationale: CommentRationale }>,
+    model: string,
   ) => CommentJudgeBatchResult | null;
-  model: () => string;
+  /** Resolves against the SAME cwd the judge runs in — receipt identity must match the judge. */
+  model: (cwd: string) => string;
   now: () => string;
   strict: () => boolean;
 }
 
-interface PendingReview {
+interface FindingSnapshot {
   finding: CommentFinding;
   rationale: CommentRationale;
   key: string;
@@ -39,7 +41,7 @@ const defaults: FirewallDeps = {
   loadReceipts: loadEntries,
   saveReceipt: saveEntries,
   judge: judgeComments,
-  model: commentJudgeModel,
+  model: (cwd) => commentJudgeModel(process.env, cwd),
   now: () => new Date().toISOString(),
   strict: () => Boolean(process.env.GUARD_AI_STRICT),
 };
@@ -94,15 +96,23 @@ function evidenceFor(
 }
 
 /** Recompute the evidence just before publishing PASS, closing the stage-while-judge-runs race. */
-function allRemainCurrent(cwd: string, pending: PendingReview[], deps: FirewallDeps): boolean {
+function allRemainCurrent(
+  cwd: string,
+  expected: FindingSnapshot[],
+  deps: FirewallDeps,
+  model: string,
+): boolean {
   const refreshed = deps.detect(cwd);
+  if (refreshed.unsupported.length > 0 || refreshed.findings.length !== expected.length)
+    return false;
   const currentById = new Map(refreshed.findings.map((finding) => [finding.id, finding]));
+  if (currentById.size !== expected.length) return false;
   const rationales = deps.loadRationales(cwd);
-  return pending.every((item) => {
+  return expected.every((item) => {
     const current = currentById.get(item.finding.id);
     if (!current) return false;
     const rationale = evidenceFor(current, rationales);
-    return Boolean(rationale && receiptKey(current, rationale, deps.model()) === item.key);
+    return Boolean(rationale && receiptKey(current, rationale, model) === item.key);
   });
 }
 
@@ -140,16 +150,22 @@ export function runCommentFirewall(
 
   const receiptFile = devkitDataFile(cwd, COMMENT_RECEIPTS_FILE);
   const receipts = deps.loadReceipts(receiptFile);
+  // ONE model resolution per run, used for keying, judging, AND revalidation — a mid-run config
+  // edit must never persist a verdict from model B under model A's receipt key.
+  const model = deps.model(cwd);
   const missing: CommentFinding[] = [];
-  const pending: PendingReview[] = [];
+  const snapshot: FindingSnapshot[] = [];
+  const pending: FindingSnapshot[] = [];
   for (const finding of detection.findings) {
     const rationale = evidenceFor(finding, rationales);
     if (!rationale) {
       missing.push(finding);
       continue;
     }
-    const key = receiptKey(finding, rationale, deps.model());
-    if (!passReceipt(receipts[key])) pending.push({ finding, rationale, key });
+    const key = receiptKey(finding, rationale, model);
+    const item = { finding, rationale, key };
+    snapshot.push(item);
+    if (!passReceipt(receipts[key])) pending.push(item);
   }
   if (missing.length > 0) {
     printMissing(missing);
@@ -162,6 +178,7 @@ export function runCommentFirewall(
     results = deps.judge(
       cwd,
       pending.map(({ finding, rationale }) => ({ finding, rationale })),
+      model,
     );
   } catch (cause) {
     console.error(
@@ -177,7 +194,7 @@ export function runCommentFirewall(
   }
 
   try {
-    if (!allRemainCurrent(cwd, pending, deps)) {
+    if (!allRemainCurrent(cwd, snapshot, deps, model)) {
       console.error('guard-comments: local evidence changed during review; stale batch discarded.');
       return 1;
     }
@@ -198,7 +215,7 @@ export function runCommentFirewall(
           verdict: 'PASS',
           findingId: item.finding.id,
           path: item.finding.path,
-          model: deps.model(),
+          model,
           reason: results[item.finding.id]?.reason,
         },
       ]),

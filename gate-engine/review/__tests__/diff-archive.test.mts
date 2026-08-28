@@ -142,6 +142,10 @@ describe('runReviewGate — diff archive wiring', () => {
     writeFileSync(path.join(repo, 'src', 'main', 'db.ts'), 'export const q = 1;\n');
     writeFileSync(path.join(repo, 'src', 'other', 'util.ts'), 'export const u = 1;\n');
     execSync('git add .', { cwd: repo });
+    execSync(
+      'git -c user.email=devkit@example.test -c user.name="Devkit Test" commit -qm "fixture config" -- guard.config.json',
+      { cwd: repo },
+    );
     return repo;
   }
 
