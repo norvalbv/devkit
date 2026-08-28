@@ -187,7 +187,9 @@ async function run(argv: string[]): Promise<number> {
     'Usage: guard-review --gate | completeness --gate <msg-file> | scan | clear-cache | ' +
       'waive <reviewer>[:<lens>] <id> "<why>" | waive --list | transcript <ref> | ' +
       'record-agent <label> [--model <m>] [--duration-ms <n>] ' +
-      '[--disposition followed|overridden|unverified] [--reason "<why>"]',
+      '[--disposition followed|overridden|unverified] [--reason "<why>"] ' +
+      '[--input-tokens <n>] [--output-tokens <n>] [--cache-creation <n>] [--cache-read <n>] ' +
+      '[--cost-usd <n>] [--session-id <id>] [--billing subscription]',
   );
   return 2;
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -65,12 +65,21 @@ describe('gate bypass telemetry', () => {
   });
 
   it('qavis-advisory records GUARD_QAVIS_OK and GUARD_NO_QAVIS_ADVISORY under their own names', () => {
+    // The recipe makes this a qavis repo — a flag in a NON-qavis repo must record nothing (below).
+    mkdirSync(path.join(dir, '.qavis'), { recursive: true });
+    writeFileSync(path.join(dir, '.qavis', 'recipe.json'), '{}\n');
     process.env.GUARD_QAVIS_OK = '1';
     expect(runQavisAdvisory(dir)).toBe(0);
     delete process.env.GUARD_QAVIS_OK;
     process.env.GUARD_NO_QAVIS_ADVISORY = '1';
     expect(runQavisAdvisory(dir)).toBe(0);
     expect(events().map((e) => e.bypass)).toEqual(['GUARD_QAVIS_OK', 'GUARD_NO_QAVIS_ADVISORY']);
+  });
+
+  it('a qavis flag in a repo WITHOUT a recipe records no phantom bypass', () => {
+    process.env.GUARD_QAVIS_OK = '1';
+    expect(runQavisAdvisory(dir)).toBe(0);
+    expect(events()).toEqual([]);
   });
 
   it('completeness records GUARD_NO_COMPLETENESS at its skip', async () => {

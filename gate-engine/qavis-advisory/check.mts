@@ -89,6 +89,12 @@ function defaultRoute(cwd: string): RouteResult {
 }
 
 export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps = {}): number {
+  const hasRecipe = deps.hasRecipe ?? ((c) => existsSync(path.join(c, QAVIS_RECIPE)));
+  // Not a qavis repo (or qavis not installed by this committer) → nothing to advise. This is also the
+  // zero-weight path for every non-qavis consumer: the gate returns before shelling anything —
+  // checked BEFORE the flags, or a globally exported GUARD_QAVIS_OK would record a phantom bypass
+  // of a gate that had nothing to run here.
+  if (!hasRecipe(cwd)) return 0;
   // GUARD_QAVIS_OK is a per-run bypass, NO_QAVIS_ADVISORY a standing disable — recorded under
   // their own flag names because before this the advisory's bypasses emitted nothing at all.
   if (envFlag('QAVIS_OK')) {
@@ -99,10 +105,6 @@ export function runQavisAdvisory(cwd: string = process.cwd(), deps: AdvisoryDeps
     emitGateBypass('qavis-advisory', 'GUARD_NO_QAVIS_ADVISORY');
     return 0;
   }
-  const hasRecipe = deps.hasRecipe ?? ((c) => existsSync(path.join(c, QAVIS_RECIPE)));
-  // Not a qavis repo (or qavis not installed by this committer) → nothing to advise. This is also the
-  // zero-weight path for every non-qavis consumer: the gate returns before shelling anything.
-  if (!hasRecipe(cwd)) return 0;
   const result = (deps.route ?? defaultRoute)(cwd);
   if (result.verdict === null) {
     // Fail-open, but never silently: this repo ships a recipe, so it EXPECTS qavis. Printed on a

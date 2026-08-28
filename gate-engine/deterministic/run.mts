@@ -303,6 +303,11 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
   const cachedPrefix = prefixEntry(cwd, { hookPath: opts.hookPath, scope: cacheScope });
   const skip = Boolean(cachedPrefix);
   const bypassStructure = Boolean(opts.structure) && structureBypassed();
+  // Emitted BEFORE the prefix-cache short-circuit: a cached all-green tree skips the gate runs, but
+  // a bypassed ATTEMPT must still count in telemetry — the bypassed run caches under its own scope,
+  // so a repeat bypassed run would otherwise record nothing. could_not_run, never a clean-reading
+  // status — the ruling emitGateBypass carries forward.
+  if (bypassStructure) emitGateBypass('structure-lint', 'GUARD_STRUCTURE_OK');
   const fails = [];
   // Gates that opted out (exit 2 where that IS an opt-out) and so proved nothing. Reported even on a
   // green run — the whole defect this exists for is a skipped gate reading like a passed one.
@@ -311,8 +316,6 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     if (bypassStructure) {
       console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
       console.log('   Repository structure was NOT verified for this commit.');
-      // could_not_run, never a clean-reading status — the ruling emitGateBypass carries forward.
-      emitGateBypass('structure-lint', 'GUARD_STRUCTURE_OK');
     }
     const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({
