@@ -30,7 +30,12 @@ export const CLAUDE_FAMILY_SET = {
     correctnessModel: 'sonnet',
     correctnessChunkLoc: 0,
 };
-const FAMILY_KEYS = ['model', 'escalationModel', 'correctnessModel', 'correctnessChunkLoc'];
+const FAMILY_KEYS = [
+    'model',
+    'escalationModel',
+    'correctnessModel',
+    'correctnessChunkLoc',
+];
 /** A bind is a sub-second synchronous operation; a lock older than this belongs to a dead process. */
 const STALE_LOCK_MS = 10_000;
 const executable = (abs) => {

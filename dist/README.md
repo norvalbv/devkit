@@ -63,7 +63,7 @@ Package mode is the default. Standalone gates fail open when the pinned global C
 | --- | --- |
 | `devkit init` | Detect and install selected components |
 | `devkit doctor` | Report configuration, hook, skill, and agent drift |
-| `devkit doctor --fix` | Re-run the recorded installation idempotently |
+| `devkit doctor --fix` | Re-run the recorded installation idempotently; on a codex-less machine with default judge models, bind the claude judge family into guard.config.json |
 | `devkit upgrade` | Re-pin and reconcile configs, assets, hooks, and gates |
 | `devkit sync-skills` / `sync-agents` | Refresh only the selected agent surfaces |
 | `devkit move` | Move source files and rewrite imports safely |
