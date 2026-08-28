@@ -255,6 +255,75 @@ describe('correctness-reviewer (domain all)', () => {
     const sel = selectReviewers(['src/main/data.json'], cfg);
     expect(names(sel)).not.toContain('correctness-reviewer');
   });
+  it('uses explicit repo-wide runtime paths without widening commit-guard', () => {
+    const scoped = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        correctnessPaths: {
+          include: ['agents-hooks/**/*.sh', 'runtime/**'],
+          exclude: ['**/*.test.*'],
+        },
+      },
+    };
+    const sel = selectReviewers(
+      ['agents-hooks/ship.sh', 'runtime/worker.custom', 'runtime/worker.test.sh'],
+      scoped,
+    );
+    expect(sel.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
+      'agents-hooks/ship.sh',
+      'runtime/worker.custom',
+    ]);
+    expect(names(sel)).not.toContain('commit-guard');
+  });
+
+  it('unions HEAD and staged correctness policy when the caller supplies a baseline config', () => {
+    const baseline = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        correctnessPaths: { include: ['legacy-runtime/**'], exclude: [] },
+      },
+    };
+    const staged = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        correctnessPaths: { include: ['new-runtime/**'], exclude: [] },
+      },
+    };
+    const selected = selectReviewers(
+      ['legacy-runtime/a.sh', 'new-runtime/b.sh', 'outside/c.sh'],
+      staged,
+      baseline,
+    );
+    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
+      'legacy-runtime/a.sh',
+      'new-runtime/b.sh',
+    ]);
+  });
+
+  it('Devkit self-scope includes executable helpers and excludes tests/eval prose', () => {
+    const self = resolveGuardConfig(process.cwd());
+    const selected = selectReviewers(
+      [
+        'agents-hooks/decision-stop-check.sh',
+        'cli/index.mts',
+        'skills/_devkit/review-roots.mjs',
+        'skills/correctness/scripts/checklist.mjs',
+        'gate-engine/review/__tests__/reviewers.test.mts',
+        'gate-engine/review/eval/reviewers/bench.mts',
+        'docs/decisions/review-gate-in-chain.md',
+      ],
+      self,
+    );
+    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
+      'agents-hooks/decision-stop-check.sh',
+      'cli/index.mts',
+      'skills/_devkit/review-roots.mjs',
+      'skills/correctness/scripts/checklist.mjs',
+    ]);
+  });
   it('gets the semantic search tool ONLY when the consumer wired an index (indexPath set)', () => {
     expect(allowedToolsFor(corr, { ...cfg, indexPath: null })).not.toContain(cfg.searchTool);
     expect(allowedToolsFor(corr, { ...cfg, indexPath: '.idx/db' })).toContain(cfg.searchTool);

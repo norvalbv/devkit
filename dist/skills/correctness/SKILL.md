@@ -25,7 +25,7 @@ if [ -z "$CORRECTNESS_SKILL" ]; then
 fi
 SCRIPT="$CORRECTNESS_SKILL/scripts/checklist.mjs"
 
-node $SCRIPT generate     # Enumerate review items from staged source files (all declared roots)
+node $SCRIPT generate     # Enumerate review items from the selected runtime paths
 node $SCRIPT status       # Show progress
 node $SCRIPT check-item <name> --pass   # Mark item passed
 node $SCRIPT check-item <name> --fail "reason"  # Mark item failed
@@ -33,9 +33,10 @@ node $SCRIPT finalize     # Verify every item was resolved; refuses if any are p
 node $SCRIPT cleanup      # Remove checklist
 ```
 
-The roots the script scans are the UNION of `scanRoots`, `review.backendRoots` and
-`review.frontendRoots` from `guard.config.json` — correctness is not domain-sliceable, so a
-backend writer and its frontend reader are reviewed together. Source files only.
+Optional `review.correctnessPaths` include/exclude globs in `guard.config.json` define runtime
+scope independently of `sourceExtensions`; exclude wins. When the block is absent, the script keeps
+the legacy union of declared roots filtered by source extensions. The gate-injected staged list is
+authoritative, so the checklist never re-filters files that the gate selected.
 
 Exactly four items (`state-transitions`, `concurrency-races`, `writer-reader-contracts`,
 `error-and-edge-classification`) are ALWAYS enumerated when any source file is staged — a
@@ -90,7 +91,11 @@ broadcastToAllWindows('task:chat-ready', { subChatId, isRetry: true });
 
 ```typescript
 // BAD: resumeFailedFlowInPlace returns false on every precondition miss — silently dropped
-try { await resumeFailedFlowInPlace(runId); } catch { /* only exceptions handled */ }
+try {
+  await resumeFailedFlowInPlace(runId);
+} catch {
+  /* only exceptions handled */
+}
 
 // GOOD: the boolean is load-bearing
 const resumed = await resumeFailedFlowInPlace(runId);

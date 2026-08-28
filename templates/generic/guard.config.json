@@ -10,6 +10,19 @@
   "review": {
     "backendRoots": ["src"],
     "frontendRoots": [],
+    "correctnessPaths": {
+      "include": ["src/**", "scripts/**"],
+      "exclude": [
+        "**/__tests__/**",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/fixtures/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss"
+      ]
+    },
     "trustBoundaries": "",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": false }

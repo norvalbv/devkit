@@ -14,9 +14,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  authoritativeStagedFilesOverride,
   isNonEmptyStringArray,
+  normalizeCorrectnessPaths,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
+  selectCorrectnessFiles,
   stagedFilesOverride,
   toGitPathspecs,
 } from '../../../skills/_devkit/review-roots.mjs';
@@ -203,4 +206,106 @@ describe('stagedFilesOverride — the gate-injected authoritative file list (sc-
     expect(withEnv({ DEVKIT_REVIEW_STAGED_FILES: list }, stagedFilesOverride)).toEqual([real]);
     rmSync(dir, { recursive: true, force: true });
   });
+});
+
+describe('review.correctnessPaths', () => {
+  it('canonicalizes include/exclude patterns so config reordering does not churn cache identity', () => {
+    expect(
+      normalizeCorrectnessPaths({
+        include: [' scripts/**/*.sh ', './src/**', 'src/**'],
+        exclude: ['**/*.test.*', '**/__tests__/**'],
+      }),
+    ).toEqual({
+      include: ['scripts/**/*.sh', 'src/**'],
+      exclude: ['**/*.test.*', '**/__tests__/**'],
+    });
+  });
+
+  it.each([
+    ['missing include', { exclude: [] }],
+    ['empty include', { include: [] }],
+    ['absolute include', { include: ['/src/**'] }],
+    ['windows include', { include: ['C:\\src\\**'] }],
+    ['traversal', { include: ['src/../secret/**'] }],
+    ['negation', { include: ['!src/**'] }],
+    ['git pathspec magic', { include: [':(top)src/**'] }],
+    ['unknown key', { include: ['src/**'], ignores: ['x/**'] }],
+    ['disable all', { include: ['src/**'], exclude: ['**/*'] }],
+    ['disable all equivalent', { include: ['src/**'], exclude: ['**/**'] }],
+    [
+      'exclude every include',
+      {
+        include: ['src/**', 'scripts/**'],
+        exclude: ['src/**/*', 'scripts/**'],
+      },
+    ],
+  ])('rejects %s instead of silently selecting zero', (_label, value) => {
+    expect(() => normalizeCorrectnessPaths(value)).toThrow(/correctnessPaths/);
+  });
+
+  it('allows a broad subtree exclusion when another include remains reviewable', () => {
+    expect(
+      normalizeCorrectnessPaths({
+        include: ['src/**', 'scripts/**'],
+        exclude: ['src/**'],
+      }),
+    ).toEqual({ include: ['scripts/**', 'src/**'], exclude: ['src/**'] });
+  });
+
+  it('configured scope admits runtime scripts independently of sourceExtensions and excludes win', () => {
+    const files = [
+      'src/main.mts',
+      'scripts/ship.sh',
+      'scripts/worker',
+      'scripts/worker.custom',
+      'scripts/worker.test.sh',
+      'docs/runtime.sh',
+      'scripts/logo.png',
+    ];
+    expect(
+      selectCorrectnessFiles(files, {
+        correctnessPaths: {
+          include: ['src/**', 'scripts/**'],
+          exclude: ['**/*.test.*'],
+        },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(['src/main.mts', 'scripts/ship.sh', 'scripts/worker', 'scripts/worker.custom']);
+  });
+
+  it('absent scope preserves legacy roots + sourceExtensions + test exclusion', () => {
+    expect(
+      selectCorrectnessFiles(['src/a.mts', 'src/a.test.mts', 'src/run.sh', 'outside/a.mts'], {
+        correctnessPaths: undefined,
+        roots: ['src'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(['src/a.mts']);
+  });
+});
+
+describe('authoritativeStagedFilesOverride', () => {
+  it('preserves the gate list exactly, including deleted and pathspec-shaped names', () => {
+    expect(
+      withEnv(
+        {
+          DEVKIT_REVIEW_STAGED_FILES: JSON.stringify([
+            'scripts/deleted.sh',
+            ':(exclude)still-a-real-file.sh',
+          ]),
+        },
+        authoritativeStagedFilesOverride,
+      ),
+    ).toEqual(['scripts/deleted.sh', ':(exclude)still-a-real-file.sh']);
+  });
+
+  it.each(['not json', '[]', '[1]', '["../escape.sh"]', '["C:\\\\escape.sh"]'])(
+    'fails loudly on malformed injected evidence: %s',
+    (value) => {
+      expect(() =>
+        withEnv({ DEVKIT_REVIEW_STAGED_FILES: value }, authoritativeStagedFilesOverride),
+      ).toThrow(/DEVKIT_REVIEW_STAGED_FILES|repository-relative/);
+    },
+  );
 });

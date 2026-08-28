@@ -54,11 +54,25 @@
 
   "//review": "Topology the reviewer subagents read. backendRoots/frontendRoots = path prefixes per reviewer. An EMPTY array disables that domain's reviewers entirely \u2014 \"frontendRoots\": [] means frontend-security-reviewer and frontend-performance-reviewer are never selected (the gate warns on stderr when a commit stages frontend files anyway; `devkit doctor` flags it against the detected stack). trustBoundaries = optional prose describing your client/server split. shortcutTracking = enable the tracked-story rule. accessibility.skipTouchTargets = opt out of the 44px WCAG touch-target check (e.g. a desktop-only app).",
   "//review-models": "Optional judge knobs (env > this file > defaults): model = cascade first-pass for unpinned reviewers (default gpt-5.6-terra@high); escalationModel = the model that re-investigates an unpinned reviewer's FAIL, confirm or overturn (default gpt-5.6-sol); correctnessModel = the correctness reviewer's single-pass pin (default gpt-5.6-sol); correctnessChunkLoc = correctness chunk cap in LOC, 0 = un-chunked kill switch (default 400). A gpt-* value may carry a reasoning-effort suffix (model@low|medium|high|xhigh). gpt-* models route judges through the codex CLI \u2014 it must be installed (or GUARD_CODEX_BIN set) on every machine that commits; devkit doctor DRIFTs when it is missing. Claude-only installs set the four claude-era values shown here.",
+  "//correctnessPaths": "Optional runtime scope for correctness-reviewer. include/exclude are repo-relative POSIX globs; exclude wins. This scope is independent of scanRoots/sourceExtensions so scripts such as .sh can be reviewed. Omit the whole block to preserve legacy declared-roots + sourceExtensions behavior.",
   "review": {
     "model": "haiku",
     "escalationModel": "opus",
     "correctnessModel": "sonnet",
     "correctnessChunkLoc": 0,
+    "correctnessPaths": {
+      "include": ["src/**", "socket-server/**", "vercel-serverless/**", "scripts/**"],
+      "exclude": [
+        "**/__tests__/**",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/fixtures/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss"
+      ]
+    },
     "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
     "frontendRoots": ["src/renderer", "src/preload"],
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",

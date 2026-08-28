@@ -6,9 +6,8 @@
  * Checks a staged diff for correctness bug classes: state-machine integrity, concurrency/races,
  * writer/reader contracts, recovery/failure modes, classifier edge cases.
  *
- * Scope is the UNION of every declared root (scanRoots ∪ review.backendRoots ∪
- * review.frontendRoots) — correctness is not domain-sliceable: a backend writer and its
- * frontend reader are one concern. Source files only.
+ * Scope comes from optional review.correctnessPaths include/exclude globs. When absent, the legacy
+ * UNION of declared roots + sourceExtensions remains exact for backward compatibility.
  *
  * Unlike the domain checklists, the four lenses are ALWAYS enumerated when any source file is
  * staged — they never regex-gate to zero. A correctness bug has no reliable lexical signature
@@ -22,18 +21,15 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
-  assertStagedSetSane,
+  authoritativeStagedFilesOverride,
   isNonEmptyStringArray,
+  normalizeCorrectnessPaths,
   normalizeReviewRoots,
   parseInjectedReviewRoots,
-  stagedFilesOverride,
-  toGitPathspecs,
+  selectCorrectnessFiles,
 } from '../../_devkit/review-roots.mjs';
 
 const CHECKLIST_PATH = '.claude/.correctness-review.json';
-
-const RE_LEADING_DOT = /^\./;
-const RE_TEST_INFIX = /\.(test|spec)\./;
 
 // --lens <a[,b,...]>: split mode runs one judge PER LENS GROUP; each works a checklist holding
 // only its own lenses, in a group-scoped state file so parallel judges never collide. A group is
@@ -141,34 +137,24 @@ function sourceExtensions() {
   return ['ts', 'tsx'];
 }
 
-function getStagedFiles() {
-  const override = stagedFilesOverride();
-  if (override) {
-    const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
-    return override.filter((f) => exts.some((x) => f.endsWith(x)) && !RE_TEST_INFIX.test(f));
-  }
-  const pathspecs = toGitPathspecs(unionRoots());
+function correctnessPaths() {
   try {
-    const output = execFileSync(
-      'git',
-      ['diff', '--cached', '--name-only', '--diff-filter=ACM', '--', ...pathspecs],
-      { encoding: 'utf-8' },
-    );
-    // ACM hides deletions, so an all-deletions index reads as "nothing staged" here. Never report
-    // that as zero items — a reviewer that examined nothing must not read as a pass.
-    if (!output.trim()) assertStagedSetSane(pathspecs, 'correctness');
-    const exts = sourceExtensions().map((e) => `.${e.replace(RE_LEADING_DOT, '')}`);
-    return output
-      .trim()
-      .split('\n')
-      .filter(
-        (f) =>
-          f.length > 0 &&
-          exts.some((x) => f.endsWith(x)) &&
-          // impl files only — test hunks can't introduce runtime defects, and excluding them
-          // keeps the single opus pass inside its timeout (mirror of the gate's selection)
-          !RE_TEST_INFIX.test(f),
-      );
+    const c = JSON.parse(readFileSync('guard.config.json', 'utf-8'));
+    return normalizeCorrectnessPaths(c?.review?.correctnessPaths);
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+}
+
+function getStagedFiles() {
+  const override = authoritativeStagedFilesOverride();
+  if (override) return override;
+  let output;
+  try {
+    output = execFileSync('git', ['diff', '--cached', '--name-only', '-z'], {
+      encoding: 'utf-8',
+    });
   } catch (e) {
     // A git FAILURE (not-a-repo, corrupt index, bad plumbing) must never masquerade as "nothing
     // staged" — that would send generate() down its clean skip/exit(0) path and wave the commit
@@ -177,6 +163,11 @@ function getStagedFiles() {
     console.error(`❌ correctness: \`git diff --cached\` failed — ${e.message ?? e}`);
     process.exit(1);
   }
+  return selectCorrectnessFiles(output.split('\0').filter(Boolean), {
+    correctnessPaths: correctnessPaths(),
+    roots: unionRoots(),
+    sourceExtensions: sourceExtensions(),
+  });
 }
 
 // The four lenses: ALWAYS on (whole-brief mode), never more. See module header.
@@ -208,15 +199,7 @@ const { save: saveChecklist, status, checkItem, finalize } = store;
 function generate(lens) {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
-    log('⏭️  No staged source files under the declared roots. Skipping correctness review.');
-    // sc-1439: the GATE selected this reviewer, so an artifact must exist — a named skip, never
-    // an absence (verifyChecklist voids a PASS on a missing artifact).
-    if (stagedFilesOverride())
-      saveChecklist({
-        items: [],
-        skipped:
-          "gate-selected files were all excluded by this checklist's own filters (prose/tests/extensions/deletions) — deliberate skip, not an unfinished review",
-      });
+    log('⏭️  No configured runtime paths matched. Skipping correctness review.');
     process.exit(0);
   }
   const items = detectCorrectnessItems(lens);

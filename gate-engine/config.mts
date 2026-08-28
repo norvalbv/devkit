@@ -28,6 +28,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mts';
 import { isAbsolute, resolve } from 'node:path';
+import { normalizeCorrectnessPaths } from '../skills/_devkit/review-roots.mjs';
+import { parseJsonObject } from './config-json.mts';
 
 // ── Shared config types ──────────────────────────────────────────────────────
 /** Matcher/clone tier + size thresholds (DEFAULTS.thresholds; a consumer tunes any subset). */
@@ -61,6 +63,7 @@ export interface ReviewConfig {
   escalationModel: string; // the cascade's FAIL-escalation second pass for UNPINNED reviewers
   correctnessModel: string; // the correctness single-pass pin
   correctnessChunkLoc: number;
+  correctnessPaths?: { include: string[]; exclude: string[] };
 }
 
 /**
@@ -95,6 +98,11 @@ export interface GuardConfig {
   cwd: string;
 }
 
+type RawReviewConfig = Partial<Omit<ReviewConfig, 'accessibility' | 'correctnessPaths'>> & {
+  accessibility?: Partial<ReviewConfig['accessibility']>;
+  correctnessPaths?: { include?: string[]; exclude?: string[] };
+};
+
 // Raw shape of a parsed guard.config.json — every field optional, typed as EXPECTED (the JSON
 // boundary). Malformed values are tolerated via the arr()/str()/finite guards, never trusted.
 interface RawGuardConfigFile {
@@ -117,18 +125,7 @@ interface RawGuardConfigFile {
   graphTool?: string;
   testCommand?: string | null;
   coverage?: CoverageConfig;
-  review?: {
-    backendRoots?: string[];
-    frontendRoots?: string[];
-    trustBoundaries?: string;
-    shortcutTracking?: boolean;
-    accessibility?: { skipTouchTargets?: boolean };
-    agentsDir?: string;
-    model?: string;
-    escalationModel?: string;
-    correctnessModel?: string;
-    correctnessChunkLoc?: number;
-  };
+  review?: RawReviewConfig;
   research?: { referenceCheckouts?: string[] };
   noLog?: boolean;
   noLlm?: boolean;
@@ -311,25 +308,13 @@ export function deterministicStrict(): boolean {
   return envFlag('DETERMINISTIC_STRICT');
 }
 
-// Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
-// unparseable / not an object => throw: a typo'd config must fail loudly, never weaken a gate.
 function loadConfigFile(cwd: string): RawGuardConfigFile {
   const file = resolve(cwd, CONFIG_FILENAME);
   if (!existsSync(file)) return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(file, 'utf8'));
-  } catch (e: unknown) {
-    throw new Error(
-      `${CONFIG_FILENAME} at ${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`,
-    );
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${CONFIG_FILENAME} at ${file} must be a JSON object.`);
-  }
-  // Parse boundary: assert the validated object to the raw-config shape (fields typed as
-  // expected; the resolver below re-guards every one before trusting it).
-  return parsed as RawGuardConfigFile;
+  return parseJsonObject<RawGuardConfigFile>(
+    readFileSync(file, 'utf8'),
+    `${CONFIG_FILENAME} at ${file}`,
+  );
 }
 
 const arr = <T,>(v: unknown, fallback: T[]): T[] => (Array.isArray(v) ? v : fallback);
@@ -341,7 +326,8 @@ const nonNegInt = (v: number | undefined, d: number): number =>
   v !== undefined && Number.isInteger(v) && v >= 0 ? v : d;
 
 /**
- * Resolve the effective governance-gate config for a consumer repo.
+ * Resolve one already-parsed governance config. Kept separate so a staged guard.config.json can
+ * be compared with its HEAD baseline without materializing either version onto the filesystem.
  *
  * @param cwd The CONSUMER repo root (default process.cwd()). All path fields are
  *   interpreted relative to THIS, never the package dir (W-3).
@@ -349,8 +335,7 @@ const nonNegInt = (v: number | undefined, d: number): number =>
  */
 // Reason: flat config-precedence resolver: each field independently applies the same env ?? file ?? DEFAULT ladder (plus Number.isFinite/Boolean guards); the branch COUNT is high but every branch is a trivial fallback, and the ?? chains ARE the precedence policy — extracting them scatters one resolution table.
 // fallow-ignore-next-line complexity
-export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
-  const file = loadConfigFile(cwd);
+function resolveLoadedGuardConfig(file: RawGuardConfigFile, cwd: string): GuardConfig {
   const fr = file.review ?? {};
   const dr = DEFAULTS.review;
 
@@ -427,6 +412,7 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
       escalationModel: str(fr.escalationModel, dr.escalationModel),
       correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
       correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
+      correctnessPaths: normalizeCorrectnessPaths(fr.correctnessPaths),
       accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
     },
     // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:
@@ -439,6 +425,20 @@ export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
     // for __dirname): they resolve every path field against THIS cwd.
     cwd,
   };
+}
+
+/** Resolve the effective governance-gate config from the consumer working tree. */
+export function resolveGuardConfig(cwd = process.cwd()): GuardConfig {
+  return resolveLoadedGuardConfig(loadConfigFile(cwd), cwd);
+}
+
+/** Resolve a Git-snapshot copy of guard.config.json through the exact same precedence/defaults. */
+export function resolveGuardConfigJson(contents: string | null, cwd = process.cwd()): GuardConfig {
+  const file =
+    contents === null
+      ? {}
+      : parseJsonObject<RawGuardConfigFile>(contents, `${CONFIG_FILENAME} snapshot`);
+  return resolveLoadedGuardConfig(file, cwd);
 }
 
 /**

@@ -13,6 +13,19 @@
   "review": {
     "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
     "frontendRoots": ["src/renderer", "src/preload"],
+    "correctnessPaths": {
+      "include": ["src/**", "socket-server/**", "vercel-serverless/**", "scripts/**"],
+      "exclude": [
+        "**/__tests__/**",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/fixtures/**",
+        "**/*.md",
+        "**/*.mdx",
+        "**/*.css",
+        "**/*.scss"
+      ]
+    },
     "trustBoundaries": "src/main = untrusted client; socket-server + vercel-serverless = trusted backend",
     "shortcutTracking": false,
     "accessibility": { "skipTouchTargets": true }

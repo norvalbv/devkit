@@ -270,6 +270,64 @@ describe('skill checklist script (spawned source)', () => {
     expect(JSON.stringify(state)).not.toContain('static-api/excluded.ts');
   });
 
+  it('correctness treats the gate list as exact evidence without re-filtering extensions or deletions', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-authoritative-'));
+    dirs.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({ scanRoots: ['src'], sourceExtensions: ['mts'] }),
+    );
+    const script = fileURLToPath(
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+    );
+    const files = ['agents-hooks/live.sh', 'agents-hooks/deleted.sh'];
+    const r = spawnSync('node', [script, 'generate'], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, DEVKIT_REVIEW_STAGED_FILES: JSON.stringify(files) },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual(files);
+  });
+
+  it('standalone correctness uses configured runtime paths instead of sourceExtensions', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-paths-'));
+    dirs.push(repo);
+    const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+    git(['init', '-q']);
+    writeFileSync(
+      join(repo, 'guard.config.json'),
+      JSON.stringify({
+        sourceExtensions: ['mts'],
+        review: {
+          correctnessPaths: {
+            include: ['agents-hooks/**', 'src/**'],
+            exclude: ['**/*.test.*'],
+          },
+        },
+      }),
+    );
+    mkdirSync(join(repo, 'agents-hooks'), { recursive: true });
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'agents-hooks', 'ship.sh'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(join(repo, 'src', 'main.mts'), 'export const main = true;\n');
+    writeFileSync(join(repo, 'src', 'main.test.mts'), 'export const test = true;\n');
+    git(['add', '.']);
+    const script = fileURLToPath(
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+    );
+    const r = spawnSync('node', [script, 'generate'], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual(['agents-hooks/ship.sh', 'src/main.mts']);
+  });
+
   it.each(REVIEW_ROOT_CASES)(
     '%s rejects unsafe injected roots before constructing a Git pathspec',
     (skill, envName, stateName) => {
@@ -403,10 +461,6 @@ describe('skill checklist script (spawned source)', () => {
   });
 });
 
-// Every checklist selects files with `--diff-filter=ACM`, which drops deletions. A staged set that is
-// ENTIRELY deletions therefore renders as "nothing to review", and the reviewer waves the commit
-// through. That is how a clobbered ship index — a foreign tree staged as a whole-repo deletion —
-// reached the review gate reporting "no items" instead of blocking.
 describe('checklist scripts — a pure-deletion staged set is never reported as "no items"', () => {
   // commit-guard names its build step `init`; every other checklist calls it `generate`.
   const CASES = [
@@ -443,15 +497,31 @@ describe('checklist scripts — a pure-deletion staged set is never reported as 
     return repo;
   }
 
-  it.each(CASES)('%s fails loudly rather than reporting zero items', (skill, root, cmd) => {
-    const repo = repoWithDeletionOnlyIndex(root);
+  it.each(CASES.filter(([skill]) => skill !== 'correctness'))(
+    '%s fails loudly rather than reporting zero items',
+    (skill, root, cmd) => {
+      const repo = repoWithDeletionOnlyIndex(root);
+      const script = fileURLToPath(
+        new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      );
+      const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
+      expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).not.toBe(0);
+      expect(r.stderr).toMatch(/pure deletions/);
+      expect(r.stderr).toMatch(/Refusing to report "no items"/);
+    },
+  );
+
+  it('correctness reviews a staged deletion because the diff remains semantic evidence', () => {
+    const repo = repoWithDeletionOnlyIndex('src');
     const script = fileURLToPath(
-      new URL(`../../skills/${skill}/scripts/checklist.mjs`, import.meta.url),
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
     );
-    const r = spawnSync('node', [script, cmd], { cwd: repo, encoding: 'utf8' });
-    expect(r.status, `${skill}: ${r.stdout}${r.stderr}`).not.toBe(0);
-    expect(r.stderr).toMatch(/pure deletions/);
-    expect(r.stderr).toMatch(/Refusing to report "no items"/);
+    const r = spawnSync('node', [script, 'generate'], { cwd: repo, encoding: 'utf8' });
+    expect(r.status, r.stderr).toBe(0);
+    const state = JSON.parse(
+      readFileSync(join(repo, '.claude', '.correctness-review.json'), 'utf8'),
+    );
+    expect(state.files).toEqual(['src/doomed.tsx']);
   });
 
   it.each(CASES)('%s stays silent when the index is genuinely empty', (skill, root, cmd) => {

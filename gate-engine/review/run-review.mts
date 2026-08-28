@@ -66,8 +66,8 @@ import {
   type ReviewerSelection,
   resolveEscalationModel,
   resolveReviewModel,
-  selectReviewers,
 } from './reviewers.mts';
+import { selectRepositoryReviewers as selectReviewers } from './scope/repository.mts';
 import {
   gateJudgeEnv,
   passAssetVerifier,
