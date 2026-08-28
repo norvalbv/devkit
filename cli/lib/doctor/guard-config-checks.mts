@@ -42,6 +42,7 @@ import {
 import { detectStack, type Stack } from '../detect-stack.mts';
 import { packageDir, readJson } from '../fs-helpers.mts';
 import { type CheckResult, check } from './check-result.mts';
+import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge-auth.mts';
 
 export const SEARCH_INDEX_CHECK = 'search-code index';
 
@@ -234,6 +235,8 @@ export async function checkGuardConfig(
   if (topology) results.push(topology);
   const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
   if (codex) results.push(codex);
+  const auth = reviewSelected ? judgeAuthResult(cfg) : null;
+  if (auth) results.push(auth);
   return results;
 }
 
@@ -339,10 +342,11 @@ export async function adviseCodexRuntime(cwd: string, sel: { guards?: string[] }
     false,
     sel.guards?.includes('review') === true,
   );
-  const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
-  if (!codex) return;
-  console.log(`  ⚠ ${codex.name}: ${codex.detail}`);
-  if (codex.remediation) console.log(`      → ${codex.remediation}`);
+  const rows = results.filter((r) => r.name === CODEX_RUNTIME_CHECK || r.name === JUDGE_AUTH_CHECK);
+  for (const row of rows) {
+    console.log(`  ⚠ ${row.name}: ${row.detail}`);
+    if (row.remediation) console.log(`      → ${row.remediation}`);
+  }
 }
 
 export const REVIEW_TOPOLOGY_CHECK = 'review topology';
