@@ -150,6 +150,11 @@ function rejectFullyExcludedScope(include, exclude, name) {
     );
 }
 
+// `node:path.matchesGlob` follows dotfile glob rules, so bare `**` misses any path containing a
+// dot-prefixed segment. In review scope, `**` is the explicit repository-wide sentinel; consumers
+// should not need to enumerate every authored tool directory merely to keep it reviewable.
+const matchesReviewPath = (file, pattern) => pattern === '**' || matchesGlob(file, pattern);
+
 /** Strict, canonical config boundary for review.paths. */
 export function normalizeReviewPaths(value, name = 'review.paths') {
   if (value === undefined) return undefined;
@@ -185,8 +190,8 @@ export function selectReviewFiles(files, { paths, roots, sourceExtensions }) {
       normalizeRepositoryFile(file);
       if (RE_OPAQUE_BINARY.test(file)) return false;
       return (
-        scope.include.some((pattern) => matchesGlob(file, pattern)) &&
-        !scope.exclude.some((pattern) => matchesGlob(file, pattern))
+        scope.include.some((pattern) => matchesReviewPath(file, pattern)) &&
+        !scope.exclude.some((pattern) => matchesReviewPath(file, pattern))
       );
     });
   }

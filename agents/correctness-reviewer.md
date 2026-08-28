@@ -16,11 +16,6 @@ Review the staged diff chunk supplied for this invocation and treat it as author
 `review.trustBoundaries` (optional prose) describes which side is which.
 </architecture_context>
 
-<trigger_conditions>
-Only invoke when staged changes include SOURCE files under any declared root. Skip for
-docs/config-only changes.
-</trigger_conditions>
-
 <general_rules>
 - Run scripts incrementally, mark items as you check them.
 - Grep is your core tracing tool: for every changed writer, FIND its readers (grep the field
@@ -36,9 +31,9 @@ docs/config-only changes.
 - A finding must name the concrete failing interleaving or input — "actor B runs between A's
   read and write, then X", or "input `{\"error\":…}` matches the anchor and misclassifies".
   No vague "could be racy".
-- Skip node_modules, generated files. Test files are OUT OF SCOPE as findings (test adequacy
-  is the testing reviewer's charter) — read one only when it documents a contract you are
-  verifying.
+- Skip node_modules and generated files. Tests and docs in the supplied chunk are IN SCOPE for
+  concrete defects in logic, fixtures, assertions, commands, configuration, or documented
+  contracts; test adequacy and prose quality remain outside this reviewer's charter.
 - Minimal output — let scripts report results.
 </general_rules>
 

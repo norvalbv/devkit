@@ -7,26 +7,18 @@
     "backendRoots": ["cli", "gate-engine"],
     "frontendRoots": [],
     "paths": {
-      "include": [
-        "agents-hooks/**/*.sh",
-        "cli/**/*.mts",
-        "cli/**/*.sh",
-        "gate-engine/**/*.mts",
-        "scripts/**/*.mjs",
-        "scripts/**/*.mts",
-        "skills/_devkit/**/*.mjs",
-        "skills/*/scripts/**/*.mjs",
-        "templates/**/*.mjs"
-      ],
+      "include": ["**"],
       "exclude": [
-        "**/__tests__/**",
-        "**/*.spec.*",
-        "**/*.test.*",
-        "**/fixtures/**",
-        "docs/**",
-        "e2e/**",
-        "gate-engine/**/eval/**",
-        "skills/**/references/**"
+        ".agents/**",
+        ".claude/**",
+        ".codex/**",
+        ".cursor/**",
+        ".devkit/**",
+        "node_modules/**",
+        "dist/**",
+        "coverage/**",
+        "*.lock",
+        "**/*.lock"
       ]
     },
     "trustBoundaries": "devkit is a CLI + portable gate-engine, not a hosted app — no server/client split. Its trust model is W-3: devkit ships inside the consumer's node_modules and EXECUTES in a repo it does not own, so every path it resolves must be consumer-cwd-relative, never __dirname, and synced assets (skills/agents/gate scripts) must read layout from the consumer's guard.config.json, never hardcode a stack's directory tree."

@@ -22,19 +22,23 @@
   "//decisionsDir": "Append-only decision-log dir (guard-decisions CLI + smell gate target).",
   "decisionsDir": "docs/decisions",
 
-  "//review": "paths.include/exclude defines the shared reviewable runtime universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
+  "//review": "paths.include/exclude defines the shared reviewable repository universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
   "review": {
     "backendRoots": [],
     "frontendRoots": ["src"],
     "paths": {
-      "include": ["src/**"],
+      "include": ["**"],
       "exclude": [
-        "**/__tests__/**",
-        "**/*.test.*",
-        "**/*.spec.*",
-        "**/fixtures/**",
-        "**/*.md",
-        "**/*.mdx"
+        ".agents/**",
+        ".claude/**",
+        ".codex/**",
+        ".cursor/**",
+        ".devkit/**",
+        "node_modules/**",
+        "dist/**",
+        "coverage/**",
+        "*.lock",
+        "**/*.lock"
       ]
     },
     "trustBoundaries": "",

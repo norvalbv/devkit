@@ -323,32 +323,39 @@ describe('correctness-reviewer (domain all)', () => {
       expect(selection.files).toEqual(['src/main/legacy/a.ts', 'src/main/new/b.ts']);
   });
 
-  it('Devkit self-scope includes executable helpers and excludes tests/eval prose', () => {
+  it('Devkit self-scope reviews authored tests, evals, docs, references, and hidden project files', () => {
     const self = resolveGuardConfig(process.cwd());
+    const authored = [
+      'agents-hooks/decision-stop-check.sh',
+      'cli/index.mts',
+      'skills/_devkit/review-roots.mjs',
+      'skills/correctness/scripts/checklist.mjs',
+      'gate-engine/review/__tests__/reviewers.test.mts',
+      'gate-engine/review/eval/reviewers/bench.mts',
+      'docs/decisions/review-gate-in-chain.md',
+      'skills/correctness/references/checklist.md',
+      'README.md',
+      '.github/workflows/gate.yml',
+      'packages/ui/.storybook/main.ts',
+      '.env.example',
+    ];
+    const generated = [
+      '.agents/skills/correctness/SKILL.md',
+      '.claude/agents/correctness-reviewer.md',
+      '.codex/agents/correctness-reviewer.toml',
+      '.cursor/agents/correctness-reviewer.md',
+      '.devkit/agents-manifest.json',
+    ];
     const selected = selectReviewers(
-      [
-        'agents-hooks/decision-stop-check.sh',
-        'cli/index.mts',
-        'skills/_devkit/review-roots.mjs',
-        'skills/correctness/scripts/checklist.mjs',
-        'gate-engine/review/__tests__/reviewers.test.mts',
-        'gate-engine/review/eval/reviewers/bench.mts',
-        'docs/decisions/review-gate-in-chain.md',
-      ],
+      [...authored, ...generated, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
       self,
     );
-    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual([
-      'agents-hooks/decision-stop-check.sh',
-      'cli/index.mts',
-      'skills/_devkit/review-roots.mjs',
-      'skills/correctness/scripts/checklist.mjs',
-    ]);
-    expect(selected.find((s) => s.reviewer.name === 'conventions-reviewer')?.files).toEqual([
-      'agents-hooks/decision-stop-check.sh',
-      'cli/index.mts',
-      'skills/_devkit/review-roots.mjs',
-      'skills/correctness/scripts/checklist.mjs',
-    ]);
+    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual(
+      authored,
+    );
+    expect(selected.find((s) => s.reviewer.name === 'conventions-reviewer')?.files).toEqual(
+      authored,
+    );
   });
   it('gets the semantic search tool ONLY when the consumer wired an index (indexPath set)', () => {
     expect(allowedToolsFor(corr, { ...cfg, indexPath: null })).not.toContain(cfg.searchTool);

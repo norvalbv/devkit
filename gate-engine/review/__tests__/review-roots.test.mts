@@ -275,6 +275,23 @@ describe('review.paths', () => {
     ).toEqual(['src/main.mts', 'scripts/ship.sh', 'scripts/worker', 'scripts/worker.custom']);
   });
 
+  it('treats the repository-wide ** sentinel as including dot paths at any depth', () => {
+    const files = [
+      '.env.example',
+      '.storybook/main.ts',
+      'packages/ui/.storybook/main.ts',
+      'packages/ui/.storybook/.generated/types.ts',
+      '.devkit/cache.json',
+    ];
+    expect(
+      selectReviewFiles(files, {
+        paths: { include: ['**'], exclude: ['.devkit/**'] },
+        roots: ['elsewhere'],
+        sourceExtensions: ['mts'],
+      }),
+    ).toEqual(files.slice(0, -1));
+  });
+
   it('absent scope preserves legacy roots + sourceExtensions + test exclusion', () => {
     expect(
       selectReviewFiles(['src/a.mts', 'src/a.test.mts', 'src/run.sh', 'outside/a.mts'], {

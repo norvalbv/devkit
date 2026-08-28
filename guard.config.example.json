@@ -52,23 +52,27 @@
   "//coverage": "The `coverage` guard (opt-in — add it to your devkit guards). Reads coverage/coverage-final.json (produced by `test:run:coverage`) and enforces the threshold KEYS you set here (statements/functions/lines/branches — any subset). FAIL-CLOSED: when the guard is selected and coverage data is ABSENT, the commit fails hard (run test:run:coverage first). Set `false` to bypass entirely. Default (omit): {} = enforce no % floor but still fail hard on absent data.",
   "coverage": { "statements": 60, "functions": 55 },
 
-  "//review": "paths.include/exclude defines the shared reviewable runtime universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
+  "//review": "paths.include/exclude defines the shared reviewable repository universe for every reviewer; backendRoots/frontendRoots then route eligible files to domain reviewers. An EMPTY frontendRoots array means frontend-security-reviewer and frontend-performance-reviewer are never selected; an EMPTY backendRoots array similarly disables backend domain reviewers. Omit paths to preserve legacy reviewer selection. trustBoundaries, shortcutTracking, and accessibility configure reviewer context.",
   "//review-models": "Optional judge knobs (env > this file > defaults): model = cascade first-pass for unpinned reviewers (default gpt-5.6-terra@high); escalationModel = the model that re-investigates an unpinned reviewer's FAIL, confirm or overturn (default gpt-5.6-sol); correctnessModel = the correctness reviewer's single-pass pin (default gpt-5.6-sol); correctnessChunkLoc = correctness chunk cap in LOC, 0 = un-chunked kill switch (default 400). A gpt-* value may carry a reasoning-effort suffix (model@low|medium|high|xhigh). gpt-* models route judges through the codex CLI \u2014 it must be installed (or GUARD_CODEX_BIN set) on every machine that commits; devkit doctor DRIFTs when it is missing. Claude-only installs set the four claude-era values shown here.",
-  "//reviewPaths": "Optional shared runtime scope for all reviewers. include/exclude are repo-relative POSIX globs; exclude wins. It is independent of sourceExtensions so explicitly included scripts such as .sh can reach reviewers that can reason about them; language-aware tools such as commit-guard still apply sourceExtensions afterward. Omit the whole block to preserve every reviewer's legacy selection behavior.",
+  "//reviewPaths": "Optional shared repository scope for all reviewers. include/exclude are repo-relative POSIX globs; exclude wins. It is independent of sourceExtensions so tests, docs, scripts, and other authored text can reach reviewers that can reason about them; language-aware tools such as commit-guard still apply sourceExtensions afterward. Omit the whole block to preserve every reviewer's legacy selection behavior.",
   "review": {
     "model": "haiku",
     "escalationModel": "opus",
     "correctnessModel": "sonnet",
     "correctnessChunkLoc": 0,
     "paths": {
-      "include": ["src/**", "socket-server/**", "vercel-serverless/**", "scripts/**"],
+      "include": ["**"],
       "exclude": [
-        "**/__tests__/**",
-        "**/*.test.*",
-        "**/*.spec.*",
-        "**/fixtures/**",
-        "**/*.md",
-        "**/*.mdx"
+        ".agents/**",
+        ".claude/**",
+        ".codex/**",
+        ".cursor/**",
+        ".devkit/**",
+        "node_modules/**",
+        "dist/**",
+        "coverage/**",
+        "*.lock",
+        "**/*.lock"
       ]
     },
     "backendRoots": ["src/main", "socket-server", "vercel-serverless"],
