@@ -207,8 +207,14 @@ run_gates_with_capture() {
       unfinished=$(node "$progress_reader" unfinished "$progress" 2>/dev/null || true)
       [ -n "$unfinished" ] && echo "   Reviewers with no completion heartbeat (unfinished): $unfinished"
       echo "   Completed reviewer verdicts, cleared decisions judgements and the deterministic prefix are CACHED."
-      if [ "$label" = ship ]; then
-        echo "   Re-run the same devkit ship command to converge (only unfinished work re-runs)."
+      if [ "$label" = ship ] && [ "${DEVKIT_SHIP_INTENT_RECORDED:-0}" = 1 ]; then
+        # A 124 may have landed the commit + minted its receipt, so --resume here rides the
+        # landed-commit resume path — the replayed bytes ARE the recorded ones, so it verifies.
+        # Gated on the exported recorded flag: advertising --resume for an attempt that was never
+        # recorded (ignore rule missing, lock busy) sends the retry into a deterministic refusal.
+        echo "   Retry with \`devkit ship --resume ${DEVKIT_SHIP_BRANCH:-<branch>}\` to converge (only unfinished work re-runs)."
+      elif [ "$label" = ship ]; then
+        echo "   Re-run the same full devkit ship command to converge (this attempt was NOT recorded, so --resume has nothing to replay)."
       else
         echo "   Re-run the same devkit review command to converge (only unfinished work re-runs)."
       fi

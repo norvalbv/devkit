@@ -12,8 +12,11 @@ command. Do not pre-run every gate or replace the managed chain with a hand-writ
 
 1. Identify the exact gate and keep its full output. After `devkit ship`, use the gate-log path the
    command prints; a failed ship may include a remediation command that refers to that retained log.
-2. Fix the reported cause, then re-run the same commit or ship command. Ship checkpoints successful
-   stages, so restarting with different flags usually wastes work and can discard useful evidence.
+2. Fix the reported cause, then retry with `devkit ship --resume <branch>` (a fix that adds a NEW
+   file rides along as a trailing path: `--resume <branch> -- <new-path>`); a plain commit re-runs
+   the identical commit command. Ship checkpoints successful stages and `--resume` replays the
+   recorded invocation byte-identically, so restarting with different flags or a re-typed body
+   usually wastes work and can discard useful evidence.
 3. Treat a bypass as an explicit operator decision. Never use `--no-verify`, silently disable a
    selected guard, freeze a baseline to absorb new debt, or invent an environment variable.
 

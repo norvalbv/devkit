@@ -81,11 +81,18 @@ commit_with_gate_capture() {
 
   # Start the attempt before hook resolution so a fail-closed setup error still has a terminal
   # ship_result row instead of disappearing from telemetry.
-  local dur_start; dur_start=$(date +%s)
-  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","log_path":"%s","ts":"%s"}\n' \
+  # resumed/body_bytes: the shell-safe fields of the retry-cost story (bare JSON bool/number — no
+  # escaping needed). The body ITSELF rides the node-side ship_intent event, which can JSON-escape
+  # arbitrary bytes; a printf %s of the body here could tear the line on a quote.
+  local dur_start resumed_json body_bytes
+  dur_start=$(date +%s)
+  resumed_json=false; [ "${DEVKIT_SHIP_RESUMED:-0}" = "1" ] && resumed_json=true
+  body_bytes=$(printf '%s' "$body" | wc -c | tr -d ' ')
+  printf '{"type":"ship_attempt","ship_id":"%s","repo":"%s","branch":"%s","devkit_version":"%s","mode":"%s","resumed":%s,"body_bytes":%d,"log_path":"%s","ts":"%s"}\n' \
     "$(devkit_json_escape "$DEVKIT_SHIP_ID")" "$(devkit_json_escape "$repo_name")" "$(devkit_json_escape "$br")" \
     "$(devkit_json_escape "$DEVKIT_TELEMETRY_VERSION")" \
-    "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(devkit_json_escape "${DEVKIT_SHIP_MODE:-ship}")" "$resumed_json" "$body_bytes" \
+    "$(devkit_json_escape "$ship_log")" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     >> "$DEVKIT_GATE_EVENTS" 2>/dev/null || true
 
   # $log is a REUSED per-branch path ("last-ship-gates-*"), so this attempt starts from empty even
@@ -310,8 +317,16 @@ SHIP_HOOK_WRAPPER
     {
       echo "🔀 ship: the ship worktree's HEAD was moved by ANOTHER process mid-commit, so git refused"
       echo "   to finalise (\"cannot lock ref 'HEAD'\"). Every gate PASSED — this is not a gate block,"
-      echo "   and NOTHING was pushed. Re-running the same devkit ship command is safe and fast"
-      echo "   (cleared judgements + reviewer verdicts are cached)."
+      echo "   and NOTHING was pushed."
+      # Same guard as the gate-rejection banner: --resume is only real advice when this attempt
+      # actually recorded its invocation.
+      if [ -n "${SHIP_INTENT_GENERATION:-}" ]; then
+        echo "   Retrying with \`devkit ship --resume $br\` is safe and fast"
+        echo "   (it replays this exact invocation; cleared judgements + reviewer verdicts are cached)."
+      else
+        echo "   Re-running the same full devkit ship command is safe (this attempt was NOT recorded,"
+        echo "   so --resume has nothing to replay); cleared judgements + reviewer verdicts are cached."
+      fi
       echo "   Most likely an outdated fallow: its audit base-snapshot cleanup could reach outside its"
       echo "   own worktree before 3.4.2. Check with: fallow --version  (devkit pins >= 3.6.0)."
       echo "   Full log: $log"
@@ -331,7 +346,21 @@ SHIP_HOOK_WRAPPER
     } >&2
   else
     # rc non-zero, not a hang (124/137): a gate or hook rejected the commit — its output is in $log
-    # above. Surface ONE otherwise-cryptic failure: a repo path with a SPACE + a git hook (usually a
+    # above. The retry line is the highest-traffic guidance ship prints (every gate block lands
+    # here), so it names the short form AND the new-file case: the commonest remedies (a decisions
+    # record, a new test) ADD a path, and --resume merges extra paths into the recorded set.
+    # Guarded on the captured ownership token: when this attempt's recording was skipped or failed
+    # (no ignore rule, lock contention), advertising --resume would send the retry to a
+    # deterministic "no recorded invocation" refusal.
+    if [ -n "${SHIP_INTENT_GENERATION:-}" ]; then
+      {
+        echo "↩️  Retry after fixing: devkit ship --resume $br"
+        echo "   (fix adds a NEW file? include it: devkit ship --resume $br -- <new-path>...; only unfinished work re-runs)"
+      } >&2
+    else
+      echo "↩️  Retry after fixing: re-run the same devkit ship command (this attempt was NOT recorded, so --resume has nothing to replay)" >&2
+    fi
+    # Surface ONE otherwise-cryptic failure: a repo path with a SPACE + a git hook (usually a
     # consumer commit-msg like `commitlint --edit $1`) that forwards the message-file path UNQUOTED.
     # git hands a LINKED-worktree hook the ABSOLUTE $GIT_DIR/COMMIT_EDITMSG path, so the space
     # word-splits inside that hook and its arg parser dumps "Unknown argument: <fragment>". Gate on BOTH

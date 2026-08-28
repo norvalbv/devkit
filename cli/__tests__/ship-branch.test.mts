@@ -754,6 +754,7 @@ describe('ship-branch.sh — worktree integration', () => {
     // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
     // seconds leaves enough startup headroom under load while staying well below either sleep.
     const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &\nsleep 30' });
+    writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/hung-gate', 't', 'note.txt'], {
       cwd: dir,
@@ -768,7 +769,7 @@ describe('ship-branch.sh — worktree integration', () => {
     // The make-or-break: the group-kill closes the pipe and the supervisor reports its own expiry.
     // A leader-only signal leaves the background sleep holding the pipe and spawnSync hits its 45s cap.
     expect(r.stderr).toMatch(/gate chain hit the 15s ceiling \(exit 124\)/);
-    expect(r.stderr).toMatch(/Re-run the same devkit ship command to converge/); // resume hint
+    expect(r.stderr).toMatch(/devkit ship --resume .+ to converge/); // resume hint
     expect(r.stderr).toMatch(/export SHIP_COMMIT_TIMEOUT/); // the knob, with the exported-env caveat
   });
 
@@ -785,6 +786,7 @@ describe('ship-branch.sh — worktree integration', () => {
       PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}`,
       TEST_HOOK_COUNT: hookCount,
     };
+    writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
 
     const first = spawnSync(
@@ -800,7 +802,7 @@ describe('ship-branch.sh — worktree integration', () => {
     );
 
     expect(first.status, first.stderr).toBe(124);
-    expect(first.stderr).toMatch(/Re-run the same devkit ship command to converge/);
+    expect(first.stderr).toMatch(/devkit ship --resume .+ to converge/);
     expect(first.stdout).not.toContain('https://github.com/acme/app/pull/42');
     expect(localBranchExists(git, 'feat/post-commit-timeout')).toBe(true);
     expect(remoteBranchExists(bare, 'feat/post-commit-timeout')).toBe(false);

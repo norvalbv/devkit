@@ -41,6 +41,8 @@ devkit command.
 | The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
 | You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself. An unrelated existing branch is rejected; only the exact local commit with a gate receipt from a prior post-commit failure can resume. |
 | Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
+| A ship was **blocked or timed out** and you are about to re-type the command | `devkit ship --resume <branch>` — a fix that ADDS a file: `devkit ship --resume <branch> -- <new-path>` | every attempt records its invocation (title, base, body, links, paths); `--resume` replays it byte-identically, so cached verdicts and a preserved landed commit still converge. Re-typing a multi-KB heredoc across 20–70 attempts is pure token burn, and one typo forfeits the landed-commit resume |
+| The PR body is **long** and the ship may take several attempts | write it to a file once, then `devkit ship <branch> "<title>" --body-file <file> -- <paths>` | a heredoc does not survive a retry through a wrapper (its stdin reads as a silently EMPTY body); the file and the recorded invocation both do |
 | `devkit doctor` reports **config drift** (`biome.jsonc`/`tsconfig.json`/husky `DRIFT`/`MISSING`) | `devkit doctor --fix` | hand-editing re-introduces the same drift on the next sync; `--fix` re-runs the recorded init idempotently |
 | `devkit doctor` reports **skills/agents drift** (synced copy ≠ manifest) | `devkit sync-skills` / `devkit sync-agents` | editing `.claude/.cursor` copies by hand just re-drifts; `devkit sync` is **not a command** |
 | You must **relocate or rename source files** and imports must follow | `devkit move <src...> <dest-dir>` | `git mv` leaves every `import`/`vi.mock`/dynamic-import pointing at the old path; `move` rewrites them all in the repo's alias style |
@@ -87,12 +89,30 @@ devkit command.
   gate chain's worst case (AI reviewer cascades) exceeds the 10-minute foreground Bash cap, which kills
   the ship mid-gates as exit 143 with no banner. Poll the shell output for the per-reviewer heartbeat
   lines (`guard-review: <name> — PASS … (checkpointed)`).
-- **A timed-out ship (exit 124) is NOT stuck at zero — re-run the SAME command.** Reviewer PASSes
-  checkpoint as they land, cleared decisions judgements and the deterministic gate prefix are cached,
-  so a re-run only pays for the unfinished work; the timeout banner names the stage that was mid-flight.
-  If the commit landed before the timeout surfaced, the retry verifies its gate receipt and publishes
-  that preserved commit without re-running gates; it never adopts a merely same-named or hand-made commit.
-  Do not respond to a 124 by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) — that defeats the ship.
+- **A blocked or timed-out ship retries with `devkit ship --resume <branch>` — never re-type the
+  invocation.** Reviewer PASSes checkpoint as they land, cleared decisions judgements and the
+  deterministic gate prefix are cached, so a retry only pays for the unfinished work; `--resume`
+  replays the recorded title/base/body/paths byte-identically, which is exactly what the caches and
+  the landed-commit resume verify against. If the commit landed before a timeout surfaced, the retry
+  verifies its gate receipt and publishes that preserved commit without re-running gates; it never
+  adopts a merely same-named or hand-made commit. A fix that ADDS a file rides the retry as a trailing
+  path (`--resume <branch> -- <new-path>`); changing branch/title/base means running the full command,
+  which re-records. If the blocked attempt WARNED that it could not record the invocation (the intent
+  file is not gitignored — a managed .gitignore predating this feature), `--resume` will refuse: run
+  `devkit doctor --fix` to restore the ignore line, then the full command once — recording resumes
+  from that attempt. Do not respond to a block by bypassing gates (`--no-verify`, `GUARD_NO_REVIEW`) —
+  that defeats the ship.
+- **Ship-message rules — structure the message for the gates; length is yours.**
+  - The **subject line** is what retrieves the governing decision Targets — make it the change's real
+    intent, not a mechanical file list.
+  - Author a long body **once, in a file**, and pass `--body-file` — it survives every retry via the
+    recorded invocation.
+  - **Never reword the body between attempts.** The completeness judge keys on the exact message
+    bytes: an unchanged body replays its cached PASS, a reworded one re-pays a multi-minute opus
+    call — per attempt.
+  - Gates read only the **first ~2KB** of the message, so put the load-bearing claims (what changed,
+    why, any bypass notes) up front. The long narrative after that is for human reviewers and is
+    welcome — it is recorded once and costs nothing on retries.
 - **Raising the gate budget: `SHIP_COMMIT_TIMEOUT` must be an EXPORTED env var** (`export
   SHIP_COMMIT_TIMEOUT=2400`, then ship). An inline `SHIP_COMMIT_TIMEOUT=2400 devkit ship …` prefix can
   be silently stripped by command-rewriting shell hooks — verify with `env | grep SHIP` if in doubt.

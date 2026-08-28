@@ -17,8 +17,10 @@
 # and is removed on exit. Scope is explicit paths; never auto-detect, because in a
 # shared tree your files are indistinguishable from parallel work.
 #
-# Usage:   ship-branch.sh <branch> "<title>" [--base <b>] [--link <d>]... [--] <path...>
-#          # PR body via stdin; bare positional paths (no --) are also accepted.
+# Usage:   ship-branch.sh <branch> "<title>" [--base <b>] [--body-file <f>] [--link <d>]... [--] <path...>
+#          # PR body via stdin, --body or --body-file; bare positional paths (no --) are accepted.
+# Retry:   ship-branch.sh --resume <branch> [--body-file <f>] [--] <extra-path...>
+#          # replays the invocation recorded by the previous attempt (ship-intent.mts)
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 set -euo pipefail
 
@@ -41,12 +43,31 @@ unset DEVKIT_MANAGED_SIGNAL_ROOT
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
 
-BR=${1:?branch}; TITLE=${2:?title}; shift 2
+# `--resume <branch>` replays the invocation the previous attempt recorded (ship-intent.mts). A
+# gate block deletes the ephemeral worktree AND branch, so before the manifest existed every retry
+# re-supplied title + full path list + multi-KB body verbatim — and the landed-commit resume below
+# refuses on a single differing byte. Leading position only, stripped BEFORE the positional binds:
+# `${2:?title}` under set -u would abort on the title --resume deliberately omits.
+RESUME=0
+[ "${1:-}" = "--resume" ] && { RESUME=1; shift; }
+BR=${1:?branch}
+if [ "$RESUME" -eq 1 ]; then
+  shift 1
+  TITLE=""                # loaded from the recorded invocation below
+  RESUME_ARGS=("$@")      # kept verbatim for the cross-mode exec into reship.sh
+else
+  TITLE=${2:?title}; shift 2
+fi
 
 # Reject a flag sitting in a positional slot, before anything treats BR/TITLE as real values.
 . "$SCRIPT_DIR/assert-positional-args.sh"
-ship_assert_positional_args "$BR" "$TITLE" \
-  'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>'
+if [ "$RESUME" -eq 1 ]; then
+  ship_assert_positional_args "$BR" "" \
+    'ship --resume <branch> [--body-file <f>] [--] <extra-path...>'
+else
+  ship_assert_positional_args "$BR" "$TITLE" \
+    'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>'
+fi
 
 # Arg grammar: branch + title are the first two positionals (above). The rest is a mix of
 # repeatable --link flags and file paths; `--` forces everything after it to be a
@@ -54,20 +75,92 @@ ship_assert_positional_args "$BR" "$TITLE" \
 # that is not a known flag is also a path — preserving the old `<branch> <title> <path...>` form.
 LINK_EXTRA=()      # extra symlink dirs beyond the universal base
 PATHS=()
-BODY_SET=0         # --body given? else the body comes from stdin (back-compat)
+BODY_SET=0         # --body given? else --body-file, else stdin (back-compat)
+BODY_FILE_SET=0    # --body-file <path>: author the body ONCE in a file; survives every retry
 BASE_FLAG=""       # --base <branch>? else base off this checkout's HEAD/current branch
 QAVIS_PUBLISH=1     # passed staged evidence is published after the PR exists; explicit opt-out only
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --base) BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
-    --link) LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
+    --base)
+      # Under --resume only the body may be overridden: a changed base/link set is a DIFFERENT ship,
+      # and replaying the rest of the record around it would misdescribe what was asked for.
+      [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded invocation — to change --base, run the full devkit ship command (it re-records)" >&2; exit 1; }
+      BASE_FLAG="${2:?--base requires a branch}"; shift 2 ;;
+    --link)
+      [ "$RESUME" -eq 0 ] || { echo "--resume replays the recorded invocation — to change --link, run the full devkit ship command (it re-records)" >&2; exit 1; }
+      LINK_EXTRA+=("${2:?--link requires a directory}"); shift 2 ;;
     --body) BODY_FLAG="${2:?--body requires text}"; BODY_SET=1; shift 2 ;;
+    --body-file) BODY_FILE_FLAG="${2:?--body-file requires a path}"; BODY_FILE_SET=1; shift 2 ;;
     --no-qavis-publish) QAVIS_PUBLISH=0; shift ;;
+    --resume) echo "--resume must come FIRST: devkit ship --resume <branch> [--] <extra-path...>" >&2; exit 1 ;;
     --) shift; while [ "$#" -gt 0 ]; do PATHS+=("$1"); shift; done; break ;;
     -*) echo "unknown flag: $1 (pass a dash-leading file path after --)" >&2; exit 1 ;;
     *) PATHS+=("$1"); shift ;;
   esac
 done
+# Two body sources cannot both win, and silently preferring one would make the OTHER the operator's
+# unnoticed dead argument — refuse instead.
+[ "$BODY_SET" -eq 0 ] || [ "$BODY_FILE_SET" -eq 0 ] || { echo "--body and --body-file are mutually exclusive" >&2; exit 1; }
+
+# Hoisted above the --resume load (which needs it); everything below the worktree ceremony reads it.
+ROOT=$(git rev-parse --show-toplevel)
+
+# devkit's own modules are .mts in the source tree (Node strips types) and compiled .mjs in an
+# installed consumer (dist) — same fallback the reconcile writer uses.
+SHIP_INTENT="$SCRIPT_DIR/ship-intent.mts"; [ -f "$SHIP_INTENT" ] || SHIP_INTENT="$SCRIPT_DIR/ship-intent.mjs"
+RESUME_BODY=
+if [ "$RESUME" -eq 1 ]; then
+  # NUL-delimited so every field survives byte-exact (a body holds newlines; a path may hold almost
+  # anything). bash 3.2 floor: plain `read -r -d ''` per field — no mapfile/readarray. The trailing
+  # empty read at EOF fails in the while CONDITION, which set -e does not treat as an error.
+  SI_OUT=$(mktemp "${TMPDIR:-/tmp}/ship-intent-read.XXXXXX")
+  if ! node "$SHIP_INTENT" read --root "$ROOT" --branch "$BR" > "$SI_OUT"; then
+    rm -f "$SI_OUT"; exit 1   # ship-intent already printed the named refusal (absent/stale/mismatch)
+  fi
+  SI_FIELDS=()
+  while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
+  rm -f "$SI_OUT"
+  # Field order is ship-intent.mts's emitFields contract:
+  #   mode, title, base, noQavisPublish, createdAt, generation, nlinks, <links...>, body, <paths...>
+  [ "${#SI_FIELDS[@]}" -ge 9 ] || { echo "recorded invocation is malformed — run the full devkit ship command" >&2; exit 1; }
+  SI_MODE=${SI_FIELDS[0]}
+  if [ "$SI_MODE" = "reship" ]; then
+    # The blocked attempt was a `--pr` re-push; hand over so the agent needn't remember which form
+    # it used. POSITIVE match + one-shot marker only — an unrecognised mode must hard-error below,
+    # never bounce between the two scripts.
+    [ -z "${DEVKIT_SHIP_RESUME_DISPATCHED:-}" ] || { echo "recorded invocation dispatched in a loop (mode '$SI_MODE') — the manifest is inconsistent; run the full command" >&2; exit 1; }
+    DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$SCRIPT_DIR/reship.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
+  fi
+  [ "$SI_MODE" = "ship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship command" >&2; exit 1; }
+  TITLE=${SI_FIELDS[1]}
+  BASE_FLAG=${SI_FIELDS[2]}
+  [ "${SI_FIELDS[3]}" != "1" ] || QAVIS_PUBLISH=0
+  RESUME_CREATED=${SI_FIELDS[4]}
+  RESUME_GENERATION=${SI_FIELDS[5]}
+  SI_NLINKS=${SI_FIELDS[6]}
+  case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
+  si_i=7
+  si_body_at=$((7 + SI_NLINKS))
+  [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
+  while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
+  RESUME_BODY=${SI_FIELDS[$si_body_at]}
+  # Recorded paths first, then any NEW paths this retry briefed (deduped). The union is load-bearing:
+  # the commonest gate remedies ADD a file (a decisions record, a new test), and a frozen list would
+  # silently ship without the fix and re-block on the same gate.
+  SI_PATHS=("${SI_FIELDS[@]:$((si_body_at + 1))}")
+  # RESUME_EXTRA_PATHS: only what THIS retry explicitly briefed beyond the record — the sole set a
+  # losing re-record may donate to a newer invocation (its stale recorded list must never leak in).
+  RESUME_EXTRA_PATHS=()
+  for p in ${PATHS[@]+"${PATHS[@]}"}; do
+    si_dup=0
+    for q in "${SI_PATHS[@]}"; do [ "$q" = "$p" ] && { si_dup=1; break; }; done
+    [ "$si_dup" -eq 1 ] || { SI_PATHS+=("$p"); RESUME_EXTRA_PATHS+=("$p"); }
+  done
+  PATHS=("${SI_PATHS[@]}")
+  # One line naming what is being replayed, BEFORE the multi-minute gate chain — a stale-but-valid
+  # record must be visible here, not after the run.
+  echo "Resuming recorded invocation for $BR: \"$TITLE\" — ${#PATHS[@]} paths, body $(printf '%s' "$RESUME_BODY" | wc -c | tr -d ' ') bytes, recorded $RESUME_CREATED" >&2
+fi
 
 [ "${#PATHS[@]}" -gt 0 ] || { echo "no paths given" >&2; exit 1; }
 # Files only: `git diff/ls-files -- <dir>` recurses and would sweep in a parallel
@@ -135,7 +228,6 @@ if [ -z "${SHIP_DRY_RUN:-}" ]; then
   esac
 fi
 
-ROOT=$(git rev-parse --show-toplevel)
 # The PR target branch. Default: the branch we branched from — the PR merges back into it. A detached
 # HEAD has no such branch, so fail fast rather than silently targeting `main` (wrong base + a bogus
 # diff). With --base <branch> the PR targets THAT branch instead, so a repo whose source-of-truth
@@ -223,12 +315,21 @@ fi
 WT="${TMPDIR:-/tmp}/devkit-ship-${BR//\//-}-$$"
 PATCH=$(mktemp "${TMPDIR:-/tmp}/ship.XXXXXX")
 STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
-# Body: --body "<text>" wins (explicit, no temp file); else stdin (back-compat — a piped/here-doc
-# body still works). TTY means no body; non-TTY uses a bounded read so an inherited, open-but-idle
-# background-task pipe fails loud instead of blocking forever. Nothing is created yet, so aborting is
-# clean.
+# Body: --body "<text>" wins (explicit, no temp file); then --body-file (authored once, survives
+# every retry); then — on --resume — the recorded body, with stdin never consulted (a re-run heredoc
+# does not survive a wrapper, and a closed stdin reads as a silently EMPTY body); else stdin
+# (back-compat — a piped/here-doc body still works). TTY means no body; non-TTY uses a bounded read
+# so an inherited, open-but-idle background-task pipe fails loud instead of blocking forever.
+# Nothing is created yet, so aborting is clean.
 . "$SCRIPT_DIR/read-stdin-body.sh"
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
+elif [ "$BODY_FILE_SET" -eq 1 ]; then
+  [ -f "$BODY_FILE_FLAG" ] || { echo "--body-file: no such file: $BODY_FILE_FLAG" >&2; exit 1; }
+  # cat + sentinel, never $(<file): command substitution strips EVERY trailing newline, silently
+  # altering a deliberately-authored body before it is recorded.
+  BODY=$(cat -- "$BODY_FILE_FLAG" && printf x) || { echo "--body-file: unreadable: $BODY_FILE_FLAG" >&2; exit 1; }
+  BODY=${BODY%x}
+elif [ "$RESUME" -eq 1 ]; then BODY="$RESUME_BODY"
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
 # The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
@@ -236,6 +337,32 @@ else ship_read_stdin_body; fi
 # caller's stdin. This redirect MUST come after the read; the prompt-suppressing exports could NOT
 # wait for it — remote git runs far earlier — so they sit at the top of the file.
 exec 0</dev/null
+
+# Record THIS attempt's effective invocation, so the next retry is `devkit ship --resume <branch>`.
+# Every attempt re-records, resume included: the staleness clock resets while a retry chain is live,
+# and a --body/--body-file override becomes what the NEXT resume replays. The DEVKIT_SHIP_* exports
+# are hoisted from commit-with-gate-capture.sh's derivation (which keeps an inherited id), so the
+# ship_intent event this write emits carries the same ship_id as everything the gate chain emits.
+# Best-effort: a recording miss costs the retry a full re-type, never the ship.
+. "$SCRIPT_DIR/repo-identity.sh"
+export DEVKIT_SHIP_ID="${DEVKIT_SHIP_ID:-$(uuidgen 2>/dev/null || echo "${BR//\//-}-$$-$(date +%s)")}"
+export DEVKIT_SHIP_REPO="$(devkit_repo_identity "$ROOT")" DEVKIT_SHIP_BRANCH="$BR"
+export DEVKIT_SHIP_RESUMED=$RESUME
+SHIP_INTENT_ARGS=(write --root "$ROOT" --branch "$BR" --mode ship --title "$TITLE")
+[ -z "$BASE_FLAG" ] || SHIP_INTENT_ARGS+=(--base "$BASE_FLAG")
+for d in ${LINK_EXTRA[@]+"${LINK_EXTRA[@]}"}; do SHIP_INTENT_ARGS+=(--link "$d"); done
+[ "$QAVIS_PUBLISH" -eq 1 ] || SHIP_INTENT_ARGS+=(--no-qavis-publish)
+if [ "$RESUME" -eq 1 ]; then
+  SHIP_INTENT_ARGS+=(--resumed --merge-paths --expect-generation "$RESUME_GENERATION")
+  for p in ${RESUME_EXTRA_PATHS[@]+"${RESUME_EXTRA_PATHS[@]}"}; do SHIP_INTENT_ARGS+=(--donate "$p"); done
+fi
+# Capture the record's ownership token (write prints a per-attempt random generation): success may delete ONLY the
+# record this attempt wrote — a concurrent attempt's newer record must survive for ITS --resume.
+SHIP_INTENT_GENERATION=$(printf '%s' "$BODY" | node "$SHIP_INTENT" "${SHIP_INTENT_ARGS[@]}" -- "${PATHS[@]}") \
+  || { SHIP_INTENT_GENERATION=""; echo "ship: invocation not recorded — the retry needs the full command (non-fatal)" >&2; }
+# Exported flag (not the token itself) so the SUBPROCESS gate runner's timeout banner can tell a
+# recorded attempt (--resume works) from an unrecorded one (--resume would refuse by name).
+export DEVKIT_SHIP_INTENT_RECORDED=$([ -n "$SHIP_INTENT_GENERATION" ] && echo 1 || echo 0)
 
 SHIP_RUN_MODE=live; [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
@@ -684,6 +811,13 @@ RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DI
 node "$RMW" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "${RECOVERY_PARENT:-$BASE}" --pr "$PR_NUM" -- "${PATHS[@]}" \
   || echo "ship-branch: reconcile manifest not recorded (non-fatal)" >&2
+
+# The push landed, so the recorded invocation is spent — a later ship reusing this branch name must
+# not resume THESE bytes. Kept on every earlier failure (that is its whole purpose), and compare-
+# and-deleted on the captured generation so a concurrent attempt's newer record survives; the
+# shipped paths are handed over so a record carrying a concurrently-donated UNSHIPPED remedy path
+# is kept for its --resume. Stderr stays visible: a lock-busy keep must be seen.
+[ -z "${SHIP_INTENT_GENERATION:-}" ] || node "$SHIP_INTENT" delete --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION" -- ${PATHS[@]+"${PATHS[@]}"} || true
 
 # PR-create failed but the push + manifest record both landed: the branch is recoverable AND known to
 # reconcile. Tell the operator how to open the PR by hand; reconcile cleans the branch once it merges.
