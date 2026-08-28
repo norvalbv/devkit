@@ -134,9 +134,7 @@ function selectionFlags(sel) {
     }
     return flags;
 }
-// --fix repairs only fixable findings and never refreezes. Tuned config content is preserved;
-// the judge-family bind (judge-family.mts) is the one path that writes config keys, and only
-// into a default-shaped review block — explicit keys and GUARD_* envs always win.
+// --fix repairs only fixable findings, preserves tuned config content, and never refreezes.
 // Missing files/hooks use init with the recorded selection and install mode.
 // Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
 // fallow-ignore-next-line complexity

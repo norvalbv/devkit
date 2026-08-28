@@ -177,8 +177,9 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const escalationModel = resolveEscalationModel(cfg);
     // An engine-error rejection loses WHICH pass threw, so name every binary the cascade could have
     // spawned — a single guess reads as fact and sends a mixed-family operator to the wrong CLI.
-    const engineOutageBin = (rev) => [...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel))]
-        .join('` or `');
+    const engineOutageBin = (rev) => [
+        ...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel)),
+    ].join('` or `');
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = gateJudgeEnv(reviewMode, cfg);
