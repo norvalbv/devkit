@@ -15,7 +15,7 @@
 # `no remote branch origin/--pr to re-push to`). Documentation has now failed at this three separate
 # times, so the check belongs in the script, where it cannot be misread.
 #
-# Deliberately matches only the four KNOWN flags rather than a blanket `-*`: a title may legitimately
+# Deliberately matches only the KNOWN flags rather than a blanket `-*`: a title may legitimately
 # begin with a dash, and rejecting that would trade this footgun for a different one.
 
 # ship_assert_positional_args <branch> <title> <usage-line>
@@ -23,7 +23,7 @@ ship_assert_positional_args() {
   local usage=$3 arg
   for arg in "$1" "$2"; do
     case "$arg" in
-      --base|--link|--body|--pr)
+      --base|--link|--body|--body-file|--pr|--resume)
         {
           echo "<branch> and \"<title>\" must come FIRST, before any flag — got '$arg' in a positional slot."
           echo "  $usage"

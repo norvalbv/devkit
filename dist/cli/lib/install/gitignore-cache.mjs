@@ -12,7 +12,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 // Each entry matches its writer verbatim: prefix-cache.mjs STORE_FILE, decisions/verdict-cache.mjs
 // STORE_FILE, review/cache.mjs CACHE_FILE, review/run-review.mjs progress (DEVKIT_REVIEW_PROGRESS),
-// review-target.sh's per-run output, commit-with-gate-capture.sh's log, reconcile-manifest-write.
+// review-target.sh's per-run output, commit-with-gate-capture.sh's log, reconcile-manifest-write,
+// ship-intent.mts (which also PROBES the ignore with `git check-ignore` before writing, so the
+// recorded PR body can never precede its own ignore line as a stageable untracked file).
 export const DEVKIT_CACHE_IGNORES = [
     '.devkit/prefix-cache.json',
     '.devkit/decisions-verdict-cache.json',
@@ -22,6 +24,7 @@ export const DEVKIT_CACHE_IGNORES = [
     '.devkit/review-progress-*.json',
     '.devkit/review-runs/',
     '.devkit/last-ship-gates-*.log',
+    '.devkit/ship-intent-*',
     '.devkit/reconcile-manifest.json',
     '.devkit/telemetry/',
     '.devkit/setup.json',
