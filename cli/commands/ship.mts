@@ -14,7 +14,8 @@ export const meta = {
   help: `devkit ship — commit <path...> onto a new branch + open a PR without moving HEAD.
 
 Usage:
-  devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>
+  devkit ship <branch> "<title>" [--base <b>] [--body "<text>"] [--body-file <f>] [--link <d>]... [--] <path...>
+  devkit ship --resume <branch> [--body-file <f>] [--] <extra-path...>
                           bare positional paths (no --) are accepted.
 
   <branch> and "<title>" are POSITIONAL and must come FIRST, before any flag. The bracketed flags
@@ -33,6 +34,16 @@ Usage:
                       can't be a sha or a tag. "origin/x" and "x" are equivalent.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
                       body from stdin (a pipe or here-doc) or to leave the body empty.
+  --body-file <f>     Commit + PR body read from a file — author it ONCE; the recorded invocation
+                      replays it on every retry. Mutually exclusive with --body; wins over stdin.
+  --resume <branch>   Replay the invocation recorded by the previous attempt for <branch> (title,
+                      base, body, links, paths — every attempt records itself), instead of re-typing
+                      them. LEADING position only. Extra paths after [--] are MERGED into the
+                      recorded set (a gate remedy that adds a file rides the retry); --body/--body-file
+                      override the recorded body — note an amended body re-pays the completeness
+                      judge, while an unchanged one replays its cached PASS. Works for both a blocked
+                      new ship and a blocked --pr re-push (the record knows which it was). A pushed
+                      ship deletes its record; a stale (>6h) or foreign record is refused by name.
   --link <d>          Extra gitignored gate-dep dir to symlink into the worktree (repeatable;
                       the base .husky/_ + node_modules are always linked).
   --no-qavis-publish  Do not publish a passed staged Qavis result into the PR description for this
@@ -59,7 +70,8 @@ Env:
 
 Exits 0 on PR opened (or committed under SHIP_DRY_RUN), 1 on any preflight/git/gh error. A commit
 that lands but fails to push KEEPS the branch; an identical retry verifies and resumes that commit.
-A commit that never lands auto-deletes the empty branch.`,
+A commit that never lands auto-deletes the empty branch. Every blocked attempt records its
+invocation — retry with \`devkit ship --resume <branch>\` instead of re-typing the command.`,
 };
 
 export default function ship(args: string[], cwd: string): number | Promise<number> {

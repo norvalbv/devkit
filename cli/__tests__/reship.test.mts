@@ -187,6 +187,31 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
     expect(gwt(['show', 'HEAD:a.ts'])).toBe('v2'); // the new commit carries the current content
     expect(gwt(['rev-parse', 'HEAD~1'])).toBe(prTip); // parented on the PR-branch tip (a real ff)
     g(['worktree', 'remove', '--force', wt], { stdio: 'ignore' });
+
+    // --body-file: same grammar as new-ship — the file wins over stdin, and pairing it with --body
+    // refuses instead of silently preferring one.
+    writeFileSync(join(dir, 'a.ts'), 'v3\n');
+    writeFileSync(join(dir, 'body.md'), 'authored once\n');
+    const rf = run(['feat/pr', 'add v3', '--pr', '--body-file', 'body.md', '--', 'a.ts'], dir, {
+      SHIP_DRY_RUN: '1',
+    });
+    expect(rf.status, rf.stderr).toBe(0);
+    const wt2 = WT_RE.exec(rf.stderr)?.[1];
+    expect(
+      execFileSync('git', ['-C', wt2, 'log', '-1', '--format=%b'], {
+        env,
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('authored once');
+    g(['worktree', 'remove', '--force', wt2], { stdio: 'ignore' });
+
+    const both = run(
+      ['feat/pr', 'x', '--pr', '--body', 'a', '--body-file', 'body.md', '--', 'a.ts'],
+      dir,
+      { SHIP_DRY_RUN: '1' },
+    );
+    expect(both.status).not.toBe(0);
+    expect(both.stderr).toContain('mutually exclusive');
   });
 });
 
