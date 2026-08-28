@@ -253,7 +253,11 @@ forceReadOnlySandbox = false) {
 /** The binary NAME for outage wording — must never throw (it runs inside catch blocks, including
  * when argv translation itself threw), so it derives from the same parse but skips translation. */
 export function judgeBinFor(args) {
-    return isCodexModel(parseClaudeArgv(args).model) ? codexBin() : 'claude';
+    return judgeBinForModel(parseClaudeArgv(args).model);
+}
+/** Same contract, keyed on a bare model id — for callers that hold the model, not an argv. */
+export function judgeBinForModel(model) {
+    return isCodexModel(model) ? codexBin() : 'claude';
 }
 /** The verdict text: the LAST completed `agent_message` in the JSONL stream, or null when none
  * parses — the spawn layer then falls back to the raw bytes, same fail-safe as the claude path. */

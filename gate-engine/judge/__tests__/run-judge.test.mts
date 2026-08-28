@@ -67,8 +67,14 @@ describe('strictRemedy', () => {
     expect(strictRemedy('outage')).toBe('check `claude` CLI auth/quota, then re-run devkit ship');
   });
 
+  it('an outage remedy names the binary that went dark — codex outages must not say claude', () => {
+    const r = strictRemedy('outage', 'codex');
+    expect(r).toBe('check `codex` CLI auth/quota, then re-run devkit ship');
+    expect(r).not.toContain('claude');
+  });
+
   it('every cause yields a distinct remedy — no two gates can print the same wrong line', () => {
-    const all = (['timeout', 'sync', 'outage'] as const).map(strictRemedy);
+    const all = (['timeout', 'sync', 'outage'] as const).map((c) => strictRemedy(c));
     expect(new Set(all).size).toBe(3);
   });
 });

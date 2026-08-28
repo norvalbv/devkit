@@ -147,6 +147,9 @@ export interface ReviewOutcome {
   /** Machine-owned category set where the inconclusive outcome originates. Consumers must never
    * reverse-engineer this from the human-readable reason. */
   inconclusiveCause?: ReviewInconclusiveCause;
+  /** Binary of the SPAWN that went dark; an engine-error rejection, where the failing pass is
+   * unknowable, carries the backtick-joined candidate set exactly as the remedy renders it. */
+  outageBin?: string;
   transcript?: string;
   /** Structured acknowledgement records for findings suppressed by the override valve. Present on
    * both all-waived PASS and mixed waived+blocking FAIL outcomes. */

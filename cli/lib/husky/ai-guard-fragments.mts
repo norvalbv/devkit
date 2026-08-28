@@ -81,7 +81,7 @@ if [ "$rrc" -eq 1 ]; then
     exit 1
 elif [ "$rrc" -eq 3 ]; then
     echo "   guard-review: judge unavailable after retry — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (completed verdicts are cached)."
+    echo "   Check the judge CLI auth/quota named above, then re-run devkit ship (completed verdicts are cached)."
     exit 1
 elif [ "$rrc" -ne 0 ] && [ "$rrc" -ne 2 ]; then
     echo "   guard-review: unexpected exit $rrc — blocking the commit."
