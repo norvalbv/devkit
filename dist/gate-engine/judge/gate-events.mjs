@@ -80,6 +80,23 @@ export function finishGateTiming(gate, startedAt, code, cacheState = 'none', eff
 export function emitGateInfraFailure(ev) {
     emitGateEvent({ type: 'gate_infra_failure', ...ev });
 }
+/**
+ * A DELIBERATE per-run gate bypass (a GUARD_* flag the operator exported). One shared emitter so
+ * every bypass is countable on the structured `bypass` field instead of grepping ad-hoc `detail`
+ * encodings — and so new bypasses keep `status: 'could_not_run'`, the deterministic gate's ruled
+ * precedent: a bypassed gate verified nothing, and a status downstream readers would treat as
+ * clean is what Ruling (3) of gate-telemetry-self-describing forbids inventing. (coverage's
+ * pre-existing `status: 'bypassed'` row keeps its shape for continuity and gains the same field.)
+ */
+export function emitGateBypass(gate, flag) {
+    emitGateEvent({
+        type: 'gate_result',
+        gate,
+        status: 'could_not_run',
+        bypass: flag,
+        detail: `${gate}(bypassed:${flag})`,
+    });
+}
 export function emitGateEvent(ev) {
     const file = telemetrySink();
     if (!file)

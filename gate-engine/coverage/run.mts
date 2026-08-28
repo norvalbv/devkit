@@ -124,6 +124,7 @@ export function runCoverage(cwd = process.cwd()): number {
       type: 'gate_result',
       gate: 'coverage',
       status: 'bypassed',
+      bypass: 'GUARD_COVERAGE_OK',
       detail: 'GUARD_COVERAGE_OK',
     });
     return 0;

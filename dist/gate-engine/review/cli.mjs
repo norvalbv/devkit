@@ -105,15 +105,34 @@ function recordAgent(label, rest) {
     if (disposition !== undefined && !DISPOSITIONS.has(disposition))
         console.error(`guard-review: ignoring unknown --disposition "${disposition}" ` +
             `(expected ${[...DISPOSITIONS].join(' | ')})`);
+    const extra = {};
+    if (disposition !== undefined && DISPOSITIONS.has(disposition))
+        extra.disposition = disposition;
+    if (reason)
+        extra.disposition_reason = reason;
+    // Spend flags, mirroring the judge_exec usage keys execJudge emits so a Task-dispatched agent's
+    // row prices identically in the warehouse. A malformed or negative value OMITS the key — an
+    // emitted 0 would read downstream as a genuinely free agent and deflate every cost total.
+    for (const name of ['input-tokens', 'output-tokens', 'cache-creation', 'cache-read', 'cost-usd']) {
+        // Number(), not parseFloat: '1200oops' must read as malformed, never as a fabricated 1200.
+        // Token counters are integers; only cost-usd is legitimately fractional.
+        const raw = (flag(name) ?? '').trim();
+        const n = raw === '' ? Number.NaN : Number(raw);
+        if (Number.isFinite(n) && n >= 0 && (name === 'cost-usd' || Number.isInteger(n)))
+            extra[name.replace(/-/g, '_')] = n;
+    }
+    const sessionId = flag('session-id');
+    if (sessionId)
+        extra.session_id = sessionId;
+    const billing = flag('billing');
+    if (billing)
+        extra.billing = billing;
     recordAgentRun({
         label,
         output,
         model: flag('model') ?? null,
         ...(Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
-        extra: {
-            ...(disposition !== undefined && DISPOSITIONS.has(disposition) ? { disposition } : {}),
-            ...(reason ? { disposition_reason: reason } : {}),
-        },
+        extra,
     });
     return 0;
 }

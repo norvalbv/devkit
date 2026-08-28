@@ -69,21 +69,14 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { envBool, resolveGuardConfig } from '../config.mts';
-import { emitGateEvent } from '../judge/gate-events.mts';
+import { envBool, envVar, resolveGuardConfig } from '../config.mts';
+import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mts';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mts';
 import { reportGateInfraFailure } from '../judge/odb-probe.mts';
 import { execJudge } from '../judge/run-judge.mts';
 import { resolveReviewModel } from '../review/reviewers.mts';
 import { buildEvidence, degradeCause, renderInventory, type SentryEvidence } from './evidence.mts';
 import { judgeSentryWithCache } from './verdict-cache.mts';
-
-// Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
-// gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
-function envVar(name: string): string | undefined {
-  const guard = process.env[`GUARD_${name}`];
-  return guard !== undefined ? guard : process.env[`FRINK_${name}`];
-}
 
 // One judge sample: the parsed verdict + the raw reply it came from (kept for evidence extraction).
 interface SentryRun {
@@ -450,7 +443,10 @@ export function effectiveHard(
 
 /** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
 export function skipReason(message: string): string | null {
-  if (envVar('NO_SENTRY_JUDGE')) return 'sentry-judge: skipped (GUARD_NO_SENTRY_JUDGE)';
+  if (envVar('NO_SENTRY_JUDGE')) {
+    emitGateBypass('sentry', 'GUARD_NO_SENTRY_JUDGE'); // previously this bypass emitted nothing
+    return 'sentry-judge: skipped (GUARD_NO_SENTRY_JUDGE)';
+  }
   if (!shouldJudge(message)) return 'sentry-judge: SKIP (trivial commit type / empty — not judged)';
   return null;
 }

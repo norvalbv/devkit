@@ -36,7 +36,7 @@ import { envBool, envFlag, resolveGuardConfig } from '../config.mjs';
 import { scopedTargets } from '../decisions/scoped-targets.mjs';
 import { renderTargets } from './evidence/targets-block.mjs';
 export { renderTargets } from './evidence/targets-block.mjs';
-import { emitCacheHit, finishGateTiming } from '../judge/gate-events.mjs';
+import { emitCacheHit, emitGateBypass, finishGateTiming } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION } from '../judge/judge-isolation.mjs';
 import { judgeMcpCapabilityFingerprint, namedAgentMcpProfile, withNamedAgentMcpTools, } from '../judge/mcp/profile.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
@@ -102,8 +102,10 @@ export function wrapCompleteness(agentBody, message, files, targetsBlock) {
 export async function runCompleteness(msgFile, cwd = process.cwd(), { exec = execJudgeAsync } = {}) {
     const startedAt = Date.now();
     const finish = (code, cacheState = 'none', effectiveMs) => finishGateTiming('completeness', startedAt, code, cacheState, effectiveMs);
-    if (envFlag('NO_COMPLETENESS'))
+    if (envFlag('NO_COMPLETENESS')) {
+        emitGateBypass('completeness', 'GUARD_NO_COMPLETENESS');
         return finish(0);
+    }
     let prompt;
     let diff;
     let allowedTools = withNamedAgentMcpTools(TOOLS);

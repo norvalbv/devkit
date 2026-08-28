@@ -43,7 +43,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { coverageBypassed, deterministicStrict, structureBypassed } from '../config.mts';
-import { emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
+import { emitGateBypass, emitGateEvent, finishGateTiming } from '../judge/gate-events.mts';
 import { prefixEntry, recordPrefix } from '../prefix-cache/prefix-cache.mts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -311,15 +311,8 @@ export function runDeterministic(cwd = process.cwd(), opts: RunDeterministicOpts
     if (bypassStructure) {
       console.log('⚠️  Structure lint BYPASSED for this run (GUARD_STRUCTURE_OK=1).');
       console.log('   Repository structure was NOT verified for this commit.');
-      emitGateEvent({
-        type: 'gate_result',
-        gate: 'structure-lint',
-        // The collector's gate_result schema accepts fail | could_not_run. Keep the deliberate
-        // bypass measurable as a non-run, and distinguish it from an infrastructure opt-out in
-        // detail instead of inventing a status that downstream readers would treat as clean.
-        status: 'could_not_run',
-        detail: 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
-      });
+      // could_not_run, never a clean-reading status — the ruling emitGateBypass carries forward.
+      emitGateBypass('structure-lint', 'GUARD_STRUCTURE_OK');
     }
     const ids = new Set(effectiveIds);
     const gates: Gate[] = DETERMINISTIC.filter((g) => ids.has(g.id)).map((g) => ({

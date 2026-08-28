@@ -27,6 +27,7 @@ import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { envFlag } from '../config.mjs';
+import { emitGateBypass } from '../judge/gate-events.mjs';
 /**
  * Is the qavis CLI resolvable on PATH? `devkit doctor` asks this to report a dead advisory gate
  * OUTSIDE commit time — a plain filesystem scan, never a `route` call, so it costs no model spend.
@@ -76,8 +77,16 @@ function defaultRoute(cwd) {
     return { verdict: null, skip: `qavis route printed no verdict (${JSON.stringify(last)})` };
 }
 export function runQavisAdvisory(cwd = process.cwd(), deps = {}) {
-    if (envFlag('NO_QAVIS_ADVISORY') || envFlag('QAVIS_OK'))
+    // GUARD_QAVIS_OK is a per-run bypass, NO_QAVIS_ADVISORY a standing disable — recorded under
+    // their own flag names because before this the advisory's bypasses emitted nothing at all.
+    if (envFlag('QAVIS_OK')) {
+        emitGateBypass('qavis-advisory', 'GUARD_QAVIS_OK');
         return 0;
+    }
+    if (envFlag('NO_QAVIS_ADVISORY')) {
+        emitGateBypass('qavis-advisory', 'GUARD_NO_QAVIS_ADVISORY');
+        return 0;
+    }
     const hasRecipe = deps.hasRecipe ?? ((c) => existsSync(path.join(c, QAVIS_RECIPE)));
     // Not a qavis repo (or qavis not installed by this committer) → nothing to advise. This is also the
     // zero-weight path for every non-qavis consumer: the gate returns before shelling anything.
