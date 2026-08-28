@@ -19,8 +19,8 @@ import {
   correctnessModel,
   resolveEscalationModel,
   resolveReviewModel,
-} from '../../../gate-engine/review/reviewers.mts';
-import { type CheckResult, check } from './check-result.mts';
+} from '../../../../gate-engine/review/reviewers.mts';
+import { type CheckResult, check } from '../check-result.mts';
 
 export const JUDGE_AUTH_CHECK = 'judge auth';
 

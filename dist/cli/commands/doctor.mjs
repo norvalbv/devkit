@@ -3,14 +3,15 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { QAVIS_RECIPE, qavisOnPath } from '../../gate-engine/qavis-advisory/check.mjs';
 import { FANOUT_BASELINE, LEGACY_FANOUT_BASELINE, LEGACY_LINES_BASELINE, LEGACY_SIZE_BASELINE, LINES_BASELINE, readRatchetBaseline, SIZE_BASELINE, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { RECOMMENDED_GUARD_IDS, structureCmdFor } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { checkAgentAssets, checkRegistrations } from '../lib/doctor/asset-checks.mjs';
 import { check } from '../lib/doctor/check-result.mjs';
 import { checkExtends, EXTENDS_REPAIRABLE, expectedExtends, repairExtends, } from '../lib/doctor/extends-checks.mjs';
-import { checkGuardConfig, SEARCH_INDEX_CHECK } from '../lib/doctor/guard-config-checks.mjs';
+import { checkGuardConfig, CODEX_RUNTIME_CHECK, SEARCH_INDEX_CHECK, } from '../lib/doctor/guard-config-checks.mjs';
+import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mjs';
+import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mjs';
 import { hookChecks } from '../lib/doctor/hook-checks.mjs';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mjs';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mjs';
@@ -18,7 +19,7 @@ import { ALLOW_SKEW_ENV, delegateToPinned, printSkewBanner, runnerSkew, skewChec
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mjs';
 import { packageDir, readJson } from '../lib/fs-helpers.mjs';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mjs';
-import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mjs';
+import { extractGuardBlock } from '../lib/husky/husky-block.mjs';
 import { checkAdhdSkill } from '../lib/install/adhd-skill.mjs';
 import { resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../lib/install/agent-assets/agent-providers.mjs';
 import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../lib/install/anti-slop/lifecycle.mjs';
@@ -133,7 +134,9 @@ function selectionFlags(sel) {
     }
     return flags;
 }
-// --fix repairs only fixable findings, preserves tuned config content, and never refreezes.
+// --fix repairs only fixable findings and never refreezes. Tuned config content is preserved;
+// the judge-family bind (judge-family.mts) is the one path that writes config keys, and only
+// into a default-shaped review block — explicit keys and GUARD_* envs always win.
 // Missing files/hooks use init with the recorded selection and install mode.
 // Reason: flat repair orchestration: independent sequential `if (this kind drifted) repair it` steps (extends-repair loop, init re-run, sync-skills, recreate-missing-baseline) with near-zero nesting; high branch COUNT, each a trivial guarded fixup. Splitting scatters the deliberate repair ordering.
 // fallow-ignore-next-line complexity
@@ -146,6 +149,12 @@ function applyFix(cwd, results, sel, stack, standalone) {
         if (kind && r.status === 'DRIFT' && repairExtends(join(cwd, r.name), want[kind])) {
             console.log(`  ✓ repaired ${r.name} extends → ${want[kind]}`);
         }
+    }
+    // A fixable codex-runtime DRIFT means the bind preconditions held at check time (claude
+    // resolves, no explicit review.* keys) — bindClaudeFamily re-verifies them before writing.
+    const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
+    if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
+        console.log('  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json');
     }
     // MISSING template files / husky drift → init for the recorded selection (idempotent).
     const OXC_CHECKS = new Set([
@@ -207,30 +216,6 @@ function applyFix(cwd, results, sel, stack, standalone) {
         });
     }
     // Baselines are cut at init; an explicit re-cut uses `guard-* freeze`, never doctor.
-}
-/**
- * qavis-advisory health — ADVISORY, printed by every doctor mode, never a CheckResult and never a
- * `--fix` target. Deliberately outside the exit code: a repo that keeps the guard selected but has
- * no qavis installed is a choice, not drift.
- *
- * What it catches is the gate's one blind spot: it fails OPEN when qavis can't be reached, so a
- * missing binary looks exactly like a healthy "nothing to QA" at commit time. Resolved against the
- * git ROOT because that's the cwd the husky fragment shells the gate from — doctor should report
- * what the hook would actually see, not what this cwd sees.
- */
-export function printQavisAdvisoryHealth(cwd, guards) {
-    if (!guards.includes(QAVIS_ADVISORY_ID))
-        return;
-    const { gitRoot } = detectGitRoot(cwd);
-    if (!existsSync(join(gitRoot, QAVIS_RECIPE))) {
-        console.log(`  · ${QAVIS_ADVISORY_ID}: no ${QAVIS_RECIPE} — gate inert (nothing to QA)`);
-    }
-    else if (!qavisOnPath()) {
-        console.log(`  · ${QAVIS_ADVISORY_ID}: ${QAVIS_RECIPE} present but qavis is NOT on PATH — the QA advisory is skipped on every commit (install qavis, or drop the guard)`);
-    }
-    else {
-        console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present)`);
-    }
 }
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
 const DEFAULT_DOCTOR_SEL = {

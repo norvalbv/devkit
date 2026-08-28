@@ -40,7 +40,8 @@ import { correctnessModel, resolveEscalationModel, resolveReviewModel, REVIEWERS
 import { detectStack } from '../detect-stack.mjs';
 import { packageDir, readJson } from '../fs-helpers.mjs';
 import { check } from './check-result.mjs';
-import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge-auth.mjs';
+import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge/judge-auth.mjs';
+import { CLAUDE_RUNTIME_CHECK, claudeBindable, claudeRuntimeResult, explicitFamilyKeys, FAMILY_STALE_CHECK, familyStaleResult, } from './judge/judge-family.mjs';
 export const SEARCH_INDEX_CHECK = 'search-code index';
 /** Where `devkit init --search-code` puts the index — mirrors INDEX_PATH in install-search-code.mts. */
 const DEFAULT_INDEX = '.search-code/index.db';
@@ -177,6 +178,21 @@ reviewSelected) {
     const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
     if (codex)
         results.push(codex);
+    if (codex && claudeBindable(cwd)) {
+        codex.fixable = true;
+        codex.remediation += ' — or `devkit doctor --fix` binds the claude family (haiku/opus/sonnet, chunking off) into guard.config.json';
+    }
+    else if (codex) {
+        const explicit = explicitFamilyKeys(cwd);
+        if (explicit.length)
+            codex.remediation += ` — automatic binding is blocked by your explicit review.${explicit.join(' / review.')}`;
+    }
+    const claude = reviewSelected ? claudeRuntimeResult(cwd) : null;
+    if (claude)
+        results.push(claude);
+    const stale = reviewSelected ? familyStaleResult(cwd) : null;
+    if (stale)
+        results.push(stale);
     const auth = reviewSelected ? judgeAuthResult(cfg) : null;
     if (auth)
         results.push(auth);
@@ -264,11 +280,13 @@ export async function adviseSearchIndex(cwd, sel) {
  */
 export async function adviseCodexRuntime(cwd, sel) {
     const results = await checkGuardConfig(cwd, false, false, sel.guards?.includes('review') === true);
-    const rows = results.filter((r) => r.name === CODEX_RUNTIME_CHECK || r.name === JUDGE_AUTH_CHECK);
-    for (const row of rows) {
+    const ADVISED = new Set([CODEX_RUNTIME_CHECK, CLAUDE_RUNTIME_CHECK, FAMILY_STALE_CHECK, JUDGE_AUTH_CHECK]);
+    for (const row of results.filter((r) => ADVISED.has(r.name))) {
         console.log(`  ⚠ ${row.name}: ${row.detail}`);
         if (row.remediation)
             console.log(`      → ${row.remediation}`);
+        if (row.name === CODEX_RUNTIME_CHECK && row.fixable)
+            console.log('      → automatic family binding is package-mode only — in this mode, set the four review.* keys by hand');
     }
 }
 export const REVIEW_TOPOLOGY_CHECK = 'review topology';

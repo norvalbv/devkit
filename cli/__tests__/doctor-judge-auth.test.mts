@@ -6,7 +6,7 @@ import {
   judgeAuthResult,
   type ProbeExec,
   type ProbeOutput,
-} from '../lib/doctor/judge-auth.mts';
+} from '../lib/doctor/judge/judge-auth.mts';
 
 const ENV_KEYS = [
   'GUARD_REVIEW_MODEL',

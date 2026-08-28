@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -153,13 +153,25 @@ describe('runQavisAdvisory reports a fail-open skip', () => {
 });
 
 describe('qavisOnPath', () => {
-  it('finds qavis in a PATH entry, and reports false when no entry has it', () => {
+  it('finds an EXECUTABLE qavis in a PATH entry, and reports false when no entry has one', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'qavis-path-'));
     const empty = mkdtempSync(path.join(tmpdir(), 'qavis-empty-'));
     writeFileSync(path.join(dir, 'qavis'), '');
+    chmodSync(path.join(dir, 'qavis'), 0o755);
 
     expect(qavisOnPath({ PATH: [empty, dir].join(path.delimiter) })).toBe(true);
     expect(qavisOnPath({ PATH: empty })).toBe(false);
     expect(qavisOnPath({})).toBe(false);
+  });
+
+  it('a non-executable file (or a directory) named qavis is NOT a healthy install', () => {
+    const noExec = mkdtempSync(path.join(tmpdir(), 'qavis-noexec-'));
+    writeFileSync(path.join(noExec, 'qavis'), '');
+    chmodSync(path.join(noExec, 'qavis'), 0o644);
+    const dirNamed = mkdtempSync(path.join(tmpdir(), 'qavis-dir-'));
+    mkdirSync(path.join(dirNamed, 'qavis'));
+
+    expect(qavisOnPath({ PATH: noExec })).toBe(false);
+    expect(qavisOnPath({ PATH: dirNamed })).toBe(false);
   });
 });

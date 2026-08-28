@@ -4,7 +4,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { QAVIS_RECIPE, qavisOnPath } from '../../gate-engine/qavis-advisory/check.mts';
 import {
   FANOUT_BASELINE,
   LEGACY_FANOUT_BASELINE,
@@ -24,7 +23,13 @@ import {
   expectedExtends,
   repairExtends,
 } from '../lib/doctor/extends-checks.mts';
-import { checkGuardConfig, SEARCH_INDEX_CHECK } from '../lib/doctor/guard-config-checks.mts';
+import {
+  checkGuardConfig,
+  CODEX_RUNTIME_CHECK,
+  SEARCH_INDEX_CHECK,
+} from '../lib/doctor/guard-config-checks.mts';
+import { bindClaudeFamily } from '../lib/doctor/judge/judge-family.mts';
+import { printQavisAdvisoryHealth } from '../lib/doctor/qavis-health.mts';
 import { hookChecks } from '../lib/doctor/hook-checks.mts';
 import { runOverlayDoctor } from '../lib/doctor/overlay-doctor.mts';
 import { checkLockPin, checkPin } from '../lib/doctor/pin/pin-checks.mts';
@@ -38,7 +43,7 @@ import {
 import { runSelfHostDoctor } from '../lib/doctor/self-host-doctor.mts';
 import { packageDir, readJson } from '../lib/fs-helpers.mts';
 import { checkCommitMsgHook, commitMsgGuards } from '../lib/husky/commit-msg-block.mts';
-import { extractGuardBlock, QAVIS_ADVISORY_ID } from '../lib/husky/husky-block.mts';
+import { extractGuardBlock } from '../lib/husky/husky-block.mts';
 import { checkAdhdSkill } from '../lib/install/adhd-skill.mts';
 import {
   resolveExistingAgentProviders,
@@ -223,6 +228,15 @@ function applyFix(
     }
   }
 
+  // A fixable codex-runtime DRIFT means the bind preconditions held at check time (claude
+  // resolves, no explicit review.* keys) — bindClaudeFamily re-verifies them before writing.
+  const codexRow = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
+  if (codexRow?.fixable && codexRow.status !== 'OK' && bindClaudeFamily(cwd)) {
+    console.log(
+      '  ✓ bound the claude judge family (haiku/opus/sonnet, chunking off) into guard.config.json',
+    );
+  }
+
   // MISSING template files / husky drift → init for the recorded selection (idempotent).
   const OXC_CHECKS = new Set([
     'Oxc manifest',
@@ -292,30 +306,6 @@ function applyFix(
     });
   }
   // Baselines are cut at init; an explicit re-cut uses `guard-* freeze`, never doctor.
-}
-
-/**
- * qavis-advisory health — ADVISORY, printed by every doctor mode, never a CheckResult and never a
- * `--fix` target. Deliberately outside the exit code: a repo that keeps the guard selected but has
- * no qavis installed is a choice, not drift.
- *
- * What it catches is the gate's one blind spot: it fails OPEN when qavis can't be reached, so a
- * missing binary looks exactly like a healthy "nothing to QA" at commit time. Resolved against the
- * git ROOT because that's the cwd the husky fragment shells the gate from — doctor should report
- * what the hook would actually see, not what this cwd sees.
- */
-export function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
-  if (!guards.includes(QAVIS_ADVISORY_ID)) return;
-  const { gitRoot } = detectGitRoot(cwd);
-  if (!existsSync(join(gitRoot, QAVIS_RECIPE))) {
-    console.log(`  · ${QAVIS_ADVISORY_ID}: no ${QAVIS_RECIPE} — gate inert (nothing to QA)`);
-  } else if (!qavisOnPath()) {
-    console.log(
-      `  · ${QAVIS_ADVISORY_ID}: ${QAVIS_RECIPE} present but qavis is NOT on PATH — the QA advisory is skipped on every commit (install qavis, or drop the guard)`,
-    );
-  } else {
-    console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present)`);
-  }
 }
 
 // The default component selection (pre-`components`-block configs, and the all-on fallback).
