@@ -40,6 +40,7 @@ import { correctnessModel, resolveEscalationModel, resolveReviewModel, REVIEWERS
 import { detectStack } from '../detect-stack.mjs';
 import { packageDir, readJson } from '../fs-helpers.mjs';
 import { check } from './check-result.mjs';
+import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge-auth.mjs';
 export const SEARCH_INDEX_CHECK = 'search-code index';
 /** Where `devkit init --search-code` puts the index — mirrors INDEX_PATH in install-search-code.mts. */
 const DEFAULT_INDEX = '.search-code/index.db';
@@ -176,6 +177,9 @@ reviewSelected) {
     const codex = reviewSelected ? codexRuntimeResult(cfg, cwd) : null;
     if (codex)
         results.push(codex);
+    const auth = reviewSelected ? judgeAuthResult(cfg) : null;
+    if (auth)
+        results.push(auth);
     return results;
 }
 export const CODEX_RUNTIME_CHECK = 'codex judge runtime';
@@ -260,12 +264,12 @@ export async function adviseSearchIndex(cwd, sel) {
  */
 export async function adviseCodexRuntime(cwd, sel) {
     const results = await checkGuardConfig(cwd, false, false, sel.guards?.includes('review') === true);
-    const codex = results.find((r) => r.name === CODEX_RUNTIME_CHECK);
-    if (!codex)
-        return;
-    console.log(`  ⚠ ${codex.name}: ${codex.detail}`);
-    if (codex.remediation)
-        console.log(`      → ${codex.remediation}`);
+    const rows = results.filter((r) => r.name === CODEX_RUNTIME_CHECK || r.name === JUDGE_AUTH_CHECK);
+    for (const row of rows) {
+        console.log(`  ⚠ ${row.name}: ${row.detail}`);
+        if (row.remediation)
+            console.log(`      → ${row.remediation}`);
+    }
 }
 export const REVIEW_TOPOLOGY_CHECK = 'review topology';
 /**
