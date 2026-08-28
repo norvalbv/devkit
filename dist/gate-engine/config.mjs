@@ -126,7 +126,7 @@ export const DEFAULTS = Object.freeze({
 function positiveMs(v) {
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
 }
-function envVar(name) {
+export function envVar(name) {
     const guard = process.env[`GUARD_${name}`];
     if (guard !== undefined)
         return guard;

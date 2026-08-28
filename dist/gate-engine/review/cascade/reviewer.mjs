@@ -8,6 +8,7 @@ import { buildCappedDiffEvidence } from '../diff-evidence.mjs';
 import { responseContractFor } from '../contracts/registry.mjs';
 import { attachItems } from '../evidence/items.mjs';
 import { gitCached } from '../evidence/staged-git.mjs';
+import { lensGroupId } from '../lens/groups.mjs';
 import { applyOverrideValve } from '../overrides.mjs';
 import { allowedToolsFor, escalatePrompt, hasChecklist, resolveEscalationModel, resolveReviewModel, wrapConventionsPrompt, wrapPrompt, } from '../reviewers.mjs';
 import { agentBody, cleanupChecklistState, enforceChecklistContract, initializeCommitGuardChecklist, readChecklistState, withStagedFiles, } from '../runtime.mjs';
@@ -71,6 +72,9 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         allowedTools,
     ];
     const passModel = reviewer.model ?? firstModel;
+    // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
+    // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
+    const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
     let firstOutage;
     const firstOpts = {
         label: `review:${reviewer.name}`,
@@ -81,6 +85,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         transcript: false,
         mcpProfile,
         env,
+        lens,
         onOutage: (kind) => {
             firstOutage = kind;
         },
@@ -211,6 +216,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
         transcript: false,
         mcpProfile,
         env,
+        lens,
         onOutage: (kind) => {
             secondOutage = kind;
         },

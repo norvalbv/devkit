@@ -180,7 +180,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
     );
   });
 
-  it('does not re-emit the structure bypass when a prefix-cache hit skips the retry', () => {
+  it('re-emits the structure bypass on a prefix-cached retry — every bypassed ATTEMPT counts', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const d = repo(['size']);
     execFileSync('git', ['init', '-q'], { cwd: d });
@@ -208,7 +208,7 @@ describe('runDeterministic — --structure / --extra / --only', () => {
           event.status === 'could_not_run' &&
           event.detail === 'structure-lint(bypassed:GUARD_STRUCTURE_OK)',
       );
-    expect(bypassEvents).toHaveLength(1);
+    expect(bypassEvents).toHaveLength(2);
   });
 
   it('a structure failure prints the explicit base-debt remedy', () => {

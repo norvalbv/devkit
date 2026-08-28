@@ -349,14 +349,14 @@ function runGate() {
         const staged = decisionStaged(cwd, decisionMatcher);
         const verdict = gateVerdict({ bypass: cfg.noLog, decisionStaged: staged, smells });
         if (verdict === 0) {
-            // Announce clean runs visibly and emit their pass telemetry.
             const detail = cfg.noLog
                 ? 'bypassed (GUARD_NO_LOG)'
                 : smells.length === 0
                     ? 'no architectural smell — routine ✓'
                     : `decision recorded ✓ (${smells.join(', ')})`;
             console.error(`decision-gate: ${detail}`);
-            emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail });
+            const bypass = cfg.noLog ? 'GUARD_NO_LOG' : undefined; // undefined key drops in serialization
+            emitGateEvent({ type: 'gate_result', gate: 'decisions', status: 'pass', detail, bypass });
             finish(0);
         }
         // Regex says block — let the LLM try to clear a false positive (dep bump, sync, etc.).

@@ -231,7 +231,7 @@ function positiveMs(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
 }
 
-function envVar(name: string): string | undefined {
+export function envVar(name: string): string | undefined {
   const guard = process.env[`GUARD_${name}`];
   if (guard !== undefined) return guard;
   return process.env[`FRINK_${name}`];

@@ -48,6 +48,8 @@ interface JudgeError {
   message?: string;
   killed?: boolean;
   signal?: string;
+  /** execFileSync attaches the child's partial stdout to the throw (utf8 → string here). */
+  stdout?: string;
 }
 
 // Narrow an unknown thrown value to the JudgeError shape; a non-object (or null) reads as {} so every
@@ -198,6 +200,10 @@ interface ExecJudgeOpts {
   /** Tool-equipped but write-free judge: pin the codex path to the read-only sandbox (see
    * judgeCliFor). Required for any codex judge on a gate without staged-tree tamper detection. */
   codexReadOnly?: boolean;
+  /** Which lens group of a split reviewer this invocation judges. Rides the judge_exec event so
+   * per-lens spend is attributable — every lens part shares one judge LABEL by design (the label
+   * is the reviewer identity the caches and the warehouse key on), which made lens cost invisible. */
+  lens?: string;
 }
 
 /** The `--model <m>` value from a judge argv, for the telemetry event; null when absent. */
@@ -281,6 +287,10 @@ function emitJudgeExec(
   output?: string,
   usage?: JudgeUsage | null,
 ): void {
+  // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
+  // than an absent one.
+  const extra: Partial<JudgeUsage> & { lens?: string } = usage ? { ...usage } : {};
+  if (opts.lens !== undefined) extra.lens = opts.lens;
   recordAgentRun({
     label: opts.label,
     output,
@@ -289,9 +299,7 @@ function emitJudgeExec(
     outcome,
     durationMs: Date.now() - startedAt,
     transcript: opts.transcript,
-    // Omitted entirely when unreadable — see parseJudgeUsage on why a zero-filled row is worse
-    // than an absent one.
-    ...(usage ? { extra: { ...usage } } : {}),
+    extra: Object.keys(extra).length > 0 ? extra : undefined,
   });
 }
 
@@ -306,13 +314,26 @@ function emitJudgeExec(
 function readJudgeOutput(
   stdout: string,
   cli: JudgeCli,
-): { text: string; usage: JudgeUsage | null } | { failure: string } {
+): { text: string; usage: JudgeUsage | null } | { failure: string; usage: JudgeUsage | null } {
   if (cli.codex) {
     const failure = codexFailure(stdout);
-    if (failure !== null) return { failure };
+    // A failed turn's stream can still carry its usage event — those tokens were burned whether or
+    // not a verdict arrived, and dropping them under-counts exactly the most expensive failures.
+    if (failure !== null) return { failure, usage: parseCodexUsage(stdout) };
     return { text: unwrapCodexResult(stdout) ?? stdout, usage: parseCodexUsage(stdout) };
   }
   return { text: unwrapClaudeResult(stdout) ?? stdout, usage: parseJudgeUsage(stdout) };
+}
+
+/**
+ * Salvage the spend from a FAILED spawn's partial stdout: the SIGKILL at the cap and a non-zero
+ * exit both leave whatever the judge streamed first, and a parseable usage record there prices
+ * tokens that were burned regardless of the missing verdict. Unparseable/absent → null, never a
+ * zero row (see parseJudgeUsage: a zero-filled row reads downstream as a free judge).
+ */
+function salvageUsage(text: string | undefined, args: string[]): JudgeUsage | null {
+  if (!text || !text.trim()) return null;
+  return judgeBinFor(args) === 'claude' ? parseJudgeUsage(text) : parseCodexUsage(text);
 }
 
 /**
@@ -361,7 +382,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
     if ('failure' in parsed) {
       // The stream itself reported the turn failed (exit 0 notwithstanding) — an outage, retryable.
       warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
-      emitJudgeExec(opts, 'transient', startedAt);
+      emitJudgeExec(opts, 'transient', startedAt, undefined, parsed.usage);
       onOutage?.('transient');
       return null;
     }
@@ -370,7 +391,7 @@ export function execJudge(opts: ExecJudgeOpts): string | null {
   } catch (e) {
     warnUnavailable(label, judgeErr(e), timeout, judgeBinFor(args));
     const kind = isJudgeTimeout(e) ? 'timeout' : 'transient';
-    emitJudgeExec(opts, kind, startedAt);
+    emitJudgeExec(opts, kind, startedAt, undefined, salvageUsage(judgeErr(e).stdout, args));
     onOutage?.(kind);
     return null;
   } finally {
@@ -403,11 +424,13 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
     // promise, breaking this function's own documented contract (never throws/rejects, always
     // resolves) for any caller awaiting it outside its own try/catch — the sync execJudge twin
     // already had this same guard via its enclosing try/catch.
-    const fail = (err: unknown) => {
+    const fail = (err: JudgeError, stdout?: string) => {
       mcp.cleanup();
-      warnUnavailable(label, judgeErr(err), timeout, judgeBinFor(args));
+      warnUnavailable(label, err, timeout, judgeBinFor(args));
       const kind = isJudgeTimeout(err) ? 'timeout' : 'transient';
-      emitJudgeExec(opts, kind, startedAt);
+      // The callback's own stdout wins (execFile hands it beside the error); the throw-attached
+      // copy covers the synchronous-throw path.
+      emitJudgeExec(opts, kind, startedAt, undefined, salvageUsage(stdout ?? err.stdout, args));
       onOutage?.(kind);
       resolve(null);
     };
@@ -430,7 +453,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
         },
         (err, stdout) => {
           if (err) {
-            fail(err);
+            fail(judgeErr(err), stdout ? String(stdout) : undefined);
             return;
           }
           mcp.cleanup();
@@ -445,7 +468,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
           if ('failure' in parsed) {
             // See the sync twin: a stream-reported failed turn is an outage, retryable.
             warnUnavailable(label, new Error(parsed.failure), timeout, cli.bin);
-            emitJudgeExec(opts, 'transient', startedAt);
+            emitJudgeExec(opts, 'transient', startedAt, undefined, parsed.usage);
             onOutage?.('transient');
             resolve(null);
             return;
@@ -459,7 +482,7 @@ export function execJudgeAsync(opts: ExecJudgeOpts): Promise<string | null> {
       if (input !== undefined) child.stdin?.write(input);
       child.stdin?.end();
     } catch (e) {
-      fail(e);
+      fail(judgeErr(e));
     }
   });
 }

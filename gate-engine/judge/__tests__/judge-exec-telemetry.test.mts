@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execJudge, execJudgeAsync, recordAgentRun } from '../run-judge.mts';
 import { DIFF_HEADER, OUTPUT_HEADER, readTranscript } from '../transcript-store.mts';
 
-const ENV_KEYS = ['DEVKIT_GATE_EVENTS', 'DEVKIT_JUDGE_MCP_CONFIG', 'DEVKIT_SHIP_ID', 'PATH'];
+const ENV_KEYS = [
+  'DEVKIT_GATE_EVENTS',
+  'DEVKIT_JUDGE_MCP_CONFIG',
+  'DEVKIT_SHIP_ID',
+  'GUARD_CODEX_BIN',
+  'PATH',
+];
 const saved: Record<string, string | undefined> = {};
 let dir: string;
 let sink: string;
@@ -519,5 +525,99 @@ describe('judge spend capture', () => {
     const event = events()[0];
     expect(event).toMatchObject({ outcome: 'transient' });
     expect(event).not.toHaveProperty('cost_usd');
+  });
+});
+
+describe('judge_exec usage on failure outcomes', () => {
+  const ENVELOPE = JSON.stringify({
+    type: 'result',
+    result: 'VERDICT: PASS',
+    usage: {
+      input_tokens: 111,
+      output_tokens: 22,
+      cache_creation_input_tokens: 3,
+      cache_read_input_tokens: 4,
+    },
+    total_cost_usd: 0.5,
+    session_id: 'sess-1',
+  });
+
+  it('sync: a non-zero exit that already printed its envelope books the spend on the transient row', () => {
+    fakeClaude(`printf '%s' '${ENVELOPE}'\nexit 1`);
+    const out = execJudge({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(out).toBeNull();
+    const [ev] = events();
+    expect(ev).toMatchObject({
+      outcome: 'transient',
+      input_tokens: 111,
+      output_tokens: 22,
+      cost_usd: 0.5,
+      session_id: 'sess-1',
+    });
+  });
+
+  it('sync: the SIGKILL at the cap salvages usage from the partial stdout on the timeout row', () => {
+    fakeClaude(`printf '%s' '${ENVELOPE}'\ntrap '' TERM\nsleep 5`);
+    const out = execJudge({ label: 'review:x', args: ['-p', 'q'], timeout: 700 });
+    expect(out).toBeNull();
+    const [ev] = events();
+    expect(ev).toMatchObject({ outcome: 'timeout', input_tokens: 111, cost_usd: 0.5 });
+  });
+
+  it('async: the callback error path books the spend from its own stdout argument', async () => {
+    fakeClaude(`printf '%s' '${ENVELOPE}'\nexit 1`);
+    const out = await execJudgeAsync({ label: 'review:x', args: ['-p', 'q'], timeout: 20_000 });
+    expect(out).toBeNull();
+    const [ev] = events();
+    expect(ev).toMatchObject({ outcome: 'transient', input_tokens: 111, output_tokens: 22 });
+  });
+
+  it('codex: a failed turn whose stream carries turn.completed still books its usage', async () => {
+    const bin = path.join(dir, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const fake = path.join(bin, 'codex-fake');
+    writeFileSync(
+      fake,
+      [
+        '#!/bin/sh',
+        'cat >/dev/null',
+        `printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":20,"reasoning_output_tokens":30}}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"usage limit reached"}}'`,
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    process.env.GUARD_CODEX_BIN = fake;
+    const out = await execJudgeAsync({
+      label: 'review:x',
+      args: ['-p', 'q', '--model', 'gpt-5'],
+      timeout: 20_000,
+      codexReadOnly: true,
+    });
+    expect(out).toBeNull();
+    const [ev] = events();
+    // Codex semantics: input minus cached; output folds reasoning in; subscription billing.
+    expect(ev).toMatchObject({
+      outcome: 'transient',
+      input_tokens: 60,
+      output_tokens: 50,
+      cache_read: 40,
+      billing: 'subscription',
+    });
+  });
+
+  it('the lens field rides the event beside the shared reviewer label', () => {
+    fakeClaude('echo FIT');
+    execJudge({
+      label: 'review:correctness-reviewer',
+      args: ['-p', 'q'],
+      timeout: 20_000,
+      lens: 'concurrency-races',
+    });
+    const [ev] = events();
+    expect(ev).toMatchObject({
+      judge: 'review:correctness-reviewer',
+      outcome: 'ok',
+      lens: 'concurrency-races',
+    });
   });
 });

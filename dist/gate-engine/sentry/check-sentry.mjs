@@ -67,20 +67,14 @@ import { execSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { envBool, resolveGuardConfig } from '../config.mjs';
-import { emitGateEvent } from '../judge/gate-events.mjs';
+import { envBool, envVar, resolveGuardConfig } from '../config.mjs';
+import { emitGateBypass, emitGateEvent } from '../judge/gate-events.mjs';
 import { JUDGE_ISOLATION, JUDGE_READ_ONLY } from '../judge/judge-isolation.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudge } from '../judge/run-judge.mjs';
 import { resolveReviewModel } from '../review/reviewers.mjs';
 import { buildEvidence, degradeCause, renderInventory } from './evidence.mjs';
 import { judgeSentryWithCache } from './verdict-cache.mjs';
-// Read a GUARD_* env var, falling back to its FRINK_* alias for back-compat with the original frink
-// gate. Mirrors the config loader's envVar so every devkit gate reads env the same way.
-function envVar(name) {
-    const guard = process.env[`GUARD_${name}`];
-    return guard !== undefined ? guard : process.env[`FRINK_${name}`];
-}
 const CWD = process.cwd();
 const modelSpec = () => envVar('SENTRY_MODEL') ?? resolveReviewModel(resolveGuardConfig(CWD));
 /** Confidence contract: a run that can BLOCK votes a 3-sample majority; warn-only spends 1. A positive *_SENTRY_SAMPLES always wins (unset/invalid → the default). */
@@ -386,8 +380,10 @@ export function effectiveHard(hardEnv, tier, evidence) {
 }
 /** Why the gate should bypass judging (env override or trivial commit type), or null to proceed. */
 export function skipReason(message) {
-    if (envVar('NO_SENTRY_JUDGE'))
+    if (envVar('NO_SENTRY_JUDGE')) {
+        emitGateBypass('sentry', 'GUARD_NO_SENTRY_JUDGE'); // previously this bypass emitted nothing
         return 'sentry-judge: skipped (GUARD_NO_SENTRY_JUDGE)';
+    }
     if (!shouldJudge(message))
         return 'sentry-judge: SKIP (trivial commit type / empty — not judged)';
     return null;

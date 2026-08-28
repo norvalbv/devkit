@@ -9,6 +9,7 @@ import { buildCappedDiffEvidence } from '../diff-evidence.mts';
 import { responseContractFor } from '../contracts/registry.mts';
 import { attachItems } from '../evidence/items.mts';
 import { gitCached } from '../evidence/staged-git.mts';
+import { lensGroupId } from '../lens/groups.mts';
 import { applyOverrideValve } from '../overrides.mts';
 import {
   allowedToolsFor,
@@ -137,6 +138,9 @@ async function cascadeVerdict(
     allowedTools,
   ];
   const passModel = reviewer.model ?? firstModel;
+  // Per-lens spend attribution: every split part deliberately shares one judge LABEL (the reviewer
+  // identity the caches and warehouse key on), so the lens rides the judge_exec event as its own field.
+  const lens = reviewer.lens?.length ? lensGroupId(reviewer.lens) : undefined;
   let firstOutage: 'timeout' | 'transient' | 'empty' | undefined;
   const firstOpts = {
     label: `review:${reviewer.name}`,
@@ -147,6 +151,7 @@ async function cascadeVerdict(
     transcript: false,
     mcpProfile,
     env,
+    lens,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       firstOutage = kind;
     },
@@ -281,6 +286,7 @@ async function cascadeVerdict(
     transcript: false,
     mcpProfile,
     env,
+    lens,
     onOutage: (kind: 'timeout' | 'transient' | 'empty') => {
       secondOutage = kind;
     },
