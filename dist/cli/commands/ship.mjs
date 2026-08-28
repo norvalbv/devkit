@@ -6,7 +6,7 @@
  * manual lane runs the identical command in a plain terminal.
  */
 import { delimiter, dirname } from 'node:path';
-import { runPackagedScript } from '../lib/ship/run-packaged-script.mjs';
+import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mjs';
 export const meta = {
     name: 'ship',
     summary: 'Commit files onto a new branch + open a PR without moving HEAD.',
@@ -74,6 +74,9 @@ export default function ship(args, cwd) {
     // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
     // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
     //
+    // MANAGED (sc-2159), matching `devkit review`: signals reach the script's own process group, not
+    // the wrapper alone.
+    //
     // PATH carries the node running THIS process, the way `devkit review` already does. The gate
     // supervisor bounding the commit is a node script, so no commit happens at all without node on
     // PATH — and a devkit launched through a wrapper whose PATH omits it would fail at the gate, not
@@ -83,5 +86,5 @@ export default function ship(args, cwd) {
         ...process.env,
         PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
     };
-    return runPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd, env });
+    return runManagedPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd, env });
 }

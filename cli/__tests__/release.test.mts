@@ -98,6 +98,40 @@ describe('release publishing', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    [0, false, 'a successful publish reports success'],
+    [1, true, 'a failed publish reports the failure'],
+  ])('awaits ship, whose return is now a Promise (%i): %s', async (shipCode, expectFailure) => {
+    // Regression guard for the managed-spawn swap (sc-2159). `devkit ship` returns Promise<number>
+    // now, while every other test here mocks a BARE number that an accidental removal of `await`
+    // would still satisfy. Note the exit CODE cannot catch it: release is async, so returning an
+    // un-awaited Promise is flattened by the caller's own await and still yields the right number.
+    // The observable damage is the branch taken — un-awaited, `publishCode !== 0` is true for a
+    // Promise, so a perfectly good release announces "could not publish" and tells the user their
+    // files are stranded.
+    const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
+    made.push(cwd);
+    writeFileSync(
+      join(cwd, 'package.json'),
+      '{\n  "name": "@norvalbv/devkit",\n  "version": "0.47.1"\n}\n',
+    );
+    writeFileSync(
+      join(cwd, 'README.md'),
+      'bun add -D git+ssh://git@github.com/norvalbv/devkit.git#v0.47.1\n',
+    );
+    writeShipDistFixture(cwd);
+    mockShip.mockReturnValue(Promise.resolve(shipCode));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    expect(await release(['minor', '--yes'], cwd)).toBe(shipCode);
+
+    const announcedFailure = errors.mock.calls.some((c) => /could not publish/.test(String(c[0])));
+    expect(announcedFailure).toBe(expectFailure);
+    const announcedSuccess = logs.mock.calls.some((c) => /Opened release PR/.test(String(c[0])));
+    expect(announcedSuccess).toBe(!expectFailure);
+  });
+
   it('opens a release PR and never commits, tags, or pushes the base branch directly', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'devkit-release-'));
     made.push(cwd);

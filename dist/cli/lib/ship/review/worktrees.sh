@@ -5,6 +5,7 @@
 
 REVIEW_WORKTREE_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$REVIEW_WORKTREE_LIB_DIR/tree-materialization.sh"
+. "$REVIEW_WORKTREE_LIB_DIR/../worktree-registry.sh"
 
 _review_worktree_clear_git_env() {
   local name
@@ -76,14 +77,11 @@ _review_worktree_repo_root() {
   printf '%s\0' "$root"
 }
 
+# The status-carrying porcelain stream this file introduced now lives in worktree-registry.sh, so
+# ship's orphan preflight reads the registry through the same failure-aware reader. Emitted bytes are
+# unchanged; the `devkit-worktree-list-status` trailer both consumers below match on is its contract.
 _review_worktree_list_stream() {
-  local status
-  if git -c core.hooksPath=/dev/null -C "$1" worktree list --porcelain -z; then
-    status=0
-  else
-    status=$?
-  fi
-  printf 'devkit-worktree-list-status %s\0' "$status"
+  worktree_registry_stream "$1"
 }
 
 _review_worktree_validate_external_destination() {

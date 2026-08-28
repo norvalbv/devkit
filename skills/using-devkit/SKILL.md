@@ -66,6 +66,17 @@ devkit command.
 - **`branch already exists` → ship to a different name; on ORIGIN → `--pr`.** Do not detach HEAD,
   delete the branch, or switch to the base branch to free the name. In a linked worktree all three
   fail (`already used by worktree at …`) and none of them is necessary.
+- **`another ship for <branch> is still running` → wait or stop that run; never force-remove it.**
+  Ship reclaims the worktree and branch a KILLED ship left behind automatically, so a refusal means
+  it proved the owner is alive. When the message says the shell is gone but the gate tree survives,
+  the pid it names is the gate supervisor — reviewers are still working inside that worktree, and
+  removing it corrupts the run. The remove/delete pair it prints applies only once nothing is running
+  there.
+- **`no devkit run record there` → that checkout is not ship's to reclaim.** Ship only removes
+  worktrees it can attribute to a killed run of its own. An unattributable one — your own checkout
+  sitting on that branch, or an orphan predating this behaviour — is reported and left alone. If it
+  is the repo's main working tree, switch it off that branch or ship under another name; `git
+  worktree remove` never applies to a main working tree.
 - **Detached HEAD only matters when `--base` is absent.** With `--base <b>` the PR target comes from
   the flag and HEAD is never consulted — so detaching to "free" something fixes nothing.
 - **Never hand-roll a `git commit` on a protected branch.** If the branch guard is wired, it blocks it

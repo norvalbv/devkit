@@ -37,9 +37,19 @@ review_gate_launching() { GATE_LAUNCHING=1; }
 review_gate_started() {
   ACTIVE_GATE_PID=$1
   GATE_LAUNCHING=0
+  # Record the supervisor alongside the ship shell, when the caller keeps a run record (ship does;
+  # review does not, so this is a no-op there). sc-2159's shape is that the SHELL dies and its
+  # DETACHED gate tree keeps running with the ephemeral worktree as its cwd — judging that worktree
+  # by the shell's pid alone would call it abandoned and remove it out from under live reviewers.
+  if [ -n "${SHIP_RUN_RECORD:-}" ]; then
+    ship_run_record_append gate_pid "$ACTIVE_GATE_PID"
+    ship_run_record_append gate_identity "$(ship_run_identity "$ACTIVE_GATE_PID")"
+  fi
   if [ "$REQUESTED_SIGNAL_STATUS" -ne 0 ]; then
     kill -s "$REQUESTED_SIGNAL" "$ACTIVE_GATE_PID" 2>/dev/null || true
   fi
 }
+# The reaped supervisor is deliberately NOT unrecorded: a pid that has exited already reads as dead,
+# and a recycled one fails the start-time identity check. Clearing it would only add a write.
 review_gate_reaped() { ACTIVE_GATE_PID=; }
 review_gate_finished() { ACTIVE_GATE_PID=; }
