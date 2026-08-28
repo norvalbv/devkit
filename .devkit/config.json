@@ -1,6 +1,6 @@
 {
   "stack": "node-service",
-  "devkitRef": "v0.57.1",
+  "devkitRef": "v0.57.2",
   "initVersion": 2,
   "pkgRel": "",
   "standalone": false,
