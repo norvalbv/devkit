@@ -1,4 +1,5 @@
 import type { GuardConfig } from '../../config.mts';
+import { judgeBinForModel } from '../../judge/codex/result.mts';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mts';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mts';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mts';
@@ -167,6 +168,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
       inconclusiveCause: firstOutage === 'timeout' ? 'timeout' : 'outage',
+      outageBin: judgeBinForModel(passModel),
       escalated: false,
       model: passModel,
     };
@@ -212,6 +214,7 @@ async function cascadeVerdict(
             status: 'inconclusive',
             reason: contractRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
             inconclusiveCause: contractRetryOutage === 'timeout' ? 'timeout' : 'outage',
+            outageBin: judgeBinForModel(passModel),
             escalated: false,
             model: passModel,
             transcript: first,
@@ -288,6 +291,7 @@ async function cascadeVerdict(
       status: 'inconclusive',
       reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
       inconclusiveCause: secondOutage === 'timeout' ? 'timeout' : 'outage',
+      outageBin: judgeBinForModel(escalationModel),
       escalated: true,
       model: passModel,
       transcript: first,
