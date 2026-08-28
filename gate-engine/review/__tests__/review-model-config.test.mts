@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveGuardConfig } from '../../config.mts';
+import { resolveGuardConfig, resolveGuardConfigJson } from '../../config.mts';
 import { reviewerTargetSalts } from '../evidence/targets-block.mts';
 import {
   correctnessModel,
@@ -46,6 +46,7 @@ interface ReviewConfigFile {
     escalationModel?: string;
     correctnessModel?: string;
     correctnessChunkLoc?: number;
+    paths?: { include?: string[]; exclude?: string[] };
   };
 }
 
@@ -103,6 +104,39 @@ describe('model resolution: env > guard.config.json > shipped default', () => {
     process.env.GUARD_CORRECTNESS_MODEL = '  ';
     expect(resolveReviewModel(cfg)).toBe('haiku');
     expect(correctnessModel(cfg)).toBe('sonnet');
+  });
+});
+
+describe('shared review path config resolution', () => {
+  it('keeps the block absent for exact legacy compatibility', () => {
+    expect(cfgIn().review.paths).toBeUndefined();
+  });
+
+  it('canonicalizes valid path rules and resolves a HEAD snapshot through the same code', () => {
+    const json = JSON.stringify({
+      review: {
+        paths: {
+          include: [' scripts/** ', './src/**'],
+          exclude: ['**/*.test.*'],
+        },
+      },
+    });
+    const fromFile = cfgIn(JSON.parse(json)).review.paths;
+    const fromSnapshot = resolveGuardConfigJson(json, '/consumer').review.paths;
+    expect(fromFile).toEqual({
+      include: ['scripts/**', 'src/**'],
+      exclude: ['**/*.test.*'],
+    });
+    expect(fromSnapshot).toEqual(fromFile);
+  });
+
+  it('fails setup loudly for malformed or disable-all configured scope', () => {
+    expect(() => cfgIn({ review: { paths: { include: [] } } })).toThrow(/review\.paths\.include/);
+    expect(() =>
+      cfgIn({
+        review: { paths: { include: ['src/**'], exclude: ['**/*'] } },
+      }),
+    ).toThrow(/disable the entire review scope/);
   });
 });
 

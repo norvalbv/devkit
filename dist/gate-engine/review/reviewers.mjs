@@ -10,11 +10,12 @@
  */
 import { createHash } from 'node:crypto';
 import { normalizeReviewRoots } from '../../skills/_devkit/review-roots.mjs';
-import { sourceMatchers } from '../config.mjs';
 import { devkitVersion } from '../devkit-version.mjs';
 import { LIGHT_JUDGE_MODEL } from '../judge/judge-isolation.mjs';
 import { withNamedAgentMcpTools } from '../judge/mcp/profile.mjs';
 import { checklistContractFor } from './lens/split.mjs';
+import { reviewerFilesAcrossPolicies } from './scope/policy.mjs';
+export { declaredRoots, rootsFor, underRoot } from './scope/policy.mjs';
 export { parseReviewVerdict } from './contracts/response.mjs';
 /** Type guard: does this REVIEWERS entry use the checklist workflow? Skill-less reviewers (e.g.
  * conventions-reviewer) don't — see Reviewer.skill docstring. */
@@ -69,8 +70,6 @@ export const REVIEWERS = Object.freeze([
         stateFile: '.claude/.pre-commit-review.json',
         cmds: Object.freeze({ gen: 'init', check: 'check-file' }),
     }),
-    // Correctness is NOT domain-sliceable: a writer in a backend root and its reader in a frontend
-    // root are ONE finding, so this reviewer sees SOURCE files across the UNION of declared roots.
     // Four ALWAYS-ON lenses — a correctness bug has no reliable lexical signature, so a regex gate
     // would blind exactly the class this reviewer exists to catch. Runs SINGLE-PASS at a pinned
     // model (see `model` below and the Reviewer.model docstring) — no escalation cascade: the
@@ -118,32 +117,6 @@ const BASE_TOOLS = 'Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git sta
 // Leading YAML frontmatter (the agent .md header is Task-tool metadata, not brief).
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const TRAILING_SLASH_RE = /\/$/;
-/** The deduped union of every DECLARED root (scan + backend + frontend) — never `['.']`:
- * undeclared trees (vendored code, scripts) are outside the consumer's stated review surface. */
-export function declaredRoots(cfg) {
-    return [...new Set([...cfg.scanRoots, ...cfg.review.backendRoots, ...cfg.review.frontendRoots])];
-}
-/** The config roots that trigger a reviewer's domain. */
-export function rootsFor(reviewer, cfg) {
-    if (reviewer.domain === 'backend')
-        return cfg.review.backendRoots;
-    if (reviewer.domain === 'frontend')
-        return cfg.review.frontendRoots;
-    // `conventions` shares the `all` union (a CLAUDE.md rule anywhere in the declared surface is fair
-    // game) but — unlike `all` — is never filtered to source-only in selectReviewers below.
-    if (reviewer.domain === 'all' || reviewer.domain === 'conventions')
-        return declaredRoots(cfg);
-    return cfg.scanRoots;
-}
-export function underRoot(file, root) {
-    const r = root.endsWith('/') ? root.slice(0, -1) : root;
-    if (r === '.')
-        return true;
-    return file === r || file.startsWith(`${r}/`);
-}
-// Mirrors the prose exclusion inside each skill's checklist.mjs getStagedFiles — the two lists
-// must agree or a prose-only selection strands the judge with an empty checklist.
-const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
 /**
  * Which reviewers must run for this staged set → [{reviewer, files}]. Backend/frontend trigger on
  * ANY staged file under their roots (matching the old husky HAS_BACKEND/HAS_FRONTEND semantics);
@@ -151,36 +124,33 @@ const RE_PROSE_FILE = /\.(md|mdx|markdown|txt)$/i;
  * a staged JSON or doc under src/ is not its business). Empty roots (e.g. a repo with no
  * configured frontend) simply never select that domain.
  */
-export function selectReviewers(stagedFiles, cfg) {
-    const { isSource, isTest } = sourceMatchers(cfg.sourceExtensions);
+function configuredReviewer(reviewer, cfg) {
+    if (reviewer.name !== 'conventions-reviewer')
+        return reviewer;
+    return Object.freeze({ ...reviewer, model: resolveReviewModel(cfg) });
+}
+export function selectReviewers(stagedFiles, cfg, baselineCfg) {
     return REVIEWERS.map((reviewer) => {
-        const roots = rootsFor(reviewer, cfg);
-        let files = stagedFiles.filter((f) => roots.some((r) => underRoot(f, r)));
+        const files = reviewerFilesAcrossPolicies(reviewer, stagedFiles, cfg, baselineCfg);
+        if (reviewer.name === 'correctness-reviewer') {
+            return {
+                reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }),
+                files,
+            };
+        }
         // Backend/frontend judges read code diffs, and their checklist scripts skip prose files
         // outright — selecting a reviewer for a prose-only diff strands its judge with an empty
         // checklist (scored inconclusive, fail-closed under ship). Keep selection and script agreed.
-        if (reviewer.domain === 'backend' || reviewer.domain === 'frontend')
-            files = files.filter((f) => !RE_PROSE_FILE.test(f));
-        // code + all trigger only on SOURCE files: a staged JSON/doc is neither a duplication nor a
-        // correctness concern.
-        if (reviewer.domain === 'code' || reviewer.domain === 'all')
-            files = files.filter((f) => isSource(f.split('/').pop() ?? ''));
-        // The correctness charter is RUNTIME defects — a test-only hunk cannot introduce one, and
-        // test files are ~half a branch diff's bytes: excluding them keeps the judge inside its
-        // timeout on a ship-sized diff. Test adequacy is the testing reviewer's charter.
-        if (reviewer.domain === 'all')
-            files = files.filter((f) => !isTest(f.split('/').pop() ?? ''));
+        // commit-guard remains coupled to sourceExtensions: semantic duplication is a language-aware
+        // capability. review.paths defines shared eligibility without pretending every reviewer can
+        // interpret every language equally.
         // The correctness pin is config-resolved (env > guard.config.json > default) so every
         // installation can move it without a package edit; the static REVIEWERS entry only carries
         // the shipped default. Applied HERE because both the gate and the scan CLI select through
         // this function — resolving it anywhere later would let their cache salts diverge.
-        if (reviewer.name === 'correctness-reviewer')
-            return { reviewer: Object.freeze({ ...reviewer, model: correctnessModel(cfg) }), files };
         // conventions is the other single-pass pin: it runs at the light judge model (review.model —
         // the same knob as the cascade first pass), resolved here for the same salt-coherence reason.
-        if (reviewer.name === 'conventions-reviewer')
-            return { reviewer: Object.freeze({ ...reviewer, model: resolveReviewModel(cfg) }), files };
-        return { reviewer, files };
+        return { reviewer: configuredReviewer(reviewer, cfg), files };
     }).filter((s) => s.files.length > 0);
 }
 /** A model env var as an override: set AND non-blank — `GUARD_X=''` must fall through, never pin
