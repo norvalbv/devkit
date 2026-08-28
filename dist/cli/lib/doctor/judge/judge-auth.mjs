@@ -14,8 +14,8 @@
  * when all three configured models are codex-family.
  */
 import { spawnSync } from 'node:child_process';
-import { correctnessModel, resolveEscalationModel, resolveReviewModel } from '../../../gate-engine/review/reviewers.mjs';
-import { check } from './check-result.mjs';
+import { correctnessModel, resolveEscalationModel, resolveReviewModel, } from '../../../../gate-engine/review/reviewers.mjs';
+import { check } from '../check-result.mjs';
 export const JUDGE_AUTH_CHECK = 'judge auth';
 const PROBE_TIMEOUT_MS = 5000;
 const runProbe = (bin, args) => {
