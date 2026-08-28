@@ -1,3 +1,4 @@
+import { judgeBinForModel } from '../../judge/codex/result.mjs';
 import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mjs';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mjs';
@@ -99,6 +100,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'inconclusive',
             reason: firstOutage === 'timeout' ? 'judge timed out' : 'judge outage',
             inconclusiveCause: firstOutage === 'timeout' ? 'timeout' : 'outage',
+            outageBin: judgeBinForModel(passModel),
             escalated: false,
             model: passModel,
         };
@@ -142,6 +144,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
                         status: 'inconclusive',
                         reason: contractRetryOutage === 'timeout' ? 'judge timed out' : 'judge outage',
                         inconclusiveCause: contractRetryOutage === 'timeout' ? 'timeout' : 'outage',
+                        outageBin: judgeBinForModel(passModel),
                         escalated: false,
                         model: passModel,
                         transcript: first,
@@ -218,6 +221,7 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             status: 'inconclusive',
             reason: secondOutage === 'timeout' ? 'escalation timed out' : 'escalation outage',
             inconclusiveCause: secondOutage === 'timeout' ? 'timeout' : 'outage',
+            outageBin: judgeBinForModel(escalationModel),
             escalated: true,
             model: passModel,
             transcript: first,

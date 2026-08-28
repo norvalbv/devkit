@@ -93,7 +93,7 @@ export const DEEP_JUDGE_TIMEOUT_MS = 1800000;
  *
  * Each caller appends its own cached-verdict clause — what a retry re-uses differs per gate.
  */
-export function strictRemedy(cause) {
+export function strictRemedy(cause, bin = 'claude') {
     if (cause === 'timeout')
         return ('the judge hit its time cap — this is NOT an auth/quota problem. Re-run `devkit ship`; run ' +
             'it in a real terminal or a detached ship so the 600s agent tool cap cannot kill it early; ' +
@@ -101,7 +101,7 @@ export function strictRemedy(cause) {
     if (cause === 'sync')
         return ('run `devkit sync-agents && devkit sync-skills` so the briefs + checklist scripts are ' +
             'present, then re-run devkit ship');
-    return 'check `claude` CLI auth/quota, then re-run devkit ship';
+    return `check \`${bin}\` CLI auth/quota, then re-run devkit ship`;
 }
 // execFile's `timeout` fires by KILLING the child (SIGKILL, sc-1317 — SIGTERM alone let a child that
 // traps/ignores it survive past the cap), which marks the error `killed`. That kill — not ENOENT /

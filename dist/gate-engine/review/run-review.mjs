@@ -31,6 +31,7 @@
  * `devkit review` deliberately supplies CURRENT packaged briefs/skills via an isolated runtime.
  */
 import { envFlag, resolveGuardConfig } from '../config.mjs';
+import { judgeBinForModel } from '../judge/codex/result.mjs';
 import { emitCacheHit } from '../judge/gate-events.mjs';
 import { reportGateInfraFailure } from '../judge/odb-probe.mjs';
 import { execJudgeAsync, strictRemedy } from '../judge/run-judge.mjs';
@@ -174,6 +175,10 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     const cache = loadCache(cwd);
     const firstModel = resolveReviewModel(cfg);
     const escalationModel = resolveEscalationModel(cfg);
+    // An engine-error rejection loses WHICH pass threw, so name every binary the cascade could have
+    // spawned — a single guess reads as fact and sends a mixed-family operator to the wrong CLI.
+    const engineOutageBin = (rev) => [...new Set((rev.model ? [rev.model] : [firstModel, escalationModel]).map(judgeBinForModel))]
+        .join('` or `');
     const concurrency = reviewConcurrency();
     timing.configure(selected.map((selection) => selection.reviewer.name), concurrency);
     const judgeEnv = gateJudgeEnv(reviewMode, cfg);
@@ -252,6 +257,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
             name: t.sel.reviewer.name,
             status: reviewMode ? 'error' : 'inconclusive',
             reason: `engine error: ${e?.message ?? e}`,
+            outageBin: engineOutageBin(t.sel.reviewer),
             escalated: false,
         }))
             .then((outcome) => {
@@ -272,6 +278,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
         status: reviewMode ? 'error' : 'inconclusive',
         reason: `engine error: ${e?.message ?? e}`,
         inconclusiveCause: 'outage',
+        outageBin: engineOutageBin(task.sel.reviewer),
         escalated: false,
     })), gateStart);
     if (progressFile)
@@ -304,7 +311,7 @@ export async function runReviewGate(cwd = process.cwd(), { exec = execJudgeAsync
     for (const r of inconclusive) {
         // Producers carry the machine cause; human-readable reasons are never parsed as an API.
         const cause = r.inconclusiveCause ?? 'outage';
-        const remedy = cause === 'response-contract' ? RESPONSE_CONTRACT_REMEDY : strictRemedy(cause);
+        const remedy = cause === 'response-contract' ? RESPONSE_CONTRACT_REMEDY : strictRemedy(cause, r.outageBin);
         console.error(strict
             ? `guard-review: ${r.name} INCONCLUSIVE (${r.reason}) — strict ship mode fails closed.\n` +
                 `   Remedy: ${remedy} (completed verdicts are cached).`
