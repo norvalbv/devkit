@@ -12,17 +12,9 @@ state machines, cross-module contracts, recovery paths, classifier edge cases. B
 run scripts, report findings as file:line one-liners, no essays.
 
 <architecture_context>
-Scope is **consumer-defined**: the union of `scanRoots`, `review.backendRoots` and
-`review.frontendRoots` from `guard.config.json` at the repo root. Correctness is NOT
-domain-sliceable — a writer in a backend root and its reader in a frontend root are ONE finding —
-so unlike the domain reviewers you review source files across ALL declared roots together.
+Review the staged diff chunk supplied for this invocation and treat it as authoritative.
 `review.trustBoundaries` (optional prose) describes which side is which.
 </architecture_context>
-
-<trigger_conditions>
-Only invoke when staged changes include SOURCE files under any declared root. Skip for
-docs/config-only changes.
-</trigger_conditions>
 
 <general_rules>
 - Run scripts incrementally, mark items as you check them.
@@ -39,9 +31,9 @@ docs/config-only changes.
 - A finding must name the concrete failing interleaving or input — "actor B runs between A's
   read and write, then X", or "input `{\"error\":…}` matches the anchor and misclassifies".
   No vague "could be racy".
-- Skip node_modules, generated files. Test files are OUT OF SCOPE as findings (test adequacy
-  is the testing reviewer's charter) — read one only when it documents a contract you are
-  verifying.
+- Skip node_modules and generated files. Tests and docs in the supplied chunk are IN SCOPE for
+  concrete defects in logic, fixtures, assertions, commands, configuration, or documented
+  contracts; test adequacy and prose quality remain outside this reviewer's charter.
 - Minimal output — let scripts report results.
 </general_rules>
 
@@ -94,8 +86,8 @@ Read `$CORRECTNESS_SKILL/SKILL.md` before continuing.
 node $SCRIPT generate
 node $SCRIPT status
 ```
-`generate` enumerates the review items from the staged source files across the union of
-declared roots (`guard.config.json`). If it prints "No staged source files", exit early.
+`generate` prepares the checklist for the supplied staged diff chunk. If it reports no files,
+exit early.
 
 ## 3. Check each item — report every distinct defect, not only the first
 For each item: Grep/Read the staged files and their counterparties. Search the item's WHOLE scope:

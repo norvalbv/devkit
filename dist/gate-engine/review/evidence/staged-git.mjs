@@ -5,12 +5,50 @@
  * JSON.stringify-quoted) lets a crafted path like `$(cmd).ts` expand before git runs.
  */
 import { execFileSync } from 'node:child_process';
+import { normalizeRepositoryFile } from '../../../skills/_devkit/review-roots.mjs';
 export function gitCached(cwd, args, files) {
-    return execFileSync('git', ['diff', '--cached', ...args, '--', ...files], {
+    const pathspecs = files.map((file) => `:(top,literal)${normalizeRepositoryFile(file, 'review evidence file')}`);
+    return execFileSync('git', ['diff', '--cached', ...args, '--', ...pathspecs], {
         cwd,
         encoding: 'utf8',
         maxBuffer: 64 * 1024 * 1024,
     });
+}
+function snapshotFile(cwd, spec) {
+    return execFileSync('git', ['show', spec], {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+    });
+}
+const literalPathspec = (file) => `:(top,literal)${file}`;
+function indexHasStageZero(cwd, file) {
+    const entries = execFileSync('git', ['ls-files', '--stage', '-z', '--', literalPathspec(file)], {
+        cwd,
+        encoding: 'utf8',
+    }).split('\0');
+    return entries.some((entry) => /^\d+ [0-9a-f]+ 0\t/.test(entry));
+}
+/** Read one file from HEAD without trusting the staged/worktree copy. Missing/unborn → null. */
+export function headFile(cwd, file) {
+    const normalized = normalizeRepositoryFile(file, 'HEAD file');
+    const head = headHash(cwd);
+    if (head === null)
+        throw new Error('cannot read HEAD while resolving review policy');
+    if (head.startsWith('unborn:'))
+        return null;
+    const entry = execFileSync('git', ['ls-tree', '-z', '--name-only', 'HEAD', '--', literalPathspec(normalized)], { cwd, encoding: 'utf8' });
+    if (entry === '')
+        return null;
+    return snapshotFile(cwd, `HEAD:${normalized}`);
+}
+/** Read one stage-0 file from Git's index. Missing/deleted/unmerged → null. */
+export function indexFile(cwd, file) {
+    const normalized = normalizeRepositoryFile(file, 'index file');
+    if (!indexHasStageZero(cwd, normalized))
+        return null;
+    return snapshotFile(cwd, `:0:${normalized}`);
 }
 export function stagedFiles(cwd) {
     // -z: NUL-separated RAW names. Without it git C-quotes paths containing tabs/unicode/quotes,

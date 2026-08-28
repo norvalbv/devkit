@@ -27,6 +27,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { LIGHT_JUDGE_MODEL } from './judge/judge-isolation.mjs';
 import { isAbsolute, resolve } from 'node:path';
+import { normalizeReviewPaths } from '../skills/_devkit/review-roots.mjs';
+import { parseJsonObject } from './config-json.mjs';
 export const CONFIG_FILENAME = 'guard.config.json';
 // Frink-agnostic defaults: old hardcoded BOUNDARIES / fanout roots are opt-in via guard.config.json.
 export const DEFAULTS = Object.freeze({
@@ -198,25 +200,11 @@ export function structureBypassed() {
 export function deterministicStrict() {
     return envFlag('DETERMINISTIC_STRICT');
 }
-// Load + validate <cwd>/guard.config.json. Missing => {} (defaults stand). Present but
-// unparseable / not an object => throw: a typo'd config must fail loudly, never weaken a gate.
 function loadConfigFile(cwd) {
     const file = resolve(cwd, CONFIG_FILENAME);
     if (!existsSync(file))
         return {};
-    let parsed;
-    try {
-        parsed = JSON.parse(readFileSync(file, 'utf8'));
-    }
-    catch (e) {
-        throw new Error(`${CONFIG_FILENAME} at ${file} is not valid JSON: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error(`${CONFIG_FILENAME} at ${file} must be a JSON object.`);
-    }
-    // Parse boundary: assert the validated object to the raw-config shape (fields typed as
-    // expected; the resolver below re-guards every one before trusting it).
-    return parsed;
+    return parseJsonObject(readFileSync(file, 'utf8'), `${CONFIG_FILENAME} at ${file}`);
 }
 const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
 // Malformed review knobs fall to DEFAULTS (a non-string model must never reach judge argv; a
@@ -224,7 +212,8 @@ const arr = (v, fallback) => (Array.isArray(v) ? v : fallback);
 const str = (v, d) => v != null && `${v}` === v && v.trim() !== '' ? v.trim() : d;
 const nonNegInt = (v, d) => v !== undefined && Number.isInteger(v) && v >= 0 ? v : d;
 /**
- * Resolve the effective governance-gate config for a consumer repo.
+ * Resolve one already-parsed governance config. Kept separate so a staged guard.config.json can
+ * be compared with its HEAD baseline without materializing either version onto the filesystem.
  *
  * @param cwd The CONSUMER repo root (default process.cwd()). All path fields are
  *   interpreted relative to THIS, never the package dir (W-3).
@@ -232,8 +221,7 @@ const nonNegInt = (v, d) => v !== undefined && Number.isInteger(v) && v >= 0 ? v
  */
 // Reason: flat config-precedence resolver: each field independently applies the same env ?? file ?? DEFAULT ladder (plus Number.isFinite/Boolean guards); the branch COUNT is high but every branch is a trivial fallback, and the ?? chains ARE the precedence policy — extracting them scatters one resolution table.
 // fallow-ignore-next-line complexity
-export function resolveGuardConfig(cwd = process.cwd()) {
-    const file = loadConfigFile(cwd);
+function resolveLoadedGuardConfig(file, cwd) {
     const fr = file.review ?? {};
     const dr = DEFAULTS.review;
     const noLogEnv = envBool('NO_LOG');
@@ -303,6 +291,7 @@ export function resolveGuardConfig(cwd = process.cwd()) {
             escalationModel: str(fr.escalationModel, dr.escalationModel),
             correctnessModel: str(fr.correctnessModel, dr.correctnessModel),
             correctnessChunkLoc: nonNegInt(fr.correctnessChunkLoc, dr.correctnessChunkLoc),
+            paths: normalizeReviewPaths(fr.paths),
             accessibility: { ...dr.accessibility, ...(fr.accessibility ?? {}) },
         },
         // Reference-checkout globs for the prior-art agent's local research leg. Declared-only:
@@ -315,6 +304,17 @@ export function resolveGuardConfig(cwd = process.cwd()) {
         // for __dirname): they resolve every path field against THIS cwd.
         cwd,
     };
+}
+/** Resolve the effective governance-gate config from the consumer working tree. */
+export function resolveGuardConfig(cwd = process.cwd()) {
+    return resolveLoadedGuardConfig(loadConfigFile(cwd), cwd);
+}
+/** Resolve a Git-snapshot copy of guard.config.json through the exact same precedence/defaults. */
+export function resolveGuardConfigJson(contents, cwd = process.cwd()) {
+    const file = contents === null
+        ? {}
+        : parseJsonObject(contents, `${CONFIG_FILENAME} snapshot`);
+    return resolveLoadedGuardConfig(file, cwd);
 }
 /**
  * Absolutize a relative path field from a resolved config against the SAME consumer cwd

@@ -106,6 +106,12 @@ export function consumerRepo({
     writeFileSync(join(repo, 'src', 'renderer', 'theme.scss'), '.a { color: red; }\n');
   }
   execSync('git add .', { cwd: repo });
+  // Most gate tests exercise runtime changes, not first-time config adoption. Give the config a
+  // real HEAD policy while leaving the requested runtime/assets staged in the index.
+  execSync(
+    'git -c user.email=devkit@example.test -c user.name="Devkit Test" commit -qm "fixture config" -- guard.config.json',
+    { cwd: repo },
+  );
   return repo;
 }
 

@@ -33,6 +33,7 @@ const cfg = {
 };
 
 const names = (sel) => sel.map((s) => s.reviewer.name);
+const filesFor = (sel, reviewer) => sel.find((s) => s.reviewer.name === reviewer)?.files;
 
 describe('test fixture invariant', () => {
   it('keeps the resolved review model knobs — dropping them would silently un-pin every config-resolved reviewer', () => {
@@ -254,6 +255,114 @@ describe('correctness-reviewer (domain all)', () => {
   it('excludes non-source (a staged JSON/doc is not a correctness concern)', () => {
     const sel = selectReviewers(['src/main/data.json'], cfg);
     expect(names(sel)).not.toContain('correctness-reviewer');
+  });
+  it('applies explicit repo-wide runtime paths to the whole reviewer fleet without widening language tooling', () => {
+    const scoped = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        paths: {
+          include: ['src/**'],
+          exclude: ['**/*.test.*'],
+        },
+      },
+    };
+    const sel = selectReviewers(
+      [
+        'src/main/ship.sh',
+        'src/main/worker.custom',
+        'src/main/worker.test.sh',
+        'src/renderer/app.css',
+      ],
+      scoped,
+    );
+    expect(filesFor(sel, 'api-security-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+    ]);
+    expect(filesFor(sel, 'backend-performance-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+    ]);
+    expect(filesFor(sel, 'frontend-security-reviewer')).toEqual(['src/renderer/app.css']);
+    expect(filesFor(sel, 'frontend-performance-reviewer')).toEqual(['src/renderer/app.css']);
+    expect(filesFor(sel, 'correctness-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+      'src/renderer/app.css',
+    ]);
+    expect(filesFor(sel, 'conventions-reviewer')).toEqual([
+      'src/main/ship.sh',
+      'src/main/worker.custom',
+      'src/renderer/app.css',
+    ]);
+    expect(names(sel)).not.toContain('commit-guard');
+  });
+
+  it('unions HEAD and staged path policy for every reviewer when the caller supplies a baseline config', () => {
+    const baseline = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        paths: { include: ['src/main/legacy/**'], exclude: [] },
+      },
+    };
+    const staged = {
+      ...cfg,
+      review: {
+        ...cfg.review,
+        paths: { include: ['src/main/new/**'], exclude: [] },
+      },
+    };
+    const selected = selectReviewers(
+      ['src/main/legacy/a.ts', 'src/main/new/b.ts', 'outside/c.ts'],
+      staged,
+      baseline,
+    );
+    for (const selection of selected)
+      expect(selection.files).toEqual(['src/main/legacy/a.ts', 'src/main/new/b.ts']);
+  });
+
+  it('Devkit self-scope reviews authored tests, evals, docs, references, and hidden project files', () => {
+    const self = resolveGuardConfig(process.cwd());
+    const authored = [
+      'agents-hooks/decision-stop-check.sh',
+      'cli/index.mts',
+      'skills/_devkit/review-roots.mjs',
+      'skills/correctness/scripts/checklist.mjs',
+      'gate-engine/review/__tests__/reviewers.test.mts',
+      'gate-engine/review/eval/reviewers/bench.mts',
+      'docs/decisions/review-gate-in-chain.md',
+      'skills/correctness/references/checklist.md',
+      'README.md',
+      '.github/workflows/gate.yml',
+      'packages/ui/.storybook/main.ts',
+    ];
+    const excluded = [
+      '.agents/skills/correctness/SKILL.md',
+      '.claude/agents/correctness-reviewer.md',
+      '.codex/agents/correctness-reviewer.toml',
+      '.cursor/agents/correctness-reviewer.md',
+      '.devkit/agents-manifest.json',
+      '.env',
+      '.env.local',
+      '.envrc',
+      'packages/api/.env.production',
+      'packages/api/.envrc',
+      'packages/ui/node_modules/package/index.js',
+      'packages/ui/dist/index.mjs',
+      'packages/ui/coverage/coverage-final.json',
+    ];
+    const selected = selectReviewers(
+      [...authored, ...excluded, 'dist/gate-engine/review/reviewers.mjs', 'bun.lock'],
+      self,
+    );
+    expect(selected.find((s) => s.reviewer.name === 'correctness-reviewer')?.files).toEqual(
+      authored,
+    );
+    expect(selected.find((s) => s.reviewer.name === 'conventions-reviewer')?.files).toEqual(
+      authored,
+    );
   });
   it('gets the semantic search tool ONLY when the consumer wired an index (indexPath set)', () => {
     expect(allowedToolsFor(corr, { ...cfg, indexPath: null })).not.toContain(cfg.searchTool);
