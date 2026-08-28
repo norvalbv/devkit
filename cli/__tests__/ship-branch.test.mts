@@ -754,6 +754,7 @@ describe('ship-branch.sh — worktree integration', () => {
     // sleep 30 → the hook itself hangs so the test timeout fires while it is still running. Fifteen
     // seconds leaves enough startup headroom under load while staying well below either sleep.
     const { dir, env, git } = seedShipRepo({ hookBody: 'sleep 30 &\nsleep 30' });
+    writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/hung-gate', 't', 'note.txt'], {
       cwd: dir,
@@ -785,6 +786,7 @@ describe('ship-branch.sh — worktree integration', () => {
       PATH: `${stubBin}:${env.PATH ?? process.env.PATH ?? ''}`,
       TEST_HOOK_COUNT: hookCount,
     };
+    writeFileSync(join(dir, '.gitignore'), '.devkit/\n'); // recorded attempt → banner offers --resume
     writeFileSync(join(dir, 'note.txt'), 'hi\n');
 
     const first = spawnSync(
