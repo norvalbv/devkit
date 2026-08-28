@@ -347,6 +347,28 @@ describe('skill checklist script (spawned source)', () => {
     expect(state.files).toEqual(['src/main.ts']);
   });
 
+  it('correctness clears a stale chunk checklist when no configured runtime paths match', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'checklist-correctness-empty-chunk-'));
+    dirs.push(repo);
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    const statePath = join(repo, '.claude', '.correctness-review-state-transitions+c0.json');
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({ files: ['stale.ts'], items: [] }));
+    const script = fileURLToPath(
+      new URL('../../skills/correctness/scripts/checklist.mjs', import.meta.url),
+    );
+
+    const r = spawnSync(
+      'node',
+      [script, 'generate', '--lens', 'state-transitions', '--chunk', '0'],
+      { cwd: repo, encoding: 'utf8' },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('No configured runtime paths matched');
+    expect(existsSync(statePath)).toBe(false);
+  });
+
   it.each(REVIEW_ROOT_CASES)(
     '%s rejects unsafe injected roots before constructing a Git pathspec',
     (skill, envName, stateName) => {

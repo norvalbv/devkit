@@ -232,6 +232,7 @@ describe('review.paths', () => {
     ['unknown key', { include: ['src/**'], ignores: ['x/**'] }],
     ['disable all', { include: ['src/**'], exclude: ['**/*'] }],
     ['disable all equivalent', { include: ['src/**'], exclude: ['**/**'] }],
+    ['exclude literal include with wildcard', { include: ['src/a.mts'], exclude: ['src/*.mts'] }],
     [
       'exclude every include',
       {

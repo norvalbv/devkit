@@ -134,6 +134,7 @@ function broadSubtreePrefix(pattern) {
 
 function excludeCoversInclude(include, exclude) {
   if (include === exclude) return true;
+  if (!RE_GLOB_META.test(include) && matchesGlob(include, exclude)) return true;
   const prefix = broadSubtreePrefix(exclude);
   if (prefix === null) return false;
   return [prefix === '', include === prefix, include.startsWith(`${prefix}/`)].includes(true);

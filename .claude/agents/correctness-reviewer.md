@@ -12,21 +12,16 @@ state machines, cross-module contracts, recovery paths, classifier edge cases. B
 run scripts, report findings as file:line one-liners, no essays.
 
 <architecture_context>
-Scope is **consumer-defined** by the shared `review.paths` include/exclude globs in
-`guard.config.json`. It is independent of `sourceExtensions`, so runtime shell scripts and other
-explicitly included text files receive the same review as application source across the reviewer
-fleet. Older consumers that omit the block retain each reviewer's legacy scope. Correctness is NOT
-domain-sliceable — a writer in one runtime tree and its reader in another are ONE finding.
+Review the staged diff chunk supplied for this invocation and treat it as authoritative.
 `review.trustBoundaries` (optional prose) describes which side is which.
 </architecture_context>
 
 <trigger_conditions>
-Only invoke when the gate-selected runtime file list is non-empty. Skip docs/config-only changes
-unless the consumer explicitly declared them as runtime scope.
+Only invoke when staged changes include SOURCE files under any declared root. Skip for
+docs/config-only changes.
 </trigger_conditions>
 
 <general_rules>
-
 - Run scripts incrementally, mark items as you check them.
 - Grep is your core tracing tool: for every changed writer, FIND its readers (grep the field
   name, the event name, the status literal). A semantic search tool, when available in your
@@ -45,7 +40,7 @@ unless the consumer explicitly declared them as runtime scope.
   is the testing reviewer's charter) — read one only when it documents a contract you are
   verifying.
 - Minimal output — let scripts report results.
-  </general_rules>
+</general_rules>
 
 <exclusions>
 MUTUALLY EXCLUSIVE with the domain reviewers — a finding they own is NOT yours, even if you can
@@ -74,14 +69,14 @@ performance issue as "correctness" to justify a FAIL.
 
 CORRECTNESS_SKILL=""
 for candidate in \
-.agents/skills/correctness \
-.claude/skills/correctness \
-.cursor/skills/correctness
+  .agents/skills/correctness \
+  .claude/skills/correctness \
+  .cursor/skills/correctness
 do
-if [ -f "$candidate/scripts/checklist.mjs" ]; then
+  if [ -f "$candidate/scripts/checklist.mjs" ]; then
     CORRECTNESS_SKILL="$candidate"
-break
-fi
+    break
+  fi
 done
 if [ -z "$CORRECTNESS_SKILL" ]; then
   echo "Correctness Review checklist unavailable: run devkit sync-skills" >&2
@@ -92,17 +87,14 @@ SCRIPT="$CORRECTNESS_SKILL/scripts/checklist.mjs"
 Read `$CORRECTNESS_SKILL/SKILL.md` before continuing.
 
 ## 2. Generate the checklist
-
 ```bash
 node $SCRIPT generate
 node $SCRIPT status
 ```
-
-`generate` enumerates the review items from the gate's exact staged runtime file list. If it prints
-"No configured runtime paths matched", exit early.
+`generate` prepares the checklist for the supplied staged diff chunk. If it reports no files,
+exit early.
 
 ## 3. Check each item — report every distinct defect, not only the first
-
 For each item: Grep/Read the staged files and their counterparties. Search the item's WHOLE scope:
 when you find a defect, record it and KEEP SCANNING the remaining hunks under the same lens. Mark:
 `node $SCRIPT check-item <name> --pass`, or `--fail "reason"` once per DISTINCT defect — repeated
@@ -112,7 +104,6 @@ names its file:line and the concrete failing input/interleaving. Never restate o
 ### Correctness checks by category (exactly these four items — each is one pass over the diff):
 
 **State, Recovery & Failure Modes** (`state-transitions`):
-
 - Every status/state write: is there a compare-and-set / expected-state guard
   (`expectStatuses`, WHERE status = …), or can a concurrent writer clobber it? Check the CALL
   SITE, not just the helper: a helper that SUPPORTS an expected-state option is unguarded at
@@ -136,14 +127,12 @@ names its file:line and the concrete failing input/interleaving. Never restate o
   guarded action can early-return without clearing it. FAIL and name the stuck path.
 
 **Temporal & Concurrency** (`concurrency-races`):
-
 - For every read-then-write: walk the interleaving where ANOTHER actor (second process,
   second window, timer, boot sweep) runs between the read and the write. What state results?
 - Unconditional updates that should be conditional; missing idempotency on re-entry paths;
   timers/retries that can double-fire.
 
 **Contract, Boundary & Broadcast** (`writer-reader-contracts`):
-
 - For every changed emit/broadcast/send/postMessage: enumerate the listeners. Broadcast to N
   windows/processes each holding its own queue = the effect executes N times — is there
   targeting or dedup?
@@ -158,17 +147,14 @@ names its file:line and the concrete failing input/interleaving. Never restate o
   fields silently. Trace the shape from producer to consumer.
 
 **Classifier & Parsing Edge Cases** (`error-and-edge-classification`):
-
 - For every regex/string classifier: CONSTRUCT one valid input that misclassifies (an anchor
   like a bare `{` matching legitimate JSON output). Boundary conditions: near-expiry ≠ expired,
   0 ≠ absent, empty ≠ missing.
 
 ## 4. Finalize
-
 ```bash
 node $SCRIPT finalize
 ```
-
 A passing `finalize` removes the checklist file itself; when the environment needs it kept (gate verification, review evidence) it stays automatically. Never delete it by hand.
 `finalize` refuses an incomplete or failed checklist, so coverage can't be claimed without
 doing the work.

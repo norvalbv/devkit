@@ -18,7 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { createChecklistStore } from '../../_devkit/checklist-store.mjs';
 import {
   authoritativeStagedFilesOverride,
@@ -205,6 +205,7 @@ const { save: saveChecklist, status, checkItem, finalize } = store;
 function generate(lens) {
   const stagedFiles = getStagedFiles();
   if (stagedFiles.length === 0) {
+    rmSync(ACTIVE_PATH, { force: true });
     log('⏭️  No configured runtime paths matched. Skipping correctness review.');
     process.exit(0);
   }
