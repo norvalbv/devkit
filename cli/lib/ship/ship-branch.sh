@@ -22,10 +22,29 @@
 # Preview: SHIP_DRY_RUN=1 ship-branch.sh ...   # local commit, no push/PR
 set -euo pipefail
 
+# Hoisted above the orphan preflight below, which runs before anything else this script sources.
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# run-packaged-script.mts hands its private signal-lock root to the managed child. Only
+# review-target.sh implements that handshake; ship inherits the variable and forwards the caller
+# environment intact, so leaving it set would export an unread private path into every gate, hook and
+# nested command — and a nested `devkit review` would take the lock and hold it, after which the
+# outer wrapper stops forwarding signals to THIS ship entirely. Ship's own bash traps
+# (gate-signal-handoff.sh) already produce the same exit statuses, so dropping it costs nothing.
+unset DEVKIT_MANAGED_SIGNAL_ROOT
+
+# Before ANY git that can reach the network. Under the managed spawn this script runs in a background
+# process group, where a tool that opens /dev/tty is SIGTTIN-suspended rather than prompted — a silent
+# hang, not an error. ls-remote/fetch happen long before the PR body is read, so these cannot wait for
+# the redirect below: an unknown host key or a passphrase with no agent would wedge the run. Same
+# ordering review-target.sh uses. An explicit GIT_SSH_COMMAND stays the caller's.
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+
 BR=${1:?branch}; TITLE=${2:?title}; shift 2
 
 # Reject a flag sitting in a positional slot, before anything treats BR/TITLE as real values.
-. "$(dirname "${BASH_SOURCE[0]}")/assert-positional-args.sh"
+. "$SCRIPT_DIR/assert-positional-args.sh"
 ship_assert_positional_args "$BR" "$TITLE" \
   'ship <branch> "<title>" [--base <b>] [--body "<text>"] [--link <d>]... [--] <path...>'
 
@@ -65,6 +84,22 @@ done
 # Assemble extra symlinks; prepare-gate-worktree.sh adds the universal base.
 LINK_DIRS=()
 [ "${#LINK_EXTRA[@]}" -gt 0 ] && LINK_DIRS+=("${LINK_EXTRA[@]}")
+
+# Reclaim what a KILLED ship left behind, BEFORE the branch is read below (sc-2159). A ship that dies
+# by SIGKILL never runs its EXIT trap, so its ephemeral worktree and branch survive and every later
+# attempt refuses — the branch is "checked out in a linked worktree" and cannot even be deleted by
+# hand without finding that worktree first. This reclaims only what a previous run's own record
+# proves was abandoned, and refuses with a message naming the live pid otherwise.
+#
+# The placement is load-bearing: LOCAL_BRANCH_EXISTS below (and the nothing-to-commit guard gated on
+# it) must be computed AFTER any branch this preflight deletes, or a successful reclaim still walks
+# into the resume block and dies on a branch that is no longer there.
+. "$SCRIPT_DIR/worktree-registry.sh"
+. "$SCRIPT_DIR/ship-run-record.sh"
+. "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
+PREFLIGHT_HINT=
+# SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
+[ -n "${SHIP_RESOLVE_ONLY:-}" ] || ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 
 # A non-dry retry may legitimately find the branch created by its previous attempt: the supervised
 # commit can land, then return 124 while reaping a leaked descendant. Defer that collision until the
@@ -149,7 +184,6 @@ fi
 # devkit self-host only: inspect the CALLER tree before the ephemeral worktree hides ignored,
 # unbriefed dist artifacts. Installed consumer copies run the same helper, which no-ops unless the
 # caller package is @norvalbv/devkit. Prefer source beside this script, then packaged .mjs.
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mts"
 [ -f "$DIST_INTEGRITY" ] || DIST_INTEGRITY="$SCRIPT_DIR/dist-integrity.mjs"
 node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
@@ -197,7 +231,13 @@ STAGED_STATE=$(mktemp "${TMPDIR:-/tmp}/ship-staged.XXXXXX")
 if [ "$BODY_SET" -eq 1 ]; then BODY="$BODY_FLAG"
 elif [ -t 0 ]; then BODY=""
 else ship_read_stdin_body; fi
+# The body is the ONLY thing ship reads from stdin, and it has been read. Hand every descendant
+# /dev/null instead: the gate chain runs consumer tooling for minutes and can otherwise consume the
+# caller's stdin. This redirect MUST come after the read; the prompt-suppressing exports could NOT
+# wait for it — remote git runs far earlier — so they sit at the top of the file.
+exec 0</dev/null
 
+SHIP_RUN_MODE=live; [ -z "${SHIP_DRY_RUN:-}" ] || SHIP_RUN_MODE=dry
 KEEP_WT=  # set by a staged-set abort: the clobbered index IS the evidence, so never reclaim it
 RECOVERY_INDEX=
 RECOVERY_PARENT=  # the preserved commit's OWN parent: what its diff and manifest anchor on, since $BASE may have advanced since it was cut
@@ -264,6 +304,10 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # that last check include tracked, untracked and ignored files without touching the caller's index.
   RECOVERY_REASON=
   RECOVERY_HINTS=()   # optional indented lines printed between the reason and the closing advice
+  # The preflight above may already know WHY this branch exists (a killed ship left it). That is the
+  # missing half of every "cannot safely resume" refusal, so it rides the hint channel that already
+  # prints between the reason and the closing advice — no new line shape.
+  [ -z "$PREFLIGHT_HINT" ] || RECOVERY_HINTS+=("$PREFLIGHT_HINT")
   RECOVERY_COMMIT=$(git rev-parse -q --verify "$BR^{commit}" 2>/dev/null || true)
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
@@ -462,9 +506,14 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   # Detached at the verified OID: a concurrent local branch update cannot change what this retry
   # pushes or what the reconcile manifest records.
   git worktree add -q --detach "$WT" "$RECOVERY_COMMIT" >&2
+  # branch_created=0: a resume attaches to a branch this run did not create, so nothing downstream
+  # may delete it. Written on the very next line, because between `worktree add` and this the entry
+  # is registered but unattributable.
+  ship_run_record_begin "$WT" "$BR" "$RECOVERY_COMMIT" 0 "$SHIP_RUN_MODE"
 else
   BRANCH_CREATED=1
   git worktree add -q -b "$BR" "$WT" "$BASE" >&2
+  ship_run_record_begin "$WT" "$BR" "$BASE" 1 "$SHIP_RUN_MODE"
 
   # Tracked edits (modify + delete, binary-safe) -> worktree index.
   git -C "$ROOT" diff "$BASE" --binary -- "${PATHS[@]}" > "$PATCH"
@@ -504,7 +553,7 @@ else
 # persists a cache-tree and every later write-tree short-circuits on it, so a staged object that goes
 # missing stays invisible to the tree comparisons (sc-1420). Establishes the "present at staging"
 # end of the window; the preflight below establishes the other.
-  ship_assert_staged_objects_readable "$WT" "after staging" || { KEEP_WT=1; exit 1; }
+  ship_assert_staged_objects_readable "$WT" "after staging" || { ship_run_keep "staged objects unreadable after staging"; exit 1; }
 
 # Only after caller content is staged: runtime symlinks must never enter the shipped diff.
   prepare_gate_worktree "$WT" "$ROOT" shipping ${LINK_DIRS[@]+"${LINK_DIRS[@]}"}
@@ -525,8 +574,8 @@ else
   export DEVKIT_RUN_MODE=ship    # never inherit a caller's review allowlist into a real ship
 # Preflight: nothing since staging is allowed to have touched the index. Cheap, and it fails BEFORE
 # the operator pays for a multi-minute gate chain.
-  ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
-  ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { KEEP_WT=1; exit 1; }
+  ship_assert_staged_unchanged "$WT" "$STAGED_STATE" || { ship_run_keep "staged set changed before the commit"; exit 1; }
+  ship_assert_staged_objects_readable "$WT" "preflight, before the commit" || { ship_run_keep "staged objects unreadable before the commit"; exit 1; }
   # Once git may create a commit, a signal must be recorded/forwarded but cannot immediately exit
   # after the supervisor is reaped: ship first needs to checkpoint the landed commit's gate proof.
   GATE_SIGNAL_DEFER_EXIT=1
@@ -537,7 +586,7 @@ else
 # anything leaves the machine — dry runs included, so the check is exercised on every ship path.
   SHIP_COMMIT=$(git -C "$WT" rev-parse HEAD)
   if [ "$SHIP_COMMIT" != "$BASE" ]; then
-    ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { KEEP_WT=1; exit 1; }
+    ship_assert_commit_scope "$WT" "$BASE" "$STAGED_STATE" || { ship_run_keep "commit scope assertion failed"; exit 1; }
     # Persist proof when the commit completed but the supervisor subsequently reported its defined
     # timeout/signal statuses. Never mint a receipt for rc=1: run_gates_with_capture deliberately
     # changes a successful child to 1 when mandatory gate-log persistence fails, and retry must keep

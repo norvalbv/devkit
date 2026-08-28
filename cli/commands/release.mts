@@ -233,7 +233,10 @@ export default async function release(args: string[], cwd: string): Promise<numb
     '',
     `Do not tag the release branch commit. After squash-merging, tag the merge commit as ${tag}.`,
   ].join('\n');
-  const publishCode = ship(
+  // `await`: ship runs its script through the managed spawn and returns a Promise. Without this the
+  // comparison below reads a Promise object, is always truthy, and release reports a failed publish
+  // for every successful one.
+  const publishCode = await ship(
     [
       releaseBranch,
       `release: ${tag}`,

@@ -6,7 +6,7 @@
  * manual lane runs the identical command in a plain terminal.
  */
 import { delimiter, dirname } from 'node:path';
-import { runPackagedScript } from '../lib/ship/run-packaged-script.mts';
+import { runManagedPackagedScript } from '../lib/ship/run-packaged-script.mts';
 
 export const meta = {
   name: 'ship',
@@ -62,7 +62,7 @@ that lands but fails to push KEEPS the branch; an identical retry verifies and r
 A commit that never lands auto-deletes the empty branch.`,
 };
 
-export default function ship(args: string[], cwd: string): number {
+export default function ship(args: string[], cwd: string): number | Promise<number> {
   if (args.length === 0) {
     console.log(meta.help); // no args is a usage error (`--help` is intercepted in index.mjs)
     return 1;
@@ -76,6 +76,9 @@ export default function ship(args: string[], cwd: string): number {
   // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
   // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
   //
+  // MANAGED (sc-2159), matching `devkit review`: signals reach the script's own process group, not
+  // the wrapper alone.
+  //
   // PATH carries the node running THIS process, the way `devkit review` already does. The gate
   // supervisor bounding the commit is a node script, so no commit happens at all without node on
   // PATH — and a devkit launched through a wrapper whose PATH omits it would fail at the gate, not
@@ -85,5 +88,5 @@ export default function ship(args: string[], cwd: string): number {
     ...process.env,
     PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
   };
-  return runPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd, env });
+  return runManagedPackagedScript(`${mode}.sh`, args, { command: 'devkit ship', cwd, env });
 }
