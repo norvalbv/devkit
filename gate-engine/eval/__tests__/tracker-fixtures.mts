@@ -5,6 +5,7 @@ import type { BenchmarkEvent, CheckpointEnvelope } from '../types.mts';
 export function memory(files: Record<string, string>): RepositorySource {
   return {
     mode: 'working',
+    root: '<memory>',
     listFiles: () => Object.keys(files).sort(),
     read: (path) => files[path] ?? null,
   };

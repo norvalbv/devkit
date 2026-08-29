@@ -16,7 +16,9 @@ const REVIEWER_NAME_RE = /\bname:\s*'([^']+)'/g;
 
 export function loadCatalog(source: RepositorySource): BenchmarkCatalog {
   const raw = source.read('docs/benchmarks/catalog.json');
-  if (!raw) throw new Error('Missing docs/benchmarks/catalog.json');
+  const snapshot = `the ${source.mode} snapshot${source.ref ? ` of ${source.ref}` : ''} at ${source.root}`;
+  if (raw === null) throw new Error(`Missing docs/benchmarks/catalog.json — not in ${snapshot}`);
+  if (!raw.trim()) throw new Error(`Empty docs/benchmarks/catalog.json in ${snapshot}`);
   let catalog: BenchmarkCatalog;
   try {
     catalog = JSON.parse(raw) as BenchmarkCatalog;
