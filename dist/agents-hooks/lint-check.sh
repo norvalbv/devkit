@@ -4,7 +4,7 @@
 # only errors in files this session edited are reported (see session-edits-lib.sh) — a
 # parallel session's breakage never blocks this one. The commit gate stays repo-wide.
 #
-# Portable (W-3): runs the consumer's OWN npm-scripts (biome via local binary; `lint:structure`
+# Portable (W-3): runs the consumer's OWN npm-scripts (biome via local binary + config; `lint:structure`
 # + `ts:check` via package.json scripts). Each step DEGRADE-SKIPS when its tool/script is
 # absent — a repo without an eslint structure preset, or without a typecheck script, simply
 # runs fewer checks rather than erroring. No frink-specific paths.
@@ -37,9 +37,13 @@ has_script() { bun -e "process.exit(((require('./package.json').scripts||{})['$1
 
 truncate() { if [ ${#1} -gt 1500 ]; then echo "${1:0:1500}... (truncated)"; else echo "$1"; fi; }
 
-# 1. Biome check (no --write) — only if the local binary is present. Scoped to the session's
-# own edited files (biome-supported extensions only), not the whole repo.
-if [ -x "./node_modules/.bin/biome" ]; then
+# 1. Biome check (no --write) — only when the repo actually FORMATS with biome, i.e. the local
+# binary AND a biome config are both present. The binary alone is not the signal: biome is a common
+# transitive dependency, and configless it checks against its own defaults (tabs, double quotes), so
+# a repo that formats with prettier/oxfmt/dprint would fail this gate on every file — including ones
+# the session never touched — while its real format gate passes. Scoped to the session's own edited
+# files (biome-supported extensions only), not the whole repo.
+if [ -x "./node_modules/.bin/biome" ] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
   biome_files=()
   while IFS= read -r f; do
     [[ "$f" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && biome_files+=("$f")

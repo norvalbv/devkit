@@ -166,6 +166,7 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     write(root, 'src/other.ts');
     write(root, 'notes.md', '# notes\n');
     write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    write(root, 'biome.json', '{}\n');
     writeExec(
       root,
       'node_modules/.bin/biome',
@@ -178,6 +179,25 @@ describe.skipIf(!HAS_BUN)('lint-check.sh — session scoping', () => {
     expect(args).toContain('src/mine.ts');
     expect(args).not.toContain('src/other.ts');
     expect(args).not.toContain('notes.md'); // not a biome-supported extension
+  });
+
+  it('skips biome when the binary is present but the repo carries no biome config', () => {
+    // biome is a common TRANSITIVE dependency. Configless, it checks against its own defaults
+    // (tabs, double quotes), so a repo that formats with prettier/oxfmt/dprint would fail this
+    // gate on every edited file while its real format gate passes — and the suggested `biome
+    // check --write` fix would rewrite the file into a style that repo then rejects.
+    const root = mkTmp('sesnb-');
+    write(root, 'src/mine.ts');
+    write(root, 'package.json', JSON.stringify({ name: 'fx', version: '0.0.0' }));
+    writeExec(
+      root,
+      'node_modules/.bin/biome',
+      '#!/bin/sh\necho "BIOME_ARGS: $@" > biome-args.txt\nexit 1\n',
+    );
+    const tmp = seedSessionLedger(root, 's1', ['src/mine.ts']);
+    const r = runHook(LINT_HOOK, root, { session_id: 's1' }, tmp);
+    expect(r.status).toBe(0);
+    expect(existsSync(join(root, 'biome-args.txt'))).toBe(false);
   });
 
   it('fail-open when session-edits-lib.sh is missing (sync-hooks --only partial install)', () => {

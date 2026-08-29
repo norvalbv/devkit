@@ -46,8 +46,12 @@ if type session_edits_file &>/dev/null; then
   fi
 fi
 
-# Biome format/lint auto-fix on the edited file (silent, best-effort).
-if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]]; then
+# Biome format/lint auto-fix on the edited file (silent, best-effort). Gated on a biome CONFIG,
+# not merely the binary: biome is a common transitive dependency, and with no config it formats to
+# its own defaults (tabs, double quotes). In a repo that formats with something else — prettier,
+# oxfmt, dprint — that silently rewrites every edited file into a style the repo's real format gate
+# then rejects, turning one small edit into a whole-file diff.
+if [[ "$file_path" =~ \.(ts|tsx|js|jsx|json|jsonc)$ ]] && { [ -f "biome.json" ] || [ -f "biome.jsonc" ]; }; then
   if command -v bun &>/dev/null && [ -f "package.json" ] && [ -x "./node_modules/.bin/biome" ]; then
     bun run biome check --write "$file_path" 2>/dev/null || true
   fi
