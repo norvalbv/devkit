@@ -1,6 +1,10 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { QAVIS_RECIPE, qavisOnPath } from '../../../gate-engine/qavis-advisory/check.mts';
+import {
+  QAVIS_RECIPE,
+  qavisOnPath,
+  qavisSupportsPublish,
+} from '../../../gate-engine/qavis-advisory/check.mts';
 import { detectGitRoot } from '../detect-git-root.mts';
 import { QAVIS_ADVISORY_ID } from '../husky/husky-block.mts';
 
@@ -24,6 +28,18 @@ export function printQavisAdvisoryHealth(cwd: string, guards: string[]): void {
       `  · ${QAVIS_ADVISORY_ID}: ${QAVIS_RECIPE} present but qavis is NOT on PATH — the QA advisory is skipped on every commit (install qavis, or drop the guard)`,
     );
   } else {
-    console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present)`);
+    // The gate is live — but ship's OTHER qavis path can still be inert, and it reports that only in
+    // post-push stderr, which a headless shipping agent may never read. Paid solely on this arm (one
+    // `qavis --help` spawn in a repo already proven to have both a recipe and the binary). Three
+    // states, not two: null means the probe could not ask, and reporting that as "cannot publish"
+    // would state a fact about a binary devkit never managed to interrogate.
+    const supportsPublish = qavisSupportsPublish(gitRoot);
+    const publish =
+      supportsPublish === null
+        ? 'publication support UNKNOWN — its --help did not answer (ship will decline to publish)'
+        : supportsPublish
+          ? 'PR evidence publishes on ship'
+          : 'ship cannot publish PR evidence — this qavis predates `publish` (upgrade it)';
+    console.log(`  ✓ ${QAVIS_ADVISORY_ID}: qavis on PATH (${QAVIS_RECIPE} present) · ${publish}`);
   }
 }
