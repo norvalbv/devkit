@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   COMMENT_JUDGE_CAPABILITY_PROFILE,
   COMMENT_JUDGE_SCHEMA_VERSION,
   commentJudgeDisabled,
   judgeBatchInput,
+  type CommentJudgeExec,
+  judgeComments,
   judgeInput,
   parseCommentJudge,
   parseCommentJudgeBatch,
@@ -202,5 +204,234 @@ describe('comment judge contract', () => {
   it('does not inherit the decisions-only no-LLM override', () => {
     expect(commentJudgeDisabled({ GUARD_DECISION_NO_LLM: '1' })).toBe(false);
     expect(commentJudgeDisabled({ GUARD_NO_LLM: '1' })).toBe(true);
+  });
+});
+
+describe('judgeComments batching', () => {
+  const batchOf = (
+    count: number,
+  ): Array<{ finding: CommentFinding; rationale: CommentRationale }> =>
+    Array.from({ length: count }, (_, index) => ({
+      finding: finding({ id: index.toString(16).padStart(12, '0'), path: `src/f${index}.ts` }),
+      rationale,
+    }));
+
+  // SAFETY: every input read here was produced by judgeBatchInput in this same test, so the
+  // evidence_schema 2 shape (a `findings` array of the fields below) is known, not assumed.
+  const sent = (input: string): Array<{ findingId: string; comment: string }> =>
+    (JSON.parse(input) as { findings: Array<{ findingId: string; comment: string }> }).findings;
+
+  const replyFor = (input: string): string => {
+    return JSON.stringify({
+      results: sent(input).map(({ findingId }) => ({
+        findingId,
+        verdict: 'PASS',
+        reason: 'Documents an external invariant.',
+      })),
+    });
+  };
+
+  const recorder = (
+    reply: (input: string, call: number) => string | null,
+    outages: Array<'timeout' | 'transient' | 'empty' | undefined> = [],
+  ) => {
+    const calls: string[] = [];
+    const exec: CommentJudgeExec = (opts) => {
+      const index = calls.length;
+      calls.push(opts.input ?? '');
+      const outage = outages[index];
+      if (outage) opts.onOutage?.(outage);
+      return reply(opts.input ?? '', index);
+    };
+    return { calls, exec };
+  };
+
+  it('splits a large pending set across sequential calls and merges every verdict', () => {
+    const { calls, exec } = recorder(replyFor);
+    const outcome = judgeComments('/repo', batchOf(25), 'haiku', { exec, chunk: 12 });
+    expect(calls).toHaveLength(3);
+    expect(calls.map((input) => sent(input).length)).toEqual([12, 12, 1]);
+    expect(Object.keys(outcome.results)).toHaveLength(25);
+    expect(outcome.unjudged).toEqual([]);
+    expect(outcome.failures).toEqual([]);
+    expect(outcome.planned).toBe(3);
+    expect(outcome.spawned).toBe(3);
+  });
+
+  it('gives each finding more evidence as the batch shrinks', () => {
+    const wordy = (count: number) =>
+      batchOf(count).map((item) => ({
+        ...item,
+        finding: { ...item.finding, comment: 'x'.repeat(20_000) },
+      }));
+    const commentOf = (count: number) => sent(judgeBatchInput(wordy(count)))[0].comment.length;
+    expect(commentOf(12)).toBeGreaterThan(commentOf(38));
+  });
+
+  it('keeps the batches that parsed when one reply is truncated', () => {
+    const { calls, exec } = recorder((input, call) =>
+      call === 1 ? '{"results":[{"findingId":"00000000000c","verdict":"PA' : replyFor(input),
+    );
+    const outcome = judgeComments('/repo', batchOf(25), 'haiku', { exec, chunk: 12 });
+    expect(calls).toHaveLength(3);
+    expect(Object.keys(outcome.results)).toHaveLength(13);
+    expect(outcome.unjudged).toHaveLength(12);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]).toMatchObject({ kind: 'malformed', batch: 1, truncated: true });
+    expect(outcome.failures[0]?.replyChars).toBeGreaterThan(0);
+  });
+
+  it('stops spawning once the binary itself goes dark', () => {
+    for (const [outage, kind] of [
+      ['timeout', 'timeout'],
+      ['transient', 'outage'],
+      ['empty', 'empty'],
+    ] as const) {
+      const { calls, exec } = recorder(
+        (input, call) => (call === 0 ? null : replyFor(input)),
+        [outage],
+      );
+      const outcome = judgeComments('/repo', batchOf(25), 'haiku', { exec, chunk: 12 });
+      expect(calls).toHaveLength(1);
+      expect(outcome.spawned).toBe(1);
+      expect(outcome.planned).toBe(3);
+      expect(outcome.unjudged).toHaveLength(25);
+      expect(outcome.failures.every((failure) => failure.kind === kind)).toBe(true);
+    }
+  });
+
+  it('reports a deliberate opt-out as itself and never spawns', () => {
+    vi.stubEnv('GUARD_NO_LLM', '1');
+    const { calls, exec } = recorder(replyFor);
+    const outcome = judgeComments('/repo', batchOf(3), 'haiku', { exec });
+    expect(calls).toHaveLength(0);
+    expect(outcome.spawned).toBe(0);
+    expect(outcome.failures).toEqual([
+      { kind: 'disabled', batch: -1, findingIds: ['000000000000', '000000000001', '000000000002'] },
+    ]);
+    vi.unstubAllEnvs();
+  });
+
+  it('resolves the judge binary without spawning anything', () => {
+    vi.stubEnv('GUARD_NO_LLM', '1');
+    const { exec } = recorder(replyFor);
+    expect(judgeComments('/repo', batchOf(1), 'gpt-5.6-terra@high', { exec }).bin).toBe('codex');
+    expect(judgeComments('/repo', batchOf(1), 'haiku', { exec }).bin).toBe('claude');
+    vi.unstubAllEnvs();
+  });
+
+  it('scopes each batch to its own ids, so a stray verdict fails only that batch', () => {
+    const { exec } = recorder((input, call) =>
+      call === 0
+        ? JSON.stringify({
+            results: [{ findingId: '00000000000f', verdict: 'PASS', reason: 'Wrong batch.' }],
+          })
+        : replyFor(input),
+    );
+    const outcome = judgeComments('/repo', batchOf(4), 'haiku', { exec, chunk: 2 });
+    expect(Object.keys(outcome.results)).toEqual(['000000000002', '000000000003']);
+    expect(outcome.failures).toHaveLength(1);
+    expect(outcome.failures[0]?.kind).toBe('malformed');
+  });
+
+  it('keeps the label stable and honours the off switch', () => {
+    const labels: string[] = [];
+    const exec: CommentJudgeExec = (opts) => {
+      labels.push(opts.label);
+      return replyFor(opts.input ?? '');
+    };
+    const outcome = judgeComments('/repo', batchOf(38), 'haiku', { exec, chunk: null });
+    expect(labels).toEqual(['comment-firewall']);
+    expect(Object.keys(outcome.results)).toHaveLength(38);
+  });
+});
+
+describe('judgeComments edge cases', () => {
+  // SAFETY: the input was produced by judgeBatchInput in this same test, so the evidence_schema 2
+  // shape (a `findings` array of objects carrying findingId) is known, not assumed.
+  const passAll = (input: string): string =>
+    JSON.stringify({
+      results: (JSON.parse(input) as { findings: Array<{ findingId: string }> }).findings.map(
+        ({ findingId }) => ({ findingId, verdict: 'PASS', reason: 'Fine.' }),
+      ),
+    });
+
+  const batchOf = (
+    count: number,
+  ): Array<{ finding: CommentFinding; rationale: CommentRationale }> =>
+    Array.from({ length: count }, (_, index) => ({
+      finding: finding({ id: index.toString(16).padStart(12, '0'), path: `src/f${index}.ts` }),
+      rationale,
+    }));
+
+  it('refuses an over-cap change deterministically even with the reviewer opted out', () => {
+    vi.stubEnv('GUARD_NO_LLM', '1');
+    const exec: CommentJudgeExec = () => '{"results":[]}';
+    expect(() => judgeComments('/repo', batchOf(201), 'haiku', { exec, chunk: null })).toThrow(
+      /exceeds 200 findings/,
+    );
+    vi.unstubAllEnvs();
+  });
+
+  it('spends no model call on an empty pending set', () => {
+    const calls: string[] = [];
+    const exec: CommentJudgeExec = (opts) => {
+      calls.push(opts.label);
+      return '{"results":[]}';
+    };
+    const outcome = judgeComments('/repo', [], 'haiku', { exec });
+    expect(calls).toEqual([]);
+    expect(outcome).toMatchObject({ results: {}, unjudged: [], planned: 0, spawned: 0 });
+    expect(outcome.failures).toEqual([]);
+  });
+
+  it('keeps the verdicts a healthy batch produced before the binary went dark', () => {
+    const calls: string[] = [];
+    const exec: CommentJudgeExec = (opts) => {
+      const index = calls.length;
+      calls.push(opts.input ?? '');
+      if (index === 0) return passAll(opts.input ?? '');
+      opts.onOutage?.('transient');
+      return null;
+    };
+    const outcome = judgeComments('/repo', batchOf(9), 'haiku', { exec, chunk: 3 });
+    expect(calls).toHaveLength(2);
+    expect(Object.keys(outcome.results)).toHaveLength(3);
+    expect(outcome.unjudged).toHaveLength(6);
+    expect(outcome.planned - outcome.failures.length).toBe(1);
+    expect(outcome.failures.every((f) => f.kind === 'outage')).toBe(true);
+  });
+
+  it('carries a truncated reply verbatim into the debug output, tail included', () => {
+    const errors: string[] = [];
+    vi.stubEnv('GUARD_COMMENTS_DEBUG', '1');
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.join(' '));
+    });
+    const cut = `{"results":[{"findingId":"000000000000","verdict":"PASS","reason":"${'z'.repeat(2_000)}`;
+    const exec: CommentJudgeExec = () => cut;
+    judgeComments('/repo', batchOf(1), 'haiku', { exec });
+    const output = errors.join('\n');
+    expect(output).toContain(`(${cut.length} chars)`);
+    expect(output).toContain('tail:');
+    expect(output).toContain(cut.slice(-200));
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('reviews exactly the ceiling in one call and refuses one past it without spawning', () => {
+    const calls: string[] = [];
+    const exec: CommentJudgeExec = (opts) => {
+      calls.push(opts.label);
+      return passAll(opts.input ?? '');
+    };
+    expect(
+      Object.keys(judgeComments('/repo', batchOf(200), 'haiku', { exec, chunk: null }).results),
+    ).toHaveLength(200);
+    expect(calls).toHaveLength(1);
+    expect(() => judgeComments('/repo', batchOf(201), 'haiku', { exec, chunk: null })).toThrow(
+      /exceeds 200 findings/,
+    );
+    expect(calls).toHaveLength(1);
   });
 });

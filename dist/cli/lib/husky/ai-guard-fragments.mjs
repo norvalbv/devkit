@@ -10,8 +10,8 @@ elif [ "$ccrc" -eq 4 ]; then
     echo "   guard-comments: NOT a rejection — staged comment evidence is unreadable or unsupported."
     exit 1
 elif [ "$ccrc" -eq 3 ]; then
-    echo "   guard-comments: judge unavailable — strict ship mode failed closed."
-    echo "   Check claude CLI auth/quota, then re-run devkit ship (approved comments are cached)."
+    echo "   guard-comments: reviewer produced no verdict — strict ship mode failed closed."
+    echo "   Follow the remedy printed above, then re-run devkit ship (approved comments are cached)."
     exit 1
 elif [ "$ccrc" -ne 0 ] && [ "$ccrc" -ne 2 ]; then
     echo "   guard-comments: unexpected exit $ccrc — blocking the commit."
