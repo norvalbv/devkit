@@ -2,7 +2,8 @@ import type { VerdictMeta } from '../judge/verdict-store.mts';
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mts';
 import { detectChangedComments } from './detect.mts';
 import { commentJudgeModel, judgeComments, receiptKey } from './judge.mts';
-import { loadWorkingRationales } from './rationales.mts';
+import type { RationaleStoreLocation } from './rationales.mts';
+import { describeRationaleStore, loadWorkingRationales } from './rationales.mts';
 import type {
   CommentFinding,
   CommentJudgeBatchResult,
@@ -16,6 +17,8 @@ export const COMMENT_RECEIPTS_FILE = 'comment-firewall-receipts.json';
 interface FirewallDeps {
   detect: (cwd: string) => DetectionResult;
   loadRationales: (cwd: string) => RationaleStore;
+  /** Names the file loadRationales consulted, so a block can be diagnosed without a second run. */
+  describeStore: (cwd: string) => RationaleStoreLocation;
   loadReceipts: (file: string) => Record<string, VerdictMeta>;
   saveReceipt: (file: string, entries: Record<string, VerdictMeta>) => boolean;
   judge: (
@@ -38,6 +41,7 @@ interface FindingSnapshot {
 const defaults: FirewallDeps = {
   detect: detectChangedComments,
   loadRationales: loadWorkingRationales,
+  describeStore: describeRationaleStore,
   loadReceipts: loadEntries,
   saveReceipt: saveEntries,
   judge: judgeComments,
@@ -61,13 +65,26 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function printMissing(findings: CommentFinding[]): void {
+function printStore(store: RationaleStoreLocation | null): void {
+  if (!store) return;
+  const total = store.sharedFindingIds?.length;
+  const count =
+    total === undefined ? 'unreadable' : `${total} recorded rationale${total === 1 ? '' : 's'}`;
+  const state = store.sharedExists ? count : 'file does not exist';
+  console.error(`\nEvidence store: ${store.sharedFile} — ${state}`);
+  if (!store.privateReview) return;
+  console.error(`A managed-review data root is in effect: ${store.writableFile}`);
+  console.error('devkit ship reads ONLY the shared store above, never the private one.');
+}
+
+function printMissing(findings: CommentFinding[], store: RationaleStoreLocation | null): void {
   const shipLog = process.env.DEVKIT_SHIP_GATE_LOG;
   const shipEvidence = shipLog ? ` --from-ship-log ${shellQuote(shipLog)}` : '';
   console.error(
     `guard-comments: ${findings.length} added/modified comment paragraph${findings.length === 1 ? '' : 's'} need a decision.`,
   );
   for (const finding of findings) printFinding(finding);
+  printStore(store);
   console.error(
     '\nFix the implementation and remove the explanatory workaround, or justify a load-bearing comment:',
   );
@@ -168,7 +185,13 @@ export function runCommentFirewall(
     if (!passReceipt(receipts[key])) pending.push(item);
   }
   if (missing.length > 0) {
-    printMissing(missing);
+    let store: RationaleStoreLocation | null = null;
+    try {
+      store = deps.describeStore(cwd);
+    } catch {
+      store = null; // a diagnostic must never convert a clean block into a crash
+    }
+    printMissing(missing, store);
     return 1;
   }
 

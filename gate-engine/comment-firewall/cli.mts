@@ -5,6 +5,7 @@ import path from 'node:path';
 import { detectChangedComments } from './detect.mts';
 import { runCommentFirewall } from './gate.mts';
 import {
+  describeRationaleStore,
   ensureLegacyRationalesMigrated,
   listRationales,
   pruneRationales,
@@ -104,6 +105,35 @@ function shipLogContainsFinding(cwd: string, file: string, id: string): boolean 
   }
 }
 
+/**
+ * A managed-review environment redirects this write into the private review data root, which a real
+ * `devkit ship` never reads. Silent, that divergence costs a full gate run to notice.
+ */
+function warnPrivateReviewWrite(cwd: string, id: string): void {
+  let store: ReturnType<typeof describeRationaleStore>;
+  try {
+    store = describeRationaleStore(cwd);
+  } catch {
+    return;
+  }
+  if (!store.privateReview) return;
+  console.error(
+    'guard-comments: WARNING — recorded into the managed-review private data root, not the shared store.',
+  );
+  console.error(`  wrote:      ${store.writableFile}`);
+  console.error(`  ship reads: ${store.sharedFile}`);
+  // Shared evidence for this id already satisfies ship, so the write is an invisible REPLACEMENT,
+  // not the difference between blocked and clear. Saying "still missing" would be plainly false.
+  console.error(
+    store.sharedFindingIds?.includes(id)
+      ? `  [${id}] already has shared evidence, so \`devkit ship\` keeps using THAT rationale and this edit never reaches it.`
+      : `  \`devkit ship\` will still report [${id}] as missing.`,
+  );
+  console.error(
+    '  Unset DEVKIT_RUN_MODE / DEVKIT_REVIEW_DATA_ROOT and re-run outside managed review to change what ship sees.',
+  );
+}
+
 export function runCommentCli(args: string[], cwd = process.cwd()): number {
   const [command, ...rest] = args;
   if (command === 'gate') {
@@ -164,6 +194,7 @@ export function runCommentCli(args: string[], cwd = process.cwd()): number {
       console.error(
         `guard-comments: local rationale recorded for [${id}]${entry.ticket ? ` (${entry.ticket})` : ''}; re-run the gate for batched independent review.`,
       );
+      warnPrivateReviewWrite(cwd, id);
       return 0;
     } catch (cause) {
       console.error(`guard-comments: justify — ${cause instanceof Error ? cause.message : cause}`);
