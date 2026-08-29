@@ -48,8 +48,8 @@ Usage:
                       the base .husky/_ + node_modules are always linked).
   --no-qavis-publish  Skip the post-push step that hands a passed staged Qavis result to qavis for
                       publication. The Qavis gate still runs; only the post-push hand-off is skipped.
-                      That hand-off is INERT until the installed qavis exposes a publication
-                      subcommand (sc-2161) — until then ship names the gap once and prints the
+                      Publication needs a qavis exposing \`publish\` (qavis #85). Against an older
+                      one the hand-off is inert: ship names the gap once and prints the
                       \`qavis qa --pr … --annotate description\` remedy instead.
   --pr                Re-push: add the changes to the EXISTING PR on <branch> as a new commit
                       (fast-forward, never --force) instead of opening a new PR.

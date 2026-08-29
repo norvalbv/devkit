@@ -197,7 +197,7 @@ describe('publish_qavis_receipt', () => {
     expect(existsSync(join(root, 'invoked'))).toBe(false);
     expect(result.stderr).not.toContain("unknown command 'publish'");
     expect(result.stderr).not.toContain('qavis publish --pr'); // an impossible remedy is worse than none
-    expect(result.stderr).toContain('no publication subcommand');
+    expect(result.stderr).toContain('predates its publish subcommand');
     expect(result.stderr).toContain(`qavis qa --pr 42 --repo ${root} --annotate description`);
   });
 
@@ -211,7 +211,7 @@ describe('publish_qavis_receipt', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(join(root, 'invoked'))).toBe(false);
-    expect(result.stderr).toContain('no publication subcommand');
+    expect(result.stderr).toContain('predates its publish subcommand');
   });
 
   // `qavis publish --help` exits 0 on a qavis WITHOUT publish, so the probe must not read an exit
@@ -237,7 +237,7 @@ describe('publish_qavis_receipt', () => {
     const result = run({ errexit: true });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stderr).toContain('no publication subcommand');
+    expect(result.stderr).toContain('predates its publish subcommand');
   });
 
   it('names a runnable remedy when qavis is not on PATH at all', () => {
@@ -261,7 +261,7 @@ describe('publish_qavis_receipt', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(join(root, 'invoked'))).toBe(true);
-    expect(result.stderr).not.toContain('no publication subcommand');
+    expect(result.stderr).not.toContain('predates its publish subcommand');
   });
 
   // The probe spawns a second process on a path that already ran `gh pr create`. Inheriting the

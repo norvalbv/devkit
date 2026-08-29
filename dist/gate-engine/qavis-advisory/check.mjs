@@ -74,12 +74,16 @@ export function qavisOnPath(env = process.env, cwd = process.cwd()) {
  */
 /** Exported so a hang-regression test can bound its own wait without hard-coding this number. */
 export const QAVIS_HELP_TIMEOUT_MS = 5_000;
-export function qavisSupportsPublish() {
+export function qavisSupportsPublish(cwd = process.cwd()) {
     let help;
     try {
         help = execFileSync('qavis', ['--help'], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
+            // Same cwd `qavisOnPath` judges from: a RELATIVE PATH entry resolves against the spawn's
+            // directory, so probing from doctor's own cwd could answer for a different binary than the one
+            // reported present — or none at all.
+            cwd,
             // Explicit `env` so the lookup uses the LIVE PATH. Bun's execFileSync resolves the executable
             // against the PATH it started with and ignores a later `process.env.PATH` write, so without
             // this the probe can answer for a different binary than the shell probe found — measured, and

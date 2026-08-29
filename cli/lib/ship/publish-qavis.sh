@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Qavis owns receipt validation, upload policy, and PR rendering. devkit supplies the shipped range.
 #
-# devkit ships the CALLER for a publication subcommand qavis does not expose yet — sc-2161 owns the
-# qavis half. PR #417 landed this call against an assumed companion that was never pushed, so every
-# ship carrying a pass receipt printed `unknown command 'publish'` AND a retry line naming that same
-# impossible command (sc-2028). Hence: probe before invoking, and when publication is unavailable say
-# so ONCE, with a remedy that actually runs.
+# The probe exists because devkit and qavis version independently. PR #417 landed this call against a
+# companion that was never pushed, so every ship carrying a pass receipt printed `unknown command
+# 'publish'` AND a retry line naming that same impossible command (sc-2028). qavis #85 has since added
+# `publish`, but an installed qavis older than it still cannot, and always will be able to lag — so
+# probe before invoking, and when publication is unavailable say so ONCE, with a runnable remedy.
 #
 # The remedy is deliberately NOT run for you. `qavis qa --pr` re-provisions a base worktree, boots the
 # app and re-judges it — minutes plus model spend on EVERY ship, and its fresh verdict can contradict
@@ -65,7 +65,7 @@ publish_qavis_receipt() {
 
   if ! qavis_supports_publish; then
     warn_qavis_publication_unavailable "$root" "$pr" \
-      'the installed qavis exposes no publication subcommand (sc-2161)'
+      'the installed qavis predates its publish subcommand — upgrade it'
     return 0
   fi
 
