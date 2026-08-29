@@ -21,10 +21,14 @@
 # Every failure arm resolves to "absent": not invoking is the safe direction, since invoking is what
 # broke. Callers run under `set -euo pipefail`, so this is only ever evaluated as an `if` CONDITION —
 # which suppresses errexit for the whole body. A publication probe must never be able to kill a ship
-# that has already pushed (see docs/decisions/fail-open-needs-an-errexit-safe-call.md).
-# `</dev/null`: this spawns a SECOND process on a path that has already pushed and opened the PR. A
-# qavis that reads stdin would otherwise swallow the operator's piped body — or block there forever,
-# after the push landed and before the reconcile-manifest write.
+# that has already pushed (see docs/decisions/fail-open-needs-an-errexit-safe-call.md) — and, for the
+# same reason, must never be able to HANG one either. `</dev/null` stops a qavis that reads stdin from
+# swallowing the operator's piped body, but a qavis that simply never returns would still wedge the
+# ship after the push landed and before the reconcile-manifest write, with nothing watching to
+# interrupt it. So the probe runs under a deadline, hand-rolled because `timeout(1)` is not on macOS
+# and this file has to work wherever a consumer ships from. SIGKILL, not SIGTERM: a process ignoring
+# TERM would leave us waiting exactly as long as no deadline at all (measured on the doctor twin —
+# a 1s timeout took 30s).
 #
 # The awk splits each term on `|` because commander renders an aliased subcommand as `publish|pub`
 # (its help.js builds the term that way), and matching the rendered term literally would report
@@ -32,14 +36,37 @@
 # It also stops at the next UNINDENTED line, because anything a help text appends after the Commands
 # block (`Examples:` and friends) is prose: reading `Examples:\n  publish --pr 1` as a registered
 # command is a false POSITIVE, which sends ship back to invoking a subcommand that does not exist.
+# Seconds the help probe may take. Overridable so a test can assert the deadline without waiting it out.
+QAVIS_HELP_TIMEOUT_S=${QAVIS_HELP_TIMEOUT_S:-5}
+
 qavis_supports_publish() {
-  local help=''
-  help=$(qavis --help 2>/dev/null </dev/null) || return 1
-  printf '%s\n' "$help" \
-    | awk '/^Commands:/ { c = 1; next }
-           c && /^[^[:space:]]/ { c = 0 }
-           c && /^  [a-z]/ { n = split($1, names, "|"); for (i = 1; i <= n; i++) print names[i] }' \
+  local out pid waited=0 status
+  out=$(mktemp) || return 1
+  qavis --help >"$out" 2>/dev/null </dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$QAVIS_HELP_TIMEOUT_S" ]; then
+      kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      rm -f "$out"
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    rm -f "$out"
+    return 1
+  fi
+  awk '/^Commands:/ { c = 1; next }
+       c && /^[^[:space:]]/ { c = 0 }
+       c && /^  [a-z]/ { n = split($1, names, "|"); for (i = 1; i <= n; i++) print names[i] }' "$out" \
     | grep -qx publish
+  status=$?
+  rm -f "$out"
+  return "$status"
 }
 
 # ONE stderr line naming WHY, then the remedy that IS supported today. The advisory gate's standing

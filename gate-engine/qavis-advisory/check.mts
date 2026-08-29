@@ -95,6 +95,10 @@ export function qavisSupportsPublish(cwd = process.cwd()): boolean | null {
       // is meant to describe; on timeout the throw lands in the catch and answers "could not ask"
       // rather than "absent". `--help` measures in tenths of a second.
       timeout: QAVIS_HELP_TIMEOUT_MS,
+      // SIGKILL, not the default SIGTERM: `execFileSync` sends the signal and then WAITS, so a child
+      // ignoring TERM makes the timeout do nothing at all. Measured: a 1s timeout against a
+      // `trap "" TERM; sleep 30` stub took 30.4s to return, versus 1.0s with SIGKILL.
+      killSignal: 'SIGKILL',
     });
   } catch {
     return null; // never ran, or was killed at the timeout — no evidence either way

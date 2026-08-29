@@ -120,7 +120,7 @@ function seedReceipt(): void {
  * (ship-branch.sh, reship.sh). Without it a probe that aborts the ship after the push has landed —
  * and before the reconcile-manifest write — is structurally unobservable here.
  */
-function run(opts: { errexit?: boolean; path?: string } = {}) {
+function run(opts: { errexit?: boolean; path?: string; helpTimeoutS?: string } = {}) {
   const prelude = opts.errexit === false ? '' : 'set -euo pipefail; ';
   return spawnSync(
     '/bin/bash',
@@ -139,6 +139,7 @@ function run(opts: { errexit?: boolean; path?: string } = {}) {
         ...process.env,
         PATH: opts.path ?? `${bin}:${process.env.PATH}`,
         QAVIS_HELPER: helper,
+        ...(opts.helpTimeoutS ? { QAVIS_HELP_TIMEOUT_S: opts.helpTimeoutS } : {}),
       },
     },
   );
@@ -239,6 +240,22 @@ describe('publish_qavis_receipt', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain('predates its publish subcommand');
   });
+
+  // `</dev/null` stops a qavis that READS stdin, but one that simply never returns would wedge the
+  // ship after the push landed and before the reconcile-manifest write, unattended. SIGKILL, not
+  // SIGTERM: a process ignoring TERM would leave the deadline doing nothing (measured on the doctor
+  // twin — a 1s timeout took 30s).
+  it('gives up on a qavis whose --help never returns, instead of hanging the ship', () => {
+    seedReceipt();
+    stubQavis('trap "" TERM\nsleep 60');
+    const started = Date.now();
+
+    const result = run({ helpTimeoutS: '1' });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain('predates its publish subcommand');
+    expect(Date.now() - started).toBeLessThan(30_000); // the stub's own sleep, i.e. no deadline at all
+  }, 60_000);
 
   it('names a runnable remedy when qavis is not on PATH at all', () => {
     seedReceipt();
@@ -371,7 +388,9 @@ describe('publish-capability probes agree (ship shell vs doctor TypeScript)', ()
   // --help never returns must degrade to "absent", not wedge the command. execFileSync waits forever
   // by default, so the bound is the whole guarantee.
   it('gives up on a qavis whose --help never returns, instead of hanging doctor', () => {
-    stubQavis('sleep 60');
+    // Ignores SIGTERM on purpose: `execFileSync` sends its kill signal and then waits, so without
+    // `killSignal: 'SIGKILL'` the timeout expires and the call still blocks for the full sleep.
+    stubQavis('trap "" TERM\nsleep 60');
     const started = Date.now();
 
     expect(doctorProbe()).toBeNull(); // could not ask — never reported as a known absence
