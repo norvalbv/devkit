@@ -360,6 +360,20 @@ describe('comparison semantics', () => {
   });
 });
 
+describe('catalog load failures name what actually happened', () => {
+  it('does not call a present-but-empty catalog missing', () => {
+    expect(() => loadCatalog(memory({ 'docs/benchmarks/catalog.json': '' }))).toThrow(/empty/i);
+    expect(() => loadCatalog(memory({ 'docs/benchmarks/catalog.json': '' }))).not.toThrow(
+      /Missing/,
+    );
+  });
+
+  it('says which snapshot it searched when the catalog is genuinely absent', () => {
+    expect(() => loadCatalog(memory({}))).toThrow(/Missing docs\/benchmarks\/catalog\.json/);
+    expect(() => loadCatalog(memory({}))).not.toThrow(/undefined/);
+  });
+});
+
 describe('catalog and generated views', () => {
   it('covers all canonical agents, bins, reviewers, singleton judges, and eval runners', () => {
     const source = repositorySource(ROOT, 'working');
