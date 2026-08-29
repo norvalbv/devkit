@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { diffLineCounts } from '../evidence/scope.mts';
 import { runReviewGate } from '../run-review.mts';
 import { cleanupReviewFixtures, consumerRepo, passWithArtifact } from './run-review-fixtures.mts';
 
@@ -44,6 +45,9 @@ describe('review_scope evidence-cap accounting', () => {
     expect(backend.evidence_bytes_shown).toBe(backend.diff_bytes);
     expect(backend.omitted_files).toBe(0);
     expect(backend.truncated_files).toBe(0);
+    // A staged-new-files fixture is pure additions: real line counts ride every scope row.
+    expect(backend.insertions).toBeGreaterThan(0);
+    expect(backend.deletions).toBe(0);
   });
 
   it('says how much of a byte-heavy diff the judge could actually see', async () => {
@@ -64,5 +68,59 @@ describe('review_scope evidence-cap accounting', () => {
     expect(backend.truncated_files + backend.omitted_files).toBeGreaterThan(0);
     // Three small integers: every event still fits the atomic-append window.
     for (const line of lines) expect(Buffer.byteLength(line, 'utf8')).toBeLessThan(4096);
+  });
+});
+
+describe('diffLineCounts', () => {
+  it('counts +/- content lines and excludes the +++/--- file headers', () => {
+    const diff = [
+      'diff --git a/f.ts b/f.ts',
+      '--- a/f.ts',
+      '+++ b/f.ts',
+      '@@ -1,3 +1,3 @@',
+      ' context',
+      '-old line',
+      '+new line',
+      '+second addition',
+    ].join('\n');
+    expect(diffLineCounts(diff)).toEqual({ insertions: 2, deletions: 1 });
+  });
+
+  it('content lines starting --/++/--- inside a hunk still count; headers outside never do', () => {
+    const diff = [
+      'diff --git a/q.sql b/q.sql',
+      '--- a/q.sql',
+      '+++ b/q.sql',
+      '@@ -1,3 +1,2 @@',
+      '--select 1',
+      '++x',
+      '---triple-dash deletion',
+    ].join('\n');
+    expect(diffLineCounts(diff)).toEqual({ insertions: 1, deletions: 2 });
+  });
+
+  it('a second file resets hunk state, so its headers stay uncounted', () => {
+    const diff = [
+      'diff --git a/a.ts b/a.ts',
+      '@@ -1 +1 @@',
+      '+one',
+      'diff --git a/b.ts b/b.ts',
+      '--- a/b.ts',
+      '+++ b/b.ts',
+      '@@ -1 +1 @@',
+      '-two',
+    ].join('\n');
+    expect(diffLineCounts(diff)).toEqual({ insertions: 1, deletions: 1 });
+  });
+
+  it('CRLF diffs count identically — the \\r rides the line body, not the prefix', () => {
+    expect(diffLineCounts('@@ -1 +1 @@\r\n+added\r\n-removed\r\n')).toEqual({
+      insertions: 1,
+      deletions: 1,
+    });
+  });
+
+  it('an empty diff counts zero both ways', () => {
+    expect(diffLineCounts('')).toEqual({ insertions: 0, deletions: 0 });
   });
 });
