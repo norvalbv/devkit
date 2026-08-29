@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -65,6 +66,10 @@ function seedRepository(): {
     [
       '#!/bin/sh',
       'printf "%s\\t%s\\n" "$PWD" "$*" >> "$PRE_PUSH_TEST_LOG"',
+      // A distinctive, non-1 code: the hook must propagate the gate's OWN status, not a normalised 1.
+      'case " $* " in *" run typecheck "*) [ ! -e "$PWD/fail-typecheck" ] || exit 7 ;; esac',
+      // Fails the SUITE only, so a test can reach the test phase — dirty-only.mts fails both.
+      'case " $* " in *" run test:run "*) [ ! -e "$PWD/fail-tests" ] || exit 7 ;; esac',
       '[ ! -e "$PWD/dirty-only.mts" ]',
       '',
     ].join('\n'),
@@ -250,5 +255,145 @@ describe('devkit repository pre-push hook', () => {
       `${realpathSync(root)}\trun typecheck`,
       `${realpathSync(root)}\trun test:run`,
     ]);
+  });
+});
+
+// sc-2198: a blocked push now names its base so a correct block is not read as flake. The block
+// itself must be untouched — these assert the verdict, not the narration.
+describe('pre-push failure attribution', () => {
+  it('preserves the gate’s own exit code, not a normalised 1', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    writeFileSync(join(root, 'fail-typecheck'), '');
+    const head = git(root, 'rev-parse', 'HEAD');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+    );
+    expect(result.status).toBe(7);
+  });
+
+  it('says nothing after a TYPECHECK failure — there are no test results to attribute', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    writeFileSync(join(root, 'fail-typecheck'), '');
+    const head = git(root, 'rev-parse', 'HEAD');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${ZERO_OID}\n`,
+    );
+    expect(result.stderr).not.toContain('push base');
+    // Exactly one command ran: the suite is never reached.
+    expect(readLog(logPath)).toEqual([`${realpathSync(root)}\trun typecheck`]);
+  });
+
+  it('names the base when the suite fails and the base resolves', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const base = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'later.mts'), 'export const later = true;\n');
+    git(root, 'add', 'later.mts');
+    git(root, 'commit', '-qm', 'later');
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'fail-tests'), '');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${base}\n`,
+    );
+    expect(result.status).toBe(7);
+    expect(result.stderr).toContain('pre-date your push');
+    expect(result.stderr).toContain(base.slice(0, 7));
+  });
+
+  it('stays silent on a brand-new branch with no remote knowledge', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'fail-tests'), '');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/new ${head} refs/heads/new ${ZERO_OID}\n`,
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain('push base');
+    expect(result.stderr).not.toContain('pre-date your push');
+  });
+
+  it('stays silent when two refs carry the same tree to different remote tips', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const base = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'later.mts'), 'export const later = true;\n');
+    git(root, 'add', 'later.mts');
+    git(root, 'commit', '-qm', 'later');
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'fail-tests'), '');
+    // Which base gets narrated would otherwise be a function of input order alone.
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${base}\n` +
+        `refs/heads/other ${head} refs/heads/other ${head}\n`,
+    );
+    expect(result.status).toBe(7);
+    expect(result.stderr).not.toContain('pre-date your push');
+  });
+
+  it('can be turned off without changing the verdict', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const base = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'later.mts'), 'export const later = true;\n');
+    git(root, 'add', 'later.mts');
+    git(root, 'commit', '-qm', 'later');
+    const head = git(root, 'rev-parse', 'HEAD');
+    writeFileSync(join(root, 'fail-tests'), '');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/main ${head} refs/heads/main ${base}\n`,
+      { DEVKIT_PREPUSH_ATTRIBUTION: '0' },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain('pre-date your push');
+  });
+
+  // Git writes an all-zero oid at the repository's HASH WIDTH: 40 for SHA-1, 64 for SHA-256. A
+  // fixed-width literal makes every deletion in a SHA-256 repo read as a real update, and the hook
+  // then tries to peel a commit from an oid that cannot exist.
+  it('treats a 64-zero (SHA-256) oid as a deletion, not a real update', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const sha256Zero = '0'.repeat(64);
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/tags/v1.0.0 ${sha256Zero} refs/tags/v1.0.0 ${sha256Zero}\n`,
+    );
+    // A tag deletion has no source tree to validate: exit 0 with the suite never invoked.
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(logPath)).toBe(false);
+  });
+
+  it('emits no attribution on the tag path', () => {
+    const { fakeBin, logPath, root, tagOid } = seedRepository();
+    writeFileSync(join(root, 'dirty-only.mts'), '');
+    git(root, 'add', 'dirty-only.mts');
+    git(root, 'commit', '-qm', 'poison');
+    git(root, 'tag', '-a', 'v2.0.0', '-m', 'poisoned');
+    const poisoned = git(root, 'rev-parse', 'refs/tags/v2.0.0');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/tags/v2.0.0 ${poisoned} refs/tags/v2.0.0 ${ZERO_OID}\n`,
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toContain('pre-date your push');
+    expect(tagOid).toBeTruthy();
   });
 });

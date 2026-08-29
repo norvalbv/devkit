@@ -45,7 +45,11 @@ import {
   renderIndex,
   upsertRow,
 } from '../../decision-format.mts';
-import { INTEGRITY_CHECK_IDS, type IntegrityCheckId } from '../../integrity/checks.mts';
+import {
+  INTEGRITY_CHECK_IDS,
+  type IntegrityCheckId,
+  integrityFindingKey,
+} from '../../integrity/checks.mts';
 import type { Fixture } from '../../integrity/perturb.mts';
 import { MUTATIONS } from '../../integrity/perturb.mts';
 import { scanCorpus } from '../../integrity/scan.mts';
@@ -80,8 +84,7 @@ export const KNOWN_REAL_EXCEPTIONS = [
   { slug: 'overlay-self-heal', check: 'retarget-missing-evidence-change', block: '2026-07-14' },
 ];
 
-const exceptionKey = (e: { slug: string; check: string; block?: string }) =>
-  `${e.slug}:${e.check}:${e.block ?? ''}`;
+const exceptionKey = integrityFindingKey;
 
 export function loadCases(): SaveQualityCase[] {
   if (!existsSync(CASES)) throw new BenchAbort(2, `save-quality: missing ${path.basename(CASES)}`);

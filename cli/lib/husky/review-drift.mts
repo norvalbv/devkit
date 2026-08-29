@@ -4,13 +4,8 @@ import { normalizeSelection, type Selection, structureCmdFor } from '../componen
 import { detectGitRoot } from '../detect-git-root.mts';
 import { readJson } from '../fs-helpers.mts';
 import { syncOverlayHook } from '../overlay.mts';
-import { buildGuardBlock, buildStandaloneBlock, extractGuardBlock } from './husky-block.mts';
-import {
-  buildSelfHostBlock,
-  SELF_HOST_EXTRAS,
-  SELF_HOST_STRUCTURE_CMD,
-  selfHostSelection,
-} from './self-host.mts';
+import { guardBlockMatches, selfHostHookParity } from './hook-parity.mts';
+import { buildGuardBlock, buildStandaloneBlock } from './husky-block.mts';
 
 interface ReviewSetupConfig {
   overlay?: boolean;
@@ -31,25 +26,19 @@ export function reviewHookDrift(cwd: string): string | null {
     const sync = syncOverlayHook(gitRoot, cwd, cfg, { dryRun: true });
     return sync.drift ? 'overlay pre-commit differs from the current generator' : null;
   }
+  if (cfg.selfHost) return selfHostHookParity(cwd, { components: cfg.components }).reason;
 
   const hookPath = join(gitRoot, '.husky', 'pre-commit');
   if (!existsSync(hookPath)) return 'missing .husky/pre-commit';
-  const current = extractGuardBlock(readFileSync(hookPath, 'utf8'), pkgRel);
   const selection = normalizeSelection(cfg.components ?? {});
-  const expected = cfg.selfHost
-    ? buildSelfHostBlock(
-        { ...selfHostSelection(), structureCmd: SELF_HOST_STRUCTURE_CMD, extras: SELF_HOST_EXTRAS },
-        pkgRel,
-        cwd,
-      )
-    : (cfg.standalone ? buildStandaloneBlock : buildGuardBlock)(
-        {
-          ...selection,
-          structureCmd: selection.structure ? structureCmdFor(cfg.stack ?? 'generic') : undefined,
-        },
-        pkgRel,
-      );
-  return current !== null && current.trim() === expected.trim()
+  const expected = (cfg.standalone ? buildStandaloneBlock : buildGuardBlock)(
+    {
+      ...selection,
+      structureCmd: selection.structure ? structureCmdFor(cfg.stack ?? 'generic') : undefined,
+    },
+    pkgRel,
+  );
+  return guardBlockMatches(readFileSync(hookPath, 'utf8'), expected, pkgRel)
     ? null
     : 'pre-commit gate block differs from the current generator';
 }

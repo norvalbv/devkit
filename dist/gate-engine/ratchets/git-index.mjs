@@ -128,6 +128,50 @@ export function hasStagedFiles(root) {
 export function splitNul(out) {
     return out.split('\0').filter((line) => line.length > 0);
 }
+function mergeInProgress(root) {
+    return (spawnSync('git', ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], { cwd: root }).status === 0);
+}
+/**
+ * Every repo-root-relative path the pending commit TOUCHES, deletions included.
+ *
+ * The sibling stagedSet filters to ACMR on purpose — it scopes per-file work to files that still
+ * exist. Attribution is the opposite question: every status the index can carry names a path this
+ * commit changed, so a gate blaming from stagedSet lets `git rm` (D) or a symlink swap (T) of a
+ * governed file read as pre-existing drift.
+ *
+ * Otherwise it matches stagedSet exactly: NUL-delimited so a path containing a newline is not split
+ * into two wrong ones, and intersected with the MERGE_HEAD diff so a merge is blamed only for the
+ * paths it actually resolved rather than everything inherited from the second parent. Returns null
+ * when git cannot answer, so callers can stand down rather than blame the tree.
+ */
+export function stagedTouchedSet(root) {
+    // No --diff-filter at all: every status the index can carry is a path this commit touched,
+    // including D (delete) and T (regular file <-> symlink). An allowlist of statuses is exactly how
+    // deletions were missed once already.
+    const argv = (args) => ['diff', '--cached', '--name-only', '-z', ...args];
+    try {
+        const staged = new Set(splitNul(execFileSync('git', argv([]), { cwd: root, encoding: 'utf8' })));
+        // An ordinary commit has no MERGE_HEAD, and the first-parent set is the whole answer.
+        if (!mergeInProgress(root))
+            return staged;
+        try {
+            const fromMergeHead = new Set(splitNul(execFileSync('git', argv(['MERGE_HEAD']), {
+                cwd: root,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
+            })));
+            return new Set([...staged].filter((file) => fromMergeHead.has(file)));
+        }
+        catch {
+            // A merge IS in progress but its second-parent diff will not resolve, so first-parent scope
+            // would blame every path inherited from MERGE_HEAD. Stand down instead of blaming the tree.
+            return null;
+        }
+    }
+    catch {
+        return null;
+    }
+}
 // The repo-root-relative paths ADDED/COPIED/MODIFIED/RENAMED in the pending commit (the git index).
 // During a merge, a first-parent diff also includes every path inherited unchanged from MERGE_HEAD;
 // intersect both parent diffs so ratchets govern only merge resolutions that differ from BOTH

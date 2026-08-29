@@ -10,6 +10,7 @@ import {
   checkFrontmatterSlug,
   checkH1Slug,
   checkIndexStale,
+  integrityFindingKey,
   checkRetargetEvidenceChange,
   checkTargetHeadingDepth,
 } from '../integrity/checks.mts';
@@ -380,5 +381,41 @@ describe('scanCorpus / runIntegrity', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(runIntegrity(join(dir, 'does-not-exist'))).toBe(2);
     err.mockRestore();
+  });
+});
+
+// integrityFindingKey is a CROSS-MODULE contract: the save-quality bench keys its known-exception
+// set with it, and the staged pre-commit gate keys its HEAD diff with it. If the two ever disagreed
+// about what "the same finding" means, a grandfathered defect would start blocking commits — or, in
+// the other direction, a new regression would be swallowed as already-known.
+describe('integrityFindingKey', () => {
+  it('includes the Target block, so two blocks on one axis are distinct findings', () => {
+    const axis = { slug: 'a', check: 'retarget-missing-evidence-change' };
+    expect(integrityFindingKey({ ...axis, block: '2026-07-14' })).not.toBe(
+      integrityFindingKey({ ...axis, block: '2026-08-01' }),
+    );
+  });
+
+  it('separates two checks reported against the same block', () => {
+    expect(integrityFindingKey({ slug: 'a', check: 'index-stale', block: '2026-07-14' })).not.toBe(
+      integrityFindingKey({
+        slug: 'a',
+        check: 'retarget-missing-evidence-change',
+        block: '2026-07-14',
+      }),
+    );
+  });
+
+  it('separates the same check on two different axes', () => {
+    expect(integrityFindingKey({ slug: 'a', check: 'index-stale' })).not.toBe(
+      integrityFindingKey({ slug: 'b', check: 'index-stale' }),
+    );
+  });
+
+  it('treats an absent block as the empty segment, so axis-level findings stay stable', () => {
+    expect(integrityFindingKey({ slug: 'a', check: 'index-stale' })).toBe('a:index-stale:');
+    expect(integrityFindingKey({ slug: 'a', check: 'index-stale', block: undefined })).toBe(
+      'a:index-stale:',
+    );
   });
 });

@@ -15,7 +15,9 @@
  *   guard-decisions check-alignment --gate | scan     scope-matched alignment + depth gate (capture C)
  *   guard-decisions scoped-targets --files <a,b> [--query "<text>" --top K]   governing Targets → JSON
  *   guard-decisions categories                        per-category view (recall/category-report.mts)
- *   guard-decisions integrity                         structural-integrity scan (integrity/scan.mts)
+ *   guard-decisions integrity [--staged]              structural-integrity scan (integrity/scan.mts);
+ *                                                     --staged judges only the records THIS commit
+ *                                                     touches, against HEAD (integrity/staged-gate.mts)
  *
  * `detect`, `check-alignment` and `scoped-targets` are thin re-dispatches into their .mjs by
  * re-importing them with a synthesised argv (so their own run-as-main dispatch fires); `categories`
@@ -30,6 +32,7 @@
 import { realpathSync } from 'node:fs';
 import { main as decisionsMain } from './decisions.mts';
 import { cmdIntegrity } from './integrity/scan.mts';
+import { runStagedIntegrity } from './integrity/staged-gate.mts';
 import { cmdCategories } from './recall/category-report.mts';
 
 // Dev runs the .mts source (Node strips types); the shipped dist is compiled .mjs. Derive the
@@ -50,7 +53,9 @@ async function run(argv: string[]) {
   if (cmd === 'integrity') {
     // A non-zero scan is a finding, not a crash — set exitCode rather than throwing into the
     // catch below, which would relabel it as `guard-decisions: <error>`.
-    process.exitCode = cmdIntegrity();
+    // --staged is the commit-time gate: same checks, scoped to this change and diffed against HEAD.
+    // Bare `integrity` keeps its whole-corpus contract, known historical finding included.
+    process.exitCode = rest.includes('--staged') ? runStagedIntegrity() : cmdIntegrity();
     return;
   }
   const sub = SUB_ENGINES[cmd];

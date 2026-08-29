@@ -3,7 +3,15 @@ set -euo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ZERO_OID=0000000000000000000000000000000000000000
+# Git's "this ref does not exist" oid is all zeros at the repository's hash width — 40 for SHA-1,
+# 64 for SHA-256. Match on the shape, not a fixed-width literal, or every deletion in a SHA-256 repo
+# reads as a real update. (DEVKIT_SHIP_PREPUSH_SKIP_SHA below already accepts both widths.)
+is_zero_oid() {
+  case "$1" in
+    *[!0]* | '') return 1 ;;
+    *) return 0 ;;
+  esac
+}
 # sc-1508: the exact commit sha a `devkit ship` is pushing (set command-scoped by ship-branch.sh /
 # reship.sh). Only a 40/64-hex non-zero oid is honoured; anything else — including a plain `git push`
 # where the env is unset — is treated as absent, so the branch path falls through to the full suite.
@@ -11,6 +19,8 @@ SHIP_SKIP_SHA="${DEVKIT_SHIP_PREPUSH_SKIP_SHA:-}"
 if ! { [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{64}$ ]]; }; then
   SHIP_SKIP_SHA=
 fi
+GATE_PHASE=
+GATE_HEAD_OID=
 NON_TAG_UPDATE_COUNT=0
 NON_TAG_MATCH_COUNT=0
 UPDATES_FILE=$(mktemp "${TMPDIR:-/tmp}/devkit-pre-push-updates.XXXXXX")
@@ -44,13 +54,27 @@ trap 'exit 130' INT
 trap 'exit 131' QUIT
 trap 'exit 143' TERM
 
+# The `|| return $?` guards are load-bearing, not style. The branch call site is now an OR-list, and
+# per docs/decisions/fail-open-needs-an-errexit-safe-call.md an OR-list suppresses errexit for the
+# whole dynamic extent of the call — so a bare two-subshell split would run the entire suite after a
+# failed typecheck. GATE_PHASE buys "typecheck failed, so there is nothing to attribute" for free.
 run_checks() {
   local worktree=$1
+  # Pin the commit being judged BEFORE the suite runs. Attribution re-reading HEAD afterwards would
+  # narrate the base of whatever another process advanced HEAD to, not the tree that actually failed.
+  GATE_HEAD_OID=$(git -C "$worktree" rev-parse --verify HEAD 2>/dev/null || true)
+  GATE_PHASE=typecheck
   (
     cd "$worktree"
     bun run typecheck
+  ) || return $?
+  GATE_PHASE=test
+  (
+    cd "$worktree"
     bun run test:run
-  )
+  ) || return $?
+  GATE_PHASE=
+  return 0
 }
 
 append_tag_commit() {
@@ -61,6 +85,107 @@ append_tag_commit() {
     done
   fi
   TAG_COMMITS+=("$candidate")
+}
+
+# ---------------------------------------------------------------------------------------------
+# sc-2198: narrate WHOSE fault a blocked push is. Never decide it.
+#
+# On 2026-08-27 main was red for 5h15m; a developer pushing an unrelated two-file change saw five
+# failures in files they had never touched, read a correct block as flake, and pushed --no-verify.
+# The block was right. What was missing was any way to tell "I broke this" from "main is red".
+#
+# THE INVARIANT: every line below runs AFTER the verdict is captured, is reached through an
+# errexit-suppressing OR-list, contains no `exit`, and returns non-zero (printing nothing) on every
+# unhappy path. The authoritative run_checks keeps zero added flags, zero redirection and zero
+# pipes, so a green suite can never be reddened by anything here.
+# ---------------------------------------------------------------------------------------------
+
+# attribution_base
+# Print a locally-resolvable base commit for the tree run_checks just judged, or print nothing and
+# return non-zero. The base is derived ONLY from the ref lines this push negotiated with the remote:
+# git supplies remote_oid on stdin, freshly agreed with the remote moments ago, which is why the
+# rejection of origin/main in ratchets-blame-the-change-not-the-tree does not bind here. There is no
+# tracking-ref fallback — that WOULD be the rejected comparison, and a brand-new branch simply has no
+# base this push agreed on. Ambiguity degrades to silence rather than a guess.
+attribution_base() {
+  local head_oid lref loid rref roid
+  local picked= picked_set=0 single= count=0
+
+  head_oid=$GATE_HEAD_OID
+  [ -n "$head_oid" ] || return 1
+
+  while read -r lref loid rref roid; do
+    [ -n "${rref:-}" ] || continue
+    case "$rref" in refs/tags/*) continue ;; esac
+    is_zero_oid "$loid" && continue # a deletion has no tree to judge
+    count=$((count + 1))
+    single=$roid
+    if [ "$loid" = "$head_oid" ]; then
+      # Two refs carrying the same tree to different remote tips: whichever we picked would be an
+      # arbitrary function of input order, so pick neither.
+      if [ "$picked_set" -eq 1 ] && [ "$picked" != "$roid" ]; then
+        return 1
+      fi
+      picked=$roid
+      picked_set=1
+    fi
+  done < "$UPDATES_FILE"
+
+  if [ "$picked_set" -eq 0 ]; then
+    # Several refs and none is the tree we tested: picking one would be guessing.
+    [ "$count" -eq 1 ] || return 1
+    picked=$single
+  fi
+
+  # A brand-new branch (an all-zero remote oid) or a tip this checkout has never fetched.
+  is_zero_oid "$picked" && return 1
+  git -C "$ROOT" cat-file -e "${picked}^{commit}" 2>/dev/null || return 1
+
+  # A force-push or rebase makes the remote tip a non-ancestor; the shared point is the honest base.
+  # When the tip IS an ancestor — the common case — merge-base returns it unchanged, so this is free.
+  git -C "$ROOT" merge-base "$head_oid" "$picked" 2>/dev/null
+}
+
+# attribute_push_failure
+# Narration for a FAILED run_checks. Returns non-zero for "nothing honest to say". Its sole call site
+# swallows that with `|| true`, so no statement in here can change the push verdict. There is no
+# `exit` anywhere below this line.
+attribute_push_failure() {
+  local base subject conclusion
+
+  [ "${DEVKIT_PREPUSH_ATTRIBUTION:-1}" = 0 ] && return 1
+  # A typecheck failure produced no test results, so there is nothing to attribute — at zero cost.
+  [ "$GATE_PHASE" = test ] || return 1
+
+  base=$(attribution_base) || return 1
+  [ -n "$base" ] || return 1
+
+  subject=$(git -C "$ROOT" log -1 --format='%h  %s  (%an)' "$base" 2>/dev/null) || subject=$base
+
+  # CI's verdict on the base, when it is worth anything. ONLY the `success` arm is acted on, and
+  # that asymmetry is deliberate: devkit's own `gate` workflow currently concludes `failure` on
+  # every main commit for an unrelated fixture reason (autonomous report 62314729 / sc-1896), so a
+  # "CI already failed at your base" line would fire on 100% of pushes and become a standing excuse
+  # to --no-verify — the exact behaviour this whole change exists to remove. A `success` is rare,
+  # informative, and points AT the pusher; it starts working by itself the day the gate goes green.
+  if command -v gh >/dev/null 2>&1; then
+    conclusion=$(gh api "repos/{owner}/{repo}/commits/$base/check-runs" \
+      --jq '[.check_runs[] | select(.name=="gate") | .conclusion] | first' 2>/dev/null) || conclusion=
+  fi
+
+  echo "" >&2
+  if [ "${conclusion:-}" = success ]; then
+    echo "i CI passed at the push base - the failures above are in your change:" >&2
+    echo "      base $subject" >&2
+    return 0
+  fi
+  echo "i these failures may pre-date your push. To check, run the suite at the base:" >&2
+  echo "      base $subject" >&2
+  echo "     git worktree add --detach /tmp/devkit-base $base \\" >&2
+  echo "       && (cd /tmp/devkit-base && bun install && bun run test:run)" >&2
+  echo "   Anything that fails there too is not yours. Your push is still blocked either way -" >&2
+  echo "   '--no-verify' hands whatever is broken to the next person." >&2
+  return 0
 }
 
 cat > "$UPDATES_FILE"
@@ -75,7 +200,7 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     fi
     continue
   fi
-  [ "$local_oid" = "$ZERO_OID" ] && continue
+  is_zero_oid "$local_oid" && continue
   tag_commit=$(git -C "$ROOT" rev-parse --verify "${local_oid}^{commit}")
   append_tag_commit "$tag_commit"
 done < "$UPDATES_FILE"
@@ -85,7 +210,7 @@ if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
   # sc-1508: skip the heavy suite ONLY for a devkit ship of the exact commit(s) it just built — every
   # non-tag ref being pushed must be the ship sha, and there must be at least one. Anything else fails
   # closed to the full suite: a plain `git push` (SHIP_SKIP_SHA unset), a branch DELETION (local_oid is
-  # ZERO_OID, never the sha), or a piggybacked second branch (count > matches). The skip is content-keyed,
+  # all-zero, never the sha), or a piggybacked second branch (count > matches). The skip is content-keyed,
   # not "a ship is running", and CI's .github/workflows/gate.yml re-runs typecheck + test:run on the PR —
   # so the check is not dropped, only moved server-side. A skipped run is announced (never silent).
   if [ -n "$SHIP_SKIP_SHA" ] && [ "$NON_TAG_UPDATE_COUNT" -gt 0 ] \
@@ -95,7 +220,21 @@ if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
     echo "  A plain git push still runs the full suite." >&2
     exit 0
   fi
-  run_checks "$ROOT"
+  gate_rc=0
+  run_checks "$ROOT" || gate_rc=$?
+  if [ "$gate_rc" -ne 0 ]; then
+    # `|| true` is the safety argument: it supplies a zero status so `set -e` cannot abort here, AND
+    # it suppresses errexit for the whole call, so nothing inside can short-circuit the script.
+    # The signal traps are re-pointed at the captured verdict for the same reason: interrupting the
+    # narration (its gh call is the slow part) must not swap a real gate code for 130/143.
+    trap 'exit "$gate_rc"' HUP INT QUIT TERM
+    attribute_push_failure || true
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 131' QUIT
+    trap 'exit 143' TERM
+    exit "$gate_rc"
+  fi
   exit 0
 fi
 
