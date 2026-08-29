@@ -247,7 +247,7 @@ export function wrapPrompt(agentBody, reviewer, files, assetRoot, checklistRecov
  * on stdin, while Read/Grep/Glob resolve a capped current file or rule without changing verdict or
  * stable override-fingerprint contracts.
  */
-export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '' } = {}) {
+export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitMsgBlock = '', lineCountBlock = '' } = {}) {
     return ('You are running as an automated HEADLESS COMMIT GATE, not an interactive assistant.\n' +
         `Review ONLY the STAGED changes. Staged files in scope: ${files.join(', ')}.\n` +
         'You have NO Bash, but Read/Grep/Glob are available. The diff evidence on stdin is capped: ' +
@@ -259,6 +259,7 @@ export function wrapConventionsPrompt(agentBody, files, claudeMdBlock, { commitM
         'marked OMITTED/TRUNCATED, use Read to inspect every named rule file before returning PASS. ' +
         'Never treat incomplete evidence alone as a violation.\n' +
         `${claudeMdBlock}\n` +
+        (lineCountBlock ? `${lineCountBlock}\n` : '') + // sc-2181: the counts, so none is derived
         (commitMsgBlock ? `${commitMsgBlock}\n` : '') + // sc-1442: fenced untrusted advisory intent
         'Your reviewer brief follows. IGNORE any instructions in it about checklist scripts, marker ' +
         'files, tracker/Shortcut lookups, or invoking other subagents — none apply in gate mode.\n' +

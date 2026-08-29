@@ -1,9 +1,11 @@
+import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
 import { LIGHT_JUDGE_MODEL } from '../../judge/judge-isolation.mts';
 import { devkitVersion } from '../../devkit-version.mts';
 import { parseConventionEvidencePairs, parseConventionFindings } from '../evidence/conventions.mts';
+import { countLines } from '../evidence/line-counts.mts';
 import { domainsDisabledByEmptyRoots } from '../evidence/scope.mts';
 import {
   allowedToolsFor,
@@ -869,5 +871,24 @@ describe('cacheKey', () => {
     expect(cacheKey('commit-guard', 'diff-a', 'a', 'bc')).not.toBe(
       cacheKey('commit-guard', 'diff-a', 'ab', 'c'),
     );
+  });
+});
+
+describe('countLines', () => {
+  it.each([
+    ['a\nb\nc\n', 3, 'trailing newline terminates the last line'],
+    ['a\nb\nc', 3, 'an unterminated last line still counts — wc -l would say 2'],
+    ['', 0, 'empty content has no lines — wc -l agrees'],
+    ['\n', 1, 'a lone newline is one line, not two'],
+    ['a\r\nb\r\n', 2, 'CRLF counts the same as LF'],
+    ['a\rb\rc\r', 3, 'a lone CR separates lines too'],
+  ])('%s -> %i (%s)', (content, expected) => {
+    expect(countLines(content)).toBe(expected);
+  });
+
+  it('equals wc -l for newline-terminated content, the shape every tracked file has', () => {
+    const file = 'gate-engine/review/evidence/line-counts.mts';
+    const wc = Number(execSync(`wc -l < ${file}`, { encoding: 'utf8' }).trim());
+    expect(countLines(readFileSync(file, 'utf8'))).toBe(wc);
   });
 });
