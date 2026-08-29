@@ -160,7 +160,10 @@ describe('CLI freeze/gate contract', () => {
     expect(run(root, 'freeze').status).toBe(0);
     const canonical = JSON.parse(readFileSync(join(root, '.devkit/baselines/fanout.json'), 'utf8'));
     expect(canonical.dirs['src/pile']).toBe(21);
-    expect(() => readFileSync(join(root, 'eslint/baselines/fanout.json'))).toThrow();
+    // The legacy alias is still a supported read path, so a freeze keeps it CURRENT rather than
+    // retiring it — retiring is migrateRatchetBaselines' job under `devkit init`/`upgrade` (sc-1934).
+    const alias = JSON.parse(readFileSync(join(root, 'eslint/baselines/fanout.json'), 'utf8'));
+    expect(alias.dirs['src/pile']).toBe(21);
   });
 
   it('writes the baseline under the CONSUMER cwd, not the package dir (W-3)', () => {

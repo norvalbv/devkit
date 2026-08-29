@@ -1,13 +1,16 @@
 import {
   existsSync,
+  lstatSync,
   linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   assertBaselineTrackable,
@@ -83,6 +86,62 @@ function canCopyAfterLinkFailure(error: NodeJS.ErrnoException): boolean {
   return error.code === 'EXDEV' || error.code === 'EPERM';
 }
 
+/**
+ * Point the legacy alias at canonical, so one write publishes both names.
+ *
+ * Contract: never create the alias, and never write through it.
+ *
+ * A symlink is the mechanism because it removes the second write entirely — statSync resolves it, so
+ * the two names report one inode and every later canonical write publishes both with nothing to keep
+ * in step and nothing to diverge. It also survives materialisation: git stores a symlink as a
+ * symlink, where it cannot store two paths as one inode, so a clone or checkout keeps the alias
+ * pointing at canonical instead of splitting into a stale copy. The target is relative so a moved or
+ * cloned checkout still resolves.
+ *
+ * The name is only ever REPLACED, never created: ENOENT means migrateRatchetBaselines retired it and
+ * that retirement stands. Replacing does mean a brief unlink, so a migration retiring the name in
+ * that window is re-created as a symlink to canonical — an equal duplicate, which is what migration
+ * removes on its next pass (sc-2256).
+ */
+function adoptLegacyAlias(canonicalFile: string, legacyFile: string): void {
+  // lstat, not existsSync: existsSync follows the link and reports FALSE for a DANGLING alias, which
+  // would misread a name that still exists as one migration retired, leaving it dangling for a
+  // legacy-only reader instead of being re-pointed at canonical.
+  if (!aliasNamePresent(legacyFile) || sharesInode(canonicalFile, legacyFile)) return;
+  const target = relative(dirname(legacyFile), canonicalFile);
+  rmSync(legacyFile, { force: true });
+  try {
+    symlinkSync(target, legacyFile);
+  } catch (error) {
+    // A peer re-pointed the alias first, which is the outcome this wanted — converge on it, but only
+    // once the name really resolves to canonical, since EEXIST alone does not say whose file won.
+    // SAFETY: symlink() follows Node's filesystem contract and reports failures as ErrnoException.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (!sharesInode(canonicalFile, legacyFile)) throw error;
+  }
+}
+
+function aliasNamePresent(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    // SAFETY: Node filesystem failures carry ErrnoException.code; unknown failures are rethrown.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function sharesInode(left: string, right: string): boolean {
+  try {
+    const a = statSync(left);
+    const b = statSync(right);
+    return a.ino === b.ino && a.dev === b.dev;
+  } catch {
+    return false; // either name is gone, so they are not one file — all the caller asks
+  }
+}
+
 type BaselineLink = (existingPath: string, newPath: string) => void;
 type BaselineCreate = (path: string, contents: Buffer) => void;
 
@@ -149,7 +208,7 @@ export function readRatchetBaseline(
   return read(canonical) ?? read(legacy) ?? read(canonical);
 }
 
-/** Persist current debt canonically; removing the legacy copy makes a concurrent migration safe. */
+/** Persist current debt canonically, keeping any legacy copy byte-identical so migration sees one ceiling. */
 export function writeRatchetBaseline(
   root: string,
   canonical: string,
@@ -202,7 +261,9 @@ export function writeRatchetBaseline(
   } else {
     writeFileSync(canonicalFile, contents);
   }
-  rmSync(legacyFile, { force: true });
+  // readRatchetBaseline still resolves the legacy name, so a commit-time tighten may not retire it —
+  // see docs/decisions/ratchets-blame-the-change-not-the-tree.md (sc-1934).
+  adoptLegacyAlias(canonicalFile, legacyFile);
   if (stage) {
     stageBaseline(root, canonical);
     stageBaseline(root, legacy);

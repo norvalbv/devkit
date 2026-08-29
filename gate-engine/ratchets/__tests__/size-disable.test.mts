@@ -357,8 +357,18 @@ describe('raw-line cap (the maxLines gate — size owned by the ratchet, not esl
         'src/legacy.ts'
       ],
     ).toBe(90);
-    expect(() => readFileSync(join(root, 'eslint/baselines/size.json'))).toThrow();
-    expect(() => readFileSync(join(root, 'eslint/baselines/size-lines.json'))).toThrow();
+    // Both legacy aliases stay readable and track the canonical ceiling, so a reader still
+    // resolving eslint/baselines/* sees the same debt instead of none (sc-1934).
+    expect(
+      JSON.parse(readFileSync(join(root, 'eslint/baselines/size.json'), 'utf8')).files[
+        'src/legacy.ts'
+      ].file,
+    ).toBe(1);
+    expect(
+      JSON.parse(readFileSync(join(root, 'eslint/baselines/size-lines.json'), 'utf8')).files[
+        'src/legacy.ts'
+      ],
+    ).toBe(90);
   });
 
   it('a grandfathered file that GROWS past its recorded ceiling fails (the ratchet)', () => {

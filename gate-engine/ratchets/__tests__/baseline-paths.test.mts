@@ -1,10 +1,12 @@
 import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -109,6 +111,98 @@ describe('ratchet baseline paths', () => {
     write(root, LINES_BASELINE, '{"files":{}}\n');
     expect(readRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE)?.relativePath).toBe(
       LINES_BASELINE,
+    );
+  });
+
+  it('keeps an existing legacy alias current instead of retiring it on a gate write', () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    // Present is not enough: stale bytes here would enforce an OUTDATED ceiling, which is worse
+    // than either keeping the alias current or deleting it outright.
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+  });
+
+  it('re-points a dangling alias instead of reading it as retired', () => {
+    const root = makeRoot();
+    write(root, LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    mkdirSync(join(root, LEGACY_LINES_BASELINE, '..'), { recursive: true });
+    // existsSync follows the link and reports false here, which would misread a name that still
+    // exists as one migration retired — leaving a legacy-only reader with a broken path.
+    symlinkSync(join(root, 'never-existed.json'), join(root, LEGACY_LINES_BASELINE));
+
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+  });
+
+  it('never creates a legacy alias in a repo that has already migrated', () => {
+    const root = makeRoot();
+    write(root, LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it('leaves a refreshed alias migratable as a duplicate rather than a conflict', () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    // Keeping both names byte-identical satisfies hasStableBaselineConflict by CONTENT, which is
+    // what the delete used to buy by absence — so the explicit migration still completes cleanly.
+    expect(migrateRatchetBaselines(root)).toEqual([
+      { from: LEGACY_LINES_BASELINE, kind: 'removed-duplicate', to: LINES_BASELINE },
+    ]);
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+  });
+
+  it('leaves a legacy-only reader reading the tightened ceiling after a gate write', () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    // Read the legacy path directly: a pre-migration devkit has no canonical-first fallback.
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":70}}\n',
     );
   });
 
@@ -245,22 +339,41 @@ describe('ratchet baseline paths', () => {
     );
 
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    // A gate write never retires the legacy alias — it refreshes it, so a reader still resolving
+    // that name sees the SAME tightened ceiling rather than nothing (sc-1934) or stale debt.
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toContain('70');
   });
 
-  it('copies a gate write when a cross-device hard link is unavailable', () => {
+  it('never writes through the alias when it IS canonical', () => {
     const root = makeRoot();
+    // Branch 1 leaves both names on ONE inode, so a second write through the alias truncates
+    // canonical, and an equality check between two names of one file cannot detect it.
     write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
     writeRatchetBaseline(
       root,
       LINES_BASELINE,
       LEGACY_LINES_BASELINE,
       '{"files":{"src/legacy.ts":70}}\n',
-      { link: denyHardLink('EXDEV') },
+    );
+    expect(statSync(join(root, LEGACY_LINES_BASELINE)).ino).toBe(
+      statSync(join(root, LINES_BASELINE)).ino,
     );
 
-    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('70');
-    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    const long = `{"files":{"src/legacy.ts":65,"src/pad.ts":${'9'.repeat(40)}}}\n`;
+    writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, long);
+    writeRatchetBaseline(
+      root,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":60}}\n',
+    );
+
+    // Byte-exact, not merely parseable: a truncate-then-write through the shared inode would leave
+    // the longer payload's tail behind and still look like JSON to a lenient assertion.
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":60}}\n',
+    );
+    expect(() => JSON.parse(readFileSync(join(root, LINES_BASELINE), 'utf8'))).not.toThrow();
   });
 
   it("persists the writer's payload when a peer changes legacy state before fallback", () => {
@@ -400,6 +513,120 @@ describe('ratchet baseline paths', () => {
     expect(results).toEqual(Array.from({ length: 8 }, () => ({ code: 0, stderr: '' })));
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(bytes);
     expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it('tracks a later canonical write without ever recreating a retired name', () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    const tighten = (n: number) =>
+      writeRatchetBaseline(
+        root,
+        LINES_BASELINE,
+        LEGACY_LINES_BASELINE,
+        `{"files":{"src/legacy.ts":${n}}}\n`,
+      );
+
+    tighten(70);
+    tighten(60);
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      readFileSync(join(root, LINES_BASELINE), 'utf8'),
+    );
+
+    // Once migration retires the name, no later write may bring it back — O_CREAT is absent, so the
+    // kernel refuses rather than this code racing a check against migration's removal.
+    rmSync(join(root, LEGACY_LINES_BASELINE));
+    tighten(50);
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toContain('50');
+  });
+
+  it('keeps a split pair current, so the fix survives a clone or checkout', () => {
+    const root = makeRoot();
+    // Git cannot materialise two tracked paths as one inode and the write stages both names, so
+    // this split pair is what every clone or checkout hands the next write.
+    write(root, LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    expect(statSync(join(root, LINES_BASELINE)).ino).not.toBe(
+      statSync(join(root, LEGACY_LINES_BASELINE)).ino,
+    );
+
+    const tighten = (n: number) =>
+      writeRatchetBaseline(
+        root,
+        LINES_BASELINE,
+        LEGACY_LINES_BASELINE,
+        `{"files":{"src/legacy.ts":${n}}}\n`,
+      );
+    tighten(70);
+    tighten(60);
+
+    // Both names track every write, which is what a legacy-only reader needs.
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":60}}\n',
+    );
+    expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(
+      '{"files":{"src/legacy.ts":60}}\n',
+    );
+  });
+
+  it('keeps a projected pair intact when the caller holds one inode', () => {
+    const wt = makeRoot();
+    const caller = makeRoot();
+    // A healthy caller: the two names are ONE file, so both symlinks resolve to the same inode and
+    // the canonical write publishes both at once.
+    write(caller, LINES_BASELINE, '{"files":{"src/legacy.ts":80}}\n');
+    mkdirSync(join(caller, LEGACY_LINES_BASELINE, '..'), { recursive: true });
+    linkSync(join(caller, LINES_BASELINE), join(caller, LEGACY_LINES_BASELINE));
+    for (const rel of [LINES_BASELINE, LEGACY_LINES_BASELINE]) {
+      mkdirSync(join(wt, rel, '..'), { recursive: true });
+      symlinkSync(join(caller, rel), join(wt, rel));
+    }
+
+    writeRatchetBaseline(
+      wt,
+      LINES_BASELINE,
+      LEGACY_LINES_BASELINE,
+      '{"files":{"src/legacy.ts":70}}\n',
+    );
+
+    // Neither projected name is disturbed, and both report the tightened ceiling in the caller.
+    expect(existsSync(join(caller, LEGACY_LINES_BASELINE))).toBe(true);
+    expect(readFileSync(join(caller, LEGACY_LINES_BASELINE), 'utf8')).toBe(
+      readFileSync(join(caller, LINES_BASELINE), 'utf8'),
+    );
+    expect(readFileSync(join(caller, LINES_BASELINE), 'utf8')).toContain('70');
+  });
+
+  it('leaves both names holding one ceiling after concurrent gate writes', async () => {
+    const root = makeRoot();
+    write(root, LEGACY_LINES_BASELINE, '{"files":{"src/legacy.ts":900}}\n');
+    write(
+      root,
+      'concurrent-write.mjs',
+      `import { writeRatchetBaseline, LINES_BASELINE, LEGACY_LINES_BASELINE } from ${JSON.stringify(new URL('../baseline-paths.mts', import.meta.url).href)};\nwriteRatchetBaseline(process.argv[2], LINES_BASELINE, LEGACY_LINES_BASELINE, process.argv[3]);\n`,
+    );
+    const run = (contents: string) =>
+      new Promise<{ code: number | null; stderr: string }>((resolve) => {
+        const child = spawn(process.execPath, [join(root, 'concurrent-write.mjs'), root, contents]);
+        let stderr = '';
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => {
+          stderr += chunk;
+        });
+        child.on('close', (code) => resolve({ code, stderr }));
+      });
+
+    // Distinct ceilings per writer: with equal ones an interleave would hide behind the equality.
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => run(`{"files":{"src/legacy.ts":${800 + i}}}\n`)),
+    );
+
+    expect(results).toEqual(Array.from({ length: 8 }, () => ({ code: 0, stderr: '' })));
+    // Not `legacy === canonical`: they are one inode here, so that compares a file to itself. Assert
+    // the published ceiling is one of the writers' payloads and parses — a torn write fails both.
+    const published = readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8');
+    expect(() => JSON.parse(published)).not.toThrow();
+    expect(JSON.parse(published).files['src/legacy.ts']).toBeGreaterThanOrEqual(800);
   });
 
   it('converges when a gate write races migration', async () => {
