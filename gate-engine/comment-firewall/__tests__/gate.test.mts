@@ -5,10 +5,38 @@ import type { RationaleStoreLocation } from '../rationales.mts';
 import { receiptKey } from '../judge.mts';
 import type {
   CommentFinding,
+  CommentJudgeBatchResult,
+  CommentJudgeChunkFailure,
+  CommentJudgeOutcome,
   CommentRationale,
   DetectionResult,
   RationaleStore,
 } from '../types.mts';
+
+/** A complete review: every supplied verdict landed, nothing was left unjudged. */
+const judged = (results: CommentJudgeBatchResult): CommentJudgeOutcome => ({
+  results,
+  unjudged: [],
+  failures: [],
+  planned: 1,
+  spawned: 1,
+  bin: 'claude',
+});
+
+/** The failing batch is the last one planned, so its 0-based index fixes the plan size. Deriving it
+ * from the verdict COUNT instead would fabricate a batch per finding on any multi-finding batch. */
+const failed = (
+  failure: CommentJudgeChunkFailure,
+  results: CommentJudgeBatchResult = {},
+  bin = 'claude',
+): CommentJudgeOutcome => ({
+  results,
+  unjudged: failure.findingIds,
+  failures: [failure],
+  planned: failure.batch + 1,
+  spawned: failure.batch + 1,
+  bin,
+});
 
 const finding: CommentFinding = {
   id: 'a1b2c3d4e5f6',
@@ -205,12 +233,13 @@ describe('runCommentFirewall', () => {
           Object.assign(saved, entries);
           return true;
         },
-        judge: () => ({
-          [finding.id]: {
-            verdict: 'PASS',
-            reason: 'Documents an external protocol invariant.',
-          },
-        }),
+        judge: () =>
+          judged({
+            [finding.id]: {
+              verdict: 'PASS',
+              reason: 'Documents an external protocol invariant.',
+            },
+          }),
         model: () => 'haiku',
       }),
     ).toBe(0);
@@ -243,12 +272,13 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt: () => false,
-        judge: () => ({
-          [finding.id]: {
-            verdict: 'PASS',
-            reason: 'Documents an external protocol invariant.',
-          },
-        }),
+        judge: () =>
+          judged({
+            [finding.id]: {
+              verdict: 'PASS',
+              reason: 'Documents an external protocol invariant.',
+            },
+          }),
       }),
     ).toBe(4);
     expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
@@ -265,12 +295,13 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({
-          [finding.id]: {
-            verdict: 'FAIL',
-            reason: 'The comment defends a removable workaround.',
-          },
-        }),
+        judge: () =>
+          judged({
+            [finding.id]: {
+              verdict: 'FAIL',
+              reason: 'The comment defends a removable workaround.',
+            },
+          }),
       }),
     ).toBe(1);
     expect(saveReceipt).not.toHaveBeenCalled();
@@ -282,10 +313,64 @@ describe('runCommentFirewall', () => {
       detect: () => detection(),
       loadRationales: () => store({ [finding.id]: rationale }),
       loadReceipts: () => ({}),
-      judge: () => null,
+      judge: () => failed({ kind: 'outage', batch: 0, findingIds: [finding.id] }),
     };
     expect(runCommentFirewall('/repo', { ...base, strict: () => false })).toBe(2);
     expect(runCommentFirewall('/repo', { ...base, strict: () => true })).toBe(3);
+  });
+
+  it('names the reviewer failure that actually happened, never the old disjunction', () => {
+    const cases = [
+      {
+        failure: { kind: 'malformed' as const, truncated: true, replyChars: 41_233 },
+        expect: /cut off mid-verdict after 41233 characters/,
+        remedy: /GUARD_COMMENTS_BATCH/,
+      },
+      {
+        failure: { kind: 'timeout' as const },
+        expect: /hit its 120s cap/,
+        remedy: /NOT an auth\/quota problem/,
+      },
+      {
+        failure: { kind: 'disabled' as const },
+        expect: /GUARD_NO_LLM is set/,
+        remedy: /unset GUARD_NO_LLM/,
+      },
+    ];
+    for (const item of cases) {
+      quiet();
+      expect(
+        runCommentFirewall('/repo', {
+          detect: () => detection(),
+          loadRationales: () => store({ [finding.id]: rationale }),
+          loadReceipts: () => ({}),
+          judge: () => failed({ ...item.failure, batch: 0, findingIds: [finding.id] }),
+          strict: () => true,
+        }),
+      ).toBe(3);
+      const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+      expect(output).toMatch(item.expect);
+      expect(output).toMatch(item.remedy);
+      expect(output).not.toContain('unavailable or returned malformed evidence');
+      expect(output).not.toMatch(/auth\/quota, then re-run/);
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('sends a genuine outage to the binary that went dark, not always claude', () => {
+    quiet();
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection(),
+        loadRationales: () => store({ [finding.id]: rationale }),
+        loadReceipts: () => ({}),
+        judge: () => failed({ kind: 'outage', batch: 0, findingIds: [finding.id] }, {}, 'codex'),
+        strict: () => true,
+      }),
+    ).toBe(3);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain('check `codex` CLI auth/quota');
+    expect(output).not.toContain('claude');
   });
 
   it('classifies deterministic batch overflow as unsafe evidence, not a reviewer outage', () => {
@@ -315,7 +400,7 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        judge: () => judged({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
       }),
     ).toBe(1);
     expect(saveReceipt).not.toHaveBeenCalled();
@@ -337,7 +422,7 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        judge: () => judged({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
         model: () => 'haiku',
       }),
     ).toBe(0);
@@ -361,7 +446,7 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale, [added.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        judge: () => judged({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
         model: () => 'haiku',
       }),
     ).toBe(1);
@@ -384,7 +469,7 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale }),
         loadReceipts: () => ({}),
         saveReceipt,
-        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        judge: () => judged({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
         model: () => 'haiku',
       }),
     ).toBe(1);
@@ -408,7 +493,7 @@ describe('runCommentFirewall', () => {
         loadRationales: () => store({ [finding.id]: rationale, [cached.id]: rationale }),
         loadReceipts: () => ({ [cachedKey]: { verdict: 'PASS' } }),
         saveReceipt,
-        judge: () => ({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
+        judge: () => judged({ [finding.id]: { verdict: 'PASS', reason: 'Valid.' } }),
         model: () => 'haiku',
       }),
     ).toBe(1);
@@ -419,10 +504,12 @@ describe('runCommentFirewall', () => {
     quiet();
     const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
     const rationales = store({ [finding.id]: rationale, [second.id]: rationale });
-    const judge = vi.fn(() => ({
-      [finding.id]: { verdict: 'PASS' as const, reason: 'First invariant.' },
-      [second.id]: { verdict: 'PASS' as const, reason: 'Second invariant.' },
-    }));
+    const judge = vi.fn(() =>
+      judged({
+        [finding.id]: { verdict: 'PASS' as const, reason: 'First invariant.' },
+        [second.id]: { verdict: 'PASS' as const, reason: 'Second invariant.' },
+      }),
+    );
     const saveReceipt = vi.fn(() => true);
 
     expect(
@@ -437,6 +524,180 @@ describe('runCommentFirewall', () => {
     expect(judge).toHaveBeenCalledTimes(1);
     expect(judge.mock.calls[0]?.[1]).toHaveLength(2);
     expect(Object.keys(saveReceipt.mock.calls[0]?.[1] ?? {})).toHaveLength(2);
+  });
+
+  it('receipts the batches that parsed so the retry reviews only the remainder', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const rationales = store({ [finding.id]: rationale, [second.id]: rationale });
+    const persisted: Record<string, VerdictMeta> = {};
+    const saveReceipt = vi.fn((_file: string, entries: Record<string, VerdictMeta>) => {
+      Object.assign(persisted, entries);
+      return true;
+    });
+    const first = vi.fn(() =>
+      failed(
+        {
+          kind: 'malformed',
+          batch: 1,
+          findingIds: [second.id],
+          truncated: true,
+          replyChars: 8_192,
+        },
+        { [finding.id]: { verdict: 'PASS' as const, reason: 'First invariant.' } },
+      ),
+    );
+
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second]),
+        loadRationales: () => rationales,
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: first,
+        model: () => 'haiku',
+        strict: () => false,
+      }),
+    ).toBe(2);
+    expect(Object.keys(saveReceipt.mock.calls[0]?.[1] ?? {})).toEqual([
+      receiptKey(finding, rationale, 'haiku'),
+    ]);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain('judged 1 of 2 pending findings in 1 of 2 batches');
+    expect(output).toContain(second.id);
+    expect(output).toContain('re-running reviews only the 1');
+
+    const retry = vi.fn(() => judged({ [second.id]: { verdict: 'PASS', reason: 'Second.' } }));
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second]),
+        loadRationales: () => rationales,
+        loadReceipts: () => persisted,
+        saveReceipt: () => true,
+        judge: retry,
+        model: () => 'haiku',
+      }),
+    ).toBe(0);
+    expect(retry.mock.calls[0]?.[1]).toHaveLength(1);
+    expect(retry.mock.calls[0]?.[1]?.[0]?.finding.id).toBe(second.id);
+  });
+
+  it('lets a judged rejection outrank an incomplete review, after receipting its sibling', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const third = { ...finding, id: 'c1d2e3f4a5b6', path: 'src/c.ts' };
+    const saveReceipt = vi.fn(() => true);
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second, third]),
+        loadRationales: () =>
+          store({ [finding.id]: rationale, [second.id]: rationale, [third.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: () =>
+          failed(
+            { kind: 'malformed', batch: 1, findingIds: [third.id], replyChars: 900 },
+            {
+              [finding.id]: { verdict: 'PASS' as const, reason: 'Invariant.' },
+              [second.id]: { verdict: 'FAIL' as const, reason: 'Defends a workaround.' },
+            },
+          ),
+        strict: () => false,
+      }),
+    ).toBe(1);
+    expect(saveReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a partial publish when local evidence changed during the review', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const saveReceipt = vi.fn(() => true);
+    let calls = 0;
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => (calls++ === 0 ? detection([finding, second]) : detection([finding])),
+        loadRationales: () => store({ [finding.id]: rationale, [second.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt,
+        judge: () =>
+          failed(
+            { kind: 'malformed', batch: 1, findingIds: [second.id], replyChars: 900 },
+            {
+              [finding.id]: { verdict: 'PASS' as const, reason: 'Invariant.' },
+            },
+          ),
+      }),
+    ).toBe(1);
+    expect(saveReceipt).not.toHaveBeenCalled();
+  });
+
+  it('blocks when a partial run cannot persist the receipts it did earn', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second]),
+        loadRationales: () => store({ [finding.id]: rationale, [second.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt: () => false,
+        judge: () =>
+          failed(
+            { kind: 'malformed', batch: 1, findingIds: [second.id], replyChars: 900 },
+            {
+              [finding.id]: { verdict: 'PASS' as const, reason: 'Invariant.' },
+            },
+          ),
+        strict: () => false,
+      }),
+    ).toBe(4);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain('PASS receipts could not be persisted');
+    expect(output).not.toContain('re-running reviews only');
+  });
+
+  it('keeps the fail-open contract for an unjudged remainder on a plain commit', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    const deps = {
+      detect: () => detection([finding, second]),
+      loadRationales: () => store({ [finding.id]: rationale, [second.id]: rationale }),
+      loadReceipts: () => ({}),
+      saveReceipt: () => true,
+      judge: () =>
+        failed(
+          { kind: 'timeout', batch: 1, findingIds: [second.id] },
+          {
+            [finding.id]: { verdict: 'PASS' as const, reason: 'Invariant.' },
+          },
+        ),
+    };
+    expect(runCommentFirewall('/repo', { ...deps, strict: () => false })).toBe(2);
+    expect(runCommentFirewall('/repo', { ...deps, strict: () => true })).toBe(3);
+  });
+
+  it('still reports a cause when an injected judge leaves findings unjudged silently', () => {
+    quiet();
+    const second = { ...finding, id: 'b1c2d3e4f5a6', path: 'src/b.ts' };
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection([finding, second]),
+        loadRationales: () => store({ [finding.id]: rationale, [second.id]: rationale }),
+        loadReceipts: () => ({}),
+        saveReceipt: () => true,
+        judge: () => ({
+          results: { [finding.id]: { verdict: 'PASS' as const, reason: 'Invariant.' } },
+          unjudged: [second.id],
+          failures: [],
+          planned: 1,
+          spawned: 1,
+          bin: 'claude',
+        }),
+        strict: () => false,
+      }),
+    ).toBe(2);
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain('the reviewer returned no verdict');
+    expect(output).toContain(second.id);
   });
 
   it('fails visibly when a configured changed language has no lexer adapter', () => {

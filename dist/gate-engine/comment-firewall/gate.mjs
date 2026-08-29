@@ -1,4 +1,5 @@
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
+import { commentFailureCause, commentFailureRemedy, dominantFailure } from './batch.mjs';
 import { detectChangedComments } from './detect.mjs';
 import { commentJudgeModel, judgeComments, receiptKey } from './judge.mjs';
 import { describeRationaleStore, loadWorkingRationales } from './rationales.mjs';
@@ -20,6 +21,17 @@ function findingLocation(finding) {
 function printFinding(finding) {
     const summary = finding.comment.replace(/\s+/g, ' ').slice(0, 140);
     console.error(`  • [${finding.id}] ${findingLocation(finding)} — ${summary}`);
+}
+/** The reviewer failure the operator should act on first — one cause line, never the old
+ * "unavailable or malformed" disjunction that made five distinct causes indistinguishable. */
+function describeFailure(outcome) {
+    const failure = dominantFailure(outcome.failures);
+    return failure ? commentFailureCause(failure, outcome.bin) : 'the reviewer returned no verdict';
+}
+function printRemedy(outcome) {
+    const failure = dominantFailure(outcome.failures);
+    if (failure)
+        console.error(`   Remedy: ${commentFailureRemedy(failure, outcome.bin)}.`);
 }
 function shellQuote(value) {
     return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -132,16 +144,22 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
     }
     if (pending.length === 0)
         return 0;
-    let results;
+    let outcome;
     try {
-        results = deps.judge(cwd, pending.map(({ finding, rationale }) => ({ finding, rationale })), model);
+        outcome = deps.judge(cwd, pending.map(({ finding, rationale }) => ({ finding, rationale })), model);
     }
     catch (cause) {
         console.error(`guard-comments: deterministic review-batch limit exceeded; split the staged change — ${cause instanceof Error ? cause.message : cause}`);
         return 4;
     }
-    if (!results || pending.some(({ finding }) => results[finding.id] === undefined)) {
-        console.error('guard-comments: batched reviewer unavailable or returned malformed evidence; no receipt was written.');
+    const results = outcome.results;
+    const judged = pending.filter(({ finding }) => results[finding.id] !== undefined);
+    const unjudged = pending.filter(({ finding }) => results[finding.id] === undefined);
+    if (judged.length === 0) {
+        // Nothing to publish, so the freshness re-read below is skipped: it guards publication, not
+        // review, and re-deriving evidence here would only mask the reviewer failure with a second one.
+        console.error(`guard-comments: no verdict for any of the ${pending.length} pending finding${pending.length === 1 ? '' : 's'} — ${describeFailure(outcome)}. No receipt was written.`);
+        printRemedy(outcome);
         return deps.strict() ? 3 : 2;
     }
     try {
@@ -154,7 +172,7 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         console.error(`guard-comments: could not re-read local evidence before publishing PASS — ${cause instanceof Error ? cause.message : cause}`);
         return 4;
     }
-    const approved = pending.filter(({ finding }) => results[finding.id]?.verdict === 'PASS');
+    const approved = judged.filter(({ finding }) => results[finding.id]?.verdict === 'PASS');
     if (approved.length > 0) {
         const entries = Object.fromEntries(approved.map((item) => [
             item.key,
@@ -174,25 +192,33 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
         }
         Object.assign(receipts, entries);
     }
+    if (unjudged.length > 0) {
+        console.error(`guard-comments: judged ${judged.length} of ${pending.length} pending findings in ${outcome.planned - outcome.failures.length} of ${outcome.planned} batches — ${unjudged.length} have no verdict (${describeFailure(outcome)}).`);
+    }
     let rejected = false;
-    for (const item of pending) {
+    for (const item of judged) {
         const result = results[item.finding.id];
-        if (!result) {
-            console.error(`guard-comments: [${item.finding.id}] reviewer result disappeared before publication; commit blocked.`);
-            return 4;
-        }
-        if (result.verdict === 'FAIL') {
+        if (result?.verdict === 'FAIL') {
             rejected = true;
             console.error(`guard-comments: [${item.finding.id}] rationale rejected — ${result.reason}`);
         }
         else {
-            console.error(`guard-comments: [${item.finding.id}] approved — ${result.reason}`);
+            console.error(`guard-comments: [${item.finding.id}] approved — ${result?.reason}`);
         }
+    }
+    if (unjudged.length > 0) {
+        console.error('Unjudged this run (still blocking):');
+        for (const item of unjudged)
+            printFinding(item.finding);
+        printRemedy(outcome);
+        console.error(`Approved findings are receipted, so re-running reviews only the ${unjudged.length} that ${unjudged.length === 1 ? 'is' : 'are'} left.`);
     }
     if (rejected) {
         console.error('Fix the implementation/comment, or replace the rationale with specific evidence.');
         console.error('For unavoidable temporary debt, include a cleanup ticket with --ticket SC-123.');
         return 1;
     }
+    if (unjudged.length > 0)
+        return deps.strict() ? 3 : 2;
     return 0;
 }
