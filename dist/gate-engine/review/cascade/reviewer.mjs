@@ -3,6 +3,7 @@ import { JUDGE_ISOLATION } from '../../judge/judge-isolation.mjs';
 import { namedAgentMcpProfile } from '../../judge/mcp/profile.mjs';
 import { DEEP_JUDGE_TIMEOUT_MS, execJudgeAsync } from '../../judge/run-judge.mjs';
 import { renderGoverningClaudeMd } from '../claude-md.mjs';
+import { renderStagedLineCounts } from '../evidence/line-counts.mjs';
 import { parseReviewVerdict } from '../contracts/response.mjs';
 import { buildCappedDiffEvidence } from '../diff-evidence.mjs';
 import { responseContractFor } from '../contracts/registry.mjs';
@@ -54,12 +55,19 @@ async function cascadeVerdict({ reviewer, files }, { cwd, cfg, exec = execJudgeA
             inconclusiveCause: 'sync',
             escalated: false,
         };
-    const stat = gitCached(cwd, ['--stat'], files);
+    // Both forms name every staged file; only the checklist reviewers have the Bash to verify a churn
+    // count, so the Bash-less one is given the inventory without it.
+    const inventory = hasChecklist(reviewer)
+        ? gitCached(cwd, ['--stat'], files)
+        : `STAGED FILES (complete inventory):\n${gitCached(cwd, ['--name-only'], files)}`;
     const prompt = hasChecklist(reviewer)
         ? wrapPrompt(body, reviewer, files, assetRoot, checklistRecoveryReason, promptExtras, checklistRoot)
-        : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), promptExtras);
+        : wrapConventionsPrompt(body, files, renderGoverningClaudeMd(cwd, files), {
+            ...promptExtras,
+            lineCountBlock: renderStagedLineCounts(cwd, files),
+        });
     const responseContract = responseContractFor(reviewer.responseContract);
-    const input = buildCappedDiffEvidence(gitCached(cwd, [], files), stat);
+    const input = buildCappedDiffEvidence(gitCached(cwd, [], files), inventory);
     const allowedTools = allowedToolsFor(reviewer, cfg, checklistRoot);
     const mcpProfile = namedAgentMcpProfile();
     const args = (promptBody, model) => [

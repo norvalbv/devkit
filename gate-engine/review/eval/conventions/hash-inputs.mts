@@ -8,6 +8,7 @@ export const CONVENTIONS_GATE_HASH_INPUTS = Object.freeze([
   'gate-engine/review/evidence/commit-message.mts',
   'gate-engine/review/evidence/staged-git.mts',
   'gate-engine/review/evidence/conventions.mts',
+  'gate-engine/review/evidence/line-counts.mts',
   'gate-engine/review/eval/conventions/hash-inputs.mts',
 ]);
 
