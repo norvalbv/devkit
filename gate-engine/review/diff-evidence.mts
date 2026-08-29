@@ -28,7 +28,7 @@ export interface CapOptions {
    * "run `git diff --cached -- <label>`" or "Read `<label>` directly". */
   hint: (label: string) => string;
   /** Footer appended after the OMITTED_LIST_MAX cutoff, naming where the FULL inventory lives
-   * (e.g. "the --stat map above lists every file"). */
+   * (e.g. "the staged-file inventory above lists every file"). */
   omittedFooterHint: string;
 }
 
@@ -138,11 +138,12 @@ export function measureDiffEvidenceCap(fullDiff: string): DiffEvidenceCap {
   };
 }
 
-/** Per-file capped diff evidence + explicit omission accounting. `stat` (the full `--stat` map)
- * always rides first — the complete inventory. */
-export function buildCappedDiffEvidence(fullDiff: string, stat: string): string {
+/** Per-file capped diff evidence + explicit omission accounting. `inventory` (the full `--stat`
+ * map, or a churn-free `--name-only` list for a reviewer with no Bash to verify churn with — see
+ * cascade/reviewer.mts) always rides first, and either form names every file. */
+export function buildCappedDiffEvidence(fullDiff: string, inventory: string): string {
   const diff = String(fullDiff);
-  if (diff.length <= EVIDENCE_TOTAL_CAP) return `${stat}\n${diff}`;
+  if (diff.length <= EVIDENCE_TOTAL_CAP) return `${inventory}\n${diff}`;
   const segments = splitDiffByFile(diff).map((content) => ({
     label: segmentPath(content),
     content,
@@ -152,7 +153,7 @@ export function buildCappedDiffEvidence(fullDiff: string, stat: string): string 
     segmentCap: SEGMENT_CAP,
     omittedListMax: OMITTED_LIST_MAX,
     hint: diffHint,
-    omittedFooterHint: 'the --stat map above lists every file',
+    omittedFooterHint: 'the staged-file inventory above lists every file',
   });
-  return `${stat}\n${body}`;
+  return `${inventory}\n${body}`;
 }

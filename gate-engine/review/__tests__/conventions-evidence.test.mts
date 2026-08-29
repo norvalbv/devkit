@@ -212,3 +212,62 @@ describe('conventions evidence completeness', () => {
     expect(exec).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('conventions post-change line counts', () => {
+  const sizeRepo = (lines: number) => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'No source file may exceed 500 lines.\n');
+    writeFileSync(join(repo, 'src', 'big.json'), `${'x\n'.repeat(lines - 1)}x\n`);
+    execSync('git add .', { cwd: repo });
+    return repo;
+  };
+
+  it('hands the reviewer the true post-change count so it never derives one', async () => {
+    const repo = sizeRepo(496);
+    const exec = passWithArtifact(repo);
+    expect(await runReviewGate(repo, { exec })).toBe(0);
+
+    const [call] = exec.mock.calls[0];
+    expect(call.label).toBe('review:conventions-reviewer');
+    // wc -l semantics: the trailing newline terminates line 496, it does not start a 497th.
+    expect(call.args[1]).toContain('src/big.json: 496');
+    expect(call.args[1]).toContain('POST-CHANGE LINE COUNTS (authoritative');
+    expect(call.args[1]).toContain('never compute one from churn');
+    const block = call.args[1].slice(call.args[1].indexOf('POST-CHANGE LINE COUNTS'));
+    expect(block).not.toMatch(/never your finding|owned by guard-size/i);
+    // The churn number that was misread as a net delta never reaches this judge.
+    expect(call.input).not.toMatch(/\|\s+\d+\s+\+/);
+  });
+
+  it('omits a file the index cannot measure rather than reporting it as empty', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'No source file may exceed 500 lines.\n');
+    writeFileSync(join(repo, 'src', 'kept.json'), '{ "a": 1 }\n');
+    writeFileSync(join(repo, 'src', 'gone.json'), '{ "b": 2 }\n');
+    execSync('git add .', { cwd: repo });
+    execSync('git rm -q --cached src/gone.json', { cwd: repo });
+
+    const exec = passWithArtifact(repo);
+    await runReviewGate(repo, { exec });
+    const [call] = exec.mock.calls[0];
+    expect(call.args[1]).toContain('src/kept.json: 1');
+    expect(call.args[1]).not.toContain('src/gone.json:');
+  });
+
+  it('never reports a binary blob as a line count', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'No source file may exceed 500 lines.\n');
+    writeFileSync(join(repo, 'src', 'text.json'), '{ "a": 1 }\n');
+    writeFileSync(join(repo, 'src', 'blob.bin'), Buffer.from([0x89, 0x00, 0x0a, 0x0a, 0x00]));
+    execSync('git add .', { cwd: repo });
+
+    const exec = passWithArtifact(repo);
+    await runReviewGate(repo, { exec });
+    const [call] = exec.mock.calls[0];
+    expect(call.args[1]).toContain('src/text.json: 1');
+    expect(call.args[1]).not.toContain('src/blob.bin:');
+  });
+});
