@@ -101,6 +101,18 @@ Byte-identical paragraphs in one file are the exception: text alone cannot tell 
 keep a position-sensitive ID. Editing near one of them re-keys it, and a pasted copy is always
 challenged on its own rather than inheriting the rationale its twin earned.
 
+When the gate blocks for missing evidence it now names the store it consulted, for example
+`Evidence store: /repo/.git/devkit/comment-firewall-rationales.json — 0 recorded rationales`. If you
+have just run `justify` successfully and the gate still reports zero, the two commands resolved
+different stores; the line tells you which file the gate actually read. A `file does not exist` state
+is reported distinctly from a store that loaded no entries.
+
+The most common cause is a managed-review environment leaking into an interactive shell. With
+`DEVKIT_RUN_MODE=review` and `DEVKIT_REVIEW_DATA_ROOT` set, `justify` records into the private review
+data root, where `guard-comments list` and `guard-comments gate` still see it through the overlay but
+`devkit ship` never does. `justify` now warns when that happens and prints both paths; unset those
+variables and re-run it outside managed review.
+
 The command records pending evidence under the repository's local Git metadata, so it is shared by
 linked worktrees but never committed. If two worktrees encounter the same finding ID, they may share
 identical evidence; conflicting rationale text is rejected instead of silently overwriting either

@@ -1,11 +1,12 @@
 import { devkitDataFile, loadEntries, saveEntries } from '../judge/verdict-store.mjs';
 import { detectChangedComments } from './detect.mjs';
 import { commentJudgeModel, judgeComments, receiptKey } from './judge.mjs';
-import { loadWorkingRationales } from './rationales.mjs';
+import { describeRationaleStore, loadWorkingRationales } from './rationales.mjs';
 export const COMMENT_RECEIPTS_FILE = 'comment-firewall-receipts.json';
 const defaults = {
     detect: detectChangedComments,
     loadRationales: loadWorkingRationales,
+    describeStore: describeRationaleStore,
     loadReceipts: loadEntries,
     saveReceipt: saveEntries,
     judge: judgeComments,
@@ -23,12 +24,25 @@ function printFinding(finding) {
 function shellQuote(value) {
     return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
-function printMissing(findings) {
+function printStore(store) {
+    if (!store)
+        return;
+    const total = store.sharedFindingIds?.length;
+    const count = total === undefined ? 'unreadable' : `${total} recorded rationale${total === 1 ? '' : 's'}`;
+    const state = store.sharedExists ? count : 'file does not exist';
+    console.error(`\nEvidence store: ${store.sharedFile} — ${state}`);
+    if (!store.privateReview)
+        return;
+    console.error(`A managed-review data root is in effect: ${store.writableFile}`);
+    console.error('devkit ship reads ONLY the shared store above, never the private one.');
+}
+function printMissing(findings, store) {
     const shipLog = process.env.DEVKIT_SHIP_GATE_LOG;
     const shipEvidence = shipLog ? ` --from-ship-log ${shellQuote(shipLog)}` : '';
     console.error(`guard-comments: ${findings.length} added/modified comment paragraph${findings.length === 1 ? '' : 's'} need a decision.`);
     for (const finding of findings)
         printFinding(finding);
+    printStore(store);
     console.error('\nFix the implementation and remove the explanatory workaround, or justify a load-bearing comment:');
     console.error(`  guard-comments justify <id> "why code/types/tests cannot express this durable constraint"${shipEvidence}`);
     console.error('If this is legitimate temporary debt, create/link its cleanup ticket:');
@@ -106,7 +120,14 @@ export function runCommentFirewall(cwd = process.cwd(), injected = {}) {
             pending.push(item);
     }
     if (missing.length > 0) {
-        printMissing(missing);
+        let store = null;
+        try {
+            store = deps.describeStore(cwd);
+        }
+        catch {
+            store = null; // a diagnostic must never convert a clean block into a crash
+        }
+        printMissing(missing, store);
         return 1;
     }
     if (pending.length === 0)
