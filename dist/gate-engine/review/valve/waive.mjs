@@ -18,7 +18,8 @@
  * command refuses them rather than silently writing a store entry reconcile() will never consult.
  */
 import { execFileSync } from 'node:child_process';
-import { FINGERPRINT_RE, loadOverrides, persist, withOverridesLock, } from '../overrides.mjs';
+import { emitGateEvent } from '../../judge/gate-events.mjs';
+import { FINGERPRINT_RE, loadOverrides, persist, WAIVER_LENS_EVENT_CAP, WAIVER_RATIONALE_EVENT_CAP, withOverridesLock, } from '../overrides.mjs';
 import { REVIEWERS } from '../reviewers.mjs';
 // REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
 // shape), so `.find` on it directly can't be read through the shared `model` field below — every
@@ -121,8 +122,15 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
             `chars, not a placeholder), got "${rationale}"`);
         return 2;
     }
-    withOverridesLock(cwd, () => {
+    // The lock is try-once (a held lock throws, not queues), so no telemetry I/O may run inside it —
+    // the closure only decides and stamps. Telemetry counts DECISIONS: an identical re-run returns
+    // null and adds no second ledger row. Append order across concurrent waives is unordered by
+    // design; recorded_at (the store entry's own timestamp) is the authoritative decision time, and
+    // the event's rationale copy is BOUNDED (the full text is the store entry) for the sink's
+    // sub-4KB atomic-append contract.
+    const recordedAt = withOverridesLock(cwd, () => {
         const store = loadOverrides(cwd);
+        const prior = store[itemId];
         const entry = {
             rationale,
             reviewer,
@@ -134,7 +142,18 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
         };
         store[itemId] = entry;
         persist(cwd, store);
+        return prior?.rationale !== rationale ? entry.at : null;
     });
+    if (recordedAt)
+        emitGateEvent({
+            type: 'waiver_created',
+            reviewer,
+            lens: lens.slice(0, WAIVER_LENS_EVENT_CAP),
+            fingerprint: itemId,
+            rationale: rationale.slice(0, WAIVER_RATIONALE_EVENT_CAP),
+            recorded_at: recordedAt,
+            by: 'cli',
+        });
     console.error(`guard-review: waived ${reviewer}:${lens} [${itemId}] — ${rationale}`);
     return 0;
 }

@@ -170,7 +170,14 @@ async function run(argv: string[]): Promise<number> {
     clearCache(process.cwd());
     return 0;
   }
-  if (cmd === 'waive' && rest.length >= 1) return runWaive(rest);
+  if (cmd === 'waive' && rest.length >= 1) {
+    // Same per-invocation id rule as recordAgent above: without it a plain CLI waive falls back to
+    // runId()'s `commit-<write-tree>` envelope — run_mode:'commit' fabricates a commit run the
+    // collector synthesizes a row for, and two waives on an unchanged index share one id. A
+    // ship/review that legitimately owns the run still wins: runId() checks those first.
+    process.env.DEVKIT_AGENT_RUN_ID ||= `waive-${randomUUID()}`;
+    return runWaive(rest);
+  }
   // The local "API" behind a transcript_ref: cat any persisted agent transcript (review-* OR
   // decisions) the telemetry stream referenced, so a human can read the full reasoning on demand.
   if (cmd === 'transcript' && rest[0]) {
