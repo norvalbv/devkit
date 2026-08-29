@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -19,8 +20,16 @@ const roots: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+
+/** DEVKIT_REVIEW_DATA_ROOT is validated as an absolute PHYSICAL directory, so resolve the symlink. */
+function reviewDataRoot(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'guard-comments-review-'));
+  roots.push(dir);
+  return realpathSync(dir);
+}
 
 function repo(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'guard-comments-cli-'));
@@ -61,6 +70,22 @@ function errors(): ReturnType<typeof vi.spyOn> {
   return vi.spyOn(console, 'error').mockImplementation(() => {});
 }
 
+describe('guard-comments gate', () => {
+  it('names an unreadable evidence store instead of blaming the lock', () => {
+    const root = repo();
+    stageFinding(root);
+    const file = path.join(root, '.git', 'devkit', 'comment-firewall-rationales.json');
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '{broken');
+    const error = errors();
+
+    expect(runCommentCli(['gate'], root)).toBe(4);
+    const output = error.mock.calls.flat().join('\n');
+    expect(output).toContain('not valid JSON');
+    expect(output).not.toContain('could not acquire or retain');
+  });
+});
+
 describe('guard-comments justify', () => {
   it('records a ship-only finding from the retained gate log after cleanup', () => {
     const root = repo();
@@ -75,6 +100,77 @@ describe('guard-comments justify', () => {
       error.mock.calls.flat().join('\n'),
     ).toBe(0);
     expect(loadWorkingRationales(root).entries[findingId]?.rationale).toBe(rationale);
+  });
+
+  it('warns that a managed-review write is invisible to devkit ship', () => {
+    const root = repo();
+    const id = stageFinding(root);
+    const dataRoot = reviewDataRoot();
+    vi.stubEnv('DEVKIT_RUN_MODE', 'review');
+    vi.stubEnv('DEVKIT_REVIEW_DATA_ROOT', dataRoot);
+    const error = errors();
+
+    expect(
+      runCommentCli(['justify', id, rationale], root),
+      error.mock.calls.flat().join('\n'),
+    ).toBe(0);
+    const output = error.mock.calls.flat().join('\n');
+    expect(output).toContain('recorded into the managed-review private data root');
+    expect(output).toContain(
+      `wrote:      ${path.join(dataRoot, 'comment-firewall-rationales.json')}`,
+    );
+    expect(output).toContain(`ship reads: ${path.join(realpathSync(root), '.git', 'devkit')}`);
+    expect(output).toContain(`will still report [${id}] as missing`);
+  });
+
+  it('stays silent about the store when the write lands in the shared one', () => {
+    const root = repo();
+    const id = stageFinding(root);
+    const error = errors();
+
+    expect(runCommentCli(['justify', id, rationale], root)).toBe(0);
+    expect(error.mock.calls.flat().join('\n')).not.toContain('managed-review private data root');
+  });
+
+  it.each([
+    ['run mode alone', { DEVKIT_RUN_MODE: 'review' }],
+    ['a data root alone', { DEVKIT_REVIEW_DATA_ROOT: '/tmp' }],
+  ])('does not warn about a private store from %s', (_label, env) => {
+    const root = repo();
+    const id = stageFinding(root);
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    const error = errors();
+
+    expect(runCommentCli(['justify', id, rationale], root)).toBe(0);
+    expect(error.mock.calls.flat().join('\n')).not.toContain('managed-review private data root');
+  });
+
+  it('does not claim ship will block when the shared store already holds that evidence', () => {
+    const root = repo();
+    const id = stageFinding(root);
+    const error = errors();
+    expect(runCommentCli(['justify', id, rationale], root)).toBe(0);
+
+    vi.stubEnv('DEVKIT_RUN_MODE', 'review');
+    vi.stubEnv('DEVKIT_REVIEW_DATA_ROOT', reviewDataRoot());
+    expect(runCommentCli(['justify', id, `${rationale} Revised under managed review.`], root)).toBe(
+      0,
+    );
+    const output = error.mock.calls.flat().join('\n');
+    expect(output).toContain('managed-review private data root');
+    expect(output).toContain(`[${id}] already has shared evidence`);
+    expect(output).not.toContain('will still report');
+  });
+
+  it('warns about the private store even when a ticket is supplied', () => {
+    const root = repo();
+    const id = stageFinding(root);
+    vi.stubEnv('DEVKIT_RUN_MODE', 'review');
+    vi.stubEnv('DEVKIT_REVIEW_DATA_ROOT', reviewDataRoot());
+    const error = errors();
+
+    expect(runCommentCli(['justify', id, rationale, '--ticket', 'SC-123'], root)).toBe(0);
+    expect(error.mock.calls.flat().join('\n')).toContain('managed-review private data root');
   });
 
   it('preserves the current-staged rejection when no ship log is supplied', () => {

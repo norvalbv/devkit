@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VerdictMeta } from '../../judge/verdict-store.mts';
 import { runCommentFirewall } from '../gate.mts';
+import type { RationaleStoreLocation } from '../rationales.mts';
 import { receiptKey } from '../judge.mts';
 import type {
   CommentFinding,
@@ -32,6 +33,14 @@ const detection = (findings: CommentFinding[] = [finding]): DetectionResult => (
 const store = (entries: RationaleStore['entries'] = {}): RationaleStore => ({
   version: 1,
   entries,
+});
+const location = (over: Partial<RationaleStoreLocation> = {}): RationaleStoreLocation => ({
+  sharedFile: '/repo/.git/devkit/comment-firewall-rationales.json',
+  writableFile: '/repo/.git/devkit/comment-firewall-rationales.json',
+  sharedExists: true,
+  sharedFindingIds: [],
+  privateReview: false,
+  ...over,
 });
 
 afterEach(() => {
@@ -78,6 +87,109 @@ describe('runCommentFirewall', () => {
     expect(output).toContain(
       `--from-ship-log '/tmp/repo'"'"'s $gate;log/.devkit/last-ship-gates-feat.log'`,
     );
+  });
+
+  it('names the evidence store it consulted and how many rationales it held', () => {
+    quiet();
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection(),
+        loadRationales: () => store(),
+        loadReceipts: () => ({}),
+        describeStore: () => location({ sharedFindingIds: ['a1', 'b2', 'c3'] }),
+      }),
+    ).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      'Evidence store: /repo/.git/devkit/comment-firewall-rationales.json — 3 recorded rationales',
+    );
+  });
+
+  it('distinguishes an absent store from one that loaded zero entries', () => {
+    quiet();
+    runCommentFirewall('/repo', {
+      detect: () => detection(),
+      loadRationales: () => store(),
+      loadReceipts: () => ({}),
+      describeStore: () => location({ sharedExists: false }),
+    });
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      'comment-firewall-rationales.json — file does not exist',
+    );
+  });
+
+  it('warns that a managed-review data root is invisible to ship', () => {
+    quiet();
+    runCommentFirewall('/repo', {
+      detect: () => detection(),
+      loadRationales: () => store(),
+      loadReceipts: () => ({}),
+      describeStore: () =>
+        location({ writableFile: '/private/review/rationales.json', privateReview: true }),
+    });
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain(
+      'A managed-review data root is in effect: /private/review/rationales.json',
+    );
+    expect(output).toContain('devkit ship reads ONLY the shared store above');
+  });
+
+  it.each([
+    ['an absent store', { sharedExists: false }, 'file does not exist'],
+    ['an existing empty store', { sharedFindingIds: [] }, '0 recorded rationales'],
+    ['a single entry', { sharedFindingIds: ['a1'] }, '1 recorded rationale'],
+    ['several entries', { sharedFindingIds: ['a1', 'b2'] }, '2 recorded rationales'],
+  ])('describes %s', (_label, over, expected) => {
+    quiet();
+    runCommentFirewall('/repo', {
+      detect: () => detection(),
+      loadRationales: () => store(),
+      loadReceipts: () => ({}),
+      describeStore: () => location(over),
+    });
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      `comment-firewall-rationales.json — ${expected}`,
+    );
+  });
+
+  it('never renders a single entry with a plural noun', () => {
+    quiet();
+    runCommentFirewall('/repo', {
+      detect: () => detection(),
+      loadRationales: () => store(),
+      loadReceipts: () => ({}),
+      describeStore: () => location({ sharedFindingIds: ['a1'] }),
+    });
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).not.toContain(
+      '1 recorded rationales',
+    );
+  });
+
+  it('says a present store is unreadable rather than silently calling it empty', () => {
+    quiet();
+    runCommentFirewall('/repo', {
+      detect: () => detection(),
+      loadRationales: () => store(),
+      loadReceipts: () => ({}),
+      describeStore: () => location({ sharedFindingIds: null }),
+    });
+    const output = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(output).toContain('comment-firewall-rationales.json — unreadable');
+    expect(output).not.toContain('0 recorded');
+  });
+
+  it('still blocks cleanly when the store cannot be described at all', () => {
+    quiet();
+    expect(
+      runCommentFirewall('/repo', {
+        detect: () => detection(),
+        loadRationales: () => store(),
+        loadReceipts: () => ({}),
+        describeStore: () => {
+          throw new Error('git is unavailable');
+        },
+      }),
+    ).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).not.toContain('Evidence store:');
   });
 
   it('lets Haiku downgrade the block and writes a content-addressed PASS receipt', () => {

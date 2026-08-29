@@ -168,6 +168,37 @@ function loadCombinedStore(cwd: string): RationaleStore {
   };
 }
 
+export interface RationaleStoreLocation {
+  sharedFile: string;
+  writableFile: string;
+  sharedExists: boolean;
+  /** Finding ids in the shared store; null when the file exists but could not be read. */
+  sharedFindingIds: string[] | null;
+  privateReview: boolean;
+}
+
+/** Where this cwd reads and writes rationale evidence, so a gate can NAME the file it consulted. */
+export function describeRationaleStore(cwd: string): RationaleStoreLocation {
+  const sharedFile = sharedPath(cwd);
+  const writableFile = mutationPath(cwd);
+  const sharedExists = existsSync(sharedFile);
+  let sharedFindingIds: string[] | null = [];
+  if (sharedExists) {
+    try {
+      sharedFindingIds = Object.keys(loadFile(sharedFile).entries);
+    } catch {
+      sharedFindingIds = null;
+    }
+  }
+  return {
+    sharedFile,
+    writableFile,
+    sharedExists,
+    sharedFindingIds,
+    privateReview: writableFile !== sharedFile,
+  };
+}
+
 interface LegacyMergeResult {
   changed: boolean;
   conflict: string;
@@ -212,8 +243,20 @@ export function ensureLegacyRationalesMigrated(cwd: string): void {
   const file = mutationPath(cwd);
   let error = '';
   const completed = withStoreLock(file, {}, (handle) => {
-    const store = loadCombinedStore(cwd);
-    const merged = mergeLegacyForOwner(store, loadLegacy(cwd), worktreeIdentity(cwd));
+    // withStoreLock reports ANY throw as a lock failure, so an unreadable store would surface as
+    // "could not acquire the lock" and send the reader hunting a lock that was never contended.
+    let store: RationaleStore;
+    let legacy: RationaleStore;
+    let owner: string;
+    try {
+      store = loadCombinedStore(cwd);
+      legacy = loadLegacy(cwd);
+      owner = worktreeIdentity(cwd);
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      return;
+    }
+    const merged = mergeLegacyForOwner(store, legacy, owner);
     if (merged.conflict) {
       error = merged.conflict;
       return;
