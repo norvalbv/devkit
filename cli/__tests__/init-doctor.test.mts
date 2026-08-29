@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { collectResults } from '../commands/doctor.mts';
@@ -599,6 +599,47 @@ describe('doctor — selection-aware', () => {
     });
     expect(dead.stdout).toMatch(/qavis-advisory: .*present but qavis is NOT on PATH/);
     expect(dead.status, dead.stderr).toBe(0);
+  });
+
+  // sc-2028: ship's post-push evidence hand-off is inert on a qavis with no publication subcommand,
+  // and it says so only in post-push stderr — a stream a headless shipping agent may never read. So
+  // doctor names it on the HEALTHY arm too, where the recipe and the binary are both proven present.
+  it('reports whether the installed qavis can publish PR evidence, without gating the exit code', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes', '--guards', 'size,qavis-advisory');
+    mkdirSync(join(root, '.qavis'), { recursive: true });
+    writeFileSync(join(root, '.qavis', 'recipe.json'), '{}');
+    const stubBin = join(root, 'stub-bin');
+    mkdirSync(stubBin, { recursive: true });
+
+    const doctorWith = (script: string) => {
+      writeFileSync(join(stubBin, 'qavis'), `#!/bin/sh\n${script}\n`);
+      chmodSync(join(stubBin, 'qavis'), 0o755);
+      return spawnSync(process.execPath, [CLI, 'doctor'], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, PATH: `${stubBin}:${process.env.PATH}` },
+      });
+    };
+    const qavisStub = (commands: string) => doctorWith(`printf 'Commands:\\n${commands}'`);
+
+    const noPublish = qavisStub('  qa [options]  x\\n  route [options]  x\\n');
+    expect(noPublish.stdout).toMatch(/qavis-advisory: qavis on PATH .*cannot publish PR evidence/);
+
+    const withPublish = qavisStub('  qa [options]  x\\n  publish [options]  x\\n');
+    expect(withPublish.stdout).toMatch(/qavis-advisory: qavis on PATH .*publishes on ship/);
+
+    // A qavis whose --help cannot be read is a THIRD state. Reporting it as "no publication
+    // subcommand" would state a fact about a binary doctor never managed to interrogate.
+    const unreadable = doctorWith('echo "boom" >&2; exit 3');
+    expect(unreadable.stdout).toMatch(
+      /qavis-advisory: qavis on PATH .*publication support UNKNOWN/,
+    );
+    expect(unreadable.stdout).not.toMatch(/has no publication subcommand/);
+
+    // Advisory to the end: which of the three a repo is in must never move doctor's exit code.
+    expect(withPublish.status, withPublish.stderr).toBe(noPublish.status);
+    expect(unreadable.status, unreadable.stderr).toBe(noPublish.status);
   });
 
   it('reports invalid JSON in a managed config as drift (not a silent pass)', () => {
