@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fingerprint, loadOverrides, reconcile } from '../overrides.mts';
 import { parseWaiveTarget, resolveWaiveAuthor, runWaive } from '../valve/waive.mts';
 
@@ -11,10 +11,28 @@ const repo = () => {
   dirs.push(d);
   return d;
 };
+let savedSink: string | undefined;
+let sink: string;
+beforeEach(() => {
+  savedSink = process.env.DEVKIT_GATE_EVENTS;
+  sink = join(repo(), 'events.jsonl');
+  process.env.DEVKIT_GATE_EVENTS = sink;
+});
 afterEach(() => {
+  if (savedSink === undefined) delete process.env.DEVKIT_GATE_EVENTS;
+  else process.env.DEVKIT_GATE_EVENTS = savedSink;
   while (dirs.length) rmSync(dirs.pop() as string, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
+
+const waiverEvents = () =>
+  existsSync(sink)
+    ? readFileSync(sink, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l))
+        .filter((e) => e.type === 'waiver_created')
+    : [];
 
 const AUTHOR = 'Ada Lovelace';
 // runWaive's real author resolver shells out to `git config`; every test injects a fixed identity
@@ -199,5 +217,80 @@ describe('runWaive', () => {
       expect(out).toContain('correctness-reviewer:concurrency-races');
       expect(out).toContain(RATIONALE);
     });
+  });
+});
+
+describe('waiver_created telemetry', () => {
+  it('a recorded CLI waive emits exactly one event carrying reviewer/lens/fingerprint/rationale/by', () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    runWaive(['correctness-reviewer:concurrency-races', fp, RATIONALE], cwd, fixedAuthor);
+    const events = waiverEvents();
+    expect(events).toMatchObject([
+      {
+        reviewer: 'correctness-reviewer',
+        lens: 'concurrency-races',
+        fingerprint: fp,
+        rationale: RATIONALE,
+        by: 'cli',
+      },
+    ]);
+    // recorded_at is the STORE entry's timestamp — the authoritative decision time, since events
+    // are appended after the lock releases and concurrent appends carry no order guarantee.
+    expect(events[0].recorded_at).toBe(loadOverrides(cwd)[fp].at);
+  });
+
+  it('re-running the identical waive emits nothing; a CHANGED rationale emits again', () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    const args = ['correctness-reviewer:concurrency-races', fp, RATIONALE];
+    runWaive(args, cwd, fixedAuthor);
+    runWaive(args, cwd, fixedAuthor);
+    expect(waiverEvents()).toHaveLength(1);
+    runWaive(
+      [args[0], fp, 'sharper second rationale: the lock is held by the caller'],
+      cwd,
+      fixedAuthor,
+    );
+    expect(waiverEvents()).toHaveLength(2);
+  });
+
+  it('the event carries a bounded rationale copy; the store keeps the full text', async () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fp = fingerprint('correctness-reviewer', 'concurrency-races', 'D');
+    const long = `the lock is held by the caller ${'x'.repeat(2000)}`;
+    runWaive(['correctness-reviewer:concurrency-races', fp, long], cwd, fixedAuthor);
+    const { WAIVER_RATIONALE_EVENT_CAP } = await import('../overrides.mts');
+    expect(waiverEvents()[0].rationale).toBe(long.slice(0, WAIVER_RATIONALE_EVENT_CAP));
+    expect(loadOverrides(cwd)[fp].rationale).toBe(long);
+  });
+
+  it('a refused waive (cascade reviewer) emits nothing', () => {
+    const cwd = repo();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(runWaive(['api-security-reviewer', 'a1b2c3d4e5f6', RATIONALE], cwd, fixedAuthor)).toBe(
+      2,
+    );
+    expect(waiverEvents()).toHaveLength(0);
+  });
+
+  it('the env write-through channel emits by:"env" on the first persist and never on a re-read', () => {
+    const cwd = repo();
+    const fp = fingerprint('correctness-reviewer', 'stale-read', 'ENVDIFF');
+    const env = { [`OVERRIDE_${fp}_RATIONALE`]: 'reader re-validates the row before use' };
+    reconcile(cwd, 'correctness-reviewer', ['stale-read'], 'ENVDIFF', '2026-01-01', env);
+    reconcile(cwd, 'correctness-reviewer', ['stale-read'], 'ENVDIFF', '2026-01-02', env);
+    expect(waiverEvents()).toMatchObject([
+      {
+        reviewer: 'correctness-reviewer',
+        lens: 'stale-read',
+        fingerprint: fp,
+        rationale: 'reader re-validates the row before use',
+        by: 'env',
+      },
+    ]);
   });
 });

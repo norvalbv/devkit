@@ -98,6 +98,27 @@ export function reportNonRuns(staged, cfg, selected, alreadyReported, skip = new
     }
     emitUnselected(selected, alreadyReported);
 }
+/**
+ * True added/removed line counts from unified-diff text. Only lines INSIDE an `@@` hunk count —
+ * `+++`/`---` file headers sit between a `diff ` line and the first `@@`, so hunk state (not a
+ * prefix-length test) is what keeps a real `---x`/`+++x` content line counted and a header not.
+ */
+export function diffLineCounts(diffText) {
+    let insertions = 0;
+    let deletions = 0;
+    let inHunk = false;
+    for (const line of diffText.split('\n')) {
+        if (line.startsWith('@@'))
+            inHunk = true;
+        else if (line.startsWith('diff '))
+            inHunk = false;
+        else if (inHunk && line.startsWith('+'))
+            insertions += 1;
+        else if (inHunk && line.startsWith('-'))
+            deletions += 1;
+    }
+    return { insertions, deletions };
+}
 // Past this budget the path list spills to a sidecar and the event carries the ref instead.
 // `file_count` + `files_sha256` ride inline either way, so a reader can always tell a truly-empty
 // scope from a spilled one — the list is never silently dropped.
@@ -124,6 +145,7 @@ contextFields = null) {
         prompt_identity: promptIdentity,
         diff_sha256: sha256(diffText),
         diff_bytes: Buffer.byteLength(diffText, 'utf8'),
+        ...diffLineCounts(diffText),
         ...measureDiffEvidenceCap(diffText),
         file_count: files.length,
         files_sha256: sha256(files.join('\n')),
