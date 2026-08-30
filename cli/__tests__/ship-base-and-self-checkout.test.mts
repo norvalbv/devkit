@@ -211,6 +211,27 @@ describe('ship-branch.sh — the branch is checked out in THIS worktree (sc-2261
     expect(wtGit(['rev-parse', 'story']).trim()).toBe(tip);
   });
 
+  it('states plainly that a self-checked-out branch carries no commit of its own', () => {
+    const { env, git, wt } = seedSelfCheckout();
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'story', 't', '--base', 'work', '--body', 'b', '--', 'note.txt'],
+      { cwd: wt, encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toContain('carries no commit of its own over');
+    expect(r.stderr).not.toContain('is not a single commit');
+    expect(r.stderr).not.toContain('diverges from it');
+    // The two halves must still agree: the reason explains, the closing advice acts, and neither may
+    // reach for the worktree this run is executing inside.
+    expect(r.stderr).toMatch(/story is checked out in THIS worktree/);
+    expect(r.stderr).toMatch(/git branch -m 'story' "devkit-freed-[0-9a-f]+-\$\$"/);
+    expect(r.stderr).not.toMatch(REMOVE_FORCE_RE);
+    expect(localBranchExists(git, 'story')).toBe(true);
+  });
+
   it('the printed remedy actually works: run it verbatim, then the same ship succeeds', () => {
     const { env, wt, bare } = seedSelfCheckout();
     const stubBin = ghStub('exit 0');

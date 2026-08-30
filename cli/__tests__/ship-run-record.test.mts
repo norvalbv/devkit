@@ -2,7 +2,15 @@
  *  maxTestLines headroom. */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -844,5 +852,168 @@ describe('ship run record + orphan preflight', () => {
     // The resolve seam promises no side effects; reclaiming would be one.
     expect(worktreeList(git)).toContain(wt);
     expect(localBranchExists(git, 'feat/resolve')).toBe(true);
+  });
+});
+
+describe('the blocker is the worktree ship is running in (sc-2273)', () => {
+  const CWD_LOST_RE = /Unable to read current working directory/;
+
+  /** A leftover ship worktree with an abandoned record, staged work inside it, and the caller
+   *  standing in it — the state ship's own "Worktree KEPT for diagnosis / Inspect:" text produces. */
+  function abandonedSelfWorktree(git, branch, { detach = false, keep = false } = {}) {
+    const base = git(['rev-parse', 'work']).trim();
+    const { wt, record } = orphanWorktree(git, branch, { detach });
+    expect(() => process.kill(Number(DEAD_PID), 0)).toThrow();
+    const fields = {
+      v: 1,
+      branch,
+      wt,
+      pid: DEAD_PID,
+      identity: 'Wed Aug 26 14:18:10 2026',
+      base,
+      branch_created: 1,
+      mode: 'live',
+    };
+    // `keep` is ABSENT, not falsy, on the ordinary path: the preflight branches on `-n "$r_keep"`, so
+    // writing `keep=0` would read as a kept worktree and route every case through the wrong arm.
+    if (keep) fields.keep = 1;
+    writeRecord(record, fields);
+    // Staged, never committed: exactly what `worktree remove --force` discards with no reflog to
+    // recover it, and the whole reason the printed remedy was reported as unsafe.
+    seedScopedFile(wt);
+    writeFileSync(join(wt, 'uncommitted.txt'), 'the work being shipped\n');
+    git(['-C', wt, 'add', 'uncommitted.txt'], { stdio: 'ignore' });
+    return { wt, record };
+  }
+
+  function expectSurvived(git, wt) {
+    expect(existsSync(wt)).toBe(true);
+    expect(existsSync(join(wt, 'uncommitted.txt'))).toBe(true);
+    expect(worktreeList(git)).toContain(wt);
+  }
+
+  it('refuses to reclaim it, and names a checkout to re-run from', () => {
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    const { wt } = abandonedSelfWorktree(git, 'feat/self-reclaim');
+
+    const r = runShip(wt, publishEnvFor(env), 'feat/self-reclaim');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('devkit will not reclaim the tree it is running in');
+    // The escape is positional, so the refusal is only actionable if it says where to go. Compare
+    // against the REALPATH: devkit derives this from git's common dir, which is realpath-resolved,
+    // while the fixture's own path is the /var symlink form macOS hands out for TMPDIR.
+    expect(r.stderr).toMatch(/ cd /);
+    expect(r.stderr).toContain(realpathSync(dir));
+    expectSurvived(git, wt);
+    // The removal wedges every later `git -C "$PWD"`, which surfaces as a push refusal blaming
+    // ls-remote. Its absence is the proof the run failed cleanly rather than mid-flight.
+    expect(r.stderr).not.toMatch(CWD_LOST_RE);
+    expect(r.stderr).not.toContain('reclaimed the worktree');
+  });
+
+  it('refuses the same way when that worktree is DETACHED', () => {
+    const { env, git } = seedShipRepoLocalRemote();
+    git(['branch', 'feat/self-detached', 'work'], { stdio: 'ignore' });
+    const { wt } = abandonedSelfWorktree(git, 'feat/self-detached', { detach: true });
+
+    const r = runShip(wt, publishEnvFor(env), 'feat/self-detached');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('devkit will not reclaim the tree it is running in');
+    expect(r.stderr).not.toContain('git branch -m');
+    expect(r.stderr).not.toContain('is checked out in THIS worktree');
+    expectSurvived(git, wt);
+    expect(r.stderr).not.toMatch(CWD_LOST_RE);
+  });
+
+  it('refuses from `devkit reship` too, which shares the preflight', () => {
+    // reship.sh calls ship_reclaim_orphan_worktrees itself, and the reclaim arm is mode-independent —
+    // so a fix wired only through ship-branch.sh would leave the destruction reachable here.
+    const { env, git } = seedShipRepoLocalRemote();
+    const { wt } = abandonedSelfWorktree(git, 'feat/self-reship');
+    // A re-push targets an EXISTING remote branch and bails at the fetch without one — long before
+    // the preflight. Without this the test passes on the unfixed code for the wrong reason.
+    git(['push', '-q', 'origin', 'feat/self-reship:feat/self-reship'], { stdio: 'ignore' });
+
+    const r = spawnSync(
+      '/bin/bash',
+      [reshipScript, '--pr', 'feat/self-reship', 'ship it', 'note.txt'],
+      {
+        cwd: wt,
+        input: 'pr body\n',
+        encoding: 'utf8',
+        env: publishEnvFor(env),
+      },
+    );
+
+    expect(r.status, r.stderr).not.toBe(0);
+    expectSurvived(git, wt);
+    expect(r.stderr).not.toMatch(CWD_LOST_RE);
+    expect(r.stderr).not.toContain('reclaimed the worktree');
+  });
+
+  it('still advises on OTHER checkouts holding the branch while refusing to touch its own', () => {
+    const { env, git } = seedShipRepoLocalRemote();
+    git(['branch', 'feat/mixed', 'work'], { stdio: 'ignore' });
+    const { wt } = abandonedSelfWorktree(git, 'feat/mixed', { detach: true });
+    const other = join(mkdtempSync(join(tmpdir(), 'shipmixed-')), 'wt');
+    dirs.push(other);
+    git(['worktree', 'add', '-q', other, 'feat/mixed'], { stdio: 'ignore' });
+
+    const r = runShip(wt, publishEnvFor(env), 'feat/mixed');
+
+    expect(r.status, r.stderr).toBe(1);
+    // Own tree: refused and intact.
+    expect(r.stderr).toContain('devkit will not reclaim the tree it is running in');
+    expectSurvived(git, wt);
+    // Other tree: still named, still advised, and the removal points THERE. Registry paths are
+    // realpath-resolved, which on macOS is the /private form of the fixture's own /var path.
+    const otherReal = realpathSync(other);
+    expect(r.stderr).toContain(`is also checked out at ${otherReal}`);
+    expect(r.stderr).toContain(`git worktree remove --force '${otherReal}'`);
+    expect(r.stderr).not.toContain(`git worktree remove --force '${realpathSync(wt)}'`);
+    expect(worktreeList(git)).toContain(other);
+  });
+
+  it('KEEPS the cleanup command for a kept worktree, qualified as one to run from outside', () => {
+    const { env, git } = seedShipRepoLocalRemote();
+    const { wt } = abandonedSelfWorktree(git, 'feat/self-keep', { keep: true });
+
+    const r = runShip(wt, publishEnvFor(env), 'feat/self-keep');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toMatch(/git worktree remove --force/);
+    expect(r.stderr).toContain('run that from another checkout, not here');
+    expectSurvived(git, wt);
+  });
+
+  it('never suggests renaming a branch a LIVE ship still holds', () => {
+    // The live arm's command is already gated on the process being gone. Substituting the rename
+    // remedy would move refs/heads/<br> out from under a ship that will push -u it.
+    const { env, git } = seedShipRepoLocalRemote();
+    const base = git(['rev-parse', 'work']).trim();
+    const { wt, record } = orphanWorktree(git, 'feat/self-live');
+    const pid = spawnSleeper();
+    writeRecord(record, {
+      v: 1,
+      branch: 'feat/self-live',
+      wt,
+      pid,
+      identity: identityOf(pid),
+      base,
+      branch_created: 1,
+      mode: 'live',
+    });
+    seedScopedFile(wt);
+
+    const r = runShip(wt, publishEnvFor(env), 'feat/self-live');
+
+    expect(r.status, r.stderr).toBe(1);
+    expect(r.stderr).toContain('is still running');
+    expect(r.stderr).not.toContain('git branch -m');
+    expect(r.stderr).toContain('cd out before running it');
+    expect(worktreeList(git)).toContain(wt);
+    expect(localBranchExists(git, 'feat/self-live')).toBe(true);
   });
 });
