@@ -45,7 +45,10 @@ export default defineConfig({
           name: 'parallel',
           include: TEST_INCLUDE,
           exclude: GIT_INTEGRATION_TESTS,
-          // Leave headroom for the one serial git worker and for concurrent local development.
+          // Leave headroom for concurrent local development. NOTE: this does NOT need headroom for
+          // the git-integration project — vitest resolves fileParallelism:false to maxWorkers:1,
+          // which puts that project in its own trailing `sequential` task group, and task groups are
+          // awaited one at a time. The two projects run back-to-back, never concurrently.
           maxWorkers: '50%',
         },
       },
@@ -56,6 +59,8 @@ export default defineConfig({
           include: GIT_INTEGRATION_TESTS,
           // These files create real repos/worktrees and contend on git + filesystem resources.
           // One worker prevents the suite from manufacturing the load that made their clocks flaky.
+          // It does NOT shield them from load outside this process, so a file here still must not
+          // assert on how fast a contended machine executes (sc-2288).
           fileParallelism: false,
         },
       },

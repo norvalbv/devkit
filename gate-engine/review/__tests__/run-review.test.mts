@@ -1434,6 +1434,7 @@ describe('runReviewGate — conventions-reviewer selected ALONE (non-source file
   });
 });
 
+const WAIT_MS = 30_000; // one budget in one place; a hang detector, not a speed assertion
 describe('runReviewGate — per-completion checkpoints', () => {
   it('a finished PASS is on disk BEFORE slower cascades resolve (checkpoint, not batch)', async () => {
     const repo = consumerRepo({ backend: true });
@@ -1448,9 +1449,8 @@ describe('runReviewGate — per-completion checkpoints', () => {
     });
     const done = runReviewGate(repo, { exec });
     // the fast reviewer's PASS lands in the cache while the other three are still pending
-    await vi.waitFor(() => {
-      expect(Object.keys(loadCache(repo)).length).toBe(1);
-    });
+    const onePassCached = () => expect(Object.keys(loadCache(repo)).length).toBe(1);
+    await vi.waitFor(onePassCached, { timeout: WAIT_MS });
     release();
     expect(await done).toBe(0);
     expect(Object.keys(loadCache(repo)).length).toBe(5);

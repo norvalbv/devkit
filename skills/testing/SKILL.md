@@ -44,6 +44,22 @@ These are not allowed to make a suite "pass":
 
 A test that fails is information. Suppressing it discards the information and ships the bug. If a test is genuinely obsolete (the behaviour was intentionally removed), delete it **as part of** the behaviour change with a clear reason — not to mute a red suite.
 
+## Deadlines are hang detectors, not performance assertions
+
+Raising a test's timeout is **not** on the list above, and reviewers should not treat it as loosening an assertion.
+
+A deadline in a test exists to stop a genuine hang from wedging the suite. It is not a claim that the machine is fast. When a suite runs its files in parallel, a step that takes 200ms alone can take twenty times that under load — so a short deadline fails with **no assertion actually being wrong**, in a different random file each run. That trains people to ignore red and to reach for `--no-verify`.
+
+So:
+
+- Give a deadline enough room that only a real hang reaches it. Seconds of headroom, not milliseconds.
+- Assert the **observable behaviour** — exit status, the exact error text, the reaped process, the file that appeared — never how long it took to happen.
+- Prefer waiting on a **signal** (poll for a file, await an event) over sleeping for a duration.
+- Never assert an elapsed-time *lower* bound (`expect(elapsed).toBeGreaterThan(n)`) to prove something waited. Raising `n` makes it strictly more flaky; assert the effect of waiting instead.
+- Put the budget in one named constant per file, with a comment, so it is not quietly tightened later.
+
+Making these changes is fixing a broken test, not weakening a real one — the timing claim was never what the test was protecting.
+
 ## Reviewing test adequacy
 
 When judging whether a change is adequately tested, ask:

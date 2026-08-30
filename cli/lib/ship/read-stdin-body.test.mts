@@ -8,6 +8,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 const shipScript = fileURLToPath(new URL('./ship-branch.sh', import.meta.url));
 const reshipScript = fileURLToPath(new URL('./reship.sh', import.meta.url));
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
+// Bounds a hang only; the configured-timeout claim is asserted on the stderr text below.
+const WATCHDOG_MS = 30_000;
+
 const roots: string[] = [];
 
 afterAll(() => {
@@ -90,7 +93,7 @@ function runWithIdleStdin({
       if (process.platform === 'win32' || child.pid === undefined) child.kill('SIGTERM');
       else process.kill(-child.pid, 'SIGTERM');
       child.stdin.destroy();
-    }, 2_500);
+    }, WATCHDOG_MS);
     child.once('close', (status) => {
       clearTimeout(watchdog);
       child.stdin.destroy();
@@ -108,7 +111,7 @@ describe('ship stdin body timeout (sc-1340)', () => {
       const result = await runWithIdleStdin(seed());
       expect(result.watchdogFired, result.stderr).toBe(false);
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain('stdin stayed open without completing a PR body');
+      expect(result.stderr).toContain('stdin stayed open without completing a PR body within 1s');
       expect(result.stderr).toContain('redirect stdin from /dev/null');
     });
   }

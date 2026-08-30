@@ -90,6 +90,12 @@ function expectSilentSuccess(result: ReturnType<typeof spawnSync>): void {
   expect(result.stderr).toEqual(Buffer.alloc(0));
 }
 
+// A HANG detector, not a performance budget. The wrapper has no stdin timeout of its own, so it
+// either exits immediately (opt-out honoured) or blocks forever on a pipe nothing writes to and
+// nothing closes — 30s separates those two outcomes exactly as well as the previous 2_000 did, and
+// without racing a cold Node start under suite load (sc-2288).
+const STDIN_WATCHDOG_MS = 30_000;
+
 async function runWithOpenStdin(
   args: string[],
   cwd: string,
@@ -108,7 +114,7 @@ async function runWithOpenStdin(
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error('wrapper waited for stdin'));
-    }, 2_000);
+    }, STDIN_WATCHDOG_MS);
     child.once('error', (error) => {
       clearTimeout(timeout);
       reject(error);
