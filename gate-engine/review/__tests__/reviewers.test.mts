@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
+import { normalizeLineEndings, VERDICT_LINE_RE } from '../contracts/response.mts';
 import { LIGHT_JUDGE_MODEL } from '../../judge/judge-isolation.mts';
 import { devkitVersion } from '../../devkit-version.mts';
 import { parseConventionEvidencePairs, parseConventionFindings } from '../evidence/conventions.mts';
@@ -73,6 +74,88 @@ describe('parseReviewVerdict', () => {
   });
   it('empty / no output → null', () => {
     expect(parseReviewVerdict('').verdict).toBe(null);
+  });
+
+  it.each([
+    ['CRLF', '\r\n'],
+    ['CR', '\r'],
+  ])('captures the FAIL reason when the judge emits %s', (_name, eol) => {
+    expect(
+      parseReviewVerdict(`Bad.${eol}VERDICT: FAIL — SQL built by string concat in db.ts:12`),
+    ).toEqual({ verdict: 'FAIL', reason: 'SQL built by string concat in db.ts:12' });
+  });
+
+  it('does not absorb a trailing CRLF into the reason', () => {
+    expect(parseReviewVerdict('Bad.\r\nVERDICT: FAIL — missing auth check\r\n')).toEqual({
+      verdict: 'FAIL',
+      reason: 'missing auth check',
+    });
+  });
+
+  it('still strips markdown dressing on a CRLF verdict line', () => {
+    expect(parseReviewVerdict('notes\r\n- VERDICT: **FAIL** - missing auth check')).toEqual({
+      verdict: 'FAIL',
+      reason: 'missing auth check',
+    });
+  });
+
+  it.each([
+    ['CRLF', '\r\n'],
+    ['CR', '\r'],
+  ])('still lets the LAST of several verdict lines win under %s', (_name, eol) => {
+    expect(
+      parseReviewVerdict(`VERDICT: FAIL — hasty${eol}Re-reading…${eol}VERDICT: PASS`).verdict,
+    ).toBe('PASS');
+  });
+});
+
+// sc-2284: consumers slice a transcript at this regex's match index, so the index must be the
+// verdict line's own start. An unguarded leading dressing class consumed the `\n` of a CRLF —
+// multiline `^` already matches after the bare `\r` — leaving the slice ending in a dangling `\r`
+// that the non-multiline evidence-label regexes cannot match.
+describe('VERDICT_LINE_RE match position', () => {
+  const DRESSING = [
+    ['plain', 'VERDICT: FAIL — why'],
+    ['blockquote and bold', '> **VERDICT: FAIL** — reason'],
+    ['heading', '## VERDICT: FAIL - why'],
+    ['indented', '   VERDICT: FAIL'],
+    ['list item and bold', '- VERDICT: **FAIL** - missing auth check'],
+  ];
+  const EOLS = [
+    ['LF', '\n'],
+    ['CRLF', '\r\n'],
+    ['CR', '\r'],
+  ];
+  const cases = DRESSING.flatMap(([dressing, line]) =>
+    EOLS.map(([eolName, eol]) => [`${dressing} under ${eolName}`, line, eol]),
+  );
+
+  it.each(cases)('anchors on the verdict line start — %s', (_name, line, eol) => {
+    const head = `preceding prose${eol}more prose`;
+    const transcript = head + eol + line;
+    expect([...transcript.matchAll(VERDICT_LINE_RE)].at(-1)?.index).toBe((head + eol).length);
+  });
+
+  it('anchors past a blank line rather than swallowing it', () => {
+    // HEAD returned 2 here (the class ate the blank line's own newline). Both slices parse to the
+    // same findings, so this pins the intent, not a behaviour change.
+    expect([...'x\n\nVERDICT: FAIL'.matchAll(VERDICT_LINE_RE)].at(-1)?.index).toBe(3);
+  });
+
+  it('stays unadvanced when read repeatedly, so concurrent reviewers sharing it agree', () => {
+    const transcript = 'notes\r\nVERDICT: FAIL — why';
+    const first = [...transcript.matchAll(VERDICT_LINE_RE)].at(-1)?.index;
+    expect([...transcript.matchAll(VERDICT_LINE_RE)].at(-1)?.index).toBe(first);
+    expect(VERDICT_LINE_RE.lastIndex).toBe(0);
+    expect(parseReviewVerdict(transcript)).toEqual(parseReviewVerdict(transcript));
+  });
+
+  it('leaves a CRLF evidence slice newline-terminated, never ending in a dangling CR', () => {
+    const transcript =
+      'VIOLATION: rule — CLAUDE.md:1\r\nOFFENDING: x — src/a.ts:1\r\nVERDICT: FAIL — why';
+    const last = [...transcript.matchAll(VERDICT_LINE_RE)].at(-1);
+    expect(transcript.slice(0, last?.index)).toMatch(/\r\n$/);
+    expect(parseReviewVerdict(transcript)).toEqual({ verdict: 'FAIL', reason: 'why' });
   });
 });
 
@@ -685,6 +768,251 @@ describe('wrapConventionsPrompt / parseConventionFindings', () => {
   });
   it('no OFFENDING blocks → empty (a PASS transcript has none to key on)', () => {
     expect(parseConventionFindings('NO_VIOLATIONS\nVERDICT: PASS')).toEqual([]);
+  });
+});
+
+// sc-2284: the evidence contract must be line-ending agnostic. A CRLF transcript used to lose the
+// pair adjacent to the VERDICT line (one pair -> inconclusive; two -> a SILENT truncation that
+// still blocked), and a CR-only transcript lost everything because the splitter never split. Rows
+// carry their expected findings as a LITERAL rather than comparing CRLF output to LF output: an
+// LF-vs-CRLF comparison is vacuously green if a future edit breaks both, and the literal is what
+// pins the two-pair row at exactly 2.
+describe('conventions evidence parsing is line-ending agnostic', () => {
+  const LINE_ENDING_FIXTURES = [
+    {
+      name: 'a single cited pair',
+      transcript:
+        'VIOLATION: never use console.log — CLAUDE.md:4\n' +
+        'OFFENDING: console.log(x) — src/a.ts:12\n' +
+        'VERDICT: FAIL — logging rule violated',
+      findings: [
+        { rulePath: 'CLAUDE.md', ruleLine: 4, offendingPath: 'src/a.ts', offendingLine: 12 },
+      ],
+    },
+    {
+      name: 'two cited pairs',
+      transcript:
+        'VIOLATION: rule a — CLAUDE.md:1\n' +
+        'OFFENDING: x — src/a.ts:1\n' +
+        'VIOLATION: rule b — docs/CLAUDE.md:2\n' +
+        'OFFENDING: y — src/b.ts:2\n' +
+        'VERDICT: FAIL — two violations',
+      findings: [
+        { rulePath: 'CLAUDE.md', ruleLine: 1, offendingPath: 'src/a.ts', offendingLine: 1 },
+        { rulePath: 'docs/CLAUDE.md', ruleLine: 2, offendingPath: 'src/b.ts', offendingLine: 2 },
+      ],
+    },
+    {
+      name: 'numeric line ranges',
+      transcript:
+        'VIOLATION: multi-line rule — db/CLAUDE.md:3-4\n' +
+        'OFFENDING: multi-line call — src/db/client.ts:42–44\n' +
+        'VERDICT: FAIL — cited range',
+      findings: [
+        {
+          rulePath: 'db/CLAUDE.md',
+          ruleLine: 3,
+          offendingPath: 'src/db/client.ts',
+          offendingLine: 42,
+        },
+      ],
+    },
+    {
+      name: 'a line-less rule citation',
+      transcript:
+        'VIOLATION: Components must not accept className. — packages/ui/CLAUDE.md\n' +
+        'OFFENDING: className?: string; — packages/ui/Button.tsx:10\n' +
+        'VERDICT: FAIL — cited rule',
+      findings: [
+        {
+          rulePath: 'packages/ui/CLAUDE.md',
+          ruleLine: null,
+          offendingPath: 'packages/ui/Button.tsx',
+          offendingLine: 10,
+        },
+      ],
+    },
+    {
+      name: 'a parenthetical rule location',
+      transcript:
+        'VIOLATION: Never call console.* directly. — CLAUDE.md (repo root):2-3\n' +
+        "OFFENDING: console.log('total'); — services/orders/pricing.ts:4\n" +
+        'VERDICT: FAIL — cited rule',
+      findings: [
+        {
+          rulePath: 'CLAUDE.md (repo root)',
+          ruleLine: 2,
+          offendingPath: 'services/orders/pricing.ts',
+          offendingLine: 4,
+        },
+      ],
+    },
+    {
+      name: 'a quoted verdict string inside the offending block',
+      transcript:
+        'VIOLATION: Test fixtures must not hardcode verdict strings. — CLAUDE.md:5\n' +
+        'OFFENDING: The fixture writes\n' +
+        '"VERDICT: FAIL"\n' +
+        '— src/fixture.test.ts:42\n' +
+        'VERDICT: FAIL — cited fixture',
+      findings: [
+        {
+          rulePath: 'CLAUDE.md',
+          ruleLine: 5,
+          offendingPath: 'src/fixture.test.ts',
+          offendingLine: 42,
+        },
+      ],
+    },
+    {
+      name: 'a blank-line-separated pair',
+      transcript:
+        'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n\nOFFENDING: db.raw(query) — src/db.ts:80',
+      findings: [
+        { rulePath: 'CLAUDE.md', ruleLine: 3, offendingPath: 'src/db.ts', offendingLine: 80 },
+      ],
+    },
+    {
+      name: 'mixed malformed and valid blocks',
+      transcript:
+        'OFFENDING: orphan — src/orphan.ts:9\n' +
+        'VIOLATION: real rule — CLAUDE.md:2\n' +
+        'OFFENDING: bad value — src/config.ts:4\n' +
+        'VERDICT: FAIL — one real violation\n' +
+        'VIOLATION: appendix — CLAUDE.md:8\n' +
+        'OFFENDING: too late — src/late.ts:3',
+      findings: [
+        { rulePath: 'CLAUDE.md', ruleLine: 2, offendingPath: 'src/config.ts', offendingLine: 4 },
+      ],
+    },
+    {
+      name: 'an orphan VIOLATION',
+      transcript: 'VIOLATION: rule a — CLAUDE.md:1\nVERDICT: FAIL',
+      findings: [],
+    },
+    {
+      name: 'an orphan OFFENDING',
+      transcript: 'OFFENDING: x — src/a.ts:1\nVERDICT: FAIL',
+      findings: [],
+    },
+    {
+      name: 'an uncited rule trailer',
+      transcript:
+        'VIOLATION: rule text — see repo guidelines for context\n' +
+        'OFFENDING: setState(x) — src/component.tsx:42\n' +
+        'VERDICT: FAIL — uncited rule',
+      findings: [],
+    },
+  ];
+
+  it.each(LINE_ENDING_FIXTURES)(
+    '$name parses to its recorded findings under LF',
+    ({ transcript, findings }) => {
+      expect(parseConventionFindings(transcript)).toEqual(findings);
+    },
+  );
+
+  it.each(LINE_ENDING_FIXTURES)(
+    '$name parses identically when the judge emits CRLF',
+    ({ transcript, findings }) => {
+      const crlf = transcript.replaceAll('\n', '\r\n');
+      expect(parseConventionFindings(crlf)).toEqual(findings);
+      expect(parseConventionEvidencePairs(crlf)).toEqual(parseConventionEvidencePairs(transcript));
+    },
+  );
+
+  it.each(LINE_ENDING_FIXTURES)(
+    '$name parses identically under CR-only line endings',
+    ({ transcript, findings }) => {
+      const cr = transcript.replaceAll('\n', '\r');
+      expect(parseConventionFindings(cr)).toEqual(findings);
+      expect(parseConventionEvidencePairs(cr)).toEqual(parseConventionEvidencePairs(transcript));
+    },
+  );
+
+  // The three shapes a wholesale \n -> \r\n swap cannot generate. A bare CR is what a judge emits
+  // when it quotes a line out of a CRLF-checked-out file; only collapsing `\r\n?` (never `\r\n`)
+  // reads it as a break, so these are the rows that keep the normalizer from being narrowed.
+  it('reads a bare CR inside a VIOLATION quote as a line break', () => {
+    const transcript =
+      'VIOLATION: Never edit generated files.\rSee the header. — CLAUDE.md:1\n' +
+      'OFFENDING: export const icons = [] — src/icons.ts:9\n' +
+      'VERDICT: FAIL — cited rule';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 1, offendingPath: 'src/icons.ts', offendingLine: 9 },
+    ]);
+  });
+
+  it('reads a bare CR inside an OFFENDING quote as a line break', () => {
+    const transcript =
+      'VIOLATION: Never use raw SQL. — CLAUDE.md:3\n' +
+      'OFFENDING: db.raw(\rquery) — src/db.ts:80\n' +
+      'VERDICT: FAIL — cited query';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 3, offendingPath: 'src/db.ts', offendingLine: 80 },
+    ]);
+  });
+
+  it('parses a CR-only transcript the splitter would otherwise never split', () => {
+    const transcript =
+      'VIOLATION: never use console.log — CLAUDE.md:4\r' +
+      'OFFENDING: console.log(x) — src/a.ts:12\r' +
+      'VERDICT: FAIL — logging rule violated';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 4, offendingPath: 'src/a.ts', offendingLine: 12 },
+    ]);
+  });
+
+  // The likeliest production shape of all, and the one a uniform \n -> \r\n swap cannot produce: a
+  // judge writing LF prose that pastes a quoted line out of a CRLF-checked-out file. Whichever side
+  // of the pair carries the CRLF, the finding must survive.
+  it.each([
+    ['the rule citation', '\r\n', '\n'],
+    ['the offending citation', '\n', '\r\n'],
+  ])('parses a transcript with mixed line endings around %s', (_name, first, second) => {
+    const transcript =
+      `VIOLATION: never use console.log — CLAUDE.md:4${first}` +
+      `OFFENDING: console.log(x) — src/a.ts:12${second}` +
+      'VERDICT: FAIL — mixed endings';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 4, offendingPath: 'src/a.ts', offendingLine: 12 },
+    ]);
+  });
+
+  // Slice-boundary values for the terminal-verdict index: end-of-transcript, 0, and absent.
+  it('ignores a trailing terminator after the verdict line', () => {
+    const transcript =
+      'VIOLATION: never use console.log — CLAUDE.md:4\r\n' +
+      'OFFENDING: console.log(x) — src/a.ts:12\r\n' +
+      'VERDICT: FAIL — why\r\n';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 4, offendingPath: 'src/a.ts', offendingLine: 12 },
+    ]);
+  });
+
+  it('treats a CRLF transcript whose verdict comes FIRST as evidence-free', () => {
+    // Index 0 — the evidence slice is empty, so a pair below the verdict can never authorize it.
+    const transcript =
+      'VERDICT: FAIL — no evidence\r\n' +
+      'VIOLATION: r — CLAUDE.md:1\r\n' +
+      'OFFENDING: x — src/a.ts:1';
+    expect(parseConventionFindings(transcript)).toEqual([]);
+  });
+
+  it('parses a CRLF transcript with NO verdict line, scanning the whole of it', () => {
+    const transcript =
+      'VIOLATION: never use console.log — CLAUDE.md:4\r\nOFFENDING: console.log(x) — src/a.ts:12';
+    expect(parseConventionFindings(transcript)).toEqual([
+      { rulePath: 'CLAUDE.md', ruleLine: 4, offendingPath: 'src/a.ts', offendingLine: 12 },
+    ]);
+  });
+
+  // parseConventionFindings normalizes, then hands the slice to parseConventionEvidencePairs which
+  // normalizes again. That double pass is only safe because the collapse is idempotent.
+  it('normalizes idempotently, so both entry points may normalize independently', () => {
+    const mixed = 'a\r\nb\rc\nd';
+    expect(normalizeLineEndings(mixed)).toBe('a\nb\nc\nd');
+    expect(normalizeLineEndings(normalizeLineEndings(mixed))).toBe(normalizeLineEndings(mixed));
   });
 });
 

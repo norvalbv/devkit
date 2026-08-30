@@ -102,7 +102,32 @@ describe('conventions evidence completeness', () => {
 
     expect(await runReviewGate(repo, { exec })).toBe(1);
     expect(err.mock.calls.flat().join('\n')).toContain('conventions-reviewer FAILED');
-    expect(err.mock.calls.flat().join('\n')).not.toContain('unsubstantiated conventions FAIL');
+    expect(err.mock.calls.flat().join('\n')).not.toContain(
+      'response contract rejected an unsubstantiated FAIL',
+    );
+  });
+
+  it('keeps a complete cited pair blocking when the judge emits CRLF line endings', async () => {
+    const repo = consumerRepo();
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'CLAUDE.md'), 'Every config must set flag true.\n');
+    writeFileSync(join(repo, 'src', 'config.json'), '{ "flag": false }\n');
+    execSync('git add .', { cwd: repo });
+    // Joined, not string-replaced, so the CRLF is structural to the fixture and survives a reformat.
+    const exec = vi.fn(async () =>
+      [
+        'VIOLATION: Every config must set flag true. — CLAUDE.md:1',
+        'OFFENDING: { "flag": false } — src/config.json:1',
+        'VERDICT: FAIL — cited violation',
+      ].join('\r\n'),
+    );
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(exec).toHaveBeenCalledOnce();
+    const printed = err.mock.calls.flat().join('\n');
+    expect(printed).toContain('conventions-reviewer FAILED');
+    expect(printed).not.toContain('response contract rejected an unsubstantiated FAIL');
   });
 
   it('an unsubstantiated FAIL over a 93-file capped diff is inconclusive, not a rule violation', async () => {

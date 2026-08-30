@@ -8,10 +8,24 @@ export interface ReviewVerdict {
   reason: string;
 }
 
+/**
+ * Collapse CRLF and bare CR to LF before any line-oriented contract reads a transcript. `\r\n?`
+ * rather than `\r\n`: a judge quoting a line out of a CRLF-checked-out file emits a LONE `\r`,
+ * which the label regexes below cannot cross either (JS `.` never matches a carriage return), so
+ * narrowing this to CRLF-only silently re-opens sc-2284. Idempotent — entry points may normalize
+ * independently without coordinating.
+ */
+export function normalizeLineEndings(raw: string): string {
+  return String(raw).replace(/\r\n?/g, '\n');
+}
+
 // Tolerates markdown dressing around the verdict line; the LAST match wins. Deliberately no
-// bare-word fallback: pass/fail saturate review prose, so absence must remain inconclusive.
+// bare-word fallback: pass/fail saturate review prose, so absence must remain inconclusive. The
+// leading dressing class is guarded so it can never consume a line terminator: multiline `^`
+// matches immediately after a bare `\r`, so an unguarded `[\s*#>-]*` swallows the `\n` of a CRLF
+// and every consumer that slices on `.index` gets a fragment ending in a dangling `\r`.
 export const VERDICT_LINE_RE =
-  /^[\s*#>-]*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
+  /^(?:(?![\r\n])[\s*#>-])*VERDICT:\s*\**\s*(PASS|FAIL)\b\**\s*(?:[—–:-]+\s*)?(.*)$/gim;
 
 export function parseReviewVerdict(raw: string): ReviewVerdict {
   const lines = [...String(raw).matchAll(VERDICT_LINE_RE)];

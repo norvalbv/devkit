@@ -136,7 +136,9 @@ when any of these differ from the run that produced the baseline:
 - `matchModel` / `matchRuns` (matcher config)
 - `gateHash` — `reviewers.mts` + `run-review.mts` + `claude-md.mts` + `diff-evidence.mts` + the
   reviewer's `evidence/*.mts` inputs (including the shared conventions parser) +
-  `agents/conventions-reviewer.md`, hashed together. Everything that changes conventions-reviewer's
+  `contracts/response.mts` (it owns `VERDICT_LINE_RE`, which bounds the evidence slice, and the
+  shared line-ending normalizer both parsers run first) + `agents/conventions-reviewer.md`, hashed
+  together. Everything that changes conventions-reviewer's
   _behaviour_ lives in this hash; neither completeness-eval nor critique-eval is a `REVIEWERS`-table
   entry, so those benches do not share these evidence inputs.
 - `matcherHash` — see the cross-bench hazard above.
