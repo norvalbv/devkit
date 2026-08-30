@@ -24,6 +24,10 @@ import {
 import { withPlanCritiquePersistenceLock } from '../persistence-lock.mts';
 import { bytes, recordFor, sha256Bytes, temporaryRoot } from './evidence-store-fixture.mts';
 
+// Hang detector for the worker handshake, well inside the 150s central testTimeout so a missed
+// signal fails fast and by name here instead of as an unattributable suite-level timeout.
+const HANDSHAKE_MS = 30_000;
+
 describe('plan critique evidence store', () => {
   it('derives the specified callback identity without timestamps or response bytes', () => {
     const record = recordFor(bytes('{}'));
@@ -105,27 +109,52 @@ describe('plan critique evidence store', () => {
     const exact = new Uint8Array(shared);
     exact.fill(1);
     const record = recordFor(exact);
+    // Polls for the FIRST observable sign that publication has begun, rather than watching for one
+    // via fs.watch. Two reasons (sc-2288): a dropped/late FSEvents event made the handshake hang to
+    // the 150s worker ceiling, and the old trigger (the evidence root appearing) fired only ~1-3ms
+    // before the blob write, so the mutation usually landed after publication and the test passed
+    // VACUOUSLY. The persistence lock file is created in this same parent directory strictly after
+    // the snapshot and strictly before the root, giving a real head start into the window. It is
+    // deleted again in a finally, so a slow poll could miss it; the persistent root is then a
+    // backstop that ends the wait rather than hanging — but it means publication already finished,
+    // so the worker reports 'too-late' and the assertion below fails by name instead of passing
+    // vacuously. Same poll idiom as immutable-file.test.mts.
     const worker = new Worker(
-      `const { existsSync, watch } = require('node:fs');
+      `const { existsSync, readdirSync } = require('node:fs');
        const path = require('node:path');
        const { parentPort, workerData } = require('node:worker_threads');
        const target = path.join(workerData.parent, workerData.name);
-       const watcher = watch(workerData.parent, (_event, name) => {
-         if (String(name) !== workerData.name || !existsSync(target)) return;
-         new Uint8Array(workerData.shared).fill(2);
-         watcher.close();
-         parentPort.postMessage('mutated');
-       });
-       parentPort.postMessage('ready');`,
+       const locked = () =>
+         readdirSync(workerData.parent).some((entry) => entry.startsWith('.plan-critique-'));
+       const idle = new Int32Array(new SharedArrayBuffer(4));
+       parentPort.postMessage('ready');
+       let sawLock = false;
+       while (!(sawLock = locked()) && !existsSync(target)) Atomics.wait(idle, 0, 0, 1);
+       new Uint8Array(workerData.shared).fill(2);
+       parentPort.postMessage(sawLock ? 'mutated' : 'too-late');`,
       {
         eval: true,
         workerData: { parent: path.dirname(root), name: path.basename(root), shared },
       },
     );
+    // Bounded, and rejecting on 'exit'. An unbounded handshake is what turned a missed trigger into
+    // a 150s timeout attributed to a random file instead of a fast, named failure here.
     const nextMessage = (): Promise<unknown> =>
       new Promise((resolve, reject) => {
-        worker.once('message', resolve);
-        worker.once('error', reject);
+        const bail = setTimeout(
+          () => reject(new Error('worker handshake did not arrive')),
+          HANDSHAKE_MS,
+        );
+        const settle = (fn: (value: never) => void) => (value: never) => {
+          clearTimeout(bail);
+          fn(value);
+        };
+        worker.once('message', settle(resolve));
+        worker.once('error', settle(reject));
+        worker.once(
+          'exit',
+          settle(() => reject(new Error('worker exited before responding'))),
+        );
       });
 
     try {
