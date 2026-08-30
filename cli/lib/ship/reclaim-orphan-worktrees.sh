@@ -15,16 +15,27 @@
 # an unmounted volume. Accepted because git runs the same prune unconditionally during `gc`, and it
 # destroys no files -- only a registration git already considers dead.
 
-# ship_reclaim_orphan_worktrees <repo> <branch>
+# Sourced, not assumed: ship-run-record.test.mts sources THIS file directly, so its dependency has to
+# travel with it rather than relying on ship-branch.sh having sourced it first.
+. "$(dirname "${BASH_SOURCE[0]}")/origin-base.sh"
+
+# ship_reclaim_orphan_worktrees <repo> <branch> [ship|reship]
 # 0 = proceed (possibly after reclaiming), 1 = refuse. Sets PREFLIGHT_HINT when the caller's later
-# resume refusal should explain where the branch came from.
+# resume refusal should explain where the branch came from, and PREFLIGHT_SELF when the blocker is
+# the caller's own worktree -- which changes what that refusal's closing advice may say.
+#
+# The mode exists for one question only: does the CALLER create the branch? A new ship does, so a
+# branch already checked out here is fatal and gets a remedy. A re-push commits in a --detach
+# worktree and never touches refs/heads/<br>, so the same state is entirely benign there -- and
+# telling it to delete the branch it is re-pushing would be wrong twice over.
 ship_reclaim_orphan_worktrees() {
-  local repo=$1 br=$2
+  local repo=$1 br=$2 mode=${3:-ship}
   local common record status= refuse=0
   local path= wt_branch= locked= lock_reason= entry_n=0
   local paths=() branches=() locks=() lock_reasons=()
 
   PREFLIGHT_HINT=
+  PREFLIGHT_SELF=
 
   common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
   [ -n "$common" ] || return 0
@@ -58,17 +69,17 @@ ship_reclaim_orphan_worktrees() {
   local i=0
   while [ "$i" -lt "$entry_n" ]; do
     _ship_orphan_consider "$repo" "$common" "$br" \
-      "${paths[$i]}" "${branches[$i]}" "${locks[$i]}" "${lock_reasons[$i]}" || refuse=1
+      "${paths[$i]}" "${branches[$i]}" "${locks[$i]}" "${lock_reasons[$i]}" "$mode" || refuse=1
     i=$((i + 1))
   done
 
   [ "$refuse" -eq 0 ]
 }
 
-# _ship_orphan_consider <repo> <common> <branch> <path> <wt-branch> <locked> <lock-reason>
+# _ship_orphan_consider <repo> <common> <branch> <path> <wt-branch> <locked> <lock-reason> [mode]
 # 0 = this entry does not block, 1 = refuse.
 _ship_orphan_consider() {
-  local repo=$1 common=$2 br=$3 path=$4 wt_branch=$5 locked=$6 lock_reason=$7
+  local repo=$1 common=$2 br=$3 path=$4 wt_branch=$5 locked=$6 lock_reason=$7 mode=${8:-ship}
   local admin= rec= r_branch= r_pid= r_identity= r_base= r_created= r_keep=
   local r_gate_pid= r_gate_identity= attached=
 
@@ -103,6 +114,26 @@ _ship_orphan_consider() {
 
   if [ -z "$r_pid" ]; then
     # Rule 10: unattributable. Say what is in the way, then behave exactly as before.
+    if [ "$mode" != ship ] && _ship_orphan_is_self "$repo" "$common" "$admin" "$path"; then
+      # A re-push cuts a DETACHED worktree at origin/<br> and never writes refs/heads/<br>, so this
+      # checkout holding the branch obstructs nothing. Saying anything here would be noise at best
+      # and, since the only remedy on offer is "delete it", actively wrong.
+      return 0
+    fi
+    if _ship_orphan_is_self "$repo" "$common" "$admin" "$path"; then
+      # sc-2261: the blocker is the CALLER'S OWN worktree -- the state an agent lands in after being
+      # told to `git switch -c <branch>` and then to ship that same branch. The generic advice below
+      # would tell it to force-remove the worktree it is executing inside, and the main-tree arm's
+      # "switch it off" is true but unactionable without naming what to switch TO. Print the exact
+      # commands that free the branch instead, and set the self flag so ship's closing advice
+      # (ship-branch.sh) says the same thing rather than "choose a new branch name".
+      echo "ship: $br is checked out in THIS worktree ($path), and ship must create it." >&2
+      echo "  ship commits on a branch it creates, so the branch cannot already be checked out here." >&2
+      _ship_orphan_report_self "$repo" "$br"
+      PREFLIGHT_SELF=1
+      PREFLIGHT_HINT="this worktree ($path) is itself checked out on $br"
+      return 0
+    fi
     echo "ship: $br is also checked out at $path" >&2
     echo "  no devkit run record there, so devkit will not remove it — a ship may still own it." >&2
     if [ -z "$admin" ]; then
@@ -141,6 +172,72 @@ _ship_orphan_consider() {
 
   _ship_orphan_reclaim "$repo" "$br" "$path" "$r_pid" "$r_identity" "$r_base" "$r_created"
   return 0
+}
+
+# _ship_orphan_is_self <repo> <common> <admin> <path>
+# Is the blocking worktree the one ship was invoked FROM? Compared by git ADMIN DIR:
+# `rev-parse --absolute-git-dir` returns <common>/worktrees/<id> for a linked worktree and <common>
+# for the main one -- exactly what worktree_registry_admin_dir yields, which is empty for the main
+# tree. Both are git-canonical and realpath-resolved, so this sidesteps the /private/var symlink
+# forms that made path-keying unusable in this file (see the header's Rejected note).
+#
+# The empty-admin arm needs the extra path check, because empty means TWO things: "the main worktree,
+# which has no admin dir" and "resolution failed" -- the registry cannot key a worktree whose path
+# holds a newline, since the gitdir file it matches on is read a line at a time. Without the check, a
+# caller sitting in the main tree satisfies self == common and would claim an unresolvable OTHER
+# checkout as its own, then advise renaming that checkout's branch. So identify the main worktree
+# positively instead of inferring it from an absence.
+_ship_orphan_is_self() {
+  local repo=$1 common=$2 admin=$3 path=$4 self top
+  self=$(git -C "$repo" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  [ -n "$self" ] || return 1
+  if [ -n "$admin" ]; then
+    [ "$self" = "$admin" ]
+  else
+    [ "$self" = "$common" ] || return 1
+    top=$(git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 1
+    [ -n "$top" ] && [ "$top" = "$path" ]
+  fi
+}
+
+# _ship_orphan_report_self <repo> <branch>
+# The remedy for "you are standing on the branch you asked ship to create".
+#
+# It RENAMES, and it is the only shape offered. Every delete-shaped remedy has the same defect:
+# whether the branch is safe to remove is decided here and acted on seconds later, so any answer can
+# be stale by then -- `git branch -D` forces past a commit that landed in between, `git branch -d`
+# asks the wrong question (merged into HEAD, false once you move to an older base), and even a
+# compare-and-delete on the tip drops the last ref if the covering ref is pruned in the window. A
+# rename cannot lose a commit under ANY interleaving, and freeing the NAME is all ship needs. The
+# leftover is one branch to drop once the PR is open -- far cheaper than an unreachable commit.
+#
+# And it never moves the working tree. An earlier draft led with `git switch <base>` so the ship
+# command could stay unchanged, but this worktree holds the uncommitted work being shipped: a switch
+# can legitimately refuse when those edits collide with the base, handing back a command that fails.
+# `git branch -m` carries the worktree onto the new name without touching a file, so it works in
+# every state. The cost is that HEAD then sits on a branch origin does not have, which is exactly
+# what --base is for -- and naming the PR target explicitly is no loss on the one path where an
+# inferred base was the original bug.
+_ship_orphan_report_self() {
+  local repo=$1 br=$2 base freed tip
+  # The destination name is chosen by the OPERATOR'S shell, at the moment the command runs, not here.
+  # Picking one now means probing for a free name and then handing over a command that runs seconds
+  # later -- a check-then-act whose only outcome on a lost race is a rename that refuses and a caller
+  # back where they started. `$$` is expanded on execution and is unique among live processes; the
+  # tip disambiguates a reused pid from an older run. Both parts are ours (hex and a shell builtin),
+  # so this half is deliberately left OUTSIDE the quoting the source branch gets.
+  tip=$(git -C "$repo" rev-parse --short --verify --quiet "refs/heads/$br") || tip=
+  freed="devkit-freed-${tip:-nohead}-\$\$"
+  base=$(ship_origin_base_candidate "$repo") || base=
+  # Every ref name in a copyable line goes through ship_shell_quote. These are meant to be pasted
+  # into a shell, and a branch name is not a safe literal in either direction: `$`, backticks and
+  # parentheses are legal, so a bare name could execute as the operator, and an apostrophe is legal
+  # too, so a naive wrapper would emit an unmatched quote and an unrunnable command.
+  echo "  free the name by renaming it — this moves this worktree with it, and touches no file:" >&2
+  echo "    git branch -m $(ship_shell_quote "$br") \"$freed\"" >&2
+  echo "  then re-run ship, naming the PR base (HEAD is then on a branch origin does not have):" >&2
+  echo "    devkit ship $(ship_shell_quote "$br") \"<title>\" --base $(ship_shell_quote "${base:-<branch-on-origin>}") -- <paths>" >&2
+  echo "  (renaming keeps every commit; drop the renamed branch once the PR is open)" >&2
 }
 
 # _ship_orphan_alive <pid> <recorded-identity>

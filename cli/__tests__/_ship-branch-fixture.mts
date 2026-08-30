@@ -154,7 +154,14 @@ export function seedShipRepoLocalRemote({ hookBody } = {}) {
   const bare = join(ghRoot, 'github.com', 'acme', 'app.git');
   mkdirSync(join(ghRoot, 'github.com', 'acme'), { recursive: true });
   execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
-  return { ...seedShipRepo({ origin: bare, ...(hookBody ? { hookBody } : {}) }), bare };
+  const opts = { origin: bare };
+  if (hookBody) opts.hookBody = hookBody;
+  const seeded = seedShipRepo(opts);
+  // `work` on origin too. Ship refuses a PR base that is not a remote branch (a local-only base is
+  // exactly sc-2261's bug), and every non-dry test here ships from `work` with no --base — so a bare
+  // that lacks it is not a realistic new-ship starting state, it is the failure under test.
+  seeded.git(['push', '-q', 'origin', 'work:work'], { stdio: 'ignore' });
+  return { ...seeded, bare };
 }
 
 /** An `origin` bare with a `studio` branch plus a checked-out `finalized` branch whose note.txt change
