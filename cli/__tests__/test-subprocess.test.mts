@@ -1,7 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { processAlive, rootRegistry, testExecFileSync, testSpawnSync } from './_helpers.mts';
+import {
+  processAlive,
+  rootRegistry,
+  supervisedCommand,
+  testExecFileSync,
+  testSpawnSync,
+} from './_helpers.mts';
 
 const { mkTmp, cleanup } = rootRegistry();
 
@@ -35,6 +41,37 @@ const GRANDCHILD_SLEEP_S = 120;
 // supervisor's group kill — the topology these assertions depend on.
 const LEADER_SCRIPT = `/bin/sleep ${GRANDCHILD_SLEEP_S} & echo $! > "$1"; wait`;
 const LEADER_ARGV0 = 'devkit-reap-fixture';
+
+// `shell` names how the SUPERVISED command runs. Forwarded to the supervisor's OWN invocation it
+// made Node join that argv into one unquoted shell string, so the absolute path of
+// `test-subprocess.mts` split on its first space and the run died with
+// `Cannot find module '/Users/benji/Desktop/Personal'`. Asserted on the argv rather than by running
+// a command, because every CI checkout sits at a space-free path where the bug cannot reproduce.
+describe('the shell option applies to the supervised command, not the supervisor', () => {
+  it('wraps the inner command and drops shell from the supervisor invocation', () => {
+    const { args, options } = supervisedCommand('command', ['-v', 'git'], {
+      shell: true,
+      encoding: 'utf8',
+    });
+
+    expect(options.shell, 'shell must never reach the supervisor invocation').toBeUndefined();
+    expect(options.encoding, 'unrelated options still pass through').toBe('utf8');
+    expect(args.slice(-3)).toEqual(['/bin/sh', '-c', 'command -v git']);
+  });
+
+  it('honours an explicit shell path', () => {
+    const { args } = supervisedCommand('echo', ['hi'], { shell: '/bin/bash' });
+
+    expect(args.slice(-3)).toEqual(['/bin/bash', '-c', 'echo hi']);
+  });
+
+  it('leaves a shell-less call as a plain argv', () => {
+    const { args, options } = supervisedCommand('git', ['status'], { encoding: 'utf8' });
+
+    expect(args.slice(-2)).toEqual(['git', 'status']);
+    expect(options.shell).toBeUndefined();
+  });
+});
 
 describe('supervised synchronous test subprocesses', () => {
   it('preserves command output and natural exit status', () => {
