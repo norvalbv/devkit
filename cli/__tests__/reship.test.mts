@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +80,89 @@ function repo(origin = 'git@github.com:acme/app.git') {
   g(['commit', '-q', '--allow-empty', '-m', 'base']);
   g(['remote', 'add', 'origin', origin]);
   return { dir, g };
+}
+
+/** Existing PR off an old base plus a caller snapshot already resolved on today's main. The raw
+ * origin stays GitHub-shaped for PR identity checks; url.insteadOf keeps every fetch/push hermetic. */
+function rewriteRepo({ extraPath = false, rename = false } = {}) {
+  const bare = mkdtempSync(join(tmpdir(), 'reship-rewrite-bare-'));
+  const dir = mkdtempSync(join(tmpdir(), 'reship-rewrite-wt-'));
+  const stubBin = mkdtempSync(join(tmpdir(), 'reship-rewrite-bin-'));
+  dirs.push(bare, dir, stubBin);
+  const env = { ...process.env, ...GENV };
+  const g = (a, o = {}) =>
+    execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
+  execFileSync('git', ['init', '-q', '--bare', bare], { env });
+  g(['init', '-q', '-b', 'main']);
+  g(['config', 'user.email', 'a@b.c']);
+  g(['config', 'user.name', 'a']);
+  g(['config', 'commit.gpgsign', 'false']);
+  g(['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
+  g(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git']);
+  mkdirSync(join(dir, '.husky/_'), { recursive: true });
+  writeFileSync(join(dir, '.husky/.keep'), '');
+  writeFileSync(join(dir, '.gitignore'), '.devkit/\n');
+  writeFileSync(join(dir, 'conflict.txt'), 'base\n');
+  if (rename) writeFileSync(join(dir, 'old.txt'), 'old\n');
+  g(['add', '.gitignore', '.husky/.keep', 'conflict.txt', ...(rename ? ['old.txt'] : [])]);
+  g(['commit', '-q', '-m', 'base']);
+  g(['push', '-q', 'origin', 'main']);
+
+  g(['checkout', '-q', '-b', 'feature']);
+  writeFileSync(join(dir, 'conflict.txt'), 'feature\n');
+  if (extraPath) writeFileSync(join(dir, 'extra.txt'), 'feature extra\n');
+  if (rename) {
+    rmSync(join(dir, 'old.txt'));
+    writeFileSync(join(dir, 'new.txt'), 'renamed\n');
+  }
+  g(['add', '-A']);
+  g(['commit', '-q', '-m', 'feature']);
+  g(['push', '-q', 'origin', 'HEAD:feat/pr']);
+  const oldPrTip = g(['rev-parse', 'HEAD']);
+
+  g(['checkout', '-q', 'main']);
+  writeFileSync(join(dir, 'conflict.txt'), 'main\n');
+  g(['add', 'conflict.txt']);
+  g(['commit', '-q', '-m', 'main moves']);
+  g(['push', '-q', 'origin', 'main']);
+  const mainTip = g(['rev-parse', 'HEAD']);
+
+  // Equivalent to the completed local rebase in sc-2323: main is the ancestor and the caller has
+  // already resolved the conflict. devkit's job is publication, not this history edit.
+  g(['checkout', '-q', '-b', 'prepared']);
+  writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
+  if (extraPath) writeFileSync(join(dir, 'extra.txt'), 'feature extra\n');
+  if (rename) {
+    rmSync(join(dir, 'old.txt'));
+    writeFileSync(join(dir, 'new.txt'), 'renamed\n');
+  }
+  g(['add', '-A']);
+  g(['commit', '-q', '-m', 'resolved feature']);
+  writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+  g(['config', 'core.hooksPath', '.husky/_']);
+
+  const prFields = [
+    '7',
+    'OPEN',
+    'feat/pr',
+    oldPrTip,
+    'acme/app',
+    'main',
+    mainTip,
+    'https://github.com/acme/app/pull/7',
+  ].join('\t');
+  writeFileSync(join(stubBin, 'gh'), `#!/bin/sh\nprintf '%s\\n' '${prFields}'\n`);
+  chmodSync(join(stubBin, 'gh'), 0o755);
+  return {
+    bare,
+    dir,
+    env: { PATH: `${stubBin}:${process.env.PATH}` },
+    g,
+    mainTip,
+    oldPrTip,
+    stubBin,
+  };
 }
 
 describe('reship — resolve + arg guards', () => {
@@ -212,6 +303,133 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
     );
     expect(both.status).not.toBe(0);
     expect(both.stderr).toContain('mutually exclusive');
+  });
+});
+
+describe('reship --base — replace a conflicted PR from a caller-prepared snapshot (sc-2323)', () => {
+  it('gates one replacement commit on the current PR base instead of appending resolved bytes to stale ancestry', () => {
+    const { bare, dir, env, g, mainTip } = rewriteRepo();
+    mkdirSync(join(dir, '.devkit'), { recursive: true });
+    writeFileSync(
+      join(dir, '.devkit/reconcile-manifest.json'),
+      `${JSON.stringify({
+        version: 1,
+        branches: {
+          'feat/pr': {
+            prNumber: 7,
+            repo: 'acme/app',
+            baseRef: 'old-base',
+            baseSha: '0'.repeat(40),
+            shippedAt: '2020-01-01T00:00:00.000Z',
+            paths: [
+              { path: 'conflict.txt', blobSha: '1'.repeat(40), mode: '100644', op: 'modify' },
+              { path: 'stale.txt', blobSha: '2'.repeat(40), mode: '100644', op: 'modify' },
+            ],
+          },
+        },
+      })}\n`,
+    );
+    const r = run(
+      ['feat/pr', 'publish resolved PR', '--pr', '--base', 'main', '--', 'conflict.txt'],
+      dir,
+      env,
+    );
+    expect(r.status, r.stderr).toBe(0);
+    const replacement = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(g(['--git-dir', bare, 'rev-parse', `${replacement}^`])).toBe(mainTip);
+    expect(g(['--git-dir', bare, 'show', `${replacement}:conflict.txt`])).toBe('main + feature');
+    // Main is the replacement commit's ancestor, so Git has no conflict left to resolve.
+    expect(g(['--git-dir', bare, 'merge-base', '--is-ancestor', mainTip, replacement])).toBe('');
+    expect(g(['for-each-ref', '--format=%(refname)', 'refs/devkit/reship-rewrite'])).toBe('');
+    const manifest = JSON.parse(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8'));
+    expect(manifest.branches['feat/pr']).toMatchObject({
+      prNumber: 7,
+      repo: 'acme/app',
+      baseRef: 'main',
+      baseSha: mainTip,
+    });
+    expect(manifest.branches['feat/pr'].paths).toHaveLength(1);
+    expect(manifest.branches['feat/pr'].paths[0]).toMatchObject({ path: 'conflict.txt' });
+  });
+
+  it('refuses before gates when the brief omits any path changed by the old PR', () => {
+    const { dir, env } = rewriteRepo({ extraPath: true });
+    const r = run(
+      ['feat/pr', 'incomplete rewrite', '--pr', '--base', 'main', '--', './conflict.txt'],
+      dir,
+      { ...env, SHIP_DRY_RUN: '1' },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('rewrite brief omits paths from the existing PR');
+    expect(r.stderr).toContain('extra.txt');
+    expect(r.stderr).not.toMatch(/\n  conflict\.txt/);
+    expect(r.stderr).not.toContain('GATE_RAN');
+  });
+
+  it('requires both halves of an old-PR rename', () => {
+    const { dir, env } = rewriteRepo({ rename: true });
+    const r = run(
+      ['feat/pr', 'incomplete rename', '--pr', '--base', 'main', '--', 'conflict.txt', 'new.txt'],
+      dir,
+      { ...env, SHIP_DRY_RUN: '1' },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('rewrite brief omits paths from the existing PR');
+    expect(r.stderr).toContain('old.txt');
+  });
+
+  it('does not turn a sparse or unmaterialized caller path into a deletion', () => {
+    const { dir, env, g } = rewriteRepo();
+    g(['update-index', '--skip-worktree', 'conflict.txt']);
+    rmSync(join(dir, 'conflict.txt'));
+    const r = run(
+      ['feat/pr', 'unsafe sparse rewrite', '--pr', '--base', 'main', '--', 'conflict.txt'],
+      dir,
+      { ...env, SHIP_DRY_RUN: '1' },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('absent but not deleted (sparse or unmaterialized)');
+  });
+
+  it('refuses a dangling symlink that reconcile cannot represent', () => {
+    const { dir, env } = rewriteRepo();
+    rmSync(join(dir, 'conflict.txt'));
+    symlinkSync('missing-target', join(dir, 'conflict.txt'));
+    const r = run(
+      ['feat/pr', 'unsafe symlink rewrite', '--pr', '--base', 'main', '--', 'conflict.txt'],
+      dir,
+      { ...env, SHIP_DRY_RUN: '1' },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('dangling symlinks are not representable in reconcile');
+  });
+
+  it('uses an exact expected-OID lease and never overwrites a PR head that advances during gates', () => {
+    const { bare, dir, env, g, oldPrTip, stubBin } = rewriteRepo();
+    const raceCommit = g(['commit-tree', `${oldPrTip}^{tree}`, '-p', oldPrTip], {
+      input: 'concurrent update\n',
+    });
+    g(['push', '-q', 'origin', `${raceCommit}:refs/heads/race`]);
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\ngit --git-dir='${bare}' update-ref refs/heads/feat/pr '${raceCommit}'\nexit 0\n`,
+    );
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    const r = run(
+      ['feat/pr', 'lease race', '--pr', '--base', 'main', '--', 'conflict.txt'],
+      dir,
+      env,
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('expected-OID lease rejected');
+    expect(
+      execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'], {
+        env: { ...process.env, ...GENV },
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe(raceCommit);
+    // The test gh binary remains the only stub involved; push itself was real Git against the bare.
+    expect(readFileSync(join(stubBin, 'gh'), 'utf8')).toContain(oldPrTip);
   });
 });
 
