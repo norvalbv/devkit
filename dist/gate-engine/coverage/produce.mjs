@@ -38,6 +38,8 @@ export const COVERAGE_FILE = `${COVERAGE_DIR}/${REPORT_NAME}`;
 export const RUNS_DIR = `${COVERAGE_DIR}/.runs`;
 /** Long enough it can never catch a live run; short enough that killed runs don't pile up. */
 export const STALE_RUN_MS = 6 * 60 * 60 * 1000;
+/** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
+const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'];
 /**
  * This run's reports directory, absolute. pid alone is not enough — pids are recycled and two runs
  * can start in the same millisecond — hence the random suffix.
@@ -339,16 +341,25 @@ export async function produceCoverage(cwd = process.cwd(), argv = []) {
     // ship entirely from devkit, with no config edit in the consuming repo.
     const child = spawn(vitest, ['run', '--coverage', `--coverage.reportsDirectory=${runDir}`, ...injected, ...argv], { cwd, stdio: 'inherit' });
     // A Ctrl-C'd run must not leave a run directory behind, nor a stale report the gate would trust.
-    for (const signal of ['SIGINT', 'SIGTERM']) {
-        process.on(signal, () => child.kill(signal));
-    }
-    const code = await new Promise((done) => {
-        child.on('error', (err) => {
-            console.error(`🚫 could not start vitest: ${err.message}`);
-            done(1);
+    // Removed in `finally` because a caller can outlive the run (sc-2228): Node suppresses default
+    // terminate-on-signal while a listener exists, so a leaked one stops the HOST answering SIGTERM.
+    const forwarders = INTERRUPT_SIGNALS.map((signal) => [signal, () => void child.kill(signal)]);
+    for (const [signal, forward] of forwarders)
+        process.on(signal, forward);
+    let code;
+    try {
+        code = await new Promise((done) => {
+            child.on('error', (err) => {
+                console.error(`🚫 could not start vitest: ${err.message}`);
+                done(1);
+            });
+            child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
         });
-        child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
-    });
+    }
+    finally {
+        for (const [signal, forward] of forwarders)
+            process.off(signal, forward);
+    }
     const { outcome, diagnosis } = settle();
     reportDiagnosis(diagnosis, cwd, retrying);
     // Green tests but no report means the suite never emitted one — most often because `json` is

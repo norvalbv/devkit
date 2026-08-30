@@ -6,6 +6,7 @@
  */
 import { spawn } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -20,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CLI, testSpawnSync, waitForPath } from '../../../cli/__tests__/_helpers.mts';
 import { CLEAR_MARKER_NAME, readClearMarker } from '../failures.mts';
 import {
   buildInjectedArgs,
@@ -54,6 +56,38 @@ afterEach(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots = [];
 });
+
+const silentStubVitest = (root: string, silentBody: string) => {
+  const bin = join(root, 'node_modules', '.bin');
+  mkdirSync(bin, { recursive: true });
+  const path = join(bin, 'vitest');
+  // Extensionless + shebang ⇒ Node treats it as CommonJS, hence `require` rather than `import`.
+  // The version probe runs BEFORE the real invocation (vitestMajorMinor), and its stdio is piped, so
+  // answering it here neither breaks the silence contract nor lets a fixture mistake the probe for
+  // the run it is waiting on.
+  writeFileSync(
+    path,
+    `#!/usr/bin/env node
+if (process.argv.includes('--version')) {
+  process.stdout.write('vitest/4.1.10 darwin-arm64 node-v22.20.0\\n');
+  process.exit(0);
+}
+${silentBody}
+`,
+  );
+  chmodSync(path, 0o755);
+  return path;
+};
+
+const HONOURS_REPORTS_DIR_FLAG_SILENTLY = `const fs = require('node:fs');
+const flag = process.argv.find((a) => a.startsWith('--coverage.reportsDirectory='));
+const dir = flag.slice('--coverage.reportsDirectory='.length);
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(dir + '/coverage-final.json', JSON.stringify({ 'lib.mjs': { fresh: true } }));`;
+
+/** Blocks the stub for `ms` without spawning a grandchild that could outlive it. */
+const blockFor = (ms: number) =>
+  `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms});`;
 
 const runDirWith = (root: string, name: string, ...files: string[]) => {
   const dir = join(root, RUNS_DIR, name);
@@ -245,11 +279,22 @@ describe('resolveVitest', () => {
   });
 });
 
+/**
+ * NOT `await produceCoverage(root)` (sc-2228). tinypool forks workers with stdio:'pipe' and pipes
+ * them into the parent's stdout, so a grandchild inheriting that fd replays its whole reporter
+ * stream — FAIL blocks, ANSI cursor control — through the run reporting on itself.
+ *
+ * testSpawnSync over a bare spawn for the kill path: 90s, then SIGTERM to the process group, then
+ * SIGKILL, reported as 124.
+ */
+const coverageRun = (root: string) =>
+  testSpawnSync(process.execPath, [CLI, 'coverage-run'], { cwd: root, encoding: 'utf8' });
+
 describe('a run that verified nothing', () => {
   // The gate already fails CLOSED on an absent artifact, so this is diagnosis rather than a
   // correctness hole: without it, a consumer missing the `json` reporter gets a green
   // test:run:coverage and then a commit-time block whose cause is three steps upstream.
-  it('exits non-zero when vitest passes but emits no report', async () => {
+  it('exits non-zero when vitest passes but emits no report', () => {
     const root = makeRoot();
     symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
     writeFileSync(
@@ -267,13 +312,15 @@ describe('a run that verified nothing', () => {
       it('passes', () => { expect(1).toBe(1); });\n`,
     );
 
-    expect(await produceCoverage(root)).toBe(1);
+    // No per-test timeout: 120_000 was exactly the supervisor's own ceiling (90s + 30s reap), so a
+    // wedge raced the two and surfaced as an opaque worker timeout instead of a clean 124.
+    expect(coverageRun(root).status).toBe(1);
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
-  }, 120_000);
+  });
 
   // The fail-closed guarantee, end to end against real vitest — the arrangement the unit tests could
   // not reproduce, because it depends on vitest deleting its own reports directory.
-  it('clears a previous report when the suite actually fails', async () => {
+  it('clears a previous report when the suite actually fails', () => {
     const root = makeRoot();
     symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
     writeFileSync(
@@ -293,16 +340,31 @@ describe('a run that verified nothing', () => {
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
 
-    expect(await produceCoverage(root)).not.toBe(0);
+    const result = coverageRun(root);
+
+    // 124 is the supervisor's timeout status. Asserting only `not 0` would let a WEDGED nested run
+    // masquerade as "the suite failed", which is the exact claim this test makes.
+    expect(result.status).not.toBe(124);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain('boom.test.mjs');
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
-  }, 120_000);
+  });
 
   it('refuses to forward the reports-directory flag it owns', async () => {
     const root = makeRoot();
     symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    const before = process.listenerCount('SIGTERM');
     expect(await produceCoverage(root, ['--coverage.reportsDirectory=/tmp/elsewhere'])).toBe(1);
     // Rejected before anything ran, so no run directory was ever created.
     expect(existsSync(join(root, RUNS_DIR))).toBe(false);
+    // …and nothing was registered either: the forwarders are downstream of this early return.
+    expect(process.listenerCount('SIGTERM')).toBe(before);
+  });
+
+  it('registers nothing when the consumer has no vitest to run', async () => {
+    const before = process.listenerCount('SIGTERM');
+    expect(await produceCoverage(makeRoot())).toBe(1);
+    expect(process.listenerCount('SIGTERM')).toBe(before);
   });
 });
 
@@ -519,24 +581,21 @@ describe('a suite that flakes under load', () => {
         expect(1).toBe(1);
       });\n`,
     );
-    const errors: string[] = [];
-    const spy = vi
-      .spyOn(console, 'error')
-      .mockImplementation((...a) => void errors.push(a.join(' ')));
+    // Out of process (sc-2228): produceCoverage spawns vitest with stdio:'inherit', so an
+    // in-process call hands the nested run THIS worker's fd 1. The child's stderr carries the same
+    // diagnosis a console spy would have captured, and reading it there tests the real CLI.
+    const result = coverageRun(root);
+    const errors = result.stderr;
 
-    try {
-      expect(await produceCoverage(root)).toBe(0);
-    } finally {
-      spy.mockRestore();
-    }
+    expect(result.status).toBe(0);
     // Coverage survived a run that would previously have deleted it and cost a full recompute.
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
     expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
     // ...and the rescue is REPORTED. A retry that passed in silence would be the fail-open this
     // feature must not become: green is not the same fact as green-on-the-second-try.
-    expect(errors.join('\n')).toMatch(/passed only on retry/);
-    expect(errors.join('\n')).toMatch(/slow under load/);
-  }, 120_000);
+    expect(errors).toMatch(/passed only on retry/);
+    expect(errors).toMatch(/slow under load/);
+  });
 
   it('does not retry a real failure, and records what discarded the artifact', async () => {
     const root = makeRoot();
@@ -548,22 +607,15 @@ describe('a suite that flakes under load', () => {
     );
     mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
     writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
-    const errors: string[] = [];
-    const spy = vi
-      .spyOn(console, 'error')
-      .mockImplementation((...a) => void errors.push(a.join(' ')));
+    const result = coverageRun(root);
 
-    try {
-      expect(await produceCoverage(root)).not.toBe(0);
-    } finally {
-      spy.mockRestore();
-    }
-    expect(errors.join('\n')).not.toMatch(/passed only on retry/);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).not.toMatch(/passed only on retry/);
     // Fail-CLOSED is unchanged — the artifact is gone. What is new is that the gate can now say WHY.
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
     const marker = readClearMarker(join(root, COVERAGE_DIR));
     expect(marker?.failedFiles.some((f) => f.endsWith('bug.test.mjs'))).toBe(true);
-  }, 120_000);
+  });
 });
 
 describe('a retry devkit cannot report on', () => {
@@ -620,5 +672,254 @@ describe('a failing run with nothing of its own to discard', () => {
     expect(publishCoverage(dir, root, null, ['/repo/a.test.ts'])).toBe('kept');
     expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+  });
+});
+
+describe('the interrupt forwarders around the vitest child', () => {
+  // Measured cost of a leaked listener, against tinypool's teardown (plain kill(), SIGKILL 1000ms
+  // later): 305ms via SIGTERM without one, 1307ms via SIGKILL with one.
+  const PROBE = `import { writeFileSync } from 'node:fs';
+import { produceCoverage } from ${JSON.stringify(join(DEVKIT_ROOT, 'gate-engine', 'coverage', 'produce.mts'))};
+const count = () => process.listenerCount('SIGINT') + process.listenerCount('SIGTERM');
+const before = count();
+let peak = before;
+const sampler = setInterval(() => { peak = Math.max(peak, count()); }, 25);
+const code = await produceCoverage(process.argv[2]);
+clearInterval(sampler);
+writeFileSync(process.argv[3], JSON.stringify({ before, peak, after: count(), code }));
+`;
+
+  it('installs them while the child runs and removes every one afterwards', () => {
+    const root = makeRoot();
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    // One trivial test with the `json` reporter: the cheapest arrangement that still REACHES the
+    // spawn, which is where the forwarders are registered.
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          coverage: { provider: 'v8', reporter: ['json'] },
+        },
+      };\n`,
+    );
+    writeFileSync(
+      join(root, 'one.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('passes', () => { expect(1).toBe(1); });\n`,
+    );
+    const probe = join(root, 'probe.mjs');
+    const observed = join(root, 'observed.json');
+    writeFileSync(probe, PROBE);
+
+    const run = testSpawnSync(process.execPath, [probe, root, observed], { encoding: 'utf8' });
+    expect(run.status).toBe(0);
+
+    const { before, peak, after, code } = JSON.parse(readFileSync(observed, 'utf8'));
+    expect(code).toBe(0); // it really reached, and completed, the spawn
+    // Without this the test passes just as well on a version that deleted the Ctrl-C forwarding
+    // outright — a different regression, and one this file is also responsible for not shipping.
+    expect(peak).toBeGreaterThan(before);
+    expect(after).toBe(before);
+  });
+});
+
+describe('a nested coverage run stays inside its own process', () => {
+  // A test cannot read its own worker's fd 1 — Node exposes no dup2, and spying on
+  // process.stdout.write never sees a spawned grandchild — so the observation happens one level up.
+  // Swap the fixture's spawnSync for an in-process produceCoverage and this goes red.
+  const SENTINEL = 'devkit-sc2228-nested-fixture-marker';
+
+  it("never puts a nested run's output on the test runner's stdout", () => {
+    const root = makeRoot();
+    const target = join(root, 'target');
+    mkdirSync(target, { recursive: true });
+    for (const dir of [root, target]) {
+      symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(dir, 'node_modules'));
+    }
+
+    // The sentinel is a FAILING test's name because a reporter always prints that, whereas a
+    // passing test's console.log is swallowed by vitest's console interception.
+    writeFileSync(
+      join(target, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          coverage: { provider: 'v8', reporter: ['json'] },
+        },
+      };\n`,
+    );
+    writeFileSync(
+      join(target, 'loud.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it(${JSON.stringify(SENTINEL)}, () => { expect(1).toBe(2); });\n`,
+    );
+
+    // `include: ['*.test.mjs']` is root-level only, so target/ is not collected.
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default { test: { include: ['*.test.mjs'] } };\n`,
+    );
+    writeFileSync(
+      join(root, 'observed.test.mjs'),
+      `import { spawnSync } from 'node:child_process';
+      import { expect, it } from 'vitest';
+      it('runs the producer out of process', () => {
+        const r = spawnSync(process.execPath, [${JSON.stringify(CLI)}, 'coverage-run'], {
+          cwd: ${JSON.stringify(target)}, encoding: 'utf8',
+        });
+        // Non-zero: the nested suite fails on purpose. What matters is WHERE its output landed.
+        expect(r.status).not.toBe(0);
+        expect(r.stdout + r.stderr).toContain(${JSON.stringify(SENTINEL)});
+      });\n`,
+    );
+
+    const observer = testSpawnSync(
+      join(DEVKIT_ROOT, 'node_modules', '.bin', 'vitest'),
+      ['run', '--root', root],
+      { cwd: root, encoding: 'utf8' },
+    );
+
+    // Green proves the nested producer really ran and really printed the sentinel INSIDE the child.
+    expect(observer.status).toBe(0);
+    // …and it never surfaced on the runner's own streams. This is the assertion no exit code of a
+    // coverage-run can make.
+    expect(`${observer.stdout}${observer.stderr}`).not.toContain(SENTINEL);
+  });
+});
+
+describe('what the forwarders leave behind on each way out', () => {
+  // A throw out of settle() and a child that never started are the two exits a `process.off` placed
+  // after the await would silently miss.
+  const forwarderCount = () => process.listenerCount('SIGINT') + process.listenerCount('SIGTERM');
+
+  it('publishes the report, drops the run directory, and restores the listener count', async () => {
+    const root = makeRoot();
+    silentStubVitest(root, HONOURS_REPORTS_DIR_FLAG_SILENTLY);
+
+    const before = forwarderCount();
+    expect(await produceCoverage(root)).toBe(0);
+
+    expect(forwarderCount()).toBe(before);
+    expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({
+      'lib.mjs': { fresh: true },
+    });
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+  });
+
+  it('restores the listener count even when publishing throws', async () => {
+    const root = makeRoot();
+    silentStubVitest(root, HONOURS_REPORTS_DIR_FLAG_SILENTLY);
+    // A non-empty directory at the artifact path makes publishCoverage's rename fail at the OS —
+    // the only way to reach settle() throwing after the forwarders are registered.
+    mkdirSync(join(root, COVERAGE_FILE), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE, 'occupant'), 'x');
+
+    const before = forwarderCount();
+    await expect(produceCoverage(root)).rejects.toThrow();
+
+    // The throw escapes — callers must still see it — but it does not take the listeners with it.
+    expect(forwarderCount()).toBe(before);
+  });
+
+  it('restores the listener count when the vitest binary cannot be executed', async () => {
+    const root = makeRoot();
+    // resolveVitest only tests for EXISTENCE, so a directory at that path gets past it and fails at
+    // spawn instead — the `child.on('error')` branch, which resolves without a 'close' event.
+    mkdirSync(join(root, 'node_modules', '.bin', 'vitest'), { recursive: true });
+
+    const before = forwarderCount();
+    expect(await produceCoverage(root)).toBe(1);
+
+    expect(forwarderCount()).toBe(before);
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
+  });
+
+  it('exits non-zero and clears the artifact when the suite fails', async () => {
+    const root = makeRoot();
+    silentStubVitest(root, 'process.exit(1);');
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+
+    const before = forwarderCount();
+    expect(await produceCoverage(root)).toBe(1);
+
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(forwarderCount()).toBe(before);
+  });
+
+  // The child said 0, so a runner that only forwarded exit codes would call this a pass.
+  it('refuses to call a run that emitted no report a success', async () => {
+    const root = makeRoot();
+    silentStubVitest(root, 'process.exit(0);');
+
+    const before = forwarderCount();
+    expect(await produceCoverage(root)).toBe(1);
+
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(forwarderCount()).toBe(before);
+  });
+
+  // The forwarders are per-call closures, so the first run to settle must remove only its own pair.
+  // Over-eager removal disarms every run still in flight, with no symptom until someone interrupts.
+  it("keeps a live run's forwarders when a sibling run settles first", async () => {
+    const slowRoot = makeRoot();
+    const fastRoot = makeRoot();
+    silentStubVitest(slowRoot, `${HONOURS_REPORTS_DIR_FLAG_SILENTLY}\n${blockFor(4000)}`);
+    silentStubVitest(fastRoot, HONOURS_REPORTS_DIR_FLAG_SILENTLY);
+
+    const before = forwarderCount();
+    const slow = produceCoverage(slowRoot);
+    const fast = produceCoverage(fastRoot);
+
+    expect(await fast).toBe(0);
+    // The slow run is still awaiting its child, so its own pair must have survived its sibling's
+    // settle. `>=` not `===`: this file's other tests may hold none, but never fewer than these two.
+    expect(forwarderCount() - before).toBeGreaterThanOrEqual(2);
+
+    expect(await slow).toBe(0);
+    expect(forwarderCount()).toBe(before);
+  });
+});
+
+describe('a run interrupted mid-flight', () => {
+  // Out of process because the signal must reach the HOST, which in-process is a live vitest worker.
+  const PROBE = `import { writeFileSync } from 'node:fs';
+import { produceCoverage } from ${JSON.stringify(join(DEVKIT_ROOT, 'gate-engine', 'coverage', 'produce.mts'))};
+const code = await produceCoverage(process.argv[3]);
+writeFileSync(process.argv[2], JSON.stringify({ code }));
+`;
+
+  it('kills the child, clears the stale artifact, and leaves no run directory', async () => {
+    const root = makeRoot();
+    const ready = join(root, 'ready.flag');
+    silentStubVitest(
+      root,
+      `require('node:fs').writeFileSync(${JSON.stringify(ready)}, 'x');\n${blockFor(60_000)}`,
+    );
+    // Seeded, untouched by this run, and therefore ours to clear: an interrupted run verified
+    // nothing, so leaving the previous run's report where the gate reads it would be a fail-OPEN.
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+
+    const probe = join(root, 'probe.mjs');
+    const observed = join(root, 'observed.json');
+    writeFileSync(probe, PROBE);
+
+    const child = spawn(process.execPath, [probe, observed, root], { cwd: root, stdio: 'pipe' });
+    const guard = setTimeout(() => child.kill('SIGKILL'), 60_000);
+    try {
+      await waitForPath(ready, 30_000);
+      child.kill('SIGINT');
+      expect(await new Promise((r) => child.on('close', r))).toBe(0);
+    } finally {
+      clearTimeout(guard);
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+
+    // A child that died on a signal reports 1, not the 0 an untouched stub would have exited with.
+    expect(JSON.parse(readFileSync(observed, 'utf8')).code).toBe(1);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
   });
 });
