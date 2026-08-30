@@ -27,9 +27,10 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { coverageBypassed, resolveGuardConfig } from '../config.mjs';
 import { emitGateEvent } from '../judge/gate-events.mjs';
+import { formatClearMarker, readClearMarker } from './failures.mjs';
 // Shared with the PRODUCER (`devkit coverage-run`) so the path this gate reads and the path that
 // runner writes can never drift apart.
-import { COVERAGE_FILE } from './produce.mjs';
+import { COVERAGE_DIR, COVERAGE_FILE } from './produce.mjs';
 // The metrics we can compute from an istanbul/V8 coverage-final.json. Only the KEYS a consumer
 // configured are enforced; the rest are computed but ignored.
 const METRICS = ['statements', 'functions', 'branches', 'lines'];
@@ -116,6 +117,10 @@ export function runCoverage(cwd = process.cwd()) {
     const file = resolve(cwd, COVERAGE_FILE);
     if (!existsSync(file)) {
         console.error(`🚫 Coverage gate FAILED — no coverage data (${COVERAGE_FILE} absent).`);
+        const marker = readClearMarker(resolve(cwd, COVERAGE_DIR));
+        if (marker)
+            for (const line of formatClearMarker(marker, cwd))
+                console.error(line);
         console.error('   Coverage was NOT verified for this commit. Generate it with');
         console.error('   `bun run test:run:coverage`, then re-run. Under `devkit ship` the artifact is');
         console.error('   SYMLINKED IN from your checkout — so it must exist THERE; the ephemeral ship');
