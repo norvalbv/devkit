@@ -19,20 +19,27 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CLEAR_MARKER_NAME, readClearMarker } from '../failures.mts';
 import {
+  buildInjectedArgs,
   COVERAGE_DIR,
   COVERAGE_FILE,
+  ownsReporter,
+  ownsRetry,
   produceCoverage,
   pruneStaleRuns,
   publishCoverage,
   REPORT_NAME,
+  reportDiagnosis,
   RUNS_DIR,
   reservesCoverageDir,
   resolveRunDir,
   resolveVitest,
   STALE_RUN_MS,
   snapshotArtifact,
+  supportsRetryCondition,
+  vitestMajorMinor,
 } from '../produce.mts';
 
 const DEVKIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -92,7 +99,7 @@ describe('publishCoverage', () => {
     const dir = runDirWith(root, 'runA');
     writeFileSync(join(dir, REPORT_NAME), '{"a.ts":{}}');
 
-    expect(publishCoverage(dir, root, null)).toBe(true);
+    expect(publishCoverage(dir, root, null)).toBe('published');
     expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({ 'a.ts': {} });
     expect(existsSync(join(dir, REPORT_NAME))).toBe(false);
   });
@@ -108,7 +115,7 @@ describe('publishCoverage', () => {
     // Unchanged since we snapshotted it ⇒ it is the very file this run started with ⇒ stale.
     const before = snapshotArtifact(root);
 
-    expect(publishCoverage(dir, root, before)).toBe(false);
+    expect(publishCoverage(dir, root, before)).toBe('cleared');
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
   });
 
@@ -126,7 +133,7 @@ describe('publishCoverage', () => {
     if (mtimeNow === null) throw new Error('the artifact written above must have an mtime');
     const aDifferentFileThanTheOneThereNow = mtimeNow - 5_000;
 
-    expect(publishCoverage(dir, root, aDifferentFileThanTheOneThereNow)).toBe(false);
+    expect(publishCoverage(dir, root, aDifferentFileThanTheOneThereNow)).toBe('kept');
     expect(JSON.parse(readFileSync(join(root, COVERAGE_FILE), 'utf8'))).toEqual({
       'sibling.ts': {},
     });
@@ -139,7 +146,7 @@ describe('publishCoverage', () => {
     writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
     const dir = runDirWith(root, 'runA');
 
-    expect(publishCoverage(dir, root, null)).toBe(false); // null = nothing there when we started
+    expect(publishCoverage(dir, root, null)).toBe('kept'); // null = nothing there when we started
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
   });
 
@@ -156,7 +163,7 @@ describe('publishCoverage', () => {
     const before = snapshotArtifact(root);
     rmSync(dir, { recursive: true, force: true }); // exactly what cleanAfterRun() does
 
-    expect(publishCoverage(dir, root, before)).toBe(false);
+    expect(publishCoverage(dir, root, before)).toBe('cleared');
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
   });
 
@@ -183,7 +190,7 @@ describe('publishCoverage', () => {
     const root = makeRoot();
     const dir = runDirWith(root, 'runA');
     writeFileSync(join(dir, REPORT_NAME), '{}');
-    expect(publishCoverage(dir, root, null)).toBe(true);
+    expect(publishCoverage(dir, root, null)).toBe('published');
     expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
   });
 });
@@ -375,4 +382,243 @@ describe('two concurrent coverage runs in one working tree', () => {
     expect(Object.keys(report).some((f) => f.endsWith('lib.mjs'))).toBe(true);
     expect(readdirSync(join(root, RUNS_DIR))).toEqual([]);
   }, 120_000);
+});
+
+describe('the flags devkit adds on the consumer behalf', () => {
+  const VITEST = join(DEVKIT_ROOT, 'node_modules', '.bin', 'vitest');
+
+  // ANY spelling of retry means the consumer owns it. This is not politeness: vitest 4.1.10 CRASHES
+  // on `--retry=1` together with `--retry.condition`, so injecting alongside a consumer's own retry
+  // would break the run of whoever had configured retry most deliberately.
+  it.each([['--retry=0'], ['--retry=3'], ['--retry.count=0'], ['--retry.delay=100'], ['--retry']])(
+    'injects no retry when the consumer passed %s',
+    (arg) => {
+      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json');
+      expect(args.some((a) => a.startsWith('--retry'))).toBe(false);
+    },
+  );
+
+  it('injects the timeout-scoped retry when the consumer said nothing', () => {
+    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json');
+    expect(args).toContain('--retry.count=1');
+    expect(args).toContain('--retry.condition=(Test|Hook) timed out');
+  });
+
+  it('leaves the consumer reporters alone when they chose their own', () => {
+    for (const arg of ['--reporter=verbose', '--reporter', '--outputFile.json=x.json']) {
+      const args = buildInjectedArgs(VITEST, [arg], '/tmp/results.json');
+      expect(args.some((a) => a.startsWith('--reporter') || a.startsWith('--outputFile'))).toBe(
+        false,
+      );
+    }
+  });
+
+  it('keeps the default reporter so console output is unchanged', () => {
+    const args = buildInjectedArgs(VITEST, [], '/tmp/results.json');
+    expect(args).toContain('--reporter=default');
+    expect(args).toContain('--reporter=json');
+    expect(args).toContain('--outputFile.json=/tmp/results.json');
+  });
+
+  it('reads the version off the binary it will actually run', () => {
+    expect(vitestMajorMinor(VITEST)).toEqual([4, 1]);
+    expect(vitestMajorMinor(join(DEVKIT_ROOT, 'node_modules', '.bin', 'not-a-binary'))).toBeNull();
+  });
+
+  // FEATURE-DETECT, DO NOT GUESS. vitest silently IGNORES an unknown dotted sub-option, so on an
+  // older vitest `--retry.condition` would evaporate while `--retry.count=1` survived — quietly
+  // turning the narrow timeout retry into the blanket retry it exists to avoid. A version we cannot
+  // read is therefore unsupported, not assumed-good.
+  it('treats an unreadable or too-old vitest as unable to retry safely', () => {
+    expect(supportsRetryCondition(null)).toBe(false);
+    expect(supportsRetryCondition([4, 0])).toBe(false);
+    expect(supportsRetryCondition([3, 9])).toBe(false);
+    expect(supportsRetryCondition([4, 1])).toBe(true);
+    expect(supportsRetryCondition([5, 0])).toBe(true);
+  });
+
+  it('recognises every retry and reporter spelling', () => {
+    expect(ownsRetry(['--retry.condition=x'])).toBe(true);
+    expect(ownsRetry(['--retries=3'])).toBe(false); // not a vitest flag; must not swallow the retry
+    expect(ownsReporter(['--outputFile=x'])).toBe(true);
+    expect(ownsReporter(['--reporters=x'])).toBe(false);
+  });
+});
+
+describe('the marker a cleared artifact leaves behind', () => {
+  it('is not written when a sibling report was preserved', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
+    const dir = runDirWith(root, 'runA');
+    const mtimeNow = snapshotArtifact(root);
+    if (mtimeNow === null) throw new Error('the artifact written above must have an mtime');
+
+    expect(publishCoverage(dir, root, mtimeNow - 5_000, ['a.test.ts'])).toBe('kept');
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+  });
+
+  it('records what failed when the artifact really was discarded', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
+    const dir = runDirWith(root, 'runA');
+    const before = snapshotArtifact(root);
+
+    expect(publishCoverage(dir, root, before, ['/repo/a.test.ts'])).toBe('cleared');
+    const marker = readClearMarker(join(root, COVERAGE_DIR));
+    expect(marker?.failedFiles).toEqual(['/repo/a.test.ts']);
+    expect(marker?.previousMtime).toBe(before);
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+  });
+
+  // A fresh report answers everything the marker existed to answer. Leaving it would let the gate
+  // narrate an old failure over a current pass.
+  it('is cleaned up by the next successful publish', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"stale.ts":{}}');
+    publishCoverage(runDirWith(root, 'runA'), root, snapshotArtifact(root), ['a.test.ts']);
+    expect(readClearMarker(join(root, COVERAGE_DIR))).not.toBeNull();
+
+    const good = runDirWith(root, 'runB');
+    writeFileSync(join(good, REPORT_NAME), '{"a.ts":{}}');
+    expect(publishCoverage(good, root, null)).toBe('published');
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+    expect(existsSync(join(root, COVERAGE_DIR, CLEAR_MARKER_NAME))).toBe(false);
+  });
+});
+
+describe('a suite that flakes under load', () => {
+  const consumerRepo = (root: string, testTimeout: number) => {
+    symlinkSync(join(DEVKIT_ROOT, 'node_modules'), join(root, 'node_modules'));
+    writeFileSync(
+      join(root, 'vitest.config.mjs'),
+      `export default {
+        test: {
+          include: ['*.test.mjs'],
+          testTimeout: ${testTimeout},
+          coverage: { provider: 'v8', reporter: ['json'], reportsDirectory: './coverage' },
+        },
+      };\n`,
+    );
+  };
+
+  it('rescues a timeout flake instead of discarding the run', async () => {
+    const root = makeRoot();
+    consumerRepo(root, 300);
+    // Times out on the first attempt only — the shape the field report describes, where every
+    // failing test passed when re-run alone.
+    writeFileSync(
+      join(root, 'flake.test.mjs'),
+      `import { expect, it } from 'vitest';
+      let attempts = 0;
+      it('slow under load', async () => {
+        attempts++;
+        if (attempts === 1) await new Promise((r) => setTimeout(r, 5000));
+        expect(1).toBe(1);
+      });\n`,
+    );
+    const errors: string[] = [];
+    const spy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...a) => void errors.push(a.join(' ')));
+
+    try {
+      expect(await produceCoverage(root)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    // Coverage survived a run that would previously have deleted it and cost a full recompute.
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+    // ...and the rescue is REPORTED. A retry that passed in silence would be the fail-open this
+    // feature must not become: green is not the same fact as green-on-the-second-try.
+    expect(errors.join('\n')).toMatch(/passed only on retry/);
+    expect(errors.join('\n')).toMatch(/slow under load/);
+  }, 120_000);
+
+  it('does not retry a real failure, and records what discarded the artifact', async () => {
+    const root = makeRoot();
+    consumerRepo(root, 5_000);
+    writeFileSync(
+      join(root, 'bug.test.mjs'),
+      `import { expect, it } from 'vitest';
+      it('real bug', () => { expect(2).toBe(99); });\n`,
+    );
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"from-an-earlier-green-run.ts":{}}');
+    const errors: string[] = [];
+    const spy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...a) => void errors.push(a.join(' ')));
+
+    try {
+      expect(await produceCoverage(root)).not.toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.join('\n')).not.toMatch(/passed only on retry/);
+    // Fail-CLOSED is unchanged — the artifact is gone. What is new is that the gate can now say WHY.
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(false);
+    const marker = readClearMarker(join(root, COVERAGE_DIR));
+    expect(marker?.failedFiles.some((f) => f.endsWith('bug.test.mjs'))).toBe(true);
+  }, 120_000);
+});
+
+describe('a retry devkit cannot report on', () => {
+  const said = (diagnosis: Parameters<typeof reportDiagnosis>[0], retrying: boolean) => {
+    const lines: string[] = [];
+    const spy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...a: unknown[]) => void lines.push(a.join(' ')));
+    try {
+      reportDiagnosis(diagnosis, '/repo', retrying);
+      return lines.join('\n');
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  // Whether the json report ran cannot be predicted from argv: a consumer who sets `reporters` in
+  // vitest.config silently WINS over the CLI flag (verified against vitest 4.1.10), so the report
+  // never appears while the injected retry still fires — a rescue nobody can see. Deciding from the
+  // artifact covers that case, an older vitest, an argv --reporter and the env switch at once.
+  it('discloses a retry whose rescue produced no report', () => {
+    const out = said(null, true);
+    expect(out).toMatch(/cannot be reported/);
+    expect(out).toMatch(/--retry=0/);
+  });
+
+  it('says nothing when it did not retry', () => {
+    expect(said(null, false)).toBe('');
+  });
+
+  it('says nothing about reportability once a report exists', () => {
+    const out = said({ failedFiles: [], flaky: [] }, true);
+    expect(out).not.toMatch(/cannot be reported/);
+  });
+});
+
+describe('a failing run with nothing of its own to discard', () => {
+  it('writes no marker when there was no artifact to begin with', () => {
+    const root = makeRoot();
+    const dir = runDirWith(root, 'runA');
+
+    expect(publishCoverage(dir, root, null, ['/repo/a.test.ts'])).toBe('kept');
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+  });
+
+  // A sibling created the artifact WHILE we ran (`before` is null but one is there now). It is not
+  // ours to describe, and publishCoverage restores it — so there must be no marker either.
+  it('writes no marker for an artifact that appeared under it', () => {
+    const root = makeRoot();
+    const dir = runDirWith(root, 'runA');
+    mkdirSync(join(root, COVERAGE_DIR), { recursive: true });
+    writeFileSync(join(root, COVERAGE_FILE), '{"sibling.ts":{}}');
+
+    expect(publishCoverage(dir, root, null, ['/repo/a.test.ts'])).toBe('kept');
+    expect(readClearMarker(join(root, COVERAGE_DIR))).toBeNull();
+    expect(existsSync(join(root, COVERAGE_FILE))).toBe(true);
+  });
 });
