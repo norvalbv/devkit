@@ -10,6 +10,13 @@
 # checkout, an orphan from before this shipped, a record a consumer gate deleted -- gets one advisory
 # line and is never touched. That is what makes reclamation safe to do without asking.
 #
+# ITS BOUND (sc-2273): a record authorises removing an ARTIFACT, never the worktree this preflight is
+# EXECUTING IN. git will happily remove the caller's own cwd, taking any staged work with it and
+# wedging every later `git -C "$PWD"`, so that one entry refuses and says where to re-run from. The
+# same tree is reclaimed as normal from any other cwd. The advisory arms carry the weaker form of the
+# same rule: they may still PRINT a removal the operator runs (devkit is not the one running it), but
+# must say it cannot be run from where they are standing.
+#
 # ONE ACKNOWLEDGED EXCEPTION: `git worktree prune` has no per-entry form, so the dir-missing arm
 # deregisters every entry whose directory is currently unreachable, including unattributable ones on
 # an unmounted volume. Accepted because git runs the same prune unconditionally during `gc`, and it
@@ -33,12 +40,21 @@ ship_reclaim_orphan_worktrees() {
   local common record status= refuse=0
   local path= wt_branch= locked= lock_reason= entry_n=0
   local paths=() branches=() locks=() lock_reasons=()
+  local self_admin= self_top=
 
   PREFLIGHT_HINT=
   PREFLIGHT_SELF=
 
   common=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 0
   [ -n "$common" ] || return 0
+
+  # The caller's own identity is loop-INVARIANT, so resolve it once here rather than shelling out per
+  # entry -- and per entry it was resolved twice, since the unattributable arm asks the question in
+  # both of its branches. Both values may legitimately come back empty (a repo layout git cannot
+  # answer for); _ship_orphan_is_self then answers "not self" for every entry, which is the polarity
+  # that leaves ship behaving exactly as it did before any self-check existed.
+  self_admin=$(git -C "$repo" rev-parse --absolute-git-dir 2>/dev/null) || self_admin=
+  self_top=$(git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || self_top=
 
   # Collect first, act second. Acting while the stream is still open would mean acting on a list that
   # may yet turn out to be truncated.
@@ -69,7 +85,8 @@ ship_reclaim_orphan_worktrees() {
   local i=0
   while [ "$i" -lt "$entry_n" ]; do
     _ship_orphan_consider "$repo" "$common" "$br" \
-      "${paths[$i]}" "${branches[$i]}" "${locks[$i]}" "${lock_reasons[$i]}" "$mode" || refuse=1
+      "${paths[$i]}" "${branches[$i]}" "${locks[$i]}" "${lock_reasons[$i]}" "$mode" \
+      "$self_admin" "$self_top" || refuse=1
     i=$((i + 1))
   done
 
@@ -77,16 +94,23 @@ ship_reclaim_orphan_worktrees() {
 }
 
 # _ship_orphan_consider <repo> <common> <branch> <path> <wt-branch> <locked> <lock-reason> [mode]
+#                       [self-admin] [self-top]
 # 0 = this entry does not block, 1 = refuse.
 _ship_orphan_consider() {
   local repo=$1 common=$2 br=$3 path=$4 wt_branch=$5 locked=$6 lock_reason=$7 mode=${8:-ship}
+  local self_admin=${9:-} self_top=${10:-}
   local admin= rec= r_branch= r_pid= r_identity= r_base= r_created= r_keep=
-  local r_gate_pid= r_gate_identity= attached=
+  local r_gate_pid= r_gate_identity= attached= is_self=
 
   [ "$wt_branch" = "refs/heads/$br" ] && attached=1
 
   admin=$(worktree_registry_admin_dir "$common" "$path" 2>/dev/null) || admin=
   [ -n "$admin" ] && rec="$admin/devkit-ship-run"
+
+  # Asked once, consumed by four arms below. Every one of them has a different correct answer for
+  # "the blocker is the tree you are standing in", so this is a fact each arm reads, never a shared
+  # remedy (sc-2273).
+  _ship_orphan_is_self "$admin" "$path" "$common" "$self_admin" "$self_top" && is_self=1
 
   if [ -n "$rec" ] && [ -f "$rec" ]; then
     r_branch=$(ship_run_record_get "$rec" branch)
@@ -114,13 +138,13 @@ _ship_orphan_consider() {
 
   if [ -z "$r_pid" ]; then
     # Rule 10: unattributable. Say what is in the way, then behave exactly as before.
-    if [ "$mode" != ship ] && _ship_orphan_is_self "$repo" "$common" "$admin" "$path"; then
+    if [ "$mode" != ship ] && [ -n "$is_self" ]; then
       # A re-push cuts a DETACHED worktree at origin/<br> and never writes refs/heads/<br>, so this
       # checkout holding the branch obstructs nothing. Saying anything here would be noise at best
       # and, since the only remedy on offer is "delete it", actively wrong.
       return 0
     fi
-    if _ship_orphan_is_self "$repo" "$common" "$admin" "$path"; then
+    if [ -n "$is_self" ]; then
       # sc-2261: the blocker is the CALLER'S OWN worktree -- the state an agent lands in after being
       # told to `git switch -c <branch>` and then to ship that same branch. The generic advice below
       # would tell it to force-remove the worktree it is executing inside, and the main-tree arm's
@@ -153,11 +177,11 @@ _ship_orphan_consider() {
   # that is already gone -- a no-op that then makes the force-remove advice below look like the only
   # way forward, against a worktree live reviewers are still cwd'd into.
   if _ship_orphan_alive "$r_pid" "$r_identity"; then
-    _ship_orphan_report_live "$br" "$path" "$r_pid" "$r_identity" ship
+    _ship_orphan_report_live "$br" "$path" "$r_pid" "$r_identity" ship "$is_self"
     return 1
   fi
   if _ship_orphan_alive "$r_gate_pid" "$r_gate_identity"; then
-    _ship_orphan_report_live "$br" "$path" "$r_gate_pid" "$r_gate_identity" gate
+    _ship_orphan_report_live "$br" "$path" "$r_gate_pid" "$r_gate_identity" gate "$is_self"
     return 1
   fi
 
@@ -167,6 +191,28 @@ _ship_orphan_consider() {
     echo "   Worktree KEPT for diagnosis: $path (branch $br)" >&2
     echo "   Inspect: git --git-dir='$admin' ls-files | head" >&2
     echo "   Then:    git worktree remove --force '$path' && git branch -D '$br'" >&2
+    # sc-2273: the removal line stays even when it names the caller's own tree. It is the ONLY
+    # cleanup a kept worktree ever gets -- withholding it would trade one run's bad advice for a
+    # permanent orphan -- and unlike the reclaim arm devkit is not the one running it. What was
+    # missing is that it cannot be run from where the operator is standing, which is precisely the
+    # place the "Inspect:" line above invites them to.
+    [ -z "$is_self" ] || echo "   (you are standing in it — run that from another checkout, not here)" >&2
+    return 1
+  fi
+
+  if [ -n "$is_self" ]; then
+    # sc-2273: the record proves the owner is gone, so everything below WOULD be authorised -- and
+    # reclamation begins by force-removing $path, which here is the directory this shell is executing
+    # inside. git carries that out (there is no self-guard), so the tree and every staged file in it
+    # are destroyed, and every later `git -C "$PWD"` then fails with "Unable to read current working
+    # directory" -- surfacing downstream as a push refusal blaming ls-remote for a directory devkit
+    # itself deleted. The caller reaches this state by accepting ship's own invitation to go inspect a
+    # worktree it kept, so it is a state ship advertises. Refuse instead: the record's authority
+    # extends to the artifact, never to the tree the preflight is standing in.
+    # No PREFLIGHT_HINT: that channel feeds the resume refusal downstream, which only runs when the
+    # preflight returns 0. Refusing here exits at ship-branch.sh's `|| exit 1`, so a hint set on this
+    # path would never be read -- the same reason the live and keep arms above set none.
+    _ship_orphan_report_reclaim_self "$br" "$path" "$r_pid" "$r_identity" "$common"
     return 1
   fi
 
@@ -174,7 +220,33 @@ _ship_orphan_consider() {
   return 0
 }
 
-# _ship_orphan_is_self <repo> <common> <admin> <path>
+# _ship_orphan_report_reclaim_self <branch> <path> <pid> <identity> <common>
+# "The worktree devkit would reclaim is the one you are standing in."
+#
+# Deliberately NOT _ship_orphan_report_self, and deliberately does not set PREFLIGHT_SELF. That
+# remedy frees a NAME by renaming the branch; the blocker here is a DIRECTORY, and the branch may not
+# even be checked out -- a resume worktree is --detach, so it is matched by its record rather than by
+# attachment, and "this moves this worktree with it" would describe something that is not happening.
+# Setting the self flag would additionally make ship-branch.sh re-print that rename as the LAST line
+# read, sending an agent to re-run from the same doomed directory and land on this identical refusal.
+# The only escape is to leave, so name where to go.
+_ship_orphan_report_reclaim_self() {
+  local br=$1 path=$2 pid=$3 identity=$4 common=$5 main=
+  # <common> is the main worktree's .git directory; its parent is that checkout. A repo whose common
+  # dir does not end in /.git is bare or otherwise unusual, and a guessed path is worse than none --
+  # so only the suffix form yields a suggestion.
+  case "$common" in */.git) main=${common%/.git} ;; esac
+  echo "ship: $br is held by a worktree a killed ship left behind (pid $pid${identity:+, started $identity})," >&2
+  echo "  and that worktree is THIS one ($path) — devkit will not reclaim the tree it is running in." >&2
+  echo "  reclaiming force-removes it, which would discard everything uncommitted here." >&2
+  if [ -n "$main" ]; then
+    echo "  re-run from the main checkout and devkit will clean this up for you: cd $(ship_shell_quote "$main")" >&2
+  else
+    echo "  re-run from any checkout of this repo other than this one, and devkit will clean it up." >&2
+  fi
+}
+
+# _ship_orphan_is_self <admin> <path> <common> <self-admin> <self-top>
 # Is the blocking worktree the one ship was invoked FROM? Compared by git ADMIN DIR:
 # `rev-parse --absolute-git-dir` returns <common>/worktrees/<id> for a linked worktree and <common>
 # for the main one -- exactly what worktree_registry_admin_dir yields, which is empty for the main
@@ -187,16 +259,19 @@ _ship_orphan_consider() {
 # caller sitting in the main tree satisfies self == common and would claim an unresolvable OTHER
 # checkout as its own, then advise renaming that checkout's branch. So identify the main worktree
 # positively instead of inferring it from an absence.
+#
+# Pure comparison: the caller's two values are resolved once per preflight, not once per entry (they
+# cannot change while the loop runs). An empty <self-admin> means git could not answer for the
+# caller, and every entry then reads as NOT self -- the polarity that keeps the pre-self-check
+# behaviour rather than claiming someone else's tree on a failed probe.
 _ship_orphan_is_self() {
-  local repo=$1 common=$2 admin=$3 path=$4 self top
-  self=$(git -C "$repo" rev-parse --absolute-git-dir 2>/dev/null) || return 1
-  [ -n "$self" ] || return 1
+  local admin=$1 path=$2 common=$3 self_admin=$4 self_top=$5
+  [ -n "$self_admin" ] || return 1
   if [ -n "$admin" ]; then
-    [ "$self" = "$admin" ]
+    [ "$self_admin" = "$admin" ]
   else
-    [ "$self" = "$common" ] || return 1
-    top=$(git -C "$repo" rev-parse --path-format=absolute --show-toplevel 2>/dev/null) || return 1
-    [ -n "$top" ] && [ "$top" = "$path" ]
+    [ "$self_admin" = "$common" ] || return 1
+    [ -n "$self_top" ] && [ "$self_top" = "$path" ]
   fi
 }
 
@@ -253,9 +328,9 @@ _ship_orphan_alive() {
   [ "$current" = "$recorded" ]
 }
 
-# _ship_orphan_report_live <branch> <path> <pid> <identity> <ship|gate>
+# _ship_orphan_report_live <branch> <path> <pid> <identity> <ship|gate> [is-self]
 _ship_orphan_report_live() {
-  local br=$1 path=$2 pid=$3 identity=$4 role=$5 state
+  local br=$1 path=$2 pid=$3 identity=$4 role=$5 is_self=${6:-} state
   state=$(ship_run_process_state "$pid")
   echo "ship: another ship for $br is still running — nothing was created." >&2
   if [ "$role" = gate ]; then
@@ -278,6 +353,11 @@ _ship_orphan_report_live() {
   # have as their cwd corrupts the run still using it (sc-1538), so this must never read as the
   # alternative to waiting.
   echo "  only once nothing is running there: git worktree remove --force '$path' && git branch -D '$br'" >&2
+  # sc-2273: ADD to this line, never replace it. The command above is already gated on the process
+  # being gone, which is the hazard that matters here; substituting the rename remedy would tell the
+  # operator to move refs/heads/<br> out from under a ship that still holds it checked out and will
+  # push -u it -- a worse outcome than the one being corrected. The only missing fact is positional.
+  [ -z "$is_self" ] || echo "  you are standing in that worktree — cd out before running it." >&2
 }
 
 # _ship_orphan_reclaim <repo> <branch> <path> <pid> <identity> <recorded-base> <branch-created>
