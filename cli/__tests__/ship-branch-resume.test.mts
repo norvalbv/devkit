@@ -226,7 +226,7 @@ describe('ship-branch.sh — resume when the base moved', () => {
 
   // The other is-ancestor fail-open: BASE == RECOVERY_COMMIT and BASE_REF == BR. Accepting it pushes
   // first and fails at `gh pr create --base <br> --head <br>`, stranding the branch on origin with no PR.
-  it('refuses when the checkout is sitting on the preserved branch (base would equal head)', () => {
+  it('refuses when the checkout is sitting on the preserved branch (it cannot be the PR base)', () => {
     const { dir, env, git, bare } = seedShipRepoLocalRemote();
     const { publishEnv } = publishEnvFor(dir, env);
     preserveWithReceipt(dir, env, git, 'feat/self-base');
@@ -241,7 +241,8 @@ describe('ship-branch.sh — resume when the base moved', () => {
     });
 
     expect(r.status, r.stderr).toBe(1);
-    expect(r.stderr).toContain('cannot safely resume it');
+    expect(r.stderr).toContain("base 'feat/self-base' is not on origin");
+    expect(r.stderr).toContain('is checked out in THIS worktree');
     expect(remoteBranchExists(bare, 'feat/self-base')).toBe(false); // nothing left stranded on origin
   });
 
@@ -255,6 +256,9 @@ describe('ship-branch.sh — resume when the base moved', () => {
     writeFileSync(join(dir, 'root.txt'), 'orphan\n');
     git(['add', 'root.txt'], { stdio: 'ignore' });
     git(['commit', '-q', '--no-verify', '-m', 'unrelated root'], { stdio: 'ignore' });
+    // On origin so the PR-base preflight (sc-2261) passes: this test's subject is the RESUME refusal
+    // on unrelated history, and a base that cannot be one would refuse first, several screens earlier.
+    git(['push', '-q', 'origin', 'detached-root:detached-root'], { stdio: 'ignore' });
 
     const r = spawnSync('/bin/bash', [scriptPath, 'feat/unrelated-base', 'ship it', 'note.txt'], {
       cwd: dir,

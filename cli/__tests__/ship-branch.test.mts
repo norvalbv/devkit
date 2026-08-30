@@ -548,6 +548,10 @@ describe('ship-branch.sh — worktree integration', () => {
     dirs.push(bare);
     execFileSync('git', ['init', '-q', '--bare', bare], { env: { ...process.env, ...GIT_ENV } });
     const { dir, env, git } = seedShipRepo({ hookBody: 'exit 1', origin: bare }); // hook REJECTS the commit
+    // `work` on origin so the PR-base preflight passes and this test still fails for its OWN reason
+    // (the rejected commit). Without it the run refuses before the branch is ever created, and the
+    // "branch is gone" assertion below passes VACUOUSLY.
+    git(['push', '-q', 'origin', 'work:work'], { stdio: 'ignore' });
     writeFileSync(join(dir, 'note.txt'), 'hello\n');
 
     // NON-dry run exercises the real cleanup; the commit is rejected before any push.

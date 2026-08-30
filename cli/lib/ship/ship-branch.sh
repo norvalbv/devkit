@@ -187,10 +187,12 @@ LINK_DIRS=()
 # The placement is load-bearing: LOCAL_BRANCH_EXISTS below (and the nothing-to-commit guard gated on
 # it) must be computed AFTER any branch this preflight deletes, or a successful reclaim still walks
 # into the resume block and dies on a branch that is no longer there.
+. "$SCRIPT_DIR/origin-base.sh"
 . "$SCRIPT_DIR/worktree-registry.sh"
 . "$SCRIPT_DIR/ship-run-record.sh"
 . "$SCRIPT_DIR/reclaim-orphan-worktrees.sh"
 PREFLIGHT_HINT=
+PREFLIGHT_SELF=   # set when the branch's holder is THIS worktree; changes the closing advice below
 # SHIP_RESOLVE_ONLY promises no side effects, so it must not reclaim anything.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] || ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 
@@ -214,7 +216,9 @@ fi
 # no push happens, and it avoids a network round-trip.)
 if [ -z "${SHIP_DRY_RUN:-}" ]; then
   set +e
-  git ls-remote --exit-code --heads origin "$BR" >/dev/null 2>&1
+  # Fully-qualified, NOT a bare `$BR`: a bare pattern tail-matches on path segments, so shipping `x`
+  # would read `refs/heads/feat/x` as "this branch already exists" and refuse a legitimate name.
+  git ls-remote --exit-code --heads origin "refs/heads/$BR" >/dev/null 2>&1
   remote_check=$?
   set -e
   # ls-remote exits 2 for "no matching ref" but ALSO non-zero on auth/network error — only exit 2
@@ -252,6 +256,33 @@ REPO=$(git remote get-url origin | sed -E 's#^.*github\.com[^:/]*[:/]##; s#\.git
 # (no worktree, no stdin read, no push). Lets the regression test that guards the
 # fork-repo-resolution bug run hermetically. Never set in normal use.
 [ -n "${SHIP_RESOLVE_ONLY:-}" ] && { printf 'BASE_REF=%s\nREPO=%s\n' "$BASE_REF" "$REPO"; exit 0; }
+
+# The DEFAULT base gets the same proof --base has always had (below): that it is a BRANCH ON ORIGIN.
+# Without this the only thing that ever checked was `gh pr create` — AFTER the gates, the commit and
+# the push — so shipping from a local-only branch (a provisioned worktree's scratch branch, a branch
+# whose push failed) left a real branch on origin with no PR and printed a recovery command naming
+# the same impossible base (sc-2261). BASE itself stays this checkout's HEAD: only the PR TARGET NAME
+# is being validated, so nothing about the normal path changes.
+#
+# Placement: after the resolve-only seam (which promises no network) and before the worktree, the
+# commit and the push. NOT before every side effect — ship_reclaim_orphan_worktrees above may already
+# have reclaimed an abandoned worktree, and it must stay first for the reason given at its call site.
+# Dry runs skip it: they never push, and the fake/unreachable origin they usually carry makes the
+# probe meaningless — same trade-off as the $BR probe above.
+if [ -z "$BASE_FLAG" ] && [ -z "${SHIP_DRY_RUN:-}" ]; then
+  set +e
+  git ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" >/dev/null 2>&1
+  base_check=$?
+  set -e
+  case "$base_check" in
+    0) ;; # the PR base exists on origin → gh pr create can use it
+    2) echo "base '$BASE_REF' is not on origin; pass --base <branch>" >&2
+       echo "  a PR base must be a branch that exists on the remote, and this checkout is on one that is not." >&2
+       ship_suggest_base "$REPO" >&2
+       exit 1 ;;   # ship_suggest_base quotes its own copyable half — branch names are not safe literals
+    *) echo "could not verify base '$BASE_REF' (ls-remote exit $base_check) — refusing to push" >&2; exit 1 ;;
+  esac
+fi
 
 # The commit the ephemeral worktree is cut from — and therefore what the gates judge and what the PR
 # diffs against. Resolved AFTER the seam above: --base needs the network, and the seam promises no
@@ -625,7 +656,15 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
     if [ "${#RECOVERY_HINTS[@]}" -gt 0 ]; then
       for hint in "${RECOVERY_HINTS[@]}"; do echo "  $hint" >&2; done
     fi
-    echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
+    # This is the LAST line the operator reads, so it must not contradict the preflight. When the
+    # holder is this very worktree the preflight already printed the two commands that free the
+    # branch; repeating the generic advice here would send an agent off to invent a new branch name
+    # instead of running them (sc-2261). Re-print the remedy rather than appending to it.
+    if [ -n "$PREFLIGHT_SELF" ]; then
+      _ship_orphan_report_self "$PWD" "$BR"
+    else
+      echo "  choose a new branch name, or inspect and remove the local branch yourself" >&2
+    fi
     exit 1
   fi
 
@@ -806,7 +845,11 @@ fi
 # commit's parent IS $BASE, and RECOVERY_PARENT is empty. On a resume they diverge: $BASE was re-resolved
 # this invocation and may have advanced, which would record this ship's ADD as a modify (upstream added
 # the path meanwhile) or a stranger's newer blob as a delete's pre-deletion blob — silently, in both
-# cases. --base-ref stays the branch NAME: that is the PR target, not a sha.
+# cases. --base-ref stays the branch NAME: that is the PR target, not a sha. It records the base this
+# ship ATTEMPTED, even when `gh pr create` then rejected it — the manifest is a record of what
+# happened, not of what should have happened, and reconcile resolves merge state via
+# `gh pr view <branch>` rather than from this field. The recovery hint below normally re-prints this
+# same base and diverges only when it has actually left origin, saying so when it does (sc-2261).
 RMW="$SCRIPT_DIR/reconcile-manifest-write.mts"; [ -f "$RMW" ] || RMW="$SCRIPT_DIR/reconcile-manifest-write.mjs"
 node "$RMW" \
   --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" --base-sha "${RECOVERY_PARENT:-$BASE}" --pr "$PR_NUM" -- "${PATHS[@]}" \
@@ -824,7 +867,39 @@ node "$RMW" \
 if [ -n "$PR_CREATE_FAILED" ]; then
   echo "push OK but PR create failed — branch is pushed AND recorded for reconcile." >&2
   echo "Open the PR by hand (reconcile cleans the branch once it merges):" >&2
-  echo "  gh pr create --repo '$REPO' --base '$BASE_REF' --head '$BR'" >&2
+  # sc-2261's original defect was re-printing a base that could never work. The cure is NOT to
+  # substitute one unconditionally: `gh pr create` fails for plenty of reasons that have nothing to do
+  # with the base (an API outage, a permissions problem), and swapping a deliberately chosen
+  # `--base release/1.0` for origin's default would send the operator to open the PR against the wrong
+  # branch — a quieter, worse error than the one being fixed. So ASK which failure this was: the base
+  # was proven to be a branch on origin before the push, so re-print it unless it has vanished since.
+  set +e
+  git ls-remote --exit-code --heads origin "refs/heads/$BASE_REF" >/dev/null 2>&1
+  hint_base_check=$?
+  set -e
+  # Only exit 2 proves the base is ABSENT. ls-remote is also non-zero for auth and network trouble,
+  # and treating those as deletion would announce a branch is gone on the strength of a failed lookup
+  # — then swap a perfectly good base for a different one. Same three-way polarity as the probes above.
+  if [ "$hint_base_check" -ne 2 ]; then
+    # Present, or unverifiable. Either way the base is not shown to be the cause, so hand the command
+    # back verbatim rather than substituting on a guess.
+    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "$BASE_REF") --head $(ship_shell_quote "$BR")" >&2
+    if [ "$hint_base_check" -eq 0 ]; then
+      echo "  ('$BASE_REF' is on origin, so the base is not the cause — see gh's error above.)" >&2
+    else
+      echo "  (could not re-verify '$BASE_REF' on origin (ls-remote exit $hint_base_check); it is the base this ship used.)" >&2
+    fi
+  else
+    # The base is genuinely gone (deleted between the preflight and now). Only here may the hint name
+    # a different one, and only one that is known to exist.
+    PR_HINT_BASE=$(ship_origin_head_branch) || PR_HINT_BASE=
+    echo "  gh pr create --repo $(ship_shell_quote "$REPO") --base $(ship_shell_quote "${PR_HINT_BASE:-<branch-on-origin>}") --head $(ship_shell_quote "$BR")" >&2
+    if [ -n "$PR_HINT_BASE" ]; then
+      echo "  ('$BASE_REF' is no longer on origin; '$PR_HINT_BASE' is origin's default branch.)" >&2
+    else
+      echo "  ('$BASE_REF' is no longer on origin; choose a base that is.)" >&2
+    fi
+  fi
   exit 1
 fi
 
