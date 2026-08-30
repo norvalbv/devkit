@@ -1,11 +1,15 @@
 import {
+  closeSync,
   existsSync,
+  ftruncateSync,
   linkSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -85,9 +89,29 @@ function canCopyAfterLinkFailure(error: NodeJS.ErrnoException): boolean {
 
 type BaselineLink = (existingPath: string, newPath: string) => void;
 type BaselineCreate = (path: string, contents: Buffer) => void;
+type BaselineOpenExisting = (path: string) => number;
 
 function createBaselineExclusively(path: string, contents: Buffer): void {
   writeFileSync(path, contents, { flag: 'wx' });
+}
+
+function openBaselineExisting(path: string): number {
+  return openSync(path, 'r+');
+}
+
+function rewriteOpenBaseline(descriptor: number, contents: string): void {
+  const bytes = Buffer.from(contents);
+  try {
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = writeSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (written === 0) throw new Error('Devkit ratchet baseline write made no progress.');
+      offset += written;
+    }
+    ftruncateSync(descriptor, bytes.length);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export interface RatchetBaselineMigration {
@@ -155,7 +179,11 @@ export function writeRatchetBaseline(
   canonical: string,
   legacy: string,
   contents: string,
-  { stage = false, link = linkSync }: { stage?: boolean; link?: BaselineLink } = {},
+  {
+    stage = false,
+    link = linkSync,
+    openExisting = openBaselineExisting,
+  }: { stage?: boolean; link?: BaselineLink; openExisting?: BaselineOpenExisting } = {},
 ): void {
   const overlay = (() => {
     if (process.env.DEVKIT_OVERLAY === '1') return true;
@@ -184,20 +212,34 @@ export function writeRatchetBaseline(
   const canonicalBytes = readExisting(canonicalFile);
   const legacyBytes = readExisting(legacyFile);
   if (canonicalBytes === null && legacyBytes !== null) {
-    // Update the legacy inode first. A simultaneous migration hard-links this same inode, so both
-    // names are identical for their entire overlap and the newer write cannot be stranded.
-    writeFileSync(legacyFile, contents);
+    let legacyDescriptor: number | null;
     try {
-      link(legacyFile, canonicalFile);
+      // Bind the write to an existing inode so a completed migration cannot be followed by a stale
+      // path-based write recreating the legacy name as a second, divergent file.
+      legacyDescriptor = openExisting(legacyFile);
     } catch (error) {
-      const concurrentCanonical = readExisting(canonicalFile);
-      if (concurrentCanonical === null) {
-        // SAFETY: link() follows Node's filesystem contract and reports failures as ErrnoException.
-        const linkFailure = error as NodeJS.ErrnoException;
-        if (!canCopyAfterLinkFailure(linkFailure)) throw error;
-        // Copying the shared legacy path can capture a peer's bytes. Persist this writer's payload.
-        writeFileSync(canonicalFile, contents);
-      } else writeFileSync(canonicalFile, contents);
+      // SAFETY: openExisting() follows Node's filesystem contract and reports ErrnoException.code.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      legacyDescriptor = null;
+    }
+    if (legacyDescriptor === null) {
+      writeFileSync(canonicalFile, contents);
+    } else {
+      // A simultaneous migration hard-links this open inode, so the canonical name receives the
+      // complete rewrite even if the migrator removes the legacy pathname before this process runs.
+      rewriteOpenBaseline(legacyDescriptor, contents);
+      try {
+        link(legacyFile, canonicalFile);
+      } catch (error) {
+        const concurrentCanonical = readExisting(canonicalFile);
+        if (concurrentCanonical === null) {
+          // SAFETY: link() follows Node's filesystem contract and reports failures as ErrnoException.
+          const linkFailure = error as NodeJS.ErrnoException;
+          if (!canCopyAfterLinkFailure(linkFailure)) throw error;
+          // Copying the shared legacy path can capture a peer's bytes. Persist this writer's payload.
+          writeFileSync(canonicalFile, contents);
+        } else writeFileSync(canonicalFile, contents);
+      }
     }
   } else {
     writeFileSync(canonicalFile, contents);
