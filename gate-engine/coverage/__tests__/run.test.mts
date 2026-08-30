@@ -123,6 +123,33 @@ describe('runCoverage — fail-closed gate', () => {
     expect(text(s.err)).toMatch(/test:run:coverage/);
   });
 
+  it('names what discarded the artifact, and still fails CLOSED', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, 'coverage'), { recursive: true });
+    writeFileSync(
+      join(root, 'coverage', '.last-clear.json'),
+      JSON.stringify({
+        clearedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
+        previousMtime: 1,
+        head: 'da19b37c',
+        failedFiles: [join(root, 'src', 'unrelated.test.ts')],
+      }),
+    );
+    const s = spy();
+
+    expect(runCoverage(root)).toBe(1); // the marker is diagnosis; it can never buy a pass
+    expect(text(s.err)).toMatch(/discarded by a test run that produced no report/);
+    expect(text(s.err)).toMatch(/4m ago \(HEAD da19b37c\)/);
+    expect(text(s.err)).toMatch(/src\/unrelated\.test\.ts/);
+  });
+
+  it('says nothing extra when there is no marker to read', () => {
+    const root = makeRoot();
+    const s = spy();
+    expect(runCoverage(root)).toBe(1);
+    expect(text(s.err)).not.toMatch(/discarded by a test run/);
+  });
+
   it('default {} + artifact present, no thresholds → PASS (presence is enough)', () => {
     const root = makeRoot();
     writeCoverage(root, COV);
