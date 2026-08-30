@@ -26,6 +26,7 @@ import {
 } from '../../lib/install/agent-assets/agent-providers.mts';
 import {
   DECISION_EDIT_HOOK,
+  DECISION_SCOPE_BRIEF_HOOK,
   hookScriptsFor,
 } from '../../lib/install/hook-registration-ledger/selection.mts';
 import { syncHookScripts } from '../../lib/install/install-hooks.mts';
@@ -96,8 +97,13 @@ export default function run(args: string[], cwd: string): number {
     );
     return 1;
   }
-  if (only?.includes(DECISION_EDIT_HOOK) && !decisions) {
-    console.error('sync-hooks: decision-edit-guard.mjs requires the decisions guard');
+  // Both decisions-owned scripts are registered ONLY by the decisions component, so installing one
+  // without that guard leaves a script no registration ever invokes.
+  const decisionsOnly = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK].filter((hook) =>
+    only?.includes(hook),
+  );
+  if (decisionsOnly.length && !decisions) {
+    console.error(`sync-hooks: ${decisionsOnly.join(', ')} requires the decisions guard`);
     return 1;
   }
   const override = args.includes('--force') ? () => true : undefined;

@@ -24,7 +24,9 @@ import {
   syncAntiSlopCapability,
 } from '../install/anti-slop/lifecycle.mts';
 import { checkOxcCapability } from '../install/oxc/lifecycle.mts';
-import { checkAgents, checkSkills } from './asset-checks.mts';
+import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mts';
+import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mts';
+import { checkAgentAssets, checkAgents, checkRegistrations, checkSkills } from './asset-checks.mts';
 import { type CheckResult, check } from './check-result.mts';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mts';
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mts';
@@ -134,6 +136,16 @@ export async function runSelfHostDoctor(
   // (i-have-adhd)" — which reads as bookkeeping drift, while what it actually meant was that a
   // component the config said was ON had no installed skill and a silently self-skipping hook.
   if (sel.adhd) advise(checkAdhdSkill(cwd));
+  // Self-host short-circuits before collectResults, so without these two the agent-hook half is
+  // unverified in exactly the repo that dogfoods devkit — which is how a registration whose script
+  // was never installed sat in devkit's own settings.json while doctor reported OK (sc-2278).
+  const hooks = selectedHookAssets(sel);
+  const hookSurfaces = resolveExistingAgentProviders(gitRoot, sel.agentTargets);
+  if (hooks.scripts.length && hookSurfaces.length)
+    advise(checkAgentAssets(cwd, 'hooks', hookSurfaces, { expected: hooks.scripts }));
+  // Shared scope, not overlay's `.claude/settings.local.json`: self-host writes registrations
+  // exactly where a package-mode consumer does.
+  if (hookSurfaces.length) advise(checkRegistrations(cwd, hooks.components, hookSurfaces));
   // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
   // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
   // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
