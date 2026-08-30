@@ -27,11 +27,13 @@ Usage:
   commit landed, so narrowing <path...> on the retry still refuses. On origin, use --pr to append to
   the existing PR branch instead.
 
-  --base <branch>     Branch off origin/<branch> and target the PR at it, instead of this checkout's
-                      HEAD / current branch. <path...> content is still read from your working tree,
-                      so this ships even when the branch you're on has ALREADY committed those files
-                      (that case otherwise stages nothing). Must be a branch on origin — a PR base
-                      can't be a sha or a tag. "origin/x" and "x" are equivalent.
+  --base <branch>     For a new ship, branch off origin/<branch> and target the PR at it instead of
+                      this checkout's HEAD/current branch. With --pr, explicitly replace the open
+                      PR from a caller-prepared resolution on origin/<branch>: verify the exact PR
+                      head/base, gate one replacement commit, then push under an exact-OID lease.
+                      The caller must first rebase or merge the base; devkit does not resolve it.
+                      Every path changed by the old PR must be briefed. Must name a branch on origin;
+                      a PR base cannot be a sha or tag. "origin/x" and "x" are equivalent.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
                       body from stdin (a pipe or here-doc) or to leave the body empty.
   --body-file <f>     Commit + PR body read from a file — author it ONCE; the recorded invocation
@@ -51,8 +53,10 @@ Usage:
                       Publication needs a qavis exposing \`publish\` (qavis #85). Against an older
                       one the hand-off is inert: ship names the gap once and prints the
                       \`qavis qa --pr … --annotate description\` remedy instead.
-  --pr                Re-push: add the changes to the EXISTING PR on <branch> as a new commit
-                      (fast-forward, never --force) instead of opening a new PR.
+  --pr                Re-push: add changes to the EXISTING PR on <branch> as a new commit
+                      (fast-forward, never --force). Pair with --base only when replacing a PR whose
+                      conflicts you already resolved; that explicit mode rewrites under an exact
+                      expected-OID lease and refuses an incomplete old-PR path brief.
   --                  Force everything after it to be a file path (ships a dash-leading filename).
 
 Env:
