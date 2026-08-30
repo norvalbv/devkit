@@ -185,6 +185,28 @@ describe('doctor decisions hook completeness', () => {
     expect(line).toMatch(/DRIFT/);
     expect(line).toContain('drifted/absent');
   });
+
+  it('names a hook the manifest never recorded as a HOOK SCRIPT, not an agent', () => {
+    const root = tmpRepo();
+    devkit(root, 'init', '--stack', 'generic', '--yes');
+    const manifestPath = join(root, '.devkit/agent-hooks-manifest.json');
+    const manifest: {
+      files: Record<string, string>;
+      providers?: Record<string, { files: Record<string, string> }>;
+    } = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    delete manifest.files['decision-scope-brief.mjs'];
+    for (const projection of Object.values(manifest.providers ?? {}))
+      delete projection.files['decision-scope-brief.mjs'];
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    for (const provider of ['claude', 'cursor', 'codex'])
+      rmSync(join(root, `.${provider}/hooks/decision-scope-brief.mjs`), { force: true });
+
+    const line = hooksLine(root);
+    expect(line).toMatch(/DRIFT/);
+    expect(line).toContain('hook script(s) the manifest lacks');
+    expect(line).toContain('decision-scope-brief.mjs');
+    expect(line).not.toContain('agent(s)');
+  });
 });
 
 describe('doctor provider hook ownership', () => {
