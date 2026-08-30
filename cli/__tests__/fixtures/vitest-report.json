@@ -1,0 +1,96 @@
+{
+  "numFailedTestSuites": 1,
+  "numFailedTests": 1,
+  "numPassedTestSuites": 2,
+  "numPassedTests": 3,
+  "numPendingTestSuites": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "numTotalTestSuites": 3,
+  "numTotalTests": 4,
+  "snapshot": {
+    "added": 0,
+    "didUpdate": false,
+    "failure": false,
+    "total": 0
+  },
+  "startTime": 1756499999000,
+  "success": false,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["g"],
+          "duration": 1,
+          "failureMessages": [],
+          "fullName": "g > a",
+          "meta": {},
+          "status": "passed",
+          "tags": [],
+          "title": "a"
+        },
+        {
+          "ancestorTitles": ["g"],
+          "duration": 1,
+          "failureMessages": [],
+          "fullName": "g > b",
+          "meta": {},
+          "status": "passed",
+          "tags": [],
+          "title": "b"
+        }
+      ],
+      "endTime": 1756500000000,
+      "message": "",
+      "name": "/home/runner/work/devkit/devkit/cli/lib/git-tracked.test.mts",
+      "startTime": 1756499999000,
+      "status": "passed"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["g"],
+          "duration": 1,
+          "failureMessages": ["AssertionError: expected 200 to be 401"],
+          "fullName": "g > c",
+          "meta": {},
+          "status": "failed",
+          "tags": [],
+          "title": "c"
+        }
+      ],
+      "endTime": 1756500000000,
+      "message": "",
+      "name": "/home/runner/work/devkit/devkit/cli/__tests__/review-setup-worktree.test.mts",
+      "startTime": 1756499999000,
+      "status": "failed"
+    },
+    {
+      "assertionResults": [],
+      "endTime": 0,
+      "message": "",
+      "startTime": 0,
+      "status": "failed",
+      "name": "/tmp/coverage-produce-4TDZDO/boom.test.mjs"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["g"],
+          "duration": 1,
+          "failureMessages": [],
+          "fullName": "g > d",
+          "meta": {},
+          "status": "passed",
+          "tags": [],
+          "title": "d"
+        }
+      ],
+      "endTime": 1756500000000,
+      "message": "",
+      "name": "/home/runner/work/devkit/devkit/gate-engine/coverage/__tests__/produce.test.mts",
+      "startTime": 1756499999000,
+      "status": "passed"
+    }
+  ]
+}

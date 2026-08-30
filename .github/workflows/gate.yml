@@ -64,4 +64,31 @@ jobs:
         run: bun run benchmarks:check -- --mode tree --tree HEAD --base "$BENCHMARK_BASE"
 
       - name: Tests
-        run: bun run test:run
+        run: bun run test:run:report
+
+      # Uploaded on RED runs too — a red run is precisely the one `devkit baseline-status` exists to
+      # decompose into per-file facts. Two artifacts, not one: a baseline query fetches only the
+      # small summary, so bundling it with the multi-MB report would make every walk-back expensive.
+      # The producer writes into a per-run directory and never a shared path, so nothing uploaded
+      # here can be an artifact some other run produced.
+      - name: Upload test report summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-summary
+          path: .devkit/test-reports/*/summary.json
+          # `.devkit` is a dot-folder, and upload-artifact excludes "files within folders beginning
+          # with `.`" by default — without this the artifact uploads NOTHING, and
+          # `if-no-files-found: ignore` makes that silent, so every baseline query answers
+          # "no artifact" forever.
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+      - name: Upload full test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: .devkit/test-reports/*/report.json
+          include-hidden-files: true
+          if-no-files-found: ignore

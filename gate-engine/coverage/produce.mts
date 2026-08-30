@@ -201,6 +201,35 @@ export function resolveVitest(cwd: string): string | null {
   return existsSync(bin) ? bin : null;
 }
 
+/**
+ * Run vitest to completion and return the code the caller should exit with.
+ *
+ * Shared with cli/lib/baseline-status/produce.mts, devkit's other vitest runner.
+ */
+export async function runVitest(bin: string, args: string[], cwd: string): Promise<number> {
+  const child = spawn(bin, args, { cwd, stdio: 'inherit' });
+  // A Ctrl-C'd run must not leave a run directory behind, nor a stale report the gate would trust.
+  // Removed in `finally` because a caller can outlive the run (sc-2228): Node suppresses default
+  // terminate-on-signal while a listener exists, so a leaked one stops the HOST answering SIGTERM.
+  const forwarders = INTERRUPT_SIGNALS.map(
+    (signal) => [signal, () => void child.kill(signal)] as const,
+  );
+  for (const [signal, forward] of forwarders) process.on(signal, forward);
+  try {
+    return await new Promise<number>((done) => {
+      child.on('error', (err) => {
+        console.error(`🚫 could not start vitest: ${err.message}`);
+        done(1);
+      });
+      // `signal ? 1` matters: a killed child reports exitCode null, which `?? 1` alone would keep,
+      // but an explicit 0 from a child that was ALSO signalled must not read as success.
+      child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
+    });
+  } finally {
+    for (const [signal, forward] of forwarders) process.off(signal, forward);
+  }
+}
+
 /** The flag this runner owns — passing it too is what isolation MEANS, so it cannot be delegated. */
 export const RESERVED_FLAG = '--coverage.reportsDirectory';
 
@@ -399,34 +428,12 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
     return result;
   };
 
-  // The CLI flag beats the consumer's vitest.config reportsDirectory — that is what lets this fix
-  // ship entirely from devkit, with no config edit in the consuming repo.
-  const child = spawn(
+  // The CLI flag beats the consumer's vitest.config reportsDirectory — no config edit downstream.
+  const code = await runVitest(
     vitest,
     ['run', '--coverage', `--coverage.reportsDirectory=${runDir}`, ...injected, ...argv],
-    { cwd, stdio: 'inherit' },
+    cwd,
   );
-
-  // A Ctrl-C'd run must not leave a run directory behind, nor a stale report the gate would trust.
-  // Removed in `finally` because a caller can outlive the run (sc-2228): Node suppresses default
-  // terminate-on-signal while a listener exists, so a leaked one stops the HOST answering SIGTERM.
-  const forwarders = INTERRUPT_SIGNALS.map(
-    (signal) => [signal, () => void child.kill(signal)] as const,
-  );
-  for (const [signal, forward] of forwarders) process.on(signal, forward);
-
-  let code: number;
-  try {
-    code = await new Promise<number>((done) => {
-      child.on('error', (err) => {
-        console.error(`🚫 could not start vitest: ${err.message}`);
-        done(1);
-      });
-      child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
-    });
-  } finally {
-    for (const [signal, forward] of forwarders) process.off(signal, forward);
-  }
   const { outcome, diagnosis } = settle();
   reportDiagnosis(diagnosis, cwd, retrying);
 
