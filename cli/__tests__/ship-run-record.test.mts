@@ -346,7 +346,7 @@ describe('concurrent agents sharing one checkout', () => {
     expect(r.stderr).toContain('is checked out in THIS worktree');
     expect(r.stderr).toMatch(/git branch -m 'feat\/main-wt' "devkit-freed-[0-9a-f]+-\$\$"/);
     expect(r.stderr).not.toContain('git branch -D'); // a forced delete trusts a stale reachability read
-    expect(r.stderr).not.toMatch(/worktree remove --force '[^']*'\s*&&/);
+    expect(r.stderr).not.toMatch(/git worktree remove --force/); // rejected whatever follows it
   });
 
   it('still points at the OTHER tree when the branch is held somewhere the caller is not', async () => {
@@ -376,6 +376,9 @@ describe('concurrent agents sharing one checkout', () => {
 
     const r = runShip(dir, publishEnvFor(env), 'feat/nl-wt');
 
+    // Anchor on the arm that SHOULD fire first: without it both absence assertions are satisfied by
+    // any earlier refusal, and the test proves nothing about attribution.
+    expect(r.stderr).toContain('is also checked out at');
     expect(r.stderr).not.toContain('is checked out in THIS worktree');
     expect(r.stderr).not.toMatch(/git branch -m 'feat\/nl-wt'/);
   });

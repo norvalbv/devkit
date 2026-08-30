@@ -77,10 +77,12 @@ devkit command.
   removing it corrupts the run. The remove/delete pair it prints applies only once nothing is running
   there.
 - **`no devkit run record there` → that checkout is not ship's to reclaim.** Ship only removes
-  worktrees it can attribute to a killed run of its own. An unattributable one — your own checkout
-  sitting on that branch, or an orphan predating this behaviour — is reported and left alone. If it
-  is the repo's main working tree, switch it off that branch or ship under another name; `git
-  worktree remove` never applies to a main working tree.
+  worktrees it can attribute to a killed run of its own. An unattributable one — an orphan predating
+  this behaviour, or a checkout that is not yours — is reported and left alone; `git worktree remove`
+  never applies to a main working tree anyway. When the holder is **your own** checkout, ship says
+  `is checked out in THIS worktree` and prints a `git branch -m` rename — run that, not a switch:
+  moving HEAD on a shared checkout disturbs every other agent in it, and the rename frees the name
+  without touching a file.
 - **Detached HEAD only matters when `--base` is absent.** With `--base <b>` the PR target comes from
   the flag and HEAD is never consulted — so detaching to "free" something fixes nothing.
 - **Never hand-roll a `git commit` on a protected branch.** If the branch guard is wired, it blocks it

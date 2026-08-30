@@ -493,6 +493,9 @@ describe('ship-branch.sh — edge cases around the self-checkout remedy (sc-2261
       },
     );
 
+    // Anchor the run to the path under test BEFORE asserting absences: three `not.toMatch`es are
+    // satisfied by any earlier refusal, so without this the test would pass while proving nothing.
+    expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).not.toMatch(/ship must create it/);
     expect(r.stderr).not.toMatch(/git branch -m 'pr-open'/);
     expect(r.stderr).not.toMatch(REMOVE_FORCE_RE);

@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "kind": "skills",
   "devkitRef": "v0.58.0",
-  "generatedAt": "2026-08-30T04:11:26.457Z",
+  "generatedAt": "2026-08-30T09:20:52.258Z",
   "files": {
     "_devkit/checklist-store.mjs": "c8a6a01fe75bd570953ccc88e3b99b8ac365bb249c4b1db2ce0c32a589c52193",
     "_devkit/review-roots.d.mts": "384d95945ccf04f994d805e78a5507835321ee5bcbd46acbf216c77385238c9e",
@@ -36,7 +36,7 @@
     "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
     "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
     "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-    "using-devkit/SKILL.md": "443c1f44983690d83bdb1774c36ff8f4cc8f9f1711467259bab5379fc59ed1b4"
+    "using-devkit/SKILL.md": "2dbace9a671abc609c75ebf01aa1e101c28be6aac5968ef0d5e10c529ed3afb5"
   },
   "providers": {
     "claude": {
@@ -73,7 +73,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "443c1f44983690d83bdb1774c36ff8f4cc8f9f1711467259bab5379fc59ed1b4"
+        "using-devkit/SKILL.md": "2dbace9a671abc609c75ebf01aa1e101c28be6aac5968ef0d5e10c529ed3afb5"
       }
     },
     "cursor": {
@@ -110,7 +110,7 @@
         "upstream-sync/SKILL.md": "1007c8377ac15393dcc9db5384d80bd38487c85aa465921ae0b49ba5a91bad70",
         "upstream-sync/scripts/sync.mjs": "218aa7ad7e96f280f281a38f99919f2ce55eace902ed95b1119a0099ddbb3c76",
         "upstream-sync/scripts/verify-merge.mjs": "afb2977ab8b7a96fac2e93e29a68ae432508ba7e63d03c580fcf03229fcd0676",
-        "using-devkit/SKILL.md": "443c1f44983690d83bdb1774c36ff8f4cc8f9f1711467259bab5379fc59ed1b4"
+        "using-devkit/SKILL.md": "2dbace9a671abc609c75ebf01aa1e101c28be6aac5968ef0d5e10c529ed3afb5"
       }
     }
   }
