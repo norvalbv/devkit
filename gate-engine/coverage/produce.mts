@@ -57,6 +57,8 @@ export const COVERAGE_FILE = `${COVERAGE_DIR}/${REPORT_NAME}`;
 export const RUNS_DIR = `${COVERAGE_DIR}/.runs`;
 /** Long enough it can never catch a live run; short enough that killed runs don't pile up. */
 export const STALE_RUN_MS = 6 * 60 * 60 * 1000;
+/** Forwarded to the vitest child so a Ctrl-C'd run leaves no run directory and no stale report. */
+const INTERRUPT_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
 /**
  * What publishCoverage did. `kept` = a sibling's report survived us; `cleared` = ours was removed.
@@ -406,17 +408,25 @@ export async function produceCoverage(cwd = process.cwd(), argv: string[] = []):
   );
 
   // A Ctrl-C'd run must not leave a run directory behind, nor a stale report the gate would trust.
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => child.kill(signal));
-  }
+  // Removed in `finally` because a caller can outlive the run (sc-2228): Node suppresses default
+  // terminate-on-signal while a listener exists, so a leaked one stops the HOST answering SIGTERM.
+  const forwarders = INTERRUPT_SIGNALS.map(
+    (signal) => [signal, () => void child.kill(signal)] as const,
+  );
+  for (const [signal, forward] of forwarders) process.on(signal, forward);
 
-  const code = await new Promise<number>((done) => {
-    child.on('error', (err) => {
-      console.error(`🚫 could not start vitest: ${err.message}`);
-      done(1);
+  let code: number;
+  try {
+    code = await new Promise<number>((done) => {
+      child.on('error', (err) => {
+        console.error(`🚫 could not start vitest: ${err.message}`);
+        done(1);
+      });
+      child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
     });
-    child.on('close', (exitCode, signal) => done(signal ? 1 : (exitCode ?? 1)));
-  });
+  } finally {
+    for (const [signal, forward] of forwarders) process.off(signal, forward);
+  }
   const { outcome, diagnosis } = settle();
   reportDiagnosis(diagnosis, cwd, retrying);
 
