@@ -42,6 +42,23 @@ const OUTCOME_RANK = { skipped: 0, passed: 1, failed: 2 };
 export function escapesRoot(rel) {
     return rel === '' || rel === '..' || rel.startsWith('../') || rel.startsWith(`..${sep}`);
 }
+/**
+ * Admit only a payload that carries vitest's two run-level guarantees.
+ *
+ * A shape check, not decoration: `for...of` over a STRING iterates characters, so a
+ * `testResults: "nope"` would yield an empty file map while a `success: true` carried straight
+ * through — a green published over zero files. And an absent `success` means a truncated or foreign
+ * report, which must not be summarised at all rather than summarised as "nothing failed".
+ */
+export function assertVitestReport(report) {
+    if (report?.success !== true && report?.success !== false) {
+        throw new Error('report has no run-level success flag — not a complete vitest report');
+    }
+    if (!Array.isArray(report.testResults)) {
+        throw new Error('report testResults is not an array — not a vitest report');
+    }
+    return report;
+}
 /** The flags this runner owns — forwarding them too would defeat the point of the command. */
 export const RESERVED_FLAGS = ['--reporter', '--outputFile'];
 /** True when the forwarded args try to set a flag this runner must control. */
@@ -134,9 +151,9 @@ export async function produceTestReport(cwd = process.cwd(), argv = []) {
         return code === 0 ? 1 : code;
     }
     try {
-        // SAFETY: written by vitest's own json reporter into a directory only this run holds, and every
-        // VitestJsonReport field is optional — a disagreeing shape yields an empty summary, never a pass.
-        const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+        // SAFETY: unverified at this point BY DESIGN — assertVitestReport below is what admits it.
+        const parsed = JSON.parse(readFileSync(reportPath, 'utf8'));
+        const report = assertVitestReport(parsed);
         writeFileAtomic(join(runDir, SUMMARY_NAME), `${JSON.stringify(summarise(report, cwd), null, 2)}\n`);
     }
     catch (e) {

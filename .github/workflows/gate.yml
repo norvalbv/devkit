@@ -77,6 +77,11 @@ jobs:
         with:
           name: test-report-summary
           path: .devkit/test-reports/*/summary.json
+          # `.devkit` is a dot-folder, and upload-artifact excludes "files within folders beginning
+          # with `.`" by default — without this the artifact uploads NOTHING, and
+          # `if-no-files-found: ignore` makes that silent, so every baseline query answers
+          # "no artifact" forever.
+          include-hidden-files: true
           if-no-files-found: ignore
 
       - name: Upload full test report
@@ -85,4 +90,5 @@ jobs:
         with:
           name: test-report
           path: .devkit/test-reports/*/report.json
+          include-hidden-files: true
           if-no-files-found: ignore

@@ -19,3 +19,4 @@ created: 2026-08-29
 **Scope:** cli/commands/baseline-status.mts,cli/commands/test-report-run.mts,cli/lib/baseline-status/**,.github/workflows/gate.yml
 **Category:** self-host-release
 **Source:** manual
+- 2026-08-30 — **Scope:** cli/commands/baseline/**,cli/lib/baseline-status/**,.github/workflows/gate.yml — The two commands were moved into cli/commands/baseline/ to satisfy the folder fan-out cap during this change, so the recorded Scope named paths that no longer exist. A stale glob means neither the decision-scope-brief hook nor check-alignment ever matches the files this ruling actually governs — the record silently stops informing the work it was written for.

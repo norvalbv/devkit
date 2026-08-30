@@ -472,6 +472,10 @@ describe('wiring', () => {
     expect(gate).toContain('name: test-report');
     const uploads = gate.slice(gate.indexOf('Upload test report summary'));
     expect(uploads.match(/if: always\(\)/g)).toHaveLength(2);
+    // `.devkit` is a dot-folder and upload-artifact skips "files within folders beginning with `.`"
+    // unless told otherwise, so without this BOTH artifacts upload nothing — silently, because
+    // `if-no-files-found: ignore` treats an empty match as success.
+    expect(uploads.match(/include-hidden-files: true/g)).toHaveLength(2);
   });
 });
 
@@ -1045,5 +1049,38 @@ describe('a report with no run-level verdict', () => {
       {},
     );
     expect(summary.testsPassed).toBe(false);
+  });
+});
+
+describe('a report that is valid JSON but not a vitest report', () => {
+  let dir: string;
+
+  const fakeVitest = (payload: string) => {
+    mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
+    const bin = join(dir, 'node_modules', '.bin', 'vitest');
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nd=$(ls -d .devkit/test-reports/*/ | head -1); printf '%s' '${payload}' > "$d/report.json"; exit 0\n`,
+    );
+    chmodSync(bin, 0o755);
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'produce-foreign-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('refuses a payload whose testResults is not an array', async () => {
+    // `for...of` over a string iterates CHARACTERS, so this yields an empty file map while
+    // `success: true` carries straight through — a green published over zero files.
+    fakeVitest('{"success":true,"testResults":"nope"}');
+    expect(await produceTestReport(dir, [])).toBe(1);
+    expect(existsSync(join(dir, '.devkit/test-reports'))).toBe(true);
+    expect(readdirSync(join(dir, '.devkit/test-reports'))).toHaveLength(0);
+  });
+
+  it('refuses a payload with no run-level success flag', async () => {
+    fakeVitest('{"testResults":[]}');
+    expect(await produceTestReport(dir, [])).toBe(1);
   });
 });
