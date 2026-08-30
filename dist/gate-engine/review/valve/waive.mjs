@@ -19,7 +19,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { emitGateEvent } from '../../judge/gate-events.mjs';
-import { FINGERPRINT_RE, loadOverrides, persist, WAIVER_LENS_EVENT_CAP, WAIVER_RATIONALE_EVENT_CAP, withOverridesLock, } from '../overrides.mjs';
+import { FINGERPRINT_RE, loadOverrides, persist, reviewerSkipRemedy, WAIVER_LENS_EVENT_CAP, WAIVER_RATIONALE_EVENT_CAP, withOverridesLock, } from '../overrides.mjs';
 import { REVIEWERS } from '../reviewers.mjs';
 // REVIEWERS is a frozen literal-typed tuple (each entry's own field set, not a common `Reviewer`
 // shape), so `.find` on it directly can't be read through the shared `model` field below — every
@@ -109,7 +109,7 @@ export function runWaive(rest, cwd = process.cwd(), resolveAuthor = resolveWaive
     if (!known.model) {
         console.error(`guard-review: waive — ${reviewer} is a cascade reviewer whose FAIL is already ` +
             `opus-confirmed; only a model-pinned reviewer (correctness-reviewer, conventions-reviewer) ` +
-            `can be waived today`);
+            `can be waived today. ${reviewerSkipRemedy(reviewer)}`);
         return 2;
     }
     if (!FINGERPRINT_RE.test(itemId)) {

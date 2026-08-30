@@ -24,6 +24,7 @@ import {
   loadOverrides,
   type OverrideEntry,
   persist,
+  reviewerSkipRemedy,
   WAIVER_LENS_EVENT_CAP,
   WAIVER_RATIONALE_EVENT_CAP,
   withOverridesLock,
@@ -135,7 +136,7 @@ export function runWaive(
     console.error(
       `guard-review: waive — ${reviewer} is a cascade reviewer whose FAIL is already ` +
         `opus-confirmed; only a model-pinned reviewer (correctness-reviewer, conventions-reviewer) ` +
-        `can be waived today`,
+        `can be waived today. ${reviewerSkipRemedy(reviewer)}`,
     );
     return 2;
   }

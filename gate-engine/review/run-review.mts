@@ -45,6 +45,7 @@ import { renderFindingsBlockForParts } from './evidence/findings.mts';
 import { emitReviewScope, emitReviewSkipped, reportNonRuns } from './evidence/scope.mts';
 import { gitCached, headHash, stagedFiles, stagedTreeHash } from './evidence/staged-git.mts';
 import { reviewerTargetSalts } from './evidence/targets-block.mts';
+import { reviewerSkipRemedy } from './overrides.mts';
 import {
   emitMergedLensResults,
   mapLimit,
@@ -359,7 +360,8 @@ export async function runReviewGate(
     );
     // A split reviewer fails as several lens-part results under one name: render its block ONCE,
     // merged across the failing parts, so a multi-lens failure never fragments or double-counts.
-    if (!findingsPrinted.has(f.name)) {
+    const firstFindingForReviewer = !findingsPrinted.has(f.name);
+    if (firstFindingForReviewer) {
       findingsPrinted.add(f.name);
       const findings = renderFindingsBlockForParts(
         f.name,
@@ -368,6 +370,8 @@ export async function runReviewGate(
       if (findings) console.error(findings);
     }
     if (f.transcript) console.error(f.transcript.trim());
+    if (firstFindingForReviewer && f.escalated)
+      console.error(`   Remedy: ${reviewerSkipRemedy(f.name)}`);
   }
   const errors = results.filter((r) => r.status === 'error');
   for (const r of errors) {
