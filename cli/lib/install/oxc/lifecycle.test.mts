@@ -1,9 +1,22 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import fs, {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { waitForPath } from '../../../__tests__/_helpers.mts';
 import { checkOxcCapability, removeOxcCapability, syncOxcCapability } from './lifecycle.mts';
+
+// Hang detector for the holder process's boot, NOT a cold-start budget. Matches waitForPath's own
+// default and review-gate-supervisor.test.mts's WAIT_MS; nothing asserts how long the boot takes.
+const LOCK_HOLDER_READY_MS = 30_000;
 
 const roots: string[] = [];
 
@@ -13,38 +26,118 @@ function tempRoot(): string {
   return root;
 }
 
+/**
+ * Owns the Oxc lock until the contender reports contention, then audits what changed while it held
+ * it — exiting 3 if the holder stamp moved, 4 if the managed state did.
+ */
+const LOCK_HOLDER_SCRIPT = [
+  "const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');",
+  "const { join } = require('node:path');",
+  'const [lock, held, release, managed] = process.argv.slice(1);',
+  "const stamp = process.pid + ':oxc-lifecycle-test';",
+  "const snapshot = () => (existsSync(managed) ? readFileSync(managed, 'utf8') : '<absent>');",
+  'const idle = new Int32Array(new SharedArrayBuffer(4));',
+  'mkdirSync(lock);',
+  "writeFileSync(join(lock, 'holder'), stamp);",
+  'const before = snapshot();',
+  "writeFileSync(held, 'held');",
+  // No timer. `release` exists ONLY because withLock took EEXIST on this exact directory, so the
+  // hold lasts exactly as long as the contention does — however long the machine takes to get there.
+  'while (!existsSync(release)) Atomics.wait(idle, 0, 0, 2);',
+  // The contender is provably parked in withLock's retry loop right now. Anything that moved the
+  // holder stamp or the managed bytes got there WITHOUT the lock.
+  "if (readFileSync(join(lock, 'holder'), 'utf8') !== stamp) {",
+  "  console.error('oxc lock holder stamp was replaced while the lock was held');",
+  '  process.exit(3);',
+  '}',
+  'if (snapshot() !== before) {',
+  "  console.error('managed Oxc state was mutated while the lock was held');",
+  '  process.exit(4);',
+  '}',
+  'rmSync(lock, { recursive: true, force: true });',
+].join('\n');
+
+let lockGateSeq = 0;
+
+/**
+ * Run `action` against an Oxc lock a FOREIGN process holds, and prove the lock was honoured.
+ *
+ * `action` is synchronous: withLock parks the calling thread in `Atomics.wait` (atomic-write.mts),
+ * so while it is contended NOTHING on this thread runs — no setTimeout, no microtask, no fake timer.
+ * The release signal therefore cannot come from the test body; it has to come from INSIDE the
+ * blocking call. `mkdirSync` is the syscall withLock uses to attempt acquisition, so a one-shot hook
+ * on the EEXIST it takes against this lock directory is an exact, CAUSAL "the product is now blocked
+ * behind the holder" event — and that is what releases the holder. Same idiom as
+ * gate-engine/critique/__tests__/persistence-lock.test.mts (`signalMainLockAttempt`).
+ *
+ * Nothing here measures elapsed time. The only test-side deadline is waitForPath's hang detector.
+ * The previous shape asserted `Date.now() - started >= 100` after a fixed 300ms hold, which failed
+ * whenever load delayed `action()` past the hold — and was VACUOUS for syncOxcCapability anyway,
+ * whose two probeOxcRuntime spawns inside the critical section already exceed 100ms (sc-2288).
+ */
 async function runWhileOxcLockIsHeld(root: string, action: () => void): Promise<void> {
-  const ready = join(root, '.devkit', 'lock-ready');
   const lock = join(root, '.devkit', 'oxc.lock');
-  const script = `
-    import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-    import { join } from 'node:path';
-    const lock = process.env.DEVKIT_TEST_LOCK;
-    const ready = process.env.DEVKIT_TEST_READY;
-    mkdirSync(lock);
-    writeFileSync(join(lock, 'holder'), String(process.pid) + ':test');
-    writeFileSync(ready, 'ready');
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    rmSync(lock, { recursive: true, force: true });
-  `;
-  const child = spawn(process.execPath, ['--input-type=module', '--eval', script], {
-    env: { ...process.env, DEVKIT_TEST_LOCK: lock, DEVKIT_TEST_READY: ready },
-    stdio: 'inherit',
+  const managed = join(root, '.devkit', 'oxc', 'manifest.json');
+  const gate = join(root, '.devkit', `lock-gate-${(lockGateSeq += 1)}`);
+  mkdirSync(gate, { recursive: true });
+  const held = join(gate, 'held');
+  const release = join(gate, 'release');
+
+  const child = spawn(process.execPath, ['-e', LOCK_HOLDER_SCRIPT, lock, held, release, managed], {
+    stdio: ['ignore', 'ignore', 'inherit'],
   });
-  await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 2_000 });
-  const started = Date.now();
-  action();
-  expect(Date.now() - started).toBeGreaterThanOrEqual(100);
-  if (child.exitCode !== null) {
-    expect(child.exitCode).toBe(0);
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
+  const exited = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject);
-    child.once('exit', (code) =>
-      code === 0 ? resolve() : reject(new Error(`child exited ${code}`)),
-    );
+    child.once('exit', resolve);
   });
+
+  try {
+    await waitForPath(held, LOCK_HOLDER_READY_MS);
+  } catch (cause) {
+    // The holder blocks until `release` exists, so a boot failure here would otherwise leave it
+    // spinning for the rest of the run rather than surfacing what actually went wrong.
+    writeFileSync(release, 'release');
+    child.kill('SIGKILL');
+    throw cause;
+  }
+  expect(existsSync(lock)).toBe(true);
+
+  let contended = false;
+  const realMkdirSync = fs.mkdirSync;
+  // SAFETY: the wrapper forwards every argument to the real mkdirSync and returns its value
+  // unchanged, so it is call-compatible with the overloaded signature; only the throw path is
+  // observed. The narrowing inside is likewise safe: a caught value is only read for `.code`, and
+  // Node's fs errors are ErrnoException — a non-Error cause yields undefined and fails the ===.
+  fs.mkdirSync = ((...args: Parameters<typeof fs.mkdirSync>) => {
+    try {
+      return realMkdirSync(...args);
+    } catch (cause: unknown) {
+      if (String(args[0]) === lock && (cause as NodeJS.ErrnoException).code === 'EEXIST') {
+        contended = true;
+        if (!existsSync(release)) writeFileSync(release, 'release');
+      }
+      throw cause;
+    }
+  }) as typeof fs.mkdirSync;
+  // atomic-write.mts imports mkdirSync as a NAMED ESM binding, so assigning fs.mkdirSync alone is
+  // invisible to withLock without this re-sync — `contended` would silently stay false.
+  syncBuiltinESMExports();
+  try {
+    action();
+  } finally {
+    fs.mkdirSync = realMkdirSync;
+    syncBuiltinESMExports();
+    // In the finally, so a THROW from action() cannot skip it: the holder spins until this file
+    // appears, and leaving it unwritten wedges the worker until vitest's close timeout instead of
+    // surfacing whatever action() actually threw.
+    if (!existsSync(release)) writeFileSync(release, 'release');
+  }
+
+  // Replaces `Date.now() - started >= 100`. The operation did not merely take a while: it
+  // demonstrably found the lock HELD and waited for the holder to release it.
+  expect(contended).toBe(true);
+  expect(existsSync(lock)).toBe(false);
+  expect(await exited).toBe(0);
 }
 
 beforeEach(() => {
@@ -107,9 +200,14 @@ describe('Oxc capability lifecycle', () => {
   it('serializes lifecycle ownership updates with the Oxc manifest lock', async () => {
     const root = tempRoot();
     syncOxcCapability(root);
+    const base = readFileSync(join(root, '.devkit/oxc/oxlint.base.json'), 'utf8');
 
     await runWhileOxcLockIsHeld(root, () => syncOxcCapability(root));
-    rmSync(join(root, '.devkit', 'lock-ready'));
+
+    // A sync that had to WAIT still produced complete, correct state — not a partial write.
+    expect(readFileSync(join(root, '.devkit/oxc/oxlint.base.json'), 'utf8')).toBe(base);
+    expect(checkOxcCapability(root).every((result) => result.status === 'OK')).toBe(true);
+
     await runWhileOxcLockIsHeld(root, () => removeOxcCapability(root));
 
     expect(existsSync(join(root, '.devkit/oxc.lock'))).toBe(false);
