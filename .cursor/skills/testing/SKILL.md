@@ -27,11 +27,18 @@ Docs-, config-, and comment-only changes do not require a test run.
 
 ## Reading a run
 
-A finished run ends with its runner's summary line (labelled examples: vitest `Test Files … Tests …`; pytest `=== N passed in Ns ===`). Judge the run by that line, not by the last thing on screen.
+Read the runner's summary line (labelled examples: vitest `Test Files … Tests …`; pytest `=== N passed in Ns ===`), the command's exit status, and any error printed *instead of* a summary. Not the last thing on screen.
 
-- **No summary line** — the output just stops mid-progress — means **truncated, not failed**. Re-run before reporting a regression: a truncated log names no failing test, so any conclusion drawn from it is invented.
-- A run **terminated by a signal** (exit 130/137/143, `Terminated`, `Killed`) is not red either. It reached no verdict. Re-run it.
-- Only a summary reporting failures, or a named failing test, is a failure.
+**If there is a summary**, it and the exit status decide — a failed attempt the runner retried and passed appears in the log but not in a green summary.
+
+- Summary reports failures → **failed**. Fix the named tests.
+- Summary green, exit status non-zero → **failed**. Something after the runner — a coverage gate, a later step in the same script — failed. Read the tail; do not report green.
+
+**If there is no summary**, the run was cut short. In order:
+
+- A failing test was already named → **failed**. A run killed after reporting a failure still reported it.
+- An error says why the run could not start (missing dependency, bad config, unreadable path) → **failed**. Re-running changes nothing; fix what it names.
+- Neither — output just stops, or the process was killed (`Terminated`, `Killed`, exit 130/137/143) → **inconclusive, not failed**. It reached no verdict and names nothing, so any conclusion drawn from it is invented. Re-run before reporting a regression.
 
 ## Fixing failures — max 2 cycles
 

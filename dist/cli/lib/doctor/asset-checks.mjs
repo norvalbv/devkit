@@ -26,13 +26,6 @@ const AGENT_ASSET_CHECKS = {
     hooks: ['agent-hooks', 'agent-hooks-manifest.json', 'run `devkit init`', 'hook script(s)'],
 };
 const PRE_LEDGER_HOOK_OWNERS = new Set(['searchSteering', 'agentHooks', 'decisions', 'fallow']);
-// What a MISSING unit is called in the drift line. Naming a hook script "agent(s)" sent the reader
-// to agents-manifest.json for a fault that lives in agent-hooks-manifest.json.
-const UNSYNCED_UNIT = {
-    skills: 'skill(s)',
-    agents: 'agent(s)',
-    hooks: 'hook script(s)',
-};
 function assetExistsOnAnyProvider(gitRoot, providers, kind, logicalRel) {
     return providers.some((provider) => existsSync(join(gitRoot, agentAssetDir(provider, kind), projectedAssetRel(provider, kind, logicalRel))));
 }
@@ -114,7 +107,7 @@ export function checkAgentAssets(cwd, kind, providers,
         if (missingProviders.length)
             parts.push(`manifest lacks selected provider(s): ${missingProviders.join(', ')}`);
         if (unsynced.length)
-            parts.push(`bundle has ${unsynced.length} ${UNSYNCED_UNIT[kind]} the manifest lacks (${unsynced.join(', ')})`);
+            parts.push(`bundle has ${unsynced.length} ${kind === 'skills' ? 'skill(s)' : 'agent(s)'} the manifest lacks (${unsynced.join(', ')})`);
         if (unexpected.length)
             parts.push(kind === 'skills'
                 ? `manifest contains disabled skill(s) (${unexpected.join(', ')})`

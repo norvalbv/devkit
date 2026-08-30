@@ -184,10 +184,7 @@ node "$DIST_INTEGRITY" --root "$ROOT" --base "$BASE" -- "${PATHS[@]}"
 # happened to target the same branch. Reclamation here can only ever remove a worktree: every reship
 # record carries branch_created=0, and branch deletion is gated on 1.
 PREFLIGHT_HINT=
-# `reship`: this command re-pushes onto an EXISTING branch from a --detach worktree, so unlike a new
-# ship it never needs refs/heads/$BR free — and being checked out on the branch being re-pushed is
-# the normal way to reach `--pr`, not a problem to report.
-ship_reclaim_orphan_worktrees "$PWD" "$BR" reship || exit 1
+ship_reclaim_orphan_worktrees "$PWD" "$BR" || exit 1
 ship_size_preflight "$ROOT" "$BASE" "${PATHS[@]}"
 
 WT="${TMPDIR:-/tmp}/devkit-reship-${BR//\//-}-$$"

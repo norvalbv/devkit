@@ -19,7 +19,7 @@ import { AGENT_TARGETS } from '../../lib/components.mjs';
 import { detectGitRoot } from '../../lib/detect-git-root.mjs';
 import { readJson } from '../../lib/fs-helpers.mjs';
 import { isAgentProvider, resolveExistingAgentProviders, SUPPORTED_AGENT_PROVIDERS, } from '../../lib/install/agent-assets/agent-providers.mjs';
-import { DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK, hookScriptsFor, } from '../../lib/install/hook-registration-ledger/selection.mjs';
+import { DECISION_EDIT_HOOK, hookScriptsFor, } from '../../lib/install/hook-registration-ledger/selection.mjs';
 import { syncHookScripts } from '../../lib/install/install-hooks.mjs';
 // `--flag a,b` → ['a','b']; undefined when the flag is absent (so a caller-default can apply).
 function listFlag(args, name) {
@@ -71,11 +71,8 @@ export default function run(args, cwd) {
         console.error(`sync-hooks --targets: unknown surface ${bad.join(', ')} (use ${SUPPORTED_AGENT_PROVIDERS.join('|')})`);
         return 1;
     }
-    // Both decisions-owned scripts are registered ONLY by the decisions component, so installing one
-    // without that guard leaves a script no registration ever invokes.
-    const decisionsOnly = [DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK].filter((hook) => only?.includes(hook));
-    if (decisionsOnly.length && !decisions) {
-        console.error(`sync-hooks: ${decisionsOnly.join(', ')} requires the decisions guard`);
+    if (only?.includes(DECISION_EDIT_HOOK) && !decisions) {
+        console.error('sync-hooks: decision-edit-guard.mjs requires the decisions guard');
         return 1;
     }
     const override = args.includes('--force') ? () => true : undefined;

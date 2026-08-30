@@ -40,8 +40,6 @@ devkit command.
 | You need to preview a hot file's real line ceiling before shipping | `guard-size preflight --base origin/<branch> -- <paths>` | It reads `size-lines.json` from the requested base, prints current lines / effective cap / headroom, and names any stale working-tree baseline. `devkit ship` runs the same preflight automatically before creating its gate worktree. |
 | The PR must target a branch **other than the one you're on** — e.g. your work is already committed on a source branch and the base is a different one | `devkit ship <branch> "<title>" --base <base-branch> -- <paths>` (branch + title FIRST — see Rules) | plain `ship` bases on this checkout's HEAD, where those paths are already identical, so it stages nothing and aborts `nothing to commit`; `--base` diffs your **working tree** against `origin/<base-branch>` and targets the PR there — no checkout, no worktree juggling |
 | You're in a **linked worktree, already on a branch**, and need a PR | `devkit ship <new-branch> "<title>" --base <base> -- <paths>` | you don't need — and must not create — another branch: `ship` makes the PR branch itself. An unrelated existing branch is rejected; only the exact local commit with a gate receipt from a prior post-commit failure can resume. |
-| You already ran `git switch -c <branch>` and now want to ship **that same branch** — ship says it *is checked out in THIS worktree* | `git branch -m <branch> <the-name-ship-prints>`, then re-run ship **with `--base <branch-on-origin>`**. Ship prints both commands, filled in — run them verbatim | `ship` CREATES the branch, so it cannot already be checked out here. It tells you to RENAME, never to delete: a rename cannot lose a commit however the refs change under it, and it carries this worktree onto the new name without touching a file (a `git switch` can refuse when your uncommitted work collides with the base). HEAD then sits on a branch origin does not have, which is why the re-run must name `--base`. Never `git worktree remove --force` the tree you are running in. Drop the renamed branch once the PR is open |
-| Ship refuses with **`base '<x>' is not on origin`** | `devkit ship <branch> "<title>" --base <branch-on-origin> -- <paths>` | the PR base defaults to the branch this checkout is on, and a provisioned worktree's scratch branch exists only locally — GitHub cannot open a PR against it. Ship now refuses **before** it pushes, so nothing is left on origin to clean up |
 | Ship reports the branch **already exists on origin** (an open PR uses it) | `devkit ship <branch> "<title>" --pr -- <paths>` | picking a new name orphans the existing PR; `--pr` fast-forwards a new commit onto that branch instead |
 | A ship was **blocked or timed out** and you are about to re-type the command | `devkit ship --resume <branch>` — a fix that ADDS a file: `devkit ship --resume <branch> -- <new-path>` | every attempt records its invocation (title, base, body, links, paths); `--resume` replays it byte-identically, so cached verdicts and a preserved landed commit still converge. Re-typing a multi-KB heredoc across 20–70 attempts is pure token burn, and one typo forfeits the landed-commit resume |
 | The PR body is **long** and the ship may take several attempts | write it to a file once, then `devkit ship <branch> "<title>" --body-file <file> -- <paths>` | a heredoc does not survive a retry through a wrapper (its stdin reads as a silently EMPTY body); the file and the recorded invocation both do |
@@ -77,12 +75,10 @@ devkit command.
   removing it corrupts the run. The remove/delete pair it prints applies only once nothing is running
   there.
 - **`no devkit run record there` → that checkout is not ship's to reclaim.** Ship only removes
-  worktrees it can attribute to a killed run of its own. An unattributable one — an orphan predating
-  this behaviour, or a checkout that is not yours — is reported and left alone; `git worktree remove`
-  never applies to a main working tree anyway. When the holder is **your own** checkout, ship says
-  `is checked out in THIS worktree` and prints a `git branch -m` rename — run that, not a switch:
-  moving HEAD on a shared checkout disturbs every other agent in it, and the rename frees the name
-  without touching a file.
+  worktrees it can attribute to a killed run of its own. An unattributable one — your own checkout
+  sitting on that branch, or an orphan predating this behaviour — is reported and left alone. If it
+  is the repo's main working tree, switch it off that branch or ship under another name; `git
+  worktree remove` never applies to a main working tree.
 - **Detached HEAD only matters when `--base` is absent.** With `--base <b>` the PR target comes from
   the flag and HEAD is never consulted — so detaching to "free" something fixes nothing.
 - **Never hand-roll a `git commit` on a protected branch.** If the branch guard is wired, it blocks it

@@ -13,9 +13,7 @@ import { checkAdhdSkill } from '../install/adhd-skill.mjs';
 import { readBaseline } from '../install/anti-slop/baseline.mjs';
 import { checkAntiSlopCapability, syncAntiSlopCapability, } from '../install/anti-slop/lifecycle.mjs';
 import { checkOxcCapability } from '../install/oxc/lifecycle.mjs';
-import { resolveExistingAgentProviders } from '../install/agent-assets/agent-providers.mjs';
-import { selectedHookAssets } from '../install/hook-registration-ledger/selection.mjs';
-import { checkAgentAssets, checkAgents, checkRegistrations, checkSkills } from './asset-checks.mjs';
+import { checkAgents, checkSkills } from './asset-checks.mjs';
 import { check } from './check-result.mjs';
 import { adviseCodexRuntime, adviseSearchIndex } from './guard-config-checks.mjs';
 import { checkHookRunner, checkHooksPathOwner } from './hook-checks.mjs';
@@ -95,17 +93,6 @@ export async function runSelfHostDoctor(cwd, cfg, fix) {
     // component the config said was ON had no installed skill and a silently self-skipping hook.
     if (sel.adhd)
         advise(checkAdhdSkill(cwd));
-    // Self-host short-circuits before collectResults, so without these two the agent-hook half is
-    // unverified in exactly the repo that dogfoods devkit — which is how a registration whose script
-    // was never installed sat in devkit's own settings.json while doctor reported OK (sc-2278).
-    const hooks = selectedHookAssets(sel);
-    const hookSurfaces = resolveExistingAgentProviders(gitRoot, sel.agentTargets);
-    if (hooks.scripts.length && hookSurfaces.length)
-        advise(checkAgentAssets(cwd, 'hooks', hookSurfaces, { expected: hooks.scripts }));
-    // Shared scope, not overlay's `.claude/settings.local.json`: self-host writes registrations
-    // exactly where a package-mode consumer does.
-    if (hookSurfaces.length)
-        advise(checkRegistrations(cwd, hooks.components, hookSurfaces));
     // Self-host never reaches collectResults, so without this the dup gate's silent opt-out is
     // undetectable in exactly the repo that dogfoods devkit — the one whose own index is most likely
     // to drift out of guard.config.json. Advisory: the exit code stays gated on hook + runner.
