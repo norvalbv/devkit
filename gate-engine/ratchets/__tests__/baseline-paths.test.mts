@@ -1,8 +1,10 @@
 import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -271,6 +273,61 @@ describe('ratchet baseline paths', () => {
       link: replaceLegacyThenDeny('{"files":{"src/legacy.ts":60}}\n'),
     });
     expect(readFileSync(join(root, LINES_BASELINE), 'utf8')).toBe(tightened);
+  });
+
+  it('keeps the write bound to legacy debt when migration removes its pathname', () => {
+    const root = makeRoot();
+    const prior = '{"files":{"src/legacy.ts":8000}}\n';
+    const tightened = '{"files":{"src/legacy.ts":70}}\n';
+    const canonicalFile = join(root, LINES_BASELINE);
+    let migrationRan = false;
+    let observedSplitDebt = false;
+    write(root, LEGACY_LINES_BASELINE, prior);
+
+    writeRatchetBaseline(root, LINES_BASELINE, LEGACY_LINES_BASELINE, tightened, {
+      openExisting: (legacyFile) => {
+        const descriptor = openSync(legacyFile, 'r+');
+        linkSync(legacyFile, canonicalFile);
+        rmSync(legacyFile);
+        migrationRan = true;
+        return descriptor;
+      },
+      link: (legacyFile, destination) => {
+        if (existsSync(legacyFile) && existsSync(destination)) {
+          observedSplitDebt =
+            readFileSync(legacyFile, 'utf8') !== readFileSync(destination, 'utf8');
+        }
+        linkSync(legacyFile, destination);
+      },
+    });
+
+    expect(migrationRan).toBe(true);
+    expect(observedSplitDebt).toBe(false);
+    expect(readFileSync(canonicalFile, 'utf8')).toBe(tightened);
+    expect(existsSync(join(root, LEGACY_LINES_BASELINE))).toBe(false);
+  });
+
+  it('does not hide a non-ENOENT failure opening legacy debt', () => {
+    const root = makeRoot();
+    const prior = '{"files":{"src/legacy.ts":80}}\n';
+    const openError = Object.assign(new Error('legacy baseline is unreadable'), { code: 'EACCES' });
+    write(root, LEGACY_LINES_BASELINE, prior);
+
+    expect(() =>
+      writeRatchetBaseline(
+        root,
+        LINES_BASELINE,
+        LEGACY_LINES_BASELINE,
+        '{"files":{"src/legacy.ts":70}}\n',
+        {
+          openExisting: () => {
+            throw openError;
+          },
+        },
+      ),
+    ).toThrow(openError);
+    expect(readFileSync(join(root, LEGACY_LINES_BASELINE), 'utf8')).toBe(prior);
+    expect(existsSync(join(root, LINES_BASELINE))).toBe(false);
   });
 
   it('copies legacy debt during migration when hard links are not permitted', () => {
