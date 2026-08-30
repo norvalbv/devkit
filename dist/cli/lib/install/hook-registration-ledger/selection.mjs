@@ -2,6 +2,7 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageDir } from '../../fs-helpers.mjs';
 export const DECISION_EDIT_HOOK = 'decision-edit-guard.mjs';
+export const DECISION_SCOPE_BRIEF_HOOK = 'decision-scope-brief.mjs';
 export const ADHD_SESSION_HOOK = 'adhd-session-start.mjs';
 export const ADHD_ANCHOR_HOOK = 'adhd-prompt-anchor.mjs';
 export const FALLOW_STAGED_GATE = 'fallow-staged-gate.sh';
@@ -19,14 +20,19 @@ export function hookScriptsFor({ agentHooks, decisions, fallow, adhd, priorArtGa
     // Scripts owned by a component OTHER than agentHooks — selecting agent hooks must not drag them
     // in, and deselecting agent hooks must not prune them.
     const adhdOwned = new Set([ADHD_SESSION_HOOK, ADHD_ANCHOR_HOOK]);
+    // Both scripts the `decisions` component REGISTERS (hook-registrations decisions:pre-edit and
+    // decisions:scope-brief). A script the registry wires must be installed by the same component that
+    // wires it — leaving the brief to the agentHooks catch-all wrote a registration the default
+    // selection (decisions on, agentHooks off) never installed a file for (sc-2278).
+    const decisionsOwned = new Set([DECISION_EDIT_HOOK, DECISION_SCOPE_BRIEF_HOOK]);
     const independentlyOwned = new Set([
-        DECISION_EDIT_HOOK,
         FALLOW_STAGED_GATE,
         PRIOR_ART_GATE_HOOK,
+        ...decisionsOwned,
         ...adhdOwned,
     ]);
     return all.filter((name) => (agentHooks && !independentlyOwned.has(name)) ||
-        (decisions && name === DECISION_EDIT_HOOK) ||
+        (decisions && decisionsOwned.has(name)) ||
         (fallow && name === FALLOW_STAGED_GATE) ||
         (adhd && adhdOwned.has(name)) ||
         (priorArtGate && name === PRIOR_ART_GATE_HOOK));

@@ -25,6 +25,14 @@ Docs-, config-, and comment-only changes do not require a test run.
 2. **Write the test next to its peers**, following the project's existing test layout and naming. Reuse existing fixtures and helpers before adding new ones.
 3. **Run the full command**, not a single-file subset, before declaring done — a change can break a sibling.
 
+## Reading a run
+
+A finished run ends with its runner's summary line (labelled examples: vitest `Test Files … Tests …`; pytest `=== N passed in Ns ===`). Judge the run by that line, not by the last thing on screen.
+
+- **No summary line** — the output just stops mid-progress — means **truncated, not failed**. Re-run before reporting a regression: a truncated log names no failing test, so any conclusion drawn from it is invented.
+- A run **terminated by a signal** (exit 130/137/143, `Terminated`, `Killed`) is not red either. It reached no verdict. Re-run it.
+- Only a summary reporting failures, or a named failing test, is a failure.
+
 ## Fixing failures — max 2 cycles
 
 When the suite fails:

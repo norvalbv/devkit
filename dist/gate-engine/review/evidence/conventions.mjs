@@ -1,4 +1,4 @@
-import { VERDICT_LINE_RE } from '../contracts/response.mjs';
+import { normalizeLineEndings, VERDICT_LINE_RE } from '../contracts/response.mjs';
 const CONVENTION_VIOLATION_START_RE = /^[\s>*#-]*\**VIOLATION\**\s*:\s*(.*)$/i;
 const CONVENTION_OFFENDING_START_RE = /^[\s>*#-]*\**OFFENDING\**\s*:\s*(.*)$/i;
 const CONVENTION_CLOSER_RE = /^[\s>*#-]*\**(VERDICT|NO_VIOLATIONS)\b/i;
@@ -45,7 +45,7 @@ export function parseConventionEvidencePairs(raw) {
         mode = 'idle';
         buffer = [];
     };
-    const lines = String(raw).split(/\r?\n/);
+    const lines = normalizeLineEndings(raw).split('\n');
     const hasCitationTrailerAhead = (index) => {
         for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
             if (!lines[cursor].trim() || CODE_FENCE_RE.test(lines[cursor]))
@@ -143,7 +143,7 @@ function parseConventionCitation(block, requireLine) {
  * free-text verdict reason a judge may paraphrase between byte-identical runs.
  */
 export function parseConventionFindings(raw) {
-    const transcript = String(raw);
+    const transcript = normalizeLineEndings(raw);
     const verdicts = [...transcript.matchAll(VERDICT_LINE_RE)];
     const terminalVerdict = verdicts.at(-1);
     const evidence = transcript.slice(0, terminalVerdict?.index ?? transcript.length);
