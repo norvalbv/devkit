@@ -61,10 +61,13 @@ const COMMANDS: Record<string, CommandLoader> = {
   review: () => import('./commands/review.mts'),
   'guard-branch': () => import('./commands/guard-branch.mts'),
   'coverage-run': () => import('./commands/coverage/run.mts'),
+  'test-report-run': () => import('./commands/baseline/test-report-run.mts'),
+  'baseline-status': () => import('./commands/baseline/status.mts'),
 };
 
 // The subcommands that shell out to git — they get a friendly missing-git preflight (require-git).
 const GIT_COMMANDS = new Set([
+  'baseline-status',
   'ship',
   'review',
   'move',

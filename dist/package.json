@@ -57,6 +57,7 @@
     "devkit": "node cli/index.mts",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:run:report": "node cli/index.mts test-report-run",
     "test:e2e": "vitest run -c vitest.e2e.config.mjs",
     "playground": "bun scripts/playground.mts",
     "lint": "bun run lint:oxlint",

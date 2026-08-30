@@ -36,7 +36,16 @@
         "sourceExtensions": ["mts"],
         "entryAllowlist": ["index.mts"],
         "libDomains": {
-          "lib": ["doctor", "generate", "guard", "help", "husky", "install", "ship"]
+          "lib": [
+            "baseline-status",
+            "doctor",
+            "generate",
+            "guard",
+            "help",
+            "husky",
+            "install",
+            "ship"
+          ]
         },
         "grammar": {
           "files": ["index.mts"],

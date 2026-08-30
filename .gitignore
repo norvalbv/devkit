@@ -16,6 +16,10 @@ node_modules
 .devkit/last-ship-gates-*.log
 .devkit/reconcile-manifest.json
 .devkit/comment-firewall-receipts.json
+# `devkit test-report-run` output: one directory per run, uploaded as CI artifacts.
+# per-run summaries `devkit baseline-status` caches after fetching them, keyed <runId>-<attempt>
+.devkit/baseline-status/
+.devkit/test-reports/
 # ...and the `.generation` sidecars those caches write. Untracked-but-not-ignored, they were enough
 # to make `devkit release` refuse ("working tree not clean") in the repo that ships devkit itself.
 .devkit/*.generation
