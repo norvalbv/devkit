@@ -44,24 +44,36 @@ function commandCall(
   return { command, args, options, timeoutMs };
 }
 
-function supervisedCommand(
+/** Exported for `test-subprocess.test.mts`: the shell-handling contract below is invisible to a
+ *  behavioural test on any checkout whose path has no spaces, which is every CI runner. */
+export function supervisedCommand(
   command: string,
   argsOrOptions: readonly string[] | Record<string, unknown> | undefined,
   maybeOptions: Record<string, unknown> | undefined,
   groupOnly = false,
 ) {
   const call = commandCall(command, argsOrOptions, maybeOptions);
+  // `shell` describes how the SUPERVISED command should run, never the supervisor invocation.
+  // Forwarding it to the outer call makes Node join that argv into one unquoted shell string, so
+  // TEST_SUBPROCESS's own path splits on the first space in the repo location — a checkout under
+  // `.../Personal and learning/devkit` died with `Cannot find module '/Users/benji/Desktop/Personal'`
+  // while CI, whose paths have no spaces, stayed green. Wrap the inner command instead.
+  // `shell: true` is node's "pick the platform default"; any other truthy value names the shell.
+  const { shell, ...options } = call.options;
+  const shellPath = shell === true ? '/bin/sh' : String(shell);
+  const supervised = shell
+    ? [shellPath, '-c', [call.command, ...call.args].join(' ')]
+    : [call.command, ...call.args];
   return {
     args: [
       TEST_SUBPROCESS,
       ...(groupOnly ? ['--group-only'] : []),
       String(call.timeoutMs),
       '--',
-      call.command,
-      ...call.args,
+      ...supervised,
     ],
     options: {
-      ...call.options,
+      ...options,
       timeout: call.timeoutMs + TEST_SUBPROCESS_CLEANUP_MS,
     },
   };
