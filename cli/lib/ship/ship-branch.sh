@@ -470,12 +470,21 @@ if [ -n "$LOCAL_BRANCH_EXISTS" ]; then
   RECOVERY_LINE=$(git rev-list --parents -n 1 "$RECOVERY_COMMIT" 2>/dev/null || true)
   RECOVERY_PARENTS=()
   read -r -a RECOVERY_PARENTS <<< "$RECOVERY_LINE"
+  # sc-2273: name the simplest shape FIRST. A branch whose tip the base already contains carries
+  # nothing to resume, and both arms below describe that state as a topology puzzle — the parent-count
+  # arm as "its tip is not a single commit" (the root-commit case, which short-circuits before the
+  # merge-base arm is ever reached), the diverges arm as three speculative causes. Neither says the
+  # one fact that decides it. This REFUSES exactly as they did; it is the wording that changes, so the
+  # two shapes ship-branch-resume.test.mts pins as unresumable ($BASE == the tip, and a base that has
+  # already absorbed the commit) are still refused — they are both instances of this very state.
+  if [ -n "$RECOVERY_COMMIT" ] && git merge-base --is-ancestor "$RECOVERY_COMMIT" "$BASE" 2>/dev/null; then
+    RECOVERY_REASON="it carries no commit of its own over $BASE_REF (${BASE:0:7}) — ${RECOVERY_COMMIT:0:7} is already contained in that base"
   # $BASE is re-resolved every invocation, so on a retry it has usually MOVED. Demand the PR's merge-base
   # instead of equality: GitHub renders a PR as merge-base(base, head) -> head, so this asserts directly
   # that the PR shows exactly this one commit. Unreachable histories yield an empty fork point, which
   # compares unequal and refuses. Do NOT weaken to `--is-ancestor` — ship-branch-resume.test.mts pins the
   # two cases that would then be accepted (a base that already absorbed the commit, and $BASE == the tip).
-  if [ "${#RECOVERY_PARENTS[@]}" -ne 2 ]; then
+  elif [ "${#RECOVERY_PARENTS[@]}" -ne 2 ]; then
     RECOVERY_REASON="its tip is not a single commit (a ship commit has exactly one parent)"
   else
     RECOVERY_PARENT=${RECOVERY_PARENTS[1]}
