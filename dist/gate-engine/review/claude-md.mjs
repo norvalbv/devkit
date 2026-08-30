@@ -14,6 +14,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { renderCappedSegments } from './diff-evidence.mjs';
+import { indexFile, indexPathsNamed } from './evidence/staged-git.mjs';
 // A CLAUDE.md's own size rarely needs deep truncation, but one huge file must not crowd out every
 // other governing file's rules from the budget.
 const CLAUDE_MD_TOTAL_CAP = 60000;
@@ -49,26 +50,42 @@ function hasExactCase(dirAbs, filename) {
         return false; // directory unreadable/absent — never block on a dir we can't even list
     }
 }
+export const newGoverningLookup = (cwd) => ({
+    staged: indexPathsNamed(cwd, 'CLAUDE.md'),
+    contents: new Map(),
+});
+/** Both DISCOVERY and CONTENT come from git's index, so neither an unstaged deletion nor an
+ * unstaged edit can add, remove or alter a rule the commit will actually carry. */
+function governingContent(cwd, relPath, staged) {
+    if (staged !== null)
+        return staged.has(relPath) ? indexFile(cwd, relPath) : null;
+    const dirAbs = path.join(cwd, path.posix.dirname(relPath));
+    if (!hasExactCase(dirAbs, path.posix.basename(relPath)))
+        return null;
+    try {
+        return readFileSync(path.join(cwd, relPath), 'utf8');
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Every governing CLAUDE.md for ONE file, repo-tracked only (see module note — no $HOME). A
  * CLAUDE.md at `packages/foo/` is included only when `fileRelPath` is under `packages/foo/` —
  * walking PER FILE (not a repo-wide glob) is what makes a sibling `packages/bar/` file never see
  * it, which is the scoping the AC requires.
  */
-export function collectGoverningClaudeMd(cwd, fileRelPath) {
+export function collectGoverningClaudeMd(cwd, fileRelPath, lookup) {
     const out = [];
+    const { staged, contents } = lookup ?? newGoverningLookup(cwd);
     for (const dir of ancestorDirs(fileRelPath)) {
-        const dirAbs = dir ? path.join(cwd, dir) : cwd;
-        if (!hasExactCase(dirAbs, 'CLAUDE.md'))
-            continue;
-        let content;
-        try {
-            content = readFileSync(path.join(dirAbs, 'CLAUDE.md'), 'utf8');
-        }
-        catch {
-            continue; // unreadable (permissions, race, or a directory literally named CLAUDE.md) — skip
-        }
-        out.push({ path: dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md', scope: dir, content });
+        const rel = dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md';
+        const cached = contents.get(rel);
+        const content = cached === undefined ? governingContent(cwd, rel, staged) : cached;
+        contents.set(rel, content);
+        if (content === null)
+            continue; // not in the commit, or unreadable on disk outside a repo
+        out.push({ path: rel, scope: dir, content });
     }
     return out;
 }
@@ -79,8 +96,9 @@ export function collectGoverningClaudeMd(cwd, fileRelPath) {
  */
 export function renderGoverningClaudeMd(cwd, files) {
     const byPath = new Map();
+    const lookup = newGoverningLookup(cwd);
     for (const f of files)
-        for (const gov of collectGoverningClaudeMd(cwd, f))
+        for (const gov of collectGoverningClaudeMd(cwd, f, lookup))
             if (!byPath.has(gov.path))
                 byPath.set(gov.path, gov);
     const governing = [...byPath.values()];

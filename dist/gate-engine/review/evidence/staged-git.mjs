@@ -24,9 +24,11 @@ function snapshotFile(cwd, spec) {
 }
 const literalPathspec = (file) => `:(top,literal)${file}`;
 function indexHasStageZero(cwd, file) {
+    // stderr ignored, as in snapshotFile: callers probe paths that may not be in a repo at all.
     const entries = execFileSync('git', ['ls-files', '--stage', '-z', '--', literalPathspec(file)], {
         cwd,
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
     }).split('\0');
     return entries.some((entry) => /^\d+ [0-9a-f]+ 0\t/.test(entry));
 }
@@ -42,6 +44,27 @@ export function headFile(cwd, file) {
     if (entry === '')
         return null;
     return snapshotFile(cwd, `HEAD:${normalized}`);
+}
+/** Stage-0 paths whose basename matches, or null when git cannot answer (no repo, no git).
+ * Index names are exact, so this is case-sensitive on every filesystem. */
+export function indexPathsNamed(cwd, basename) {
+    let out;
+    try {
+        out = execFileSync('git', ['ls-files', '--stage', '-z', '--', `:(top,glob)**/${basename}`, literalPathspec(basename)], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    }
+    catch {
+        return null;
+    }
+    const paths = new Set();
+    for (const entry of out.split('\0')) {
+        // Split on the tab rather than matching the path: git paths may contain newlines, which `-z`
+        // preserves intact but a regex `.` would refuse.
+        const tab = entry.indexOf('\t');
+        if (tab < 0 || !/^\d+ [0-9a-f]+ 0$/.test(entry.slice(0, tab)))
+            continue;
+        paths.add(entry.slice(tab + 1));
+    }
+    return paths;
 }
 /** Read one stage-0 file from Git's index. Missing/deleted/unmerged → null. */
 export function indexFile(cwd, file) {
