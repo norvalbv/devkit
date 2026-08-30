@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { resolveGuardConfig } from '../../config.mts';
-import { gitCached, headFile, indexFile, stagedFiles } from '../evidence/staged-git.mts';
+import {
+  gitCached,
+  headFile,
+  indexFile,
+  indexPathsNamed,
+  stagedFiles,
+} from '../evidence/staged-git.mts';
 import { selectRepositoryReviewers } from '../scope/repository.mts';
 
 const roots: string[] = [];
@@ -24,6 +30,36 @@ function repo(): string {
   git(['commit', '-qm', 'baseline']);
   return root;
 }
+
+describe('indexPathsNamed', () => {
+  it('finds every staged file of that basename, at the root and nested', () => {
+    const root = repo();
+    mkdirSync(join(root, 'pkg'), { recursive: true });
+    writeFileSync(join(root, 'CLAUDE.md'), '# root\n');
+    writeFileSync(join(root, 'pkg', 'CLAUDE.md'), '# nested\n');
+    writeFileSync(join(root, 'pkg', 'other.md'), '# not a match\n');
+    execFileSync('git', ['add', '-A'], { cwd: root });
+
+    expect(indexPathsNamed(root, 'CLAUDE.md')).toEqual(new Set(['CLAUDE.md', 'pkg/CLAUDE.md']));
+  });
+
+  it('keeps a staged path containing a NEWLINE — `-z` preserves it and a regex `.` would not', () => {
+    const root = repo();
+    mkdirSync(join(root, 'odd\nname'), { recursive: true });
+    writeFileSync(join(root, 'odd\nname', 'CLAUDE.md'), '# nested\n');
+    execFileSync('git', ['add', '-A'], { cwd: root });
+
+    expect(indexPathsNamed(root, 'CLAUDE.md')).toEqual(new Set(['odd\nname/CLAUDE.md']));
+  });
+
+  it('outside a git repository it reports null rather than an empty set', () => {
+    // null means "cannot answer" and drives the worktree fallback; an empty set would read as
+    // "nothing is staged" and silently drop every governing file.
+    const plain = mkdtempSync(join(tmpdir(), 'review-no-git-'));
+    roots.push(plain);
+    expect(indexPathsNamed(plain, 'CLAUDE.md')).toBeNull();
+  });
+});
 
 describe('review staged Git evidence', () => {
   it('literalizes pathspec-shaped and glob-shaped staged filenames', () => {

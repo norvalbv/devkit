@@ -15,6 +15,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { type NamedSegment, renderCappedSegments } from './diff-evidence.mts';
+import { indexFile, indexPathsNamed } from './evidence/staged-git.mts';
 
 export interface ClaudeMdFile {
   /** POSIX-relative path from the repo root, e.g. `packages/foo/CLAUDE.md`. */
@@ -60,24 +61,51 @@ function hasExactCase(dirAbs: string, filename: string): boolean {
   }
 }
 
+/** One index listing plus one content read per governing file, shared across every staged file in
+ * a review — both lookups shell out to git. `staged` is null only when there is no git at all. */
+export interface GoverningLookup {
+  staged: Set<string> | null;
+  contents: Map<string, string | null>;
+}
+
+export const newGoverningLookup = (cwd: string): GoverningLookup => ({
+  staged: indexPathsNamed(cwd, 'CLAUDE.md'),
+  contents: new Map(),
+});
+
+/** Both DISCOVERY and CONTENT come from git's index, so neither an unstaged deletion nor an
+ * unstaged edit can add, remove or alter a rule the commit will actually carry. */
+function governingContent(cwd: string, relPath: string, staged: Set<string> | null): string | null {
+  if (staged !== null) return staged.has(relPath) ? indexFile(cwd, relPath) : null;
+  const dirAbs = path.join(cwd, path.posix.dirname(relPath));
+  if (!hasExactCase(dirAbs, path.posix.basename(relPath))) return null;
+  try {
+    return readFileSync(path.join(cwd, relPath), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Every governing CLAUDE.md for ONE file, repo-tracked only (see module note — no $HOME). A
  * CLAUDE.md at `packages/foo/` is included only when `fileRelPath` is under `packages/foo/` —
  * walking PER FILE (not a repo-wide glob) is what makes a sibling `packages/bar/` file never see
  * it, which is the scoping the AC requires.
  */
-export function collectGoverningClaudeMd(cwd: string, fileRelPath: string): ClaudeMdFile[] {
+export function collectGoverningClaudeMd(
+  cwd: string,
+  fileRelPath: string,
+  lookup?: GoverningLookup,
+): ClaudeMdFile[] {
   const out: ClaudeMdFile[] = [];
+  const { staged, contents } = lookup ?? newGoverningLookup(cwd);
   for (const dir of ancestorDirs(fileRelPath)) {
-    const dirAbs = dir ? path.join(cwd, dir) : cwd;
-    if (!hasExactCase(dirAbs, 'CLAUDE.md')) continue;
-    let content: string;
-    try {
-      content = readFileSync(path.join(dirAbs, 'CLAUDE.md'), 'utf8');
-    } catch {
-      continue; // unreadable (permissions, race, or a directory literally named CLAUDE.md) — skip
-    }
-    out.push({ path: dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md', scope: dir, content });
+    const rel = dir ? `${dir}/CLAUDE.md` : 'CLAUDE.md';
+    const cached = contents.get(rel);
+    const content = cached === undefined ? governingContent(cwd, rel, staged) : cached;
+    contents.set(rel, content);
+    if (content === null) continue; // not in the commit, or unreadable on disk outside a repo
+    out.push({ path: rel, scope: dir, content });
   }
   return out;
 }
@@ -89,8 +117,9 @@ export function collectGoverningClaudeMd(cwd: string, fileRelPath: string): Clau
  */
 export function renderGoverningClaudeMd(cwd: string, files: string[]): string {
   const byPath = new Map<string, ClaudeMdFile>();
+  const lookup = newGoverningLookup(cwd);
   for (const f of files)
-    for (const gov of collectGoverningClaudeMd(cwd, f))
+    for (const gov of collectGoverningClaudeMd(cwd, f, lookup))
       if (!byPath.has(gov.path)) byPath.set(gov.path, gov);
   const governing = [...byPath.values()];
   if (governing.length === 0)

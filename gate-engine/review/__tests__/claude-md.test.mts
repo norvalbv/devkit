@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -115,6 +116,70 @@ describe('collectGoverningClaudeMd — repo-tracked scoping', () => {
     expect(collectGoverningClaudeMd(r, 'CLAUDE.md')).toEqual([
       { path: 'CLAUDE.md', scope: '', content: '# rules, currently being edited' },
     ]);
+  });
+});
+
+describe('collectGoverningClaudeMd — judges the staged blob, not the worktree copy', () => {
+  /** A repo with CLAUDE.md staged at `staged`, then overwritten in the worktree with `worktree`. */
+  function repoWithDivergedClaudeMd(staged: string, worktree: string): string {
+    const r = repo();
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: r, stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'user.name', 'T');
+    writeFileSync(join(r, 'CLAUDE.md'), staged);
+    git('add', 'CLAUDE.md');
+    writeFileSync(join(r, 'CLAUDE.md'), worktree);
+    return r;
+  }
+
+  it('an unstaged edit cannot MASK a rule that is actually being committed', () => {
+    const r = repoWithDivergedClaudeMd('Never use console.log.\n', '# nothing to see here\n');
+    expect(collectGoverningClaudeMd(r, 'a.ts')[0]?.content).toBe('Never use console.log.\n');
+  });
+
+  it('an unstaged edit cannot INVENT a rule that never lands', () => {
+    const r = repoWithDivergedClaudeMd('# nothing to see here\n', 'Never use console.log.\n');
+    expect(collectGoverningClaudeMd(r, 'a.ts')[0]?.content).toBe('# nothing to see here\n');
+  });
+
+  it('outside a git repo it still reads the worktree copy, never throwing', () => {
+    // Interactive (Task-dispatched) runs and consumer checkouts without git both land here.
+    const r = repo();
+    writeFileSync(join(r, 'CLAUDE.md'), '# root rules');
+    expect(collectGoverningClaudeMd(r, 'a.ts')[0]?.content).toBe('# root rules');
+  });
+
+  it('an untracked CLAUDE.md governs nothing — the commit will not carry it', () => {
+    // Also the $HOME reasoning in the module header: a file that is not part of the repo would
+    // block one developer's commit and pass another's.
+    const r = repo();
+    execFileSync('git', ['init', '-q'], { cwd: r, stdio: ['ignore', 'pipe', 'ignore'] });
+    writeFileSync(join(r, 'CLAUDE.md'), 'Never use console.log.\n');
+    expect(collectGoverningClaudeMd(r, 'a.ts')).toEqual([]);
+  });
+
+  it('a staged CLAUDE.md still governs when its worktree copy is DELETED', () => {
+    // Discovery reads the index too: an unstaged deletion cannot drop a rule that will be committed.
+    const r = repoWithDivergedClaudeMd('Never use console.log.\n', '# ignored\n');
+    rmSync(join(r, 'CLAUDE.md'));
+    expect(collectGoverningClaudeMd(r, 'a.ts')[0]?.content).toBe('Never use console.log.\n');
+  });
+
+  it('a CLAUDE.md staged for DELETION governs nothing, even when recreated in the worktree', () => {
+    const r = repo();
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: r, stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'user.name', 'T');
+    writeFileSync(join(r, 'CLAUDE.md'), 'Never use console.log.\n');
+    git('add', 'CLAUDE.md');
+    git('commit', '-qm', 'add rules');
+    git('rm', '-q', '--cached', 'CLAUDE.md');
+    writeFileSync(join(r, 'CLAUDE.md'), 'Never ship on Friday.\n');
+    expect(collectGoverningClaudeMd(r, 'a.ts')).toEqual([]);
   });
 });
 
