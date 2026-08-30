@@ -997,7 +997,7 @@ describe('self-host mode (devkit dogfooding itself)', () => {
     expect(hook).toContain('node gate-engine/deterministic/run.mts');
     expect(hook).toContain('node gate-engine/review/cli.mts --gate');
     expect(hook).toContain('--extra "lint=bun run lint"');
-    expect(hook).toContain('--extra "anti-slop=node cli/index.mts anti-slop check --staged"');
+    expect(hook).not.toContain('--extra "anti-slop=');
     expect(hook).not.toContain('$__dk_package_bin_dir/guard-');
 
     expect(config(root)).toMatchObject({
