@@ -13,6 +13,10 @@ import {
   collectGoverningClaudeMd,
   renderGoverningClaudeMd,
 } from '../../gate-engine/review/claude-md.mts';
+import {
+  referencedRepoPathCandidates,
+  resolvesCaseExact,
+} from '../../gate-engine/markdown/referenced-paths.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -26,57 +30,12 @@ const DIRECTIVE_RE = /\b(?:must|never|always|required|forbidden)\b/i;
  * before the judge reads it. */
 const SEGMENT_CAP = 12_000;
 
-const PATH_EXT_RE = /\.(?:md|json|mts|mjs|ts|sh)$/;
-
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
 
 const tmp: string[] = [];
 afterAll(() => {
   for (const dir of tmp.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-
-/** Repo-relative paths a routing doc names, tokenised across the whole file — a stale path inside a
- * fenced command misroutes exactly as badly as one in prose. */
-function referencedPaths(markdown: string): string[] {
-  const out = new Set<string>();
-  for (const raw of markdown.split(/[\s`()[\],;"'<>]+/)) {
-    const token = raw.replace(/[.,;:!?]+$/, '');
-    if (token === '') continue;
-    if (/^(?:https?|mailto):/.test(token)) continue;
-    if (token.includes('*')) continue;
-    if (token.startsWith('#')) continue;
-    // Strip an anchor, query or line locator BEFORE deciding whether what remains looks like a
-    // path — `README.md#documentation`, `README.md?raw=1` and `cli/index.mts:12` all name a file.
-    const located = token.replace(/[#?:].*$/, '');
-    // Judge path-shape on the located form, BEFORE the trailing slash goes: `skills/` is a
-    // directory reference, and stripping first would leave a bare `skills` that reads as prose.
-    if (!located.includes('/') && !PATH_EXT_RE.test(located)) continue;
-    const path = located.replace(/\/+$/, '');
-    if (path === '') continue;
-    out.add(path);
-  }
-  return [...out];
-}
-
-/** Case-SENSITIVE resolution segment by segment — the defence claude-md.mts:50-60 documents, so a
- * wrong-cased reference fails here rather than only on case-sensitive CI. */
-function resolvesCaseExact(relPath: string): boolean {
-  let dir = ROOT;
-  // `./README.md` and `README.md` name the same file; `../` escapes the repo and never resolves.
-  const segments = relPath.split('/').filter((s) => s !== '' && s !== '.');
-  if (segments.includes('..')) return false;
-  for (const [i, segment] of segments.entries()) {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return false;
-    }
-    if (!entries.includes(segment)) return false;
-    if (i < segments.length - 1) dir = join(dir, segment);
-  }
-  return segments.length > 0;
-}
 
 describe('root routing docs exist with the exact filename each harness looks for', () => {
   const rootEntries = readdirSync(ROOT);
@@ -88,65 +47,14 @@ describe('root routing docs exist with the exact filename each harness looks for
 
 describe('every path the routing docs name still resolves', () => {
   it.each(ROUTING_DOCS)('%s names no dangling path', (doc) => {
-    const dangling = referencedPaths(read(doc)).filter((p) => !resolvesCaseExact(p));
+    const dangling = referencedRepoPathCandidates(read(doc)).filter(
+      (path) => !resolvesCaseExact(ROOT, path),
+    );
     expect(dangling, `${doc} names paths that do not resolve from the repo root`).toEqual([]);
   });
 
   it('CLAUDE.md names enough paths for that check to mean something', () => {
-    expect(referencedPaths(read('CLAUDE.md')).length).toBeGreaterThanOrEqual(10);
-  });
-
-  it('the extractor itself catches a stale path, an anchor and a line locator', () => {
-    const found = referencedPaths(
-      'see `docs/decisions/gone.md` and [the list](README.md#documentation) at `cli/index.mts:12`',
-    );
-    expect(found).toContain('docs/decisions/gone.md');
-    expect(found).toContain('README.md');
-    expect(found).toContain('cli/index.mts');
-    expect(resolvesCaseExact('docs/decisions/gone.md')).toBe(false);
-    expect(resolvesCaseExact('README.md')).toBe(true);
-  });
-
-  it('checks a bare top-level directory reference like `skills/`', () => {
-    // Dropping these would let a renamed top-level directory slip past the whole guard — and
-    // CLAUDE.md cites `skills/` exactly this way.
-    expect(referencedPaths('the docs under `skills/` and a stale `gone/`')).toEqual([
-      'skills',
-      'gone',
-    ]);
-    expect(resolvesCaseExact('skills')).toBe(true);
-    expect(resolvesCaseExact('gone')).toBe(false);
-  });
-
-  it('keeps a path carrying a query suffix instead of silently dropping it', () => {
-    expect(referencedPaths('see [raw](README.md?raw=1) and `docs/decisions/gone.md?v=2`')).toEqual([
-      'README.md',
-      'docs/decisions/gone.md',
-    ]);
-  });
-
-  it('reads paths out of fenced blocks too, not just prose', () => {
-    expect(referencedPaths('```\nnode gate-engine/decisions/cli.mts query\n```')).toEqual([
-      'gate-engine/decisions/cli.mts',
-    ]);
-  });
-
-  it('ignores URLs, globs and placeholders rather than reporting them as dangling', () => {
-    const found = referencedPaths(
-      'https://bun.sh/docs and `skills/**` and `<slug>` and `node cli/index.mts show <slug>`',
-    );
-    expect(found).toEqual(['cli/index.mts']);
-  });
-
-  it('treats a ./-prefixed link as the same file, and rejects one that escapes the repo', () => {
-    expect(resolvesCaseExact('./README.md')).toBe(true);
-    expect(resolvesCaseExact('./docs/decisions/INDEX.md')).toBe(true);
-    expect(resolvesCaseExact('../README.md')).toBe(false);
-  });
-
-  it('a wrong-cased reference is reported as dangling on every OS', () => {
-    expect(resolvesCaseExact('docs/Decisions/INDEX.md')).toBe(false);
-    expect(resolvesCaseExact('docs/decisions/INDEX.md')).toBe(true);
+    expect(referencedRepoPathCandidates(read('CLAUDE.md')).length).toBeGreaterThanOrEqual(10);
   });
 });
 
