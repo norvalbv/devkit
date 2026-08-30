@@ -334,17 +334,50 @@ describe('concurrent agents sharing one checkout', () => {
     expect(localBranchExists(git, 'feat/gate-alive')).toBe(true);
   });
 
-  it('does not offer removing the main working tree, which git always refuses', async () => {
-    // The unattributable case that fires on a shared checkout sitting on the branch being shipped —
-    // including this PR's own ship. `worktree remove` never applies to a main working tree.
+  it('does not offer removing the caller’s own working tree, which git always refuses', async () => {
+    // `worktree remove` never applies to a main working tree, and on a LINKED one it would name the
+    // tree the caller is executing inside — so no arm of this path may ever offer it.
     const { dir, env, git } = seedShipRepoLocalRemote();
     seedScopedFile(dir);
     git(['checkout', '-q', '-b', 'feat/main-wt'], { stdio: 'ignore' });
 
     const r = runShip(dir, publishEnvFor(env), 'feat/main-wt');
 
-    expect(r.stderr).toContain('main working tree');
+    expect(r.stderr).toContain('is checked out in THIS worktree');
+    expect(r.stderr).toMatch(/git branch -m 'feat\/main-wt' "devkit-freed-[0-9a-f]+-\$\$"/);
+    expect(r.stderr).not.toContain('git branch -D'); // a forced delete trusts a stale reachability read
     expect(r.stderr).not.toMatch(/worktree remove --force '[^']*'\s*&&/);
+  });
+
+  it('still points at the OTHER tree when the branch is held somewhere the caller is not', async () => {
+    // The self-attribution above must not swallow the case it was carved out of: a branch held by a
+    // DIFFERENT checkout is still that checkout's to free, and the advice must name it.
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    seedScopedFile(dir);
+    const other = join(mkdtempSync(join(tmpdir(), 'shipother-')), 'wt');
+    dirs.push(other);
+    git(['worktree', 'add', '-q', '-b', 'feat/other-wt', other], { stdio: 'ignore' });
+
+    const r = runShip(dir, publishEnvFor(env), 'feat/other-wt');
+
+    expect(r.stderr).toContain('is also checked out at');
+    expect(r.stderr).not.toContain('is checked out in THIS worktree');
+  });
+
+  it('does not claim an unresolvable OTHER worktree as its own', async () => {
+    // A worktree path containing a newline defeats admin-dir resolution, and an empty admin dir also
+    // means "this is the main worktree". Conflating the two lets the main checkout claim someone
+    // else's tree and advise renaming that checkout's branch.
+    const { dir, env, git } = seedShipRepoLocalRemote();
+    seedScopedFile(dir);
+    const other = join(mkdtempSync(join(tmpdir(), 'shipnl-')), 'wt\nnewline');
+    dirs.push(other);
+    git(['worktree', 'add', '-q', '-b', 'feat/nl-wt', other], { stdio: 'ignore' });
+
+    const r = runShip(dir, publishEnvFor(env), 'feat/nl-wt');
+
+    expect(r.stderr).not.toContain('is checked out in THIS worktree');
+    expect(r.stderr).not.toMatch(/git branch -m 'feat\/nl-wt'/);
   });
 
   it('reports a locked worktree instead of reclaiming it', () => {

@@ -20,3 +20,4 @@ created: 2026-08-27
 **Scope:** cli/lib/ship/**,cli/commands/ship.mts,cli/commands/release.mts
 **Category:** ship-pipeline
 **Source:** shortcut · sc-2159
+- 2026-08-30 — sc-2261 — the preflight now attributes the branch's holder to the CALLER'S OWN worktree (compared by git admin dir, never by filesystem path) and prints the two commands that free it. Previously a linked worktree was told to force-remove the tree it was executing inside, and a main tree got 'switch it off' without naming what to switch to. Same 'reports and falls through' clause, no new destructive path. Paired with a PR-base preflight: the DEFAULT base (this checkout's branch) is now proven to be a branch ON ORIGIN before the worktree, the commit and the push, so shipping from a provisioned worktree's local-only scratch branch refuses early instead of pushing a branch whose PR then cannot open; and the post-push PR-create hint no longer re-proposes the base gh just rejected.
