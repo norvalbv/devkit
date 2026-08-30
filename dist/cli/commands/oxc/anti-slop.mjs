@@ -6,7 +6,7 @@ import { withLock } from '../../lib/atomic-write.mjs';
 import { AntiSlopCapabilityError } from '../../lib/install/anti-slop/base-capability.mjs';
 import { baselineFromGroups, baselineIncreases, compareBaseline, migrateBaselineRenames, pruneBaseline, readBaseline, writeBaseline, } from '../../lib/install/anti-slop/baseline.mjs';
 import { ANTI_SLOP_BASELINE_LOCK_REL, ANTI_SLOP_BASELINE_REL, } from '../../lib/install/anti-slop/constants.mjs';
-import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
+import { gitBaselineEnvelope, withBaseAntiSlopSnapshot, withStableGitIndex, withStagedAntiSlopSnapshot, } from '../../lib/install/anti-slop/git-snapshot.mjs';
 import { collectAntiSlopGroups, resolveAntiSlopScope, } from '../../lib/install/anti-slop/runner.mjs';
 export const meta = {
     name: 'anti-slop',
@@ -15,6 +15,8 @@ export const meta = {
 
 Usage:
   devkit anti-slop create [--force] [paths...]   Explicitly snapshot current findings
+  devkit anti-slop adopt-renames                 Persist debt across staged Git renames
+  devkit anti-slop adopt-renames --base <ref>    Persist debt across committed Git renames
   devkit anti-slop check [paths...]              Check working-tree findings (read-only)
   devkit anti-slop check --staged                Check the exact Git index against HEAD
   devkit anti-slop check --base <git-ref>         Full check + baseline monotonicity for CI
@@ -23,7 +25,8 @@ Usage:
 
 Configure per-rule off/warn/error and scoped overrides in the repository Oxlint config. Paths default
 to the repository root. Check and inspect never write. Create refuses an existing baseline unless
---force is explicit; prune refuses to write while new error-severity findings exist.`,
+--force is explicit; a whole-repository replacement that removes debt from existing files also requires
+--confirm-baseline-removals. Prune refuses to write while new error-severity findings exist.`,
 };
 function baselineOrExplain(cwd) {
     const baseline = readBaseline(cwd);
@@ -48,31 +51,94 @@ function printNew(groups) {
         console.log(`      ${group.diagnostic}`);
     }
 }
-function create(cwd, args, force) {
+function create(cwd, args, force, confirmBaselineRemovals) {
     if (!capabilityReady(cwd))
         return 2;
     return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
         const path = join(cwd, ANTI_SLOP_BASELINE_REL);
         if (existsSync(path) && !force) {
-            console.error(`anti-slop: ${ANTI_SLOP_BASELINE_REL} already exists; use prune, or --force to replace it explicitly`);
+            console.error(`anti-slop: ${ANTI_SLOP_BASELINE_REL} exists; use prune or create --force`);
             return 2;
         }
-        const existing = existsSync(path) && args.length > 0 ? readBaseline(cwd) : null;
+        const scope = resolveAntiSlopScope(cwd, args);
+        const wholeRepository = scope.includes('');
+        if (confirmBaselineRemovals && !wholeRepository) {
+            console.error('anti-slop: removal confirmation requires whole-repository create --force');
+            return 2;
+        }
+        let existing = null;
+        if (existsSync(path)) {
+            try {
+                existing = readBaseline(cwd);
+            }
+            catch (error) {
+                if (!force || !wholeRepository)
+                    throw error;
+                console.error('anti-slop: replacing unreadable whole-repository baseline explicitly');
+            }
+        }
         const groups = collectAntiSlopGroups(cwd, args);
         const next = baselineFromGroups(groups);
-        if (existing) {
-            const scope = resolveAntiSlopScope(cwd, args);
+        if (existing && !wholeRepository) {
             next.entries = [
                 ...existing.entries.filter((entry) => !scope.includes(entry.file)),
                 ...next.entries,
             ].sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
+        }
+        if (existing && wholeRepository && !confirmBaselineRemovals) {
+            const nextCounts = new Map(next.entries.map((entry) => [entry.fingerprint, entry.count]));
+            const removals = existing.entries.flatMap((entry) => {
+                const removedCount = Math.max(0, entry.count - (nextCounts.get(entry.fingerprint) ?? 0));
+                return removedCount > 0 && existsSync(join(cwd, entry.file))
+                    ? [{ file: entry.file, removedCount }]
+                    : [];
+            });
+            if (removals.length > 0) {
+                const files = [...new Set(removals.map((entry) => entry.file))].sort((a, b) => a.localeCompare(b));
+                const removedCount = removals.reduce((sum, entry) => sum + entry.removedCount, 0);
+                const samples = files.slice(0, 3).join(', ');
+                console.error(`anti-slop: create --force would remove ${removedCount} finding(s) from ${files.length} still-existing file(s) (${samples}); baseline unchanged`);
+                console.error('anti-slop: rerun with `devkit anti-slop create --force --confirm-baseline-removals` to confirm the whole-repository replacement');
+                return 2;
+            }
         }
         writeBaseline(cwd, next);
         console.log(`anti-slop: created ${ANTI_SLOP_BASELINE_REL} with ${count(next.entries)} finding(s) in ${next.entries.length} fingerprint(s)`);
         return 0;
     });
 }
-function checkBaselineEnvelope(candidate, envelope) {
+function adoptRenames(cwd, baseRef = 'HEAD', requireRenames = false) {
+    if (!capabilityReady(cwd))
+        return 2;
+    return withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+        const baseline = baselineOrExplain(cwd);
+        if (!baseline)
+            return 2;
+        const { baseOid, baseRefName, candidateTree, headOid, headRef, renames } = gitBaselineEnvelope(cwd, baseRef);
+        const stableBase = baseRefName !== null || /^(?:HEAD(?:[~^]\d*)*|[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseRef);
+        if (requireRenames && !stableBase) {
+            console.error('anti-slop: --base cannot be locked; use a direct ref, full OID, or HEAD~n');
+            return 2;
+        }
+        if (requireRenames && renames.size === 0) {
+            console.error(`anti-slop: no Git renames from ${baseRef} to the index; baseline unchanged`);
+            console.error('anti-slop: use the same --base ref as the failing check; if history no longer contains the rename, review the debt before `devkit anti-slop create --force --confirm-baseline-removals`');
+            return 2;
+        }
+        const affected = baseline.entries.filter((entry) => renames.has(entry.file));
+        const next = migrateBaselineRenames(baseline, renames);
+        if (JSON.stringify(next) === JSON.stringify(baseline)) {
+            console.log('anti-slop: adopted 0 finding(s) across 0 staged rename(s); baseline unchanged');
+            return 0;
+        }
+        return withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, { expression: baseRef, oid: baseOid, symbolicRef: baseRefName }, candidateTree, () => {
+            writeBaseline(cwd, next);
+            console.log(`anti-slop: adopted ${count(affected)} finding(s) across ${new Set(affected.map((entry) => entry.file)).size} staged rename(s); stage ${ANTI_SLOP_BASELINE_REL}`);
+            return 0;
+        });
+    });
+}
+function checkBaselineEnvelope(candidate, envelope, baseRef) {
     if (!envelope?.base)
         return 0; // one-time bootstrap: the base commit has no baseline
     const staleRenames = candidate.entries.flatMap((entry) => {
@@ -83,7 +149,10 @@ function checkBaselineEnvelope(candidate, envelope) {
         for (const entry of staleRenames) {
             console.error(`BASELINE-RENAME ${entry.ruleId} ${entry.file} -> ${entry.nextFile} (${entry.count} adopted finding(s))`);
         }
-        console.error('anti-slop: FAIL — persist renamed debt with `devkit anti-slop create --force`, then stage the baseline');
+        const remedy = baseRef
+            ? `devkit anti-slop adopt-renames --base ${baseRef}`
+            : 'devkit anti-slop adopt-renames';
+        console.error(`anti-slop: FAIL — persist renamed debt with \`${remedy}\`, then stage the baseline`);
         return 1;
     }
     const increases = baselineIncreases(envelope.base, candidate, envelope.renames);
@@ -152,11 +221,11 @@ function inheritedBaseAllowance(cwd, capabilityCwd, selected, candidateGroups, e
         };
     });
 }
-function check(cwd, args, envelope = null) {
+function check(cwd, args, envelope = null, baseRef) {
     const baseline = baselineOrExplain(cwd);
     if (!baseline)
         return 2;
-    const envelopeStatus = checkBaselineEnvelope(baseline, envelope);
+    const envelopeStatus = checkBaselineEnvelope(baseline, envelope, baseRef);
     if (envelopeStatus !== 0)
         return envelopeStatus;
     const scope = resolveAntiSlopScope(cwd, args);
@@ -244,6 +313,7 @@ export default function run(args, cwd) {
     const options = separator >= 0 ? rest.slice(0, separator) : rest;
     const trailingPaths = separator >= 0 ? rest.slice(separator + 1) : [];
     const force = options.includes('--force');
+    const confirmBaselineRemovals = options.includes('--confirm-baseline-removals');
     const json = options.includes('--json');
     const staged = options.includes('--staged');
     const baseIndex = options.indexOf('--base');
@@ -258,11 +328,19 @@ export default function run(args, cwd) {
         consumed.add(baseIndex + 1);
     }
     const paths = [
-        ...options.filter((arg, index) => arg !== '--force' && arg !== '--json' && arg !== '--staged' && !consumed.has(index)),
+        ...options.filter((arg, index) => arg !== '--force' &&
+            arg !== '--confirm-baseline-removals' &&
+            arg !== '--json' &&
+            arg !== '--staged' &&
+            !consumed.has(index)),
         ...(separator >= 0 ? ['--', ...trailingPaths] : []),
     ];
     if (force && operation !== 'create') {
         console.error('anti-slop: --force is accepted only by create');
+        return 2;
+    }
+    if (confirmBaselineRemovals && (operation !== 'create' || !force)) {
+        console.error('anti-slop: --confirm-baseline-removals is accepted only by whole-repository create --force');
         return 2;
     }
     if (json && operation !== 'inspect') {
@@ -273,8 +351,8 @@ export default function run(args, cwd) {
         console.error('anti-slop: --staged is accepted only by check');
         return 2;
     }
-    if (baseRef && operation !== 'check') {
-        console.error('anti-slop: --base is accepted only by check');
+    if (baseRef && operation !== 'check' && operation !== 'adopt-renames') {
+        console.error('anti-slop: --base is accepted only by check or adopt-renames');
         return 2;
     }
     if (staged && (baseRef || paths.length > 0)) {
@@ -282,7 +360,14 @@ export default function run(args, cwd) {
         return 2;
     }
     if (operation === 'create')
-        return create(cwd, paths, force);
+        return create(cwd, paths, force, confirmBaselineRemovals);
+    if (operation === 'adopt-renames') {
+        if (paths.length > 0) {
+            console.error('anti-slop adopt-renames accepts no flags or paths');
+            return 2;
+        }
+        return adoptRenames(cwd, baseRef ?? 'HEAD', baseRef !== undefined);
+    }
     if (operation === 'check' && staged) {
         return withStagedAntiSlopSnapshot(cwd, (snapshot) => {
             if (snapshot.skipped) {
@@ -294,7 +379,7 @@ export default function run(args, cwd) {
     }
     if (operation === 'check') {
         const envelope = baseRef ? gitBaselineEnvelope(cwd, baseRef) : null;
-        return check(cwd, paths, envelope);
+        return check(cwd, paths, envelope, envelope?.baseOid ?? baseRef);
     }
     if (operation === 'inspect') {
         if (paths.length > 0 || force) {
@@ -305,6 +390,6 @@ export default function run(args, cwd) {
     }
     if (operation === 'prune')
         return prune(cwd, paths);
-    console.error('devkit anti-slop: expected create, check, inspect, or prune');
+    console.error('devkit anti-slop: expected create, adopt-renames, check, inspect, or prune');
     return 2;
 }
