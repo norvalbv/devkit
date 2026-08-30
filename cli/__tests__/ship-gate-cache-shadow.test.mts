@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { dirs as shipDirs, dropWorktree, seedShipRepo } from './_ship-branch-fixture.mts';
 import { testExecFileSync as execFileSync, testSpawnSync as spawnSync } from './_helpers.mts';
 
 // sc-1489: a consumer committed `.qavis/receipt.json`, so the base checkout kept putting a stale copy
@@ -71,6 +72,40 @@ function ship(dir: string, env: NodeJS.ProcessEnv, git, branch: string, paths = 
 }
 
 describe('ship — a committed gate cache must lose to the live one', () => {
+  it('uses an ignore rule shipped from a linked worktree to classify a main-worktree index', () => {
+    const { dir, env, git } = seedShipRepo();
+    writeFileSync(join(dir, 'guard.config.json'), '{"indexPath":".search-code/index.db"}\n');
+    writeFileSync(join(dir, '.gitignore'), '.base-cache/\n');
+    git(['add', 'guard.config.json', '.gitignore'], { stdio: 'ignore' });
+    git(['commit', '-q', '--no-verify', '-m', 'track config + base ignores'], {
+      stdio: 'ignore',
+    });
+    mkdirSync(join(dir, '.search-code'), { recursive: true });
+    writeFileSync(join(dir, '.search-code/index.db'), 'index');
+
+    const linkedParent = mkdtempSync(join(tmpdir(), 'ship-linked-ignore-'));
+    shipDirs.push(linkedParent);
+    const linked = join(linkedParent, 'checkout');
+    git(['worktree', 'add', '-q', '-b', 'linked-ignore-task', linked], { stdio: 'ignore' });
+    writeFileSync(join(linked, '.gitignore'), '.base-cache/\n.search-code/\n');
+    writeFileSync(join(linked, 'note.txt'), 'hi\n');
+
+    const r = spawnSync(
+      '/bin/bash',
+      [scriptPath, 'feat/same-ship-ignore', 't', '--', '.gitignore', 'note.txt'],
+      {
+        cwd: linked,
+        input: 'b\n',
+        encoding: 'utf8',
+        env: { ...env, SHIP_DRY_RUN: '1' },
+      },
+    );
+    dropWorktree(git, r.stderr);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/\.search-code\/index\.db .*gitignored cache/);
+    expect(r.stderr).not.toMatch(/\.search-code\/index\.db .*commit it/);
+  });
+
   it('links the live receipt over the stale committed copy, without touching the shipped commit', () => {
     const { dir, env, git } = seedRepo();
     writeFileSync(join(dir, '.qavis/receipt.json'), '{"sha":"stale"}\n');

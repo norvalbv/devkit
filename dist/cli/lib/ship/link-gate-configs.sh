@@ -94,6 +94,10 @@ is_review_projection_purpose() {
 # so resolve the source's parent physically and ask the worktree that owns those bytes instead.
 gate_projection_source_is_ignored() {
   local root=$1 source=$2 rel=$3 physical_parent physical_source owner='' candidate owner_rel
+  # The caller may be shipping the ignore rule now while the projected bytes come from an older
+  # main-worktree view. Ask it first; a symlink traversal can fail fatally, so keep that probe quiet
+  # and let the physical-source-owner fallback below handle the path.
+  if git -C "$root" check-ignore -q -- "$rel" 2>/dev/null; then return 0; fi
   if ! physical_parent=$(cd -P "$(dirname "$source")" 2>/dev/null && pwd); then
     git -C "$root" check-ignore -q -- "$rel"
     return
