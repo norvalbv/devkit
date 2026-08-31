@@ -97,6 +97,23 @@ describe('guard-decisions integrity (via cli.mts, the real bin)', () => {
     expect(r.stderr).toContain('my-axis');
   });
 
+  // The hook invokes `integrity --staged`. If that dispatch ever silently fell through to the
+  // whole-corpus variant, devkit's own repo would block on every commit — the corpus carries a
+  // permanent, unrepairable finding that only the staged variant tolerates.
+  it('routes --staged to the staged gate, not the whole-corpus scan', () => {
+    expect(run(['add', 'my-axis', '--target', '--new', ...reqFlags('my-axis')]).status).toBe(0);
+    const file = join(dir, 'my-axis.md');
+    writeFileSync(file, readFileSync(file, 'utf8').replace(/^# my-axis$/m, '# renamed-by-hand'));
+
+    // The whole-corpus scan sees the hand-edit and fails...
+    expect(run(['integrity']).status).toBe(1);
+    // ...while the staged variant finds nothing staged in a non-git fixture and stands down. The
+    // two must not produce the same verdict, or the dispatch is not wired.
+    const staged = run(['integrity', '--staged']);
+    expect(staged.status ?? 0).toBe(0);
+    expect(staged.stderr).not.toContain('h1-slug-mismatch');
+  });
+
   it('reports a clean pass rather than an error when no decisions exist yet', () => {
     const r = run(['integrity']);
     expect(r.status, r.stderr).toBe(0);

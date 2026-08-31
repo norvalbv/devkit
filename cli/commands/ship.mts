@@ -107,6 +107,12 @@ Env:
                       Use only when the BASE branch already has structure violations your diff did
                       not cause. The gate logs a loud BYPASSED line, records telemetry, and keeps
                       every other deterministic gate active. Prefer exporting it on its own line.
+  GUARD_HOOK_PARITY_OK=1  Commit while .husky/pre-commit differs from its generator (self-host only).
+                      The gate already stays advisory when no generator input is staged, so reach for
+                      this only when it blocks on drift your diff genuinely did not cause.
+  GUARD_DECISIONS_INTEGRITY_OK=1  Commit past a structural finding on a decision record in this
+                      change (self-host only). Findings that already exist at HEAD are advisory
+                      without any flag; this is for a NEW finding you believe is wrong.
 
 Exits 0 on PR opened, committed under SHIP_DRY_RUN, or a passing --dry-gates rehearsal; 1 on any
 preflight/git/gh/gate error. A commit
