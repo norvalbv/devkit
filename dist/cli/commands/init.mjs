@@ -582,6 +582,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
         lineGrowth: Boolean(selection.lineGrowth),
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
+        baseDrift: Boolean(selection.baseDrift),
         agentTargets: [...(selection.agentTargets ?? AGENT_TARGETS)],
     }, upgradeOffers.overlayUndecidedLineGrowth(cwd, selection, plan.undecided), prevConfig?.components);
     overlayComponents.disabledGuards = disabledGuardsFor(selection.guards ?? [], plan.disabledGuards);
@@ -788,6 +789,7 @@ export async function applyInit(cwd, plan) {
         // recording the decline is what stops `devkit upgrade` re-asking (see unofferedComponents).
         adhd: Boolean(selection.adhd),
         priorArtGate: Boolean(selection.priorArtGate),
+        baseDrift: Boolean(selection.baseDrift),
         agentTargets: [...agentTargets],
         // Most guards are pre-commit capabilities and disappear with husky. Decisions additionally
         // owns an agent pre-edit hook, so it remains authoritative in config even without husky.

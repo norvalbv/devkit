@@ -34,6 +34,7 @@ export interface InitFlags extends ReviewFlagValues {
   searchCode: boolean;
   adhd: boolean;
   priorArtGate: boolean;
+  baseDrift: boolean;
   standalone: boolean;
   overlay: boolean;
   baselinesOnly: boolean;
@@ -70,6 +71,7 @@ export function parseFlags(args: string[]): InitFlags {
     searchCode: false,
     adhd: false,
     priorArtGate: false,
+    baseDrift: false,
     standalone: false,
     overlay: false,
     baselinesOnly: false,
@@ -92,6 +94,7 @@ export function parseFlags(args: string[]): InitFlags {
     else if (a === '--search-code') flags.searchCode = true;
     else if (a === '--adhd') flags.adhd = true;
     else if (a === '--prior-art-gate') flags.priorArtGate = true;
+    else if (a === '--base-drift') flags.baseDrift = true;
     else if (a === '--standalone') flags.standalone = true;
     else if (a === '--overlay') flags.overlay = true;
     else if (a === '--global-commit-gate') flags.globalCommitGate = true;
@@ -141,6 +144,8 @@ export function selectionFromFlags(flags: InitFlags, recorded?: Partial<Selectio
   // The prior-art gate denies harness tool calls: opt-in even under --yes.
   if (flags.priorArtGate) sel.priorArtGate = true;
   if (flags.no.has('prior-art-gate')) sel.priorArtGate = false;
+  if (flags.baseDrift) sel.baseDrift = true;
+  if (flags.no.has('base-drift')) sel.baseDrift = false;
   // Preserve recorded providers on a re-run; a fresh base still contains every default provider.
   sel.agentTargets = sel.agentTargets.filter((target) => !flags.no.has(target));
   // The gate's registrations are Claude-only: recording it enabled with no claude surface would

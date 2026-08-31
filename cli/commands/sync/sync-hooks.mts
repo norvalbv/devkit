@@ -39,6 +39,7 @@ interface DevkitConfig {
     fallow?: boolean;
     adhd?: boolean;
     priorArtGate?: boolean;
+    baseDrift?: boolean;
     guards?: string[];
   };
 }
@@ -84,6 +85,9 @@ export default function run(args: string[], cwd: string): number {
   const adhd = cfg?.components?.adhd ?? false;
   // Same again: the prior-art gate hook is owned by the priorArtGate component.
   const priorArtGate = cfg?.components?.priorArtGate ?? false;
+  // And again for base-drift: reading it here is what stops a full sync PRUNING an installed
+  // hook as though the component had been deselected.
+  const baseDrift = cfg?.components?.baseDrift ?? false;
   const explicitTargets = listFlag(args, '--targets');
   const targets =
     explicitTargets ??
@@ -109,7 +113,7 @@ export default function run(args: string[], cwd: string): number {
   const override = args.includes('--force') ? () => true : undefined;
   const desired = only
     ? undefined
-    : hookScriptsFor({ agentHooks: true, decisions, fallow, adhd, priorArtGate });
+    : hookScriptsFor({ agentHooks: true, decisions, fallow, adhd, priorArtGate, baseDrift });
   syncHookScripts(gitRoot, {
     dryRun: args.includes('--dry-run'),
     targets,

@@ -37,6 +37,12 @@ Usage:
                          denied once with the skip predicate; a call whose plan/prompt carries
                          a \`Prior-art:\` line passes untaxed, and retries pass (off by default).
                          Drop it with --no-prior-art-gate (also removes it on a re-run).
+  --base-drift           Install the base-drift ADVISORY hooks: a SessionStart brief and a pre-edit
+                         warning when origin/<base> has moved a file you are about to touch, so a
+                         conclusion drawn from a stale local copy is caught while it can still be
+                         corrected. Fetches one ref from your remote (TTL-cached, never blocks).
+                         Query it directly with \`devkit base-status\` (off by default). Drop it with
+                         --no-base-drift (also removes it on a re-run).
   --standalone           NO-PACKAGE mode: vendor configs + a fail-open hook calling GLOBAL guard-*
                          bins; add nothing to package.json. Requires \`bun add -g\` devkit.
   --overlay              LOCAL-ONLY mode for a repo you can't modify: git-ignored, chains to the
