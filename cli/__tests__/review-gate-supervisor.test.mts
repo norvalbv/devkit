@@ -390,6 +390,30 @@ describe('review gate supervisor', () => {
     expect(result.stderr).toContain('stderr-marker');
   });
 
+  // sc-2088: the deferred checklist recovery decides whether to start a judge by reading this
+  // deadline. Nothing else publishes it, so if the supervisor stops exporting it the recovery
+  // silently falls back to a duration it measures from the WRONG origin (the review gate's start,
+  // blind to the deterministic prefix the supervisor's own clock already counted).
+  it('publishes an absolute deadline to the child that matches the timer it arms', () => {
+    const before = Date.now();
+    const result = supervisor(
+      '30',
+      '--',
+      process.execPath,
+      '-e',
+      "process.stdout.write(String(process.env.DEVKIT_GATE_DEADLINE_MS ?? 'ABSENT'))",
+    );
+    const after = Date.now();
+
+    expect(result.status, result.stderr).toBe(0);
+    const published = Number(result.stdout.trim());
+    expect(Number.isFinite(published)).toBe(true);
+    // An ABSOLUTE epoch, not the 30 it was handed as a duration — a duration is exactly what the
+    // downstream phase cannot use, since it cannot see when the chain started.
+    expect(published).toBeGreaterThanOrEqual(before + 30_000);
+    expect(published).toBeLessThanOrEqual(after + 30_000);
+  });
+
   it('returns 127 when the command cannot be spawned', () => {
     const result = supervisor('5', '--', join(mkTmp('devkit-review-missing-'), 'absent'));
 

@@ -69,7 +69,7 @@ elif [ "$crc" -eq 4 ]; then
     exit 1
 elif [ "$crc" -eq 3 ]; then
     echo "   guard-review completeness: judge unavailable — strict ship mode failed closed."
-    echo "   Check \\\`claude\\\` CLI auth/quota, then re-run devkit ship (cleared judgements are cached)."
+    echo "   Follow the judge CLI remedy printed above, then re-run devkit ship (cleared judgements are cached)."
     exit 1
 fi
 # crc 0 = pass / warn-only / skipped, crc 2 = fail-open → continue; 4 = object-database fault.

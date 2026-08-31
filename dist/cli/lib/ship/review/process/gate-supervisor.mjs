@@ -18,6 +18,9 @@ const FORWARDED_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGTERM'];
 const LEGACY_PID_FILE_ENV = 'DEVKIT_REVIEW_SUPERVISOR_PID_FILE';
 const OWNERSHIP_TOKEN_ENV = 'DEVKIT_REVIEW_GATE_OWNER';
 const OWNERSHIP_SEED_ENV = 'DEVKIT_REVIEW_SUPERVISOR_OWNER_TOKEN';
+// Absolute epoch (ms) at which this supervisor kills the gate chain. Read by
+// gate-engine/review/recovery/settle.mts; keep the two spellings in sync.
+const GATE_DEADLINE_ENV = 'DEVKIT_GATE_DEADLINE_MS';
 const OWNERSHIP_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 const NATURAL_RESERVED_STATUSES = new Set([124, 129, 130, 131, 143]);
 const SIGNAL_EXIT_CODES = {
@@ -416,13 +419,20 @@ export function superviseGateCommand(timeoutMs, command, inspectProcesses = read
         for (const signal of FORWARDED_SIGNALS)
             process.on(signal, handlers[signal]);
         try {
+            // ONE clock for the whole gate chain (sc-2088). The deadline published to the child and the
+            // timer armed here are the SAME number, so no downstream phase can believe it has budget this
+            // supervisor will not grant. It must be an ABSOLUTE epoch, not a duration: the timeout covers
+            // the entire `git commit` — deterministic prefix, decisions cascade, then the review gate —
+            // and a gate deep in that chain cannot see how much of it already burned. guard-review's
+            // deferred checklist recovery reads it before starting a judge it could not finish.
+            const deadlineMs = Date.now() + timeoutMs;
             const child = spawn(executable, command.slice(1), {
                 detached: true,
-                env: childEnvironment,
+                env: { ...childEnvironment, [GATE_DEADLINE_ENV]: String(deadlineMs) },
                 stdio: 'inherit',
             });
             groupId = child.pid;
-            timeoutTimer = setTimeout(() => terminate(124), timeoutMs);
+            timeoutTimer = setTimeout(() => terminate(124), Math.max(0, deadlineMs - Date.now()));
             child.once('error', (cause) => {
                 childDone = true;
                 childStatus = errorCode(cause) === 'ENOENT' ? 127 : 1;

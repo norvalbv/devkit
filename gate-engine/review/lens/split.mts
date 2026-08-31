@@ -147,7 +147,12 @@ export function emitMergedLensResults(
     const merged = mergeLensOutcomes(
       parts.map((p) => p.res),
       name,
-    ) as LensPart['res'] & { reason?: string; escalated?: boolean; waivers?: unknown[] };
+    ) as LensPart['res'] & {
+      reason?: string;
+      escalated?: boolean;
+      waivers?: unknown[];
+      inconclusiveCause?: string;
+    };
     const transcript = parts
       .filter((p) => p.res.transcript)
       .map((p) => p.res.transcript)
@@ -166,6 +171,7 @@ export function emitMergedLensResults(
       escalated: Boolean(merged.escalated),
       model: merged.model ?? firstModel,
       reason: merged.reason,
+      inconclusive_cause: merged.inconclusiveCause,
       secs: parts.reduce((sum, p) => sum + p.secs, 0),
       // Per-group cost and verdict. `secs` above sums, and `escalated`/`model` collapse to the
       // worst part, so without this vector a slow or repeatedly-escalating lens is invisible —

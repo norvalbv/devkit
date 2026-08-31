@@ -17,7 +17,7 @@
 // regex floor still blocks. Each caller describes its own consequence where it differs.
 import { execFile, execFileSync } from 'node:child_process';
 import { parseJudgeUsage, unwrapClaudeResult, withResultArgs, } from './claude-result.mjs';
-import { codexFailure, judgeBinFor, judgeCliFor, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
+import { codexFailure, judgeBinFor, judgeCliFor, parseClaudeArgv, parseCodexUsage, unwrapCodexResult, } from './codex/result.mjs';
 import { emitGateEvent } from './gate-events.mjs';
 import { withoutGitEnv } from './judge-isolation.mjs';
 import { prepareJudgeMcpProfile, } from './mcp/profile.mjs';
@@ -118,6 +118,9 @@ function isJudgeTimeout(e) {
 function modelFromArgs(args) {
     const i = args.indexOf('--model');
     return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+function allowedToolsFromArgs(args) {
+    return parseClaudeArgv(args).allowedTools?.join(',') ?? '';
 }
 /**
  * Record ONE agent invocation into the shared telemetry stream: the durable transcript plus the
@@ -225,8 +228,10 @@ export function execJudge(opts) {
     const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
         cwd: cwd ?? process.cwd(),
         env,
+        allowedTools: allowedToolsFromArgs(args),
     });
     try {
+        opts.onMcpPrepared?.(mcp.capabilityFingerprint);
         // Inside the try on purpose: an argv a codex model cannot express (no prompt) surfaces as ONE
         // outage warning carrying the translation error, keeping this function's never-throws contract.
         const cli = spawnFor(args, mcp, opts.codexReadOnly === true);
@@ -289,6 +294,7 @@ export function execJudgeAsync(opts) {
     const mcp = prepareJudgeMcpProfile(opts.mcpProfile ?? { kind: 'none' }, {
         cwd: cwd ?? process.cwd(),
         env,
+        allowedTools: allowedToolsFromArgs(args),
     });
     return new Promise((resolve) => {
         // Shared outage path — a callback error AND a synchronous throw from execFile() itself (e.g. an
@@ -308,6 +314,7 @@ export function execJudgeAsync(opts) {
             resolve(null);
         };
         try {
+            opts.onMcpPrepared?.(mcp.capabilityFingerprint);
             // See the sync twin: routing inside the try keeps the never-rejects contract when argv
             // translation itself throws.
             const cli = spawnFor(args, mcp, opts.codexReadOnly === true);

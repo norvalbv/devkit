@@ -5,8 +5,10 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { AGENT_TARGETS, defaultSelection, GUARD_IDS } from '../../components.mjs';
+import { defaultSelection, GUARD_IDS, normalizeSelection, STRUCTURE_STACKS, unofferedComponents, } from '../../components.mjs';
+import { detectGitRoot } from '../../detect-git-root.mjs';
 import { readJson } from '../../fs-helpers.mjs';
+import { resolveExistingAgentProviders } from '../agent-assets/agent-providers.mjs';
 import { parseReviewFlags } from './review-profile.mjs';
 const guardDisableFlag = (guard) => (guard === 'review' ? 'review-gate' : guard);
 export function disabledGuardsFromFlags(flags) {
@@ -88,10 +90,8 @@ export function parseFlags(args) {
     }
     return flags;
 }
-// Build a selection from flags (the --yes / non-TTY path): all recommended, minus --no-*,
-// guards narrowed by --guards / --no-guards.
-export function selectionFromFlags(flags) {
-    const sel = defaultSelection();
+export function selectionFromFlags(flags, recorded) {
+    const sel = recorded ? normalizeSelection(recorded) : defaultSelection();
     for (const id of ['biome', 'tsconfig', 'skills', 'agents', 'husky', 'structure']) {
         if (flags.no.has(id))
             sel[id] = false;
@@ -105,22 +105,44 @@ export function selectionFromFlags(flags) {
     // Line-growth block is recommended-on; --no-line-growth opts out under --yes / non-TTY.
     if (flags.no.has('line-growth'))
         sel.lineGrowth = false;
-    // fallow + the agent-hook components are OPT-IN: off unless their flag is passed (and --no-* keeps off).
-    sel.fallow = flags.fallow && !flags.no.has('fallow');
-    sel.antiSlop = flags.antiSlop && !flags.no.has('anti-slop');
+    // Opt-ins stay off on a fresh install, but a re-run preserves an existing opt-in unless this
+    // invocation explicitly changes it. --no-* wins when both forms are present.
+    if (flags.fallow)
+        sel.fallow = true;
+    if (flags.no.has('fallow'))
+        sel.fallow = false;
+    if (flags.antiSlop)
+        sel.antiSlop = true;
+    if (flags.no.has('anti-slop'))
+        sel.antiSlop = false;
     if (flags.legacyOxc)
         console.warn('  • --oxc is no longer needed: Oxc is core Devkit tooling');
     if (flags.no.has('oxc'))
         console.warn('  ! --no-oxc is retired and ignored: Oxc is core');
-    sel.searchSteering = flags.searchSteering && !flags.no.has('search-steering');
-    sel.agentHooks = flags.agentHooks && !flags.no.has('agent-hooks');
-    sel.searchCode = flags.searchCode && !flags.no.has('search-code');
+    if (flags.searchSteering)
+        sel.searchSteering = true;
+    if (flags.no.has('search-steering'))
+        sel.searchSteering = false;
+    if (flags.agentHooks)
+        sel.agentHooks = true;
+    if (flags.no.has('agent-hooks'))
+        sel.agentHooks = false;
+    if (flags.searchCode)
+        sel.searchCode = true;
+    if (flags.no.has('search-code'))
+        sel.searchCode = false;
     // The vendored i-have-adhd skill: opt-in even under --yes (an output-style preference).
-    sel.adhd = flags.adhd && !flags.no.has('adhd');
+    if (flags.adhd)
+        sel.adhd = true;
+    if (flags.no.has('adhd'))
+        sel.adhd = false;
     // The prior-art gate denies harness tool calls: opt-in even under --yes.
-    sel.priorArtGate = flags.priorArtGate && !flags.no.has('prior-art-gate');
-    // Fresh defaults minus explicit --no-<provider>; selecting none is allowed.
-    sel.agentTargets = AGENT_TARGETS.filter((t) => !flags.no.has(t));
+    if (flags.priorArtGate)
+        sel.priorArtGate = true;
+    if (flags.no.has('prior-art-gate'))
+        sel.priorArtGate = false;
+    // Preserve recorded providers on a re-run; a fresh base still contains every default provider.
+    sel.agentTargets = sel.agentTargets.filter((target) => !flags.no.has(target));
     // The gate's registrations are Claude-only: recording it enabled with no claude surface would
     // install nothing and leave dead config, so deselect it visibly instead.
     if (sel.priorArtGate && !sel.agentTargets.includes('claude')) {
@@ -128,6 +150,43 @@ export function selectionFromFlags(flags) {
         console.warn('  ! prior-art gate skipped: its hooks are Claude-only and the claude surface is deselected');
     }
     return sel;
+}
+/** Resolve a non-interactive run as an explicit flag patch over the raw recorded component state. */
+export function resolveFlagSelection(cwd, args, flags) {
+    const recorded = readJson(join(cwd, '.devkit', 'config.json'));
+    const recordedComponents = recorded?.components ? { ...recorded.components } : undefined;
+    if (recordedComponents && recordedComponents.agentTargets === undefined) {
+        const { gitRoot } = detectGitRoot(cwd);
+        recordedComponents.agentTargets = resolveExistingAgentProviders(gitRoot, undefined, [
+            'skills',
+            'agents',
+        ]);
+    }
+    if (recorded?.overlay && recordedComponents && recordedComponents.biome === undefined) {
+        recordedComponents.biome = existsSync(join(cwd, 'biome.devkit.jsonc'));
+    }
+    if (flags.stack &&
+        recorded?.stack &&
+        !STRUCTURE_STACKS.has(recorded.stack) &&
+        STRUCTURE_STACKS.has(flags.stack) &&
+        recordedComponents?.structure === false &&
+        !flags.no.has('structure')) {
+        recordedComponents.structure = true;
+    }
+    let selection = selectionFromFlags(flags, recordedComponents);
+    selection = recoverInterruptedCapabilitySelection(cwd, flags, selection);
+    const disabledGuards = [
+        ...(recorded?.components?.disabledGuards ?? []),
+        ...disabledGuardsFromFlags(flags),
+    ];
+    // normalizeSelection fills absent optionals with false for the apply layer; keep raw absence
+    // unless this invocation explicitly answers the optional component's positive/negative flag.
+    const undecided = recorded?.components
+        ? unofferedComponents(recorded.components)
+            .filter((component) => !args.includes(component.flag) && !flags.no.has(component.flag.slice('--'.length)))
+            .map((component) => component.id)
+        : [];
+    return { selection, disabledGuards, undecided };
 }
 /** Recover managed capabilities published before an interrupted init wrote its component record. */
 export function recoverInterruptedCapabilitySelection(cwd, flags, selection) {

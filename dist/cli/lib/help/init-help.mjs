@@ -5,7 +5,8 @@ Usage:
 
   --stack <x>            electron | react-app | next | node-service | generic
                          (default: auto-detect; structure preset ships for electron + react-app).
-  --yes                  Non-interactive: install all recommended defaults (no prompts).
+  --yes                  Non-interactive: use recommended defaults on a fresh install; on a re-run,
+                         preserve recorded components except those changed by explicit flags.
   --dry-run              Print every file action; write nothing.
   --force                Overwrite existing devkit-managed files, AND adopt/overwrite a consumer's
                          own same-named skill/agent/hook collisions (default: preserve them).

@@ -119,6 +119,7 @@ export function emitMergedLensResults(splitParts, firstModel) {
             escalated: Boolean(merged.escalated),
             model: merged.model ?? firstModel,
             reason: merged.reason,
+            inconclusive_cause: merged.inconclusiveCause,
             secs: parts.reduce((sum, p) => sum + p.secs, 0),
             // Per-group cost and verdict. `secs` above sums, and `escalated`/`model` collapse to the
             // worst part, so without this vector a slow or repeatedly-escalating lens is invisible —

@@ -308,13 +308,20 @@ export async function runReviewGate(
     judgeEnv,
     promptExtras: ctx.promptExtras,
   };
-  // sc-1476: checklist-contract recovery is DEFERRED out of the contended wave (review-only —
-  // the same scope the inline retry had). Parked outcomes settle nothing; the serial phase below
-  // re-runs each solo through the SAME settle path with `retried` marked.
+  // sc-1476/sc-2088: contract recovery defers out of the contended wave; the serial phase below
+  // re-runs each parked reviewer solo through the SAME settle path.
   const parked: ParkedRecovery[] = [];
   const results = await mapLimit(plan.tasks, concurrency, (t, index) => {
     const t0 = Date.now();
-    return runCascade(t.sel, { ...baseOpts, recovery: assetRoot ? 'defer' : undefined })
+    // sc-2088 widens recovery from review-only to review + STRICT (ship/reship). `assetRoot` stays
+    // in the condition rather than relying on strict alone: review mode owns its recovery under its
+    // own contract, and GUARD_AI_STRICT is a shell export the engine must not depend on to keep it.
+    // Plain `git commit` is excluded deliberately, not by omission: it runs from the husky fragment
+    // with no gate supervisor and no SHIP_COMMIT_TIMEOUT, so a serial recovery phase there would be
+    // unbounded (a solo cascade can run to DEEP_JUDGE_TIMEOUT_MS with nothing able to kill it), and
+    // the added wall-clock would widen the staged-tree tamper window — turning today's instant
+    // exit-2 fail-open into a hard exit-1 block for anyone who stages a file mid-gate.
+    return runCascade(t.sel, { ...baseOpts, recovery: strict || assetRoot ? 'defer' : undefined })
       .catch((e): CascadeResult => ({
         name: t.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',
@@ -333,12 +340,13 @@ export async function runReviewGate(
     parked,
     results,
     sctx,
-    (task, reason) =>
+    (task, reason, budgetMs) =>
       runCascade(task.sel, {
         ...baseOpts,
         retryFirst: false, // the deferred run IS the second chance — never stack the outage retry
         checklistRecoveryReason: reason,
         recovery: 'final',
+        judgeTimeoutMs: budgetMs,
       }).catch((e): CascadeResult => ({
         name: task.sel.reviewer.name,
         status: reviewMode ? 'error' : 'inconclusive',

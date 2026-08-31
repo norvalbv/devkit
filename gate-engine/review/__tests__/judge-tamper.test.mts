@@ -16,8 +16,11 @@ import {
 // the gate snapshots the staged tree before the judge wave and refuses every verdict if it moved.
 
 let savedSplit: string | undefined;
+let savedStrict: string | undefined;
 
 beforeEach(() => {
+  savedStrict = process.env.GUARD_AI_STRICT;
+  delete process.env.GUARD_AI_STRICT;
   // The fixture artifact writer speaks the MONOLITH shape (base state file); pin the split off
   // the way run-review.test.mts does — the tamper contract is orthogonal to lens fan-out.
   savedSplit = process.env.GUARD_CORRECTNESS_SPLIT;
@@ -29,6 +32,8 @@ afterEach(() => {
   cleanupReviewFixtures();
   if (savedSplit === undefined) delete process.env.GUARD_CORRECTNESS_SPLIT;
   else process.env.GUARD_CORRECTNESS_SPLIT = savedSplit;
+  if (savedStrict === undefined) delete process.env.GUARD_AI_STRICT;
+  else process.env.GUARD_AI_STRICT = savedStrict;
   vi.restoreAllMocks();
 });
 
@@ -48,6 +53,26 @@ describe('staged-tree tamper detection', () => {
     expect(await runReviewGate(repo, { exec })).toBe(1);
     const err = vi.mocked(console.error).mock.calls.flat().join('\n');
     expect(err).toContain('STAGED TREE CHANGED');
+  });
+
+  it('a tamper during the DEFERRED recovery phase still hard-blocks, not fail-open', async () => {
+    const repo = consumerRepo({ backend: true });
+    process.env.GUARD_AI_STRICT = '1'; // the strict path is the one that schedules recovery
+    const attempts = new Map<string, number>();
+    const exec = mkExec(async ({ label }) => {
+      const attempt = (attempts.get(label) ?? 0) + 1;
+      attempts.set(label, attempt);
+      const parking = label === 'review:api-security-reviewer' && attempt === 1;
+      writeArtifact(repo, label, { pending: parking ? 3 : 0 });
+      if (!parking && attempt > 1) {
+        // Runs in the SOLO recovery, after the whole first wave settled.
+        writeFileSync(join(repo, 'src', 'smuggled-late.ts'), 'export const late = true;\n');
+        execFileSync('git', ['add', 'src/smuggled-late.ts'], { cwd: repo });
+      }
+      return 'looks fine\nVERDICT: PASS';
+    });
+    expect(await runReviewGate(repo, { exec })).toBe(1);
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain('STAGED TREE CHANGED');
   });
 
   it('a judge that COMMITS mid-wave is caught by HEAD identity — write-tree alone cannot see it', async () => {

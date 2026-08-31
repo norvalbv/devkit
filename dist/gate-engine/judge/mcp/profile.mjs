@@ -162,33 +162,38 @@ export function judgeMcpCapabilityFingerprint(profile, allowedTools, options) {
     const servers = profile.kind === 'named-agent' && registry
         ? selectedServers(registry, profile.serverNames, projectCandidates(options.cwd, env, options.projectRoots))
         : {};
+    return capabilityFingerprint(profile, allowedTools, registryPath ?? requested, servers);
+}
+function capabilityFingerprint(profile, allowedTools, registryPath, servers) {
     return createHash('sha256')
-        .update(JSON.stringify({ allowedTools, profile, registryPath: registryPath ?? requested, servers }))
+        .update(JSON.stringify({ allowedTools, profile, registryPath, servers }))
         .digest('hex');
 }
-function emptyProfile() {
+function emptyProfile(capabilityFingerprint) {
     return {
         args: ['--mcp-config', EMPTY_MCP_CONFIG, '--strict-mcp-config'],
         serverNames: [],
         servers: {},
+        capabilityFingerprint,
         cleanup: () => { },
     };
 }
 export function prepareJudgeMcpProfile(profile, options) {
+    const allowedTools = options.allowedTools ?? '';
     if (profile.kind === 'none')
-        return emptyProfile();
+        return emptyProfile(judgeMcpCapabilityFingerprint(profile, allowedTools, options));
     const env = options.env ?? process.env;
     const explicit = options.registryPath !== undefined || env[REGISTRY_ENV] !== undefined;
     const requested = options.registryPath ?? env[REGISTRY_ENV] ?? path.join(homedir(), '.claude.json');
     const registryPath = trustedRegistryPath(requested, options.cwd, explicit);
     if (!registryPath) {
         warnOnce(`registry:${requested}`, `guard-review: trusted MCP registry unavailable at ${requested} — named agents continue with strict-empty MCP isolation`);
-        return emptyProfile();
+        return emptyProfile(capabilityFingerprint(profile, allowedTools, requested, {}));
     }
     const registry = readRegistry(registryPath);
     if (!registry) {
         warnOnce(`registry-json:${registryPath}`, 'guard-review: trusted MCP registry is unreadable — named agents continue with strict-empty MCP isolation');
-        return emptyProfile();
+        return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
     }
     const roots = projectCandidates(options.cwd, env, options.projectRoots);
     const servers = selectedServers(registry, profile.serverNames, roots);
@@ -197,7 +202,7 @@ export function prepareJudgeMcpProfile(profile, options) {
     if (missing.length > 0)
         warnOnce(`missing:${registryPath}:${missing.join(',')}`, `guard-review: named-agent MCP profile missing ${missing.join(', ')} — continuing with the configured subset under strict isolation`);
     if (present.length === 0)
-        return emptyProfile();
+        return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
     let directory = null;
     try {
         directory = mkdtempSync(path.join(options.temporaryRoot ?? tmpdir(), 'devkit-judge-mcp-'));
@@ -213,6 +218,7 @@ export function prepareJudgeMcpProfile(profile, options) {
             args: ['--mcp-config', file, '--strict-mcp-config'],
             serverNames: present,
             servers,
+            capabilityFingerprint: capabilityFingerprint(profile, allowedTools, registryPath, servers),
             cleanup: () => rmSync(privateDirectory, { recursive: true, force: true }),
         };
     }
@@ -220,6 +226,6 @@ export function prepareJudgeMcpProfile(profile, options) {
         if (directory)
             rmSync(directory, { recursive: true, force: true });
         warnOnce('temporary-config', 'guard-review: private MCP profile file could not be created — named agents continue with strict-empty MCP isolation');
-        return emptyProfile();
+        return emptyProfile(capabilityFingerprint(profile, allowedTools, registryPath, {}));
     }
 }

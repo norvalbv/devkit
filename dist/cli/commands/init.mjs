@@ -5,7 +5,7 @@ import { confirm, isCancel, outro } from '@clack/prompts';
 import { enableLineGrowth, hasLineCap, LINE_CAP, } from '../../gate-engine/ratchets/size-disable.mjs';
 import { IMPORT_WALL_BASELINE, LEGACY_IMPORT_WALL_BASELINE, STRUCTURE_BASELINE_DIR, STRUCTURE_EXEMPT, reportRatchetBaselineMigration, } from '../../gate-engine/ratchets/baseline-paths.mjs';
 import { loadImportWallExempt } from '../../gate-engine/structure/load-baseline.mjs';
-import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, } from '../lib/components.mjs';
+import { AGENT_TARGETS, applyOverlayConstraints, COMPONENTS, CONFIG_DRIVEN_STRUCTURE, disabledGuardsFor, dropUndecided, GUARD_IDS, normalizeReviewProfile, RECORDED_COMPONENT_IDS, structureCmdFor, STRUCTURE_STACKS, } from '../lib/components.mjs';
 import { detectGitRoot } from '../lib/detect-git-root.mjs';
 import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mjs';
 import { detectStack } from '../lib/detect-stack.mjs';
@@ -35,8 +35,6 @@ import { removeAgents, removeSkills } from '../lib/sync-manifest.mjs';
 import { runWizard } from '../lib/wizard.mjs';
 import { repoUrl } from './update.mjs';
 const INIT_VERSION = 2;
-// Stacks with structure-lint presets; omitted stacks have no shipped template yet.
-const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 // Config-driven stacks keep topology in guard.config and use Devkit's own structure binary.
 // Electron remains package-mode because its preset imports consumer-side eslint dependencies.
 const STRUCTURE_TEMPLATE_FILES = {
@@ -573,6 +571,7 @@ function applyOverlay(cwd, plan, pkgRel, devkitRef) {
     // outcome (fallowWired) — an aborted install (no binary) records false. dropUndecided keeps an
     // un-asked optional component absent, exactly as the package writer does.
     const overlayComponents = dropUndecided({
+        biome: Boolean(selection.biome),
         guards: [...(selection.guards ?? [])],
         skills: Boolean(selection.skills),
         agents: Boolean(selection.agents),
@@ -866,6 +865,7 @@ export default async function run(args, cwd) {
     let mode = detectedMode;
     let review;
     let disabledGuards;
+    let undecided = [];
     // --baselines-only re-derives structure/import-wall baselines only for package-mode presets.
     if (flags.baselinesOnly) {
         if (mode !== 'package') {
@@ -910,9 +910,7 @@ export default async function run(args, cwd) {
             : [];
     }
     else {
-        selection = initFlags.selectionFromFlags(flags);
-        selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
-        disabledGuards = initFlags.disabledGuardsFromFlags(flags);
+        ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
     }
     antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
     if (mode === 'overlay')
@@ -957,6 +955,7 @@ export default async function run(args, cwd) {
         globalCommitGate: flags.globalCommitGate,
         review,
         disabledGuards,
+        undecided,
     });
     if (interactive && !selfHost)
         outro('Done — run `devkit doctor` to verify.');

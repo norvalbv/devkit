@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { resolveGuardConfig, sourceMatchers } from '../config.mjs';
 import { LEGACY_LINES_BASELINE, readRatchetBaseline } from './baseline-paths.mjs';
 import { stagedSet, treeTextAtRef } from './git-index.mjs';
-import { decodeLineBaseline } from './size-line-authority.mjs';
+import { decodeLineBaseline, effectiveLineCeiling, measureLines, normalizeCandidateLineBaseline, normalizeLineBaseline, } from './size-line-authority.mjs';
 import { LINES_BASELINE, SIZE_SKIP_DIRS } from './size-policy.mjs';
 function readLinesBaseline(contents, label) {
     const decoded = decodeLineBaseline(contents, label);
@@ -20,7 +20,15 @@ function readLinesBaselineAtRef(root, ref) {
     const text = treeTextAtRef(root, ref, LINES_BASELINE) ?? treeTextAtRef(root, ref, LEGACY_LINES_BASELINE);
     if (text === null)
         return null;
-    return readLinesBaseline(text, ref);
+    return normalizeLineBaseline(readLinesBaseline(text, ref), (file) => treeTextAtRef(root, ref, file));
+}
+function workingText(root, file) {
+    try {
+        return readFileSync(join(root, file), 'utf8');
+    }
+    catch {
+        return null;
+    }
 }
 function sourcePaths(root, cfg, selected) {
     const match = sourceMatchers(cfg.sourceExtensions);
@@ -53,6 +61,7 @@ export function preflightLines(root, ref, requested = []) {
         console.error(`guard-size preflight unavailable at ${ref}: ${String(error)}`);
         return 2;
     }
+    local = normalizeCandidateLineBaseline(root, local, [ref], (file) => workingText(root, file));
     const match = sourceMatchers(cfg.sourceExtensions);
     const cap = (file) => (match.isTest(file) ? cfg.maxTestLines : cfg.maxLines);
     const selected = requested.length > 0 ? requested : [...(stagedSet(root) ?? [])];
@@ -72,10 +81,16 @@ export function preflightLines(root, ref, requested = []) {
     let rows;
     try {
         rows = files.map((file) => {
-            const lines = readFileSync(join(root, file), 'utf8').split('\n').length;
-            const ceiling = Math.max(cap(file), baseline.files[file] ?? 0);
-            const localCeiling = Math.max(cap(file), local.files[file] ?? 0);
-            return { file, lines, ceiling, headroom: ceiling - lines, localCeiling };
+            const measured = measureLines(readFileSync(join(root, file), 'utf8'));
+            const ceiling = effectiveLineCeiling(baseline, file, cap(file));
+            const localCeiling = effectiveLineCeiling(local, file, cap(file));
+            return {
+                file,
+                lines: measured.lines,
+                ceiling,
+                headroom: ceiling - measured.lines,
+                localCeiling,
+            };
         });
     }
     catch (error) {

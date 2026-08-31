@@ -35,13 +35,13 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { inspectIndexFreshness, missingIndexMessage, staleIndexMessage, } from '../../../gate-engine/co-occurrence/index-refresh.mjs';
-import { parseModelSpec } from '../../../gate-engine/judge/codex/result.mjs';
-import { correctnessModel, resolveEscalationModel, resolveReviewModel, REVIEWERS, } from '../../../gate-engine/review/reviewers.mjs';
+import { isCodexModel, parseModelSpec } from '../../../gate-engine/judge/codex/result.mjs';
+import { REVIEWERS } from '../../../gate-engine/review/reviewers.mjs';
 import { detectStack } from '../detect-stack.mjs';
 import { packageDir, readJson } from '../fs-helpers.mjs';
 import { check } from './check-result.mjs';
 import { JUDGE_AUTH_CHECK, judgeAuthResult } from './judge/judge-auth.mjs';
-import { CLAUDE_RUNTIME_CHECK, claudeBindable, claudeRuntimeResult, explicitFamilyKeys, FAMILY_STALE_CHECK, familyStaleResult, } from './judge/judge-family.mjs';
+import { CLAUDE_RUNTIME_CHECK, claudeBindable, claudeRuntimeResult, explicitFamilyKeys, FAMILY_STALE_CHECK, familyStaleResult, resolvedJudgeModels, } from './judge/judge-family.mjs';
 export const SEARCH_INDEX_CHECK = 'search-code index';
 /** Where `devkit init --search-code` puts the index — mirrors INDEX_PATH in install-search-code.mts. */
 const DEFAULT_INDEX = '.search-code/index.db';
@@ -188,7 +188,7 @@ reviewSelected) {
         if (explicit.length)
             codex.remediation += ` — automatic binding is blocked by your explicit review.${explicit.join(' / review.')}`;
     }
-    const claude = reviewSelected ? claudeRuntimeResult(cwd) : null;
+    const claude = reviewSelected ? claudeRuntimeResult(cfg, cwd) : null;
     if (claude)
         results.push(claude);
     const stale = reviewSelected ? familyStaleResult(cwd) : null;
@@ -205,20 +205,20 @@ export const CODEX_RUNTIME_CHECK = 'codex judge runtime';
  * the gate uses, so no second copy of the precedence) route judges to the codex CLI but no codex
  * binary is resolvable. That combination is an undetected fail-open: every reviewer returns
  * inconclusive and the gate exits 2 while reviewing nothing (sc-2107/sc-2054). Silent when no
- * gpt-* model is configured — most installs — per this file's DRIFT-needs-positive-evidence rule.
+ * gpt-* model is configured, per this file's DRIFT-needs-positive-evidence rule.
  */
 export function codexRuntimeResult(cfg, 
 // Relative pins / PATH entries resolve against the CONSUMER repo (where the judge spawns),
 // never the doctor's own process cwd.
 cwd = process.cwd()) {
-    const models = [resolveReviewModel(cfg), resolveEscalationModel(cfg), correctnessModel(cfg)];
-    const gpt = [...new Set(models.filter((m) => m.startsWith('gpt-')))];
+    const models = resolvedJudgeModels(cfg);
+    const gpt = [...new Set(models.filter((m) => isCodexModel(m)))];
     // A model spec the spawn layer would mishandle is a config defect the doctor should name now —
     // otherwise every affected judge fails at the next commit. The @effort suffix is codex-only:
     // the claude path passes `--model` verbatim, so `sonnet@high` would reach claude untranslated.
     for (const spec of new Set(models)) {
         try {
-            if (spec.includes('@') && !spec.startsWith('gpt-'))
+            if (spec.includes('@') && !isCodexModel(spec))
                 throw new Error(`judge model ${JSON.stringify(spec)} carries a reasoning-effort suffix, but only codex (gpt-*) models support one — the claude CLI would receive it verbatim`);
             parseModelSpec(spec);
         }
@@ -251,7 +251,7 @@ cwd = process.cwd()) {
                 .some((d) => executable(join(d === '' ? '.' : d, 'codex')));
     if (resolvable)
         return null;
-    return check(CODEX_RUNTIME_CHECK, 'DRIFT', `judge model ${gpt.join(', ')} routes reviewers through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — every reviewer would go inconclusive and the review gate fails open`, 'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.escalationModel / review.correctnessModel in guard.config.json');
+    return check(CODEX_RUNTIME_CHECK, 'DRIFT', `judge model ${gpt.join(', ')} routes through the codex CLI, but no codex binary resolves (PATH${pinned ? `, GUARD_CODEX_BIN=${pinned}` : ''}) — affected judges are unavailable and strict ships fail closed`, 'install codex-cli (or set GUARD_CODEX_BIN), or override review.model / review.escalationModel / review.correctnessModel in guard.config.json');
 }
 /**
  * Print the index-wiring signal for the doctor modes that never build a CheckResult[] — overlay and
