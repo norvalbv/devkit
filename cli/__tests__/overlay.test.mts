@@ -1353,10 +1353,8 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
     expect(readFileSync(join(root, '.devkit', 'hooks', 'pre-commit'), 'utf8')).toBe(stale); // untouched
   });
 
-  it('does NOT re-add biome to a --no-biome overlay (opt-out survives; applyOverlay never records biome)', async () => {
+  it('records a --no-biome overlay so later refreshes preserve the opt-out', async () => {
     const root = workRepo();
-    // simulate `devkit init --overlay --no-biome`: biome off, so no biome.devkit.jsonc is written and
-    // applyOverlay's config write never records `biome` (its components literal omits the key).
     await applyInit(root, {
       stack: 'react-app',
       selection: applyOverlayConstraints({ ...defaultSelection(), biome: false }),
@@ -1364,12 +1362,10 @@ describe('overlay upgrade (re-syncs, not the old bail)', () => {
       devkitRef: 'v0.7.0',
     });
     expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false); // opted out at init
-    expect(readCfg(root).components.biome).toBeUndefined(); // never persisted → the gap the fix closes
+    expect(readCfg(root).components.biome).toBe(false);
 
     await upgrade([], root);
 
-    // upgrade infers biome from the absent on-disk marker (not normalizeSelection's true default), so
-    // the opt-out is honoured — biome.devkit.jsonc is NOT silently re-added.
     expect(existsSync(join(root, 'biome.devkit.jsonc'))).toBe(false);
   });
 
