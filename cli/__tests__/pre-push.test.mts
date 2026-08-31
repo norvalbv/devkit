@@ -343,6 +343,33 @@ describe('pre-push failure attribution', () => {
     expect(result.stderr).not.toContain('pre-date your push');
   });
 
+  // run_checks tests the WORKTREE. Pushing a ref that carries some other commit means the tested
+  // tree was never that ref's, so naming its base would blame the wrong change entirely.
+  it('stays silent when the pushed ref is not the tree that was tested', () => {
+    const { fakeBin, logPath, root } = seedRepository();
+    const base = git(root, 'rev-parse', 'HEAD');
+    // A second branch whose tip is a DIFFERENT commit from the checked-out HEAD.
+    git(root, 'checkout', '-q', '-b', 'feature');
+    writeFileSync(join(root, 'feature-only.mts'), 'export const f = true;\n');
+    git(root, 'add', 'feature-only.mts');
+    git(root, 'commit', '-qm', 'feature');
+    const featureTip = git(root, 'rev-parse', 'HEAD');
+    git(root, 'checkout', '-q', '-');
+    const headNow = git(root, 'rev-parse', 'HEAD');
+    expect(featureTip).not.toBe(headNow);
+
+    writeFileSync(join(root, 'fail-tests'), '');
+    const result = runPrePush(
+      root,
+      fakeBin,
+      logPath,
+      `refs/heads/feature ${featureTip} refs/heads/feature ${base}\n`,
+    );
+    expect(result.status).toBe(7);
+    expect(result.stderr).not.toContain('pre-date your push');
+    expect(result.stderr).not.toContain('in your change');
+  });
+
   it('can be turned off without changing the verdict', () => {
     const { fakeBin, logPath, root } = seedRepository();
     const base = git(root, 'rev-parse', 'HEAD');

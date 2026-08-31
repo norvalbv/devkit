@@ -148,7 +148,18 @@ export function stagedTouchedSet(root) {
     // No --diff-filter at all: every status the index can carry is a path this commit touched,
     // including D (delete) and T (regular file <-> symlink). An allowlist of statuses is exactly how
     // deletions were missed once already.
-    const argv = (args) => ['diff', '--cached', '--name-only', '-z', ...args];
+    //
+    // --no-renames because rename detection reports only the DESTINATION. Moving a governed file out
+    // of its governed path would then be invisible to a caller matching on the source path, and the
+    // drift that move caused would read as pre-existing. Split into delete + add, both sides appear.
+    const argv = (args) => [
+        'diff',
+        '--cached',
+        '--name-only',
+        '-z',
+        '--no-renames',
+        ...args,
+    ];
     try {
         const staged = new Set(splitNul(execFileSync('git', argv([]), { cwd: root, encoding: 'utf8' })));
         // An ordinary commit has no MERGE_HEAD, and the first-parent set is the whole answer.

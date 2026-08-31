@@ -53,6 +53,7 @@ function seedRoot(hookContent?: string): string {
   copyFileSync(join(ROOT, 'package.json'), join(root, 'package.json'));
   if (hookContent !== undefined) {
     mkdirSync(join(root, '.husky'), { recursive: true });
+    mkdirSync(join(root, 'cli', 'lib', 'husky'), { recursive: true });
     writeFileSync(join(root, HOOK_REL), hookContent);
   }
   return root;
@@ -253,6 +254,43 @@ describe('judgeHookParity — attribution edge cases', () => {
     expect(verdict.code).toBe(1);
   });
 
+  // Without -z, git C-quotes a non-ASCII path, and the quoted form fails the prefix match — so the
+  // input slips past the classifier and the gate returns a clean pass.
+  // --exclude-standard would drop this file, but an ignored module imported by a staged generator
+  // is still loaded from the worktree and still absent from the commit.
+  it('detects a generator input that is untracked AND gitignored', () => {
+    const { root, git } = seedGitRoot();
+    mkdirSync(join(root, 'cli', 'lib', 'husky'), { recursive: true });
+    writeFileSync(join(root, '.gitignore'), 'cli/lib/husky/ignored-fragment.mts\n');
+    git('add', '.gitignore');
+    git('commit', '-qm', 'ignore rule');
+    writeFileSync(
+      join(root, 'cli', 'lib', 'husky', 'ignored-fragment.mts'),
+      'export const x = 1;\n',
+    );
+    const verdict = judgeHookParity(root);
+    expect(verdict.code).toBe(0);
+    expect(verdict.inert).toContain('ignored-fragment.mts');
+  });
+
+  it('detects an untracked generator input whose name git would C-quote', () => {
+    const { root } = seedGitRoot();
+    mkdirSync(join(root, 'cli', 'lib', 'husky'), { recursive: true });
+    writeFileSync(join(root, 'cli', 'lib', 'husky', 'café.mts'), 'export const x = 1;\n');
+    const verdict = judgeHookParity(root);
+    expect(verdict.code).toBe(0);
+    expect(verdict.inert).toContain('café.mts');
+  });
+
+  it('stands down when a generator input exists only in the working tree', () => {
+    const { root } = seedGitRoot();
+    mkdirSync(join(root, 'cli', 'lib', 'husky'), { recursive: true });
+    writeFileSync(join(root, 'cli', 'lib', 'husky', 'new-fragment.mts'), 'export const x = 1;\n');
+    const verdict = judgeHookParity(root);
+    expect(verdict.code).toBe(0);
+    expect(verdict.inert).toContain('cli/lib/husky/new-fragment.mts');
+  });
+
   // The expected block is generated from the WORKTREE while the hook comes from the index, so a
   // generator input that differs between them compares two different trees.
   it('stands down rather than judging when a generator input is only partly staged', () => {
@@ -295,8 +333,12 @@ describe('runHookParityGate — printed verdict and exit code', () => {
     delete process.env.GUARD_HOOK_PARITY_OK;
   });
 
+  // A clean fixture, not ROOT: this repo's own worktree is dirty whenever someone is mid-edit on a
+  // generator input, and the gate correctly refuses to judge then. Asserting the pass against the
+  // live tree would make this test depend on the developer's uncommitted state.
   it('exits 0 and says so when the committed hook is in parity', () => {
-    expect(runHookParityGate(ROOT)).toBe(0);
+    const { root } = seedGitRoot();
+    expect(runHookParityGate(root)).toBe(0);
     expect(out.join('\n')).toContain('Hook parity passed');
   });
 
@@ -395,8 +437,9 @@ describe('hook-parity --gate as the hook actually spawns it', () => {
   const spawnGate = (cwd: string, env: Record<string, string> = {}) =>
     spawnSync('node', [GATE, '--gate'], { cwd, encoding: 'utf8', env: { ...process.env, ...env } });
 
-  it('exits 0 in this repo, whose hook is in parity', () => {
-    const result = spawnGate(ROOT);
+  it('exits 0 through the real process when the hook is in parity', () => {
+    const { root } = seedGitRoot();
+    const result = spawnGate(root);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Hook parity passed');
   });

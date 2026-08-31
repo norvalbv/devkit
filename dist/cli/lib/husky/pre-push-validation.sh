@@ -21,6 +21,7 @@ if ! { [[ "$SHIP_SKIP_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$SHIP_SKIP_SHA" =~ ^[0-9a
 fi
 GATE_PHASE=
 GATE_HEAD_OID=
+gate_rc=0
 NON_TAG_UPDATE_COUNT=0
 NON_TAG_MATCH_COUNT=0
 UPDATES_FILE=$(mktemp "${TMPDIR:-/tmp}/devkit-pre-push-updates.XXXXXX")
@@ -49,10 +50,20 @@ cleanup() {
 }
 
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 131' QUIT
-trap 'exit 143' TERM
+# A signal must never turn a captured failure into a different code, and must never yield 0. Once
+# gate_rc holds a real verdict it wins; before that, the signal's own conventional code applies —
+# which still blocks. Installed ONCE, at the top: re-pointing the traps later would leave a window
+# between run_checks returning and the new trap taking effect.
+signal_exit() {
+  if [ "${gate_rc:-0}" -ne 0 ]; then
+    exit "$gate_rc"
+  fi
+  exit "$1"
+}
+trap 'signal_exit 129' HUP
+trap 'signal_exit 130' INT
+trap 'signal_exit 131' QUIT
+trap 'signal_exit 143' TERM
 
 # The `|| return $?` guards are load-bearing, not style. The branch call site is now an OR-list, and
 # per docs/decisions/fail-open-needs-an-errexit-safe-call.md an OR-list suppresses errexit for the
@@ -109,7 +120,7 @@ append_tag_commit() {
 # base this push agreed on. Ambiguity degrades to silence rather than a guess.
 attribution_base() {
   local head_oid lref loid rref roid
-  local picked= picked_set=0 single= count=0
+  local picked= picked_set=0
 
   head_oid=$GATE_HEAD_OID
   [ -n "$head_oid" ] || return 1
@@ -118,8 +129,6 @@ attribution_base() {
     [ -n "${rref:-}" ] || continue
     case "$rref" in refs/tags/*) continue ;; esac
     is_zero_oid "$loid" && continue # a deletion has no tree to judge
-    count=$((count + 1))
-    single=$roid
     if [ "$loid" = "$head_oid" ]; then
       # Two refs carrying the same tree to different remote tips: whichever we picked would be an
       # arbitrary function of input order, so pick neither.
@@ -131,11 +140,11 @@ attribution_base() {
     fi
   done < "$UPDATES_FILE"
 
-  if [ "$picked_set" -eq 0 ]; then
-    # Several refs and none is the tree we tested: picking one would be guessing.
-    [ "$count" -eq 1 ] || return 1
-    picked=$single
-  fi
+  # run_checks tested the WORKTREE, i.e. GATE_HEAD_OID's tree. A ref that carries some other commit
+  # — pushing `feature` while checked out on `main` — was never the thing measured, so attributing
+  # this run's failures to its base would name the wrong change. Only an update whose local oid IS
+  # the tested tree may supply the base; anything else is silence.
+  [ "$picked_set" -eq 1 ] || return 1
 
   # A brand-new branch (an all-zero remote oid) or a tip this checkout has never fetched.
   is_zero_oid "$picked" && return 1
@@ -220,19 +229,12 @@ if [ "$HAS_UPDATES" -eq 0 ] || [ "$HAS_NON_TAG_UPDATE" -eq 1 ]; then
     echo "  A plain git push still runs the full suite." >&2
     exit 0
   fi
-  gate_rc=0
   run_checks "$ROOT" || gate_rc=$?
   if [ "$gate_rc" -ne 0 ]; then
     # `|| true` is the safety argument: it supplies a zero status so `set -e` cannot abort here, AND
-    # it suppresses errexit for the whole call, so nothing inside can short-circuit the script.
-    # The signal traps are re-pointed at the captured verdict for the same reason: interrupting the
-    # narration (its gh call is the slow part) must not swap a real gate code for 130/143.
-    trap 'exit "$gate_rc"' HUP INT QUIT TERM
+    # it suppresses errexit for the whole call, so nothing inside can short-circuit the script. The
+    # verdict was captured before it ran, and signal_exit already prefers it over any signal code.
     attribute_push_failure || true
-    trap 'exit 129' HUP
-    trap 'exit 130' INT
-    trap 'exit 131' QUIT
-    trap 'exit 143' TERM
     exit "$gate_rc"
   fi
   exit 0

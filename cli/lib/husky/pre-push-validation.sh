@@ -120,7 +120,7 @@ append_tag_commit() {
 # base this push agreed on. Ambiguity degrades to silence rather than a guess.
 attribution_base() {
   local head_oid lref loid rref roid
-  local picked= picked_set=0 single= count=0
+  local picked= picked_set=0
 
   head_oid=$GATE_HEAD_OID
   [ -n "$head_oid" ] || return 1
@@ -129,8 +129,6 @@ attribution_base() {
     [ -n "${rref:-}" ] || continue
     case "$rref" in refs/tags/*) continue ;; esac
     is_zero_oid "$loid" && continue # a deletion has no tree to judge
-    count=$((count + 1))
-    single=$roid
     if [ "$loid" = "$head_oid" ]; then
       # Two refs carrying the same tree to different remote tips: whichever we picked would be an
       # arbitrary function of input order, so pick neither.
@@ -142,11 +140,11 @@ attribution_base() {
     fi
   done < "$UPDATES_FILE"
 
-  if [ "$picked_set" -eq 0 ]; then
-    # Several refs and none is the tree we tested: picking one would be guessing.
-    [ "$count" -eq 1 ] || return 1
-    picked=$single
-  fi
+  # run_checks tested the WORKTREE, i.e. GATE_HEAD_OID's tree. A ref that carries some other commit
+  # — pushing `feature` while checked out on `main` — was never the thing measured, so attributing
+  # this run's failures to its base would name the wrong change. Only an update whose local oid IS
+  # the tested tree may supply the base; anything else is silence.
+  [ "$picked_set" -eq 1 ] || return 1
 
   # A brand-new branch (an all-zero remote oid) or a tip this checkout has never fetched.
   is_zero_oid "$picked" && return 1
