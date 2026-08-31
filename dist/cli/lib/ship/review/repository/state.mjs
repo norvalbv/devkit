@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync, } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, readSync, statSync, } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { writeFileAtomic } from '../../../atomic-write.mjs';
 import { runDirectReviewCli } from '../run-direct.mjs';
@@ -128,17 +128,37 @@ function inspectConfigFile(path, label) {
     }
 }
 function readConfigFile(path, label, type) {
+    let descriptor;
     try {
         const linkTarget = type === 'symlink' ? readlinkSync(path, { encoding: 'buffer' }) : Buffer.alloc(0);
-        const contents = readFileSync(path);
-        if (contents.length > MAX_GIT_OUTPUT)
+        descriptor = openSync(path, 'r');
+        const stat = fstatSync(descriptor);
+        if (!stat.isFile())
+            fail(`target ${label} does not resolve to a regular file.`);
+        if (stat.size > MAX_GIT_OUTPUT)
             fail(`target ${label} is too large.`);
-        return [Buffer.from(type), linkTarget, contents];
+        const contents = Buffer.alloc(stat.size);
+        let offset = 0;
+        while (offset < contents.length) {
+            const bytesRead = readSync(descriptor, contents, offset, contents.length - offset, null);
+            if (bytesRead === 0)
+                break;
+            offset += bytesRead;
+        }
+        const extra = Buffer.allocUnsafe(1);
+        if (readSync(descriptor, extra, 0, 1, null) !== 0) {
+            fail(`target ${label} changed size while it was read.`);
+        }
+        return [Buffer.from(type), linkTarget, contents.subarray(0, offset)];
     }
     catch (cause) {
         if (cause instanceof Error && cause.message.startsWith('devkit review:'))
             throw cause;
         return fail(`could not read target ${label} (${errorMessage(cause)}).`);
+    }
+    finally {
+        if (descriptor !== undefined)
+            closeSync(descriptor);
     }
 }
 /** Exact path entry state. Regular files hash raw bytes; symlinks hash link and resolved bytes. */
@@ -180,6 +200,10 @@ function configFingerprint(context) {
         ...selectedWorktree.parts,
         worktreeEffective,
     ]);
+}
+/** Fingerprint repository-owned common/worktree config bytes plus their effective includes. */
+export function reviewRepositoryConfigFingerprint(targetRoot) {
+    return configFingerprint(repositoryContext(targetRoot));
 }
 function metadataBuffer(stat) {
     return Buffer.from([fileType(stat), stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeNs, stat.ctimeNs].join(':'));

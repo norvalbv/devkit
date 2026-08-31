@@ -2,10 +2,13 @@ import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   type BigIntStats,
+  closeSync,
+  fstatSync,
   lstatSync,
+  openSync,
   readdirSync,
-  readFileSync,
   readlinkSync,
+  readSync,
   type Stats,
   statSync,
 } from 'node:fs';
@@ -182,15 +185,31 @@ function inspectConfigFile(path: string, label: string): Stats | undefined {
 }
 
 function readConfigFile(path: string, label: string, type: 'file' | 'symlink'): Buffer[] {
+  let descriptor: number | undefined;
   try {
     const linkTarget =
       type === 'symlink' ? readlinkSync(path, { encoding: 'buffer' }) : Buffer.alloc(0);
-    const contents = readFileSync(path);
-    if (contents.length > MAX_GIT_OUTPUT) fail(`target ${label} is too large.`);
-    return [Buffer.from(type), linkTarget, contents];
+    descriptor = openSync(path, 'r');
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) fail(`target ${label} does not resolve to a regular file.`);
+    if (stat.size > MAX_GIT_OUTPUT) fail(`target ${label} is too large.`);
+    const contents = Buffer.alloc(stat.size);
+    let offset = 0;
+    while (offset < contents.length) {
+      const bytesRead = readSync(descriptor, contents, offset, contents.length - offset, null);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const extra = Buffer.allocUnsafe(1);
+    if (readSync(descriptor, extra, 0, 1, null) !== 0) {
+      fail(`target ${label} changed size while it was read.`);
+    }
+    return [Buffer.from(type), linkTarget, contents.subarray(0, offset)];
   } catch (cause) {
     if (cause instanceof Error && cause.message.startsWith('devkit review:')) throw cause;
     return fail(`could not read target ${label} (${errorMessage(cause)}).`);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
@@ -237,6 +256,11 @@ function configFingerprint(context: RepositoryContext): string {
     ...selectedWorktree.parts,
     worktreeEffective,
   ]);
+}
+
+/** Fingerprint repository-owned common/worktree config bytes plus their effective includes. */
+export function reviewRepositoryConfigFingerprint(targetRoot: string): string {
+  return configFingerprint(repositoryContext(targetRoot));
 }
 
 function metadataBuffer(stat: BigIntStats): Buffer {

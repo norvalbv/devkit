@@ -19,6 +19,7 @@ describe('devkit help surface', () => {
       'reconcile',
       'guard-branch',
       'base-status',
+      'prove-regression',
     ]) {
       expect(r.stdout).toContain(`devkit ${name}`);
     }
@@ -64,6 +65,37 @@ describe('devkit help surface', () => {
     const r = run(['reconcile', '--help']);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/devkit reconcile —/);
+  });
+
+  it('documents the generic captured-evidence contract', () => {
+    const r = run(['prove-regression', '--help']);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('--red <ref>');
+    expect(r.stdout).toContain('-- <test command>');
+    expect(r.stdout).toContain('--vitest-report');
+    expect(r.stdout).toMatch(/CAPTURED execution\s+evidence, not\s+automatic proof/i);
+    expect(r.stdout).toMatch(/sampled boundary\s+fingerprints matched/i);
+    expect(r.stdout).toMatch(/not an atomic filesystem snapshot/i);
+    expect(r.stdout).toMatch(/each\s+operand receives an independent copy/i);
+    expect(r.stdout).not.toMatch(/node_modules is linked|mutable exception/i);
+    expect(r.stdout).toMatch(/Windows interruption terminates\s+only the direct helper/i);
+  });
+
+  it('leaves --help after prove-regression command boundary in the child argv', () => {
+    const r = run([
+      'prove-regression',
+      '--red',
+      'definitely-not-a-ref',
+      '--green',
+      'definitely-not-a-ref',
+      '--',
+      'node',
+      'test.mjs',
+      '--help',
+    ]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toMatch(/devkit prove-regression —/);
+    expect(r.stderr).toContain('prove-regression setup:');
   });
 
   it('documents the review trust boundary and target/base options', () => {
