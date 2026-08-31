@@ -88,6 +88,7 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     if (packageName(root) !== '@norvalbv/devkit')
         return { ...CLEAN_REPORT };
     const physical = filesUnder(root, 'dist');
+    const physicalSet = new Set(physical);
     const tracked = new Set(git(root, ['ls-files', '--cached', '-z', '--', 'dist']));
     const briefed = new Set(briefedPaths.map(briefPath));
     // A briefed path this ship stages as a DELETION is the one case where briefing does NOT put the
@@ -102,7 +103,7 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     const shipping = (file) => briefed.has(file) && !deleted.has(file);
     const willShip = (file) => tracked.has(file) || shipping(file);
     // Shared checkouts can contain another agent's generated output. Seed the scan from this ship's
-    // explicit source/dist paths, then follow only their will-ship relative-import graph.
+    // explicit source/dist paths, then follow only their reachable physical dist import graph.
     const required = new Set([...briefed].map(generatedPath).filter((file) => file !== undefined));
     // This dependency is dev-only and intentionally loaded only for devkit self-hosting. Installed
     // consumer copies execute the no-op return above and never need es-module-lexer at runtime.
@@ -111,17 +112,19 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
     const unresolved = [];
     const unlexable = [];
     const queue = [...required].filter((file) => file.endsWith('.mjs')).sort();
+    const queued = new Set(queue);
     const parsed = new Set();
-    while (queue.length > 0) {
-        const importer = queue.shift();
-        if (!importer || parsed.has(importer))
+    let queueIndex = 0;
+    while (queueIndex < queue.length) {
+        const importer = queue[queueIndex++];
+        if (parsed.has(importer))
             continue;
         parsed.add(importer);
         const absolute = path.join(root, importer);
-        // Parsing only INDEXED importers made a brand-new module's own imports invisible at the very
-        // ship that introduces it — the artifact had no tracked importer to be demanded by, so it first
-        // surfaced a release later. Walk everything the commit will contain instead.
-        if (!willShip(importer) || !existsSync(absolute))
+        // Keep discovery inside the explicit roots, but continue through every reachable physical dist
+        // module so one report names the whole omitted closure. A deleted artifact is deliberately not
+        // a discovery root: its dependencies are leaving with it, not candidates to add back.
+        if (deleted.has(importer) || !physicalSet.has(importer) || !existsSync(absolute))
             continue;
         let imports;
         try {
@@ -147,7 +150,11 @@ export async function inspectDistIntegrity(root, base, briefedPaths) {
             if (!willShip(target) || !existsSync(path.join(root, target))) {
                 unresolved.push({ importer, specifier, target });
             }
-            else if (target.endsWith('.mjs') && !parsed.has(target)) {
+            if (target.endsWith('.mjs') &&
+                physicalSet.has(target) &&
+                !deleted.has(target) &&
+                !queued.has(target)) {
+                queued.add(target);
                 queue.push(target);
             }
         }

@@ -11,6 +11,30 @@ import {
 } from './_ship-branch-fixture.mts';
 
 describe('ship-branch.sh — --dry-gates', () => {
+  it('supports the same committed --from-branch source snapshot without keeping a branch', () => {
+    const { dir, env, git, bare } = seedBaseRepo({
+      hookBody: 'test "$(git diff --cached --name-only)" = note.txt',
+    });
+
+    const r = spawnSync(
+      '/bin/bash',
+      [
+        scriptPath,
+        'feat/dry-gates-branch',
+        'ship it',
+        '--dry-gates',
+        '--base',
+        'studio',
+        '--from-branch',
+      ],
+      { cwd: dir, input: '', encoding: 'utf8', env },
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(localBranchExists(git, 'feat/dry-gates-branch')).toBe(false);
+    expect(remoteBranchExists(bare, 'feat/dry-gates-branch')).toBe(false);
+  });
+
   it('rehearses the exact fetched base and explicit path brief without leaving a commit or branch', () => {
     const { dir, env, git, bare, studioTip } = seedBaseRepo({
       hookBody: `
