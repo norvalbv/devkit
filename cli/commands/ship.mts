@@ -48,9 +48,11 @@ Usage:
                       Every path changed by the old PR must be briefed. Must name a branch on origin;
                       a PR base cannot be a sha or tag. "origin/x" and "x" are equivalent.
   --body "<text>"     Commit + PR body, inline (no temp file). Wins over stdin; omit it to read the
-                      body from stdin (a pipe or here-doc) or to leave the body empty.
+                      commit body from stdin (a pipe or here-doc) or to leave the body empty.
   --body-file <f>     Commit + PR body read from a file — author it ONCE; the recorded invocation
                       replays it on every retry. Mutually exclusive with --body; wins over stdin.
+                      With --pr, only these two explicit flags refresh the EXISTING PR description;
+                      omitting both preserves it (piped stdin remains commit-only for compatibility).
   --resume <branch>   Replay the invocation recorded by the previous attempt for <branch> (title,
                       base, body, links, paths — every attempt records itself), instead of re-typing
                       them. LEADING position only. Extra paths after [--] are MERGED into the
@@ -117,8 +119,8 @@ export default function ship(
   const flagArgs = sep === -1 ? args : args.slice(0, sep);
   const mode = flagArgs.includes('--pr') ? 'reship' : 'ship-branch';
   // `bash <script>` (not a direct exec of the file) so a lost +x bit through packaging can't break
-  // it. stdio inherit: the PR body flows in on stdin, the PR URL out on stdout, progress on stderr,
-  // and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
+  // it. stdio inherit: the commit/initial-PR body flows in on stdin, the PR URL out on stdout,
+  // progress on stderr, and the TTY-ness the script probes (`[ -t 0 ]`) is preserved.
   //
   // MANAGED (sc-2159), matching `devkit review`: signals reach the script's own process group, not
   // the wrapper alone.

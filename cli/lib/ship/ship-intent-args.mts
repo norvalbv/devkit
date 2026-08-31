@@ -10,7 +10,12 @@ export function parseArgs(argv: string[]) {
       paths.push(...argv.slice(i + 1));
       break;
     }
-    if (a === '--no-qavis-publish' || a === '--resumed' || a === '--merge-paths')
+    if (
+      a === '--no-qavis-publish' ||
+      a === '--update-pr-body' ||
+      a === '--resumed' ||
+      a === '--merge-paths'
+    )
       booleans.add(a.slice(2));
     else if (a === '--link') links.push(argv[++i] ?? '');
     else if (a === '--donate') donates.push(argv[++i] ?? '');

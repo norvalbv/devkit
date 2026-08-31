@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-/**
- * The recorded ship invocation behind `devkit ship --resume <branch>` (write/read/delete over
- * `.devkit/ship-intent-*.json`). Two constraints the code cannot show: the body travels as BYTES
- * (Buffer → base64 — a utf8 hop substitutes U+FFFD and the landed-commit resume check in
- * ship-branch.sh refuses on any byte difference), and the failure direction is asymmetric by
- * design: `write` is best-effort at its call sites (a miss costs the retry a re-type, never a
- * ship) while `read` fails CLOSED with a named reason, because replaying the wrong invocation is
- * worse than refusing.
- */
+/** Recorded ship invocation behind `devkit ship --resume`: Buffer → base64 keeps body bytes exact
+ * (a UTF-8 hop substitutes U+FFFD). Commit-only writes are best-effort; body side effects require
+ * an owned record, and reads fail closed. */
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +13,8 @@ import { fail, parseArgs } from './ship-intent-args.mts';
 import { withLock } from '../atomic-write.mts';
 import { git } from '../reconcile.mts';
 
-const SCHEMA_VERSION = 1;
+const LEGACY_SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 // A manifest this old describes an ABANDONED ship: every live retry chain rewrites it on each
 // attempt, so age only accumulates when no attempt has run — and branch names get reused. Replaying
 // weeks-old bytes under a confident "Resuming" banner is the failure mode; refusing is cheap.
@@ -37,6 +32,7 @@ export interface ShipIntent {
   links: string[];
   paths: string[];
   noQavisPublish: boolean;
+  updatePrBody: boolean;
   bodyB64: string;
   repo: string;
   createdAt: string;
@@ -52,11 +48,8 @@ function originRepo(root: string): string {
   return m ? m[1] : '';
 }
 
-/** The gitignore-relative record path. The gate log's bare `${BR//\//-}` collapse maps `a/b` and
- * `a-b` onto one file, so concurrent ships of such twins would overwrite each other's record; the
- * raw-branch hash suffix separates those twins (truncated, so not a uniqueness proof — the RAW
- * `branch` field check in readIntent is the guarantee that a shared file never replays the other
- * branch's invocation) while the sanitized stem stays greppable. */
+/** The raw-branch hash separates sanitized-name collisions; readIntent's raw branch equality is
+ * the final guarantee that a copied or colliding file never replays another branch's invocation. */
 export const relIntentPath = (branch: string) => {
   const digest = createHash('sha256').update(branch).digest('hex').slice(0, 8);
   return `.devkit/ship-intent-${branch.replace(/\//g, '-').slice(0, 120)}-${digest}.json`;
@@ -64,13 +57,8 @@ export const relIntentPath = (branch: string) => {
 
 const intentFile = (root: string, branch: string) => path.join(root, relIntentPath(branch));
 
-/**
- * Write the manifest for this attempt. Refuses (non-fatally, exit 0 with a warning) when git does
- * not IGNORE the target path: the file holds the complete PR narrative, and a consumer whose
- * managed .gitignore predates this writer must never gain a stageable untracked copy of it — the
- * writer/ignore parity contract from gitignore-cache.mts, made self-enforcing instead of
- * ordering-dependent on `devkit doctor`.
- */
+/** Write this attempt's manifest. Refuse non-fatally when its path is not ignored so the complete
+ * PR narrative cannot become stageable and writer/gitignore parity stays self-enforcing. */
 export function writeIntent(
   opts: {
     root: string;
@@ -80,6 +68,7 @@ export function writeIntent(
     base?: string;
     links: string[];
     noQavisPublish: boolean;
+    updatePrBody: boolean;
     resumed: boolean;
     mergePaths: boolean;
     /** The generation this attempt READ before deciding to re-record. When the on-disk record has
@@ -113,6 +102,7 @@ export function writeIntent(
     links: opts.links,
     paths,
     noQavisPublish: opts.noQavisPublish,
+    updatePrBody: opts.updatePrBody,
     bodyB64: opts.body.toString('base64'),
     repo: originRepo(opts.root),
     createdAt: new Date().toISOString(),
@@ -239,6 +229,24 @@ export function deleteIntent(
   return 0;
 }
 
+/** Lock-shared proof that this process still owns the on-disk intent generation. */
+export function ownsIntentGeneration(root: string, branch: string, generation: string): boolean {
+  const file = intentFile(root, branch);
+  try {
+    return withLock(`${file}.lock`, () => {
+      try {
+        // SAFETY: only generation is read, then proven as a string before comparison.
+        const stored = JSON.parse(readFileSync(file, 'utf8')) as StoredIntent;
+        return provenString(stored.generation) === generation;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** Parse + validate the stored manifest, or return a refusal string (never both). */
 export function readIntent(
   root: string,
@@ -268,7 +276,8 @@ export function readIntent(
     };
   // SAFETY: names fields only — every field is runtime-re-proven below before it is trusted.
   const r = m as StoredIntent;
-  if (r.version !== SCHEMA_VERSION)
+  const storedVersion = r.version;
+  if (storedVersion !== LEGACY_SCHEMA_VERSION && storedVersion !== SCHEMA_VERSION)
     return {
       reason: `recorded invocation has unknown version ${String(r.version)} — run the full command, which re-records`,
     };
@@ -330,6 +339,12 @@ export function readIntent(
     return {
       reason: `recorded invocation is malformed (noQavisPublish) — run the full command, which re-records`,
     };
+  // V1 is preserve-only. V2 requires this side-effect bit, so older binaries reject new records.
+  const updatePrBody = storedVersion === LEGACY_SCHEMA_VERSION ? false : r.updatePrBody;
+  if (updatePrBody !== true && updatePrBody !== false)
+    return {
+      reason: `recorded invocation is malformed (updatePrBody) — run the full command, which re-records`,
+    };
   const generation = provenString(r.generation);
   if (!generation)
     return {
@@ -360,6 +375,7 @@ export function readIntent(
       links,
       paths,
       noQavisPublish,
+      updatePrBody,
       bodyB64,
       repo,
       createdAt,
@@ -378,6 +394,7 @@ interface StoredIntent {
   links?: string[];
   paths?: string[];
   noQavisPublish?: boolean;
+  updatePrBody?: boolean;
   bodyB64?: string;
   repo?: string;
   createdAt?: string;
@@ -400,8 +417,8 @@ function provenStrings(v: string[] | undefined): string[] | null {
 
 /**
  * Field order the bash side depends on (each field NUL-terminated, body decoded to bytes):
- *   mode, title, base ('' when null), noQavisPublish (0|1), createdAt, generation, nlinks,
- *   <links...>, body, <paths...>
+ *   mode, title, base ('' when null), noQavisPublish (0|1), updatePrBody (0|1), createdAt,
+ *   generation, nlinks, <links...>, body, <paths...>
  * Counts precede the one variable-length list that is FOLLOWED by more fields; paths run to EOF so
  * they need none. bash 3.2 reads this with plain `read -r -d ''` — no mapfile, no arrays-by-name.
  */
@@ -411,6 +428,7 @@ function emitFields(intent: ShipIntent): void {
     intent.title,
     intent.base ?? '',
     intent.noQavisPublish ? '1' : '0',
+    intent.updatePrBody ? '1' : '0',
     intent.createdAt,
     intent.generation,
     String(intent.links.length),
@@ -443,6 +461,7 @@ function main(): number {
         base: values.get('base'),
         links,
         noQavisPublish: booleans.has('no-qavis-publish'),
+        updatePrBody: booleans.has('update-pr-body'),
         resumed: booleans.has('resumed'),
         mergePaths: booleans.has('merge-paths'),
         expectGeneration: values.get('expect-generation'),
@@ -458,6 +477,11 @@ function main(): number {
     emitFields(result.intent);
     return 0;
   }
+  if (sub === 'owns') {
+    const generation = values.get('generation');
+    if (!generation) return fail('owns: missing --generation');
+    return ownsIntentGeneration(root, branch, generation) ? 0 : 1;
+  }
   if (sub === 'delete')
     return deleteIntent(
       root,
@@ -465,10 +489,9 @@ function main(): number {
       values.get('generation'),
       paths.length > 0 ? paths : undefined,
     );
-  return fail(`unknown subcommand '${String(sub)}' (write|read|delete)`);
+  return fail(`unknown subcommand '${String(sub)}' (write|read|owns|delete)`);
 }
 
-// CLI entrypoint only — an import (the colocated test) must not exit. Realpath so a symlinked
-// module dir still matches; same guard as reconcile-manifest-write.mts.
+// CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
   process.exit(main());

@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -7,11 +8,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { recordShip } from '../lib/ship/reconcile-manifest-write.mts';
+import { relIntentPath } from '../lib/ship/ship-intent.mts';
 import {
   assertInterruptedGateKeepsWorktree,
   testExecFileSync as execFileSync,
@@ -25,6 +28,7 @@ import {
 // PR-branch tip with the current file content.
 
 const scriptPath = fileURLToPath(new URL('../lib/ship/reship.sh', import.meta.url));
+const shipIntentPath = fileURLToPath(new URL('../lib/ship/ship-intent.mts', import.meta.url));
 const GENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
 const BR_RE = /BR=(.*)/;
 const REPO_RE = /REPO=(.*)/;
@@ -42,6 +46,23 @@ function run(args, dir, env = {}, opts = {}) {
     env: { ...process.env, ...GENV, ...env },
     ...opts,
   });
+}
+
+function runAsync(args, dir, env = {}) {
+  const child = spawn('/bin/bash', [scriptPath, ...args], {
+    cwd: dir,
+    env: { ...process.env, ...GENV, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => (stdout += chunk));
+  child.stderr.setEncoding('utf8').on('data', (chunk) => (stderr += chunk));
+  const completed = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+  return { child, completed };
 }
 
 describe('reship — interrupted gate handoff', () => {
@@ -84,16 +105,22 @@ function repo(origin = 'git@github.com:acme/app.git') {
 
 /** Existing PR off an old base plus a caller snapshot already resolved on today's main. The raw
  * origin stays GitHub-shaped for PR identity checks; url.insteadOf keeps every fetch/push hermetic. */
-function rewriteRepo({ extraPath = false, rename = false } = {}) {
+function rewriteRepo({ extraPath = false, rename = false, objectFormat = 'sha1' } = {}) {
   const bare = mkdtempSync(join(tmpdir(), 'reship-rewrite-bare-'));
   const dir = mkdtempSync(join(tmpdir(), 'reship-rewrite-wt-'));
   const stubBin = mkdtempSync(join(tmpdir(), 'reship-rewrite-bin-'));
+  const ghLog = join(stubBin, 'gh.log');
+  const ghBody = join(stubBin, 'gh.body');
+  const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).trim();
   dirs.push(bare, dir, stubBin);
   const env = { ...process.env, ...GENV };
   const g = (a, o = {}) =>
     execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
-  execFileSync('git', ['init', '-q', '--bare', bare], { env });
-  g(['init', '-q', '-b', 'main']);
+  const objectFormatArgs = objectFormat === 'sha256' ? ['--object-format=sha256'] : [];
+  execFileSync('git', ['init', '-q', '--bare', ...objectFormatArgs, bare], { env });
+  g(['init', '-q', '-b', 'main', ...objectFormatArgs]);
   g(['config', 'user.email', 'a@b.c']);
   g(['config', 'user.name', 'a']);
   g(['config', 'commit.gpgsign', 'false']);
@@ -142,26 +169,139 @@ function rewriteRepo({ extraPath = false, rename = false } = {}) {
   chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
   g(['config', 'core.hooksPath', '.husky/_']);
 
-  const prFields = [
-    '7',
-    'OPEN',
-    'feat/pr',
-    oldPrTip,
-    'acme/app',
-    'main',
-    mainTip,
-    'https://github.com/acme/app/pull/7',
-  ].join('\t');
-  writeFileSync(join(stubBin, 'gh'), `#!/bin/sh\nprintf '%s\\n' '${prFields}'\n`);
+  writeFileSync(
+    join(stubBin, 'gh'),
+    [
+      '#!/bin/sh',
+      'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+      'if [ "$1" = pr ] && [ "$2" = edit ]; then',
+      '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
+      '  cat > "$GH_BODY"',
+      '  if [ -n "${GH_EDIT_PAUSE_MARKER:-}" ]; then',
+      '    : > "$GH_EDIT_PAUSE_MARKER"',
+      '    while [ ! -e "$GH_EDIT_PAUSE_RELEASE" ]; do sleep 0.02; done',
+      '  fi',
+      '  if [ -n "${GH_INTENT_LOCK:-}" ]; then',
+      '    mkdir -p "$GH_INTENT_LOCK"',
+      '    printf \'%s:held\' "$PPID" > "$GH_INTENT_LOCK/holder"',
+      '  fi',
+      '  exit "${GH_EDIT_STATUS:-0}"',
+      'fi',
+      'case " $* " in',
+      "  *' --json url '*) printf '%s\\n' 'https://github.com/acme/app/pull/7'; exit 0 ;;",
+      'esac',
+      `printf '7\\tOPEN\\t%s\\t%s\\tacme/app\\tmain\\t${mainTip}\\thttps://github.com/acme/app/pull/7\\n' "\${PR_HEAD_REF_NAME:-feat/pr}" "\${PR_HEAD_OID:-${oldPrTip}}"`,
+      '',
+    ].join('\n'),
+  );
   chmodSync(join(stubBin, 'gh'), 0o755);
+  writeFileSync(
+    join(stubBin, 'git'),
+    [
+      '#!/bin/sh',
+      'if [ "${KILL_BEFORE_REWRITE_PUSH:-0}" -eq 1 ]; then',
+      '  case " $* " in',
+      '    *" push --force-with-lease="*)',
+      '      ship_pid=$(ps -o ppid= -p "$PPID" | tr -d " ")',
+      '      kill -9 "$ship_pid"',
+      '      exit 9',
+      '      ;;',
+      '  esac',
+      'fi',
+      `exec '${realGit}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(stubBin, 'git'), 0o755);
   return {
     bare,
     dir,
-    env: { PATH: `${stubBin}:${process.env.PATH}` },
+    env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
     g,
     mainTip,
     oldPrTip,
     stubBin,
+    ghLog,
+    ghBody,
+  };
+}
+
+/** A GitHub-shaped append reship with real local Git transport and a recording gh boundary. */
+function bodyUpdateRepo({ hookBody = 'exit 0' } = {}) {
+  const bare = mkdtempSync(join(tmpdir(), 'reship-body-bare-'));
+  const dir = mkdtempSync(join(tmpdir(), 'reship-body-wt-'));
+  const stubBin = mkdtempSync(join(tmpdir(), 'reship-body-bin-'));
+  const ghLog = join(stubBin, 'gh.log');
+  const ghBody = join(stubBin, 'gh.body');
+  const realGit = execFileSync('/bin/sh', ['-c', 'command -v git'], {
+    encoding: 'utf8',
+  }).trim();
+  dirs.push(bare, dir, stubBin);
+  const env = { ...process.env, ...GENV };
+  const g = (a, o = {}) =>
+    execFileSync('git', ['-C', dir, ...a], { env, encoding: 'utf8', ...o }).trim();
+  execFileSync('git', ['init', '-q', '--bare', bare], { env });
+  g(['init', '-q', '-b', 'work']);
+  g(['config', 'user.email', 'a@b.c']);
+  g(['config', 'user.name', 'a']);
+  g(['config', 'commit.gpgsign', 'false']);
+  g(['remote', 'add', 'origin', 'git@github.com:acme/app.git']);
+  g(['config', `url.${bare}.insteadOf`, 'git@github.com:acme/app.git']);
+  mkdirSync(join(dir, '.husky/_'), { recursive: true });
+  writeFileSync(join(dir, '.husky/.keep'), '');
+  writeFileSync(join(dir, '.gitignore'), '.devkit/\n');
+  writeFileSync(join(dir, 'a.ts'), 'v1\n');
+  g(['add', '.gitignore', '.husky/.keep', 'a.ts']);
+  g(['commit', '-q', '-m', 'first']);
+  g(['push', '-q', 'origin', 'HEAD:feat/pr']);
+  g(['config', 'core.hooksPath', '.husky/_']);
+  writeFileSync(join(dir, '.husky/_/pre-commit'), `#!/bin/sh\n${hookBody}\n`);
+  chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+  writeFileSync(
+    join(stubBin, 'gh'),
+    [
+      '#!/bin/sh',
+      'printf \'%s\\n\' "$*" >> "$GH_LOG"',
+      'if [ "$1" = pr ] && [ "$2" = view ]; then',
+      '  [ "${GH_VIEW_STATUS:-0}" -eq 0 ] || exit "$GH_VIEW_STATUS"',
+      "  printf '%s\\n' 'https://github.com/acme/app/pull/7'",
+      '  exit 0',
+      'fi',
+      'if [ "$1" = pr ] && [ "$2" = edit ]; then',
+      '  if [ "${GH_EDIT_KILL_PARENT:-0}" -eq 1 ]; then kill -9 "$PPID"; exit 9; fi',
+      '  cat > "$GH_BODY"',
+      '  if [ -n "${GH_INTENT_LOCK:-}" ]; then',
+      '    mkdir -p "$GH_INTENT_LOCK"',
+      '    printf \'%s:held\' "$PPID" > "$GH_INTENT_LOCK/holder"',
+      '  fi',
+      '  exit "${GH_EDIT_STATUS:-0}"',
+      'fi',
+      'exit 1',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(stubBin, 'gh'), 0o755);
+  writeFileSync(
+    join(stubBin, 'git'),
+    [
+      '#!/bin/sh',
+      'if [ "${FAIL_AFTER_PUSH:-0}" -eq 1 ]; then',
+      '  case " $* " in',
+      `    *' push origin HEAD:feat/pr '*) '${realGit}' "$@" || exit $?; exit 9 ;;`,
+      '  esac',
+      'fi',
+      `exec '${realGit}' "$@"`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(join(stubBin, 'git'), 0o755);
+  return {
+    bare,
+    dir,
+    env: { PATH: `${stubBin}:${process.env.PATH}`, GH_LOG: ghLog, GH_BODY: ghBody },
+    g,
+    ghLog,
+    ghBody,
   };
 }
 
@@ -306,6 +446,294 @@ describe('reship — re-push commits onto the PR-branch tip', () => {
   });
 });
 
+describe('reship — explicit bodies refresh the existing PR (sc-2414)', () => {
+  it('updates the resolved PR with the exact --body-file bytes after the real push', () => {
+    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+    const body = 'final red/green proof\n\ntrailing newline preserved\n';
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    writeFileSync(join(dir, 'body.md'), body);
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      env,
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(ghBody), 'gh pr edit should receive a body').toBe(true);
+    expect(readFileSync(ghBody, 'utf8')).toBe(body);
+    expect(readFileSync(ghLog, 'utf8')).toContain(
+      'pr edit https://github.com/acme/app/pull/7 --repo acme/app --body-file -',
+    );
+  });
+
+  it('an explicit empty --body clears the PR description', () => {
+    const { dir, env, ghBody } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--body', '', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      env,
+    );
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(ghBody), 'an explicit empty body is still an update').toBe(true);
+    expect(readFileSync(ghBody)).toHaveLength(0);
+  });
+
+  it('preserves the PR description when neither body flag is supplied, including piped commit text', () => {
+    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(['feat/pr', 'add v2', '--pr', '--no-qavis-publish', '--', 'a.ts'], dir, env, {
+      input: 'legacy piped commit body\n',
+    });
+
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(ghLog, 'utf8')).not.toContain('pr edit');
+    expect(existsSync(ghBody)).toBe(false);
+  });
+
+  it('keeps SHIP_DRY_RUN side-effect free when an explicit body has no commit delta', () => {
+    const { dir, env, ghLog, ghBody } = bodyUpdateRepo();
+
+    const r = run(
+      ['feat/pr', 'preview only', '--pr', '--body', 'must not publish', '--', 'a.ts'],
+      dir,
+      { ...env, SHIP_DRY_RUN: '1' },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(existsSync(ghBody)).toBe(false);
+    expect(existsSync(ghLog) ? readFileSync(ghLog, 'utf8') : '').not.toContain('pr edit');
+  });
+
+  it('refuses explicit PR-body publication before gates when intent cannot be recorded', () => {
+    const { bare, dir, env, g, ghLog, ghBody } = bodyUpdateRepo({
+      hookBody: ': > "$UNRECORDED_GATE_MARKER"\nexit 0',
+    });
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    const gateMarker = join(dir, 'unrecorded-gate-ran');
+    writeFileSync(join(dir, '.gitignore'), ''); // force the best-effort intent writer to decline
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'unrecorded body', '--pr', '--body', 'must not publish', '--', 'a.ts'],
+      dir,
+      { ...env, UNRECORDED_GATE_MARKER: gateMarker },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('requires a recorded invocation');
+    expect(r.stderr).toContain('devkit doctor --fix');
+    expect(r.stderr).toContain('no gates, push, or PR edit attempted');
+    expect(existsSync(gateMarker)).toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(before);
+    expect(existsSync(ghBody)).toBe(false);
+    expect(existsSync(ghLog) ? readFileSync(ghLog, 'utf8') : '').not.toContain('pr edit');
+  });
+
+  it('refuses an older publisher superseded while its gates were running', async () => {
+    const hookBody = [
+      'if [ -n "${GATE_PAUSE_MARKER:-}" ]; then',
+      '  : > "$GATE_PAUSE_MARKER"',
+      '  while [ ! -e "$GATE_PAUSE_RELEASE" ]; do sleep 0.02; done',
+      'fi',
+      'exit 0',
+    ].join('\n');
+    const { bare, dir, env, g, ghBody } = bodyUpdateRepo({ hookBody });
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    const oldPaused = join(dir, 'old-gates-paused');
+    const oldRelease = join(dir, 'old-gates-release');
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const oldRun = runAsync(
+      [
+        'feat/pr',
+        'old publication',
+        '--pr',
+        '--body',
+        'old body',
+        '--no-qavis-publish',
+        '--',
+        'a.ts',
+      ],
+      dir,
+      { ...env, GATE_PAUSE_MARKER: oldPaused, GATE_PAUSE_RELEASE: oldRelease },
+    );
+    const oldDeadline = Date.now() + 5000;
+    while (!existsSync(oldPaused) && oldRun.child.exitCode === null && Date.now() < oldDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    if (!existsSync(oldPaused)) {
+      writeFileSync(oldRelease, 'deadline elapsed\n');
+      const early = await oldRun.completed;
+      expect(existsSync(oldPaused), early.stderr).toBe(true);
+    }
+
+    const superseding = spawnSync(
+      'node',
+      [
+        shipIntentPath,
+        'write',
+        '--root',
+        dir,
+        '--branch',
+        'feat/pr',
+        '--mode',
+        'reship',
+        '--title',
+        'new publication',
+        '--update-pr-body',
+        '--',
+        'a.ts',
+      ],
+      { env: { ...process.env, ...GENV }, input: 'new body', encoding: 'utf8' },
+    );
+    writeFileSync(oldRelease, 'go\n');
+    const oldResult = await oldRun.completed;
+    expect(superseding.status, superseding.stderr).toBe(0);
+    expect(oldResult.status).not.toBe(0);
+    expect(oldResult.stderr).toContain('intent was superseded while gates ran; nothing pushed');
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(before);
+    expect(existsSync(ghBody)).toBe(false);
+  });
+
+  it('replays the body-update intent after a blocked attempt resumes', () => {
+    const { dir, env, ghBody } = bodyUpdateRepo({ hookBody: 'exit 1' });
+    const body = 'recorded final proof\n';
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+    writeFileSync(join(dir, 'body.md'), body);
+    const blocked = run(
+      ['feat/pr', 'add v2', '--pr', '--body-file', 'body.md', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      env,
+    );
+    expect(blocked.status).not.toBe(0);
+    expect(existsSync(ghBody)).toBe(false);
+
+    writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+    const resumed = run(['--resume', 'feat/pr'], dir, env, { input: '' });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe(body);
+  });
+
+  it('finishes the recorded body update when a lost push response resumes with no commit delta', () => {
+    const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    const body = 'publish this after recovery\n';
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const lostResponse = run(
+      ['feat/pr', 'add v2', '--pr', '--body', body, '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      { ...env, FAIL_AFTER_PUSH: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(lostResponse.status).not.toBe(0);
+    expect(accepted).not.toBe(before);
+    expect(existsSync(ghBody)).toBe(false);
+
+    const resumed = run(['--resume', 'feat/pr'], dir, env, { input: '' });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe(body);
+  });
+
+  it('keeps the body intent when the publisher dies between push and PR edit', () => {
+    const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    const body = 'survive the metadata crash\n';
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const interrupted = run(
+      ['feat/pr', 'add v2', '--pr', '--body', body, '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      { ...env, GH_EDIT_KILL_PARENT: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(interrupted.status).not.toBe(0);
+    expect(accepted).not.toBe(before);
+    expect(existsSync(ghBody)).toBe(false);
+
+    const preview = run(['--resume', 'feat/pr'], dir, { ...env, SHIP_DRY_RUN: '1' }, { input: '' });
+    expect(preview.status, preview.stderr).toBe(0);
+    expect(preview.stderr).toContain('kept its intent for a real run');
+    expect(existsSync(ghBody)).toBe(false);
+
+    const resumed = run(['--resume', 'feat/pr'], dir, env, { input: '' });
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe(body);
+  });
+
+  it('reports a manual-only partial success when PR editing fails after the push', () => {
+    const { bare, dir, env, g, ghBody } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      { ...env, GH_EDIT_STATUS: '9' },
+    );
+    const after = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+
+    expect(r.status).not.toBe(0);
+    expect(after).not.toBe(before); // the push already landed and is never misreported as rolled back
+    expect(readFileSync(ghBody, 'utf8')).toBe('new proof');
+    expect(r.stderr).toContain('PR body was not updated');
+    expect(r.stderr).toContain('the commit is already on origin/feat/pr');
+    expect(r.stderr).not.toContain('devkit ship --resume');
+  });
+
+  it('does not report success when the published body intent cannot be retired', () => {
+    const { dir, env, ghBody } = bodyUpdateRepo();
+    const intentLock = join(dir, `${relIntentPath('feat/pr')}.lock`);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      [
+        'feat/pr',
+        'add v2',
+        '--pr',
+        '--body',
+        'published proof',
+        '--no-qavis-publish',
+        '--',
+        'a.ts',
+      ],
+      dir,
+      { ...env, GH_INTENT_LOCK: intentLock },
+    );
+
+    expect(r.status).not.toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe('published proof');
+    expect(r.stderr).toContain('spent intent stayed locked');
+    expect(r.stderr).toContain('do NOT resume it');
+  });
+
+  it('does not report success when the pushed body update cannot resolve its PR target', () => {
+    const { bare, dir, env, g } = bodyUpdateRepo();
+    const before = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    writeFileSync(join(dir, 'a.ts'), 'v2\n');
+
+    const r = run(
+      ['feat/pr', 'add v2', '--pr', '--body', 'new proof', '--no-qavis-publish', '--', 'a.ts'],
+      dir,
+      { ...env, GH_VIEW_STATUS: '7' },
+    );
+    const after = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+
+    expect(r.status).not.toBe(0);
+    expect(after).not.toBe(before);
+    expect(r.stderr).toContain('PR body was not updated');
+    expect(r.stderr).toContain('could not resolve the open PR');
+  });
+});
+
 describe('reship --base — replace a conflicted PR from a caller-prepared snapshot (sc-2323)', () => {
   it('gates one replacement commit on the current PR base instead of appending resolved bytes to stale ancestry', () => {
     const { bare, dir, env, g, mainTip } = rewriteRepo();
@@ -350,6 +778,358 @@ describe('reship --base — replace a conflicted PR from a caller-prepared snaps
     });
     expect(manifest.branches['feat/pr'].paths).toHaveLength(1);
     expect(manifest.branches['feat/pr'].paths[0]).toMatchObject({ path: 'conflict.txt' });
+  });
+
+  it('resumes a retained body update when a rewrite publisher dies after reconcile', () => {
+    const { bare, dir, env, g, oldPrTip, ghBody } = rewriteRepo();
+    const body = 'rewrite proof survives publication death\n';
+    const gateRanOnResume = join(dir, 'gate-ran-on-resume');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      [
+        '#!/bin/sh',
+        'if [ -n "${GATE_RESUME_MARKER:-}" ]; then : > "$GATE_RESUME_MARKER"; exit 97; fi',
+        "printf 'gate-owned\\n' > gate-baseline.txt",
+        'git add gate-baseline.txt',
+        '',
+      ].join('\n'),
+    );
+
+    const interrupted = run(
+      [
+        'feat/pr',
+        'publish resolved PR',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        body,
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, GH_EDIT_KILL_PARENT: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(interrupted.status).not.toBe(0);
+    expect(accepted).not.toBe(oldPrTip);
+    expect(existsSync(ghBody)).toBe(false);
+
+    const manifestBeforePreview = readFileSync(
+      join(dir, '.devkit/reconcile-manifest.json'),
+      'utf8',
+    );
+    const preview = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted, SHIP_DRY_RUN: '1', GATE_RESUME_MARKER: gateRanOnResume },
+      { input: '' },
+    );
+    expect(preview.status, preview.stderr).toBe(0);
+    expect(preview.stderr).toContain('skipped reconcile + the recorded PR-body update');
+    expect(existsSync(ghBody)).toBe(false);
+    expect(readFileSync(join(dir, '.devkit/reconcile-manifest.json'), 'utf8')).toBe(
+      manifestBeforePreview,
+    );
+    expect(existsSync(gateRanOnResume), 'dry recovery must not rerun gates').toBe(false);
+
+    const manifestLock = join(dir, '.devkit/reconcile-manifest.json.lock');
+    mkdirSync(manifestLock, { recursive: true });
+    writeFileSync(join(manifestLock, 'holder'), `${process.pid}:test-holder`);
+    const reconcileBlocked = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted, GATE_RESUME_MARKER: gateRanOnResume },
+      { input: '' },
+    );
+    expect(reconcileBlocked.status).not.toBe(0);
+    expect(reconcileBlocked.stderr).toContain('kept the exact gated receipt and intent');
+    expect(existsSync(gateRanOnResume), 'blocked recovery must not rerun gates').toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
+    rmSync(manifestLock, { recursive: true, force: true });
+
+    writeFileSync(join(dir, 'conflict.txt'), 'changed after publication\n');
+    const drifted = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted, GATE_RESUME_MARKER: gateRanOnResume },
+      { input: '' },
+    );
+    expect(drifted.status).not.toBe(0);
+    expect(drifted.stderr).toContain('rewrite brief omits paths from the existing PR');
+    expect(existsSync(gateRanOnResume), 'drifted recovery must refuse before gates').toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
+    writeFileSync(join(dir, 'conflict.txt'), 'main + feature\n');
+
+    const resumed = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted, GATE_RESUME_MARKER: gateRanOnResume },
+      { input: '' },
+    );
+
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe(body);
+    expect(existsSync(gateRanOnResume), 'resume must reuse the gated receipt').toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
+  });
+
+  it.each(['sha1', 'sha256'])(
+    'prunes unpublished rewrite proof in %s repositories when a pre-push crash resumes',
+    (objectFormat) => {
+      const { bare, dir, env, g, oldPrTip } = rewriteRepo({ objectFormat });
+      const interrupted = run(
+        [
+          'feat/pr',
+          'publication',
+          '--pr',
+          '--base',
+          'main',
+          '--body',
+          'proof body',
+          '--no-qavis-publish',
+          '--',
+          'conflict.txt',
+        ],
+        dir,
+        { ...env, KILL_BEFORE_REWRITE_PUSH: '1' },
+      );
+      expect(interrupted.status).not.toBe(0);
+      expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(oldPrTip);
+      const proofRefs = () =>
+        g([
+          'for-each-ref',
+          '--format=%(refname)',
+          'refs/devkit/reship-body-receipts/feat/pr/',
+          'refs/devkit/reship-body-payloads/feat/pr/',
+        ]);
+      expect(proofRefs()).not.toBe('');
+
+      writeFileSync(join(dir, '.husky/_/pre-commit'), '#!/bin/sh\nexit 1\n');
+      chmodSync(join(dir, '.husky/_/pre-commit'), 0o755);
+      const resumed = run(['--resume', 'feat/pr'], dir, env, { input: '' });
+
+      expect(resumed.status).not.toBe(0);
+      expect(proofRefs()).toBe('');
+      expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(oldPrTip);
+    },
+  );
+
+  it('does not reuse a receipt for a byte-different body with the same Git message', () => {
+    const { bare, dir, env, g, ghBody } = rewriteRepo();
+    const interrupted = run(
+      [
+        'feat/pr',
+        'publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'line\nnext',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, GH_EDIT_KILL_PARENT: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(interrupted.status).not.toBe(0);
+    expect(
+      g([
+        'for-each-ref',
+        '--format=%(refname)',
+        `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
+      ]),
+    ).toBe(`refs/devkit/reship-body-receipts/feat/pr/${accepted}`);
+    expect(
+      g([
+        'for-each-ref',
+        '--format=%(refname)',
+        `refs/devkit/reship-body-payloads/feat/pr/${accepted}`,
+      ]),
+    ).toBe(`refs/devkit/reship-body-payloads/feat/pr/${accepted}`);
+
+    const gateLog = join(dir, 'superseding-gate.log');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\nprintf 'ran\\n' >> '${gateLog}'\nexit 1\n`,
+    );
+    const fresh = run(
+      [
+        'feat/pr',
+        'publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'line  \nnext',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, PR_HEAD_OID: accepted },
+    );
+    expect(fresh.status).not.toBe(0);
+    expect(existsSync(gateLog), fresh.stderr).toBe(true);
+
+    const resumed = run(
+      ['--resume', 'feat/pr'],
+      dir,
+      { ...env, PR_HEAD_OID: accepted },
+      { input: '' },
+    );
+    expect(resumed.status).not.toBe(0);
+    expect(readFileSync(gateLog, 'utf8')).toBe('ran\nran\n');
+    expect(existsSync(ghBody)).toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
+    expect(
+      g([
+        'for-each-ref',
+        '--format=%(refname)',
+        `refs/devkit/reship-body-receipts/feat/pr/${accepted}`,
+      ]),
+    ).toBe(`refs/devkit/reship-body-receipts/feat/pr/${accepted}`);
+  });
+
+  it('does not share a gated receipt with a sibling PR at the same commit', () => {
+    const { bare, dir, env, g, ghBody } = rewriteRepo();
+    const interrupted = run(
+      [
+        'feat/pr',
+        'publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'same body',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, GH_EDIT_KILL_PARENT: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(interrupted.status).not.toBe(0);
+    g(['push', '-q', 'origin', `${accepted}:refs/heads/feat/other`]);
+
+    const gateLog = join(dir, 'sibling-branch-gate.log');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\nprintf 'other-ran\\n' >> '${gateLog}'\nexit 1\n`,
+    );
+    const otherEnv = { ...env, PR_HEAD_REF_NAME: 'feat/other', PR_HEAD_OID: accepted };
+    const fresh = run(
+      [
+        'feat/other',
+        'publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'same body',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      otherEnv,
+    );
+    expect(fresh.status).not.toBe(0);
+    const resumed = run(['--resume', 'feat/other'], dir, otherEnv, { input: '' });
+    expect(resumed.status).not.toBe(0);
+    expect(readFileSync(gateLog, 'utf8')).toBe('other-ran\nother-ran\n');
+    expect(existsSync(ghBody)).toBe(false);
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/other'])).toBe(accepted);
+    expect(
+      g([
+        'for-each-ref',
+        '--format=%(refname)',
+        `refs/devkit/reship-body-receipts/feat/other/${accepted}`,
+      ]),
+    ).toBe('');
+  });
+
+  it('serializes recovery publication against a fresh intent that starts concurrently', async () => {
+    const { bare, dir, env, g, ghBody } = rewriteRepo();
+    const interrupted = run(
+      [
+        'feat/pr',
+        'old publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'old body',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, GH_EDIT_KILL_PARENT: '1' },
+    );
+    const accepted = g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr']);
+    expect(interrupted.status).not.toBe(0);
+
+    const paused = join(dir, 'recovery-paused');
+    const release = join(dir, 'recovery-release');
+
+    const gateLog = join(dir, 'concurrent-fresh-gate.log');
+    writeFileSync(
+      join(dir, '.husky/_/pre-commit'),
+      `#!/bin/sh\nprintf 'fresh-ran\\n' >> '${gateLog}'\nexit 1\n`,
+    );
+    const recovery = runAsync(['--resume', 'feat/pr'], dir, {
+      ...env,
+      PR_HEAD_OID: accepted,
+      GH_EDIT_PAUSE_MARKER: paused,
+      GH_EDIT_PAUSE_RELEASE: release,
+    });
+    const pauseDeadline = Date.now() + 5000;
+    while (!existsSync(paused) && recovery.child.exitCode === null && Date.now() < pauseDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    if (!existsSync(paused)) {
+      // Never leave a late-arriving gh edit parked after this diagnostic path has decided to fail.
+      // The release is harmless before the marker and guarantees the child can report its stderr.
+      writeFileSync(release, 'deadline elapsed\n');
+      const early = await recovery.completed;
+      expect(existsSync(paused), early.stderr).toBe(true);
+    }
+
+    const fresh = runAsync(
+      [
+        'feat/pr',
+        'new publication',
+        '--pr',
+        '--base',
+        'main',
+        '--body',
+        'new body',
+        '--no-qavis-publish',
+        '--',
+        'conflict.txt',
+      ],
+      dir,
+      { ...env, PR_HEAD_OID: accepted },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const gateRanBeforeRelease = existsSync(gateLog);
+    const freshExitedBeforeRelease = fresh.child.exitCode !== null;
+    writeFileSync(release, 'go\n');
+    const recovered = await recovery.completed;
+    const superseding = await fresh.completed;
+    expect(gateRanBeforeRelease, 'fresh invocation must wait before replacing the intent').toBe(
+      false,
+    );
+    expect(freshExitedBeforeRelease, superseding.stderr).toBe(false);
+    expect(recovered.status, recovered.stderr).toBe(0);
+    expect(readFileSync(ghBody, 'utf8')).toBe('old body');
+    expect(superseding.status).not.toBe(0);
+    expect(readFileSync(gateLog, 'utf8')).toBe('fresh-ran\n');
+    expect(g(['--git-dir', bare, 'rev-parse', 'refs/heads/feat/pr'])).toBe(accepted);
   });
 
   it('refuses before gates when the brief omits any path changed by the old PR', () => {
