@@ -207,14 +207,58 @@ describe('e2e: packed anti-slop capability', () => {
       join(renamed.repoDir, 'legacy.ts'),
       'function legacy(value: object) { return value; }\n',
     );
+    writeFileSync(
+      join(renamed.repoDir, 'unrelated.ts'),
+      'function unrelated(value: object) { return value; }\n',
+    );
     expect(renamed.run('devkit', ['anti-slop', 'create']).status).toBe(0);
     expect(renamed.git('add', '-A').status).toBe(0);
     expect(renamed.git('commit', '-qm', 'adopt legacy debt').status).toBe(0);
+    const baselineBeforeRename = baseline(renamed.repoDir);
+    const baselineBytesBeforeRename = readFileSync(
+      join(renamed.repoDir, '.anti-slop-baseline.json'),
+      'utf8',
+    );
+    const unrelatedDebt = baselineBeforeRename.entries.filter(
+      (entry: { file: string }) => entry.file === 'unrelated.ts',
+    );
     expect(renamed.git('mv', 'legacy.ts', 'renamed.ts').status).toBe(0);
+    writeFileSync(join(renamed.repoDir, 'unrelated.ts'), 'export const nowClean = true;\n');
     const staleRenameCheck = renamed.run('devkit', ['anti-slop', 'check', '--staged']);
     expect(staleRenameCheck.status, out(staleRenameCheck)).toBe(1);
     expect(out(staleRenameCheck)).toContain('BASELINE-RENAME');
-    expect(renamed.run('devkit', ['anti-slop', 'create', '--force']).status).toBe(0);
+    expect(out(staleRenameCheck)).toContain('devkit anti-slop adopt-renames');
+    const unsafeResnapshot = renamed.run('devkit', ['anti-slop', 'create', '--force']);
+    expect(unsafeResnapshot.status, out(unsafeResnapshot)).not.toBe(0);
+    expect(out(unsafeResnapshot)).toContain('--confirm-baseline-removals');
+    expect(readFileSync(join(renamed.repoDir, '.anti-slop-baseline.json'), 'utf8')).toBe(
+      baselineBytesBeforeRename,
+    );
+    const adoptedRename = renamed.run('devkit', ['anti-slop', 'adopt-renames']);
+    expect(adoptedRename.status, out(adoptedRename)).toBe(0);
+    const baselineAfterRename = baseline(renamed.repoDir);
+    expect(
+      baselineAfterRename.entries.filter(
+        (entry: { file: string }) => entry.file === 'unrelated.ts',
+      ),
+    ).toEqual(unrelatedDebt);
+    expect(
+      baselineAfterRename.entries.some((entry: { file: string }) => entry.file === 'legacy.ts'),
+    ).toBe(false);
+    expect(
+      baselineAfterRename.entries.some((entry: { file: string }) => entry.file === 'renamed.ts'),
+    ).toBe(true);
+    expect(
+      baselineAfterRename.entries.reduce(
+        (sum: number, entry: { count: number }) => sum + entry.count,
+        0,
+      ),
+    ).toBe(
+      baselineBeforeRename.entries.reduce(
+        (sum: number, entry: { count: number }) => sum + entry.count,
+        0,
+      ),
+    );
     expect(renamed.git('add', '.anti-slop-baseline.json').status).toBe(0);
     const renameCheck = renamed.run('devkit', ['anti-slop', 'check', '--staged']);
     expect(renameCheck.status, out(renameCheck)).toBe(0);

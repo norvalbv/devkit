@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +16,11 @@ import antiSlop from '../../../commands/oxc/anti-slop.mts';
 import { digest } from '../../fs-helpers.mts';
 import { syncOxcCapability } from '../oxc/lifecycle.mts';
 import { adoptManagedCapability } from './base-capability.mts';
-import { withBaseAntiSlopSnapshot } from './git-snapshot.mts';
+import {
+  gitBaselineEnvelope,
+  withBaseAntiSlopSnapshot,
+  withStableGitIndex,
+} from './git-snapshot.mts';
 import { ANTI_SLOP_BASELINE_REL, ANTI_SLOP_UPSTREAM } from './constants.mts';
 import { syncAntiSlopCapability } from './lifecycle.mts';
 import { collectAntiSlopGroups } from './runner.mts';
@@ -245,6 +258,226 @@ describe('staged anti-slop check across a capability upgrade', () => {
       'anti-slop: base allowance forgave 1 inherited finding(s) across 1 rule(s): anti-slop/no-object-parameters',
     );
     expect(status).toBe(0);
+  });
+});
+
+describe('anti-slop rename adoption', () => {
+  it('requires explicit confirmation before an unscoped resnapshot removes existing-file debt', () => {
+    const cwd = installedRepository();
+    const path = join(cwd, ANTI_SLOP_BASELINE_REL);
+    rmSync(path);
+    writeFileSync(join(cwd, 'src', 'file.ts'), FINDING_SOURCE);
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    const before = readFileSync(path, 'utf8');
+    writeFileSync(join(cwd, 'src', 'file.ts'), CLEAN_SOURCE);
+
+    expect(antiSlop(['create', '--force'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('--confirm-baseline-removals');
+    expect(readFileSync(path, 'utf8')).toBe(before);
+
+    expect(antiSlop(['create', '--force', '.'], cwd)).toBe(2);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+
+    expect(antiSlop(['create', '--force', '--confirm-baseline-removals', '.'], cwd)).toBe(0);
+    expect(JSON.parse(readFileSync(path, 'utf8')).entries).toEqual([]);
+
+    writeFileSync(path, '{ stale baseline');
+    expect(antiSlop(['create', '--force'], cwd)).toBe(0);
+    expect(JSON.parse(readFileSync(path, 'utf8')).entries).toEqual([]);
+  });
+
+  it('refuses to write a rename migration from a changed Git index', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    git(cwd, ['mv', 'src/moved.ts', 'src/other.ts']);
+    let wrote = false;
+
+    expect(() =>
+      withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => {
+        wrote = true;
+      }),
+    ).toThrow('Git index changed while staged renames were being read');
+    expect(wrote).toBe(false);
+  });
+
+  it('refuses to write a rename migration after HEAD advances over the same index tree', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const parent = git(cwd, ['rev-parse', 'HEAD']);
+    const tree = git(cwd, ['rev-parse', 'HEAD^{tree}']);
+    const next = git(cwd, [
+      '-c',
+      'user.name=Devkit test',
+      '-c',
+      'user.email=devkit@test.invalid',
+      'commit-tree',
+      tree,
+      '-p',
+      parent,
+      '-m',
+      'same-tree HEAD advance',
+    ]);
+    git(cwd, ['update-ref', 'HEAD', next, parent]);
+    let wrote = false;
+
+    expect(() =>
+      withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => {
+        wrote = true;
+      }),
+    ).toThrow('Git HEAD changed while staged renames were being read');
+    expect(wrote).toBe(false);
+  });
+
+  it('refuses to write after HEAD switches to a same-tree branch', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    git(cwd, ['branch', 'same-tree-peer']);
+    git(cwd, ['symbolic-ref', 'HEAD', 'refs/heads/same-tree-peer']);
+    let wrote = false;
+
+    expect(() =>
+      withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => {
+        wrote = true;
+      }),
+    ).toThrow('Git HEAD changed while staged renames were being read');
+    expect(wrote).toBe(false);
+  });
+
+  it('refuses to write after a direct base ref advances', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['branch', 'comparison-base']);
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { baseOid, baseRefName, candidateTree, headOid, headRef } = gitBaselineEnvelope(
+      cwd,
+      'comparison-base',
+    );
+    const tree = git(cwd, ['rev-parse', 'comparison-base^{tree}']);
+    const next = git(cwd, [
+      '-c',
+      'user.name=Devkit test',
+      '-c',
+      'user.email=devkit@test.invalid',
+      'commit-tree',
+      tree,
+      '-p',
+      'comparison-base',
+      '-m',
+      'advance comparison base',
+    ]);
+    git(cwd, ['update-ref', 'refs/heads/comparison-base', next, baseOid ?? '']);
+    let wrote = false;
+
+    expect(() =>
+      withStableGitIndex(
+        cwd,
+        { oid: headOid, symbolicRef: headRef },
+        { expression: 'comparison-base', oid: baseOid, symbolicRef: baseRefName },
+        candidateTree,
+        () => {
+          wrote = true;
+        },
+      ),
+    ).toThrow('Git base changed while rename evidence was being read');
+    expect(wrote).toBe(false);
+  });
+
+  it('never reaps an unrecognized Git lock while retrying', () => {
+    const cwd = installedRepository();
+    commit(cwd, 'establish base');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    const { candidateTree, headOid, headRef } = gitBaselineEnvelope(cwd, 'HEAD');
+    const indexLock = `${git(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])}.lock`;
+    const foreign = '999999:------------------------------------';
+    writeFileSync(indexLock, foreign);
+
+    expect(() =>
+      withStableGitIndex(cwd, { oid: headOid, symbolicRef: headRef }, null, candidateTree, () => 0),
+    ).toThrow(`Git lock is busy at ${indexLock}`);
+    expect(readFileSync(indexLock, 'utf8')).toBe(foreign);
+  });
+
+  it('migrates only package-relative staged renames and leaves a no-op baseline untouched', () => {
+    const cwd = installedRepository('packages/app');
+    rmSync(join(cwd, ANTI_SLOP_BASELINE_REL));
+    writeFileSync(join(cwd, 'src', 'file.ts'), FINDING_SOURCE);
+    writeFileSync(join(cwd, 'src', 'unrelated.ts'), FINDING_SOURCE);
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'adopt package debt');
+    // SAFETY: antiSlop create writes the validated baseline schema before this parse.
+    const before = JSON.parse(readFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), 'utf8')) as {
+      entries: Array<{ file: string; count: number }>;
+    };
+    const unrelated = before.entries.filter((entry) => entry.file === 'src/unrelated.ts');
+
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    writeFileSync(join(cwd, 'src', 'unrelated.ts'), CLEAN_SOURCE);
+
+    expect(antiSlop(['adopt-renames'], cwd)).toBe(0);
+    // SAFETY: adopt-renames preserves the validated baseline schema while migrating paths.
+    const adopted = JSON.parse(readFileSync(join(cwd, ANTI_SLOP_BASELINE_REL), 'utf8')) as {
+      entries: Array<{ file: string; count: number }>;
+    };
+    expect(adopted.entries.filter((entry) => entry.file === 'src/unrelated.ts')).toEqual(unrelated);
+    expect(adopted.entries.some((entry) => entry.file === 'src/file.ts')).toBe(false);
+    expect(adopted.entries.some((entry) => entry.file === 'src/moved.ts')).toBe(true);
+    expect(adopted.entries.reduce((sum, entry) => sum + entry.count, 0)).toBe(
+      before.entries.reduce((sum, entry) => sum + entry.count, 0),
+    );
+
+    const path = join(cwd, ANTI_SLOP_BASELINE_REL);
+    const historical = new Date('2001-01-01T00:00:00.000Z');
+    utimesSync(path, historical, historical);
+    const mtimeMs = statSync(path).mtimeMs;
+    expect(antiSlop(['adopt-renames'], cwd)).toBe(0);
+    expect(statSync(path).mtimeMs).toBe(mtimeMs);
+    expect(out.join('\n')).toContain('0 finding(s) across 0 staged rename(s)');
+  });
+
+  it('adopts debt across a committed rename using the same base as the CI check', () => {
+    const cwd = installedRepository();
+    const path = join(cwd, ANTI_SLOP_BASELINE_REL);
+    rmSync(path);
+    writeFileSync(join(cwd, 'src', 'file.ts'), FINDING_SOURCE);
+    expect(antiSlop(['create'], cwd)).toBe(0);
+    commit(cwd, 'commit debt baseline');
+    git(cwd, ['mv', 'src/file.ts', 'src/moved.ts']);
+    commit(cwd, 'commit debt-bearing rename');
+    git(cwd, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+
+    expect(antiSlop(['check', '--base', 'HEAD~1'], cwd)).toBe(1);
+    expect(err.join('\n')).toContain(`adopt-renames --base ${git(cwd, ['rev-parse', 'HEAD~1'])}`);
+    expect(antiSlop(['adopt-renames', '--base', 'origin/main~1'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('--base cannot be locked');
+    expect(antiSlop(['adopt-renames', '--base', 'HEAD~1'], cwd)).toBe(0);
+    // SAFETY: adopt-renames preserves the validated baseline schema while migrating paths.
+    const adopted = JSON.parse(readFileSync(path, 'utf8')) as {
+      entries: Array<{ file: string }>;
+    };
+    expect(adopted.entries.some((entry) => entry.file === 'src/file.ts')).toBe(false);
+    expect(adopted.entries.some((entry) => entry.file === 'src/moved.ts')).toBe(true);
+    git(cwd, ['add', ANTI_SLOP_BASELINE_REL]);
+    expect(antiSlop(['check', '--base', 'HEAD~1'], cwd)).toBe(0);
+
+    expect(antiSlop(['adopt-renames', '--base', 'HEAD'], cwd)).toBe(2);
+    expect(err.join('\n')).toContain('no Git renames');
+  });
+
+  it('rejects arguments before it can rewrite the baseline', () => {
+    const cwd = installedRepository();
+    const path = join(cwd, ANTI_SLOP_BASELINE_REL);
+    const before = readFileSync(path, 'utf8');
+
+    expect(antiSlop(['adopt-renames', 'src'], cwd)).toBe(2);
+
+    expect(err.join('\n')).toContain('adopt-renames accepts no flags or paths');
+    expect(readFileSync(path, 'utf8')).toBe(before);
   });
 });
 

@@ -25,6 +25,7 @@ Baseline creation is deliberately never implicit:
 ~~~bash
 devkit anti-slop create [paths...]          # refuses an existing baseline
 devkit anti-slop create --force [paths...]  # explicit replacement
+devkit anti-slop adopt-renames              # migrate debt across staged Git renames
 devkit anti-slop check [paths...]           # read-only; CI/agent-loop gate
 devkit anti-slop check --staged             # exact Git-index snapshot against HEAD
 devkit anti-slop check --base <git-ref>     # full CI scan + baseline monotonicity
@@ -34,7 +35,10 @@ devkit anti-slop prune [paths...]           # shrink existing debt only
 
 Paths are literal existing files/directories inside the repository and default to the repository
 root. Path-scoped prune and forced create preserve every baseline entry outside that scope; only an
-unscoped `create --force` replaces the complete debt record. The committed baseline is
+unscoped `create --force` replaces the complete debt record. If that replacement would remove
+findings from files that still exist, it refuses without
+`--confirm-baseline-removals`, names the removal count and sample paths, and leaves the baseline
+unchanged. The committed baseline is
 **.anti-slop-baseline.json**. Check never edits it: existing entries are allowed, a new
 error-severity finding fails, and a new warning-severity finding is reported without failing.
 Prune refuses to write while a new error exists, removes fixed fingerprints, and reduces the
@@ -51,9 +55,17 @@ linted. Deleted and unrelated files no-op.
 `--staged` compares the candidate baseline with `HEAD`; `--base` compares it with the named CI base.
 Once a base baseline exists, candidate fingerprints and counts may only stay equal or shrink. A base
 with no baseline is the sole bootstrap exception. A Git-detected rename of a file with adopted debt
-must persist that debt under the new path in the same commit: run `devkit anti-slop create --force`,
-stage the resulting baseline, and check again. The base debt is migrated in memory only to verify
-that the persisted count did not grow. This keeps the baseline valid after merge; checks never write.
+must persist that debt under the new path in the same commit: stage the rename, run
+`devkit anti-slop adopt-renames`, stage the resulting baseline, and check again. Adoption uses the
+exact index-vs-HEAD Git rename map and rewrites only the matching path-bearing identities; unrelated
+entries are never linted or pruned. If the rename is already committed and `check --base <ref>`
+reports `BASELINE-RENAME`, run the printed `adopt-renames --base <oid>` remedy, which freezes that
+comparison to an immutable object ID, then stage the baseline. An explicit base with no Git-detected
+rename fails and names the reviewed whole-repository resnapshot fallback; it does not silently
+succeed. A heavily edited move that Git
+does not detect as a rename, or a move across a monorepo package boundary, remains a zero-adoption
+no-op in staged mode. The base debt is migrated in memory only to verify that the persisted count did
+not grow. This keeps the baseline valid after merge; checks never write.
 
 Occurrences with the same rule, repository-relative file, normalized diagnostic, and normalized
 source line are intentionally fungible and share one counted fingerprint. The ratchet prevents that
