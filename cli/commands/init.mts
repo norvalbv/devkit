@@ -28,6 +28,7 @@ import {
   type ReviewProfile,
   type Selection,
   structureCmdFor,
+  STRUCTURE_STACKS,
 } from '../lib/components.mts';
 import { detectGitRoot } from '../lib/detect-git-root.mts';
 import { assertRunnerMayWrite } from '../lib/doctor/pin/runner-identity.mts';
@@ -72,9 +73,6 @@ import { runWizard } from '../lib/wizard.mts';
 import { repoUrl } from './update.mts';
 
 const INIT_VERSION = 2;
-
-// Stacks with structure-lint presets; omitted stacks have no shipped template yet.
-const STRUCTURE_STACKS = new Set(['electron', 'react-app', 'component-lib']);
 
 // Config-driven stacks keep topology in guard.config and use Devkit's own structure binary.
 // Electron remains package-mode because its preset imports consumer-side eslint dependencies.
@@ -176,8 +174,8 @@ interface InitPlan extends Pick<RecordedComponents, 'disabledGuards'> {
    * Optional-component ids the caller did NOT actually ask about, so their recorded key must stay
    * ABSENT if it already was. `upgrade` needs this: its broad refresh runs even when the offer was
    * skipped (non-TTY, or cancelled), and writing the normalized `false` would look identical to a
-   * real decline — permanently suppressing an offer nobody ever saw. An explicit `devkit init` run
-   * (wizard or flags) never passes this: choosing the defaults IS a decision.
+   * real decline. Fresh/interactive init never passes this; a non-interactive re-run does when an
+   * optional key was absent and no flag answered it: absence is recorded state too.
    */
   undecided?: string[];
 }
@@ -711,6 +709,7 @@ function applyOverlay(cwd: string, plan: InitPlan, pkgRel: string, devkitRef: st
   // un-asked optional component absent, exactly as the package writer does.
   const overlayComponents = dropUndecided(
     {
+      biome: Boolean(selection.biome),
       guards: [...(selection.guards ?? [])],
       skills: Boolean(selection.skills),
       agents: Boolean(selection.agents),
@@ -1054,6 +1053,7 @@ export default async function run(args: string[], cwd: string) {
   let mode = detectedMode;
   let review: Partial<ReviewProfile> | undefined;
   let disabledGuards: string[] | undefined;
+  let undecided: string[] = [];
 
   // --baselines-only re-derives structure/import-wall baselines only for package-mode presets.
   if (flags.baselinesOnly) {
@@ -1101,9 +1101,7 @@ export default async function run(args: string[], cwd: string) {
       ? GUARD_IDS.filter((guard) => !selection.guards.includes(guard))
       : [];
   } else {
-    selection = initFlags.selectionFromFlags(flags);
-    selection = initFlags.recoverInterruptedCapabilitySelection(cwd, flags, selection);
-    disabledGuards = initFlags.disabledGuardsFromFlags(flags);
+    ({ selection, disabledGuards, undecided } = initFlags.resolveFlagSelection(cwd, args, flags));
   }
 
   antiSlopLifecycle.warnIfAntiSlopUnavailable(mode, flags.antiSlop);
@@ -1150,6 +1148,7 @@ export default async function run(args: string[], cwd: string) {
     globalCommitGate: flags.globalCommitGate,
     review,
     disabledGuards,
+    undecided,
   });
   if (interactive && !selfHost) outro('Done — run `devkit doctor` to verify.');
   return 0;
