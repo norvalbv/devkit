@@ -28,7 +28,8 @@
  *
  * Usage (paths after `--`; --pr and --git-root optional):
  *   reconcile-manifest-write.mjs --root <manifest-root> [--git-root <hash-root>] --branch <br> \
- *     --repo <owner/repo> --base-ref <ref> --base-sha <40hex> --pr <number|""> -- <path...>
+ *     --repo <owner/repo> --base-ref <ref> --base-sha <40hex> [--tip-sha <40hex>] \
+ *     --pr <number|""> -- <path...>
  * --git-root (default --root) is where blobs are hashed; ship-branch passes the ephemeral commit
  * worktree so the manifest records what the PR committed, not a later edit to the shared tree.
  *
@@ -42,19 +43,31 @@ import { pathToFileURL } from 'node:url';
 import { withLock, writeFileAtomic } from '../atomic-write.mjs';
 const WS_SPLIT = /\s+/; // split a `git ls-tree` line into its mode/type/sha/path columns
 const PR_DIGITS = /^\d+$/; // a non-empty --pr is an integer; anything else → null
+const LITERAL_GIT_ENV = { ...process.env };
+for (const key of [
+    'GIT_LITERAL_PATHSPECS',
+    'GIT_GLOB_PATHSPECS',
+    'GIT_NOGLOB_PATHSPECS',
+    'GIT_ICASE_PATHSPECS',
+])
+    delete LITERAL_GIT_ENV[key];
 /** Run git in <root>, return trimmed stdout, or null if the command fails (missing path, etc.). */
-function git(root, args) {
+function git(root, args, literalPaths) {
     try {
-        return execFileSync('git', ['-C', root, ...args], {
+        return execFileSync('git', ['-C', root, ...(literalPaths ? ['--literal-pathspecs'] : []), ...args], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
+            // `--literal-pathspecs` conflicts with inherited glob/noglob modes. Concrete branch-derived
+            // filenames opt into a scrubbed environment; legacy explicit-pathspec callers retain their
+            // established Git semantics until Story #2425 decides that compatibility contract.
+            env: literalPaths ? LITERAL_GIT_ENV : process.env,
         }).trim();
     }
     catch {
         return null;
     }
 }
-/** Parse `--flag value` pairs (plus the valueless boolean `--merge`) and a trailing `-- <path...>`. */
+/** Parse `--flag value` pairs (plus valueless booleans) and a trailing `-- <path...>`. */
 export function parseArgs(argv) {
     const flags = {};
     const paths = [];
@@ -63,8 +76,8 @@ export function parseArgs(argv) {
             paths.push(...argv.slice(i + 1));
             break;
         }
-        if (argv[i] === '--merge')
-            flags.merge = true; // boolean — must NOT consume the next token (e.g. the `--`)
+        if (argv[i] === '--merge' || argv[i] === '--literal-paths')
+            flags[argv[i].slice(2)] = true; // booleans — must NOT consume the next token (e.g. the `--`)
         else if (argv[i].startsWith('--'))
             flags[argv[i].slice(2)] = argv[++i];
     }
@@ -77,29 +90,64 @@ function worktreeMode(abs) {
         return '120000';
     return st.mode & 0o111 ? '100755' : '100644';
 }
+/** Read all concrete branch-source identities from one tree in a single Git subprocess. */
+function treeBlobs(gitRoot, tree, paths) {
+    const blobs = new Map();
+    let raw;
+    try {
+        raw = execFileSync('git', ['-C', gitRoot, '--literal-pathspecs', 'ls-tree', '-z', tree, '--', ...paths], { env: LITERAL_GIT_ENV, stdio: ['ignore', 'pipe', 'ignore'] });
+    }
+    catch {
+        return null;
+    }
+    for (const record of raw.toString('utf8').split('\0')) {
+        if (!record)
+            continue;
+        const separator = record.indexOf('\t');
+        if (separator < 0)
+            continue;
+        const [mode, type, blobSha] = record.slice(0, separator).split(' ');
+        if (mode && type === 'blob' && blobSha)
+            blobs.set(record.slice(separator + 1), { mode, blobSha });
+    }
+    return blobs;
+}
+/** Classify a frozen branch path from two batched tree snapshots. */
+function classifyLiteral(p, tip, base) {
+    if (p.startsWith('/') || p.split('/').includes('..'))
+        return null;
+    const tipBlob = tip.get(p);
+    const baseBlob = base.get(p);
+    if (tipBlob) {
+        if (baseBlob && tipBlob.blobSha === baseBlob.blobSha && tipBlob.mode === baseBlob.mode)
+            return null;
+        return { path: p, ...tipBlob, op: baseBlob ? 'modify' : 'add' };
+    }
+    return baseBlob ? { path: p, ...baseBlob, op: 'delete' } : null;
+}
 /**
  * Classify one shipped path against the pinned BASE into a manifest entry.
  * Present in the worktree → add (absent at base) or modify; gone → delete (records the
  * PRE-deletion committed blob so reconcile can prove still-deleted-as-shipped vs re-created).
  * Returns null only if a deleted path has no base blob either (never shipped anything real).
  */
-function classify(gitRoot, baseSha, p) {
+function classify(gitRoot, baseSha, p, literalPaths) {
     if (p.startsWith('/') || p.split('/').includes('..'))
         return null; // repo-relative paths only (defense-in-depth)
     const abs = join(gitRoot, p);
     if (existsSync(abs)) {
-        const blobSha = git(gitRoot, ['hash-object', '--', p]);
+        const blobSha = git(gitRoot, ['hash-object', '--', p], literalPaths);
         if (!blobSha)
             return null;
-        const existedAtBase = git(gitRoot, ['cat-file', '-e', `${baseSha}:${p}`]) !== null;
+        const existedAtBase = git(gitRoot, ['cat-file', '-e', `${baseSha}:${p}`], literalPaths) !== null;
         return { path: p, blobSha, mode: worktreeMode(abs), op: existedAtBase ? 'modify' : 'add' };
     }
     // Deleted: the pre-deletion blob + its tree mode come from BASE.
-    const lsTree = git(gitRoot, ['ls-tree', baseSha, '--', p]); // "<mode> blob <sha>\t<path>"
+    const lsTree = git(gitRoot, ['ls-tree', baseSha, '--', p], literalPaths); // "<mode> blob <sha>\t<path>"
     if (!lsTree)
         return null;
     const [mode] = lsTree.split(WS_SPLIT);
-    const blobSha = git(gitRoot, ['rev-parse', `${baseSha}:${p}`]);
+    const blobSha = git(gitRoot, ['rev-parse', `${baseSha}:${p}`], literalPaths);
     if (!blobSha)
         return null;
     return { path: p, blobSha, mode, op: 'delete' };
@@ -153,7 +201,7 @@ function fail(msg) {
  * is where blobs are hashed — ship-branch passes the EPHEMERAL commit worktree so the manifest
  * records what the PR actually committed, not a parallel agent's later edit to the shared tree.
  */
-export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, pr, merge = false }, paths) {
+export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, tipSha, pr, merge = false, literalPaths = false, }, paths) {
     // baseSha is always required (it drives classify); repo/baseRef only when writing a FRESH entry —
     // in --merge mode they are kept from the existing branch entry (a re-push to an open PR, same metadata).
     if (!root || !branch || !baseSha)
@@ -161,12 +209,22 @@ export function recordShip({ root, gitRoot, branch, repo, baseRef, baseSha, pr, 
     if (!merge && (!repo || !baseRef)) {
         return fail('missing one of --root/--branch/--repo/--base-ref/--base-sha');
     }
+    if (literalPaths && !tipSha)
+        return fail('--literal-paths requires --tip-sha');
     if (paths.length === 0)
         return fail('no paths given');
     const hashRoot = gitRoot ?? root; // default to root; ship-branch passes the ephemeral commit worktree
-    const entries = paths
-        .map((p) => classify(hashRoot, baseSha, p))
-        .filter((e) => e !== null);
+    let classified;
+    if (literalPaths) {
+        const tip = treeBlobs(hashRoot, tipSha, paths);
+        const base = treeBlobs(hashRoot, baseSha, paths);
+        if (!tip || !base)
+            return fail('could not read the pinned tip/base trees');
+        classified = paths.map((p) => classifyLiteral(p, tip, base));
+    }
+    else
+        classified = paths.map((p) => classify(hashRoot, baseSha, p, false));
+    const entries = classified.filter((e) => e !== null);
     // Before the lock (and before the no-entry throw below): an all-unresolvable merge is a benign no-op.
     if (entries.length === 0)
         return fail('no recordable paths (all empty/unresolvable)');
@@ -222,8 +280,10 @@ function main() {
         repo: strFlag(flags.repo),
         baseRef: strFlag(flags['base-ref']),
         baseSha: strFlag(flags['base-sha']),
+        tipSha: strFlag(flags['tip-sha']),
         pr: strFlag(flags.pr),
         merge: flags.merge === true, // reship's --pr re-push extends the existing entry instead of overwriting
+        literalPaths: flags['literal-paths'] === true, // branch-source paths are concrete identities
     }, paths);
 }
 // Run only as a CLI entrypoint — importing the module (e.g. a test importing recordShip) must not

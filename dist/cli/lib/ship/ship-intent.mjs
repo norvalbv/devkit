@@ -1,13 +1,7 @@
 #!/usr/bin/env node
-/**
- * The recorded ship invocation behind `devkit ship --resume <branch>` (write/read/delete over
- * `.devkit/ship-intent-*.json`). Two constraints the code cannot show: the body travels as BYTES
- * (Buffer → base64 — a utf8 hop substitutes U+FFFD and the landed-commit resume check in
- * ship-branch.sh refuses on any byte difference), and the failure direction is asymmetric by
- * design: `write` is best-effort at its call sites (a miss costs the retry a re-type, never a
- * ship) while `read` fails CLOSED with a named reason, because replaying the wrong invocation is
- * worse than refusing.
- */
+/** Recorded ship invocation behind `devkit ship --resume`: Buffer → base64 keeps body bytes exact
+ * (a UTF-8 hop substitutes U+FFFD). Commit-only writes are best-effort; body side effects require
+ * an owned record, and reads fail closed. */
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,9 +10,12 @@ import { pathToFileURL } from 'node:url';
 import { devkitVersion } from '../../../gate-engine/devkit-version.mjs';
 import { emitShipIntentEvent } from './ship-intent-event.mjs';
 import { fail, parseArgs } from './ship-intent-args.mjs';
+import { bindSourceMembershipForWrite, cleanupDeletedSourceMembershipRefs, cleanupFailedSourceMembership, cleanupReplacedSourceMembership, emitFields, handlePathCodecCommand, provenString, provenStrings, sourceMembershipMatches, } from './ship-intent-codec.mjs';
 import { withLock } from '../atomic-write.mjs';
 import { git } from '../reconcile.mjs';
-const SCHEMA_VERSION = 1;
+const LEGACY_EXPLICIT_SCHEMA_VERSION = 1;
+const EXPLICIT_SCHEMA_VERSION = 2;
+const BRANCH_SCHEMA_VERSION = 3;
 // A manifest this old describes an ABANDONED ship: every live retry chain rewrites it on each
 // attempt, so age only accumulates when no attempt has run — and branch names get reused. Replaying
 // weeks-old bytes under a confident "Resuming" banner is the failure mode; refusing is cheap.
@@ -34,26 +31,26 @@ function originRepo(root) {
     const m = url.match(/github\.com[^:/]*[:/](.+?)(?:\.git)?$/);
     return m ? m[1] : '';
 }
-/** The gitignore-relative record path. The gate log's bare `${BR//\//-}` collapse maps `a/b` and
- * `a-b` onto one file, so concurrent ships of such twins would overwrite each other's record; the
- * raw-branch hash suffix separates those twins (truncated, so not a uniqueness proof — the RAW
- * `branch` field check in readIntent is the guarantee that a shared file never replays the other
- * branch's invocation) while the sanitized stem stays greppable. */
+/** The raw-branch hash separates sanitized-name collisions; readIntent's raw branch equality is
+ * the final guarantee that a copied or colliding file never replays another branch's invocation. */
 export const relIntentPath = (branch) => {
     const digest = createHash('sha256').update(branch).digest('hex').slice(0, 8);
     return `.devkit/ship-intent-${branch.replace(/\//g, '-').slice(0, 120)}-${digest}.json`;
 };
 const intentFile = (root, branch) => path.join(root, relIntentPath(branch));
-/**
- * Write the manifest for this attempt. Refuses (non-fatally, exit 0 with a warning) when git does
- * not IGNORE the target path: the file holds the complete PR narrative, and a consumer whose
- * managed .gitignore predates this writer must never gain a stageable untracked copy of it — the
- * writer/ignore parity contract from gitignore-cache.mts, made self-enforcing instead of
- * ordering-dependent on `devkit doctor`.
- */
+/** Write this attempt's manifest; refuse non-fatally when its path is not ignored. */
 export function writeIntent(opts, paths) {
     if (opts.mode !== 'ship' && opts.mode !== 'reship')
         return fail(`--mode must be ship|reship (got '${opts.mode}')`);
+    const sourceMode = opts.sourceMode ?? 'explicit';
+    if (sourceMode !== 'explicit' && sourceMode !== 'branch')
+        return fail(`--source-mode must be explicit|branch (got '${sourceMode}')`);
+    if (sourceMode === 'branch' && opts.mode !== 'ship')
+        return fail('--source-mode branch is only valid for a new ship');
+    if (sourceMode === 'branch' && !opts.base)
+        return fail('--source-mode branch requires a non-empty --base');
+    if (sourceMode === 'branch' && (opts.mergePaths || (opts.donatePaths?.length ?? 0) > 0))
+        return fail('--source-mode branch has frozen path membership and cannot merge/donate paths');
     if (paths.length === 0)
         return fail('no paths given');
     const rel = relIntentPath(opts.branch);
@@ -65,8 +62,13 @@ export function writeIntent(opts, paths) {
         console.error(`ship-intent: ${rel} is not gitignored here — not recording the invocation (run devkit doctor to refresh .gitignore; retries need the full command until then)`);
         return 0;
     }
+    const generation = randomUUID();
+    const requestedSourceAttempt = provenString(opts.sourceAttemptId);
+    if (sourceMode === 'branch' && opts.resumed && !requestedSourceAttempt)
+        return fail('resumed --source-mode branch requires a non-empty --source-attempt-id');
+    const sourceAttemptId = sourceMode === 'branch' ? requestedSourceAttempt || generation : undefined;
     const intent = {
-        version: SCHEMA_VERSION,
+        version: sourceMode === 'branch' ? BRANCH_SCHEMA_VERSION : EXPLICIT_SCHEMA_VERSION,
         mode: opts.mode,
         branch: opts.branch,
         title: opts.title,
@@ -74,26 +76,30 @@ export function writeIntent(opts, paths) {
         links: opts.links,
         paths,
         noQavisPublish: opts.noQavisPublish,
+        updatePrBody: opts.updatePrBody,
         bodyB64: opts.body.toString('base64'),
         repo: originRepo(opts.root),
         createdAt: new Date().toISOString(),
         // Random, not the timestamp: two same-millisecond attempts must never share the ownership
         // token the compare-and-delete matches on.
-        generation: randomUUID(),
+        generation,
         devkitVersion: devkitVersion(),
     };
+    if (sourceMode === 'branch')
+        intent.sourceMode = sourceMode;
+    if (sourceAttemptId)
+        intent.sourceAttemptId = sourceAttemptId;
     const file = intentFile(opts.root, opts.branch);
     mkdirSync(path.dirname(file), { recursive: true });
+    let boundNewMembership = null;
+    let intentPersisted = false;
     try {
-        // Writers and the compare-and-delete below share one lock, so read-then-replace interleavings
-        // cannot happen; within it the write stays temp+rename (a crash mid-write leaves the prior
-        // record) at 0600 from the first byte.
+        // The shared lock prevents read-then-replace races; temp+rename preserves the prior record if
+        // a process crashes mid-write, and the temporary file is private from its first byte.
         let superseded = false;
         withLock(`${file}.lock`, () => {
-            // Resume writes UNION paths with whatever is on disk at this instant, and CAS on the
-            // generation the resume READ: a concurrent full invocation that re-recorded newer
-            // title/body/base must not be overwritten by this attempt's stale copy of them, and a
-            // record DELETED since the read (spent by a concurrent success) must stay spent.
+            // Resume writes UNION paths and CASes the generation it read, preserving a concurrent full
+            // invocation's newer metadata; a record deleted since the read stays spent.
             let onDisk = null;
             try {
                 // SAFETY: only generation + paths are read, each re-proven by its proven* helper.
@@ -105,11 +111,8 @@ export function writeIntent(opts, paths) {
             const onDiskGen = onDisk && provenString(onDisk.generation);
             if (opts.expectGeneration !== undefined && onDiskGen !== opts.expectGeneration) {
                 superseded = true;
-                // A resume that lost the race still contributes ONLY the paths this retry explicitly
-                // briefed (donatePaths) to whoever owns the record now — metadata and the ownership token
-                // stay the owner's. Its stale copy of the RECORDED list must not leak in: the newer full
-                // invocation may have deliberately dropped those paths, and re-adding them would corrupt
-                // its scope. A deleted record stays deleted.
+                // A losing resume contributes only its explicitly briefed donatePaths. Its stale recorded
+                // list must not leak into a newer full invocation; a deleted record stays deleted.
                 if (opts.mergePaths && onDisk !== null) {
                     const ownerPaths = provenStrings(onDisk.paths) ?? [];
                     const merged = [...ownerPaths];
@@ -130,9 +133,16 @@ export function writeIntent(opts, paths) {
                 for (const p of provenStrings(onDisk.paths) ?? [])
                     if (!intent.paths.includes(p))
                         intent.paths.push(p);
+            if (sourceMode === 'branch')
+                bindSourceMembershipForWrite(opts.root, intent, opts.resumed, onDisk);
+            if (sourceMode === 'branch' && provenString(onDisk?.sourceAttemptId) !== sourceAttemptId)
+                boundNewMembership = { sourceAttemptId: sourceAttemptId, paths: intent.paths };
             const tmp = `${file}.${process.pid}.tmp`;
             writeFileSync(tmp, `${JSON.stringify(intent, null, 2)}\n`, { mode: 0o600 });
             renameSync(tmp, file);
+            intentPersisted = true;
+            if (sourceMode === 'branch')
+                cleanupReplacedSourceMembership(opts.root, intent, onDisk);
         });
         if (superseded) {
             console.error('ship-intent: record superseded by a concurrent attempt — running unrecorded');
@@ -140,10 +150,10 @@ export function writeIntent(opts, paths) {
         }
     }
     catch (e) {
+        if (!intentPersisted && boundNewMembership)
+            cleanupFailedSourceMembership(opts.root, opts.branch, boundNewMembership);
         return fail(e instanceof Error ? e.message : String(e)); // lock contention → record nothing
     }
-    // The ownership token, on stdout for the caller to hand back to `delete --generation`: a success
-    // may delete ONLY the record its own attempt wrote, never a concurrent attempt's newer one.
     process.stdout.write(`${intent.generation}\n`);
     emitShipIntentEvent(intent, opts.resumed);
     return 0;
@@ -152,26 +162,24 @@ export function writeIntent(opts, paths) {
  * Delete the record — unconditionally without `generation`, else only when the stored generation
  * matches (compare-and-delete, the receipt ref's own discipline): a concurrent attempt that
  * re-recorded between this attempt's write and its success keeps its newer record for `--resume`.
- * With `shippedPaths`, a matching record is still KEPT when it names paths this push did not ship
- * — a losing resume donates its remedy paths into the owner's record, and the owner's success must
- * not destroy the only resumable copy of that unshipped remedy. The read-compare-rm runs under the
- * same lock the writer takes, so a replace cannot slip between the compare and the rm.
+ * With `shippedPaths`, a matching record is kept if it names paths this push did not ship. The
+ * read-compare-rm shares the writer lock, so replacement cannot slip between comparison and rm.
  */
 export function deleteIntent(root, branch, generation, shippedPaths) {
     const file = intentFile(root, branch);
     let kept = false; // exit 2: the caller must not describe this outcome as a release
     try {
         withLock(`${file}.lock`, () => {
-            if (generation) {
-                let stored;
-                try {
-                    // SAFETY: only generation + paths are read, each re-proven by its proven* helper — a
-                    // corrupt record compares unequal and stays.
-                    stored = JSON.parse(readFileSync(file, 'utf8'));
-                }
-                catch {
+            let stored = null;
+            try {
+                // SAFETY: only generation, source identity, and paths are read; proven* rechecks each.
+                stored = JSON.parse(readFileSync(file, 'utf8'));
+            }
+            catch {
+                if (generation)
                     return; // absent/torn — nothing this attempt owns
-                }
+            }
+            if (generation && stored) {
                 if (provenString(stored.generation) !== generation)
                     return;
                 if (shippedPaths) {
@@ -184,6 +192,8 @@ export function deleteIntent(root, branch, generation, shippedPaths) {
                 }
             }
             rmSync(file, { force: true });
+            if (stored?.version === BRANCH_SCHEMA_VERSION)
+                cleanupDeletedSourceMembershipRefs(root, branch);
         });
         if (kept)
             return 2;
@@ -195,6 +205,25 @@ export function deleteIntent(root, branch, generation, shippedPaths) {
         return 1;
     }
     return 0;
+}
+/** Lock-shared proof that this process still owns the on-disk intent generation. */
+export function ownsIntentGeneration(root, branch, generation) {
+    const file = intentFile(root, branch);
+    try {
+        return withLock(`${file}.lock`, () => {
+            try {
+                // SAFETY: only generation is read, then proven as a string before comparison.
+                const stored = JSON.parse(readFileSync(file, 'utf8'));
+                return provenString(stored.generation) === generation;
+            }
+            catch {
+                return false;
+            }
+        });
+    }
+    catch {
+        return false;
+    }
 }
 /** Parse + validate the stored manifest, or return a refusal string (never both). */
 export function readIntent(root, branch, nowMs = Date.now()) {
@@ -223,7 +252,10 @@ export function readIntent(root, branch, nowMs = Date.now()) {
         };
     // SAFETY: names fields only — every field is runtime-re-proven below before it is trusted.
     const r = m;
-    if (r.version !== SCHEMA_VERSION)
+    const storedVersion = r.version;
+    if (storedVersion !== LEGACY_EXPLICIT_SCHEMA_VERSION &&
+        storedVersion !== EXPLICIT_SCHEMA_VERSION &&
+        storedVersion !== BRANCH_SCHEMA_VERSION)
         return {
             reason: `recorded invocation has unknown version ${String(r.version)} — run the full command, which re-records`,
         };
@@ -232,6 +264,21 @@ export function readIntent(root, branch, nowMs = Date.now()) {
         return {
             reason: `recorded invocation has no valid mode (${file}) — run the full command, which re-records`,
         };
+    let sourceMode;
+    if (storedVersion !== BRANCH_SCHEMA_VERSION) {
+        if (r.sourceMode !== undefined && r.sourceMode !== 'explicit')
+            return {
+                reason: `recorded invocation has an invalid explicit source mode (${file}) — run the full command, which re-records`,
+            };
+        sourceMode = 'explicit';
+    }
+    else {
+        if (r.sourceMode !== 'branch' || mode !== 'ship')
+            return {
+                reason: `recorded invocation has no valid version-3 branch source mode (${file}) — run the full command, which re-records`,
+            };
+        sourceMode = 'branch';
+    }
     // RAW branch equality — defense in depth behind the filename's hash suffix (a record COPIED or
     // hand-renamed onto another branch's path must refuse, never replay foreign title/body/paths).
     // Equality with the caller's known-string branch is itself the proof of stringness.
@@ -246,6 +293,10 @@ export function readIntent(root, branch, nowMs = Date.now()) {
     if (r.base !== undefined && r.base !== null && provenString(r.base) === null)
         return {
             reason: `recorded invocation is malformed (base) — run the full command, which re-records`,
+        };
+    if (sourceMode === 'branch' && !provenString(r.base))
+        return {
+            reason: `recorded version-3 branch invocation has no valid base — run the full command, which re-records`,
         };
     if (r.links !== undefined && provenStrings(r.links) === null)
         return {
@@ -285,10 +336,26 @@ export function readIntent(root, branch, nowMs = Date.now()) {
         return {
             reason: `recorded invocation is malformed (noQavisPublish) — run the full command, which re-records`,
         };
+    // V1 is preserve-only. V2+ require this side-effect bit, so older binaries reject new records.
+    const updatePrBody = storedVersion === LEGACY_EXPLICIT_SCHEMA_VERSION ? false : r.updatePrBody;
+    if (updatePrBody !== true && updatePrBody !== false)
+        return {
+            reason: `recorded invocation is malformed (updatePrBody) — run the full command, which re-records`,
+        };
     const generation = provenString(r.generation);
     if (!generation)
         return {
             reason: `recorded invocation is malformed (generation) — run the full command, which re-records`,
+        };
+    const sourceAttemptId = provenString(r.sourceAttemptId);
+    if (sourceMode === 'branch' && !sourceAttemptId)
+        return {
+            reason: `recorded version-3 branch invocation has no valid source attempt id — run the full command, which re-records`,
+        };
+    if (sourceMode === 'branch' &&
+        !sourceMembershipMatches(root, branch, { sourceAttemptId: sourceAttemptId, paths }))
+        return {
+            reason: `recorded branch-source frozen membership failed its Git binding — run the full command, which re-records`,
         };
     const createdAt = provenString(r.createdAt) ?? '';
     const created = Date.parse(createdAt);
@@ -303,66 +370,32 @@ export function readIntent(root, branch, nowMs = Date.now()) {
         return {
             reason: `recorded invocation is stale or misdated (recorded ${String(r.createdAt)}; every live attempt re-records) — run the full command`,
         };
-    return {
-        intent: {
-            version: SCHEMA_VERSION,
-            mode,
-            branch,
-            title,
-            base: provenString(r.base),
-            links,
-            paths,
-            noQavisPublish,
-            bodyB64,
-            repo,
-            createdAt,
-            generation,
-            devkitVersion: provenString(r.devkitVersion) ?? '',
-        },
+    const intent = {
+        version: storedVersion,
+        mode,
+        sourceMode,
+        branch,
+        title,
+        base: provenString(r.base),
+        links,
+        paths,
+        noQavisPublish,
+        updatePrBody,
+        bodyB64,
+        repo,
+        createdAt,
+        generation,
+        devkitVersion: provenString(r.devkitVersion) ?? '',
     };
-}
-/** The value when it really is a NUL-free string primitive, else null. The String() round-trip is
- * the runtime proof the optimistic StoredIntent typing does not give; the NUL refusal protects the
- * NUL-delimited read protocol from a tampered record's JSON-encoded U+0000 splitting a field. */
-function provenString(v) {
-    return v != null && String(v) === v && !v.includes('\0') ? v : null;
-}
-/** Every element a proven string primitive → the array; anything else → null. */
-function provenStrings(v) {
-    if (!Array.isArray(v))
-        return null;
-    for (const e of v)
-        if (provenString(e) === null)
-            return null;
-    return v;
-}
-/**
- * Field order the bash side depends on (each field NUL-terminated, body decoded to bytes):
- *   mode, title, base ('' when null), noQavisPublish (0|1), createdAt, generation, nlinks,
- *   <links...>, body, <paths...>
- * Counts precede the one variable-length list that is FOLLOWED by more fields; paths run to EOF so
- * they need none. bash 3.2 reads this with plain `read -r -d ''` — no mapfile, no arrays-by-name.
- */
-function emitFields(intent) {
-    const out = [
-        intent.mode,
-        intent.title,
-        intent.base ?? '',
-        intent.noQavisPublish ? '1' : '0',
-        intent.createdAt,
-        intent.generation,
-        String(intent.links.length),
-        ...intent.links,
-        Buffer.from(intent.bodyB64, 'base64'),
-        ...intent.paths,
-    ];
-    for (const f of out) {
-        process.stdout.write(f);
-        process.stdout.write('\0');
-    }
+    if (sourceAttemptId)
+        intent.sourceAttemptId = sourceAttemptId;
+    return { intent };
 }
 function main() {
     const [sub, ...rest] = process.argv.slice(2);
+    const codecStatus = handlePathCodecCommand(sub, rest);
+    if (codecStatus !== null)
+        return codecStatus;
     const { values, booleans, links, donates, paths } = parseArgs(rest);
     const root = values.get('root');
     const branch = values.get('branch');
@@ -377,13 +410,16 @@ function main() {
             root,
             branch,
             mode,
+            sourceMode: values.get('source-mode'),
             title,
             base: values.get('base'),
             links,
             noQavisPublish: booleans.has('no-qavis-publish'),
+            updatePrBody: booleans.has('update-pr-body'),
             resumed: booleans.has('resumed'),
             mergePaths: booleans.has('merge-paths'),
             expectGeneration: values.get('expect-generation'),
+            sourceAttemptId: values.get('source-attempt-id'),
             donatePaths: donates,
             body: readFileSync(0), // Buffer, never utf8 — see the header
         }, paths);
@@ -395,11 +431,16 @@ function main() {
         emitFields(result.intent);
         return 0;
     }
+    if (sub === 'owns') {
+        const generation = values.get('generation');
+        if (!generation)
+            return fail('owns: missing --generation');
+        return ownsIntentGeneration(root, branch, generation) ? 0 : 1;
+    }
     if (sub === 'delete')
         return deleteIntent(root, branch, values.get('generation'), paths.length > 0 ? paths : undefined);
-    return fail(`unknown subcommand '${String(sub)}' (write|read|delete)`);
+    return fail(`unknown subcommand '${String(sub)}' (write|read|owns|delete|validate-paths|validate-membership|filter-membership)`);
 }
-// CLI entrypoint only — an import (the colocated test) must not exit. Realpath so a symlinked
-// module dir still matches; same guard as reconcile-manifest-write.mts.
+// CLI entrypoint only; realpath keeps the guard correct through a symlinked module directory.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
-    process.exit(main());
+    process.exitCode = main(); // let queued stdout (notably a large validated NUL path stream) drain

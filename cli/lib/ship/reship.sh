@@ -116,7 +116,9 @@ if [ "$RESUME" -eq 1 ]; then
   SI_FIELDS=()
   while IFS= read -r -d '' si_field; do SI_FIELDS+=("$si_field"); done < "$SI_OUT"
   rm -f "$SI_OUT"
-  [ "${#SI_FIELDS[@]}" -ge 10 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
+  # ship-intent.mts field order: mode, sourceMode, title, base, qavis, updatePrBody, createdAt,
+  # generation, sourceAttemptId (empty for this explicit mode), nlinks, links..., body, paths...
+  [ "${#SI_FIELDS[@]}" -ge 12 ] || { echo "recorded invocation is malformed — run the full devkit ship --pr command" >&2; exit 1; }
   SI_MODE=${SI_FIELDS[0]}
   if [ "$SI_MODE" = "ship" ]; then
     # The blocked attempt was a NEW ship; hand over. Positive match + one-shot marker — an
@@ -125,16 +127,17 @@ if [ "$RESUME" -eq 1 ]; then
     DEVKIT_SHIP_RESUME_DISPATCHED=1 exec bash "$RESUME_SCRIPT_DIR/ship-branch.sh" --resume "$BR" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"}
   fi
   [ "$SI_MODE" = "reship" ] || { echo "recorded invocation has unrecognised mode '$SI_MODE' — run the full devkit ship --pr command" >&2; exit 1; }
-  TITLE=${SI_FIELDS[1]}
-  BASE_FLAG=${SI_FIELDS[2]}
-  [ "${SI_FIELDS[3]}" != "1" ] || QAVIS_PUBLISH=0
-  [ "${SI_FIELDS[4]}" != "1" ] || UPDATE_PR_BODY=1
-  RESUME_CREATED=${SI_FIELDS[5]}
-  RESUME_GENERATION=${SI_FIELDS[6]}
-  SI_NLINKS=${SI_FIELDS[7]}
+  [ "${SI_FIELDS[1]}" = "explicit" ] || { echo "recorded reship invocation has unsupported source mode '${SI_FIELDS[1]}'" >&2; exit 1; }
+  TITLE=${SI_FIELDS[2]}
+  BASE_FLAG=${SI_FIELDS[3]}
+  [ "${SI_FIELDS[4]}" != "1" ] || QAVIS_PUBLISH=0
+  [ "${SI_FIELDS[5]}" != "1" ] || UPDATE_PR_BODY=1
+  RESUME_CREATED=${SI_FIELDS[6]}
+  RESUME_GENERATION=${SI_FIELDS[7]}
+  SI_NLINKS=${SI_FIELDS[9]}
   case "$SI_NLINKS" in *[!0-9]*|'') echo "recorded invocation is malformed (nlinks '$SI_NLINKS')" >&2; exit 1 ;; esac
-  si_i=8
-  si_body_at=$((8 + SI_NLINKS))
+  si_i=10
+  si_body_at=$((10 + SI_NLINKS))
   [ "${#SI_FIELDS[@]}" -gt $((si_body_at + 1)) ] || { echo "recorded invocation is malformed (missing body/paths)" >&2; exit 1; }
   while [ "$si_i" -lt "$si_body_at" ]; do LINK_EXTRA+=("${SI_FIELDS[$si_i]}"); si_i=$((si_i + 1)); done
   RESUME_BODY=${SI_FIELDS[$si_body_at]}
@@ -880,7 +883,7 @@ if [ "$REWRITE" -eq 1 ]; then
   while IFS= read -r -d '' final_path; do FINAL_PATHS+=("$final_path"); done < "$FINAL_SCOPE_FILE"
   if ! node "$RMW" \
     --root "$ROOT" --git-root "$WT" --branch "$BR" --repo "$REPO" --base-ref "$BASE_REF" \
-    --base-sha "$BASE" --pr "$PR_NUM" -- "${FINAL_PATHS[@]}"; then
+    --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" --pr "$PR_NUM" -- "${FINAL_PATHS[@]}"; then
     if [ "$REWRITE_ALREADY_PUBLISHED" -eq 1 ]; then
       echo "reconcile state was not replaced; kept the exact gated receipt and intent for a safe resume" >&2
       echo "  origin/$BR remains at $SHIP_COMMIT; resume again after the manifest writer is available" >&2
@@ -920,7 +923,7 @@ else
     [ -z "${SHIP_INTENT_GENERATION:-}" ] || node "$SHIP_INTENT" delete --root "$ROOT" --branch "$BR" --generation "$SHIP_INTENT_GENERATION" -- ${PATHS[@]+"${PATHS[@]}"} || true
   fi
   node "$RMW" \
-    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --merge -- "${PATHS[@]}" \
+    --root "$ROOT" --git-root "$WT" --branch "$BR" --base-sha "$BASE" --tip-sha "$SHIP_COMMIT" --merge -- "${PATHS[@]}" \
     || echo "reship: reconcile manifest not updated (non-fatal)" >&2
   PR_URL=$(gh pr view "$BR" --repo "$REPO" --json url -q .url 2>/dev/null) || PR_URL=""
 fi

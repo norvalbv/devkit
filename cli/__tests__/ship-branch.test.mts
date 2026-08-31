@@ -293,7 +293,7 @@ describe('ship — <branch>/<title> must precede the flags', () => {
   const ORDER_RE = /must come FIRST, before any flag/;
   const GIT_UNKNOWN_OPT_RE = /unknown option/;
 
-  for (const flag of ['--base', '--link', '--body', '--pr']) {
+  for (const flag of ['--base', '--link', '--body', '--pr', '--from-branch']) {
     it(`rejects ${flag} in a positional slot, naming the ordering rule`, () => {
       const r = buildAndRun('main', 'git@github.com:acme/app.git', {
         argv: [flag, 'somevalue', 'feat/x', 'title', '--', 'dummy-path'],
@@ -317,7 +317,7 @@ describe('ship — <branch>/<title> must precede the flags', () => {
 
   it('still accepts a dash-leading TITLE (guard matches known flags, not every dash)', () => {
     // Matching a blanket `-*` would trade the flags-first footgun for a title one. A title is free
-    // text; only the four real flag spellings are rejected.
+    // text; only real flag spellings are rejected.
     const r = buildAndRun('main', 'git@github.com:acme/app.git', {
       argv: ['feat/x', '-- rebuild the parser --', '--', 'dummy-path'],
     });

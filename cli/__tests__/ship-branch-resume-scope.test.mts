@@ -429,6 +429,29 @@ describe('ship-branch.sh — resume scope edge cases', () => {
     expect(bareSha(bare, 'feat/spaced-paths')).toBe(preserved);
   });
 
+  it('root-anchors gate-authored exclusions when ship is invoked from a subdirectory', () => {
+    const { dir, env, git, bare } = seedShipRepoLocalRemote();
+    const { publishEnv } = publishEnvFor(dir, env);
+    mkdirSync(join(dir, 'sub'), { recursive: true });
+    const preserved = preserve(
+      dir,
+      env,
+      git,
+      'feat/subdir-scope',
+      {
+        briefed: { 'sub/note.txt': 'hi\n' },
+        gateAuthored: { 'sub/gate.txt': 'gate\n' },
+      },
+      ['sub/gate.txt'],
+    );
+
+    const retry = retryShip(join(dir, 'sub'), publishEnv, 'feat/subdir-scope', ['sub/note.txt']);
+
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(retry.stderr).not.toContain('outside the requested scope');
+    expect(bareSha(bare, 'feat/subdir-scope')).toBe(preserved);
+  });
+
   // The hint caps at 5 and appends the remainder. An off-by-one here reads as a miscount of how much
   // work the operator has to brief, on the one line telling them what to do next.
   it('caps the unbriefed-path hint at five and counts the remainder', () => {

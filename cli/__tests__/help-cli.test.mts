@@ -22,7 +22,34 @@ describe('devkit help surface', () => {
     expect(r.stdout).toMatch(/devkit ship —/);
     expect(r.stdout).toMatch(/SHIP_DRY_RUN/);
     expect(r.stdout).toContain('--dry-gates');
+    expect(r.stdout).toContain('--from-branch');
     expect(r.stdout).toMatch(/Never leaves a local branch or commit/);
+  });
+
+  it('rejects --from-branch with --pr at the dispatcher boundary', () => {
+    const r = run(['ship', 'feat/x', 't', '--pr', '--base', 'main', '--from-branch']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('--from-branch is only valid for a new ship');
+  });
+
+  it('does not reinterpret a body value that resembles --from-branch as a mode flag', () => {
+    const r = run(['ship', '--pr', 'feat/x', 't', '--body', '--from-branch', '--', 'note.txt'], {
+      ...process.env,
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('BR=feat/x');
+    expect(r.stderr).not.toContain('--from-branch is only valid for a new ship');
+  });
+
+  it('does not mistake an opaque --body value for the option terminator', () => {
+    const r = run(['ship', 'feat/x', 't', '--body', '--', '--pr', '--', 'note.txt'], {
+      ...process.env,
+      SHIP_RESOLVE_ONLY: '1',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain('BR=feat/x');
+    expect(r.stderr).not.toContain('unknown flag: --pr');
   });
 
   it('`<command> --help` works for every command generically', () => {
