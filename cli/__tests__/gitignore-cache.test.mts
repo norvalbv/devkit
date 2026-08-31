@@ -24,6 +24,7 @@ describe('ensureDevkitCacheGitignore', () => {
   it('manages the review run directory without ignoring tracked devkit state', () => {
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/review-runs/');
     expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/comment-firewall-receipts.json');
+    expect(DEVKIT_CACHE_IGNORES).toContain('.devkit/anti-slop-baseline-upgrade.json');
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/comment-firewall-rationales.json');
     expect(DEVKIT_TRACKED_UNIGNORES).not.toContain('!.devkit/comment-firewall-rationales.json');
     expect(DEVKIT_CACHE_IGNORES).not.toContain('.devkit/');

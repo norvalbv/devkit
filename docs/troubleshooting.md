@@ -190,19 +190,22 @@ the two disagree.
 
 - **During a `devkit ship` / `devkit ship --pr`** you shouldn't see it: the ship worktree is cut from
   the base (for `--pr`, the existing PR branch tip), so a branch that forked before a gate-infra
-  change carries that change's *predecessor* — while the gates come from the caller's linked
+  change carries that change's _predecessor_ — while the gates come from the caller's linked
   `node_modules`. `prepare_gate_worktree` therefore refreshes the managed state from the running
   package and prints `↳ shipping: refreshed managed capability state …`. That refresh touches the
   **working tree only** — it is never staged and never reaches the commit, so the PR branch stays
   self-consistent for its own CI. If you instead see `↳ shipping: managed capability refresh skipped
-  — <reason>`, the reason names the fix (usually `devkit doctor --fix`).
+— <reason>`, the reason names the fix (usually `devkit doctor --fix`).
 - **On a plain commit**, your checkout's managed state lags the devkit you upgraded to. Run
   `devkit doctor --fix` and commit the refreshed `.devkit/` bytes.
 
-One knock-on is expected after a devkit upgrade: the newer rule set runs against your existing
-`.anti-slop-baseline.json`, so rules added since the baseline was written can surface findings you
-didn't introduce. That block is deliberate — fix or explicitly re-baseline, and note that a
-re-baseline is a change to the baseline file, so it belongs in the commit.
+When a devkit upgrade newly activates anti-slop rule IDs, it merges only those rules' current
+findings into an existing `.anti-slop-baseline.json`; all older rule entries and counts remain
+shrink-only. Stage the managed capability and baseline together. If the previous managed manifest or
+config is missing or invalid, upgrade cannot prove which rules are newly active, leaves the baseline
+unchanged, and says so; repair the managed state, then explicitly review and re-baseline if needed.
+Capability repair commands preserve a pending activation marker, so a later `devkit upgrade` can
+still perform the scoped merge after `init` or `doctor --fix` refreshed the managed bytes.
 
 ## `✗ deterministic gates failed: <names>`
 

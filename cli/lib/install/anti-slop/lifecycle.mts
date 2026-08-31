@@ -26,28 +26,26 @@ import {
 import { resolveOxcRuntime } from '../oxc/runtime.mts';
 import {
   ANTI_SLOP_BASELINE_MODE,
+  ANTI_SLOP_BASELINE_LOCK_REL,
   ANTI_SLOP_CONFIG_REL,
   ANTI_SLOP_EXECUTION_MODE_ENV,
   ANTI_SLOP_LOCK_REL,
   ANTI_SLOP_MANAGED_REL,
   ANTI_SLOP_MANIFEST_REL,
   ANTI_SLOP_PLUGIN_API_VERSION,
+  ANTI_SLOP_DEVKIT_RULE_IDS,
   ANTI_SLOP_RULE_IDS,
   ANTI_SLOP_UPSTREAM,
   renderAntiSlopConfig,
 } from './constants.mts';
 import { installExecutionModeWrapper } from './execution-mode.mts';
-
-interface AntiSlopManifest {
-  schemaVersion: 1;
-  upstreamCommit: string;
-  pluginApiVersion: string;
-  ruleIds: string[];
-  pluginDigest: string;
-  configDigest: string;
-  probeDigest: string;
-  probeConfigDigest: string;
-}
+import {
+  antiSlopPluginSource,
+  type AntiSlopManifest,
+  captureAntiSlopBaselineActivationUnlocked,
+  devkitPackageVersion,
+  readAntiSlopManifest,
+} from './managed-state.mts';
 
 interface SyncOptions {
   dryRun?: boolean;
@@ -100,14 +98,6 @@ function treeDigest(root: string): string {
   return hash.digest('hex');
 }
 
-function pluginSource(): { root: string; entry: string } {
-  const root = join(packageDir(), 'anti-slop', 'src');
-  if (existsSync(join(root, 'index.mjs'))) return { root, entry: './plugin/index.mjs' };
-  if (existsSync(join(root, 'index.js'))) return { root, entry: './plugin/index.js' };
-  if (existsSync(join(root, 'index.ts'))) return { root, entry: './plugin/index.ts' };
-  throw new Error('bundled anti-slop plugin entry is missing');
-}
-
 function pluginApiSource(): string {
   const entry = createRequire(import.meta.url).resolve('@oxlint/plugins');
   const manifest = JSON.parse(readFileSync(join(dirname(entry), 'package.json'), 'utf8')) as {
@@ -146,27 +136,6 @@ function makePluginApiTrackable(plugin: string, apiSource: string): void {
   cpSync(apiSource, join(plugin, 'oxlint-plugins-api'), { recursive: true });
 }
 
-function readManifest(cwd: string): AntiSlopManifest | null {
-  const path = join(cwd, ANTI_SLOP_MANIFEST_REL);
-  if (!existsSync(path)) return null;
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<AntiSlopManifest>;
-    return value.schemaVersion === 1 &&
-      value.upstreamCommit === ANTI_SLOP_UPSTREAM &&
-      value.pluginApiVersion === ANTI_SLOP_PLUGIN_API_VERSION &&
-      Array.isArray(value.ruleIds) &&
-      value.ruleIds.every((id) => typeof id === 'string') &&
-      typeof value.pluginDigest === 'string' &&
-      typeof value.configDigest === 'string' &&
-      typeof value.probeDigest === 'string' &&
-      typeof value.probeConfigDigest === 'string'
-      ? (value as AntiSlopManifest)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Explain why an explicit request cannot activate in a non-repository mode. */
 export function warnIfAntiSlopUnavailable(mode: string, requested: boolean): void {
   if (!requested || mode !== 'overlay') return;
@@ -176,12 +145,12 @@ export function warnIfAntiSlopUnavailable(mode: string, requested: boolean): voi
 }
 
 function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
-  const source = pluginSource();
+  const source = antiSlopPluginSource();
   const apiSource = pluginApiSource();
   const config = renderAntiSlopConfig(source.entry);
   if (dryRun) {
     console.log(
-      `  [dry-run] sync ${ANTI_SLOP_MANAGED_REL}/ (15 rules; upstream ${ANTI_SLOP_UPSTREAM.slice(0, 12)})`,
+      `  [dry-run] sync ${ANTI_SLOP_MANAGED_REL}/ (${ANTI_SLOP_RULE_IDS.length} rules: ${ANTI_SLOP_RULE_IDS.length - ANTI_SLOP_DEVKIT_RULE_IDS.length} upstream + ${ANTI_SLOP_DEVKIT_RULE_IDS.length} Devkit; upstream ${ANTI_SLOP_UPSTREAM.slice(0, 12)})`,
     );
     return null;
   }
@@ -204,6 +173,7 @@ function syncUnlocked(cwd: string, dryRun: boolean): ManagedReplacement | null {
     writeFileAtomic(join(staging, '.oxlintrc.json'), PROBE_CONFIG_SOURCE);
     const manifest: AntiSlopManifest = {
       schemaVersion: 1,
+      devkitVersion: devkitPackageVersion(),
       upstreamCommit: ANTI_SLOP_UPSTREAM,
       pluginApiVersion: ANTI_SLOP_PLUGIN_API_VERSION,
       ruleIds: [...ANTI_SLOP_RULE_IDS],
@@ -244,28 +214,31 @@ export function syncAntiSlopCapability(cwd: string, opts: SyncOptions = {}): voi
     return;
   }
   mkdirSync(join(cwd, '.devkit'), { recursive: true });
-  withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
-    assertOxcCapabilityReady(cwd, { pinRoot });
-    const replacement = syncUnlocked(cwd, false);
-    if (!replacement) throw new Error('anti-slop managed replacement was not prepared');
-    try {
-      syncOxcCapability(cwd, { antiSlop: true, pinRoot });
-      replacement.commit();
-      console.log(
-        `  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`,
-      );
-    } catch (error) {
-      replacement.rollback();
+  withLock(join(cwd, ANTI_SLOP_BASELINE_LOCK_REL), () => {
+    withLock(join(cwd, ANTI_SLOP_LOCK_REL), () => {
+      assertOxcCapabilityReady(cwd, { pinRoot });
+      captureAntiSlopBaselineActivationUnlocked(cwd, false);
+      const replacement = syncUnlocked(cwd, false);
+      if (!replacement) throw new Error('anti-slop managed replacement was not prepared');
       try {
-        const restored =
-          existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL)) &&
-          existsSync(join(cwd, ANTI_SLOP_CONFIG_REL));
-        syncOxcCapability(cwd, { antiSlop: restored, pinRoot });
-      } catch {
-        // Preserve the original sync failure; doctor can repair any residual managed Oxc drift.
+        syncOxcCapability(cwd, { antiSlop: true, pinRoot });
+        replacement.commit();
+        console.log(
+          `  ✓ anti-slop: ${replacement.manifest.ruleIds.length} rules @ ${replacement.manifest.upstreamCommit.slice(0, 12)}`,
+        );
+      } catch (error) {
+        replacement.rollback();
+        try {
+          const restored =
+            existsSync(join(cwd, ANTI_SLOP_MANIFEST_REL)) &&
+            existsSync(join(cwd, ANTI_SLOP_CONFIG_REL));
+          syncOxcCapability(cwd, { antiSlop: restored, pinRoot });
+        } catch {
+          // Preserve the original sync failure; doctor can repair any residual managed Oxc drift.
+        }
+        throw error;
       }
-      throw error;
-    }
+    });
   });
 }
 
@@ -353,7 +326,7 @@ function probeIntegration(cwd: string): { ok: boolean; detail: string } {
 }
 
 function capabilityHealth(cwd: string): CapabilityHealth {
-  const manifest = readManifest(cwd);
+  const manifest = readAntiSlopManifest(cwd);
   if (!manifest) {
     return {
       manifest: null,

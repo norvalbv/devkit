@@ -12,7 +12,7 @@ A versioned developer toolkit that keeps agent instructions, project conventions
 | Shared configuration | Biome and strict TypeScript presets for common stacks | Stable package export paths |
 | Portable gate engine | Decision, review, duplication, structure, size, fan-out, Sentry, and advisory gates | `guard-*` command-line tools |
 | Repository setup | Stack detection, idempotent installation, upgrades, diagnostics, and cleanup | The `devkit` CLI |
-| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, and incremental debt adoption | Opt-in managed capability |
+| Oxc + anti-slop | Exact Oxlint/Oxfmt pins, 15 vendored rules, 2 Devkit extensions, and incremental debt adoption | Opt-in managed capability |
 
 The package and agent assets use the same release tag. A prompt or skill cannot silently drift away from the installer and gate implementation that consumes it.
 
@@ -89,8 +89,10 @@ Their severities and scoped overrides stay in the ordinary Oxlint config. Baseli
 creation is always explicit, normal checks are read-only, and pruning can only remove fixed debt.
 The staged form reads the exact Git index, and CI can pass `--base <ref>` to prevent a candidate
 baseline from growing relative to its base commit.
-See the [anti-slop capability guide](docs/anti-slop.md) for provenance, the complete rule matrix,
-and the fingerprint contract.
+See the [anti-slop capability guide](docs/anti-slop.md) for provenance, the upstream rule matrix,
+and the fingerprint contract. The
+[external-record extension guide](docs/anti-slop-external-records.md) documents Devkit's two
+default-error rules, JavaScript examples, and upgrade-baseline boundary.
 
 ### Review a trusted checkout
 
@@ -230,6 +232,7 @@ for the final ownership and performance rationale.
 ## Documentation
 
 - [Benchmark methodology and immutable history](docs/benchmarks/README.md)
+- [External-record anti-slop extensions](docs/anti-slop-external-records.md)
 - [Glossary and operating modes](docs/glossary.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Structure governance](docs/structure-governance.md)

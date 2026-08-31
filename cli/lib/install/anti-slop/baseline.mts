@@ -19,6 +19,8 @@ export interface BaselineEntry {
 export interface AntiSlopBaseline {
   schemaVersion: 1;
   upstreamCommit: string;
+  /** Durable transition receipts for activation migrations, including zero-finding rules. */
+  migrationReceipts?: string[];
   entries: BaselineEntry[];
 }
 
@@ -31,6 +33,23 @@ export interface BaselineComparison {
 
 export interface BaselineIncrease extends BaselineEntry {
   additionalCount: number;
+}
+
+/** Completion receipts are append-only; removing one reopens a finished zero-debt migration. */
+export function removedBaselineMigrationReceipts(
+  base: AntiSlopBaseline,
+  candidate: AntiSlopBaseline,
+): string[] {
+  const candidateReceipts = new Set(candidate.migrationReceipts ?? []);
+  return (base.migrationReceipts ?? []).filter((receipt) => !candidateReceipts.has(receipt));
+}
+
+function newlyActivatedRuleIdsWithoutDebt(
+  entries: readonly BaselineEntry[],
+  activatedRuleIds: ReadonlySet<string>,
+): Set<string> {
+  const existingRuleIds = new Set(entries.map((entry) => entry.ruleId));
+  return new Set([...activatedRuleIds].filter((ruleId) => !existingRuleIds.has(ruleId)));
 }
 
 function expectedFingerprint(entry: Omit<BaselineEntry, 'fingerprint' | 'count'>): string {
@@ -84,6 +103,12 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
   if (
     baseline.schemaVersion !== 1 ||
     baseline.upstreamCommit !== ANTI_SLOP_UPSTREAM ||
+    (baseline.migrationReceipts !== undefined &&
+      (!Array.isArray(baseline.migrationReceipts) ||
+        !baseline.migrationReceipts.every(
+          (receipt) => String(receipt) === receipt && String(receipt).length > 0,
+        ) ||
+        new Set(baseline.migrationReceipts).size !== baseline.migrationReceipts.length)) ||
     !Array.isArray(baseline.entries) ||
     !baseline.entries.every(validateEntry)
   ) {
@@ -93,7 +118,16 @@ export function parseBaseline(json: string, source = ANTI_SLOP_BASELINE_REL): An
   if (new Set(sorted.map((entry) => entry.fingerprint)).size !== sorted.length) {
     throw new Error(`invalid ${source}: duplicate fingerprints`);
   }
-  return { schemaVersion: 1, upstreamCommit: baseline.upstreamCommit, entries: sorted };
+  const migrationReceipts = [...(baseline.migrationReceipts ?? [])].sort((a, b) =>
+    a.localeCompare(b),
+  );
+  const parsed: AntiSlopBaseline = {
+    schemaVersion: 1,
+    upstreamCommit: baseline.upstreamCommit,
+    entries: sorted,
+  };
+  if (migrationReceipts.length > 0) parsed.migrationReceipts = migrationReceipts;
+  return parsed;
 }
 
 export function readBaseline(cwd: string): AntiSlopBaseline | null {
@@ -121,6 +155,34 @@ export function compareBaseline(
     resolvedCount: baseline.entries.reduce(
       (sum, entry) => sum + Math.max(0, entry.count - (current.get(entry.fingerprint) ?? 0)),
       0,
+    ),
+  };
+}
+
+/**
+ * Adopt current findings for rules activated by a capability upgrade. Existing rule debt is never
+ * touched: if a supposedly activated rule already has any baseline entry, it is treated as
+ * existing and remains shrink-only.
+ */
+export function adoptBaselineRuleFindings(
+  baseline: AntiSlopBaseline,
+  groups: readonly FindingGroup[],
+  activatedRuleIds: ReadonlySet<string>,
+  migrationId: string,
+): AntiSlopBaseline {
+  const eligibleRuleIds = (baseline.migrationReceipts ?? []).includes(migrationId)
+    ? new Set<string>()
+    : newlyActivatedRuleIdsWithoutDebt(baseline.entries, activatedRuleIds);
+  const adopted = baselineFromGroups(groups).entries.filter((entry) =>
+    eligibleRuleIds.has(entry.ruleId),
+  );
+  return {
+    ...baseline,
+    migrationReceipts: [...new Set([...(baseline.migrationReceipts ?? []), migrationId])].sort(
+      (a, b) => a.localeCompare(b),
+    ),
+    entries: [...baseline.entries, ...adopted].sort((a, b) =>
+      a.fingerprint.localeCompare(b.fingerprint),
     ),
   };
 }
@@ -158,12 +220,19 @@ export function baselineIncreases(
   base: AntiSlopBaseline,
   candidate: AntiSlopBaseline,
   renames: ReadonlyMap<string, string> = new Map(),
+  activatedRuleIds: ReadonlySet<string> = new Set(),
+  currentGroups: readonly FindingGroup[] = [],
 ): BaselineIncrease[] {
-  const allowed = new Map(
-    migrateBaselineRenames(base, renames).entries.map((entry) => [entry.fingerprint, entry.count]),
-  );
+  const migratedBase = migrateBaselineRenames(base, renames);
+  const eligibleRuleIds = newlyActivatedRuleIdsWithoutDebt(migratedBase.entries, activatedRuleIds);
+  const allowed = new Map(migratedBase.entries.map((entry) => [entry.fingerprint, entry.count]));
+  const current = new Map(currentGroups.map((group) => [group.fingerprint, group.count]));
   return candidate.entries.flatMap((entry) => {
-    const additionalCount = Math.max(0, entry.count - (allowed.get(entry.fingerprint) ?? 0));
+    const baseCount = allowed.get(entry.fingerprint) ?? 0;
+    const allowedCount = eligibleRuleIds.has(entry.ruleId)
+      ? Math.max(baseCount, current.get(entry.fingerprint) ?? 0)
+      : baseCount;
+    const additionalCount = Math.max(0, entry.count - allowedCount);
     return additionalCount > 0 ? [{ ...entry, additionalCount }] : [];
   });
 }

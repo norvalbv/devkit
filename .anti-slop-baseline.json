@@ -507,6 +507,14 @@
       "count": 2
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/asset-conflicts.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(m.files)).not.toContain('correctness-reviewer.md');",
+      "fingerprint": "0bf5759d0fdab7fefa1c5c11cba7b0f747b3cda10f8b6eff3c329d2ab774b7b2",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/schema.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -537,6 +545,14 @@
       "context": "const abs = path.join(dir, ref as string);",
       "fingerprint": "0c60fe5986b30da6969bc22bbd3814bb79306890b253d8caf85728241b603001",
       "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/commands/update.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "const ref = pkg.dependencies?.[DEP] ?? pkg.devDependencies?.[DEP];",
+      "fingerprint": "0c9868449bc04f9cd92a2ae83fd6769d2ee6fe1159a6887205557ebc2ddd9ca9",
+      "count": 2
     },
     {
       "ruleId": "anti-slop/no-runtime-typeof",
@@ -576,6 +592,14 @@
       "diagnostic": "Parameter `issue` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
       "context": ".map((issue: unknown) => String(issue).slice(0, ISSUE_CHARS));",
       "fingerprint": "0d9493ff7b5362da182ee6520be91f6973728ff343b90e24484c8db41cdf2b60",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "gate-engine/edge-cases/eval/lib/sources.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "for (const p of messages[j].parts ?? []) {",
+      "fingerprint": "0da2d4a9da4f7496542bf5981754b13833f061b95d6aeaf1592598d4ef708ed1",
       "count": 1
     },
     {
@@ -707,6 +731,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/__tests__/overlay.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "delete guard[key];",
+      "fingerprint": "1136e15d02a950a8fb7fd5c54decb6dd6e8202d0e93d6f38cef02e5c47d12235",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-chained-type-assertions",
       "file": "gate-engine/critique/__tests__/evidence-store.test.mts",
       "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
@@ -721,6 +753,14 @@
       "context": "const m = merged as unknown as { itemCount: number; items: unknown[] };",
       "fingerprint": "11890637f043ac786c1931bb170ef4cf5ca31610849ba2de669bf5b6fc7e7a73",
       "count": 2
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "gate-engine/edge-cases/eval/lib/sources.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "const m = messages[i];",
+      "fingerprint": "11b831feb3f85c76f1f275285616d55c9428b9a3bc8215c13d96827e7ff6ce86",
+      "count": 1
     },
     {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
@@ -776,6 +816,14 @@
       "diagnostic": "Rename symbol \"INSTRUCTION_SHAPED_LINE\" for its domain role; \"shape\" describes structure rather than ownership.",
       "context": "const INSTRUCTION_SHAPED_LINE = /^\\s*(?:#{1,6}\\s|[\\s>*#-]*\\**(?:VERDICT|OFFENDING|VIOLATION)\\b)/i;",
       "fingerprint": "124be3bcf2fd32f73f9514dd3fa0851e10894912767eddb6ef013dc8c88fec39",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/reconcile.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(out.ffBlockersByBase).sort()).toEqual(['0.0.9', 'release/1.x']);",
+      "fingerprint": "125172edcea9f69eee2cabe915753709e6d582351fb7407c524d21042776dc08",
       "count": 1
     },
     {
@@ -899,6 +947,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/adhd-component.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(manifest.files).filter((f) => f.startsWith(SKILL))).toEqual([]);",
+      "fingerprint": "15bd6dafb1eb6827ec61de6355003b5a65515cb0fd21b8d323409b3b3d3308be",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/eval/adapters.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -1003,11 +1059,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value.pluginDigest === 'string' &&",
-      "fingerprint": "18da63aeb51e39161b743db5689bb047287878281b73fb935f3890d5d716bf17",
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/asset-conflicts.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(m.files)).not.toContain('lint-check.sh'); // not claimed",
+      "fingerprint": "1904da809d713e862c59c18d13b6fd8e98b67a7afcb24e95ea83cecc2cee9261",
       "count": 1
     },
     {
@@ -1392,6 +1448,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": ".map((component) => component.id as string);",
       "fingerprint": "22f777acf05023709ffe7ebf216d64c932f6aa8de175f6b92ed59625cbafaa48",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/__tests__/doctor-judge-family.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "expect(raw.review[FAMILY_PROVENANCE_KEY]).toContain('devkit doctor --fix');",
+      "fingerprint": "22ff5e2c83c05fac5f2f4822feca6b1f11a43014991ac5f9476be3f67971e7da",
       "count": 1
     },
     {
@@ -1963,6 +2027,14 @@
       "count": 2
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/bin-run-as-main.test.mts",
+      "diagnostic": "Object.entries on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "for (const [bin, target] of Object.entries(BIN)) {",
+      "fingerprint": "2e9da7d81f979a055e4e23b3eb0bb4fc7aa179fddc8a07ce48782ca92f22e47e",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/__tests__/review-snapshot.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2171,14 +2243,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `pluginSource` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (existsSync(join(root, 'index.js'))) return { root, entry: './plugin/index.js' };",
-      "fingerprint": "33886a9afa347117173fae09511d49478388d97459b579690fea3bca742becbc",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/__tests__/eval-bench.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -2240,14 +2304,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "JSON.parse(readFileSync(join(cwd, '.devkit', 'config.json'), 'utf8')) as {",
       "fingerprint": "358ef9dd3751e4e8c6d7a1c3165c2bfa9e9b13d04a5cb8d1fceec1fc121b5e42",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value.probeConfigDigest === 'string'",
-      "fingerprint": "35abe7363b19ea561eb3ccdfe94b7f0adab64ca906067959279b1e360d8148f4",
       "count": 1
     },
     {
@@ -2419,6 +2475,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/bin-run-as-main.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(BIN).length).toBeGreaterThan(10);",
+      "fingerprint": "38cb6c576ef3ce87145e838dbf8373cf3866ece66e09f9eaaaddb09d549702f8",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-conditional-empty-object-spread",
       "file": "cli/lib/install/agent-asset-manifest/codec.mts",
       "diagnostic": "This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
@@ -2536,6 +2600,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const summary = (value.metrics ?? value) as Json;",
       "fingerprint": "3bc54629c571837810a78853dc9194c640cb4a4b3ed4da3eeef59e060b441418",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/overlay.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(manifest.files).some((k) => k.startsWith('commit-guard/'))).toBe(false);",
+      "fingerprint": "3bc861a9b4b569646d67f669ea2413c73634df5509bb90232dc58c2ec8c1c22a",
       "count": 1
     },
     {
@@ -3131,6 +3203,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/ship-manifest.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(got.paths[0]).sort()).toEqual(Object.keys(want.paths[0]).sort());",
+      "fingerprint": "47db4ed0e29ee303398f71b232546dd04e084d8b4637f914802b8e7e500e4597",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/ship/review/cache/session.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3307,11 +3387,11 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value.probeDigest === 'string' &&",
-      "fingerprint": "4b07e255fc47bf70a28b712b905b43a4725ac5e799ee08372a041bf814d93977",
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/ship-manifest.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(got).sort()).toEqual(Object.keys(want).sort());",
+      "fingerprint": "4ace98a11d796102a3abca8f491208f757a22128438c4c972858bcba47a42d83",
       "count": 1
     },
     {
@@ -3547,14 +3627,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `pluginSource` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (existsSync(join(root, 'index.ts'))) return { root, entry: './plugin/index.ts' };",
-      "fingerprint": "4fe7b38763c994bea4a1bc6b93715d721356cb5fdf33aaca40a8ab70d4d67ff4",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/__tests__/capture-normalizer.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3755,6 +3827,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/__tests__/adhd-component.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "for (const p of Object.keys(m.providers)) Object.assign(m.providers[p].files, entries);",
+      "fingerprint": "55a1f0171bba6ced18c6b59384e5a04c7587794547b9d8d93f2312c5b4288896",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/critique/evidence-store-internal.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -3888,14 +3968,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "return selected.source.physicalPath as string;",
       "fingerprint": "5990eaf3e4ddb84d6ca268f3ba9d0583f62803dff4be5bbf14a0ac156b3438a3",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-known-value-widening",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "The explicit anonymous object type on return value of `pluginSource` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
-      "context": "if (existsSync(join(root, 'index.mjs'))) return { root, entry: './plugin/index.mjs' };",
-      "fingerprint": "5997492b197aa48be1b832ea97dffb32b3928955d4f46c4094edca1fea088757",
       "count": 1
     },
     {
@@ -4424,6 +4496,14 @@
       "diagnostic": "This dictionary's unknown value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "function recordValue(value: unknown, message: string): Record<string, unknown> {",
       "fingerprint": "638147516f4093d7cfa1294dc480c1e0c2b645b6d3b1883059df196fd5f129a4",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "gate-engine/eval/cli.mts",
+      "diagnostic": "Object.entries on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "const owned = Object.entries(parsed.sections).filter(([key]) =>",
+      "fingerprint": "63e567fd206f867abee826057d0d751d5b6da11e081068db0492cf50b35c8f62",
       "count": 1
     },
     {
@@ -5059,6 +5139,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/__tests__/init-doctor.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "expect(pkg.devDependencies[dep], `${dep} should NOT be a consumer dep`).toBeUndefined();",
+      "fingerprint": "703e07c6085f59b10f4ad3457dd362ae1b60a138c6dca9f92194e582326fd8be",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/evidence-store.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -5595,14 +5683,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "? (value as AntiSlopManifest)",
-      "fingerprint": "7bc7d316f05278b159d34b2c95205c3d73f76e5608458af5bdf9d2606396b255",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/eval/schema.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -6011,6 +6091,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "gate-engine/judge/__tests__/mcp-profile.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(config.mcpServers).sort()).toEqual([",
+      "fingerprint": "838b4119ad8d3da56e89c33ad59e7b1355d40c5a4da63b200c467b9baa176591",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/__tests__/lens-split.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -6048,14 +6136,6 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": ": selection[c.id as keyof Selection] && !(c.id === 'structure' && !isStructure),",
       "fingerprint": "84043a13bb19eb033ac4888693aea176fb56ebebc9475d0459a448dc19966ea8",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "typeof value.configDigest === 'string' &&",
-      "fingerprint": "8419d9ab8a54df5fc82694e1e9f88622292fbf9259b96b7402e6636360866a62",
       "count": 1
     },
     {
@@ -6152,6 +6232,14 @@
       "diagnostic": "This dictionary's any value type gives callers no concrete value contract. Use an owner/schema-derived value type; parse external payloads before insertion.",
       "context": "type Json = Record<string, any>;",
       "fingerprint": "85fe299c3320a7eb2c02123cdb724e155d683f17c545001495fd3eed66a8738d",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/hook-registration-script-coverage.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(manifest.files)).toContain('decision-scope-brief.mjs');",
+      "fingerprint": "8612f13dacb3ceec811673345c083aed27b3299543180eb35067f6a82d5def2c",
       "count": 1
     },
     {
@@ -6480,6 +6568,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "...(typeof durationMs === 'number' && Number.isFinite(durationMs)",
       "fingerprint": "8cbdc135ca2d485042f90d94f289fc97b127fc4b8f27c36952128ab0320a7a47",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/adhd-component.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "for (const p of Object.keys(m.providers)) Object.assign(m.providers[p].files, entries);",
+      "fingerprint": "8d5eca67a5dff063cbe2ebcffd0d3fb477490612c971ea4d0c15899b37a57cca",
       "count": 1
     },
     {
@@ -7683,6 +7779,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/overlay.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(manifest.files).length).toBeGreaterThan(0);",
+      "fingerprint": "a47eb015c40070c417704c0cc2ce0b49101a122c2652c96b868cc5a457112309",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/capture-normalizer.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -8387,6 +8491,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "gate-engine/edge-cases/eval/lib/sources.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "while (end < messages.length && messages[end].role !== 'user') end++;",
+      "fingerprint": "b0d2c1e55053ffa7bb3549ae4df8ef902c57b2873a0c0c2bd8db8d5ca9237399",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/install/hook-registration-ledger/install-support.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -8744,6 +8856,14 @@
       "diagnostic": "The explicit anonymous object type on return value of `stripRetiredRegistrations` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "if (!root || !hooks) return { document, changed: false };",
       "fingerprint": "b7eb668e1ab081c58927a04ce955f860fbd86c5b403e2b27b1e8ee3295300533",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/upgrade.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "const rel = Object.keys(manifest.files)[0];",
+      "fingerprint": "b83e2ce1f6d5a8965d231d973c2549b79e535e14e619a51277414b5c02ac6d1b",
       "count": 1
     },
     {
@@ -9171,6 +9291,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "e2e/bin-shim.e2e.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "const publishedBins = new Set(Object.keys(PKG.bin));",
+      "fingerprint": "c0cc56e491bb4b41597335cd71a83842b39b19d9bca103126604eae0f70f7f80",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-chained-type-assertions",
       "file": "gate-engine/critique/__tests__/evidence-bindings.test.mts",
       "diagnostic": "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
@@ -9240,6 +9368,14 @@
       "diagnostic": "The explicit anonymous object type on return value of `resolveReviewerIdentities` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "if (reviewMode) return { identities: identitySalts, cacheSalts: identitySalts };",
       "fingerprint": "c2e1d2ee22a9f272bf31bf1d821c2ed96a43a9283fb7ce5311a39673e43d1928",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/lib/doctor/stray-gate-calls.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "const dist = pkg.bin?.[bin];",
+      "fingerprint": "c31de7f85e84dcd8d9de2aa3daa9f4f53e1935e999e0c9ae4f1a4ccfe9b3face",
       "count": 1
     },
     {
@@ -9528,6 +9664,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": ".filter((p) => p.type === 'text' && typeof p.text === 'string')",
       "fingerprint": "c798cb6bbd0f7dd2d9b06abb36d4388ba76edb27cfc7cf3e26194a83d876c7d3",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/asset-conflicts.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(m2.files)).toContain('correctness-reviewer.md');",
+      "fingerprint": "c7aaa2e86e168e703163d65abf8f7556981039d1dfe58fc26472fb067c34a237",
       "count": 1
     },
     {
@@ -10203,14 +10347,6 @@
       "count": 1
     },
     {
-      "ruleId": "anti-slop/no-runtime-typeof",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
-      "context": "value.ruleIds.every((id) => typeof id === 'string') &&",
-      "fingerprint": "d83efdcddeef98eb985e0c24575e20f9901752b595729a900ccdafa3f84cfd3e",
-      "count": 1
-    },
-    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "gate-engine/review/__tests__/eval-bench.test.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -10312,6 +10448,14 @@
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
       "context": "const pkg = readJson(join(cwd, 'package.json')) as PackageJson | null;",
       "fingerprint": "da9b124d74f688d1f29358fe96413fb19caa4b280c15c51831f07e27e847facf",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "gate-engine/co-occurrence/__tests__/remedy-contract.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "const target = pkg.bin[ALLOWLIST_CLI];",
+      "fingerprint": "daa65da69bb23f43ef87913ceeef1c7afa19bffcc35dc51e0d2b4b35b830835b",
       "count": 1
     },
     {
@@ -10600,6 +10744,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "typeof manifest.destinationFingerprint === 'string',",
       "fingerprint": "e0ec9cdfa1e1e59597c779994952d48e0254bcf77030e2872a3eb397738e6f44",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "gate-engine/coverage/__tests__/produce.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(report).some((f) => f.endsWith('lib.mjs'))).toBe(true);",
+      "fingerprint": "e1206e3d2b7f463b1ea7a9722e0c8e5e9d64ffb5e183fae4bb3d323139859a7d",
       "count": 1
     },
     {
@@ -11067,6 +11219,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/doctor-bundle-completeness.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "const before = Object.keys(m.files);",
+      "fingerprint": "eaaf709f5aebe9166b022686a27c6871fe999255ea258baecaa33ba9b74355d3",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
       "file": "cli/lib/doctor/asset-checks.mts",
       "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
@@ -11347,6 +11507,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "cli/__tests__/asset-conflicts.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(m.files)).toContain('lint-check.sh'); // adopted",
+      "fingerprint": "efeb0e03123f63e2a7e93679a69fb7d29c3fed001245872537f1455022d6b73a",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-runtime-typeof",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
@@ -11376,6 +11544,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "if (typeof f?.evidence?.detail !== 'string' || !f.evidence.detail)",
       "fingerprint": "f0413267c31a35af0b21fa8ad97659b47be6d0e3dba8ecf242ab562fc1d31918",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-access",
+      "file": "cli/__tests__/hook-registration-script-coverage.test.mts",
+      "diagnostic": "Computed access on this JSON-derived record can read inherited Object.prototype members. Guard this exact object and key with Object.hasOwn, or use a Map/null-prototype record.",
+      "context": "delete manifest.files[script];",
+      "fingerprint": "f058c251c9c3b80bdf96a2f147bb0f59b5ac7167f77ebf6db09ca20359d7c399",
       "count": 1
     },
     {
@@ -11472,14 +11648,6 @@
       "diagnostic": "The explicit anonymous object type on return value of `errexitState` discards known type evidence. Keep inference, validate with `satisfies`, or use a named owner contract.",
       "context": "return {",
       "fingerprint": "f1fe2e85f5b4146b16c16d23847ddc79c9cbd585860cdd0abac6c743ceef848b",
-      "count": 1
-    },
-    {
-      "ruleId": "anti-slop/require-safety-comment-for-type-assertion",
-      "file": "cli/lib/install/anti-slop/lifecycle.mts",
-      "diagnostic": "This type assertion has no `SAFETY:` justification. State the checked invariant immediately before the assertion or its containing statement.",
-      "context": "const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<AntiSlopManifest>;",
-      "fingerprint": "f2340d9823492ed9871e68015c39302e8bf5c402835313690d0cc33458330022",
       "count": 1
     },
     {
@@ -11587,6 +11755,14 @@
       "count": 1
     },
     {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "e2e/bin-shim.e2e.test.mts",
+      "diagnostic": "Object.keys on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "expect(Object.keys(PKG.bin).filter((bin) => !caseBins.has(bin))).toEqual([]);",
+      "fingerprint": "f40bbfc673505fffc8d06208e737189ce13f4354095755e93f084610e7a9207b",
+      "count": 1
+    },
+    {
       "ruleId": "anti-slop/no-unknown-parameters",
       "file": "gate-engine/critique/response-contract.mts",
       "diagnostic": "Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
@@ -11664,6 +11840,14 @@
       "diagnostic": "A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
       "context": "feasibility: typeof feasibility === 'string' ? feasibility : null,",
       "fingerprint": "f5ae56a9aa966deb6c59db999278cdae8bbb3257dc54c6682cc0071531c25a47",
+      "count": 1
+    },
+    {
+      "ruleId": "anti-slop/no-unsafe-external-record-enumeration",
+      "file": "gate-engine/prior-art/eval/bench.mts",
+      "diagnostic": "Object.entries on an unproven JSON-derived value admits primitives as empty records. Prove a non-null object and reject arrays before enumeration.",
+      "context": "for (const [id, base] of Object.entries(baseline.priorArt.rows)) {",
+      "fingerprint": "f5b334844489f96317cad034833b1ae933eda3f89d7a55b56f4fc690b5e0f4c5",
       "count": 1
     },
     {
@@ -12098,5 +12282,8 @@
       "fingerprint": "fff2270d04ebf163acc7766d1abb8a5c127202f509c897de27c1219a7ad16c27",
       "count": 1
     }
+  ],
+  "migrationReceipts": [
+    "anti-slop-activation@0.59.0:50ad2d1deb51ce96445be08275533d8e502efe9dc9788b2148709cc06a1525da"
   ]
 }
